@@ -38,4 +38,31 @@ describe('Workflow route model', () => {
     expect(response.headers.get('content-type')).toBe('application/x-ndjson; charset=utf-8')
     await expect(readResponseText(response)).resolves.toBe('event\n')
   })
+
+  it('adds the stream tail index header only when present, including zero', () => {
+    expect(Object.keys(workflowNdjsonHeaders('wrun_123'))).toEqual([
+      'cache-control',
+      'content-type',
+      'x-content-type-options',
+      'x-workflow-run-id'
+    ])
+
+    const zero = workflowNdjsonHeaders('wrun_123', 0)
+    expect(Object.keys(zero)).toEqual([
+      'cache-control',
+      'content-type',
+      'x-content-type-options',
+      'x-workflow-run-id',
+      'x-workflow-stream-tail-index'
+    ])
+    expect(JSON.stringify(zero)).toBe(
+      '{"cache-control":"no-cache, no-transform","content-type":"application/x-ndjson; charset=utf-8","x-content-type-options":"nosniff","x-workflow-run-id":"wrun_123","x-workflow-stream-tail-index":"0"}'
+    )
+
+    const present = workflowNdjsonHeaders('wrun_123', 7)
+    expect(present['x-workflow-stream-tail-index']).toBe('7')
+    expect(JSON.stringify(present)).toBe(
+      '{"cache-control":"no-cache, no-transform","content-type":"application/x-ndjson; charset=utf-8","x-content-type-options":"nosniff","x-workflow-run-id":"wrun_123","x-workflow-stream-tail-index":"7"}'
+    )
+  })
 })

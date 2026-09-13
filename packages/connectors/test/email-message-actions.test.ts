@@ -33,7 +33,6 @@ const integration = makeIntegration({
 })
 
 const credential = UsernamePasswordCredential.make({
-  _tag: 'UsernamePasswordCredential',
   username: 'alice@example.com',
   password: 'password'
 })
@@ -154,13 +153,14 @@ describe('generic email message actions', () => {
           }
         })
 
+        const trashInput = explicitFolders
+          ? { messageId: 'imap:123:1', folder: 'Archive', trashFolder: 'Deleted' }
+          : { messageId: 'imap:123:1' }
+
         const result = yield* emailTrashAction
           .execute({
             integration,
-            input: {
-              messageId: 'imap:123:1',
-              ...(explicitFolders ? { folder: 'Archive', trashFolder: 'Deleted' } : {})
-            }
+            input: trashInput
           })
           .pipe(Effect.provide(host.layer))
 
@@ -197,13 +197,14 @@ describe('generic email message actions', () => {
             }
           })
 
+          const untrashInput = explicitFolders
+            ? { messageId: 'trash-uid', folder: 'Deleted', destinationFolder: 'Archive' }
+            : { messageId: 'trash-uid' }
+
           const result = yield* emailUntrashAction
             .execute({
               integration,
-              input: {
-                messageId: 'trash-uid',
-                ...(explicitFolders ? { folder: 'Deleted', destinationFolder: 'Archive' } : {})
-              }
+              input: untrashInput
             })
             .pipe(Effect.provide(host.layer))
 

@@ -24,21 +24,19 @@ export class CredentialBinding extends Schema.Class<CredentialBinding>('Credenti
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
 }) {}
 
-export class ApiKeyCredential extends Schema.Class<ApiKeyCredential>('ApiKeyCredential')({
-  _tag: Schema.Literal('ApiKeyCredential'),
+export class ApiKeyCredential extends Schema.TaggedClass<ApiKeyCredential>()('ApiKeyCredential', {
   key: Schema.String
 }) {}
 
-export class BearerTokenCredential extends Schema.Class<BearerTokenCredential>(
-  'BearerTokenCredential'
-)({
-  _tag: Schema.Literal('BearerTokenCredential'),
-  token: Schema.String,
-  expiresAt: Schema.optional(Schema.Number)
-}) {}
+export class BearerTokenCredential extends Schema.TaggedClass<BearerTokenCredential>()(
+  'BearerTokenCredential',
+  {
+    token: Schema.String,
+    expiresAt: Schema.optional(Schema.Number)
+  }
+) {}
 
-export class OAuthCredential extends Schema.Class<OAuthCredential>('OAuthCredential')({
-  _tag: Schema.Literal('OAuthCredential'),
+export class OAuthCredential extends Schema.TaggedClass<OAuthCredential>()('OAuthCredential', {
   provider: Schema.String,
   accessToken: Schema.String,
   expiresAt: Schema.Number,
@@ -49,13 +47,13 @@ export class OAuthCredential extends Schema.Class<OAuthCredential>('OAuthCredent
   scopes: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
-export class UsernamePasswordCredential extends Schema.Class<UsernamePasswordCredential>(
-  'UsernamePasswordCredential'
-)({
-  _tag: Schema.Literal('UsernamePasswordCredential'),
-  username: Schema.String,
-  password: Schema.String
-}) {}
+export class UsernamePasswordCredential extends Schema.TaggedClass<UsernamePasswordCredential>()(
+  'UsernamePasswordCredential',
+  {
+    username: Schema.String,
+    password: Schema.String
+  }
+) {}
 
 export const RuntimeCredential = Schema.Union([
   ApiKeyCredential,

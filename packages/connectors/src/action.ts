@@ -42,13 +42,19 @@ export type DefineActionOptions<InputSchema extends ActionInputSchema, Output, E
   ) => Effect.Effect<ActionResult<Output>, Error | ConnectorError, Env>
 }
 
-const validationError = (actionId: string, error: unknown) =>
+const validationError = (actionId: string, error: Schema.SchemaError) =>
   new ConnectorError({
     cause: 'validation_failed',
     message: `Invalid input for action: ${actionId}`,
     actionId,
     underlying: error
   })
+
+type ConnectorActionPrefixFields = {
+  readonly id: string
+  description?: string
+  access?: ConnectorActionAccess
+}
 
 export const defineAction = <
   InputSchema extends ActionInputSchema,
@@ -57,20 +63,30 @@ export const defineAction = <
   Error = never
 >(
   options: DefineActionOptions<InputSchema, Output, Env, Error>
-): ConnectorAction<Env, Error> => ({
-  id: options.id,
-  description: options.description,
-  ...(options.access === undefined ? {} : { access: options.access }),
-  inputSchema: options.inputSchema,
-  outputSchema: options.outputSchema,
-  execute: input =>
-    Schema.decodeUnknownEffect(options.inputSchema)(input.input).pipe(
-      Effect.mapError(error => validationError(options.id, error)),
-      Effect.flatMap(params =>
-        options.execute({
-          integration: input.integration,
-          input: params
-        })
-      )
-    )
-})
+): ConnectorAction<Env, Error> =>
+  (() => {
+    const fields: ConnectorActionPrefixFields = {
+      id: options.id,
+      description: options.description
+    }
+
+    if (options.access !== undefined) {
+      fields.access = options.access
+    }
+
+    return {
+      ...fields,
+      inputSchema: options.inputSchema,
+      outputSchema: options.outputSchema,
+      execute: input =>
+        Schema.decodeUnknownEffect(options.inputSchema)(input.input).pipe(
+          Effect.mapError(error => validationError(options.id, error)),
+          Effect.flatMap(params =>
+            options.execute({
+              integration: input.integration,
+              input: params
+            })
+          )
+        )
+    }
+  })()

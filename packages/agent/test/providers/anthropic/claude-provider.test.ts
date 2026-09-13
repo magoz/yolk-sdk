@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Predicate, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientError,
@@ -125,7 +125,7 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
 const collectKeys = (value: unknown): ReadonlyArray<string> => {
   if (Array.isArray(value)) return value.flatMap(collectKeys)
 
-  if (typeof value !== 'object' || value === null) return []
+  if (!Predicate.isObjectOrArray(value) || value === null) return []
 
   return Object.entries(value).flatMap(([key, child]) => [key, ...collectKeys(child)])
 }
@@ -139,15 +139,20 @@ const runMinimalProviderRequest = (
   requests: Array<CapturedRequest>
 ) =>
   Effect.gen(function* () {
-    const providerLayer = makeAnthropicClaudeProviderLayer({
+    const providerConfig = {
       token: new OAuthAccessToken({
         provider: 'anthropic-claude',
         accessToken: 'token',
         expiresAt: Date.now() + 60_000
       }),
-      maxTokens: anthropicTestMaxTokens,
-      ...(input.extraHeaders === undefined ? {} : { extraHeaders: input.extraHeaders })
-    }).pipe(
+      maxTokens: anthropicTestMaxTokens
+    }
+
+    const providerLayer = makeAnthropicClaudeProviderLayer(
+      input.extraHeaders === undefined
+        ? providerConfig
+        : { ...providerConfig, extraHeaders: input.extraHeaders }
+    ).pipe(
       Layer.provide(
         makeHttpClientLayer(input.response ?? new Response('', { status: 200 }), requests)
       )

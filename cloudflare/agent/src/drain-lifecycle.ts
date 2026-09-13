@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Exit, Ref, Semaphore } from 'effect'
+import { Cause, Data, Deferred, Effect, Exit, Match, Predicate, Ref, Semaphore } from 'effect'
 import type { DriverApi } from '@yolk-sdk/harness/driver'
 import { makeDrainOccupancy, type DrainToken, type DrainWork } from './drain-occupancy.ts'
 
@@ -11,10 +11,16 @@ export type StartResult =
   | { readonly _tag: 'Conflict' }
   | { readonly _tag: 'Stale' }
 
+export const StartResult = Data.taggedEnum<StartResult>()
+
 export const notifyRejectedStart = <E, R>(
   started: StartResult,
   notifyConflict: Effect.Effect<void, E, R>
-): Effect.Effect<void, E, R> => (started._tag === 'Accepted' ? Effect.void : notifyConflict)
+): Effect.Effect<void, E, R> =>
+  Match.value(started).pipe(
+    Match.tag('Accepted', () => Effect.void),
+    Match.orElse(() => notifyConflict)
+  )
 
 type LiveOwner = {
   readonly token: LiveToken
@@ -114,17 +120,17 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
     const admitUnderGate = (prepareEpoch: number, socketId: string, work: DrainWork) =>
       Effect.gen(function* () {
         if ((yield* Ref.get(epoch)) !== prepareEpoch || (yield* Ref.get(reconnecting))) {
-          return { _tag: 'Stale' as const }
+          return StartResult.Stale()
         }
 
         const id = yield* Ref.modify(nextId, current => [current + 1, current + 1] as const)
         const token: LiveToken = { id, socketId }
 
         if (!(yield* occupancy.occupy(work, token))) {
-          return { _tag: 'Conflict' as const }
+          return StartResult.Conflict()
         }
 
-        return { _tag: 'Accepted' as const, token }
+        return StartResult.Accepted({ token })
       })
 
     const registerUnderGate = (
@@ -137,7 +143,7 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
       Effect.gen(function* () {
         const admitted = yield* admitUnderGate(prepareEpoch, socketId, work)
 
-        if (admitted._tag !== 'Accepted') {
+        if (!Predicate.isTagged(admitted, 'Accepted')) {
           return admitted
         }
 
@@ -169,7 +175,7 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
               registerUnderGate(prepareEpoch, socketId, work, driver, sessionId)
             )
 
-            if (started._tag !== 'Accepted') {
+            if (!Predicate.isTagged(started, 'Accepted')) {
               return started
             }
 
@@ -192,7 +198,7 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
 
             yield* casRelease(started.token)
 
-            if (exit._tag === 'Success') {
+            if (Exit.isSuccess(exit)) {
               return started
             }
 

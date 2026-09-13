@@ -46,6 +46,12 @@ import {
   agentTextReasoningEffortOptions,
   type AgentTextModel
 } from '@/lib/agents/text-agent-config'
+import type {
+  AgentAttachment,
+  FailedAttachment,
+  ReadyDocumentAttachment,
+  ReadyImageAttachment
+} from './attachment-content'
 import {
   matchingSlashCommands,
   normalizeSlashSelectionIndex,
@@ -55,36 +61,13 @@ import {
   type AgentCommandSummary
 } from './slash-command-model'
 
-export type AgentComposerReadyImageAttachment = {
-  readonly _tag: 'Ready'
-  readonly kind: 'image'
-  readonly id: string
-  readonly name: string
-  readonly mimeType: string
-  readonly previewUrl: string
-}
+export type AgentComposerReadyImageAttachment = ReadyImageAttachment
 
-export type AgentComposerReadyDocumentAttachment = {
-  readonly _tag: 'Ready'
-  readonly kind: 'document'
-  readonly id: string
-  readonly name: string
-  readonly mimeType: string
-}
+export type AgentComposerReadyDocumentAttachment = ReadyDocumentAttachment
 
-export type AgentComposerFailedAttachment = {
-  readonly _tag: 'Failed'
-  readonly kind: 'image' | 'document'
-  readonly id: string
-  readonly name: string
-  readonly mimeType: string
-  readonly reason: string
-}
+export type AgentComposerFailedAttachment = FailedAttachment
 
-export type AgentComposerAttachment =
-  | AgentComposerReadyImageAttachment
-  | AgentComposerReadyDocumentAttachment
-  | AgentComposerFailedAttachment
+export type AgentComposerAttachment = AgentAttachment
 
 type AgentComposerProps = {
   readonly input: string

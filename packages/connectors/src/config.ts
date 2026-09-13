@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { ConnectorError } from './error.ts'
 import type { ConnectorIntegration } from './integration.ts'
 
@@ -8,7 +8,7 @@ const configValue = (integration: ConnectorIntegration, key: string) =>
 export const requiredStringConfig = (integration: ConnectorIntegration, key: string) => {
   const value = configValue(integration, key)
 
-  if (typeof value === 'string' && value.trim() !== '') {
+  if (Predicate.isString(value) && value.trim() !== '') {
     return Effect.succeed(value)
   }
 
@@ -24,5 +24,5 @@ export const requiredStringConfig = (integration: ConnectorIntegration, key: str
 export const optionalStringConfig = (integration: ConnectorIntegration, key: string) => {
   const value = configValue(integration, key)
 
-  return typeof value === 'string' && value.trim() !== '' ? value : undefined
+  return Predicate.isString(value) && value.trim() !== '' ? value : undefined
 }

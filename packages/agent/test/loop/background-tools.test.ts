@@ -32,28 +32,32 @@ const call = (id = 'bg', mode = 'background', value = 'work') =>
 
 const receipt = BackgroundToolAccepted.make({ version: 1, executionId: 'owner:bg' })
 
-const setFor = (host: BackgroundToolHost<unknown>, manual = false) =>
-  resolveTools(
+const setFor = (host: BackgroundToolHost<unknown>, manual = false) => {
+  const tool = {
+    name: 'work',
+    description: '',
+    access: 'write' as const,
+    background: true as const,
+    parameters: Schema.Struct({ value: Schema.String }),
+    execute: ({ call }: { readonly call: ToolCall }) =>
+      Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'inline' }))
+  }
+
+  return resolveTools(
     [
       {
         id: 'test',
         tools: [
-          makeTool({
-            name: 'work',
-            description: '',
-            access: 'write',
-            background: true,
-            ...(manual ? { approval: ToolApprovalPolicy.make({ mode: 'manual' }) } : {}),
-            parameters: Schema.Struct({ value: Schema.String }),
-            execute: ({ call }) =>
-              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'inline' }))
-          })
+          makeTool(
+            manual ? { ...tool, approval: ToolApprovalPolicy.make({ mode: 'manual' }) } : tool
+          )
         ]
       }
     ],
     {},
     { backgroundHost: host }
   )
+}
 
 const response = (requestId: string, decision: 'approved' | 'denied' = 'approved') =>
   ToolApprovalResponse.make({ requestId, toolCallId: 'bg', decision, source: 'user' })

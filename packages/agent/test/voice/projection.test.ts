@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
+import { Predicate } from 'effect'
 import {
   AssistantAgentMessage,
   AssistantTextPart,
@@ -168,7 +169,7 @@ describe('projectVoiceEvent', () => {
     expect(messages[1]).toMatchObject({ toolCallId: 'call_1', content: '{"result":1}' })
     expect(messages[2]).toMatchObject({ toolCallId: 'call_2', isError: true })
     expect(messages[3]).toMatchObject({ parts: [{ content: 'Done.' }] })
-    expect(validateNoDanglingHostToolCalls(messages)).toEqual({ _tag: 'Valid' })
+    expect(Predicate.isTagged(validateNoDanglingHostToolCalls(messages), 'Valid')).toBe(true)
   })
 
   it('drops unsettled tool calls so interrupted sessions never persist dangling calls', () => {
@@ -185,7 +186,7 @@ describe('projectVoiceEvent', () => {
         parts: [AssistantTextPart.make({ content: 'Working on ' })]
       })
     ])
-    expect(validateNoDanglingHostToolCalls(messages)).toEqual({ _tag: 'Valid' })
+    expect(Predicate.isTagged(validateNoDanglingHostToolCalls(messages), 'Valid')).toBe(true)
   })
 
   it('flushes partial drafts on interruption', () => {

@@ -3,6 +3,7 @@ import {
   Deferred,
   Effect,
   Fiber,
+  Match,
   Option,
   Predicate,
   Queue,
@@ -153,25 +154,26 @@ export const makeVoiceController = (
       call: VoiceToolCall,
       outcome: VoiceToolCallOutcome
     ): Effect.Effect<void, VoiceSessionError> => {
-      switch (outcome._tag) {
-        case 'Executed':
-          return emitCompleted(call, outcome.output)
-        case 'Denied':
-          return emitFailed(
+      return Match.value(outcome).pipe(
+        Match.tag('Executed', current => emitCompleted(call, current.output)),
+        Match.tag('Denied', current =>
+          emitFailed(
             call,
-            outcome.reason === undefined
+            current.reason === undefined
               ? 'Tool was denied.'
-              : `Tool was denied: ${outcome.reason}`,
-            outcome.output
+              : `Tool was denied: ${current.reason}`,
+            current.output
           )
-        case 'ApprovalRequired': {
+        ),
+        Match.tag('ApprovalRequired', () => {
           const message = `Tool ${call.name} still requires approval and was not executed.`
 
           return errorOutputJson(message).pipe(
             Effect.flatMap(output => emitFailed(call, message, output))
           )
-        }
-      }
+        }),
+        Match.exhaustive
+      )
     }
 
     const awaitApproval = (

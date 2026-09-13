@@ -1,8 +1,10 @@
 import {
   Cause,
   Channel,
+  Data,
   Effect,
   Exit,
+  Match,
   Predicate,
   Pull,
   Queue,
@@ -369,28 +371,6 @@ const toTransportError = (message: string, cause: unknown) =>
 const toHttpClientTransportError = (message: string) => (error: HttpClientError.HttpClientError) =>
   toTransportError(`${message}: ${error.message}`, error)
 
-const decodeAgentEvent = (value: unknown) =>
-  Schema.decodeUnknownEffect(AgentEvent)(value).pipe(
-    Effect.mapError(
-      error =>
-        new AgentTransportError({
-          message: `Invalid agent event: ${unknownToMessage(error)}`,
-          cause: error
-        })
-    )
-  )
-
-const decodeWebSocketServerMessage = (value: unknown) =>
-  Schema.decodeUnknownEffect(AgentWebSocketServerMessage)(value).pipe(
-    Effect.mapError(
-      error =>
-        new AgentTransportError({
-          message: `Invalid agent WebSocket message: ${unknownToMessage(error)}`,
-          cause: error
-        })
-    )
-  )
-
 const encodeJsonString = (value: unknown, message: string) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
     Effect.mapError(
@@ -417,7 +397,15 @@ const parseAgentEventLine = (line: string) =>
   Effect.gen(function* () {
     const parsed = yield* decodeJsonString(line, 'Invalid NDJSON line')
 
-    return yield* decodeAgentEvent(parsed)
+    return yield* Schema.decodeUnknownEffect(AgentEvent)(parsed).pipe(
+      Effect.mapError(
+        error =>
+          new AgentTransportError({
+            message: `Invalid agent event: ${unknownToMessage(error)}`,
+            cause: error
+          })
+      )
+    )
   })
 
 const parseWebSocketServerMessage = (
@@ -426,7 +414,15 @@ const parseWebSocketServerMessage = (
   Effect.gen(function* () {
     const parsed = yield* decodeJsonString(raw, 'Invalid WebSocket message')
 
-    return yield* decodeWebSocketServerMessage(parsed)
+    return yield* Schema.decodeUnknownEffect(AgentWebSocketServerMessage)(parsed).pipe(
+      Effect.mapError(
+        error =>
+          new AgentTransportError({
+            message: `Invalid agent WebSocket message: ${unknownToMessage(error)}`,
+            cause: error
+          })
+      )
+    )
   })
 
 const isUserMessage = (message: AgentMessage): message is UserMessage =>
@@ -822,6 +818,8 @@ type AgentEventPullResult =
   | { readonly _tag: 'Done' }
   | { readonly _tag: 'Idle' }
 
+const AgentEventPullResult = Data.taggedEnum<AgentEventPullResult>()
+
 type AgentRunContinuationInput = AgentRunContinuationOptions & {
   readonly endpoint: string | undefined
   readonly startIndex: number | undefined
@@ -882,9 +880,9 @@ const pullAgentEventChunk = <A extends Iterable<AgentEventType>>(
 ) => {
   const pullEvents: Effect.Effect<AgentEventPullResult, AgentTransportError, never> =
     Pull.matchEffect(pull, {
-      onSuccess: events => Effect.succeed({ _tag: 'Events', events }),
+      onSuccess: events => Effect.succeed(AgentEventPullResult.Events({ events })),
       onFailure: cause => Effect.failCause(cause),
-      onDone: () => Effect.succeed({ _tag: 'Done' })
+      onDone: () => Effect.succeed(AgentEventPullResult.Done())
     })
 
   if (idleReconnect === undefined) return pullEvents
@@ -892,7 +890,7 @@ const pullAgentEventChunk = <A extends Iterable<AgentEventType>>(
   return pullEvents.pipe(
     Effect.raceFirst(
       Effect.sleep(`${idleReconnect.idleTimeoutMs} millis`).pipe(
-        Effect.map((): AgentEventPullResult => ({ _tag: 'Idle' }))
+        Effect.map((): AgentEventPullResult => AgentEventPullResult.Idle())
       )
     )
   )
@@ -916,27 +914,34 @@ const drainAgentEventStream = (input: {
       Effect.gen(function* () {
         const pulled = yield* pullAgentEventChunk(pull, input.idleReconnect)
 
-        switch (pulled._tag) {
-          case 'Idle':
-            return { count: state.count, terminal: state.terminal, idle: true }
-          case 'Done':
-            return { count: state.count, terminal: state.terminal, idle: false }
-          case 'Events': {
-            let count = state.count
-            let terminal = state.terminal
+        return yield* Match.value(pulled).pipe(
+          Match.tag('Idle', () =>
+            Effect.succeed({ count: state.count, terminal: state.terminal, idle: true })
+          ),
+          Match.tag('Done', () =>
+            Effect.succeed({ count: state.count, terminal: state.terminal, idle: false })
+          ),
+          Match.tag('Events', current =>
+            Effect.gen(function* () {
+              let count = state.count
+              let terminal = state.terminal
 
-            for (const event of pulled.events) {
-              count += 1
-              terminal = terminal || isTerminalAgentEvent(event)
-              yield* Effect.sync(() => input.onEvent?.(event, input.countOffset + count))
-              yield* Queue.offer(input.queue, event)
+              for (const event of current.events) {
+                count += 1
+                terminal = terminal || isTerminalAgentEvent(event)
+                yield* Effect.sync(() => input.onEvent?.(event, input.countOffset + count))
+                yield* Queue.offer(input.queue, event)
 
-              if (terminal) return { count, terminal, idle: false }
-            }
+                if (terminal) {
+                  return { count, terminal, idle: false }
+                }
+              }
 
-            return yield* run({ count, terminal })
-          }
-        }
+              return yield* run({ count, terminal })
+            })
+          ),
+          Match.exhaustive
+        )
       })
 
     return yield* run({ count: 0, terminal: false }).pipe(Effect.ensuring(closeScope(scope)))
@@ -1234,7 +1239,7 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
           Effect.runFork(Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid))
 
         const handleMessage = (event: MessageEvent) => {
-          if (typeof event.data !== 'string') {
+          if (!Predicate.isString(event.data)) {
             failQueue(toTransportError('Agent WebSocket returned binary data', event.data))
 
             return

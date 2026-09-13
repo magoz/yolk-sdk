@@ -16,10 +16,21 @@ export const FortnoxInvoiceApi = Schema.Struct({
 export const invoiceFromApi = (value: typeof FortnoxInvoiceApi.Type) => {
   const { InvoiceRows, ...fields } = value
 
-  return FortnoxInvoice.make({
-    ...fields,
-    ...(InvoiceRows === undefined ? {} : { InvoiceRows: Chunk.fromIterable(InvoiceRows) })
-  })
+  return FortnoxInvoice.make(
+    (() => {
+      type InvoiceFromApiFields = typeof fields & {
+        InvoiceRows?: FortnoxInvoice['InvoiceRows']
+      }
+
+      const out: InvoiceFromApiFields = { ...fields }
+
+      if (InvoiceRows !== undefined) {
+        out.InvoiceRows = Chunk.fromIterable(InvoiceRows)
+      }
+
+      return out
+    })()
+  )
 }
 
 export const FortnoxSupplierInvoiceApi = Schema.Struct({
@@ -30,10 +41,19 @@ export const FortnoxSupplierInvoiceApi = Schema.Struct({
 export const supplierInvoiceFromApi = (value: typeof FortnoxSupplierInvoiceApi.Type) => {
   const { SupplierInvoiceRows, ...fields } = value
 
-  return FortnoxSupplierInvoice.make({
-    ...fields,
-    ...(SupplierInvoiceRows === undefined
-      ? {}
-      : { SupplierInvoiceRows: Chunk.fromIterable(SupplierInvoiceRows) })
-  })
+  return FortnoxSupplierInvoice.make(
+    (() => {
+      type SupplierInvoiceFromApiFields = typeof fields & {
+        SupplierInvoiceRows?: FortnoxSupplierInvoice['SupplierInvoiceRows']
+      }
+
+      const out: SupplierInvoiceFromApiFields = { ...fields }
+
+      if (SupplierInvoiceRows !== undefined) {
+        out.SupplierInvoiceRows = Chunk.fromIterable(SupplierInvoiceRows)
+      }
+
+      return out
+    })()
+  )
 }

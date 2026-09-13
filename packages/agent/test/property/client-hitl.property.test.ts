@@ -1,4 +1,4 @@
-import { Predicate, Schema } from 'effect'
+import { Match, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentEnd,
@@ -35,6 +35,7 @@ import {
   submitAgentUserMessage,
   toolRunsFromHitlRequests
 } from '../../src/client'
+import { AgentToolRun } from '../../src/client/state.ts'
 import { propertyOptions } from './property-options'
 
 const terminalKind = Schema.Literals(['approvalDenied', 'questionAnswered', 'questionCancelled'])
@@ -174,26 +175,25 @@ const eventSequence = (kinds: ReadonlyArray<typeof clientEventKind.Type>) => [
 ]
 
 const toolRunIds = (runs: ReturnType<typeof reduceAgentEvents>['toolRuns']) =>
-  runs.map(run => {
-    switch (run._tag) {
-      case 'InputStreaming':
-        return run.id
-      case 'Denied':
-        return run.toolCallId
-      case 'QuestionRequested':
-        return run.request.toolCallId
-      case 'QuestionAnswered':
-      case 'QuestionCancelled':
-        return run.response.toolCallId
-      case 'InputReady':
-      case 'ApprovalRequested':
-      case 'Executing':
-      case 'Completed':
-      case 'Errored':
-      case 'ProviderCompleted':
-        return run.call.id
-    }
-  })
+  runs.map(run =>
+    Match.value(run).pipe(
+      Match.tag('InputStreaming', current => current.id),
+      Match.tag('Denied', current => current.toolCallId),
+      Match.tag('QuestionRequested', current => current.request.toolCallId),
+      Match.tag('QuestionAnswered', 'QuestionCancelled', current => current.response.toolCallId),
+      Match.tag(
+        'InputReady',
+        'ApprovalRequested',
+        'Executing',
+        'Completed',
+        'Errored',
+        'ProviderCompleted',
+        current => current.call.id
+      ),
+      Match.tag('Accepted', () => undefined),
+      Match.exhaustive
+    )
+  )
 
 const callForTarget = (target: typeof clientEventTarget.Type) =>
   target === 'one'
@@ -306,8 +306,8 @@ const isTerminalToolRun = (run: ReturnType<typeof reduceAgentEvents>['toolRuns']
 describe('client HITL property tests', () => {
   it('hydrates active tool runs from HITL requests', () => {
     expect(toolRunsFromHitlRequests([approvalRequest, questionRequest])).toEqual([
-      { _tag: 'ApprovalRequested', call, request: approvalRequest },
-      { _tag: 'QuestionRequested', request: questionRequest }
+      AgentToolRun.ApprovalRequested({ call, request: approvalRequest }),
+      AgentToolRun.QuestionRequested({ request: questionRequest })
     ])
   })
 
@@ -325,11 +325,12 @@ describe('client HITL property tests', () => {
 
       expect(state.toolRuns).toHaveLength(1)
       expect(state.toolRuns[0]?._tag).toBe(
-        kind === 'approvalDenied'
-          ? 'Denied'
-          : kind === 'questionAnswered'
-            ? 'QuestionAnswered'
-            : 'QuestionCancelled'
+        Match.value(kind).pipe(
+          Match.when('approvalDenied', () => 'Denied'),
+          Match.when('questionAnswered', () => 'QuestionAnswered'),
+          Match.when('questionCancelled', () => 'QuestionCancelled'),
+          Match.exhaustive
+        )
       )
     },
     propertyOptions

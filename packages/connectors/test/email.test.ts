@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { resolveTools } from '@yolk-sdk/agent/tools'
@@ -38,7 +38,6 @@ import {
 } from '@yolk-sdk/connectors/email'
 
 const usernamePassword = UsernamePasswordCredential.make({
-  _tag: 'UsernamePasswordCredential',
   username: 'alice@example.com',
   password: 'secret'
 })
@@ -261,10 +260,12 @@ describe('generic email connector', () => {
         input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
       }).pipe(Effect.provide(makeHostLayer({ attachmentResult })), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+        expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+      }
     })
   })
 
@@ -306,14 +307,15 @@ describe('generic email connector', () => {
         input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
       }).pipe(Effect.provide(Layer.merge(credentials, legacyClient)), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'ConnectorError',
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+        expect(result.failure).toMatchObject({
           cause: 'validation_failed',
           message: 'EmailClient does not support attachment retrieval'
-        }
-      })
+        })
+      }
     })
   })
 
@@ -344,7 +346,7 @@ describe('generic email connector', () => {
         },
         cursor: 'opaque-cursor',
         limit: 50,
-        credential: { _tag: 'UsernamePasswordCredential', username: 'alice@example.com' }
+        credential: usernamePassword
       })
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
@@ -368,9 +370,8 @@ describe('generic email connector', () => {
         }
       })
 
-      expect(result).toEqual({
-        _tag: 'Success',
-        value: {
+      expect(result).toEqual(
+        ActionResult.success({
           attachment: {
             id: 'mime-part-2',
             filename: 'invoice.pdf',
@@ -379,8 +380,8 @@ describe('generic email connector', () => {
             inline: false,
             contentBase64: 'JVBERg=='
           }
-        }
-      })
+        })
+      )
       expect(requests.attachment[0]).toMatchObject({
         connection: {
           protocol: 'imap',
@@ -391,7 +392,7 @@ describe('generic email connector', () => {
         messageId: 'message-1',
         attachmentId: 'mime-part-2',
         folder: 'Archive',
-        credential: { _tag: 'UsernamePasswordCredential', username: 'alice@example.com' }
+        credential: usernamePassword
       })
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
@@ -415,14 +416,13 @@ describe('generic email connector', () => {
         }
       })
 
-      expect(result).toEqual({
-        _tag: 'Success',
-        value: {
+      expect(result).toEqual(
+        ActionResult.success({
           saved: true,
           folder: 'Saved Drafts',
           draftId: 'imap:uid-validity-123:uid-456'
-        }
-      })
+        })
+      )
       expect(requests.draft[0]).toMatchObject({
         connection: {
           protocol: 'imap',
@@ -474,10 +474,13 @@ describe('generic email connector', () => {
         input: { folder: '   ', message: { to: [], body: {} } }
       }).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+        expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
       expect(requests.draft).toHaveLength(0)
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
@@ -504,10 +507,7 @@ describe('generic email connector', () => {
         }
       })
 
-      expect(result).toEqual({
-        _tag: 'Success',
-        value: { accepted: true, submissionId: 'submission-1' }
-      })
+      expect(result).toEqual(ActionResult.success({ accepted: true, submissionId: 'submission-1' }))
       expect(requests.send[0]).toMatchObject({
         connection: {
           protocol: 'smtp',
@@ -634,18 +634,27 @@ describe('generic email connector', () => {
         input: { messageId: 'message-1', attachmentId: 'mime-part-2', folder: 'Archive' }
       }).pipe(Effect.result)
 
-      expect(listed).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(fetched).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(attachment).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(listed)).toBe(true)
+
+      if (Result.isFailure(listed)) {
+        expect(Predicate.isTagged(listed.failure, 'ConnectorError')).toBe(true)
+        expect(listed.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(fetched)).toBe(true)
+
+      if (Result.isFailure(fetched)) {
+        expect(Predicate.isTagged(fetched.failure, 'ConnectorError')).toBe(true)
+        expect(fetched.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(attachment)).toBe(true)
+
+      if (Result.isFailure(attachment)) {
+        expect(Predicate.isTagged(attachment.failure, 'ConnectorError')).toBe(true)
+        expect(attachment.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
       expect(requests.list).toHaveLength(0)
       expect(requests.get).toHaveLength(0)
       expect(requests.attachment).toHaveLength(0)
@@ -671,10 +680,13 @@ describe('generic email connector', () => {
           input: { message: { to: [], body: { text: 'Not supported' } } }
         }).pipe(Effect.result)
 
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-        })
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+          expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+        }
+
         expect(refs).toHaveLength(0)
         expect(requests.draft).toHaveLength(0)
       }).pipe(Effect.provide(makeHostLayer({ requests, refs })))
@@ -705,10 +717,13 @@ describe('generic email connector', () => {
         }
       })
 
-      expect(rejected).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(rejected)).toBe(true)
+
+      if (Result.isFailure(rejected)) {
+        expect(Predicate.isTagged(rejected.failure, 'ConnectorError')).toBe(true)
+        expect(rejected.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
       expect(accepted._tag).toBe('Success')
       expect(requests.send).toHaveLength(1)
     }).pipe(Effect.provide(makeHostLayer({ requests })))
@@ -734,14 +749,19 @@ describe('generic email connector', () => {
         input: { message: { to: [{ address: 'bob@example.com' }], body: { text: 'Hi' } } }
       }).pipe(Effect.result)
 
-      expect(missingConfig).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(missingCredential).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'credential_binding_missing' }
-      })
+      expect(Result.isFailure(missingConfig)).toBe(true)
+
+      if (Result.isFailure(missingConfig)) {
+        expect(Predicate.isTagged(missingConfig.failure, 'ConnectorError')).toBe(true)
+        expect(missingConfig.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(missingCredential)).toBe(true)
+
+      if (Result.isFailure(missingCredential)) {
+        expect(Predicate.isTagged(missingCredential.failure, 'ConnectorError')).toBe(true)
+        expect(missingCredential.failure).toMatchObject({ cause: 'credential_binding_missing' })
+      }
     }).pipe(Effect.provide(makeHostLayer()))
   )
 
@@ -755,8 +775,7 @@ describe('generic email connector', () => {
     const invalidCredentialLayer = Layer.succeed(
       CredentialResolver,
       CredentialResolver.of({
-        resolve: () =>
-          Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'not-email-auth' }))
+        resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'not-email-auth' }))
       })
     )
 
@@ -767,10 +786,12 @@ describe('generic email connector', () => {
         input: {}
       }).pipe(Effect.result)
 
-      expect(invalidPort).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(invalidPort)).toBe(true)
+
+      if (Result.isFailure(invalidPort)) {
+        expect(Predicate.isTagged(invalidPort.failure, 'ConnectorError')).toBe(true)
+        expect(invalidPort.failure).toMatchObject({ cause: 'validation_failed' })
+      }
 
       const invalidCredential = yield* EmailConnector.invoke({
         integration: makeIntegration({
@@ -782,10 +803,12 @@ describe('generic email connector', () => {
         input: {}
       }).pipe(Effect.result)
 
-      expect(invalidCredential).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'credential_invalid' }
-      })
+      expect(Result.isFailure(invalidCredential)).toBe(true)
+
+      if (Result.isFailure(invalidCredential)) {
+        expect(Predicate.isTagged(invalidCredential.failure, 'ConnectorError')).toBe(true)
+        expect(invalidCredential.failure).toMatchObject({ cause: 'credential_invalid' })
+      }
     }).pipe(Effect.provide(Layer.merge(invalidCredentialLayer, makeEmailClientLayer())))
   })
 
@@ -865,14 +888,19 @@ describe('generic email connector', () => {
         input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
       }).pipe(Effect.result)
 
-      expect(listResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', message: 'Transport unavailable' }
-      })
-      expect(attachmentResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', message: 'Transport unavailable' }
-      })
+      expect(Result.isFailure(listResult)).toBe(true)
+
+      if (Result.isFailure(listResult)) {
+        expect(Predicate.isTagged(listResult.failure, 'ConnectorError')).toBe(true)
+        expect(listResult.failure).toMatchObject({ message: 'Transport unavailable' })
+      }
+
+      expect(Result.isFailure(attachmentResult)).toBe(true)
+
+      if (Result.isFailure(attachmentResult)) {
+        expect(Predicate.isTagged(attachmentResult.failure, 'ConnectorError')).toBe(true)
+        expect(attachmentResult.failure).toMatchObject({ message: 'Transport unavailable' })
+      }
     }).pipe(
       Effect.provide(
         Layer.merge(

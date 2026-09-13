@@ -7,7 +7,11 @@ import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
-import { updateAgentSkillWithCommand, type AgentSkillUpdateInput } from './agent-skill'
+import {
+  AgentSkillCommandInput,
+  updateAgentSkillWithCommand,
+  type AgentSkillUpdateInput
+} from './agent-skill'
 
 class AgentSkillActionError extends Data.TaggedError('AgentSkillActionError')<{
   readonly message: string
@@ -37,8 +41,7 @@ export const updateAgentSkillAction = async (
         userId: session.user.id,
         commandInput:
           input.createCommand === true
-            ? {
-                _tag: 'CreateCommand',
+            ? AgentSkillCommandInput.CreateCommand({
                 command: {
                   name:
                     commandName === undefined || commandName.length === 0
@@ -47,8 +50,8 @@ export const updateAgentSkillAction = async (
                   description: input.description,
                   template: `Use the ${input.name} skill.\n\n$ARGUMENTS`
                 }
-              }
-            : { _tag: 'SkipCommand' }
+              })
+            : AgentSkillCommandInput.SkipCommand()
       })
     }).pipe(
       Effect.withSpan('action.agentSkill.update'),

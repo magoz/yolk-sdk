@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
@@ -8,6 +8,7 @@ import {
   makeTool as makeSchemaTool,
   makeToolExecutorLayer,
   modelVisibleToolError,
+  modelVisibleToolErrorStructuredContent,
   resolveTools,
   type ToolModule,
   type ToolRegistration
@@ -97,10 +98,15 @@ describe('resolveTools', () => {
         makeToolExecutorLayer(toolSet)
       ).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'not_found' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ToolError')).toBe(true)
+
+        if (Predicate.isTagged(result.failure, 'ToolError')) {
+          expect(result.failure.cause).toBe('not_found')
+        }
+      }
     })
   )
 
@@ -110,10 +116,15 @@ describe('resolveTools', () => {
         enabled: true
       }).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolRegistryError', cause: 'duplicate_tool' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ToolRegistryError')).toBe(true)
+
+        if (Predicate.isTagged(result.failure, 'ToolRegistryError')) {
+          expect(result.failure.cause).toBe('duplicate_tool')
+        }
+      }
     })
   )
 
@@ -265,4 +276,94 @@ describe('resolveTools', () => {
       })
     })
   )
+
+  it('omits structured error details and makeTool background unless present', () => {
+    const omitted = modelVisibleToolErrorStructuredContent(
+      modelVisibleToolError({
+        tool: 't',
+        message: 'm',
+        reason: 'not_found'
+      })
+    )
+
+    expect(Object.keys(omitted)).toEqual(['type', 'tool', 'reason', 'message'])
+    expect(JSON.stringify(omitted)).toBe(
+      '{"type":"model_visible_tool_error","tool":"t","reason":"not_found","message":"m"}'
+    )
+
+    const present = modelVisibleToolErrorStructuredContent(
+      modelVisibleToolError({
+        tool: 't',
+        message: 'm',
+        reason: 'not_found',
+        details: { code: 'missing' }
+      })
+    )
+
+    expect(Object.keys(present)).toEqual(['type', 'tool', 'reason', 'message', 'details'])
+    expect(JSON.stringify(present)).toBe(
+      '{"type":"model_visible_tool_error","tool":"t","reason":"not_found","message":"m","details":{"code":"missing"}}'
+    )
+
+    const reads: Array<string> = []
+
+    const registration = makeSchemaTool({
+      name: 'echo',
+      description: 'echo',
+      parameters: EmptyToolParams,
+      access: 'read',
+      get background() {
+        reads.push('background')
+
+        return false
+      },
+      execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'x' }))
+    })
+
+    expect(reads).toEqual(['background', 'background', 'background', 'background'])
+    expect(Object.keys(registration)).toEqual([
+      'def',
+      'background',
+      'validate',
+      'access',
+      'approval',
+      'isEnabled',
+      'execute'
+    ])
+    expect(registration.background).toBe(false)
+    expect(Object.keys(registration.def)).toEqual([
+      'name',
+      'description',
+      'parameters',
+      'approval',
+      'background'
+    ])
+    expect(JSON.stringify(registration.def)).toBe(
+      '{"name":"echo","description":"echo","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false},"background":false}'
+    )
+
+    const omittedBackground = makeSchemaTool({
+      name: 'echo',
+      description: 'echo',
+      parameters: EmptyToolParams,
+      access: 'read',
+      execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'x' }))
+    })
+
+    expect(Object.keys(omittedBackground)).toEqual([
+      'def',
+      'validate',
+      'access',
+      'approval',
+      'isEnabled',
+      'execute'
+    ])
+    expect(Object.hasOwn(omittedBackground, 'background')).toBe(false)
+    expect(Object.keys(omittedBackground.def)).toEqual([
+      'name',
+      'description',
+      'parameters',
+      'approval'
+    ])
+  })
 })

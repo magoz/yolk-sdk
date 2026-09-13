@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer, Option, Predicate, Stream } from 'effect'
+import { Deferred, Effect, Layer, Option, Predicate, Result, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentContentCapabilities,
@@ -22,7 +22,7 @@ import {
   ToolResultMessage,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
-import type { AssistantAgentMessage } from '@yolk-sdk/agent/protocol'
+import type { AgentEvent } from '@yolk-sdk/agent/protocol'
 import {
   ContextTransformer,
   LLMDone,
@@ -65,14 +65,10 @@ const noToolReasoningCapabilities = AgentModelCapabilities.make({
   reasoning: false
 })
 
-const assistantMessageFromEvents = (events: ReadonlyArray<{ readonly _tag: string }>) => {
+const assistantMessageFromEvents = (events: ReadonlyArray<AgentEvent>) => {
   const event = events.find(
-    (
-      candidate
-    ): candidate is {
-      readonly _tag: 'AssistantMessage'
-      readonly message: AssistantAgentMessage
-    } => candidate._tag === 'AssistantMessage'
+    (candidate): candidate is Extract<AgentEvent, { readonly _tag: 'AssistantMessage' }> =>
+      Predicate.isTagged(candidate, 'AssistantMessage')
   )
 
   if (event === undefined) {
@@ -565,7 +561,9 @@ describe('run', () => {
         Effect.result
       )
 
-      expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'FauxExhaustedError' } })
+      expect(
+        Result.isFailure(result) && Predicate.isTagged(result.failure, 'FauxExhaustedError')
+      ).toBe(true)
     })
   )
 
@@ -602,7 +600,9 @@ describe('run', () => {
         Effect.result
       )
 
-      expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'AbortError' } })
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'AbortError')).toBe(
+        true
+      )
     })
   )
 
@@ -631,14 +631,11 @@ describe('run', () => {
         Effect.result
       )
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'LLMError',
-          cause: 'validation_error',
-          message: 'Image input is not supported by this model',
-          retryable: false
-        }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        cause: 'validation_error',
+        message: 'Image input is not supported by this model',
+        retryable: false
       })
       expect(requests).toEqual([])
     })
@@ -675,14 +672,11 @@ describe('run', () => {
         Effect.result
       )
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'LLMError',
-          cause: 'validation_error',
-          message: 'Document input is not supported by this model',
-          retryable: false
-        }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        cause: 'validation_error',
+        message: 'Document input is not supported by this model',
+        retryable: false
       })
       expect(requests).toEqual([])
     })
@@ -706,13 +700,10 @@ describe('run', () => {
         Effect.result
       )
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'LLMError',
-          cause: 'validation_error',
-          message: 'Tools are not supported by this model'
-        }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        cause: 'validation_error',
+        message: 'Tools are not supported by this model'
       })
     })
   )
@@ -1011,9 +1002,10 @@ describe('run', () => {
       )
 
       expect(calls).toBe(3)
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'LLMError', cause: 'overloaded', retryable: true }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        cause: 'overloaded',
+        retryable: true
       })
     })
   )
@@ -1070,9 +1062,9 @@ describe('run', () => {
       )
 
       expect(calls).toBe(1)
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'LLMError', message: 'late rate limit' }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        message: 'late rate limit'
       })
     })
   )
@@ -1099,15 +1091,12 @@ describe('run', () => {
         Effect.result
       )
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'LLMError',
-          cause: 'invalid_response',
-          retryable: false,
-          responseIssue: 'missing_done',
-          message: 'Expected exactly one LLM done event, received 0'
-        }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        responseIssue: 'missing_done',
+        message: 'Expected exactly one LLM done event, received 0'
       })
     })
   )
@@ -1134,15 +1123,12 @@ describe('run', () => {
         Effect.result
       )
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'LLMError',
-          cause: 'invalid_response',
-          retryable: false,
-          responseIssue: 'missing_done',
-          message: 'Expected exactly one LLM done event, received 0'
-        }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        responseIssue: 'missing_done',
+        message: 'Expected exactly one LLM done event, received 0'
       })
     })
   )
@@ -1177,16 +1163,15 @@ describe('run', () => {
         Effect.result
       )
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'LLMError',
-          cause: 'invalid_response',
-          message: 'LLM done reason must be tool_use'
-        }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        cause: 'invalid_response',
+        message: 'LLM done reason must be tool_use'
       })
 
-      if (result._tag === 'Failure') {
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
         expect('responseIssue' in result.failure ? result.failure.responseIssue : undefined).toBe(
           undefined
         )

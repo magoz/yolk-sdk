@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Predicate, Result, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
@@ -56,13 +56,10 @@ describe('makeAgentLoopLayer', () => {
       expect(config.maxRetries).toBe(2)
       expect(config.retryBaseDelayMs).toBe(2000)
       expect(config.toolConcurrency).toBe(4)
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'ToolError',
-          tool: 'weather',
-          cause: 'execution'
-        }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'ToolError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        tool: 'weather',
+        cause: 'execution'
       })
     }).pipe(
       Effect.provide(

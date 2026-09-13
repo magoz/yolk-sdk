@@ -1,3 +1,4 @@
+import { Data, Match } from 'effect'
 import type { AgentUsage } from '@yolk-sdk/agent/protocol'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -60,16 +61,15 @@ export type AgentCompactionState =
       readonly afterTokens?: number
     }
 
-const compactionLabel = (state: AgentCompactionState) => {
-  switch (state._tag) {
-    case 'Idle':
-      return undefined
-    case 'Compacting':
-      return 'compacting'
-    case 'Compacted':
-      return 'compacted'
-  }
-}
+export const AgentCompactionState = Data.taggedEnum<AgentCompactionState>()
+
+const compactionLabel = (state: AgentCompactionState) =>
+  Match.value(state).pipe(
+    Match.tag('Idle', () => undefined),
+    Match.tag('Compacting', () => 'compacting'),
+    Match.tag('Compacted', () => 'compacted'),
+    Match.exhaustive
+  )
 
 const contextBadgeVariant = (tokens: number, budget: ContextBudget) =>
   contextBudgetStatus(tokens, budget) === 'compact' ? 'destructive' : 'outline'

@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Predicate, Stream } from 'effect'
+import { Array as Arr, Effect, Match, Option, Predicate, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   assistantContent,
@@ -71,15 +71,12 @@ const isAllowedDocumentMimeType = (mimeType: string) =>
 const isValidBase64 = (data: string) =>
   data.length > 0 && data.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(data)
 
-const messageContentParts = (message: AgentMessage): ReadonlyArray<ContentPart> => {
-  switch (message._tag) {
-    case 'Assistant':
-      return contentParts(assistantContent(message))
-    case 'ToolResult':
-    case 'User':
-      return contentParts(message.content)
-  }
-}
+const messageContentParts = (message: AgentMessage): ReadonlyArray<ContentPart> =>
+  Match.value(message).pipe(
+    Match.tag('Assistant', current => contentParts(assistantContent(current))),
+    Match.tag('ToolResult', 'User', current => contentParts(current.content)),
+    Match.exhaustive
+  )
 
 const requestImageParts = (input: AgentRouteRequest) =>
   Arr.filter(Arr.flatMap(input.messages, messageContentParts), (part): part is ImagePart =>

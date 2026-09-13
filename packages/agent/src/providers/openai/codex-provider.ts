@@ -126,15 +126,31 @@ const isCodexContextWindowError = (error: LLMError) => {
   )
 }
 
+type CodexLlmErrorFields = {
+  cause: LLMError['cause']
+  message: string
+  retryable: boolean
+  provider?: LLMError['provider']
+}
+
 const normalizeCodexContextWindowError = (error: LLMError) =>
   error.cause === 'context_overflow'
     ? error
-    : new LLMError({
-        cause: 'context_overflow',
-        message: error.message,
-        retryable: false,
-        ...(error.provider === undefined ? {} : { provider: error.provider })
-      })
+    : new LLMError(
+        (() => {
+          const fields: CodexLlmErrorFields = {
+            cause: 'context_overflow',
+            message: error.message,
+            retryable: false
+          }
+
+          if (error.provider !== undefined) {
+            fields.provider = error.provider
+          }
+
+          return fields
+        })()
+      )
 
 const noteCodexToolCall =
   (hasToolCallRef: Ref.Ref<boolean>) =>

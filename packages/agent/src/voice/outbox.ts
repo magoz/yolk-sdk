@@ -1,4 +1,4 @@
-import { Duration, Effect, Predicate, Queue, Ref, type Scope } from 'effect'
+import { Duration, Effect, Match, Predicate, Queue, Ref, type Scope } from 'effect'
 import {
   initialVoiceEventSequencerState,
   sequenceVoiceEvent,
@@ -40,21 +40,21 @@ const defaultMaxBatchSize = 100
  * for the next interval so finals/tool activity land server-side with
  * minimal loss window.
  */
-const isBoundaryEvent = (event: VoiceEvent) => {
-  switch (event._tag) {
-    case 'UserTranscriptFinal':
-    case 'AssistantTranscriptFinal':
-    case 'Interrupted':
-    case 'SessionClosed':
-    case 'ToolCallsRequested':
-    case 'ToolCallCompleted':
-    case 'ToolCallFailed':
-    case 'Error':
-      return true
-    default:
-      return false
-  }
-}
+const isBoundaryEvent = (event: VoiceEvent) =>
+  Match.value(event).pipe(
+    Match.tag(
+      'UserTranscriptFinal',
+      'AssistantTranscriptFinal',
+      'Interrupted',
+      'SessionClosed',
+      'ToolCallsRequested',
+      'ToolCallCompleted',
+      'ToolCallFailed',
+      'Error',
+      () => true
+    ),
+    Match.orElse(() => false)
+  )
 
 const isToolLifecycleEvent = (
   event: VoiceEvent

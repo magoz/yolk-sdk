@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Effect, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -41,13 +41,13 @@ const schemaVariant = Schema.Literals([
 const schemaVariantArbitrary = Schema.toArbitrary(schemaVariant)
 
 const isJsonObject = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && typeof input === 'object' && !Array.isArray(input)
+  input !== null && Predicate.isObjectOrArray(input) && !Array.isArray(input)
 
 const field = (input: unknown, key: string) =>
   isJsonObject(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
 
 const localDefinitionName = (ref: unknown) => {
-  if (typeof ref !== 'string') return undefined
+  if (!Predicate.isString(ref)) return undefined
 
   const prefix = '#/$defs/'
 

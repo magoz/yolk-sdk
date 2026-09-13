@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { VoiceToolDispatch } from '../background-execution-internal.ts'
 import * as Schema from 'effect/Schema'
 import { ToolExecutor, type ToolError } from '@yolk-sdk/agent/loop'
@@ -61,8 +61,8 @@ const truncateVoiceToolResult = (value: string) => {
   return `${value.slice(0, maxVoiceToolResultCharacters)}\n\n[truncated for voice; summarize from available excerpt]`
 }
 
-const contentToSerializable = (content: Content): unknown =>
-  typeof content === 'string' ? truncateVoiceToolResult(content) : content
+const contentToSerializable = (content: Content): Content =>
+  Predicate.isString(content) ? truncateVoiceToolResult(content) : content
 
 const makeVoiceToolExecutionResult = (toolCallId: string, output: string) =>
   VoiceToolExecutionResult.make({ toolCallId, output })

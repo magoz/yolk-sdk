@@ -150,16 +150,6 @@ const modelVisibleReasonFromToolError = (error: ToolError): ModelVisibleToolErro
   }
 }
 
-const decodeWebSearchParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(WebSearchParams)(params).pipe(
-    Effect.mapError(error =>
-      makeModelVisibleError(
-        `Invalid web search arguments: ${unknownToMessage(error)}`,
-        'validation'
-      )
-    )
-  )
-
 const normalizePositiveInteger = (input: {
   readonly value: number | undefined
   readonly defaultValue: number
@@ -453,7 +443,15 @@ export const executeWebSearchTool = (
   }
 
   return Effect.gen(function* () {
-    const params = yield* decodeWebSearchParams(call.params)
+    const params = yield* Schema.decodeUnknownEffect(WebSearchParams)(call.params).pipe(
+      Effect.mapError(error =>
+        makeModelVisibleError(
+          `Invalid web search arguments: ${unknownToMessage(error)}`,
+          'validation'
+        )
+      )
+    )
+
     const content = yield* searchWeb(params, deps)
 
     return ToolResult.make({ toolCallId: call.id, content })

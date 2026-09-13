@@ -36,18 +36,26 @@ const requestMessage = (request: HttpClientRequest.HttpClientRequest) => {
 
   const value: unknown = JSON.parse(new TextDecoder().decode(body.body))
 
-  if (typeof value !== 'object' || value === null) {
+  if (!isMcpJsonRpcEnvelope(value)) {
     return { id: null, method: 'unknown' }
   }
 
-  const id = Reflect.get(value, 'id')
-  const method = Reflect.get(value, 'method')
+  const id = value.id
+  const method = value.method
 
   return {
-    id: typeof id === 'string' || typeof id === 'number' ? id : null,
-    method: typeof method === 'string' ? method : 'unknown'
+    id: Predicate.isString(id) || Predicate.isNumber(id) ? id : null,
+    method: Predicate.isString(method) ? method : 'unknown'
   }
 }
+
+type McpJsonRpcEnvelope = {
+  readonly id?: string | number | null
+  readonly method?: string
+}
+
+const isMcpJsonRpcEnvelope = (value: unknown): value is McpJsonRpcEnvelope =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
 const fakeRemoteMcpLayer: Layer.Layer<HttpClient.HttpClient> = Layer.succeed(
   HttpClient.HttpClient,

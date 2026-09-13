@@ -28,6 +28,7 @@ import {
   markAgentAborted,
   markAgentError
 } from '@yolk-sdk/agent/client'
+import { AgentToolRun } from '../../src/client/state.ts'
 
 const call = ToolCall.make({
   id: 'work',
@@ -68,14 +69,14 @@ describe('public client background replay', () => {
       expect(replay.toolRuns).toEqual(state.toolRuns)
       expect(replay.toolRuns.some(isActiveToolRun)).toBe(false)
       expect(replay.toolRuns).toMatchObject([
-        { _tag: 'Accepted', result, startedAtMs: 0, endedAtMs: 0 }
+        AgentToolRun.Accepted({ call, result, startedAtMs: 0, endedAtMs: 0 })
       ])
     }
 
     // Fencing is per call, not a global ban on subsequent tool activity.
     const sibling = applyAgentEvent(replay, ToolInputStart.make({ id: 'next', name: 'work' }))
     expect(sibling.toolRuns.filter(isActiveToolRun)).toMatchObject([
-      { _tag: 'InputStreaming', id: 'next' }
+      AgentToolRun.InputStreaming({ id: 'next', name: 'work', input: '' })
     ])
   })
 })

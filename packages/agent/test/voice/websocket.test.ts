@@ -1,4 +1,4 @@
-import { Effect, Fiber, Layer, Scope, Stream, Exit } from 'effect'
+import { Effect, Fiber, Layer, Predicate, Scope, Stream, Exit } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import * as Socket from 'effect/unstable/socket/Socket'
 import {
@@ -35,7 +35,7 @@ class FakeWebSocket implements WebSocket {
   }
 
   addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
-    if (typeof listener !== 'function') {
+    if (!Predicate.isFunction(listener)) {
       return
     }
 
@@ -43,7 +43,7 @@ class FakeWebSocket implements WebSocket {
   }
 
   removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
-    if (typeof listener !== 'function') {
+    if (!Predicate.isFunction(listener)) {
       return
     }
 

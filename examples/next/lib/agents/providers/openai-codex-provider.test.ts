@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Predicate, Stream } from 'effect'
+import { Effect, Layer, Option, Predicate, Result, Stream } from 'effect'
 import {
   Headers,
   HttpClient,
@@ -420,14 +420,15 @@ describe('OpenAiCodexProviderLayer', () => {
           .pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'LLMError',
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+        expect(result.failure).toMatchObject({
           cause: 'invalid_response',
           message: 'OpenAI Codex response did not include text or tool calls'
-        }
-      })
+        })
+      }
     })
   )
 
@@ -585,8 +586,8 @@ describe('OpenAiCodexProviderLayer', () => {
           .pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer), Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false
       })
@@ -627,8 +628,8 @@ describe('OpenAiCodexProviderLayer', () => {
           .pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer), Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false
       })
@@ -660,8 +661,8 @@ describe('OpenAiCodexProviderLayer', () => {
           .pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer), Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'overloaded',
         retryable: true,
         provider: { provider: 'openai_codex', kind: 'overloaded' }
@@ -705,7 +706,8 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const events = Array.from(eventsOption.value)
       expect(events).toHaveLength(1)
-      expect(events[0]).toMatchObject({ _tag: 'TextDelta', text: 'oauth ' })
+      expect(Predicate.isTagged(events[0], 'TextDelta')).toBe(true)
+      expect(events[0]).toMatchObject({ text: 'oauth ' })
     })
   )
 

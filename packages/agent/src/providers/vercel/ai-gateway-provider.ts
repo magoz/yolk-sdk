@@ -31,22 +31,56 @@ const vercelAiGatewayProviderIdentity = {
   name: 'Vercel AI Gateway'
 }
 
-const gatewayExtraBody = (config: VercelAiGatewayProviderConfig) => ({
-  ...(config.fallbackModels === undefined ? {} : { models: config.fallbackModels }),
-  ...(config.routing === undefined ? {} : { providerOptions: { gateway: config.routing } })
-})
+type GatewayExtraBodyFields = {
+  models?: VercelAiGatewayProviderConfig['fallbackModels']
+  providerOptions?: { gateway: VercelAiGatewayRoutingOptions }
+}
+
+const gatewayExtraBody = (config: VercelAiGatewayProviderConfig) => {
+  const fields: GatewayExtraBodyFields = {}
+
+  if (config.fallbackModels !== undefined) {
+    fields.models = config.fallbackModels
+  }
+
+  if (config.routing !== undefined) {
+    fields.providerOptions = { gateway: config.routing }
+  }
+
+  return fields
+}
+
+type VercelAiGatewayOpenAiLayerFields = {
+  apiKey: VercelAiGatewayProviderConfig['apiKey']
+  maxCompletionTokens: number
+  completionTokenField: 'max_tokens'
+  reasoningEffortFormat: 'reasoning-object'
+  chatCompletionsUrl: string
+  providerIdentity: typeof vercelAiGatewayProviderIdentity
+  extraBody: ReturnType<typeof gatewayExtraBody>
+  extraHeaders?: VercelAiGatewayProviderConfig['extraHeaders']
+}
 
 export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProviderConfig) =>
-  makeOpenAiProviderLayer({
-    apiKey: config.apiKey,
-    maxCompletionTokens: config.maxCompletionTokens,
-    completionTokenField: 'max_tokens',
-    reasoningEffortFormat: 'reasoning-object',
-    chatCompletionsUrl: config.chatCompletionsUrl ?? vercelAiGatewayChatCompletionsUrl,
-    providerIdentity: vercelAiGatewayProviderIdentity,
-    extraBody: gatewayExtraBody(config),
-    ...(config.extraHeaders === undefined ? {} : { extraHeaders: config.extraHeaders })
-  })
+  makeOpenAiProviderLayer(
+    (() => {
+      const fields: VercelAiGatewayOpenAiLayerFields = {
+        apiKey: config.apiKey,
+        maxCompletionTokens: config.maxCompletionTokens,
+        completionTokenField: 'max_tokens',
+        reasoningEffortFormat: 'reasoning-object',
+        chatCompletionsUrl: config.chatCompletionsUrl ?? vercelAiGatewayChatCompletionsUrl,
+        providerIdentity: vercelAiGatewayProviderIdentity,
+        extraBody: gatewayExtraBody(config)
+      }
+
+      if (config.extraHeaders !== undefined) {
+        fields.extraHeaders = config.extraHeaders
+      }
+
+      return fields
+    })()
+  )
 
 const vercelAiGatewayEnvironmentConfig = Effect.gen(function* () {
   const apiKey = yield* Config.redacted('AI_GATEWAY_API_KEY').pipe(

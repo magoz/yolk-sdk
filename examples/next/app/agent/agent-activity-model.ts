@@ -1,10 +1,17 @@
+import { Match } from 'effect'
 import type {
   AgentError,
   AgentEvent,
   AgentRetry,
   ProviderErrorInfo
 } from '@yolk-sdk/agent/protocol'
-import { contentPreview, countLabel, truncate, unknownPreview } from './agent-format'
+import {
+  contentPreview,
+  countLabel,
+  isJsonPreviewValue,
+  jsonPreview,
+  truncate
+} from './agent-format'
 
 export type ActivityTone = 'neutral' | 'active' | 'success' | 'error' | 'tool'
 
@@ -86,95 +93,97 @@ export const agentErrorDetail = (event: AgentError) => {
     : `${event.message} · ${retryable} · ${provider}`
 }
 
-export const activityItemFromAgentEvent = (
-  event: AgentEvent
-): Omit<AgentActivityItem, 'id'> | null => {
-  switch (event._tag) {
-    case 'AgentStart':
-      return { title: 'Run started', detail: 'Server accepted the transcript.', tone: 'active' }
-    case 'TurnStart':
-      return { title: 'Thinking', detail: `Turn ${event.turn}`, tone: 'active' }
-    case 'LLMStreamStart':
-      return { title: 'Model stream started', detail: `Turn ${event.turn}`, tone: 'active' }
-    case 'ToolInputEnd':
-      return {
-        title: `Tool requested: ${event.call.name}`,
-        detail: unknownPreview(event.call.params),
-        tone: 'tool'
-      }
-    case 'ToolExecutionStarted':
-      return { title: `Running tool: ${event.call.name}`, detail: event.call.id, tone: 'tool' }
-    case 'ToolExecutionAccepted':
-      return {
-        title: `Background tool accepted: ${event.call.name}`,
-        detail: truncate(contentPreview(event.result.content)),
-        tone: 'tool'
-      }
-    case 'ToolExecutionCompleted':
-      return {
-        title: `Tool result: ${event.call.name}`,
-        detail: truncate(contentPreview(event.result.content)),
-        tone: 'success'
-      }
-    case 'ToolExecutionError':
-      return { title: `Tool error: ${event.call.name}`, detail: event.message, tone: 'error' }
-    case 'SubagentStarted':
-      return {
-        title: `Subagent started: ${event.description}`,
-        detail: `${event.subagentType} · ${event.subagentRunId} · ${event.createdAtMs ?? 'no timestamp'}`,
-        tone: 'tool'
-      }
-    case 'SubagentCompleted':
-      return {
-        title: `Subagent ${event.status}: ${event.description}`,
-        detail: `${event.subagentType} · ${event.durationMs}ms · ${event.subagentRunId}`,
-        tone: event.status === 'error' ? 'error' : 'success'
-      }
-    case 'TurnEnd':
-      return { title: 'Turn ended', detail: event.reason, tone: 'neutral' }
-    case 'AgentEnd':
-      return {
-        title: 'Run finished',
-        detail: `${countLabel(event.turns, 'turn')} · ${countLabel(event.messages.length, 'message')}`,
-        tone: 'success'
-      }
-    case 'AgentAwaitingInput':
-      return {
-        title: 'Waiting for input',
-        detail: countLabel(event.requests.length, 'request'),
-        tone: 'active'
-      }
-    case 'AgentError':
-      return { title: agentErrorTitle(event), detail: agentErrorDetail(event), tone: 'error' }
-    case 'AgentRetry':
-      return {
-        title: agentRetryTitle(event),
-        detail: agentRetryDetail(event),
-        tone: 'active'
-      }
-    case 'CompactionStart':
-      return { title: 'Compacting context', detail: event.strategy, tone: 'active' }
-    case 'CompactionEnd':
-      return {
-        title: 'Context compacted',
-        detail: event.strategy,
-        tone: 'success'
-      }
-    case 'AssistantMessage':
-    case 'UserMessage':
-    case 'LLMReasoningDelta':
-    case 'LLMStreamEnd':
-    case 'LLMTextDelta':
-    case 'ProviderToolResult':
-    case 'QuestionAnswered':
-    case 'QuestionCancelled':
-    case 'QuestionRequested':
-    case 'ToolApprovalDenied':
-    case 'ToolApprovalGranted':
-    case 'ToolApprovalRequested':
-    case 'ToolInputDelta':
-    case 'ToolInputStart':
-    case 'UsageUpdate':
-      return null
-  }
-}
+type ActivityItemDraft = Omit<AgentActivityItem, 'id'>
+
+export const activityItemFromAgentEvent = (event: AgentEvent): ActivityItemDraft | null =>
+  Match.value(event).pipe(
+    Match.withReturnType<ActivityItemDraft | null>(),
+    Match.tag('AgentStart', () => ({
+      title: 'Run started',
+      detail: 'Server accepted the transcript.',
+      tone: 'active'
+    })),
+    Match.tag('TurnStart', current => ({
+      title: 'Thinking',
+      detail: `Turn ${current.turn}`,
+      tone: 'active'
+    })),
+    Match.tag('LLMStreamStart', current => ({
+      title: 'Model stream started',
+      detail: `Turn ${current.turn}`,
+      tone: 'active'
+    })),
+    Match.tag('ToolInputEnd', current => ({
+      title: `Tool requested: ${current.call.name}`,
+      detail: isJsonPreviewValue(current.call.params)
+        ? jsonPreview(current.call.params)
+        : 'unparsed',
+      tone: 'tool'
+    })),
+    Match.tag('ToolExecutionStarted', current => ({
+      title: `Running tool: ${current.call.name}`,
+      detail: current.call.id,
+      tone: 'tool'
+    })),
+    Match.tag('ToolExecutionAccepted', current => ({
+      title: `Background tool accepted: ${current.call.name}`,
+      detail: truncate(contentPreview(current.result.content)),
+      tone: 'tool'
+    })),
+    Match.tag('ToolExecutionCompleted', current => ({
+      title: `Tool result: ${current.call.name}`,
+      detail: truncate(contentPreview(current.result.content)),
+      tone: 'success'
+    })),
+    Match.tag('ToolExecutionError', current => ({
+      title: `Tool error: ${current.call.name}`,
+      detail: current.message,
+      tone: 'error'
+    })),
+    Match.tag('SubagentStarted', current => ({
+      title: `Subagent started: ${current.description}`,
+      detail: `${current.subagentType} · ${current.subagentRunId} · ${current.createdAtMs ?? 'no timestamp'}`,
+      tone: 'tool'
+    })),
+    Match.tag('SubagentCompleted', current => ({
+      title: `Subagent ${current.status}: ${current.description}`,
+      detail: `${current.subagentType} · ${current.durationMs}ms · ${current.subagentRunId}`,
+      tone: current.status === 'error' ? 'error' : 'success'
+    })),
+    Match.tag('TurnEnd', current => ({
+      title: 'Turn ended',
+      detail: current.reason,
+      tone: 'neutral'
+    })),
+    Match.tag('AgentEnd', current => ({
+      title: 'Run finished',
+      detail: `${countLabel(current.turns, 'turn')} · ${countLabel(current.messages.length, 'message')}`,
+      tone: 'success'
+    })),
+    Match.tag('AgentAwaitingInput', current => ({
+      title: 'Waiting for input',
+      detail: countLabel(current.requests.length, 'request'),
+      tone: 'active'
+    })),
+    Match.tag('AgentError', current => ({
+      title: agentErrorTitle(current),
+      detail: agentErrorDetail(current),
+      tone: 'error'
+    })),
+    Match.tag('AgentRetry', current => ({
+      title: agentRetryTitle(current),
+      detail: agentRetryDetail(current),
+      tone: 'active'
+    })),
+    Match.tag('CompactionStart', current => ({
+      title: 'Compacting context',
+      detail: current.strategy,
+      tone: 'active'
+    })),
+    Match.tag('CompactionEnd', current => ({
+      title: 'Context compacted',
+      detail: current.strategy,
+      tone: 'success'
+    })),
+    Match.orElse(() => null)
+  )

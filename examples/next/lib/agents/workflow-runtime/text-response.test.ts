@@ -81,8 +81,9 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
       )
 
       expect(events.map(event => event._tag)).toEqual(['TurnStart', 'UsageUpdate', 'AgentError'])
-      expect(events.at(-1)).toMatchObject({
-        _tag: 'AgentError',
+      const terminal = events.at(-1)
+      expect(Predicate.isTagged(terminal, 'AgentError')).toBe(true)
+      expect(terminal).toMatchObject({
         code: 'provider_error',
         message: 'Child failed.'
       })

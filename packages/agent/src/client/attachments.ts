@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import { documentPartFromText, inferTextDocumentMimeType } from '@yolk-sdk/agent/protocol'
 
 const couldNotReadTextError = () => new Error('Could not read text')
@@ -27,7 +27,7 @@ const textFromFileReaderEffect = (blob: Blob) =>
     const handleLoad = () => {
       removeListeners()
 
-      if (typeof reader.result === 'string') {
+      if (Predicate.isString(reader.result)) {
         resume(Effect.succeed(reader.result))
 
         return
@@ -50,7 +50,7 @@ const textFromFileReaderEffect = (blob: Blob) =>
   })
 
 export const textFromBlob = (blob: Blob) => {
-  if (typeof blob.text === 'function') {
+  if (Predicate.isFunction(blob.text)) {
     return Effect.tryPromise({
       try: () => blob.text(),
       catch: couldNotReadTextError

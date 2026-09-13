@@ -1,4 +1,4 @@
-import { Clock, Effect, Option, Predicate, Ref, Stream } from 'effect'
+import { Clock, Data, Effect, Match, Option, Predicate, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AgentAwaitingInput,
@@ -102,14 +102,12 @@ type SubagentCallMetadata = {
 }
 
 const objectField = (input: unknown, key: string) =>
-  input !== null && typeof input === 'object'
-    ? Object.getOwnPropertyDescriptor(input, key)?.value
-    : undefined
+  Predicate.isObjectOrArray(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
 
 const nonEmptyStringField = (input: unknown, key: string) => {
   const value = objectField(input, key)
 
-  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+  return Predicate.isString(value) && value.trim().length > 0 ? value : undefined
 }
 
 const subagentCallMetadata = (call: ToolCall): SubagentCallMetadata | undefined => {
@@ -250,38 +248,42 @@ const unsupportedInputError = (message: string) =>
   })
 
 const validateContent = (message: AgentMessage, capabilities: AgentModelCapabilities) =>
-  Effect.forEach(contentPartsFromMessage(message), part => {
-    switch (part._tag) {
-      case 'Text':
-        return capabilities.input.text
+  Effect.forEach(contentPartsFromMessage(message), part =>
+    Match.value(part).pipe(
+      Match.tag('Text', () =>
+        capabilities.input.text
           ? Effect.void
           : Effect.fail(unsupportedInputError('Text input is not supported by this model'))
-      case 'Image':
-        return capabilities.input.image
+      ),
+      Match.tag('Image', () =>
+        capabilities.input.image
           ? Effect.void
           : Effect.fail(unsupportedInputError('Image input is not supported by this model'))
-      case 'Document':
-        return capabilities.input.document
+      ),
+      Match.tag('Document', () =>
+        capabilities.input.document
           ? Effect.void
           : Effect.fail(unsupportedInputError('Document input is not supported by this model'))
-      case 'Audio':
-        return capabilities.input.audio
+      ),
+      Match.tag('Audio', () =>
+        capabilities.input.audio
           ? Effect.void
           : Effect.fail(unsupportedInputError('Audio input is not supported by this model'))
-    }
-  })
+      ),
+      Match.exhaustive
+    )
+  )
 
-const contentPartsFromMessage = (message: AgentMessage) => {
-  switch (message._tag) {
-    case 'User':
-    case 'ToolResult':
-      return contentParts(message.content)
-    case 'Assistant':
-      return message.parts.flatMap(part =>
+const contentPartsFromMessage = (message: AgentMessage) =>
+  Match.value(message).pipe(
+    Match.tag('User', 'ToolResult', current => contentParts(current.content)),
+    Match.tag('Assistant', current =>
+      current.parts.flatMap(part =>
         Predicate.isTagged(part, 'Text') ? contentParts(part.content) : []
       )
-  }
-}
+    ),
+    Match.exhaustive
+  )
 
 const validateCapabilities = (
   config: RunConfig,
@@ -306,42 +308,40 @@ const validateCapabilities = (
   )
 }
 
-const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> => {
-  switch (event._tag) {
-    case 'TextDelta':
-      return [AgentLLMTextDelta.make({ text: event.text })]
-    case 'ReasoningDelta':
-      return [AgentLLMReasoningDelta.make({ text: event.text })]
-    case 'ToolCall':
-      return [ToolInputEnd.make({ call: event.call })]
-    case 'ToolInputStart':
-      return [ToolInputStart.make({ id: event.id, name: event.name })]
-    case 'ToolInputDelta':
-      return [ToolInputDelta.make({ id: event.id, delta: event.delta })]
-    case 'ProviderToolResult':
-      return [ProviderToolResult.make({ call: event.call, result: event.result })]
-    case 'Usage':
-      return [UsageUpdate.make({ usage: event.usage })]
-    case 'Done':
-      return []
-  }
-}
+const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> =>
+  Match.value(event).pipe(
+    Match.tag('TextDelta', current => [AgentLLMTextDelta.make({ text: current.text })]),
+    Match.tag('ReasoningDelta', current => [AgentLLMReasoningDelta.make({ text: current.text })]),
+    Match.tag('ToolCall', current => [ToolInputEnd.make({ call: current.call })]),
+    Match.tag('ToolInputStart', current => [
+      ToolInputStart.make({ id: current.id, name: current.name })
+    ]),
+    Match.tag('ToolInputDelta', current => [
+      ToolInputDelta.make({ id: current.id, delta: current.delta })
+    ]),
+    Match.tag('ProviderToolResult', current => [
+      ProviderToolResult.make({ call: current.call, result: current.result })
+    ]),
+    Match.tag('Usage', current => [UsageUpdate.make({ usage: current.usage })]),
+    Match.tag('Done', () => []),
+    Match.exhaustive
+  )
 
-const isLlmEvent = (event: LLMEvent | AgentEvent | AgentRetry): event is LLMEvent => {
-  switch (event._tag) {
-    case 'TextDelta':
-    case 'ReasoningDelta':
-    case 'Done':
-    case 'ToolCall':
-    case 'ToolInputStart':
-    case 'ToolInputDelta':
-    case 'ProviderToolResult':
-    case 'Usage':
-      return true
-    default:
-      return false
-  }
-}
+const isLlmEvent = (event: LLMEvent | AgentEvent | AgentRetry): event is LLMEvent =>
+  Match.value(event).pipe(
+    Match.tag(
+      'TextDelta',
+      'ReasoningDelta',
+      'Done',
+      'ToolCall',
+      'ToolInputStart',
+      'ToolInputDelta',
+      'ProviderToolResult',
+      'Usage',
+      () => true
+    ),
+    Match.orElse(() => false)
+  )
 
 type TurnStreamInput = {
   readonly config: RunConfig
@@ -428,15 +428,26 @@ const withProviderRetries = (
 
                     const delayMs = retryDelayMs(loopConfig.retryBaseDelayMs, attempt, error)
 
-                    return Stream.make(
-                      AgentRetry.make({
-                        attempt,
-                        reason: retryReason(error),
-                        delayMs,
-                        message: error.message,
-                        ...(error.provider === undefined ? {} : { provider: error.provider })
-                      })
-                    ).pipe(
+                    type AgentRetryFields = {
+                      attempt: number
+                      reason: ReturnType<typeof retryReason>
+                      delayMs: number
+                      message: string
+                      provider?: LLMError['provider']
+                    }
+
+                    const retryFields: AgentRetryFields = {
+                      attempt,
+                      reason: retryReason(error),
+                      delayMs,
+                      message: error.message
+                    }
+
+                    if (error.provider !== undefined) {
+                      retryFields.provider = error.provider
+                    }
+
+                    return Stream.make(AgentRetry.make(retryFields)).pipe(
                       Stream.concat(sleepStream(delayMs)),
                       Stream.concat(
                         withProviderRetries(makeStream(), loopConfig, makeStream, attempt + 1)
@@ -519,25 +530,25 @@ type IndexedToolCall = {
   readonly call: ToolCall
 }
 
-type PreparedToolCall =
-  | {
-      readonly _tag: 'Execute'
-      readonly index: number
-      readonly call: ToolCall
-      readonly events: ReadonlyArray<AgentEvent>
-    }
-  | {
-      readonly _tag: 'Result'
-      readonly index: number
-      readonly call: ToolCall
-      readonly result: ToolResult
-      readonly events: ReadonlyArray<AgentEvent>
-    }
-  | {
-      readonly _tag: 'Pending'
-      readonly request: HitlRequest
-      readonly events: ReadonlyArray<AgentEvent>
-    }
+type PreparedToolCall = Data.TaggedEnum<{
+  Execute: {
+    readonly index: number
+    readonly call: ToolCall
+    readonly events: ReadonlyArray<AgentEvent>
+  }
+  Result: {
+    readonly index: number
+    readonly call: ToolCall
+    readonly result: ToolResult
+    readonly events: ReadonlyArray<AgentEvent>
+  }
+  Pending: {
+    readonly request: HitlRequest
+    readonly events: ReadonlyArray<AgentEvent>
+  }
+}>
+
+const PreparedToolCall = Data.taggedEnum<PreparedToolCall>()
 
 export type PreparedToolBatch = {
   readonly callsToExecute: ReadonlyArray<IndexedToolCall>
@@ -676,25 +687,23 @@ const prepareQuestionCall = (
     )
 
     if (Predicate.isTagged(decoded, 'Failure')) {
-      return {
-        _tag: 'Result',
+      return PreparedToolCall.Result({
         index,
         call,
         result: invalidQuestionToolResult(call),
         events: []
-      }
+      })
     }
 
     const response = questionResponseFor(responses, call)
 
     if (response !== undefined) {
-      return {
-        _tag: 'Result',
+      return PreparedToolCall.Result({
         index,
         call,
         result: questionToolResult(response, decoded.success.questions),
         events: [hitlResponseEvent(response)]
-      }
+      })
     }
 
     const request = QuestionRequest.make({
@@ -704,11 +713,10 @@ const prepareQuestionCall = (
       questions: decoded.success.questions
     })
 
-    return {
-      _tag: 'Pending',
+    return PreparedToolCall.Pending({
       request,
       events: [QuestionRequested.make({ request })]
-    }
+    })
   })
 
 const prepareApprovalCall = (
@@ -721,8 +729,7 @@ const prepareApprovalCall = (
 
   // Never ask a human to approve, or launch, an activated call whose envelope is malformed.
   if (envelope !== undefined && Option.isNone(envelope)) {
-    return {
-      _tag: 'Result',
+    return PreparedToolCall.Result({
       index,
       call,
       events: [],
@@ -731,40 +738,37 @@ const prepareApprovalCall = (
         isError: true,
         content: 'Expected exactly execution (foreground or background) and arguments.'
       })
-    }
+    })
   }
 
   if (!approvalRequired(tools, call)) {
-    return { _tag: 'Execute', index, call, events: [] }
+    return PreparedToolCall.Execute({ index, call, events: [] })
   }
 
   const request = toolApprovalRequest(tools, call)
   const response = approvalResponseFor(responses, call, tools)
 
   if (response === undefined) {
-    return {
-      _tag: 'Pending',
+    return PreparedToolCall.Pending({
       request,
       events: [ToolApprovalRequested.make({ call, request })]
-    }
+    })
   }
 
   if (response.decision === 'denied') {
-    return {
-      _tag: 'Result',
+    return PreparedToolCall.Result({
       index,
       call,
       result: deniedToolResult(call, response),
       events: [hitlResponseEvent(response)]
-    }
+    })
   }
 
-  return {
-    _tag: 'Execute',
+  return PreparedToolCall.Execute({
     index,
     call,
     events: [hitlResponseEvent(response)]
-  }
+  })
 }
 
 const prepareToolCall = (input: {
@@ -776,17 +780,18 @@ const prepareToolCall = (input: {
   input.call.name === questionToolName
     ? input.tools.some(tool => tool.name === questionToolName)
       ? prepareQuestionCall(input.call, input.index, input.responses)
-      : Effect.succeed({
-          _tag: 'Result',
-          index: input.index,
-          call: input.call,
-          events: [],
-          result: ToolResult.make({
-            toolCallId: input.call.id,
-            content: 'Question tool is unavailable',
-            isError: true
+      : Effect.succeed(
+          PreparedToolCall.Result({
+            index: input.index,
+            call: input.call,
+            events: [],
+            result: ToolResult.make({
+              toolCallId: input.call.id,
+              content: 'Question tool is unavailable',
+              isError: true
+            })
           })
-        })
+        )
     : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
 
 /** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution. */

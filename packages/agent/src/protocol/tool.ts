@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import * as Schema from 'effect/Schema'
 import { Content } from './content.ts'
 
@@ -90,13 +91,29 @@ export type ErrorToolResultInput = {
   readonly structuredContent?: unknown
 }
 
+type ErrorToolResultFields = {
+  toolCallId: ErrorToolResultInput['toolCallId']
+  content: ErrorToolResultInput['content']
+  isError: true
+  structuredContent?: ErrorToolResultInput['structuredContent']
+}
+
 export const makeErrorToolResult = (input: ErrorToolResultInput) =>
-  ToolResult.make({
-    toolCallId: input.toolCallId,
-    content: input.content,
-    isError: true,
-    ...(input.structuredContent === undefined ? {} : { structuredContent: input.structuredContent })
-  })
+  ToolResult.make(
+    (() => {
+      const fields: ErrorToolResultFields = {
+        toolCallId: input.toolCallId,
+        content: input.content,
+        isError: true
+      }
+
+      if (input.structuredContent !== undefined) {
+        fields.structuredContent = input.structuredContent
+      }
+
+      return fields
+    })()
+  )
 
 export class ToolApprovalRequest extends Schema.TaggedClass<ToolApprovalRequest>()(
   'ToolApprovalRequest',
@@ -199,53 +216,114 @@ export type QuestionResponseStructuredContent = {
   readonly source: HitlResponseSource
 }
 
-export const plainQuestionAnswer = (answer: QuestionAnswer): PlainQuestionAnswer => ({
-  questionId: answer.questionId,
-  ...(answer.optionIds === undefined ? {} : { optionIds: [...answer.optionIds] }),
-  ...(answer.customAnswer === undefined ? {} : { customAnswer: answer.customAnswer })
-})
+export const plainQuestionAnswer = (answer: QuestionAnswer): PlainQuestionAnswer => {
+  type PlainQuestionAnswerFields = {
+    questionId: PlainQuestionAnswer['questionId']
+    optionIds?: PlainQuestionAnswer['optionIds']
+    customAnswer?: PlainQuestionAnswer['customAnswer']
+  }
 
-export const plainQuestionResponse = (response: QuestionResponse): PlainQuestionResponse => ({
-  _tag: 'QuestionResponse',
-  requestId: response.requestId,
-  toolCallId: response.toolCallId,
-  outcome: response.outcome,
-  source: response.source,
-  ...(response.answers === undefined
-    ? {}
-    : { answers: response.answers.map(answer => plainQuestionAnswer(answer)) }),
-  ...(response.reason === undefined ? {} : { reason: response.reason })
-})
+  const fields: PlainQuestionAnswerFields = {
+    questionId: answer.questionId
+  }
+
+  if (answer.optionIds !== undefined) {
+    fields.optionIds = [...answer.optionIds]
+  }
+
+  if (answer.customAnswer !== undefined) {
+    fields.customAnswer = answer.customAnswer
+  }
+
+  return fields
+}
+
+export const plainQuestionResponse = (response: QuestionResponse): PlainQuestionResponse => {
+  type PlainQuestionResponseFields = {
+    _tag: 'QuestionResponse'
+    requestId: PlainQuestionResponse['requestId']
+    toolCallId: PlainQuestionResponse['toolCallId']
+    outcome: PlainQuestionResponse['outcome']
+    source: PlainQuestionResponse['source']
+    answers?: PlainQuestionResponse['answers']
+    reason?: PlainQuestionResponse['reason']
+  }
+
+  const fields: PlainQuestionResponseFields = {
+    _tag: 'QuestionResponse',
+    requestId: response.requestId,
+    toolCallId: response.toolCallId,
+    outcome: response.outcome,
+    source: response.source
+  }
+
+  if (response.answers !== undefined) {
+    fields.answers = response.answers.map(answer => plainQuestionAnswer(answer))
+  }
+
+  if (response.reason !== undefined) {
+    fields.reason = response.reason
+  }
+
+  return fields
+}
 
 export const plainToolApprovalResponse = (
   response: ToolApprovalResponse
-): PlainToolApprovalResponse => ({
-  _tag: 'ToolApprovalResponse',
-  requestId: response.requestId,
-  toolCallId: response.toolCallId,
-  decision: response.decision,
-  source: response.source,
-  ...(response.reason === undefined ? {} : { reason: response.reason })
-})
-
-export const plainHitlResponse = (response: HitlResponse): PlainHitlResponse => {
-  switch (response._tag) {
-    case 'QuestionResponse':
-      return plainQuestionResponse(response)
-    case 'ToolApprovalResponse':
-      return plainToolApprovalResponse(response)
+): PlainToolApprovalResponse => {
+  type PlainToolApprovalResponseFields = {
+    _tag: 'ToolApprovalResponse'
+    requestId: PlainToolApprovalResponse['requestId']
+    toolCallId: PlainToolApprovalResponse['toolCallId']
+    decision: PlainToolApprovalResponse['decision']
+    source: PlainToolApprovalResponse['source']
+    reason?: PlainToolApprovalResponse['reason']
   }
+
+  const fields: PlainToolApprovalResponseFields = {
+    _tag: 'ToolApprovalResponse',
+    requestId: response.requestId,
+    toolCallId: response.toolCallId,
+    decision: response.decision,
+    source: response.source
+  }
+
+  if (response.reason !== undefined) {
+    fields.reason = response.reason
+  }
+
+  return fields
 }
+
+export const plainHitlResponse = (response: HitlResponse): PlainHitlResponse =>
+  Match.value(response).pipe(
+    Match.tag('QuestionResponse', current => plainQuestionResponse(current)),
+    Match.tag('ToolApprovalResponse', current => plainToolApprovalResponse(current)),
+    Match.exhaustive
+  )
 
 export const questionResponseStructuredContent = (
   response: QuestionResponse
-): QuestionResponseStructuredContent => ({
-  type: 'question_response',
-  outcome: response.outcome,
-  answers: (response.answers ?? []).map(answer => plainQuestionAnswer(answer)),
-  ...(response.reason === undefined ? {} : { reason: response.reason }),
-  source: response.source
-})
+): QuestionResponseStructuredContent => {
+  type QuestionResponseStructuredContentPrefix = {
+    type: 'question_response'
+    outcome: QuestionResponseStructuredContent['outcome']
+    answers: QuestionResponseStructuredContent['answers']
+    reason?: QuestionResponseStructuredContent['reason']
+  }
+
+  const fields: QuestionResponseStructuredContentPrefix = {
+    type: 'question_response',
+    outcome: response.outcome,
+    answers: (response.answers ?? []).map(answer => plainQuestionAnswer(answer))
+  }
+
+  if (response.reason !== undefined) {
+    fields.reason = response.reason
+  }
+
+  return { ...fields, source: response.source }
+}
 
 const optionLabel = (question: QuestionPrompt, optionId: string) =>
   question.options?.find(option => option.id === optionId)?.label ?? optionId

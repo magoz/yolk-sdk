@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ConnectorIntegration } from '../integration.ts'
 import type { ConnectorFileTransferBudget } from '../file-transfer.ts'
@@ -48,8 +48,8 @@ export const downloadNotionFile = (
 
     if (
       policy === null ||
-      typeof policy !== 'object' ||
-      typeof policy.allowHostedUrl !== 'function'
+      !Predicate.isObjectOrArray(policy) ||
+      !Predicate.isFunction(policy.allowHostedUrl)
     )
       return yield* failTransfer('invalid_input')
 

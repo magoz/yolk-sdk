@@ -15,7 +15,9 @@ import {
   loadRuntimeSkillset,
   skillsetManifestFromMergedSkillset
 } from '@/lib/agents/skillset/project-source'
-import { AgentPlayground, type AgentRuntimeInfo } from './playground'
+import type { SkillsetManifest } from '@yolk-sdk/agent/skillset'
+import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
+import { AgentPlayground, AgentRuntimeInfo } from './playground'
 
 export type AgentRuntime = 'next' | 'cloudflare' | 'workflow'
 
@@ -79,7 +81,16 @@ function CloudflareUnavailableMessage({ message }: { readonly message: string })
   )
 }
 
-const encodeJson = (value: unknown) =>
+type CloudflareBootstrapPayload = {
+  readonly userId: string
+  readonly tokenEndpoint: string
+  readonly codexResponsesEndpoint: string
+  readonly bridgeSecret: string
+  readonly mcpServers: ReadonlyArray<McpRemoteServerConfig>
+  readonly skillset: SkillsetManifest
+}
+
+const encodeJson = (value: CloudflareBootstrapPayload) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
 
 const cloudflareWebSocketUrl = (url: string, sessionId: string) =>
@@ -158,24 +169,22 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
     return yield* cloudflareWebSocketUrl(workerUrl, input.sessionId)
   })
 
-const nextRuntimeInfo: AgentRuntimeInfo = {
-  _tag: 'Next',
+const nextRuntimeInfo = AgentRuntimeInfo.Next({
   label: 'Next runtime',
   detail: 'Text runs in /api/agent. Voice uses Realtime routes.'
-}
-
-const cloudflareRuntimeInfo = (webSocketUrl: string): AgentRuntimeInfo => ({
-  _tag: 'Cloudflare',
-  label: 'Cloudflare runtime',
-  detail: 'Text runs in Worker/Durable Object. Voice uses Realtime routes.',
-  webSocketUrl
 })
 
-const workflowRuntimeInfo: AgentRuntimeInfo = {
-  _tag: 'Workflow',
+const cloudflareRuntimeInfo = (webSocketUrl: string) =>
+  AgentRuntimeInfo.Cloudflare({
+    label: 'Cloudflare runtime',
+    detail: 'Text runs in Worker/Durable Object. Voice uses Realtime routes.',
+    webSocketUrl
+  })
+
+const workflowRuntimeInfo = AgentRuntimeInfo.Workflow({
   label: 'Vercel Workflow runtime',
   detail: 'Text runs in a Vercel Workflow with durable stream replay.'
-}
+})
 
 async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
   await cookies()

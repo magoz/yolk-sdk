@@ -526,4 +526,32 @@ describe('xAI Grok subscription usage', () => {
       expect(trace).not.toContain(xAiGrokSubscriptionUsageUrl)
     })
   })
+
+  it.effect('assigns the three period fields together or omits all of them', () =>
+    Effect.gen(function* () {
+      const omitted = yield* parseXAiGrokSubscriptionUsage(
+        { config: { creditUsagePercent: 10 } },
+        fetchedAt
+      )
+
+      const [omittedWindow] = Array.from(omitted.windows)
+
+      expect(Object.keys(omittedWindow ?? {})).toEqual(['id', 'usedPercent'])
+      expect(JSON.stringify(omittedWindow)).toBe('{"id":"shared","usedPercent":10}')
+
+      const present = yield* parseXAiGrokSubscriptionUsage(modernUsage(), fetchedAt)
+      const [presentWindow] = Array.from(present.windows)
+
+      expect(Object.keys(presentWindow ?? {})).toEqual([
+        'id',
+        'usedPercent',
+        'resetsAt',
+        'resetsAfterSeconds',
+        'windowDurationMinutes'
+      ])
+      expect(JSON.stringify(presentWindow)).toBe(
+        '{"id":"shared","usedPercent":42.5,"resetsAt":"2026-06-08T00:00:00.000Z","resetsAfterSeconds":432000,"windowDurationMinutes":10080}'
+      )
+    })
+  )
 })

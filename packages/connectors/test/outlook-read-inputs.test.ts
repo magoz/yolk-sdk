@@ -33,7 +33,6 @@ const makeHost = (body = '{"value":[{"id":"message-1","subject":"Car offer"}]}',
       resolve: () =>
         Effect.succeed(
           OAuthCredential.make({
-            _tag: 'OAuthCredential',
             provider: 'microsoft',
             accessToken: 'token',
             expiresAt: 4_000_000_000_000
@@ -90,13 +89,18 @@ describe('Outlook read input compatibility', () => {
         `${name} defaults absent mailbox, folder and cursor (${JSON.stringify(absent)})`,
         () =>
           Effect.gen(function* () {
-            const { result, requests } = yield* execute(name, {
-              query: 'car offer',
-              ...(absent === undefined
-                ? {}
-                : { mailbox: absent, folderId: absent, nextLink: absent }),
-              top: null
-            })
+            const params =
+              absent === undefined
+                ? { query: 'car offer', top: null }
+                : {
+                    query: 'car offer',
+                    mailbox: absent,
+                    folderId: absent,
+                    nextLink: absent,
+                    top: null
+                  }
+
+            const { result, requests } = yield* execute(name, params)
 
             expect(result.isError).not.toBe(true)
             expect(result.structuredContent).toMatchObject({ messages: [{ id: 'message-1' }] })

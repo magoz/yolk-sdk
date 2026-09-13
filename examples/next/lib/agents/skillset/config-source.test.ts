@@ -1,4 +1,4 @@
-import { ConfigProvider, Effect } from 'effect'
+import { ConfigProvider, Effect, Predicate, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { loadConfigSkillsetManifest } from './config-source'
 
@@ -54,10 +54,11 @@ describe('loadConfigSkillsetManifest', () => {
       Effect.gen(function* () {
         const result = yield* loadConfigSkillsetManifest().pipe(Effect.result)
 
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'ConfigSkillsetError' }
-        })
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'ConfigSkillsetError')).toBe(true)
+        }
       }),
       { YOLK_SKILLSET: '{' }
     )

@@ -1,4 +1,4 @@
-import { Effect, Predicate, Schema } from 'effect'
+import { Effect, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
 import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
@@ -40,13 +40,18 @@ const makeToolDef = (name: typeof toolName.Type) =>
     parameters: { type: 'object', properties: {}, additionalProperties: false }
   })
 
-const makeTool = (spec: typeof toolSpec.Type): ToolRegistration<TestContext> => ({
-  def: makeToolDef(spec.name),
-  access: spec.access,
-  ...(spec.gated ? { isEnabled: (context: TestContext) => Effect.succeed(context.enabled) } : {}),
-  execute: ({ call }) =>
-    Effect.succeed(ToolResult.make({ toolCallId: call.id, content: spec.name }))
-})
+const makeTool = (spec: typeof toolSpec.Type): ToolRegistration<TestContext> => {
+  const registration: ToolRegistration<TestContext> = {
+    def: makeToolDef(spec.name),
+    access: spec.access,
+    execute: ({ call }) =>
+      Effect.succeed(ToolResult.make({ toolCallId: call.id, content: spec.name }))
+  }
+
+  return spec.gated
+    ? { ...registration, isEnabled: (context: TestContext) => Effect.succeed(context.enabled) }
+    : registration
+}
 
 const modulesFromSpecs = (
   specs: ReadonlyArray<typeof toolSpec.Type>
@@ -98,10 +103,15 @@ describe('tool registry property tests', () => {
         }).pipe(Effect.result)
 
         if (duplicate !== undefined) {
-          expect(result).toMatchObject({
-            _tag: 'Failure',
-            failure: { _tag: 'ToolRegistryError', cause: 'duplicate_tool' }
-          })
+          expect(Result.isFailure(result)).toBe(true)
+
+          if (Result.isFailure(result)) {
+            expect(Predicate.isTagged(result.failure, 'ToolRegistryError')).toBe(true)
+
+            if (Predicate.isTagged(result.failure, 'ToolRegistryError')) {
+              expect(result.failure.cause).toBe('duplicate_tool')
+            }
+          }
 
           return
         }
@@ -147,10 +157,16 @@ describe('tool registry property tests', () => {
           expect(executeResult._tag).toBe('Success')
           expect(executeResult).toMatchObject(expectedExecuteResultFields)
         } else {
-          expect(executeResult).toMatchObject({
-            _tag: 'Failure',
-            failure: { _tag: 'ToolError', cause: 'not_found', tool: input.executeName }
-          })
+          expect(Result.isFailure(executeResult)).toBe(true)
+
+          if (Result.isFailure(executeResult)) {
+            expect(Predicate.isTagged(executeResult.failure, 'ToolError')).toBe(true)
+
+            if (Predicate.isTagged(executeResult.failure, 'ToolError')) {
+              expect(executeResult.failure.cause).toBe('not_found')
+              expect(executeResult.failure.tool).toBe(input.executeName)
+            }
+          }
         }
       }),
     propertyOptions

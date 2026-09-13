@@ -69,14 +69,16 @@ const approvalRequiredOutcome = (callId: string) =>
     })
   })
 
-const approvalResponse = (decision: 'approved' | 'denied', reason?: string) =>
-  ToolApprovalResponse.make({
+const approvalResponse = (decision: 'approved' | 'denied', reason?: string) => {
+  const response = {
     requestId: voiceApprovalRequestId('call_1'),
     toolCallId: 'call_1',
     decision,
-    source: 'user',
-    ...(reason === undefined ? {} : { reason })
-  })
+    source: 'user' as const
+  }
+
+  return ToolApprovalResponse.make(reason === undefined ? response : { ...response, reason })
+}
 
 type EventCollector = {
   readonly seen: Array<VoiceEvent>

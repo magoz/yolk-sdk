@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Effect, Layer, Predicate, Stream } from 'effect'
+import { Effect, Layer, Predicate, Result, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import {
   LLMDone,
@@ -42,6 +42,9 @@ const errorCause = (result: WsResult) =>
 const errorRetryable = (result: WsResult) =>
   Predicate.isTagged(result, 'Error') ? result.error.retryable : undefined
 
+const errorProvider = (result: WsResult) =>
+  Predicate.isTagged(result, 'Error') ? result.error.provider : undefined
+
 const request = {
   model: 'gpt-5.4',
   systemPrompt: 'Be brief.',
@@ -74,6 +77,21 @@ const makeProxyHttpClientLayer = (requests: Array<CapturedRequest>) =>
             { status: 200, headers: { 'content-type': 'text/plain' } }
           )
         )
+      })
+    )
+  )
+
+const makeProxyHttpClientLayerFromResponse = (
+  requests: Array<CapturedRequest>,
+  response: Response
+) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(httpRequest =>
+      Effect.sync(() => {
+        requests.push({ request: httpRequest })
+
+        return HttpClientResponse.fromWeb(httpRequest, response)
       })
     )
   )
@@ -222,13 +240,12 @@ describe('Codex WS proxy fallback', () => {
     )
 
     expect(fallbackCalls).toBe(0)
-    expect(result).toMatchObject({
-      _tag: 'Failure',
-      failure: {
-        _tag: 'LLMError',
-        message: 'direct failed'
-      }
-    })
+    expect(Result.isFailure(result)).toBe(true)
+
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(LLMError)
+      expect(result.failure.message).toBe('direct failed')
+    }
   })
 })
 
@@ -236,7 +253,7 @@ describe('Codex WS event mapping', () => {
   it('maps text delta', () => {
     const result = mapWsMessage({ type: 'response.output_text.delta', delta: 'hello' }, 0)
 
-    expect(result._tag).toBe('Events')
+    expect(Predicate.isTagged(result, 'Events')).toBe(true)
     expect(events(result)).toHaveLength(1)
     expect(events(result)[0]).toBeInstanceOf(LLMTextDelta)
   })
@@ -244,7 +261,7 @@ describe('Codex WS event mapping', () => {
   it('maps content_part.delta as text', () => {
     const result = mapWsMessage({ type: 'response.content_part.delta', delta: 'world' }, 0)
 
-    expect(result._tag).toBe('Events')
+    expect(Predicate.isTagged(result, 'Events')).toBe(true)
     expect(events(result)[0]).toBeInstanceOf(LLMTextDelta)
   })
 
@@ -254,7 +271,7 @@ describe('Codex WS event mapping', () => {
       0
     )
 
-    expect(result._tag).toBe('Events')
+    expect(Predicate.isTagged(result, 'Events')).toBe(true)
     expect(events(result)[0]).toBeInstanceOf(LLMReasoningDelta)
   })
 
@@ -272,7 +289,7 @@ describe('Codex WS event mapping', () => {
       0
     )
 
-    expect(result._tag).toBe('Events')
+    expect(Predicate.isTagged(result, 'Events')).toBe(true)
     const tc = events(result)[0]
     expect(tc).toBeInstanceOf(LLMToolCall)
   })
@@ -290,7 +307,7 @@ describe('Codex WS event mapping', () => {
       0
     )
 
-    expect(result._tag).toBe('Done')
+    expect(Predicate.isTagged(result, 'Done')).toBe(true)
     const evts = events(result)
     expect(evts[0]).toBeInstanceOf(LLMDone)
     expect(evts[1]).toBeInstanceOf(LLMUsage)
@@ -305,7 +322,7 @@ describe('Codex WS event mapping', () => {
       1
     )
 
-    expect(result._tag).toBe('Done')
+    expect(Predicate.isTagged(result, 'Done')).toBe(true)
     const done = events(result)[0]
     expect(done).toBeInstanceOf(LLMDone)
     expect(done !== undefined && 'stopReason' in done ? done.stopReason : undefined).toBe(
@@ -325,7 +342,7 @@ describe('Codex WS event mapping', () => {
       0
     )
 
-    expect(result._tag).toBe('Done')
+    expect(Predicate.isTagged(result, 'Done')).toBe(true)
     const done = events(result)[0]
     expect(done).toBeInstanceOf(LLMDone)
     expect(done !== undefined && 'stopReason' in done ? done.stopReason : undefined).toBe(
@@ -342,7 +359,7 @@ describe('Codex WS event mapping', () => {
       0
     )
 
-    expect(result._tag).toBe('Error')
+    expect(Predicate.isTagged(result, 'Error')).toBe(true)
     expect(errorMessage(result)).toBe('rate limit exceeded')
     expect(errorCause(result)).toBe('rate_limit')
     expect(errorRetryable(result)).toBe(true)
@@ -357,7 +374,7 @@ describe('Codex WS event mapping', () => {
       0
     )
 
-    expect(result._tag).toBe('Error')
+    expect(Predicate.isTagged(result, 'Error')).toBe(true)
     expect(errorCause(result)).toBe('overloaded')
     expect(errorRetryable(result)).toBe(true)
   })
@@ -368,14 +385,175 @@ describe('Codex WS event mapping', () => {
       0
     )
 
-    expect(result._tag).toBe('Error')
+    expect(Predicate.isTagged(result, 'Error')).toBe(true)
     expect(errorCause(result)).toBe('rate_limit')
     expect(errorRetryable(result)).toBe(true)
   })
 
   it('skips unknown event types', () => {
-    expect(mapWsMessage({ type: 'response.created' }, 0)._tag).toBe('Skip')
-    expect(mapWsMessage({ type: 'response.output_item.added' }, 0)._tag).toBe('Skip')
-    expect(mapWsMessage({}, 0)._tag).toBe('Skip')
+    expect(Predicate.isTagged(mapWsMessage({ type: 'response.created' }, 0), 'Skip')).toBe(true)
+    expect(
+      Predicate.isTagged(mapWsMessage({ type: 'response.output_item.added' }, 0), 'Skip')
+    ).toBe(true)
+    expect(Predicate.isTagged(mapWsMessage({}, 0), 'Skip')).toBe(true)
+  })
+})
+
+describe('Codex WS provider error omission', () => {
+  it('omits status, providerCode, and retryAfterMs for failed envelopes without a code', () => {
+    const result = mapWsMessage(
+      {
+        type: 'response.failed',
+        response: { error: { message: 'rate limit exceeded' } }
+      },
+      0
+    )
+
+    const provider = errorProvider(result)
+
+    expect(Predicate.isTagged(result, 'Error')).toBe(true)
+    expect(provider?.provider).toBe('openai_codex')
+    expect(provider?.kind).toBe('rate_limit')
+    expect(provider).not.toHaveProperty('providerCode')
+    expect(provider).not.toHaveProperty('status')
+    expect(provider).not.toHaveProperty('retryAfterMs')
+    expect(JSON.stringify(provider)).toBe('{"provider":"openai_codex","kind":"rate_limit"}')
+  })
+
+  it('keeps providerCode from failed envelopes with overloaded_error', () => {
+    const result = mapWsMessage(
+      {
+        type: 'response.failed',
+        response: { error: { code: 'overloaded_error', message: 'backend overloaded' } }
+      },
+      0
+    )
+
+    const provider = errorProvider(result)
+
+    expect(Predicate.isTagged(result, 'Error')).toBe(true)
+    expect(provider?.provider).toBe('openai_codex')
+    expect(provider?.providerCode).toBe('overloaded_error')
+    expect(provider).not.toHaveProperty('status')
+    expect(provider).not.toHaveProperty('retryAfterMs')
+    expect(JSON.stringify(provider)).toBe(
+      '{"provider":"openai_codex","kind":"overloaded","providerCode":"overloaded_error"}'
+    )
+  })
+
+  it('keeps providerCode from WS error envelopes with rate_limit and omits status', () => {
+    const result = mapWsMessage(
+      { type: 'error', error: { code: 'rate_limit', message: 'slow down' } },
+      0
+    )
+
+    const provider = errorProvider(result)
+
+    expect(Predicate.isTagged(result, 'Error')).toBe(true)
+    expect(provider?.provider).toBe('openai_codex')
+    expect(provider?.providerCode).toBe('rate_limit')
+    expect(provider).not.toHaveProperty('status')
+    expect(JSON.stringify(provider)).toBe(
+      '{"provider":"openai_codex","kind":"rate_limit","providerCode":"rate_limit"}'
+    )
+  })
+
+  it('omits providerCode from WS error envelopes without a code', () => {
+    const result = mapWsMessage({ type: 'error', error: { message: 'slow down' } }, 0)
+
+    const provider = errorProvider(result)
+
+    expect(Predicate.isTagged(result, 'Error')).toBe(true)
+    expect(provider?.provider).toBe('openai_codex')
+    expect(provider?.kind).toBe('unknown')
+    expect(provider).not.toHaveProperty('providerCode')
+    expect(JSON.stringify(provider)).toBe('{"provider":"openai_codex","kind":"unknown"}')
+  })
+
+  it('maps proxy HTTP 429 retry-after-ms onto provider retryAfterMs', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    const layer = makeCodexWsProviderLayer({
+      token,
+      sessionId: 'session_1',
+      fallback: {
+        endpoint: 'https://app.example.test/api/internal/cloudflare/codex-responses',
+        bridgeSecret: 'bridge-secret'
+      }
+    }).pipe(
+      Layer.provide(
+        makeProxyHttpClientLayerFromResponse(
+          requests,
+          new Response('rate limit exceeded', {
+            status: 429,
+            headers: { 'retry-after-ms': '1500', 'content-type': 'text/plain' }
+          })
+        )
+      )
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* LLMProvider
+
+        return yield* provider.stream(request).pipe(Stream.runCollect, Effect.result)
+      }).pipe(Effect.provide(layer))
+    )
+
+    expect(Result.isFailure(result)).toBe(true)
+
+    if (!Predicate.isTagged(result, 'Failure')) return
+
+    expect(result.failure).toBeInstanceOf(LLMError)
+
+    if (!(result.failure instanceof LLMError)) return
+
+    expect(result.failure.provider?.status).toBe(429)
+    expect(result.failure.provider?.kind).toBe('rate_limit')
+    expect(result.failure.provider?.retryAfterMs).toBe(1500)
+    expect(JSON.stringify(result.failure.provider)).toBe(
+      '{"provider":"openai_codex","kind":"rate_limit","status":429,"retryAfterMs":1500}'
+    )
+  })
+
+  it('omits retryAfterMs on proxy HTTP 500 without retry headers', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    const layer = makeCodexWsProviderLayer({
+      token,
+      sessionId: 'session_1',
+      fallback: {
+        endpoint: 'https://app.example.test/api/internal/cloudflare/codex-responses',
+        bridgeSecret: 'bridge-secret'
+      }
+    }).pipe(
+      Layer.provide(
+        makeProxyHttpClientLayerFromResponse(requests, new Response('boom', { status: 500 }))
+      )
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* LLMProvider
+
+        return yield* provider.stream(request).pipe(Stream.runCollect, Effect.result)
+      }).pipe(Effect.provide(layer))
+    )
+
+    expect(Result.isFailure(result)).toBe(true)
+
+    if (!Predicate.isTagged(result, 'Failure')) return
+
+    expect(result.failure).toBeInstanceOf(LLMError)
+
+    if (!(result.failure instanceof LLMError)) return
+
+    expect(result.failure.provider?.kind).toBe('server_error')
+    expect(result.failure.provider?.status).toBe(500)
+    expect(result.failure.provider).not.toHaveProperty('retryAfterMs')
+    expect(Object.hasOwn(result.failure.provider ?? {}, 'retryAfterMs')).toBe(false)
+    expect(JSON.stringify(result.failure.provider)).toBe(
+      '{"provider":"openai_codex","kind":"server_error","status":500}'
+    )
   })
 })

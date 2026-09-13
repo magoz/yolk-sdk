@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   VercelWorkflows,
@@ -189,7 +189,12 @@ describe('VercelWorkflows', () => {
         }),
         sdk
       )
-    ).rejects.toMatchObject({ _tag: 'VercelWorkflowsError', operation: 'start' })
+    ).rejects.toSatisfy(error => {
+      expect(Predicate.isTagged(error, 'VercelWorkflowsError')).toBe(true)
+      expect(error).toMatchObject({ operation: 'start' })
+
+      return true
+    })
 
     await expect(
       runWithSdk(
@@ -200,7 +205,12 @@ describe('VercelWorkflows', () => {
         }),
         sdk
       )
-    ).rejects.toMatchObject({ _tag: 'VercelWorkflowsError', operation: 'getRun' })
+    ).rejects.toSatisfy(error => {
+      expect(Predicate.isTagged(error, 'VercelWorkflowsError')).toBe(true)
+      expect(error).toMatchObject({ operation: 'getRun' })
+
+      return true
+    })
 
     await expect(
       runWithSdk(
@@ -211,6 +221,11 @@ describe('VercelWorkflows', () => {
         }),
         sdk
       )
-    ).rejects.toMatchObject({ _tag: 'VercelWorkflowsError', operation: 'resumeHook' })
+    ).rejects.toSatisfy(error => {
+      expect(Predicate.isTagged(error, 'VercelWorkflowsError')).toBe(true)
+      expect(error).toMatchObject({ operation: 'resumeHook' })
+
+      return true
+    })
   })
 })

@@ -16,6 +16,14 @@ export type ProviderFailureInput = {
   readonly underlying?: unknown
 }
 
+const ActionSuccess = Schema.TaggedStruct('Success', {
+  value: Schema.Unknown
+})
+
+const ActionFailure = Schema.TaggedStruct('Failure', {
+  error: Schema.Unknown
+})
+
 export type ActionResult<Output> =
   | {
       readonly _tag: 'Success'
@@ -26,10 +34,26 @@ export type ActionResult<Output> =
       readonly error: ProviderFailure
     }
 
+const providerFailure = (failure: ProviderFailure | ProviderFailureInput): ProviderFailure =>
+  failure instanceof ProviderFailure ? failure : ProviderFailure.make(failure)
+
+const actionResultSuccess = <Output>(value: Output): ActionResult<Output> => ({
+  ...ActionSuccess.make({ value }),
+  value
+})
+
+const actionResultFailure = (
+  failure: ProviderFailure | ProviderFailureInput
+): ActionResult<never> => {
+  const error = providerFailure(failure)
+
+  return {
+    ...ActionFailure.make({ error }),
+    error
+  }
+}
+
 export const ActionResult = {
-  success: <Output>(value: Output): ActionResult<Output> => ({ _tag: 'Success', value }),
-  failure: (failure: ProviderFailure | ProviderFailureInput): ActionResult<never> => ({
-    _tag: 'Failure',
-    error: failure instanceof ProviderFailure ? failure : ProviderFailure.make(failure)
-  })
+  success: actionResultSuccess,
+  failure: actionResultFailure
 }

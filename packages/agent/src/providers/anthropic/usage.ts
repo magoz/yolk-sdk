@@ -74,12 +74,27 @@ export const parseAnthropicClaudeSubscriptionUsage = (
         const resetsAt =
           resetValue === undefined ? undefined : canonicalSubscriptionUsageInstant(resetValue)
 
+        type AnthropicUsageWindowFields = {
+          id: typeof id
+          usedPercent: number
+          resetsAt?: string
+        }
+
         windows.push(
-          ProviderSubscriptionUsageWindow.make({
-            id,
-            usedPercent: wire.utilization,
-            ...(resetsAt === undefined ? {} : { resetsAt })
-          })
+          ProviderSubscriptionUsageWindow.make(
+            (() => {
+              const fields: AnthropicUsageWindowFields = {
+                id,
+                usedPercent: wire.utilization
+              }
+
+              if (resetsAt !== undefined) {
+                fields.resetsAt = resetsAt
+              }
+
+              return fields
+            })()
+          )
         )
       }
 

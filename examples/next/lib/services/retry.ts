@@ -1,4 +1,4 @@
-import { Schedule } from 'effect'
+import { Predicate, Schedule } from 'effect'
 import { SqlError } from 'effect/unstable/sql/SqlError'
 
 // Exponential backoff
@@ -10,7 +10,7 @@ export const retryPolicy = Schedule.exponential('500 millis', 2.0).pipe(
 )
 
 const hasIsTransient = (error: unknown): error is { isTransient: true } =>
-  typeof error === 'object' &&
+  Predicate.isObjectOrArray(error) &&
   error !== null &&
   'isTransient' in error &&
   error.isTransient === true

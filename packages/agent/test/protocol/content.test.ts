@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect, Match, Option } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,
@@ -213,16 +213,16 @@ describe('content helpers', () => {
         })
       ]
 
-      const resolved = yield* resolveContentAttachmentSources(content, part => {
-        switch (part._tag) {
-          case 'Image':
-            return Effect.succeed(inlineBase64AttachmentSource('image-data'))
-          case 'Document':
-            return Effect.succeed(inlineBase64AttachmentSource('document-data'))
-          case 'Audio':
-            return Effect.succeed(inlineBase64AttachmentSource('audio-data'))
-        }
-      })
+      const resolved = yield* resolveContentAttachmentSources(content, part =>
+        Match.value(part).pipe(
+          Match.tag('Image', () => Effect.succeed(inlineBase64AttachmentSource('image-data'))),
+          Match.tag('Document', () =>
+            Effect.succeed(inlineBase64AttachmentSource('document-data'))
+          ),
+          Match.tag('Audio', () => Effect.succeed(inlineBase64AttachmentSource('audio-data'))),
+          Match.exhaustive
+        )
+      )
 
       expect(resolved).toEqual([
         TextPart.make({ text: 'inspect' }),

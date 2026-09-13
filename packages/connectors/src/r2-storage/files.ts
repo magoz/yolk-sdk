@@ -1,4 +1,4 @@
-import { Context, Effect } from 'effect'
+import { Context, Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ConnectorIntegration } from '../integration.ts'
 import { ConnectorFileTransferError } from '../file-transfer.ts'
@@ -147,7 +147,7 @@ const put = (
       : yield* decodeInput(Schema.Struct(Target), input)
 
     const condition: R2ObjectCondition =
-      'expectedEtag' in target && typeof target.expectedEtag === 'string'
+      'expectedEtag' in target && Predicate.isString(target.expectedEtag)
         ? { kind: 'etag', etag: target.expectedEtag }
         : { kind: 'absent' }
 

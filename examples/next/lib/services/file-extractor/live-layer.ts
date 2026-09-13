@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Predicate } from 'effect'
+import { Context, Effect, Layer, Option, Predicate } from 'effect'
 import mammoth from 'mammoth'
 import { extractText, getDocumentProxy, getMeta } from 'unpdf'
 import * as XLSX from 'xlsx'
@@ -91,9 +91,6 @@ const toArrayBuffer = (bytes: Uint8Array) => {
   return copy.buffer
 }
 
-const titleFromUnknown = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined
-
 const makeExtractedFile = (content: string, metadata: ExtractedFile['metadata']) => {
   const sanitized = sanitizeExtractedText(content)
 
@@ -134,7 +131,14 @@ const extractPdf = (input: FileInput, format: ExtractedFileFormat) =>
 
     return yield* makeExtractedFile(extracted.text, {
       format,
-      title: titleFromUnknown(Predicate.isTagged(meta, 'Some') ? meta.value.info.Title : undefined),
+      title: Option.match(meta, {
+        onNone: () => undefined,
+        onSome: current => {
+          const title = current.info.Title
+
+          return Predicate.isString(title) && title.length > 0 ? title : undefined
+        }
+      }),
       pageCount: extracted.totalPages
     })
   })

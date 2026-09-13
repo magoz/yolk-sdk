@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import {
   UserMessage,
   assistantContent,
@@ -78,57 +79,61 @@ const formatAssistantPartForCompaction = (
   const includeReasoning = options.includeAssistantReasoning ?? true
   const includeToolCalls = options.includeAssistantToolCalls ?? true
 
-  switch (part._tag) {
-    case 'Text': {
-      const text = compactionContentText(part.content)
+  return Match.value(part).pipe(
+    Match.tag('Text', current => {
+      const text = compactionContentText(current.content)
 
       return text.length === 0 ? '' : `[Assistant]: ${text}`
-    }
-
-    case 'Reasoning': {
-      const reasoning = part.text.trim()
+    }),
+    Match.tag('Reasoning', current => {
+      const reasoning = current.text.trim()
 
       return includeReasoning && reasoning.length > 0 ? `[Assistant reasoning]: ${reasoning}` : ''
-    }
-
-    case 'HostToolCall':
-      return includeToolCalls
-        ? formatToolCallForCompaction('[Assistant tool call]', part, options)
+    }),
+    Match.tag('HostToolCall', current =>
+      includeToolCalls ? formatToolCallForCompaction('[Assistant tool call]', current, options) : ''
+    ),
+    Match.tag('ProviderToolCall', current =>
+      includeToolCalls
+        ? formatToolCallForCompaction('[Assistant provider tool call]', current, options)
         : ''
-    case 'ProviderToolCall':
-      return includeToolCalls
-        ? formatToolCallForCompaction('[Assistant provider tool call]', part, options)
-        : ''
-    case 'ProviderToolResult':
-      return includeToolCalls
+    ),
+    Match.tag('ProviderToolResult', current =>
+      includeToolCalls
         ? formatToolResultForCompaction(
             '[Assistant provider tool result',
-            part.toolCallId,
-            part.result.content,
+            current.toolCallId,
+            current.result.content,
             options
           )
         : ''
-  }
+    ),
+    Match.exhaustive
+  )
 }
 
 export const formatAgentMessageForCompaction = (
   message: AgentMessage,
   options: CompactionMessageFormatOptions = {}
 ) => {
-  switch (message._tag) {
-    case 'User':
-      return `[User]: ${compactionContentText(message.content)}`
-    case 'Assistant':
-      return message.parts
+  return Match.value(message).pipe(
+    Match.tag('User', current => `[User]: ${compactionContentText(current.content)}`),
+    Match.tag('Assistant', current =>
+      current.parts
         .map(part => formatAssistantPartForCompaction(part, options))
         .filter(isNonEmptyString)
         .join('\n')
-    case 'ToolResult':
-      return `[Tool result ${message.toolCallId}]: ${truncateCompactionToolOutput(
-        compactionContentText(message.content),
-        options
-      )}`
-  }
+    ),
+    Match.tag(
+      'ToolResult',
+      current =>
+        `[Tool result ${current.toolCallId}]: ${truncateCompactionToolOutput(
+          compactionContentText(current.content),
+          options
+        )}`
+    ),
+    Match.exhaustive
+  )
 }
 
 export const formatAgentMessagesForCompaction = (
@@ -136,8 +141,11 @@ export const formatAgentMessagesForCompaction = (
   options: CompactionMessageFormatOptions = {}
 ) =>
   messages
-    .map(message => formatAgentMessageForCompaction(message, options))
-    .filter(isNonEmptyString)
+    .flatMap(message => {
+      const formatted = formatAgentMessageForCompaction(message, options)
+
+      return isNonEmptyString(formatted) ? [formatted] : []
+    })
     .join('\n\n')
 
 export const truncateSummaryPreview = (value: string, maxCharacters: number) => {
@@ -160,23 +168,33 @@ export const previewAgentMessage = (
 ) => {
   const maxCharacters = options.maxCharacters ?? defaultSummaryPreviewMaxCharacters
 
-  switch (message._tag) {
-    case 'User':
-      return `User: ${truncateSummaryPreview(
-        contentText(message.content) || contentPreview(message.content),
-        maxCharacters
-      )}`
-    case 'Assistant':
-      return `Assistant: ${truncateSummaryPreview(
-        contentText(assistantContent(message)) || contentPreview(assistantContent(message)),
-        maxCharacters
-      )}`
-    case 'ToolResult':
-      return `Tool ${message.toolCallId}: ${truncateSummaryPreview(
-        contentText(message.content) || contentPreview(message.content),
-        maxCharacters
-      )}`
-  }
+  return Match.value(message).pipe(
+    Match.tag(
+      'User',
+      current =>
+        `User: ${truncateSummaryPreview(
+          contentText(current.content) || contentPreview(current.content),
+          maxCharacters
+        )}`
+    ),
+    Match.tag(
+      'Assistant',
+      current =>
+        `Assistant: ${truncateSummaryPreview(
+          contentText(assistantContent(current)) || contentPreview(assistantContent(current)),
+          maxCharacters
+        )}`
+    ),
+    Match.tag(
+      'ToolResult',
+      current =>
+        `Tool ${current.toolCallId}: ${truncateSummaryPreview(
+          contentText(current.content) || contentPreview(current.content),
+          maxCharacters
+        )}`
+    ),
+    Match.exhaustive
+  )
 }
 
 export const makePreviewSummaryContent = (

@@ -1,4 +1,4 @@
-import { Context, Effect } from 'effect'
+import { Context, Effect, Match } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { optionalStringConfig, requiredStringConfig } from '../config.ts'
@@ -48,15 +48,12 @@ const resolveApiToken = (integration: ConnectorIntegration, slot: CredentialSlot
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, slot)
 
-    switch (credential._tag) {
-      case 'ApiKeyCredential':
-        return credential.key
-      case 'BearerTokenCredential':
-        return credential.token
-      case 'OAuthCredential':
-        return credential.accessToken
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
+    return yield* Match.value(credential).pipe(
+      Match.tag('ApiKeyCredential', current => Effect.succeed(current.key)),
+      Match.tag('BearerTokenCredential', current => Effect.succeed(current.token)),
+      Match.tag('OAuthCredential', current => Effect.succeed(current.accessToken)),
+      Match.tag('UsernamePasswordCredential', () =>
+        Effect.fail(
           new ConnectorError({
             cause: 'credential_invalid',
             message: 'R2 connector does not accept username/password credentials',
@@ -64,7 +61,9 @@ const resolveApiToken = (integration: ConnectorIntegration, slot: CredentialSlot
             slotId: slot.id
           })
         )
-    }
+      ),
+      Match.exhaustive
+    )
   })
 
 const joinPublicUrl = (publicUrl: string, key: string) => {

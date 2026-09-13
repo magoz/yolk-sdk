@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect, Option, Predicate } from 'effect'
 import {
   VoiceToolDispatch,
   backgroundVoiceUnsupportedMessage
@@ -30,7 +30,7 @@ export type BackgroundToolHost<Context> = {
 }
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
+  value !== null && Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
 // Only traverse JSON Schema positions. Keywords in defaults/examples/const/enum are business data.
 const schemaMaps = new Set([
@@ -77,7 +77,7 @@ export const unsupportedBackgroundSchema = (schema: unknown): string | undefined
   for (const [key, value] of Object.entries(schema)) {
     if (unsupportedResourceKeywords.has(key)) return key
 
-    if (key === '$ref' && (typeof value !== 'string' || !/^#\/\$defs\/[^#%]+$/.test(value))) {
+    if (key === '$ref' && (!Predicate.isString(value) || !/^#\/\$defs\/[^#%]+$/.test(value))) {
       return '$ref (only #/$defs/... pointers are supported)'
     }
 
@@ -114,16 +114,34 @@ export const backgroundToolDef = (def: ToolDef): ToolDef => {
   return ToolDef.make({
     ...def,
     execution: 'background-v1',
-    parameters: {
-      type: 'object',
-      properties: {
-        execution: { type: 'string', enum: ['foreground', 'background'] },
-        arguments: argumentsSchema
-      },
-      required: ['execution', 'arguments'],
-      additionalProperties: false,
-      ...($defs === undefined ? {} : { $defs })
-    }
+    parameters: (() => {
+      type BackgroundToolParametersFields = {
+        type: 'object'
+        properties: {
+          execution: { type: 'string'; enum: ['foreground', 'background'] }
+          arguments: typeof argumentsSchema
+        }
+        required: ['execution', 'arguments']
+        additionalProperties: false
+        $defs?: unknown
+      }
+
+      const fields: BackgroundToolParametersFields = {
+        type: 'object',
+        properties: {
+          execution: { type: 'string', enum: ['foreground', 'background'] },
+          arguments: argumentsSchema
+        },
+        required: ['execution', 'arguments'],
+        additionalProperties: false
+      }
+
+      if ($defs !== undefined) {
+        fields.$defs = $defs
+      }
+
+      return fields
+    })()
   })
 }
 

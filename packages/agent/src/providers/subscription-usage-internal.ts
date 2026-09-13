@@ -1,4 +1,4 @@
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -18,7 +18,7 @@ import {
 export const defaultProviderSubscriptionUsageTimeoutMs = 10_000
 
 export const canonicalSubscriptionUsageInstant = (value: string | number): string | undefined => {
-  const date = new Date(typeof value === 'number' ? value * 1000 : value)
+  const date = new Date(Predicate.isNumber(value) ? value * 1000 : value)
 
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined
 }

@@ -143,6 +143,8 @@ export type TestWorkflowRunInspection = {
 
 export type TestWorkflowHook<T> = Promise<T> & { readonly [Symbol.dispose]: () => void }
 
+type TestWorkflowWorldStartResult = { readonly runId: string }
+
 export class TestWorkflowWorld {
   private readonly runs = new Map<string, TestWorkflowRunRecord>()
   private runSequence = 0
@@ -150,7 +152,7 @@ export class TestWorkflowWorld {
   start<TArgs extends ReadonlyArray<unknown>, TResult>(
     workflowFn: (...args: TArgs) => Promise<TResult>,
     args: TArgs
-  ): { readonly runId: string } {
+  ): TestWorkflowWorldStartResult {
     this.runSequence += 1
     const runId = `twr_${this.runSequence}`
 
@@ -374,7 +376,7 @@ export class TestWorkflowWorld {
     let rejectHook: (error: unknown) => void = () => {}
 
     const promise = new Promise<T>((resolve, reject) => {
-      // Hook payloads are caller-typed on the platform (`createHook<T>`).
+      // SAFETY: Hook payloads are caller-typed on the platform (`createHook<T>`).
       // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
       resolveHook = payload => resolve(payload as T)
       rejectHook = reject
@@ -406,7 +408,7 @@ export class TestWorkflowWorld {
         }
 
         if (index < run.chunks.length) {
-          // The platform readable is caller-typed (`WorkflowReadableStream<R = any>`);
+          // SAFETY: The platform readable is caller-typed (`WorkflowReadableStream<R = any>`);
           // the durable log stores opaque chunks, so this coercion mirrors the
           // platform contract exactly.
           // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
@@ -467,9 +469,11 @@ export class TestWorkflowWorld {
       },
       get returnValue() {
         return run.settled.then(() => {
-          // Return values are caller-typed on the platform SDK as well.
-          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-          if (run.status === 'completed') return run.returnValue as TResult
+          if (run.status === 'completed') {
+            // SAFETY: Return values are caller-typed on the platform SDK as well.
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+            return run.returnValue as TResult
+          }
 
           throw run.runError ?? new TestWorkflowRunCancelledError(run.runId)
         })

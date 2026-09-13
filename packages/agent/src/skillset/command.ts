@@ -128,17 +128,39 @@ export const parseCommandMarkdown = (input: ParseCommandInput) =>
     const fileRefs = yield* parseBooleanField('fileRefs', document.data.fileRefs)
     const commandArguments = parseCommandArgumentsField(document.data.arguments)
 
-    return {
+    type ParsedCommandFields = {
+      name: string
+      description: string | undefined
+      template: string
+      hints: ReturnType<typeof commandHints>
+      arguments?: ReadonlyArray<CommandArgument>
+      access?: CommandAccess
+      fileRefs?: boolean
+    }
+
+    const fields: ParsedCommandFields = {
       name,
       description: description === undefined || description.length === 0 ? undefined : description,
       template: document.content,
-      hints: commandHints(document.content),
-      ...(commandArguments.length === 0 ? {} : { arguments: commandArguments }),
-      ...(access === undefined ? {} : { access }),
-      ...(fileRefs === undefined ? {} : { fileRefs }),
+      hints: commandHints(document.content)
+    }
+
+    if (commandArguments.length !== 0) {
+      fields.arguments = commandArguments
+    }
+
+    if (access !== undefined) {
+      fields.access = access
+    }
+
+    if (fileRefs !== undefined) {
+      fields.fileRefs = fileRefs
+    }
+
+    return Object.assign(fields, {
       location: input.location,
       source: input.source
-    }
+    })
   })
 
 export const parseCommandArguments = (input: string) => {

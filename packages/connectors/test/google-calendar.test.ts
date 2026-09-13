@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { makeTool } from '@yolk-sdk/agent/tools'
@@ -8,12 +8,12 @@ import {
 } from '@yolk-sdk/connectors/google'
 
 const objectField = (value: unknown, key: string): unknown =>
-  typeof value === 'object' && value !== null
+  Predicate.isObjectOrArray(value) && value !== null
     ? Object.getOwnPropertyDescriptor(value, key)?.value
     : undefined
 
 const objectKeys = (value: unknown): Array<string> =>
-  typeof value === 'object' && value !== null ? Object.keys(value) : []
+  Predicate.isObjectOrArray(value) && value !== null ? Object.keys(value) : []
 
 describe('Google Calendar event date/time boundaries', () => {
   it.effect('decodes date-only and timed boundaries', () =>

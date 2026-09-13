@@ -38,6 +38,7 @@ import {
   makeWindowCompactionTransformer,
   planWindowCompaction
 } from '../../src/compaction'
+import { ContextOverflowRetryCompactionResult } from '../../src/compaction/retry.ts'
 
 const user = (content: string) => UserMessage.make({ content })
 
@@ -308,7 +309,9 @@ describe('agent compaction', () => {
         compact: messages => {
           compactCalls.push(messages)
 
-          return Effect.succeed({ _tag: 'Compacted', messages: compacted })
+          return Effect.succeed(
+            ContextOverflowRetryCompactionResult.Compacted({ messages: compacted })
+          )
         }
       })
 
@@ -351,10 +354,11 @@ describe('agent compaction', () => {
         compact: messages => {
           compactCalls.push(messages)
 
-          return Effect.succeed({
-            _tag: 'Compacted',
-            messages: messages === originalA ? compactedA : compactedB
-          })
+          return Effect.succeed(
+            ContextOverflowRetryCompactionResult.Compacted({
+              messages: messages === originalA ? compactedA : compactedB
+            })
+          )
         }
       })
 
@@ -390,7 +394,8 @@ describe('agent compaction', () => {
 
       const retryProvider = yield* makeContextOverflowRetryProvider({
         provider,
-        compact: () => Effect.succeed({ _tag: 'Compacted', messages: compacted })
+        compact: () =>
+          Effect.succeed(ContextOverflowRetryCompactionResult.Compacted({ messages: compacted }))
       })
 
       const error = yield* retryProvider
@@ -418,7 +423,9 @@ describe('agent compaction', () => {
         compact: () => {
           compactCalls += 1
 
-          return Effect.succeed({ _tag: 'Compacted', messages: [user('checkpoint')] })
+          return Effect.succeed(
+            ContextOverflowRetryCompactionResult.Compacted({ messages: [user('checkpoint')] })
+          )
         }
       })
 
@@ -430,4 +437,24 @@ describe('agent compaction', () => {
       expect(compactCalls).toBe(0)
     })
   )
+
+  it('omits createdAtMs on checkpoint messages unless supplied, including zero', () => {
+    const omitted = makeCompactionCheckpointMessage({
+      summary: 's',
+      recent: 'r'
+    })
+
+    expect(omitted).toBeInstanceOf(UserMessage)
+    expect(Object.keys(omitted)).toEqual(['content', '_tag'])
+    expect(Object.hasOwn(omitted, 'createdAtMs')).toBe(false)
+
+    const zero = makeCompactionCheckpointMessage({
+      summary: 's',
+      recent: 'r',
+      createdAtMs: 0
+    })
+
+    expect(Object.keys(zero)).toEqual(['content', 'createdAtMs', '_tag'])
+    expect(zero.createdAtMs).toBe(0)
+  })
 })

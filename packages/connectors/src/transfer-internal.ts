@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ConnectorBinaryHttpClient } from './binary-http.ts'
 import type { ConnectorBinaryHttpResponse } from './binary-http.ts'
@@ -185,7 +185,7 @@ export const safeHttpsUrl = (raw: string) =>
       const h = url.hostname.toLowerCase()
 
       if (
-        typeof raw !== 'string' ||
+        !Predicate.isString(raw) ||
         !/^https:\/\/[a-zA-Z0-9]/.test(raw) ||
         /%(?![0-9a-f]{2})/i.test(raw) ||
         raw.includes('#') ||

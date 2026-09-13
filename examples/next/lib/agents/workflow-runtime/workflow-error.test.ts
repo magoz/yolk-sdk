@@ -1,3 +1,4 @@
+import { Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { AgentError } from '@yolk-sdk/agent/protocol'
@@ -17,10 +18,12 @@ describe('workflowErrorEvent', () => {
   })
 
   it('maps route validation errors', () => {
-    expect(
-      workflowErrorEvent(new AgentDocumentLimitError({ message: 'Attach up to 4 PDFs.' }))
-    ).toMatchObject({
-      _tag: 'AgentError',
+    const event = workflowErrorEvent(
+      new AgentDocumentLimitError({ message: 'Attach up to 4 PDFs.' })
+    )
+
+    expect(Predicate.isTagged(event, 'AgentError')).toBe(true)
+    expect(event).toMatchObject({
       code: 'validation_error',
       message: 'Attach up to 4 PDFs.',
       retryable: false
@@ -28,12 +31,12 @@ describe('workflowErrorEvent', () => {
   })
 
   it('maps loop errors with typed codes', () => {
-    expect(
-      workflowErrorEvent(
-        new ToolError({ tool: 'search', message: 'Tool timed out', cause: 'timeout' })
-      )
-    ).toMatchObject({
-      _tag: 'AgentError',
+    const event = workflowErrorEvent(
+      new ToolError({ tool: 'search', message: 'Tool timed out', cause: 'timeout' })
+    )
+
+    expect(Predicate.isTagged(event, 'AgentError')).toBe(true)
+    expect(event).toMatchObject({
       code: 'tool_timeout',
       message: 'Tool timed out',
       retryable: true
@@ -41,8 +44,9 @@ describe('workflowErrorEvent', () => {
   })
 
   it('maps runtime errors with typed codes', () => {
-    expect(workflowErrorEvent(new SessionNotFoundError({ sessionId: 'session_1' }))).toMatchObject({
-      _tag: 'AgentError',
+    const event = workflowErrorEvent(new SessionNotFoundError({ sessionId: 'session_1' }))
+    expect(Predicate.isTagged(event, 'AgentError')).toBe(true)
+    expect(event).toMatchObject({
       code: 'session_not_found',
       message: 'Session not found: session_1',
       retryable: false
@@ -50,8 +54,9 @@ describe('workflowErrorEvent', () => {
   })
 
   it('redacts unexpected defect details from public errors', () => {
-    expect(workflowErrorEvent(new Error('SENSITIVE_DEFECT_DETAIL'))).toMatchObject({
-      _tag: 'AgentError',
+    const event = workflowErrorEvent(new Error('SENSITIVE_DEFECT_DETAIL'))
+    expect(Predicate.isTagged(event, 'AgentError')).toBe(true)
+    expect(event).toMatchObject({
       code: 'unknown',
       message: 'Workflow agent failed unexpectedly',
       retryable: false
@@ -59,10 +64,9 @@ describe('workflowErrorEvent', () => {
   })
 
   it('maps response encoding errors', () => {
-    expect(
-      workflowErrorEvent(new AgentResponseEncodingError({ message: 'bad event' }))
-    ).toMatchObject({
-      _tag: 'AgentError',
+    const event = workflowErrorEvent(new AgentResponseEncodingError({ message: 'bad event' }))
+    expect(Predicate.isTagged(event, 'AgentError')).toBe(true)
+    expect(event).toMatchObject({
       code: 'invalid_response',
       message: 'bad event',
       retryable: false

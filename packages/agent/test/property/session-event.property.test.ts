@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from 'effect'
+import { Effect, Match, Option, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentError,
@@ -205,10 +205,16 @@ describe('session event property tests', () => {
 
         const after = yield* store.load('session_1')
 
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'SessionConflictError', sessionId: 'session_1' }
-        })
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'SessionConflictError')).toBe(true)
+
+          if (Predicate.isTagged(result.failure, 'SessionConflictError')) {
+            expect(result.failure.sessionId).toBe('session_1')
+          }
+        }
+
         expect(after).toEqual(initialLog)
       }).pipe(Effect.provide(makeInMemorySessionEventStoreLayer())),
     propertyOptions
@@ -223,28 +229,36 @@ describe('session event property tests', () => {
         let expectedLog = emptyLog()
 
         for (const [index, command] of commands.entries()) {
-          const expectedRevision =
-            command.expectation === 'none'
-              ? undefined
-              : command.expectation === 'current'
-                ? expectedLog.revision
-                : expectedLog.revision + 1
+          const expectedRevision = Match.value(command.expectation).pipe(
+            Match.when('none', () => undefined),
+            Match.when('current', () => expectedLog.revision),
+            Match.when('stale', () => expectedLog.revision + 1),
+            Match.exhaustive
+          )
 
           const events = [eventForCommand(command.event, index)]
 
+          const appendInput = {
+            sessionId: 'session_1',
+            events
+          }
+
           const result = yield* store
-            .append({
-              sessionId: 'session_1',
-              ...(expectedRevision === undefined ? {} : { expectedRevision }),
-              events
-            })
+            .append(
+              expectedRevision === undefined ? appendInput : { ...appendInput, expectedRevision }
+            )
             .pipe(Effect.result)
 
           if (command.expectation === 'stale') {
-            expect(result).toMatchObject({
-              _tag: 'Failure',
-              failure: { _tag: 'SessionConflictError', sessionId: 'session_1' }
-            })
+            expect(Result.isFailure(result)).toBe(true)
+
+            if (Result.isFailure(result)) {
+              expect(Predicate.isTagged(result.failure, 'SessionConflictError')).toBe(true)
+
+              if (Predicate.isTagged(result.failure, 'SessionConflictError')) {
+                expect(result.failure.sessionId).toBe('session_1')
+              }
+            }
           } else {
             expectedLog = appendRuntimeSessionEventsToLog(expectedLog, {
               sessionId: 'session_1',

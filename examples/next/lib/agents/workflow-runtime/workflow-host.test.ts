@@ -80,7 +80,7 @@ vi.mock('workflow', async () => {
 
       // Test-harness runaway guard, not a claim about platform quotas.
       if (autoSleep) {
-        if (advanceSleepClock && typeof duration === 'number')
+        if (advanceSleepClock && Predicate.isNumber(duration))
           vi.setSystemTime(Date.now() + duration)
 
         if (sleepDurations.length > 40) throw new Error('Unbounded observation')
@@ -206,18 +206,21 @@ let registries = new Map<string, { userId: string; state: WorkflowRegistry }>()
 
 const originalStoreLayer = AgentWorkflowStore.layer
 
-const childCall = () =>
-  ToolCall.make({
+const childCall = () => {
+  const params = {
+    description: 'Research',
+    prompt: 'Only child context',
+    subagent_type: 'general'
+  }
+
+  const modelParams = childModel === undefined ? params : { ...params, model: childModel }
+
+  return ToolCall.make({
     id: 'child-call',
     name: 'subagent',
-    params: {
-      description: 'Research',
-      prompt: 'Only child context',
-      subagent_type: 'general',
-      ...(childModel === undefined ? {} : { model: childModel }),
-      background
-    }
+    params: { ...modelParams, background }
   })
+}
 
 const reply = (calls: ToolCall[]) =>
   Stream.fromIterable([

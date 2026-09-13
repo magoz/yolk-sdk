@@ -131,6 +131,11 @@ export class OneDriveListItemsOutput extends Schema.Class<OneDriveListItemsOutpu
   nextLink: Schema.optional(Schema.String)
 }) {}
 
+type OneDriveListItemsOutputFields = {
+  readonly items: ReadonlyArray<OneDriveItem>
+  nextLink?: string
+}
+
 const OneDriveItemsApiOutput = Schema.Struct({
   value: Schema.Array(OneDriveItem),
   '@odata.nextLink': Schema.optional(Schema.String)
@@ -351,10 +356,19 @@ const oneDriveItemsAction = (input: {
     const output = yield* decodeJsonResponse(OneDriveItemsApiOutput, response)
 
     return ActionResult.success(
-      OneDriveListItemsOutput.make({
-        items: output.value,
-        ...(output['@odata.nextLink'] === undefined ? {} : { nextLink: output['@odata.nextLink'] })
-      })
+      OneDriveListItemsOutput.make(
+        (() => {
+          const fields: OneDriveListItemsOutputFields = {
+            items: output.value
+          }
+
+          if (output['@odata.nextLink'] !== undefined) {
+            fields.nextLink = output['@odata.nextLink']
+          }
+
+          return fields
+        })()
+      )
     )
   })
 
@@ -487,10 +501,21 @@ export const oneDriveDeleteItemAction = defineAction({
         ConnectorHttpRequest.make({
           method: 'DELETE',
           url: `${microsoftGraphApiBaseUrl}${oneDriveTargetPath(input.driveId)}/items/${encodeURIComponent(input.itemId)}`,
-          headers: {
-            ...oneDriveReadHeaders(token),
-            ...(input.ifMatch === undefined ? {} : { 'if-match': input.ifMatch })
-          }
+          headers: (() => {
+            type OneDriveDeleteHeaders = {
+              authorization: string
+              accept: string
+              'if-match'?: string
+            }
+
+            const headers: OneDriveDeleteHeaders = { ...oneDriveReadHeaders(token) }
+
+            if (input.ifMatch !== undefined) {
+              headers['if-match'] = input.ifMatch
+            }
+
+            return headers
+          })()
         })
       )
 

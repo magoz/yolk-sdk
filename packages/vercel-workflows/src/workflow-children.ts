@@ -62,9 +62,20 @@ export async function orchestrateWorkflowToolBatch<Call, Result, Pause>(input: {
     })
   )
 
-  return {
-    ready: true,
-    results: [...results.entries()].sort(([a], [b]) => a - b).map(([, result]) => result),
-    ...(failures.length === 0 ? {} : { failures: failures.sort((a, b) => a.index - b.index) })
+  type ReadyWorkflowToolBatch = {
+    ready: true
+    results: Array<Result>
+    failures?: Array<{ readonly index: number; readonly error: unknown }>
   }
+
+  const ready: ReadyWorkflowToolBatch = {
+    ready: true,
+    results: [...results.entries()].sort(([a], [b]) => a - b).map(([, result]) => result)
+  }
+
+  if (failures.length !== 0) {
+    ready.failures = failures.sort((a, b) => a.index - b.index)
+  }
+
+  return ready
 }

@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Predicate } from 'effect'
+import { Array as Arr, Effect, Match, Option, Predicate } from 'effect'
 import type { Context } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
@@ -66,14 +66,31 @@ const JsonRpcMessageSchema = Schema.Union([JsonRpcRequestSchema, JsonRpcNotifica
 
 type JsonRpcMessage = typeof JsonRpcMessageSchema.Type
 
-type DecodedLine =
-  | { readonly _tag: 'Message'; readonly message: JsonRpcMessage }
-  | { readonly _tag: 'Response'; readonly response: Option.Option<string> }
+const DecodedMessageLine = Schema.TaggedStruct('Message', {
+  message: Schema.Unknown
+})
 
-const decodedMessage = (message: JsonRpcMessage): DecodedLine => ({ _tag: 'Message', message })
+const DecodedResponseLine = Schema.TaggedStruct('Response', {
+  response: Schema.Unknown
+})
+
+type DecodedLine =
+  | {
+      readonly _tag: 'Message'
+      readonly message: JsonRpcMessage
+    }
+  | {
+      readonly _tag: 'Response'
+      readonly response: Option.Option<string>
+    }
+
+const decodedMessage = (message: JsonRpcMessage): DecodedLine => ({
+  ...DecodedMessageLine.make({ message }),
+  message
+})
 
 const decodedResponse = (response: Option.Option<string>): DecodedLine => ({
-  _tag: 'Response',
+  ...DecodedResponseLine.make({ response }),
   response
 })
 
@@ -157,44 +174,47 @@ const protocolErrorResponse = (id: string | number | null, error: McpServerError
 
 const documentResourceUri = (filename: string) => `file:///${encodeURIComponent(filename)}`
 
-const mcpContentBlockFromPart = (part: ContentPart): SdkContentBlock => {
-  switch (part._tag) {
-    case 'Text':
-      return { type: 'text', text: part.text }
-    case 'Image':
-      return Option.match(attachmentSourceBase64(part.source), {
+const mcpContentBlockFromPart = (part: ContentPart): SdkContentBlock =>
+  Match.value(part).pipe(
+    Match.withReturnType<SdkContentBlock>(),
+    Match.tag('Text', current => ({ type: 'text', text: current.text })),
+    Match.tag('Image', current =>
+      Option.match(attachmentSourceBase64(current.source), {
         onNone: () => ({
           type: 'text',
-          text: `Image attachment: ${attachmentSourcePreview(part.source)}`
+          text: `Image attachment: ${attachmentSourcePreview(current.source)}`
         }),
-        onSome: data => ({ type: 'image', data, mimeType: part.mimeType })
+        onSome: data => ({ type: 'image', data, mimeType: current.mimeType })
       })
-    case 'Document':
-      return Option.match(attachmentSourceBase64(part.source), {
+    ),
+    Match.tag('Document', current =>
+      Option.match(attachmentSourceBase64(current.source), {
         onNone: () => ({
           type: 'text',
-          text: `Document attachment: ${attachmentSourcePreview(part.source)}`
+          text: `Document attachment: ${attachmentSourcePreview(current.source)}`
         }),
         onSome: data => ({
           type: 'resource',
           resource: {
-            uri: documentResourceUri(part.filename),
-            name: part.title ?? part.filename,
-            mimeType: part.mimeType,
+            uri: documentResourceUri(current.filename),
+            name: current.title ?? current.filename,
+            mimeType: current.mimeType,
             blob: data
           }
         })
       })
-    case 'Audio':
-      return Option.match(attachmentSourceBase64(part.source), {
+    ),
+    Match.tag('Audio', current =>
+      Option.match(attachmentSourceBase64(current.source), {
         onNone: () => ({
           type: 'text',
-          text: `Audio attachment: ${attachmentSourcePreview(part.source)}`
+          text: `Audio attachment: ${attachmentSourcePreview(current.source)}`
         }),
-        onSome: data => ({ type: 'audio', data, mimeType: part.mimeType })
+        onSome: data => ({ type: 'audio', data, mimeType: current.mimeType })
       })
-  }
-}
+    ),
+    Match.exhaustive
+  )
 
 const mcpResultFromToolResult = (result: ToolResult): SdkCallToolResult => {
   const content = Arr.map(contentParts(result.content), mcpContentBlockFromPart)

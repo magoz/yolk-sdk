@@ -1,3 +1,4 @@
+import { Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { makeConnectorHttpRequest } from './telegram-tool'
 import { ConnectorHttpRequest } from '@yolk-sdk/connectors'
@@ -13,8 +14,9 @@ describe('telegram connector tool adapter', () => {
       })
     )
 
-    expect(request.body.toJSON()).toMatchObject({
-      _tag: 'Uint8Array',
+    const body = request.body.toJSON()
+    expect(Predicate.isTagged(body, 'Uint8Array')).toBe(true)
+    expect(body).toMatchObject({
       body: '{"text":"hello"}',
       contentType: 'application/json'
     })

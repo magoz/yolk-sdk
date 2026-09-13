@@ -113,11 +113,6 @@ const encodeHitlRequest = Schema.encodeUnknownEffect(HitlRequest)
 
 const encodeUsage = Schema.encodeUnknownEffect(AgentUsage)
 
-const decodeUsageOrZero = (usage: unknown | undefined) =>
-  usage === undefined
-    ? Effect.succeed(zeroAgentUsage)
-    : Schema.decodeUnknownEffect(AgentUsage)(usage)
-
 const decodeHitlResponses = (responses: ReadonlyArray<unknown> | undefined) =>
   responses === undefined
     ? Effect.succeed<ReadonlyArray<HitlResponse>>([])
@@ -177,7 +172,12 @@ export async function runAgentWorkflowModelStep(input: {
       yield* validateAgentRouteImages(request)
       yield* validateAgentRouteDocuments(request)
       const createdMessages = yield* decodeMessages(input.state.createdMessages)
-      const initialUsage = yield* decodeUsageOrZero(input.state.usage)
+      const initialUsageInput = input.state.usage
+
+      const initialUsage = yield* initialUsageInput === undefined
+        ? Effect.succeed(zeroAgentUsage)
+        : Schema.decodeUnknownEffect(AgentUsage)(initialUsageInput)
+
       const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
       yield* assertChildAdmission(context, getWorkflowMetadata().workflowRunId)
       const runtime = yield* workflowRuntime(request, context)
@@ -319,7 +319,12 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
       const createdMessages = yield* decodeMessages(input.createdMessages)
       const hitlResponses = yield* decodeHitlResponses(input.hitlResponses)
-      const usage = yield* decodeUsageOrZero(input.usage)
+      const usageInput = input.usage
+
+      const usage = yield* usageInput === undefined
+        ? Effect.succeed(zeroAgentUsage)
+        : Schema.decodeUnknownEffect(AgentUsage)(usageInput)
+
       latestUsage = usage
       const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
       yield* assertChildAdmission(context, getWorkflowMetadata().workflowRunId)
@@ -555,10 +560,22 @@ export async function mergeWorkflowToolResultsStep(
 ) {
   return await Effect.runPromise(
     Effect.gen(function* () {
-      let usage = yield* decodeUsageOrZero(input.usage)
+      const usageInput = input.usage
 
-      for (const result of results)
-        usage = addAgentUsage(usage, yield* decodeUsageOrZero(result.usage))
+      let usage = yield* usageInput === undefined
+        ? Effect.succeed(zeroAgentUsage)
+        : Schema.decodeUnknownEffect(AgentUsage)(usageInput)
+
+      for (const result of results) {
+        const resultUsageInput = result.usage
+        usage = addAgentUsage(
+          usage,
+          yield* resultUsageInput === undefined
+            ? Effect.succeed(zeroAgentUsage)
+            : Schema.decodeUnknownEffect(AgentUsage)(resultUsageInput)
+        )
+      }
+
       const messages = results.flatMap(result => result.messages)
       const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
       const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(ToolResultMessage))(messages)

@@ -102,6 +102,14 @@ const decodeTranscriptionResponse = Schema.decodeUnknownEffect(OpenAiTranscripti
 
 const encodeSpeechBody = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
 
+type OpenAiSpeechJsonBodyFields = {
+  model: string
+  input: string
+  voice: string
+  response_format: string
+  instructions?: string
+}
+
 /**
  * OpenAI text-to-speech adapter for the provider-neutral
  * `VoiceSpeechSynthesizer` service. Hosts provide the `HttpClient` layer and
@@ -119,13 +127,22 @@ export const makeOpenAiSpeechSynthesizerLayer = (config: OpenAiSpeechConfig) =>
             const outputFormat = request.outputFormat ?? 'mp3'
             const instructions = request.instructions ?? config.defaultInstructions
 
-            const body = yield* encodeSpeechBody({
-              model: request.model ?? config.defaultSpeechModel ?? defaultSpeechModel,
-              input: request.text,
-              voice: request.voice ?? config.defaultVoice ?? defaultVoice,
-              response_format: outputFormat,
-              ...(instructions === undefined ? {} : { instructions })
-            }).pipe(
+            const body = yield* encodeSpeechBody(
+              (() => {
+                const fields: OpenAiSpeechJsonBodyFields = {
+                  model: request.model ?? config.defaultSpeechModel ?? defaultSpeechModel,
+                  input: request.text,
+                  voice: request.voice ?? config.defaultVoice ?? defaultVoice,
+                  response_format: outputFormat
+                }
+
+                if (instructions !== undefined) {
+                  fields.instructions = instructions
+                }
+
+                return fields
+              })()
+            ).pipe(
               Effect.mapError(
                 () =>
                   new VoiceSpeechError({

@@ -1,11 +1,11 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Predicate, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { Driver, makeDriverLayer } from '@yolk-sdk/harness/driver'
 import { makeDurableObjectDriverLayer } from '@yolk-sdk/harness/driver/durable-object'
 import { makeInMemoryHarnessLayer } from '@yolk-sdk/harness/driver/memory'
 import { makeInMemoryInboxLayer } from '@yolk-sdk/harness/inbox'
 import { RunStore, type DurableRunStoreSnapshot } from '@yolk-sdk/harness/store'
-import { makeLiveDrain, notifyRejectedStart } from '../src/drain-lifecycle.ts'
+import { makeLiveDrain, notifyRejectedStart, StartResult } from '../src/drain-lifecycle.ts'
 
 const makeHarnessLayer = (
   live: { readonly runHeld: Effect.Effect<void> },
@@ -104,18 +104,21 @@ describe('makeLiveDrain', () => {
         yield* Deferred.await(started)
 
         const overlapping = yield* live.beginPrepare()
-        expect(yield* live.runOwned(overlapping, 'sock_2', Effect.void, driver, 'run_1')).toEqual({
-          _tag: 'Conflict'
-        })
+        expect(yield* live.runOwned(overlapping, 'sock_2', Effect.void, driver, 'run_1')).toEqual(
+          StartResult.Conflict()
+        )
         expect(yield* driver.isActive('run_1')).toBe(true)
 
         yield* Deferred.succeed(release, undefined)
         yield* Fiber.join(running)
 
         const after = yield* live.beginPrepare()
-        expect((yield* live.runOwned(after, 'sock_3', Effect.void, driver, 'run_1'))._tag).toBe(
-          'Accepted'
-        )
+        expect(
+          Predicate.isTagged(
+            yield* live.runOwned(after, 'sock_3', Effect.void, driver, 'run_1'),
+            'Accepted'
+          )
+        ).toBe(true)
       }).pipe(Effect.provide(layer))
     })
   )
@@ -146,9 +149,12 @@ describe('makeLiveDrain', () => {
         expect(yield* driver.isActive('run_1')).toBe(false)
         expect(yield* Ref.get(stillRunning)).toBe(false)
         const next = yield* live.beginPrepare()
-        expect((yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'))._tag).toBe(
-          'Accepted'
-        )
+        expect(
+          Predicate.isTagged(
+            yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'),
+            'Accepted'
+          )
+        ).toBe(true)
       }).pipe(Effect.provide(layer))
     })
   )
@@ -168,9 +174,12 @@ describe('makeLiveDrain', () => {
 
         yield* Fiber.interrupt(waiting)
         const next = yield* live.beginPrepare()
-        expect((yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'))._tag).toBe(
-          'Accepted'
-        )
+        expect(
+          Predicate.isTagged(
+            yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'),
+            'Accepted'
+          )
+        ).toBe(true)
       }).pipe(Effect.provide(layer))
     })
   )
@@ -191,9 +200,12 @@ describe('makeLiveDrain', () => {
         yield* live.reconnect(driver, 'run_1', Effect.void)
         yield* Fiber.join(waiting).pipe(Effect.ignoreCause)
         const next = yield* live.beginPrepare()
-        expect((yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'))._tag).toBe(
-          'Accepted'
-        )
+        expect(
+          Predicate.isTagged(
+            yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'),
+            'Accepted'
+          )
+        ).toBe(true)
       }).pipe(Effect.provide(layer))
     })
   )
@@ -248,9 +260,12 @@ describe('makeLiveDrain', () => {
 
         expect(Exit.isFailure(exit)).toBe(true)
         const prepare = yield* live.beginPrepare()
-        expect((yield* live.runOwned(prepare, 'sock_1', Effect.void, driver, 'run_1'))._tag).toBe(
-          'Accepted'
-        )
+        expect(
+          Predicate.isTagged(
+            yield* live.runOwned(prepare, 'sock_1', Effect.void, driver, 'run_1'),
+            'Accepted'
+          )
+        ).toBe(true)
       }).pipe(Effect.provide(layer))
     })
   )
@@ -281,9 +296,12 @@ describe('makeLiveDrain', () => {
         yield* Fiber.join(first)
         yield* Fiber.join(second)
         const prepare = yield* live.beginPrepare()
-        expect((yield* live.runOwned(prepare, 'sock_1', Effect.void, driver, 'run_1'))._tag).toBe(
-          'Accepted'
-        )
+        expect(
+          Predicate.isTagged(
+            yield* live.runOwned(prepare, 'sock_1', Effect.void, driver, 'run_1'),
+            'Accepted'
+          )
+        ).toBe(true)
       }).pipe(Effect.provide(layer))
     })
   )
@@ -352,9 +370,9 @@ describe('makeLiveDrain', () => {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
         yield* live.reconnect(driver, 'run_1', Effect.void)
-        expect(yield* live.runOwned(prepare, 'sock_1', Effect.void, driver, 'run_1')).toEqual({
-          _tag: 'Stale'
-        })
+        expect(yield* live.runOwned(prepare, 'sock_1', Effect.void, driver, 'run_1')).toEqual(
+          StartResult.Stale()
+        )
       }).pipe(Effect.provide(layer))
     })
   )
@@ -446,9 +464,12 @@ describe('makeLiveDrain', () => {
         expect(yield* driver.isActive('run_1')).toBe(false)
 
         const after = yield* live.beginPrepare()
-        expect((yield* live.runOwned(after, 'sock_3', Effect.void, driver, 'run_1'))._tag).toBe(
-          'Accepted'
-        )
+        expect(
+          Predicate.isTagged(
+            yield* live.runOwned(after, 'sock_3', Effect.void, driver, 'run_1'),
+            'Accepted'
+          )
+        ).toBe(true)
       }).pipe(Effect.provide(layer))
     })
   )
@@ -503,9 +524,12 @@ describe('makeLiveDrain', () => {
           expect(yield* driver.isActive('run_1')).toBe(false)
 
           const after = yield* live.beginPrepare()
-          expect((yield* live.runOwned(after, 'sock_c', Effect.void, driver, 'run_1'))._tag).toBe(
-            'Accepted'
-          )
+          expect(
+            Predicate.isTagged(
+              yield* live.runOwned(after, 'sock_c', Effect.void, driver, 'run_1'),
+              'Accepted'
+            )
+          ).toBe(true)
         }).pipe(Effect.provide(layer))
       })
   )
@@ -559,9 +583,12 @@ describe('makeLiveDrain', () => {
           expect(yield* driver.isActive('run_1')).toBe(false)
 
           const after = yield* live.beginPrepare()
-          expect((yield* live.runOwned(after, 'sock_3', Effect.void, driver, 'run_1'))._tag).toBe(
-            'Accepted'
-          )
+          expect(
+            Predicate.isTagged(
+              yield* live.runOwned(after, 'sock_3', Effect.void, driver, 'run_1'),
+              'Accepted'
+            )
+          ).toBe(true)
         }).pipe(Effect.provide(layer))
       })
   )
@@ -593,9 +620,12 @@ describe('makeLiveDrain', () => {
         expect(yield* driver.isActive('run_1')).toBe(false)
 
         const next = yield* live.beginPrepare()
-        expect((yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'))._tag).toBe(
-          'Accepted'
-        )
+        expect(
+          Predicate.isTagged(
+            yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'),
+            'Accepted'
+          )
+        ).toBe(true)
       }).pipe(Effect.provide(layer))
     })
   )
@@ -649,7 +679,7 @@ describe('notifyRejectedStart', () => {
             Ref.update(conflicts, current => current + 1).pipe(Effect.asVoid)
           )
 
-          expect(started).toEqual({ _tag: 'Stale' })
+          expect(started).toEqual(StartResult.Stale())
           expect(yield* Ref.get(conflicts)).toBe(1)
           expect(yield* Ref.get(staleWorkRan)).toBe(false)
           expect(yield* driver.isActive('run_1')).toBe(true)
@@ -707,7 +737,7 @@ describe('notifyRejectedStart', () => {
             Ref.update(conflicts, current => current + 1).pipe(Effect.asVoid)
           )
 
-          expect(overlapping).toEqual({ _tag: 'Conflict' })
+          expect(overlapping).toEqual(StartResult.Conflict())
           expect(yield* Ref.get(conflicts)).toBe(1)
           expect(yield* Ref.get(overlappingWorkRan)).toBe(false)
           expect(yield* driver.isActive('run_1')).toBe(true)
@@ -742,7 +772,7 @@ describe('notifyRejectedStart', () => {
           started,
           Ref.update(conflicts, current => current + 1).pipe(Effect.asVoid)
         )
-        expect(started._tag).toBe('Accepted')
+        expect(Predicate.isTagged(started, 'Accepted')).toBe(true)
         expect(yield* Ref.get(conflicts)).toBe(0)
         expect(yield* Ref.get(workRan)).toBe(true)
       }).pipe(Effect.provide(layer))

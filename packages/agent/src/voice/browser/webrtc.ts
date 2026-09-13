@@ -1,4 +1,13 @@
-import { Deferred, Duration, Effect, Queue, Stream, type Cause, type Scope } from 'effect'
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Predicate,
+  Queue,
+  Stream,
+  type Cause,
+  type Scope
+} from 'effect'
 import {
   VoiceErrorEvent,
   VoiceSessionClosed,
@@ -235,7 +244,7 @@ export const makeWebRtcVoiceTransport = (
     }
 
     const handleChannelMessage = (event: WebRtcMessageEventLike) => {
-      if (typeof event.data !== 'string') {
+      if (!Predicate.isString(event.data)) {
         return
       }
 

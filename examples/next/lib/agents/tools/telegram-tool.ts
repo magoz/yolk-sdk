@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Match, Predicate } from 'effect'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -45,7 +45,7 @@ const providerFailureContent = (error: {
   const status = error.status === undefined ? '' : ` (HTTP ${error.status})`
 
   const underlying =
-    typeof error.underlying === 'string' && error.underlying.length > 0
+    Predicate.isString(error.underlying) && error.underlying.length > 0
       ? `: ${error.underlying}`
       : ''
 
@@ -125,7 +125,6 @@ const makeCredentialResolverLayer = (config: TelegramToolConfig) =>
         request.binding.credentialRef === telegramCredentialRef
           ? Effect.succeed(
               ApiKeyCredential.make({
-                _tag: 'ApiKeyCredential',
                 key: config.botToken
               })
             )
@@ -181,23 +180,26 @@ export const makeAppTelegramToolModule = (
             input: params
           }).pipe(
             Effect.provide(layer),
-            Effect.map(result => {
-              switch (result._tag) {
-                case 'Success':
-                  return ToolResult.make({
+            Effect.map(result =>
+              Match.value(result).pipe(
+                Match.tag('Success', success =>
+                  ToolResult.make({
                     toolCallId: call.id,
                     content: 'Sent Telegram message.',
-                    structuredContent: result.value
+                    structuredContent: success.value
                   })
-                case 'Failure':
-                  return ToolResult.make({
+                ),
+                Match.tag('Failure', failure =>
+                  ToolResult.make({
                     toolCallId: call.id,
-                    content: providerFailureContent(result.error),
+                    content: providerFailureContent(failure.error),
                     isError: true,
-                    structuredContent: result.error
+                    structuredContent: failure.error
                   })
-              }
-            }),
+                ),
+                Match.exhaustive
+              )
+            ),
             Effect.mapError(error =>
               error instanceof ToolError
                 ? error

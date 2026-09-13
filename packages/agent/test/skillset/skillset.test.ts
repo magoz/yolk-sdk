@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   emptySkillsetManifest,
@@ -53,10 +53,15 @@ describe('skillset', () => {
         directoryName: 'release'
       }).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'SkillsetError', cause: 'name_mismatch' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'SkillsetError')).toBe(true)
+
+        if (Predicate.isTagged(result.failure, 'SkillsetError')) {
+          expect(result.failure.cause).toBe('name_mismatch')
+        }
+      }
     })
   )
 
@@ -138,10 +143,15 @@ Do work.
         name: 'bad'
       }).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'SkillsetError', cause: 'frontmatter_invalid' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'SkillsetError')).toBe(true)
+
+        if (Predicate.isTagged(result.failure, 'SkillsetError')) {
+          expect(result.failure.cause).toBe('frontmatter_invalid')
+        }
+      }
     })
   )
 
@@ -211,10 +221,72 @@ Override.
         { id: 'bad', manifest: { ...emptySkillsetManifest, skills: [baseSkill, baseSkill] } }
       ]).pipe(Effect.result)
 
-      expect(duplicate).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'SkillsetError', cause: 'duplicate_entry' }
+      expect(Result.isFailure(duplicate)).toBe(true)
+
+      if (Result.isFailure(duplicate)) {
+        expect(Predicate.isTagged(duplicate.failure, 'SkillsetError')).toBe(true)
+
+        if (Predicate.isTagged(duplicate.failure, 'SkillsetError')) {
+          expect(duplicate.failure.cause).toBe('duplicate_entry')
+        }
+      }
+    })
+  )
+
+  it.effect('omits empty command arguments and keeps explicit undefined source', () =>
+    Effect.gen(function* () {
+      const omitted = yield* parseCommandMarkdown({
+        markdown: `---
+
+---
+
+Do work.
+`,
+        name: 'do-work',
+        location: 'here.md'
       })
+
+      expect(Object.keys(omitted)).toEqual([
+        'name',
+        'description',
+        'template',
+        'hints',
+        'location',
+        'source'
+      ])
+      expect(omitted.source).toBeUndefined()
+      expect(Object.hasOwn(omitted, 'source')).toBe(true)
+      expect(Object.hasOwn(omitted, 'arguments')).toBe(false)
+      expect(JSON.stringify(omitted)).toBe(
+        '{"name":"do-work","template":"Do work.","hints":[],"location":"here.md"}'
+      )
+
+      const fileRefsFalse = yield* parseCommandMarkdown({
+        markdown: `---
+description:
+arguments:
+fileRefs: false
+---
+
+Do $1.
+`,
+        name: 'do-work'
+      })
+
+      expect(Object.keys(fileRefsFalse)).toEqual([
+        'name',
+        'description',
+        'template',
+        'hints',
+        'fileRefs',
+        'location',
+        'source'
+      ])
+      expect(fileRefsFalse.fileRefs).toBe(false)
+      expect(fileRefsFalse.source).toBeUndefined()
+      expect(JSON.stringify(fileRefsFalse)).toBe(
+        '{"name":"do-work","template":"Do $1.","hints":["$1"],"fileRefs":false}'
+      )
     })
   )
 })

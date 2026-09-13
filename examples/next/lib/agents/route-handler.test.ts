@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Layer, Option, Predicate, Result, Stream } from 'effect'
+import { Array as Arr, Effect, Layer, Match, Option, Predicate, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -48,15 +48,12 @@ const decodeEvents = (body: string) =>
     decodeEvent
   )
 
-const messageContent = (message: AgentMessage) => {
-  switch (message._tag) {
-    case 'Assistant':
-      return assistantContent(message)
-    case 'ToolResult':
-    case 'User':
-      return message.content
-  }
-}
+const messageContent = (message: AgentMessage) =>
+  Match.value(message).pipe(
+    Match.tag('Assistant', current => assistantContent(current)),
+    Match.tag('ToolResult', 'User', current => current.content),
+    Match.exhaustive
+  )
 
 const makeLayer = () =>
   Layer.mergeAll(
@@ -434,10 +431,11 @@ describe('makeAgentPostResponse', () => {
         messages: []
       }).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'SchemaError' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'SchemaError')).toBe(true)
+      }
     })
   )
 
@@ -461,10 +459,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentImageLimitError', message: 'Attach up to 4 images.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentImageLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Attach up to 4 images.' })
+      }
     })
   )
 
@@ -484,10 +484,14 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentImageLimitError', message: 'Unsupported image type: image/svg+xml' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentImageLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({
+          message: 'Unsupported image type: image/svg+xml'
+        })
+      }
     })
   )
 
@@ -507,10 +511,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentImageLimitError', message: 'Invalid image data.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentImageLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Invalid image data.' })
+      }
     })
   )
 
@@ -535,10 +541,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentImageLimitError', message: 'Image payload is too large.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentImageLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Image payload is too large.' })
+      }
     })
   )
 
@@ -590,10 +598,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Attach up to 4 PDFs.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Attach up to 4 PDFs.' })
+      }
     })
   )
 
@@ -617,13 +627,14 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'AgentDocumentLimitError',
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({
           message: 'Unsupported document type: text/plain'
-        }
-      })
+        })
+      }
     })
   )
 
@@ -647,10 +658,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Invalid document data.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Invalid document data.' })
+      }
     })
   )
 
@@ -676,10 +689,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Document is too large.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Document is too large.' })
+      }
     })
   )
 
@@ -701,10 +716,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Document payload is too large.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Document payload is too large.' })
+      }
     })
   )
 })

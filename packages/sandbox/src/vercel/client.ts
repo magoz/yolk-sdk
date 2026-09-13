@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Match } from 'effect'
 import {
   APIError,
   Sandbox as VercelSdkSandbox,
@@ -269,30 +269,35 @@ const gitSource = (
 const createSandbox = (input: VercelSandboxCreateInput) => {
   const common = commonCreateOptions(input)
 
-  switch (input.source._tag) {
-    case 'Empty':
-      return VercelSdkSandbox.create({
+  return Match.value(input.source).pipe(
+    Match.tag('Empty', () =>
+      VercelSdkSandbox.create({
         ...common,
         runtime: input.runtime
       })
-    case 'Snapshot':
-      return VercelSdkSandbox.create({
+    ),
+    Match.tag('Snapshot', source =>
+      VercelSdkSandbox.create({
         ...common,
-        source: { type: 'snapshot', snapshotId: input.source.snapshotId }
+        source: { type: 'snapshot', snapshotId: source.snapshotId }
       })
-    case 'Git':
-      return VercelSdkSandbox.create({
-        ...common,
-        runtime: input.runtime,
-        source: gitSource(input.source)
-      })
-    case 'Tarball':
-      return VercelSdkSandbox.create({
+    ),
+    Match.tag('Git', source =>
+      VercelSdkSandbox.create({
         ...common,
         runtime: input.runtime,
-        source: { type: 'tarball', url: input.source.url }
+        source: gitSource(source)
       })
-  }
+    ),
+    Match.tag('Tarball', source =>
+      VercelSdkSandbox.create({
+        ...common,
+        runtime: input.runtime,
+        source: { type: 'tarball', url: source.url }
+      })
+    ),
+    Match.exhaustive
+  )
 }
 
 export const VercelSandboxClientLive = Layer.succeed(

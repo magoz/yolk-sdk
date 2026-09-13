@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, type Ref } from 'react'
-import { Effect, Option, Predicate } from 'effect'
+import { Data, Effect, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -47,25 +47,25 @@ import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/ope
 
 export type VoiceStatus = 'idle' | 'connecting' | 'live' | 'error'
 
-export type VoiceDebugEvent =
-  | {
-      readonly _tag: 'SessionConfigured'
-      readonly eventType: string
-      readonly model: string | null
-      readonly transcriptionModel: string | null
-      readonly transcriptionLanguage: string | null
-    }
-  | {
-      readonly _tag: 'InputTranscript'
-      readonly itemId: string | null
-      readonly transcript: string
-    }
-  | {
-      readonly _tag: 'OutputTranscript'
-      readonly itemId: string | null
-      readonly responseId: string | null
-      readonly transcript: string
-    }
+export type VoiceDebugEvent = Data.TaggedEnum<{
+  readonly SessionConfigured: {
+    readonly eventType: string
+    readonly model: string | null
+    readonly transcriptionModel: string | null
+    readonly transcriptionLanguage: string | null
+  }
+  readonly InputTranscript: {
+    readonly itemId: string | null
+    readonly transcript: string
+  }
+  readonly OutputTranscript: {
+    readonly itemId: string | null
+    readonly responseId: string | null
+    readonly transcript: string
+  }
+}>
+
+export const VoiceDebugEvent = Data.taggedEnum<VoiceDebugEvent>()
 
 type UseRealtimeVoiceInput = {
   readonly sessionId: string
@@ -158,15 +158,23 @@ const executeVoiceToolCallOnServer = (
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
 
-    const body = yield* encodeToolCallBody(
-      VoiceSessionToolCallRequest.make({
-        sessionId,
-        callId: call.callId,
-        name: call.name,
-        argumentsJson: call.argumentsJson,
-        ...(approval === undefined ? {} : { approval })
-      })
-    )
+    const requestFields =
+      approval === undefined
+        ? {
+            sessionId,
+            callId: call.callId,
+            name: call.name,
+            argumentsJson: call.argumentsJson
+          }
+        : {
+            sessionId,
+            callId: call.callId,
+            name: call.name,
+            argumentsJson: call.argumentsJson,
+            approval
+          }
+
+    const body = yield* encodeToolCallBody(VoiceSessionToolCallRequest.make(requestFields))
 
     const request = HttpClientRequest.post('/api/agent/realtime/tool').pipe(
       HttpClientRequest.setHeaders({
@@ -279,78 +287,65 @@ export const useRealtimeVoice = ({
 
   const handleVoiceEvent = useCallback(
     (event: VoiceEvent) => {
-      switch (event._tag) {
-        case 'SessionOpened':
-          callbacksRef.current.onDebug({
-            _tag: 'SessionConfigured',
-            eventType: 'session',
-            model: event.model,
-            transcriptionModel: event.transcriptionModel ?? null,
-            transcriptionLanguage: event.transcriptionLanguage ?? null
-          })
-
-          return
-        case 'UserTranscriptDelta':
+      Match.value(event).pipe(
+        Match.tag('SessionOpened', current => {
+          callbacksRef.current.onDebug(
+            VoiceDebugEvent.SessionConfigured({
+              eventType: 'session',
+              model: current.model,
+              transcriptionModel: current.transcriptionModel ?? null,
+              transcriptionLanguage: current.transcriptionLanguage ?? null
+            })
+          )
+        }),
+        Match.tag('UserTranscriptDelta', () => {
           inputPendingRef.current = true
-
-          return
-        case 'UserTranscriptFinal':
+        }),
+        Match.tag('UserTranscriptFinal', current => {
           inputPendingRef.current = false
-          callbacksRef.current.onDebug({
-            _tag: 'InputTranscript',
-            itemId: event.itemId,
-            transcript: event.text
-          })
-          callbacksRef.current.onUserMessage(UserMessage.make({ content: event.text }))
+          callbacksRef.current.onDebug(
+            VoiceDebugEvent.InputTranscript({
+              itemId: current.itemId,
+              transcript: current.text
+            })
+          )
+          callbacksRef.current.onUserMessage(UserMessage.make({ content: current.text }))
           flushBufferedEvents()
-
-          return
-        case 'AssistantTranscriptDelta': {
-          // A delta for a new response id flushes the previous response's
-          // draft; emitting it as AssistantMessage closes that bubble so the
-          // next delta opens a fresh one instead of concatenating.
-          const projected = project(event)
+        }),
+        Match.tag('AssistantTranscriptDelta', current => {
+          const projected = project(current)
           emitProjectedAssistantMessages(projected)
-          emitAgentEvent(LLMTextDelta.make({ text: event.delta }))
-
-          return
-        }
-
-        case 'AssistantTranscriptFinal': {
-          callbacksRef.current.onDebug({
-            _tag: 'OutputTranscript',
-            itemId: event.itemId,
-            responseId: event.responseId,
-            transcript: event.text ?? ''
-          })
-          const projected = project(event)
+          emitAgentEvent(LLMTextDelta.make({ text: current.delta }))
+        }),
+        Match.tag('AssistantTranscriptFinal', current => {
+          callbacksRef.current.onDebug(
+            VoiceDebugEvent.OutputTranscript({
+              itemId: current.itemId,
+              responseId: current.responseId,
+              transcript: current.text ?? ''
+            })
+          )
+          const projected = project(current)
           emitProjectedAssistantMessages(projected)
 
           if (projected.length > 0) {
             emitAgentEvent(assistantEndEvent(projected))
           }
-
-          return
-        }
-
-        case 'Interrupted':
-        case 'SessionClosed': {
-          const projected = project(event)
+        }),
+        Match.tag('Interrupted', 'SessionClosed', current => {
+          const projected = project(current)
           emitProjectedAssistantMessages(projected)
 
           if (projected.length > 0) {
             emitAgentEvent(assistantEndEvent(projected))
           }
-
-          return
-        }
-
-        case 'ToolCallsRequested': {
-          project(event)
+        }),
+        Match.tag('ToolCallsRequested', current => {
+          project(current)
 
           const calls = new Map(toolCallsRef.current)
 
-          for (const voiceCall of event.calls) {
+          for (const voiceCall of current.calls) {
             const call = protocolToolCallFromVoice(voiceCall)
             calls.set(voiceCall.callId, call)
             emitAgentEvent(ToolInputEnd.make({ call }))
@@ -358,58 +353,41 @@ export const useRealtimeVoice = ({
           }
 
           toolCallsRef.current = calls
+        }),
+        Match.tag('ToolCallCompleted', current => {
+          project(current)
 
-          return
-        }
-
-        case 'ToolCallCompleted': {
-          project(event)
-
-          const call = toolCallsRef.current.get(event.callId)
+          const call = toolCallsRef.current.get(current.callId)
 
           if (call !== undefined) {
             emitAgentEvent(
               ToolExecutionCompleted.make({
                 call,
-                result: ToolResult.make({ toolCallId: event.callId, content: event.output })
+                result: ToolResult.make({ toolCallId: current.callId, content: current.output })
               })
             )
           }
+        }),
+        Match.tag('ToolCallFailed', current => {
+          project(current)
 
-          return
-        }
-
-        case 'ToolCallFailed': {
-          project(event)
-
-          const call = toolCallsRef.current.get(event.callId)
+          const call = toolCallsRef.current.get(current.callId)
 
           if (call !== undefined) {
             emitAgentEvent(
               ToolExecutionCompleted.make({
                 call,
                 result: ToolResult.make({
-                  toolCallId: event.callId,
-                  content: event.message,
+                  toolCallId: current.callId,
+                  content: current.message,
                   isError: true
                 })
               })
             )
           }
-
-          return
-        }
-
-        case 'SessionOpening':
-        case 'AudioInputStarted':
-        case 'AudioInputStopped':
-        case 'AssistantAudioStarted':
-        case 'AssistantAudioStopped':
-        case 'ToolCallExecuting':
-        case 'AwaitingInput':
-        case 'Error':
-          return
-      }
+        }),
+        Match.orElse(() => undefined)
+      )
     },
     [emitAgentEvent, emitProjectedAssistantMessages, flushBufferedEvents, project]
   )

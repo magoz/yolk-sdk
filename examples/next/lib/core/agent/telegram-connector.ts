@@ -15,6 +15,8 @@ export type TelegramConnectorStatus =
   | { readonly _tag: 'Connected'; readonly chatId: string }
   | { readonly _tag: 'Disconnected' }
 
+export const TelegramConnectorStatus = Data.taggedEnum<TelegramConnectorStatus>()
+
 export class TelegramConnectorValidationError extends Data.TaggedError(
   'TelegramConnectorValidationError'
 )<{
@@ -81,8 +83,8 @@ export const getTelegramConnectorStatus = (userId: string) =>
     const config = yield* getTelegramConnectorConfig(userId)
 
     return config === undefined
-      ? { _tag: 'Disconnected' as const }
-      : { _tag: 'Connected' as const, chatId: config.chatId }
+      ? TelegramConnectorStatus.Disconnected()
+      : TelegramConnectorStatus.Connected({ chatId: config.chatId })
   }).pipe(Effect.withSpan('agent.telegramConnector.status'))
 
 export const saveTelegramConnectorConfig = (

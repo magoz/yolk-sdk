@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowRunNotFoundError } from 'workflow/errors'
 import {
@@ -186,10 +186,13 @@ describe('durable host registry (transactional behavioral fake)', () => {
       )
 
     const first = await run()
-    expect(first).toMatchObject({
-      _tag: 'Failure',
-      failure: { _tag: 'WorkflowStopIncomplete', runIds: ['a'] }
-    })
+    expect(Predicate.isTagged(first, 'Failure')).toBe(true)
+
+    if (Predicate.isTagged(first, 'Failure')) {
+      expect(Predicate.isTagged(first.failure, 'WorkflowStopIncomplete')).toBe(true)
+      expect(first.failure).toMatchObject({ runIds: ['a'] })
+    }
+
     expect(cancelled).toEqual(['b'])
     fail = false
     expect((await run())._tag).toBe('Success')
@@ -207,7 +210,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
       })
       store.change({ type: 'admit', callId: 'call', workflowRunId: 'physical' })
       let missing = true
-      let failure: unknown = new WorkflowRunNotFoundError('physical')
+      let failure: WorkflowRunNotFoundError | Error = new WorkflowRunNotFoundError('physical')
 
       const sdk: VercelWorkflowsSdkClient = {
         start: async () => {
@@ -256,10 +259,16 @@ describe('durable host registry (transactional behavioral fake)', () => {
       })
       expect(store.read().children[0]).toMatchObject({ workflowRunId: 'physical', result: null })
       failure = new Error('Workflow run not found')
-      await expect(read()).rejects.toMatchObject({
-        _tag: 'VercelWorkflowsError',
-        operation: failureAt
-      })
+
+      const lookupError = await read().then(
+        () => {
+          throw new Error('expected VercelWorkflowsError')
+        },
+        error => error
+      )
+
+      expect(Predicate.isTagged(lookupError, 'VercelWorkflowsError')).toBe(true)
+      expect(lookupError).toMatchObject({ operation: failureAt })
       missing = false
       expect(await read()).toEqual({ done: false, workflowRunId: 'physical', result: null })
       store.change({
@@ -314,7 +323,15 @@ describe('durable host registry (transactional behavioral fake)', () => {
 
     expect(await read()).toEqual({ done: false, workflowRunId: 'physical', result: null })
     expect(statusReads).toBe(1)
-    await expect(read('intruder')).rejects.toMatchObject({ _tag: 'WorkflowRunForbidden' })
+
+    const forbiddenError = await read('intruder').then(
+      () => {
+        throw new Error('expected WorkflowRunForbidden')
+      },
+      error => error
+    )
+
+    expect(Predicate.isTagged(forbiddenError, 'WorkflowRunForbidden')).toBe(true)
     expect(statusReads).toBe(1)
     status = 'completed'
     expect(await read()).toMatchObject({

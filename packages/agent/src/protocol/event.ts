@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { Predicate } from 'effect'
+import { Match, Predicate } from 'effect'
 import { AssistantAgentMessage, AgentMessage, UserMessage } from './message.ts'
 import {
   HitlRequest,
@@ -309,57 +309,110 @@ export class SubagentCompleted extends Schema.TaggedClass<SubagentCompleted>()(
 
 export const makeSubagentRunId = (parentToolCallId: string) => `subagent:${parentToolCallId}`
 
+type QuestionAnswerCopyFields = {
+  questionId: QuestionAnswer['questionId']
+  optionIds?: QuestionAnswer['optionIds']
+  customAnswer?: QuestionAnswer['customAnswer']
+}
+
 const questionAnswerValue = (answer: QuestionAnswer) =>
-  QuestionAnswer.make({
-    questionId: answer.questionId,
-    ...(answer.optionIds === undefined ? {} : { optionIds: [...answer.optionIds] }),
-    ...(answer.customAnswer === undefined ? {} : { customAnswer: answer.customAnswer })
-  })
+  QuestionAnswer.make(
+    (() => {
+      const fields: QuestionAnswerCopyFields = {
+        questionId: answer.questionId
+      }
+
+      if (answer.optionIds !== undefined) {
+        fields.optionIds = [...answer.optionIds]
+      }
+
+      if (answer.customAnswer !== undefined) {
+        fields.customAnswer = answer.customAnswer
+      }
+
+      return fields
+    })()
+  )
+
+type QuestionResponseCopyFields = {
+  requestId: QuestionResponse['requestId']
+  toolCallId: QuestionResponse['toolCallId']
+  outcome: QuestionResponse['outcome']
+  source: QuestionResponse['source']
+  answers?: QuestionResponse['answers']
+  reason?: QuestionResponse['reason']
+}
 
 const questionResponseValue = (response: QuestionResponse) =>
-  QuestionResponse.make({
-    requestId: response.requestId,
-    toolCallId: response.toolCallId,
-    outcome: response.outcome,
-    source: response.source,
-    ...(response.answers === undefined
-      ? {}
-      : { answers: response.answers.map(answer => questionAnswerValue(answer)) }),
-    ...(response.reason === undefined ? {} : { reason: response.reason })
-  })
+  QuestionResponse.make(
+    (() => {
+      const fields: QuestionResponseCopyFields = {
+        requestId: response.requestId,
+        toolCallId: response.toolCallId,
+        outcome: response.outcome,
+        source: response.source
+      }
+
+      if (response.answers !== undefined) {
+        fields.answers = response.answers.map(answer => questionAnswerValue(answer))
+      }
+
+      if (response.reason !== undefined) {
+        fields.reason = response.reason
+      }
+
+      return fields
+    })()
+  )
+
+type ToolApprovalResponseCopyFields = {
+  requestId: ToolApprovalResponse['requestId']
+  toolCallId: ToolApprovalResponse['toolCallId']
+  decision: ToolApprovalResponse['decision']
+  source: ToolApprovalResponse['source']
+  reason?: ToolApprovalResponse['reason']
+}
 
 const toolApprovalResponseValue = (response: ToolApprovalResponse) =>
-  ToolApprovalResponse.make({
-    requestId: response.requestId,
-    toolCallId: response.toolCallId,
-    decision: response.decision,
-    source: response.source,
-    ...(response.reason === undefined ? {} : { reason: response.reason })
-  })
+  ToolApprovalResponse.make(
+    (() => {
+      const fields: ToolApprovalResponseCopyFields = {
+        requestId: response.requestId,
+        toolCallId: response.toolCallId,
+        decision: response.decision,
+        source: response.source
+      }
 
-export const hitlResponseEvent = (response: HitlResponse): AgentEvent => {
-  switch (response._tag) {
-    case 'QuestionResponse': {
-      const responseValue = questionResponseValue(response)
+      if (response.reason !== undefined) {
+        fields.reason = response.reason
+      }
 
-      return response.outcome === 'answered'
+      return fields
+    })()
+  )
+
+export const hitlResponseEvent = (response: HitlResponse): AgentEvent =>
+  Match.value(response).pipe(
+    Match.tag('QuestionResponse', current => {
+      const responseValue = questionResponseValue(current)
+
+      return current.outcome === 'answered'
         ? QuestionAnswered.make({ response: responseValue })
         : QuestionCancelled.make({ response: responseValue })
-    }
+    }),
+    Match.tag('ToolApprovalResponse', current => {
+      const responseValue = toolApprovalResponseValue(current)
 
-    case 'ToolApprovalResponse': {
-      const responseValue = toolApprovalResponseValue(response)
-
-      return response.decision === 'approved'
-        ? ToolApprovalGranted.make({ toolCallId: response.toolCallId, response: responseValue })
+      return current.decision === 'approved'
+        ? ToolApprovalGranted.make({ toolCallId: current.toolCallId, response: responseValue })
         : ToolApprovalDenied.make({
-            toolCallId: response.toolCallId,
-            reason: response.reason ?? 'Denied by user',
+            toolCallId: current.toolCallId,
+            reason: current.reason ?? 'Denied by user',
             response: responseValue
           })
-    }
-  }
-}
+    }),
+    Match.exhaustive
+  )
 
 export const AgentEvent = Schema.Union([
   AgentStart,

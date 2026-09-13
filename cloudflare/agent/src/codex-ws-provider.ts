@@ -1,4 +1,4 @@
-import { Cause, Effect, Layer, Predicate, Queue, Ref, Stream } from 'effect'
+import { Cause, Data, Effect, Layer, Match, Predicate, Queue, Ref, Stream } from 'effect'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import {
@@ -57,18 +57,18 @@ type LLMProviderImpl = ReturnType<typeof LLMProvider.of>
 // ---------------------------------------------------------------------------
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null
+  Predicate.isObjectOrArray(value) && value !== null
 
 const getString = (obj: Record<string, unknown>, key: string): string | undefined => {
   const v = obj[key]
 
-  return typeof v === 'string' ? v : undefined
+  return Predicate.isString(v) ? v : undefined
 }
 
 const getNumber = (obj: Record<string, unknown>, key: string): number | undefined => {
   const v = obj[key]
 
-  return typeof v === 'number' ? v : undefined
+  return Predicate.isNumber(v) ? v : undefined
 }
 
 const getRecord = (
@@ -193,19 +193,58 @@ const codexFailureCause = (kind: ProviderFailureKind): LLMError['cause'] => {
   }
 }
 
+type CodexProviderInfoFields = {
+  readonly provider: typeof codexProvider
+  readonly kind: ProviderFailureKind
+  status?: number
+  providerCode?: string
+  retryAfterMs?: number
+}
+
 const codexProviderInfo = (input: {
   readonly kind: ProviderFailureKind
   readonly status?: number
   readonly providerCode?: string
   readonly retryAfterMs?: number
 }) =>
-  ProviderErrorInfo.make({
-    provider: codexProvider,
-    kind: input.kind,
-    ...(input.status === undefined ? {} : { status: input.status }),
-    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
-    ...(input.retryAfterMs === undefined ? {} : { retryAfterMs: input.retryAfterMs })
-  })
+  ProviderErrorInfo.make(
+    (() => {
+      const fields: CodexProviderInfoFields = {
+        provider: codexProvider,
+        kind: input.kind
+      }
+
+      if (input.status !== undefined) {
+        fields.status = input.status
+      }
+
+      if (input.providerCode !== undefined) {
+        fields.providerCode = input.providerCode
+      }
+
+      if (input.retryAfterMs !== undefined) {
+        fields.retryAfterMs = input.retryAfterMs
+      }
+
+      return fields
+    })()
+  )
+
+type CodexProviderInfoInputFields = {
+  readonly kind: ProviderFailureKind
+  status?: number
+  providerCode?: string
+  retryAfterMs?: number | undefined
+}
+
+type CodexProviderErrorFields = {
+  readonly message: string
+  status?: number
+  headers?: HeaderMap
+  providerCode?: string
+  body?: string
+  fallbackKind?: ProviderFailureKind
+}
 
 const codexProviderError = (input: {
   readonly message: string
@@ -217,12 +256,27 @@ const codexProviderError = (input: {
 }) => {
   const kind = codexFailureKind(input)
 
-  const provider = codexProviderInfo({
-    kind,
-    ...(input.status === undefined ? {} : { status: input.status }),
-    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
-    ...(input.headers === undefined ? {} : { retryAfterMs: retryAfterMsFromHeaders(input.headers) })
-  })
+  const provider = codexProviderInfo(
+    (() => {
+      const fields: CodexProviderInfoInputFields = {
+        kind
+      }
+
+      if (input.status !== undefined) {
+        fields.status = input.status
+      }
+
+      if (input.providerCode !== undefined) {
+        fields.providerCode = input.providerCode
+      }
+
+      if (input.headers !== undefined) {
+        fields.retryAfterMs = retryAfterMsFromHeaders(input.headers)
+      }
+
+      return fields
+    })()
+  )
 
   return new LLMError({
     cause: codexFailureCause(provider.kind),
@@ -294,6 +348,8 @@ export type WsResult =
   | { readonly _tag: 'Done'; readonly events: ReadonlyArray<LLMEvent> }
   | { readonly _tag: 'Error'; readonly error: LLMError }
   | { readonly _tag: 'Skip' }
+
+const WsResult = Data.taggedEnum<WsResult>()
 
 const parseToolCall = (item: Record<string, unknown>): LLMToolCall | undefined => {
   if (getString(item, 'type') !== 'function_call') return undefined
@@ -373,36 +429,36 @@ export const mapWsMessage = (
     case 'response.content_part.delta': {
       const delta = getString(msg, 'delta')
 
-      if (delta === undefined) return { _tag: 'Skip' }
+      if (delta === undefined) return WsResult.Skip()
 
-      return { _tag: 'Events', events: [LLMTextDelta.make({ text: delta })] }
+      return WsResult.Events({ events: [LLMTextDelta.make({ text: delta })] })
     }
 
     case 'response.reasoning_summary_text.delta':
     case 'response.reasoning_text.delta': {
       const delta = getString(msg, 'delta')
 
-      if (delta === undefined) return { _tag: 'Skip' }
+      if (delta === undefined) return WsResult.Skip()
 
-      return { _tag: 'Events', events: [LLMReasoningDelta.make({ text: delta })] }
+      return WsResult.Events({ events: [LLMReasoningDelta.make({ text: delta })] })
     }
 
     case 'response.output_item.done': {
       const item = getRecord(msg, 'item')
 
-      if (item === undefined) return { _tag: 'Skip' }
+      if (item === undefined) return WsResult.Skip()
       const toolCall = parseToolCall(item)
 
-      if (toolCall === undefined) return { _tag: 'Skip' }
+      if (toolCall === undefined) return WsResult.Skip()
 
-      return { _tag: 'Events', events: [toolCall] }
+      return WsResult.Events({ events: [toolCall] })
     }
 
     case 'response.completed': {
       const response = getRecord(msg, 'response')
 
       if (response === undefined) {
-        return { _tag: 'Done', events: [LLMDone.make({ stopReason: 'stop' })] }
+        return WsResult.Done({ events: [LLMDone.make({ stopReason: 'stop' })] })
       }
 
       const stopReason = stopReasonFromCompleted(response, streamedToolCallCount)
@@ -411,7 +467,7 @@ export const mapWsMessage = (
 
       if (usage !== undefined) events.push(usage)
 
-      return { _tag: 'Done', events }
+      return WsResult.Done({ events })
     }
 
     case 'response.failed': {
@@ -426,13 +482,21 @@ export const mapWsMessage = (
       const providerCode =
         error !== undefined ? (getString(error, 'code') ?? getString(error, 'type')) : undefined
 
-      return {
-        _tag: 'Error',
-        error: codexProviderError({
-          message,
-          ...(providerCode === undefined ? {} : { providerCode })
-        })
-      }
+      return WsResult.Error({
+        error: codexProviderError(
+          (() => {
+            const fields: CodexProviderErrorFields = {
+              message
+            }
+
+            if (providerCode !== undefined) {
+              fields.providerCode = providerCode
+            }
+
+            return fields
+          })()
+        )
+      })
     }
 
     case 'error': {
@@ -445,17 +509,25 @@ export const mapWsMessage = (
 
       const code = error !== undefined ? getString(error, 'code') : undefined
 
-      return {
-        _tag: 'Error',
-        error: codexProviderError({
-          message,
-          ...(code === undefined ? {} : { providerCode: code })
-        })
-      }
+      return WsResult.Error({
+        error: codexProviderError(
+          (() => {
+            const fields: CodexProviderErrorFields = {
+              message
+            }
+
+            if (code !== undefined) {
+              fields.providerCode = code
+            }
+
+            return fields
+          })()
+        )
+      })
     }
 
     default:
-      return { _tag: 'Skip' }
+      return WsResult.Skip()
   }
 }
 
@@ -475,7 +547,7 @@ export const mapWsMessage = (
 // Use property descriptor to avoid type-level conflicts between DOM
 // Response and Workers Response.
 const isWebSocketLike = (ws: unknown): ws is WebSocket =>
-  typeof ws === 'object' && ws !== null && 'send' in ws && 'close' in ws
+  Predicate.isObjectOrArray(ws) && ws !== null && 'send' in ws && 'close' in ws
 
 const getWorkersWebSocket = (response: Response): WebSocket | undefined => {
   if (!('webSocket' in response)) return undefined
@@ -564,7 +636,7 @@ const acquireCodexWebSocket = (config: CodexWsConfig) =>
 
       // Workers WebSocket requires accept() before use; called through
       // property access since DOM WebSocket type lacks it.
-      if ('accept' in ws && typeof ws.accept === 'function') {
+      if ('accept' in ws && Predicate.isFunction(ws.accept)) {
         ws.accept()
       }
 
@@ -718,36 +790,34 @@ const makeDirectCodexWsProvider = (config: CodexWsConfig) =>
               const count = yield* Ref.get(toolCallCount)
               const result = mapWsMessage(msg, count)
 
-              switch (result._tag) {
-                case 'Events': {
-                  const nextToolCalls = result.events.filter(e =>
-                    Predicate.isTagged(e, 'ToolCall')
-                  ).length
+              yield* Match.value(result).pipe(
+                Match.tag('Events', ({ events }) =>
+                  Effect.gen(function* () {
+                    const nextToolCalls = events.filter(e =>
+                      Predicate.isTagged(e, 'ToolCall')
+                    ).length
 
-                  if (nextToolCalls > 0) {
-                    yield* Ref.update(toolCallCount, current => current + nextToolCalls)
-                  }
+                    if (nextToolCalls > 0) {
+                      yield* Ref.update(toolCallCount, current => current + nextToolCalls)
+                    }
 
-                  yield* Effect.forEach(result.events, event => Queue.offer(queue, event), {
-                    discard: true
+                    yield* Effect.forEach(events, event => Queue.offer(queue, event), {
+                      discard: true
+                    })
                   })
-                  break
-                }
-
-                case 'Done': {
-                  yield* Effect.forEach(result.events, event => Queue.offer(queue, event), {
-                    discard: true
+                ),
+                Match.tag('Done', ({ events }) =>
+                  Effect.gen(function* () {
+                    yield* Effect.forEach(events, event => Queue.offer(queue, event), {
+                      discard: true
+                    })
+                    yield* Queue.shutdown(queue)
                   })
-                  yield* Queue.shutdown(queue)
-                  break
-                }
-
-                case 'Error':
-                  yield* Queue.failCause(queue, Cause.fail(result.error))
-                  break
-                case 'Skip':
-                  break
-              }
+                ),
+                Match.tag('Error', ({ error }) => Queue.failCause(queue, Cause.fail(error))),
+                Match.tag('Skip', () => Effect.void),
+                Match.exhaustive
+              )
             })
 
           // Fork socket runner: reads WS messages and pushes to queue.

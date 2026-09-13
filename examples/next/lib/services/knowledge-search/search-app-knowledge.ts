@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import { and, eq, inArray } from 'drizzle-orm'
 import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 import type { KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
@@ -23,14 +23,12 @@ export type SearchAppKnowledgeOptions = {
   readonly contextChunks?: number
 }
 
-const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> => {
-  switch (scope._tag) {
-    case 'KnowledgeScope':
-      return [scope.id]
-    case 'KnowledgeScopes':
-      return scope.ids
-  }
-}
+const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> =>
+  Match.value(scope).pipe(
+    Match.tag('KnowledgeScope', current => [current.id]),
+    Match.tag('KnowledgeScopes', current => current.ids),
+    Match.exhaustive
+  )
 
 const ensureUserOwnsScope = (input: {
   readonly userId: string

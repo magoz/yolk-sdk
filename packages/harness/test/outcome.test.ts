@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, Fiber, Layer, Predicate, Ref, Stream } from 'effect'
+import { Cause, Duration, Effect, Exit, Fiber, Layer, Predicate, Ref, Result, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -36,6 +36,7 @@ import {
   matchHitlResponse,
   resumeHitlIfMatched
 } from '../src/outcome.ts'
+import { OverflowCompactionResult } from '../src/outcome-constructors-internal.ts'
 
 const loopLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
 
@@ -167,7 +168,7 @@ describe('attemptModelTurn', () => {
 
       expect(outcome._tag).toBe('Retry')
 
-      if (outcome._tag !== 'Retry') return
+      if (!Predicate.isTagged(outcome, 'Retry')) return
       expect(outcome.error._tag).toBe('LLMError')
     }).pipe(
       Effect.provide(
@@ -273,7 +274,7 @@ describe('attemptModelTurn', () => {
 
       expect(outcome._tag).toBe('Continue')
 
-      if (outcome._tag !== 'Continue') return
+      if (!Predicate.isTagged(outcome, 'Continue')) return
       expect(outcome.error._tag).toBe('LLMError')
       expect(outcome.assistantMessage?._tag).toBe('Assistant')
 
@@ -303,13 +304,13 @@ describe('attemptModelTurn', () => {
           turn: 1
         },
         {
-          compact: () => Effect.succeed({ _tag: 'Compacted', messages: compacted })
+          compact: () => Effect.succeed(OverflowCompactionResult.Compacted({ messages: compacted }))
         }
       )
 
       expect(outcome._tag).toBe('Compacted')
 
-      if (outcome._tag !== 'Compacted') return
+      if (!Predicate.isTagged(outcome, 'Compacted')) return
       expect(outcome.messages).toEqual(compacted)
       expect(outcome.overflowCompactionAttempt).toBe(1)
     }).pipe(
@@ -346,13 +347,17 @@ describe('attemptModelTurn', () => {
         },
         {
           compact: () =>
-            Effect.succeed({ _tag: 'Compacted', messages: [UserMessage.make({ content: 'nope' })] })
+            Effect.succeed(
+              OverflowCompactionResult.Compacted({
+                messages: [UserMessage.make({ content: 'nope' })]
+              })
+            )
         }
       ).pipe(Effect.flip)
 
       expect(error._tag).toBe('LLMError')
 
-      if (error._tag !== 'LLMError') return
+      if (!Predicate.isTagged(error, 'LLMError')) return
       expect(error.cause).toBe('context_overflow')
     }).pipe(
       Effect.provide(
@@ -396,10 +401,11 @@ describe('attemptModelTurn', () => {
                 )
         },
         compact: () =>
-          Effect.succeed({
-            _tag: 'Compacted',
-            messages: [UserMessage.make({ content: 'summarized' })]
-          })
+          Effect.succeed(
+            OverflowCompactionResult.Compacted({
+              messages: [UserMessage.make({ content: 'summarized' })]
+            })
+          )
       })
 
       const outcome = yield* attemptModelTurn({
@@ -412,7 +418,7 @@ describe('attemptModelTurn', () => {
 
       expect(outcome._tag).toBe('Completed')
 
-      if (outcome._tag !== 'Completed') return
+      if (!Predicate.isTagged(outcome, 'Completed')) return
       expect(outcome.stopReason).toBe('stop')
     }).pipe(Effect.provide(loopLayer))
   )
@@ -423,9 +429,9 @@ describe('attemptModelTurn', () => {
 
       expect(outcome._tag).toBe('RecoverFull')
 
-      if (outcome._tag !== 'RecoverFull') return
+      if (!Predicate.isTagged(outcome, 'RecoverFull')) return
+      expect(Predicate.isTagged(outcome.error, 'LLMError')).toBe(true)
       expect(outcome.error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false,
         responseIssue: 'missing_done'
@@ -439,7 +445,7 @@ describe('attemptModelTurn', () => {
 
       expect(outcome._tag).toBe('Continue')
 
-      if (outcome._tag !== 'Continue') return
+      if (!Predicate.isTagged(outcome, 'Continue')) return
       expect(outcome.error).toMatchObject({ responseIssue: 'missing_done', retryable: false })
 
       if (outcome.assistantMessage?._tag !== 'Assistant') return
@@ -452,8 +458,8 @@ describe('attemptModelTurn', () => {
     Effect.gen(function* () {
       const error = yield* attemptModelTurn(turnConfig).pipe(Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false,
         provider: { providerCode: 'content_filter' }
@@ -483,8 +489,8 @@ describe('attemptModelTurn', () => {
     Effect.gen(function* () {
       const error = yield* attemptModelTurn(turnConfig).pipe(Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false,
         message: 'Expected exactly one LLM done event, received 2'
@@ -507,10 +513,11 @@ describe('attemptModelTurn', () => {
     Effect.gen(function* () {
       const overflow = yield* attemptModelTurn(turnConfig, {
         compact: () =>
-          Effect.succeed({
-            _tag: 'Compacted',
-            messages: [UserMessage.make({ content: 'nope' })]
-          })
+          Effect.succeed(
+            OverflowCompactionResult.Compacted({
+              messages: [UserMessage.make({ content: 'nope' })]
+            })
+          )
       }).pipe(
         Effect.provide(
           providerLayer(
@@ -522,7 +529,8 @@ describe('attemptModelTurn', () => {
         Effect.flip
       )
 
-      expect(overflow).toMatchObject({ _tag: 'LLMError', cause: 'context_overflow' })
+      expect(Predicate.isTagged(overflow, 'LLMError')).toBe(true)
+      expect(overflow).toMatchObject({ cause: 'context_overflow' })
 
       const continued = yield* attemptModelTurn(turnConfig).pipe(
         Effect.provide(
@@ -536,7 +544,7 @@ describe('attemptModelTurn', () => {
 
       expect(continued._tag).toBe('Continue')
 
-      if (continued._tag !== 'Continue') return
+      if (!Predicate.isTagged(continued, 'Continue')) return
 
       if (continued.assistantMessage?._tag !== 'Assistant') return
       expect(assistantReasoningText(continued.assistantMessage)).toBe('thinking')
@@ -549,10 +557,11 @@ describe('attemptModelTurn', () => {
 
       const error = yield* attemptModelTurn(turnConfig, {
         compact: () =>
-          Effect.succeed({
-            _tag: 'Compacted',
-            messages: [UserMessage.make({ content: 'nope' })]
-          })
+          Effect.succeed(
+            OverflowCompactionResult.Compacted({
+              messages: [UserMessage.make({ content: 'nope' })]
+            })
+          )
       }).pipe(
         Effect.provide(
           providerLayer(
@@ -567,7 +576,8 @@ describe('attemptModelTurn', () => {
         Effect.flip
       )
 
-      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'context_overflow' })
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
+      expect(error).toMatchObject({ cause: 'context_overflow' })
     })
   )
 
@@ -577,7 +587,7 @@ describe('attemptModelTurn', () => {
 
       expect(outcome._tag).toBe('Continue')
 
-      if (outcome._tag !== 'Continue') return
+      if (!Predicate.isTagged(outcome, 'Continue')) return
       expect(outcome.toolCalls).toEqual([])
     }).pipe(
       Effect.provide(
@@ -592,7 +602,8 @@ describe('attemptModelTurn', () => {
         onEvent: () => Effect.fail(rateLimitError())
       }).pipe(Effect.flip)
 
-      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'rate_limit', retryable: true })
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
+      expect(error).toMatchObject({ cause: 'rate_limit', retryable: true })
     }).pipe(Effect.provide(providerLayer(Stream.make(LLMTextDelta.make({ text: 'partial' })))))
   )
 
@@ -607,11 +618,15 @@ describe('attemptModelTurn', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
-      expect(Cause.findError(exit.cause)).toMatchObject({ _tag: 'Success', success: typed })
-      expect(Cause.findDefect(exit.cause)).toMatchObject({ _tag: 'Success', success: defect })
+      const foundError = Cause.findError(exit.cause)
+      const foundDefect = Cause.findDefect(exit.cause)
+      expect(Result.isSuccess(foundError)).toBe(true)
+      expect(Result.isSuccess(foundDefect)).toBe(true)
+      expect(foundError).toMatchObject({ success: typed })
+      expect(foundDefect).toMatchObject({ success: defect })
     }).pipe(Effect.provide(providerLayer(Stream.make(LLMTextDelta.make({ text: 'partial' })))))
   )
 
@@ -657,16 +672,13 @@ describe('attemptModelTurn', () => {
       const compact = () => {
         compactCalls += 1
 
-        return Effect.succeed({
-          _tag: 'Compacted' as const,
-          messages: compactedMessages
-        })
+        return Effect.succeed(OverflowCompactionResult.Compacted({ messages: compactedMessages }))
       }
 
       const first = yield* attemptModelTurn(turnConfig, { compact, overflowCompactionAttempt: 0 })
       expect(first._tag).toBe('Compacted')
 
-      if (first._tag !== 'Compacted') return
+      if (!Predicate.isTagged(first, 'Compacted')) return
       expect(first.overflowCompactionAttempt).toBe(1)
       expect(compactCalls).toBe(1)
 
@@ -675,7 +687,8 @@ describe('attemptModelTurn', () => {
         overflowCompactionAttempt: first.overflowCompactionAttempt
       }).pipe(Effect.flip)
 
-      expect(second).toMatchObject({ _tag: 'LLMError', cause: 'context_overflow' })
+      expect(Predicate.isTagged(second, 'LLMError')).toBe(true)
+      expect(second).toMatchObject({ cause: 'context_overflow' })
       expect(compactCalls).toBe(1)
     }).pipe(Effect.provide(providerLayer(Stream.fail(overflowError()))))
   )
@@ -686,7 +699,8 @@ describe('attemptModelTurn', () => {
         compact: () => Effect.fail(new AbortError({ reason: 'user' }))
       }).pipe(Effect.flip)
 
-      expect(aborted).toMatchObject({ _tag: 'AbortError', reason: 'user' })
+      expect(Predicate.isTagged(aborted, 'AbortError')).toBe(true)
+      expect(aborted).toMatchObject({ reason: 'user' })
 
       const failed = yield* attemptModelTurn(turnConfig, {
         compact: () =>
@@ -699,7 +713,8 @@ describe('attemptModelTurn', () => {
           )
       }).pipe(Effect.flip)
 
-      expect(failed).toMatchObject({ _tag: 'LLMError', cause: 'provider_error' })
+      expect(Predicate.isTagged(failed, 'LLMError')).toBe(true)
+      expect(failed).toMatchObject({ cause: 'provider_error' })
     }).pipe(Effect.provide(providerLayer(Stream.fail(overflowError()))))
   )
 
@@ -711,14 +726,15 @@ describe('attemptModelTurn', () => {
         const error = yield* attemptModelTurn(turnConfig, {
           overflowCompactionAttempt,
           compact: () =>
-            Effect.succeed({
-              _tag: 'Compacted' as const,
-              messages: [UserMessage.make({ content: 'nope' })]
-            })
+            Effect.succeed(
+              OverflowCompactionResult.Compacted({
+                messages: [UserMessage.make({ content: 'nope' })]
+              })
+            )
         }).pipe(Effect.flip)
 
+        expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
         expect(error).toMatchObject({
-          _tag: 'LLMError',
           cause: 'validation_error'
         })
       }
@@ -811,7 +827,7 @@ describe('attemptToolBatch', () => {
 
       expect(outcome._tag).toBe('AwaitingInput')
 
-      if (outcome._tag !== 'AwaitingInput') return
+      if (!Predicate.isTagged(outcome, 'AwaitingInput')) return
       expect('toolCalls' in outcome).toBe(false)
     }).pipe(
       Effect.provide(

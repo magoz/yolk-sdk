@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
 import type { ConnectorIntegration } from '../integration.ts'
@@ -18,15 +18,12 @@ export const resolveTodoistToken = (integration: ConnectorIntegration) =>
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, TodoistApiTokenSlot)
 
-    switch (credential._tag) {
-      case 'ApiKeyCredential':
-        return credential.key
-      case 'BearerTokenCredential':
-        return credential.token
-      case 'OAuthCredential':
-        return credential.accessToken
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
+    return yield* Match.value(credential).pipe(
+      Match.tag('ApiKeyCredential', current => Effect.succeed(current.key)),
+      Match.tag('BearerTokenCredential', current => Effect.succeed(current.token)),
+      Match.tag('OAuthCredential', current => Effect.succeed(current.accessToken)),
+      Match.tag('UsernamePasswordCredential', () =>
+        Effect.fail(
           new ConnectorError({
             cause: 'credential_invalid',
             message: 'Todoist connector does not accept username/password credentials',
@@ -34,5 +31,7 @@ export const resolveTodoistToken = (integration: ConnectorIntegration) =>
             slotId: TodoistApiTokenSlot.id
           })
         )
-    }
+      ),
+      Match.exhaustive
+    )
   })

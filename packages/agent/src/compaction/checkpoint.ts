@@ -33,11 +33,25 @@ ${input.recent}
 </recent-context>
 ${compactionCheckpointCloseTag}`
 
+type CompactionCheckpointMessageFields = {
+  content: string
+  createdAtMs?: number
+}
+
 export const makeCompactionCheckpointMessage = (input: CompactionCheckpointInput) =>
-  UserMessage.make({
-    content: makeCompactionCheckpointText(input),
-    ...(input.createdAtMs === undefined ? {} : { createdAtMs: input.createdAtMs })
-  })
+  UserMessage.make(
+    (() => {
+      const fields: CompactionCheckpointMessageFields = {
+        content: makeCompactionCheckpointText(input)
+      }
+
+      if (input.createdAtMs !== undefined) {
+        fields.createdAtMs = input.createdAtMs
+      }
+
+      return fields
+    })()
+  )
 
 export const isCompactionCheckpointText = (value: string) =>
   value.includes(compactionCheckpointOpenTag) && value.includes(compactionCheckpointCloseTag)

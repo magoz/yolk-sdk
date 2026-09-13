@@ -419,7 +419,7 @@ const validationError = (
 const requiredHost = (integration: ConnectorIntegration, key: string) => {
   const value = configValue(integration, key)
 
-  if (typeof value === 'string' && value.trim() !== '') {
+  if (Predicate.isString(value) && value.trim() !== '') {
     return Effect.succeed(value.trim())
   }
 
@@ -436,8 +436,9 @@ const enumConfig = <Value extends string>(input: {
 
   if (value === undefined) return Effect.succeed(input.fallback)
 
-  const match =
-    typeof value === 'string' ? input.allowed.find(candidate => candidate === value) : undefined
+  const match = Predicate.isString(value)
+    ? input.allowed.find(candidate => candidate === value)
+    : undefined
 
   if (match !== undefined) return Effect.succeed(match)
 
@@ -459,12 +460,11 @@ const portConfig = (
 
   if (value === undefined) return Effect.succeed(fallback)
 
-  const parsed =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' && /^\d+$/.test(value)
-        ? Number(value)
-        : Number.NaN
+  const parsed = Predicate.isNumber(value)
+    ? value
+    : Predicate.isString(value) && /^\d+$/.test(value)
+      ? Number(value)
+      : Number.NaN
 
   if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535) {
     return Effect.succeed(parsed)

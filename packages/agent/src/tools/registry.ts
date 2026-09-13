@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Layer, Option } from 'effect'
+import { Array as Arr, Effect, Layer, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
@@ -77,15 +77,30 @@ export type ModelVisibleToolErrorInput = {
 export const modelVisibleToolError = (input: ModelVisibleToolErrorInput) =>
   new ModelVisibleToolError(input)
 
+type ModelVisibleToolErrorStructuredContentFields = {
+  type: 'model_visible_tool_error'
+  tool: ModelVisibleToolError['tool']
+  reason: ModelVisibleToolError['reason']
+  message: ModelVisibleToolError['message']
+  details?: ModelVisibleToolError['details']
+}
+
 export const modelVisibleToolErrorStructuredContent = (
   error: ModelVisibleToolError
-): ModelVisibleToolErrorStructuredContent => ({
-  type: 'model_visible_tool_error',
-  tool: error.tool,
-  reason: error.reason,
-  message: error.message,
-  ...(error.details === undefined ? {} : { details: error.details })
-})
+): ModelVisibleToolErrorStructuredContent => {
+  const fields: ModelVisibleToolErrorStructuredContentFields = {
+    type: 'model_visible_tool_error',
+    tool: error.tool,
+    reason: error.reason,
+    message: error.message
+  }
+
+  if (error.details !== undefined) {
+    fields.details = error.details
+  }
+
+  return fields
+}
 
 export const modelVisibleToolErrorResult = (call: ToolCall, error: ModelVisibleToolError) =>
   makeErrorToolResult({
@@ -183,15 +198,13 @@ const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
 const objectField = (input: unknown, key: string) =>
-  input !== null && typeof input === 'object'
-    ? Object.getOwnPropertyDescriptor(input, key)?.value
-    : undefined
+  Predicate.isObjectOrArray(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
 
 const isObjectRecord = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && typeof input === 'object' && !Array.isArray(input)
+  input !== null && Predicate.isObjectOrArray(input) && !Array.isArray(input)
 
 const localDefinitionName = (ref: unknown) => {
-  if (typeof ref !== 'string') {
+  if (!Predicate.isString(ref)) {
     return undefined
   }
 
@@ -264,60 +277,95 @@ const invalidParamsMessage = (
   options.invalidParamsMessage?.(error) ??
   `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
 
+type MakeToolRegistrationFields = {
+  def: ToolDef
+  background?: boolean
+}
+
+type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
+  name: string
+  description: string
+  parameters: ReturnType<typeof jsonSchemaFromSchema>
+  approval: MakeToolOptions<Context, ParamsSchema>['approval']
+  background?: boolean
+}
+
 export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   options: MakeToolOptions<Context, ParamsSchema>
-): ToolRegistration<Context> => ({
-  def: ToolDef.make({
-    name: options.name,
-    description: options.description,
-    parameters: jsonSchemaFromSchema(options.parameters),
-    approval: options.approval,
-    ...(options.background === undefined ? {} : { background: options.background })
-  }),
-  ...(options.background === undefined ? {} : { background: options.background }),
-  validate: call =>
-    Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
-      Effect.asVoid,
-      Effect.mapError(
-        error =>
-          new InvalidToolParamsError({
-            tool: options.name,
-            cause: 'validation',
-            message: invalidParamsMessage(options, error)
-          })
-      )
-    ),
-  access: options.access,
-  approval: options.approval,
-  isEnabled: options.isEnabled,
-  execute: ({ call, context }) =>
-    Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
-      Effect.matchEffect({
-        onFailure: error => {
-          const message = invalidParamsMessage(options, error)
+): ToolRegistration<Context> => {
+  const registration: MakeToolRegistrationFields = {
+    def: ToolDef.make(
+      (() => {
+        const fields: MakeToolDefFields<Context, ParamsSchema> = {
+          name: options.name,
+          description: options.description,
+          parameters: jsonSchemaFromSchema(options.parameters),
+          approval: options.approval
+        }
 
-          return Effect.succeed(
-            modelVisibleToolErrorResult(
-              call,
-              modelVisibleToolError({
-                tool: options.name,
-                message,
-                reason: 'validation'
-              })
-            )
-          )
-        },
-        onSuccess: params =>
-          options
-            .execute({ call, context, params })
-            .pipe(
-              Effect.catchTag('ModelVisibleToolError', error =>
-                Effect.succeed(modelVisibleToolErrorResult(call, error))
+        if (options.background !== undefined) {
+          fields.background = options.background
+        }
+
+        return fields
+      })()
+    )
+  }
+
+  if (options.background !== undefined) {
+    registration.background = options.background
+  }
+
+  const tails: Pick<
+    ToolRegistration<Context>,
+    'validate' | 'access' | 'approval' | 'isEnabled' | 'execute'
+  > = {
+    validate: call =>
+      Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
+        Effect.asVoid,
+        Effect.mapError(
+          error =>
+            new InvalidToolParamsError({
+              tool: options.name,
+              cause: 'validation',
+              message: invalidParamsMessage(options, error)
+            })
+        )
+      ),
+    access: options.access,
+    approval: options.approval,
+    isEnabled: options.isEnabled,
+    execute: ({ call, context }) =>
+      Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
+        Effect.matchEffect({
+          onFailure: error => {
+            const message = invalidParamsMessage(options, error)
+
+            return Effect.succeed(
+              modelVisibleToolErrorResult(
+                call,
+                modelVisibleToolError({
+                  tool: options.name,
+                  message,
+                  reason: 'validation'
+                })
               )
             )
-      })
-    )
-})
+          },
+          onSuccess: params =>
+            options
+              .execute({ call, context, params })
+              .pipe(
+                Effect.catchTag('ModelVisibleToolError', error =>
+                  Effect.succeed(modelVisibleToolErrorResult(call, error))
+                )
+              )
+        })
+      )
+  }
+
+  return Object.assign(registration, tails)
+}
 
 const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistration<Context>>) => {
   const names = Arr.map(resolved, item => item.tool.def.name)

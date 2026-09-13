@@ -1,4 +1,4 @@
-import { Clock, Config, Effect, Layer, Predicate, Stream } from 'effect'
+import { Clock, Config, Effect, Layer, Match, Predicate, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import {
   ToolError,
@@ -62,6 +62,7 @@ import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'
 import { getTelegramConnectorConfig } from '@/lib/core/agent/telegram-connector'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
 import {
+  AgentSkillCommandInput,
   createAgentSkillWithCommand,
   listAgentSkills,
   updateAgentSkillWithCommand
@@ -309,118 +310,121 @@ const findSkillForUpdate = (input: {
   })
 
 const manageSkillsForAgent = (action: SkillManagerAction) =>
-  Effect.gen(function* () {
-    switch (action._tag) {
-      case 'List': {
-        yield* Effect.annotateCurrentSpan({
-          'tool.manage_skills.action': 'list',
-          'user.id': action.userId
-        })
-        const skills = yield* listAgentSkills({ userId: action.userId })
-        const data = { skills: skills.map(skillSummary) }
-
-        return {
-          message:
-            skills.length === 0
-              ? 'No saved skills.'
-              : `Saved skills:\n${skills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')}`,
-          data
-        }
-      }
-
-      case 'Create': {
-        yield* Effect.annotateCurrentSpan({
-          'tool.manage_skills.action': 'create',
-          'user.id': action.userId,
-          'agent_skill.name': action.name,
-          'agent_skill.create_command': action.createCommand,
-          'agent_command.name': action.commandName ?? action.name
-        })
-
-        const skill = yield* createAgentSkillWithCommand({
-          userId: action.userId,
-          name: action.name,
-          description: action.description,
-          content: action.content,
-          commandInput: action.createCommand
-            ? {
-                _tag: 'CreateCommand',
-                command: {
-                  name: action.commandName ?? action.name,
-                  description: action.description,
-                  template: `Use the ${action.name} skill.\n\n$ARGUMENTS`
-                }
-              }
-            : { _tag: 'SkipCommand' }
-        })
-
-        return {
-          message: `Created skill: ${skill.name}`,
-          data: {
-            skill: skillSummary(skill),
-            commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
-          }
-        }
-      }
-
-      case 'Update': {
-        const existing = yield* findSkillForUpdate({
-          userId: action.userId,
-          id: action.id,
-          name: action.name
-        })
-
-        const skillName = action.name ?? existing.name
-        yield* Effect.annotateCurrentSpan({
-          'tool.manage_skills.action': 'update',
-          'user.id': action.userId,
-          'agent_skill.id': existing.id,
-          'agent_skill.name': skillName,
-          'agent_skill.create_command': action.createCommand,
-          'agent_command.name': action.commandName ?? skillName
-        })
-
-        const skill = yield* updateAgentSkillWithCommand({
-          id: existing.id,
-          userId: action.userId,
-          name: skillName,
-          description: action.description,
-          content: action.content,
-          enabled: action.enabled ?? true,
-          commandInput: action.createCommand
-            ? {
-                _tag: 'CreateCommand',
-                command: {
-                  name: action.commandName ?? skillName,
-                  description: action.description,
-                  template: `Use the ${skillName} skill.\n\n$ARGUMENTS`
-                }
-              }
-            : { _tag: 'SkipCommand' }
-        })
-
-        return {
-          message: `Updated skill: ${skill.name}`,
-          data: {
-            skill: skillSummary(skill),
-            commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
-          }
-        }
-      }
-    }
-  }).pipe(
-    Effect.withSpan('tool.manageSkills'),
-    Effect.provide(SkillManagerLayer),
-    Effect.mapError(error =>
-      error instanceof ToolError
-        ? error
-        : new ToolError({
-            tool: 'manage_skills',
-            message: unknownToMessage(error),
-            cause: 'execution'
+  Match.value(action)
+    .pipe(
+      Match.tag('List', action =>
+        Effect.gen(function* () {
+          yield* Effect.annotateCurrentSpan({
+            'tool.manage_skills.action': 'list',
+            'user.id': action.userId
           })
+          const skills = yield* listAgentSkills({ userId: action.userId })
+          const data = { skills: skills.map(skillSummary) }
+
+          return {
+            message:
+              skills.length === 0
+                ? 'No saved skills.'
+                : `Saved skills:\n${skills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')}`,
+            data
+          }
+        })
+      ),
+      Match.tag('Create', action =>
+        Effect.gen(function* () {
+          yield* Effect.annotateCurrentSpan({
+            'tool.manage_skills.action': 'create',
+            'user.id': action.userId,
+            'agent_skill.name': action.name,
+            'agent_skill.create_command': action.createCommand,
+            'agent_command.name': action.commandName ?? action.name
+          })
+
+          const skill = yield* createAgentSkillWithCommand({
+            userId: action.userId,
+            name: action.name,
+            description: action.description,
+            content: action.content,
+            commandInput: action.createCommand
+              ? AgentSkillCommandInput.CreateCommand({
+                  command: {
+                    name: action.commandName ?? action.name,
+                    description: action.description,
+                    template: `Use the ${action.name} skill.\n\n$ARGUMENTS`
+                  }
+                })
+              : AgentSkillCommandInput.SkipCommand()
+          })
+
+          return {
+            message: `Created skill: ${skill.name}`,
+            data: {
+              skill: skillSummary(skill),
+              commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
+            }
+          }
+        })
+      ),
+      Match.tag('Update', action =>
+        Effect.gen(function* () {
+          const existing = yield* findSkillForUpdate({
+            userId: action.userId,
+            id: action.id,
+            name: action.name
+          })
+
+          const skillName = action.name ?? existing.name
+          yield* Effect.annotateCurrentSpan({
+            'tool.manage_skills.action': 'update',
+            'user.id': action.userId,
+            'agent_skill.id': existing.id,
+            'agent_skill.name': skillName,
+            'agent_skill.create_command': action.createCommand,
+            'agent_command.name': action.commandName ?? skillName
+          })
+
+          const skill = yield* updateAgentSkillWithCommand({
+            id: existing.id,
+            userId: action.userId,
+            name: skillName,
+            description: action.description,
+            content: action.content,
+            enabled: action.enabled ?? true,
+            commandInput: action.createCommand
+              ? AgentSkillCommandInput.CreateCommand({
+                  command: {
+                    name: action.commandName ?? skillName,
+                    description: action.description,
+                    template: `Use the ${skillName} skill.\n\n$ARGUMENTS`
+                  }
+                })
+              : AgentSkillCommandInput.SkipCommand()
+          })
+
+          return {
+            message: `Updated skill: ${skill.name}`,
+            data: {
+              skill: skillSummary(skill),
+              commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
+            }
+          }
+        })
+      ),
+      Match.exhaustive
     )
-  )
+    .pipe(
+      Effect.withSpan('tool.manageSkills'),
+      Effect.provide(SkillManagerLayer),
+      Effect.mapError(error =>
+        error instanceof ToolError
+          ? error
+          : new ToolError({
+              tool: 'manage_skills',
+              message: unknownToMessage(error),
+              cause: 'execution'
+            })
+      )
+    )
 
 export const makeAgentTextRuntime = (
   input: AgentRouteRequest,

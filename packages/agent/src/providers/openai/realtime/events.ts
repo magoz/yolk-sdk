@@ -59,6 +59,8 @@ const OpenAiRealtimeConversationItem = Schema.Union([
   OpenAiRealtimeFunctionCallOutputItem
 ])
 
+export type OpenAiRealtimeConversationItem = typeof OpenAiRealtimeConversationItem.Type
+
 export class OpenAiRealtimeConversationItemCreateEvent extends Schema.Class<OpenAiRealtimeConversationItemCreateEvent>(
   'OpenAiRealtimeConversationItemCreateEvent'
 )({
@@ -239,38 +241,6 @@ export const OpenAiRealtimeServerEvent = Schema.Union([
 
 export type OpenAiRealtimeServerEvent = typeof OpenAiRealtimeServerEvent.Type
 
-export const makeOpenAiRealtimeUserMessageItem = (
-  text: string
-): OpenAiRealtimeConversationMessageItem => ({
-  type: 'message',
-  role: 'user',
-  content: [{ type: 'input_text', text }]
-})
-
-export const makeOpenAiRealtimeAssistantMessageItem = (
-  text: string
-): OpenAiRealtimeConversationMessageItem => ({
-  type: 'message',
-  role: 'assistant',
-  content: [{ type: 'output_text', text }]
-})
-
-export const makeOpenAiRealtimeConversationItemCreateEvent = (
-  item: typeof OpenAiRealtimeConversationItem.Type
-) => OpenAiRealtimeConversationItemCreateEvent.make({ type: 'conversation.item.create', item })
-
-export const makeOpenAiRealtimeFunctionCallOutputEvent = (callId: string, output: string) =>
-  makeOpenAiRealtimeConversationItemCreateEvent(
-    OpenAiRealtimeFunctionCallOutputItem.make({
-      type: 'function_call_output',
-      call_id: callId,
-      output
-    })
-  )
-
-export const makeOpenAiRealtimeResponseCreateEvent = () =>
-  OpenAiRealtimeResponseCreateEvent.make({ type: 'response.create' })
-
 export const decodeOpenAiRealtimeToolExecutionResponse = Schema.decodeUnknownOption(
   OpenAiRealtimeToolExecutionResponse
 )
@@ -283,14 +253,12 @@ export const readOpenAiRealtimeToolOutput = (event: OpenAiRealtimeConversationIt
 
 const decodeFunctionCallItem = Schema.decodeUnknownOption(OpenAiRealtimeFunctionCallItem)
 
-const readFunctionCalls = (value: unknown): ReadonlyArray<OpenAiRealtimeFunctionCall> => {
-  const decoded = Schema.decodeUnknownOption(OpenAiRealtimeResponseDoneEvent)(value)
+const decodeResponseDoneEvent = Schema.decodeUnknownOption(OpenAiRealtimeResponseDoneEvent)
 
-  if (Option.isNone(decoded)) {
-    return []
-  }
-
-  return decoded.value.response.output.flatMap(item => {
+const readFunctionCalls = (
+  event: typeof OpenAiRealtimeResponseDoneEvent.Type
+): ReadonlyArray<OpenAiRealtimeFunctionCall> =>
+  event.response.output.flatMap(item => {
     const call = decodeFunctionCallItem(item)
 
     if (Option.isNone(call)) {
@@ -305,7 +273,6 @@ const readFunctionCalls = (value: unknown): ReadonlyArray<OpenAiRealtimeFunction
       })
     ]
   })
-}
 
 const decodeJsonString = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
@@ -379,15 +346,15 @@ export const decodeOpenAiRealtimeServerEvent = (raw: string): OpenAiRealtimeServ
     })
   }
 
-  const calls = readFunctionCalls(value.value)
-
-  if (calls.length > 0) {
-    return OpenAiRealtimeFunctionCalls.make({ calls })
-  }
-
-  const responseDone = Schema.decodeUnknownOption(OpenAiRealtimeResponseDoneEvent)(value.value)
+  const responseDone = decodeResponseDoneEvent(value.value)
 
   if (Option.isSome(responseDone)) {
+    const calls = readFunctionCalls(responseDone.value)
+
+    if (calls.length > 0) {
+      return OpenAiRealtimeFunctionCalls.make({ calls })
+    }
+
     return OpenAiRealtimeResponseDone.make({
       responseId: responseDone.value.response.id ?? responseDone.value.response_id ?? null,
       status: responseDone.value.response.status ?? null

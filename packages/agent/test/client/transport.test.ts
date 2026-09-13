@@ -1,4 +1,4 @@
-import { Effect, Exit, Layer, Stream } from 'effect'
+import { Effect, Exit, Layer, Match, Option, Predicate, Stream } from 'effect'
 import {
   Headers,
   HttpClient,
@@ -136,10 +136,7 @@ describe('collectAgentEvents', () => {
     const headers = readCapturedHeaders(requests)
     expect(requests[0]?.request.url).toBe('/api/agent')
     expect(requests[0]?.request.method).toBe('POST')
-    expect(Headers.get(headers, 'content-type')).toMatchObject({
-      _tag: 'Some',
-      value: 'application/json'
-    })
+    expect(Headers.get(headers, 'content-type')).toMatchObject(Option.some('application/json'))
     expect(readCapturedBody(requests)).toBe(
       JSON.stringify({ sessionId: 'session_1', messages, reasoningEffort: 'high' })
     )
@@ -157,7 +154,7 @@ describe('collectAgentEvents', () => {
           httpClientLayer: makeHttpClientLayer(new Response('{"_tag":"Nope"}\n'), requests)
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
   })
 
   it.each([
@@ -202,9 +199,9 @@ describe('collectAgentEvents', () => {
       expect((await events.next()).value?._tag).toBe('AgentStart')
       bodyController?.error(new TypeError('Response body terminated'))
 
-      await expect(settleTransport(events.next())).rejects.toMatchObject({
-        _tag: 'AgentTransportError'
-      })
+      await expect(settleTransport(events.next())).rejects.toSatisfy(error =>
+        Predicate.isTagged(error, 'AgentTransportError')
+      )
     }
   )
 
@@ -221,16 +218,20 @@ describe('collectAgentEvents', () => {
         }
       }
 
-      const stream =
-        mode === 'start'
-          ? streamAgentEventStreamUntilTerminal({
-              ...request,
-              sessionId: 'session_1',
-              messages: [UserMessage.make({ content: 'hello' })]
-            })
-          : mode === 'hitl'
-            ? streamAgentRunHitlResponseEventStreamUntilTerminal({ ...request, hitlResponses: [] })
-            : streamAgentRunEventStreamUntilTerminal(request)
+      const stream = Match.value(mode).pipe(
+        Match.when('start', () =>
+          streamAgentEventStreamUntilTerminal({
+            ...request,
+            sessionId: 'session_1',
+            messages: [UserMessage.make({ content: 'hello' })]
+          })
+        ),
+        Match.when('hitl', () =>
+          streamAgentRunHitlResponseEventStreamUntilTerminal({ ...request, hitlResponses: [] })
+        ),
+        Match.when('run', () => streamAgentRunEventStreamUntilTerminal(request)),
+        Match.exhaustive
+      )
 
       const exit = await settleTransport(Effect.runPromiseExit(Stream.runDrain(stream)))
       expect(Exit.isFailure(exit)).toBe(true)
@@ -457,7 +458,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests).toEqual([])
   })
@@ -476,7 +477,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests).toEqual([])
   })
@@ -611,7 +612,7 @@ describe('collectAgentEvents', () => {
           setTimeout(() => reject(new Error('Timed out waiting for abort')), 100)
         )
       ])
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests.map(item => item.request.url)).toEqual([
       '/api/agent/run_1',
@@ -635,7 +636,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
   })
 
   it('rejects when continuation limit is exhausted before terminal', async () => {
@@ -655,7 +656,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests.map(item => item.request.url)).toEqual([
       '/api/agent/run_1',
@@ -677,7 +678,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests.map(item => item.request.url)).toEqual([
       '/api/agent/run_1',
@@ -706,7 +707,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
   })
 
   it('rejects invalid durable continuation options', async () => {
@@ -723,7 +724,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests).toEqual([])
   })
@@ -767,7 +768,8 @@ describe('collectAgentEvents', () => {
 
     const firstEvent = await events.next()
 
-    expect(firstEvent).toMatchObject({ done: false, value: { _tag: 'AgentStart' } })
+    expect(firstEvent.done).toBe(false)
+    expect(Predicate.isTagged(firstEvent.value, 'AgentStart')).toBe(true)
 
     const returnEvents = events.return
 
@@ -946,7 +948,7 @@ class FakeWebSocket {
 
   private dispatch(event: Event) {
     for (const listener of this.listeners.get(event.type) ?? []) {
-      if (typeof listener === 'function') {
+      if (Predicate.isFunction(listener)) {
         listener(event)
       } else {
         listener.handleEvent(event)

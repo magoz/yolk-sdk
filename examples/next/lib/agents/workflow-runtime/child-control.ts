@@ -508,14 +508,19 @@ export async function childToolResultStep(input: {
 }) {
   return await Effect.runPromise(
     Effect.gen(function* () {
-      if (!input.lookup && input.background === true && input.child.workflowRunId !== null)
-        return yield* Schema.encodeEffect(ToolResult)(
-          makeSubagentAcceptedToolResult({
-            callId: input.callId,
-            workflowRunId: input.child.workflowRunId,
-            ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId })
-          })
-        )
+      if (!input.lookup && input.background === true && input.child.workflowRunId !== null) {
+        const accepted = {
+          callId: input.callId,
+          workflowRunId: input.child.workflowRunId
+        }
+
+        const acceptedInput =
+          input.parentRunId === undefined
+            ? accepted
+            : { ...accepted, parentRunId: input.parentRunId }
+
+        return yield* Schema.encodeEffect(ToolResult)(makeSubagentAcceptedToolResult(acceptedInput))
+      }
 
       if (!input.lookup && input.child.done && !input.child.uncertain) return input.child.result
 
@@ -531,7 +536,7 @@ export async function childToolResultStep(input: {
         ToolResult.make({
           toolCallId: input.callId,
           content:
-            !outcomeKnown && typeof content === 'string'
+            !outcomeKnown && Predicate.isString(content)
               ? withChildHandle(content, input.childCallId ?? input.callId, input.parentRunId)
               : content,
           isError: terminal?.isError,

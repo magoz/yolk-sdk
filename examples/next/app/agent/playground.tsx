@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Array as Arr, Effect, Option, Predicate, Stream } from 'effect'
+import { Array as Arr, Data, Effect, Match, Option, Predicate, Stream } from 'effect'
 import {
   UserMessage,
   addAgentUsage,
@@ -44,10 +44,13 @@ import { AgentComposer } from './agent-composer'
 import { loadAgentCommands, renderAgentCommand } from './command-client'
 import {
   contentFromInput,
+  FailedAttachment,
   isFailedAttachment,
   isReadyAttachment,
   isReadyDocumentAttachment,
   isReadyImageAttachment,
+  ReadyDocumentAttachment,
+  ReadyImageAttachment,
   type AgentAttachment
 } from './attachment-content'
 import { AgentConsoleDialog } from './agent-console-dialog'
@@ -56,29 +59,29 @@ import { AgentConversationHeader } from './agent-conversation-header'
 import { truncate } from './agent-format'
 import { appendSpeechTextDelta, emptySpeechChunkerState, flushSpeechText } from './speech-chunker'
 import { type AgentCommandSummary } from './slash-command-model'
-import type { AgentCompactionState } from './agent-usage-meter'
+import { AgentCompactionState } from './agent-usage-meter'
 import { useHoldToSpeak } from './use-hold-to-speak'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 import { playRecordingStartEarcon, playVoiceReadyEarcon, primeVoiceEarcon } from './voice-earcon'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
-export type AgentRuntimeInfo =
-  | {
-      readonly _tag: 'Next'
-      readonly label: string
-      readonly detail: string
-    }
-  | {
-      readonly _tag: 'Cloudflare'
-      readonly label: string
-      readonly detail: string
-      readonly webSocketUrl: string
-    }
-  | {
-      readonly _tag: 'Workflow'
-      readonly label: string
-      readonly detail: string
-    }
+export type AgentRuntimeInfo = Data.TaggedEnum<{
+  readonly Next: {
+    readonly label: string
+    readonly detail: string
+  }
+  readonly Cloudflare: {
+    readonly label: string
+    readonly detail: string
+    readonly webSocketUrl: string
+  }
+  readonly Workflow: {
+    readonly label: string
+    readonly detail: string
+  }
+}>
+
+export const AgentRuntimeInfo = Data.taggedEnum<AgentRuntimeInfo>()
 
 type AgentPlaygroundProps = {
   readonly sessionId: string
@@ -115,7 +118,7 @@ const blobToDataUrl = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.addEventListener('load', () => {
-      if (typeof reader.result === 'string') {
+      if (Predicate.isString(reader.result)) {
         resolve(reader.result)
 
         return
@@ -179,39 +182,37 @@ const readyImageAttachmentFromFile = async (file: File): Promise<AgentAttachment
   const blob = await compressedImageBlob(file)
   const previewUrl = await blobToDataUrl(blob)
 
-  return {
-    _tag: 'Ready',
+  return ReadyImageAttachment({
     kind: 'image',
     id: attachmentId(file),
     name: file.name,
     mimeType: blob.type.length > 0 ? blob.type : file.type,
     previewUrl,
     data: base64FromDataUrl(previewUrl)
-  }
+  })
 }
 
 const readyDocumentAttachmentFromFile = async (file: File): Promise<AgentAttachment> => {
   const dataUrl = await blobToDataUrl(file)
 
-  return {
-    _tag: 'Ready',
+  return ReadyDocumentAttachment({
     kind: 'document',
     id: attachmentId(file),
     name: file.name,
     mimeType: documentMimeTypeForFile(file),
     data: base64FromDataUrl(dataUrl)
-  }
+  })
 }
 
-const failedAttachmentFromFile = (file: File, reason: string): AgentAttachment => ({
-  _tag: 'Failed',
-  kind: file.type.startsWith('image/') ? 'image' : 'document',
-  id: attachmentId(file),
-  name: file.name,
-  mimeType: file.type.length > 0 ? file.type : 'unknown',
-  reason,
-  file
-})
+const failedAttachmentFromFile = (file: File, reason: string): AgentAttachment =>
+  FailedAttachment({
+    kind: file.type.startsWith('image/') ? 'image' : 'document',
+    id: attachmentId(file),
+    name: file.name,
+    mimeType: file.type.length > 0 ? file.type : 'unknown',
+    reason,
+    file
+  })
 
 const readyImageAttachmentCount = (attachments: ReadonlyArray<AgentAttachment>) =>
   Arr.filter(attachments, isReadyImageAttachment).length
@@ -368,7 +369,7 @@ export function AgentPlayground({
   const [usage, setUsage] = useState(zeroAgentUsage)
   const [hasUsage, setHasUsage] = useState(false)
   const [contextTokens, setContextTokens] = useState<number | null>(null)
-  const [compaction, setCompaction] = useState<AgentCompactionState>({ _tag: 'Idle' })
+  const [compaction, setCompaction] = useState<AgentCompactionState>(AgentCompactionState.Idle())
   const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
   const [commands, setCommands] = useState<ReadonlyArray<AgentCommandSummary>>([])
   const [isCommandRendering, setIsCommandRendering] = useState(false)
@@ -386,63 +387,41 @@ export function AgentPlayground({
 
   const recordAgentEvent = useCallback(
     (event: AgentEvent) => {
-      switch (event._tag) {
-        case 'AgentStart':
+      Match.value(event).pipe(
+        Match.tag('AgentStart', () => {
           setUsage(zeroAgentUsage)
           setHasUsage(false)
           setContextTokens(null)
-          setCompaction({ _tag: 'Idle' })
-          break
-        case 'AgentAwaitingInput':
-          setUsage(event.usage)
+          setCompaction(AgentCompactionState.Idle())
+        }),
+        Match.tag('AgentAwaitingInput', current => {
+          setUsage(current.usage)
           setHasUsage(true)
-          break
-        case 'UsageUpdate':
-          setUsage(current => addAgentUsage(current, event.usage))
-          setContextTokens(event.usage.input.total)
+        }),
+        Match.tag('UsageUpdate', current => {
+          setUsage(usage => addAgentUsage(usage, current.usage))
+          setContextTokens(current.usage.input.total)
           setHasUsage(true)
-          break
-        case 'AgentEnd':
-          setUsage(event.usage)
+        }),
+        Match.tag('AgentEnd', current => {
+          setUsage(current.usage)
           setHasUsage(true)
-          break
-        case 'CompactionStart':
-          setCompaction({ _tag: 'Compacting', strategy: event.strategy })
-          break
-        case 'CompactionEnd':
-          setCompaction({
-            _tag: 'Compacted',
-            strategy: event.strategy,
-            beforeTokens: event.beforeTokens,
-            afterTokens: event.afterTokens
-          })
-          setContextTokens(event.afterTokens ?? null)
-          break
-        case 'AgentError':
-        case 'AgentRetry':
-        case 'AssistantMessage':
-        case 'UserMessage':
-        case 'LLMReasoningDelta':
-        case 'LLMStreamEnd':
-        case 'LLMStreamStart':
-        case 'LLMTextDelta':
-        case 'ProviderToolResult':
-        case 'QuestionAnswered':
-        case 'QuestionCancelled':
-        case 'QuestionRequested':
-        case 'ToolApprovalDenied':
-        case 'ToolApprovalGranted':
-        case 'ToolApprovalRequested':
-        case 'ToolExecutionCompleted':
-        case 'ToolExecutionError':
-        case 'ToolExecutionStarted':
-        case 'ToolInputDelta':
-        case 'ToolInputEnd':
-        case 'ToolInputStart':
-        case 'TurnEnd':
-        case 'TurnStart':
-          break
-      }
+        }),
+        Match.tag('CompactionStart', current => {
+          setCompaction(AgentCompactionState.Compacting({ strategy: current.strategy }))
+        }),
+        Match.tag('CompactionEnd', current => {
+          setCompaction(
+            AgentCompactionState.Compacted({
+              strategy: current.strategy,
+              beforeTokens: current.beforeTokens,
+              afterTokens: current.afterTokens
+            })
+          )
+          setContextTokens(current.afterTokens ?? null)
+        }),
+        Match.orElse(() => undefined)
+      )
 
       const item = activityItemFromAgentEvent(event)
 
@@ -494,36 +473,34 @@ export function AgentPlayground({
 
   const recordVoiceDebug = useCallback(
     (event: VoiceDebugEvent) => {
-      switch (event._tag) {
-        case 'SessionConfigured':
+      Match.value(event).pipe(
+        Match.tag('SessionConfigured', current => {
           recordActivity({
-            title: `Realtime ${event.eventType}`,
+            title: `Realtime ${current.eventType}`,
             detail: [
-              `model=${event.model ?? 'unknown'}`,
-              `transcription=${event.transcriptionModel ?? 'off'}`,
-              `language=${event.transcriptionLanguage ?? 'auto'}`
+              `model=${current.model ?? 'unknown'}`,
+              `transcription=${current.transcriptionModel ?? 'off'}`,
+              `language=${current.transcriptionLanguage ?? 'auto'}`
             ].join(' · '),
             tone: 'neutral'
           })
-
-          return
-        case 'InputTranscript':
+        }),
+        Match.tag('InputTranscript', current => {
           recordActivity({
-            title: `Input transcript ${event.itemId ?? 'unknown item'}`,
-            detail: truncate(event.transcript),
+            title: `Input transcript ${current.itemId ?? 'unknown item'}`,
+            detail: truncate(current.transcript),
             tone: 'neutral'
           })
-
-          return
-        case 'OutputTranscript':
+        }),
+        Match.tag('OutputTranscript', current => {
           recordActivity({
-            title: `Output transcript ${event.responseId ?? 'unknown response'}`,
-            detail: truncate(event.transcript),
+            title: `Output transcript ${current.responseId ?? 'unknown response'}`,
+            detail: truncate(current.transcript),
             tone: 'neutral'
           })
-
-          return
-      }
+        }),
+        Match.exhaustive
+      )
     },
     [recordActivity]
   )
@@ -628,67 +605,36 @@ export function AgentPlayground({
     (event: AgentEvent) => {
       recordAgentEvent(event)
 
-      switch (event._tag) {
-        case 'AgentStart':
+      Match.value(event).pipe(
+        Match.tag('AgentStart', () => {
           speechChunkerStateRef.current = emptySpeechChunkerState
           resetTtsSpeech()
-
-          return
-        case 'AgentError':
-        case 'AgentRetry':
+        }),
+        Match.tag('AgentError', 'AgentRetry', () => {
           speechChunkerStateRef.current = emptySpeechChunkerState
           resetTtsSpeech()
-
-          return
-        case 'AgentAwaitingInput':
-        case 'AgentEnd':
+        }),
+        Match.tag('AgentAwaitingInput', 'AgentEnd', () => {
           if (ttsEnabledRef.current && !isVoiceModeRef.current) {
             flushTtsSpeech()
           } else {
             speechChunkerStateRef.current = emptySpeechChunkerState
           }
-
-          return
-        case 'LLMTextDelta': {
+        }),
+        Match.tag('LLMTextDelta', current => {
           if (!ttsEnabledRef.current || isVoiceModeRef.current) {
             return
           }
 
-          const result = appendSpeechTextDelta(speechChunkerStateRef.current, event.text)
+          const result = appendSpeechTextDelta(speechChunkerStateRef.current, current.text)
           speechChunkerStateRef.current = result.state
 
           if (result.chunks.length > 0) {
             enqueueTtsSpeech(result.chunks)
           }
-
-          return
-        }
-
-        case 'AssistantMessage':
-        case 'UserMessage':
-        case 'CompactionEnd':
-        case 'CompactionStart':
-        case 'LLMReasoningDelta':
-        case 'LLMStreamEnd':
-        case 'LLMStreamStart':
-        case 'ProviderToolResult':
-        case 'QuestionAnswered':
-        case 'QuestionCancelled':
-        case 'QuestionRequested':
-        case 'ToolApprovalDenied':
-        case 'ToolApprovalGranted':
-        case 'ToolApprovalRequested':
-        case 'ToolExecutionCompleted':
-        case 'ToolExecutionError':
-        case 'ToolExecutionStarted':
-        case 'ToolInputDelta':
-        case 'ToolInputEnd':
-        case 'ToolInputStart':
-        case 'TurnEnd':
-        case 'TurnStart':
-        case 'UsageUpdate':
-          return
-      }
+        }),
+        Match.orElse(() => undefined)
+      )
     },
     [enqueueTtsSpeech, flushTtsSpeech, recordAgentEvent, resetTtsSpeech]
   )
@@ -1080,9 +1026,12 @@ export function AgentPlayground({
       .then(() => {
         recordActivity({ title: 'Workflow canceled', detail: runId, tone: 'success' })
       })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Workflow cancel failed'
-        recordActivity({ title: 'Workflow cancel failed', detail: message, tone: 'error' })
+      .catch((error: { readonly message: string }) => {
+        recordActivity({
+          title: 'Workflow cancel failed',
+          detail: error.message.length > 0 ? error.message : 'Workflow cancel failed',
+          tone: 'error'
+        })
       })
   }, [recordActivity, resetTtsSpeech, runtime, stop, workflowRunId])
 

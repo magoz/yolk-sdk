@@ -44,7 +44,7 @@ const makeHttpClientLayer = (
           contentType: 'text/plain'
         }
 
-        const body = typeof spec.body === 'string' ? spec.body : JSON.stringify(spec.body)
+        const body = Predicate.isString(spec.body) ? spec.body : JSON.stringify(spec.body)
 
         return HttpClientResponse.fromWeb(
           request,
@@ -277,7 +277,8 @@ describe('OpenAiCodexOAuth', () => {
         return yield* oauth.startDeviceFlow()
       }).pipe(Effect.provide(layer), Effect.flip)
 
-      expect(error).toMatchObject({ _tag: 'OpenAiCodexOAuthError', status: 500 })
+      expect(Predicate.isTagged(error, 'OpenAiCodexOAuthError')).toBe(true)
+      expect(error).toMatchObject({ status: 500 })
       expect(error.message).toContain('OpenAI Codex device authorization failed: 500 bad')
     })
   )

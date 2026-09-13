@@ -1,4 +1,4 @@
-import { Cause, Effect, Predicate } from 'effect'
+import { Cause, Effect, Exit, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -32,20 +32,23 @@ const setup = (manual: boolean, activated = true) =>
   Effect.gen(function* () {
     const counts = { validate: 0, inline: 0, admissions: 0 }
 
-    const tool = makeTool({
+    const toolInput = {
       name: 'work',
       description: 'Work',
-      access: 'write',
-      background: true,
+      access: 'write' as const,
+      background: true as const,
       parameters: Schema.Struct({ value: Schema.String }),
-      ...(manual ? { approval: ToolApprovalPolicy.make({ mode: 'manual' }) } : {}),
-      execute: ({ call }) =>
+      execute: ({ call }: { readonly call: ToolCall }) =>
         Effect.sync(() => {
           counts.inline++
 
           return ToolResult.make({ toolCallId: call.id, content: 'done' })
         })
-    })
+    }
+
+    const tool = makeTool(
+      manual ? { ...toolInput, approval: ToolApprovalPolicy.make({ mode: 'manual' }) } : toolInput
+    )
 
     const set = yield* resolveTools(
       [
@@ -280,9 +283,13 @@ it.effect('does not disguise unexpected mapper defects as VoiceToolBridgeError',
     )
 
     expect(caught).toBe(false)
-    expect(exit._tag).toBe('Failure')
+    expect(Exit.isFailure(exit)).toBe(true)
 
-    if (Predicate.isTagged(exit, 'Failure'))
-      expect(Cause.findDefect(exit.cause)).toMatchObject({ _tag: 'Success', success: defect })
+    if (Exit.isFailure(exit)) {
+      const found = Cause.findDefect(exit.cause)
+
+      expect(Result.isSuccess(found)).toBe(true)
+      expect(found).toMatchObject({ success: defect })
+    }
   })
 )

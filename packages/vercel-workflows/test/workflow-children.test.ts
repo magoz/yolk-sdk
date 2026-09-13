@@ -210,4 +210,35 @@ describe('workflow child orchestration', () => {
     expect(result).toBe('failed')
     expect(operations).toEqual(['read', 'durable-sleep', 'read', 'durable-sleep', 'read'])
   })
+
+  it('omits failures when empty and includes a failures key when a child throws', async () => {
+    const ok = await orchestrateWorkflowToolBatch({
+      calls: ['a', 'b'],
+      concurrency: 2,
+      preflight: async () => ({ ready: true }),
+      execute: async call => call
+    })
+
+    expect(Object.keys(ok)).toEqual(['ready', 'results'])
+    expect(Object.hasOwn(ok, 'failures')).toBe(false)
+    expect(JSON.stringify(ok)).toBe('{"ready":true,"results":["a","b"]}')
+
+    const failed = await orchestrateWorkflowToolBatch({
+      calls: ['a', 'b'],
+      concurrency: 1,
+      preflight: async () => ({ ready: true }),
+      execute: async (call, index) => {
+        if (index === 0) throw new Error('first')
+
+        return call
+      }
+    })
+
+    if (!failed.ready) {
+      expect.fail('Expected ready batch after a child throw')
+    }
+
+    expect(Object.keys(failed)).toEqual(['ready', 'results', 'failures'])
+    expect(failed.failures?.map(item => item.index)).toEqual([0])
+  })
 })

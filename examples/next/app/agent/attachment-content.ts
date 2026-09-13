@@ -1,4 +1,4 @@
-import { Array as Arr, Predicate } from 'effect'
+import { Array as Arr, Data, Predicate } from 'effect'
 import {
   DocumentPart,
   ImagePart,
@@ -6,25 +6,43 @@ import {
   inlineBase64Source,
   type Content
 } from '@yolk-sdk/agent/protocol'
-import type {
-  AgentComposerFailedAttachment,
-  AgentComposerReadyDocumentAttachment,
-  AgentComposerReadyImageAttachment
-} from './agent-composer'
 
-export type ReadyImageAttachment = AgentComposerReadyImageAttachment & {
+export type ReadyImageAttachment = {
+  readonly _tag: 'Ready'
+  readonly kind: 'image'
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
+  readonly previewUrl: string
   readonly data: string
 }
 
-export type ReadyDocumentAttachment = AgentComposerReadyDocumentAttachment & {
+export type ReadyDocumentAttachment = {
+  readonly _tag: 'Ready'
+  readonly kind: 'document'
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
   readonly data: string
 }
 
-export type ReadyAttachment = ReadyImageAttachment | ReadyDocumentAttachment
-
-export type FailedAttachment = AgentComposerFailedAttachment & {
+export type FailedAttachment = {
+  readonly _tag: 'Failed'
+  readonly kind: 'image' | 'document'
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
+  readonly reason: string
   readonly file: File
 }
+
+export const ReadyImageAttachment = Data.taggedEnum<ReadyImageAttachment>().Ready
+
+export const ReadyDocumentAttachment = Data.taggedEnum<ReadyDocumentAttachment>().Ready
+
+export const FailedAttachment = Data.taggedEnum<FailedAttachment>().Failed
+
+export type ReadyAttachment = ReadyImageAttachment | ReadyDocumentAttachment
 
 export type AgentAttachment = ReadyAttachment | FailedAttachment
 

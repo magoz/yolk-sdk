@@ -83,7 +83,6 @@ const host = (
         return credentialError === undefined
           ? Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'dropbox',
                 accessToken: 'FAKE-BEARER-SECRET',
                 expiresAt: 4e12

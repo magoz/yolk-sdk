@@ -35,7 +35,8 @@ import {
   type McpToolAnnotations,
   type JsonRpcNotification,
   type JsonRpcRequest,
-  type JsonRpcResponse
+  type JsonRpcResponse,
+  type ToolsListResult
 } from './protocol.ts'
 import { makeEffectFetch } from './effect-fetch.ts'
 
@@ -345,28 +346,15 @@ const requestLocalSession = (
     })
   )
 
-const resolveMcpTools = (config: McpServerConfig, result: unknown) =>
-  Effect.gen(function* () {
-    const tools = yield* decodeToolsListResult(result).pipe(
-      Effect.mapError(
-        error =>
-          new McpError({
-            server: config.name,
-            message: `Invalid tools/list result: ${unknownToMessage(error)}`,
-            cause: 'validation'
-          })
-      )
-    )
-
-    return tools.tools.map(tool => ({
-      serverName: config.name,
-      mcpToolName: tool.name,
-      title: tool.title,
-      outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
-      def: mcpToolToToolDef({ serverName: config.name, tool })
-    }))
-  })
+const resolvedMcpTools = (config: McpServerConfig, listed: ToolsListResult) =>
+  listed.tools.map(tool => ({
+    serverName: config.name,
+    mcpToolName: tool.name,
+    title: tool.title,
+    outputSchema: tool.outputSchema,
+    annotations: tool.annotations,
+    def: mcpToolToToolDef({ serverName: config.name, tool })
+  }))
 
 export const listRemoteMcpServerTools = (
   config: McpRemoteServerConfig,
@@ -381,7 +369,18 @@ export const listRemoteMcpServerTools = (
       client.listTools(undefined, sdkRequestOptions(options))
     )
 
-    return yield* resolveMcpTools(config, result)
+    const listed = yield* decodeToolsListResult(result).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: config.name,
+            message: `Invalid tools/list result: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
+    )
+
+    return resolvedMcpTools(config, listed)
   })
 
 export const listLocalMcpServerTools = (
@@ -400,7 +399,18 @@ export const listLocalMcpServerTools = (
     yield* validateLocal(config, securityPolicy(options))
     const result = yield* requestLocalSession(config, listToolsRequest(), options)
 
-    return yield* resolveMcpTools(config, result)
+    const listed = yield* decodeToolsListResult(result).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: config.name,
+            message: `Invalid tools/list result: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
+    )
+
+    return resolvedMcpTools(config, listed)
   })
 
 export const listMcpServerTools = (config: McpServerConfig, options?: McpClientOptions) =>
@@ -423,22 +433,6 @@ export type CallMcpServerToolInput = {
   readonly params: unknown
   readonly options?: McpClientOptions
 }
-
-const resolveMcpToolResult = (input: CallMcpServerToolInput, result: unknown) =>
-  Effect.gen(function* () {
-    const toolCallResult = yield* decodeToolCallResult(result).pipe(
-      Effect.mapError(
-        error =>
-          new McpError({
-            server: input.config.name,
-            message: `Invalid tools/call result: ${unknownToMessage(error)}`,
-            cause: 'validation'
-          })
-      )
-    )
-
-    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
-  })
 
 export const callRemoteMcpServerTool = (
   input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpRemoteServerConfig }
@@ -464,7 +458,18 @@ export const callRemoteMcpServerTool = (
       )
     })
 
-    return yield* resolveMcpToolResult(input, result)
+    const toolCallResult = yield* decodeToolCallResult(result).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: input.config.name,
+            message: `Invalid tools/call result: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
+    )
+
+    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
   })
 
 export const callLocalMcpServerTool = (
@@ -477,7 +482,18 @@ export const callLocalMcpServerTool = (
       input.options
     )
 
-    return yield* resolveMcpToolResult(input, result)
+    const toolCallResult = yield* decodeToolCallResult(result).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: input.config.name,
+            message: `Invalid tools/call result: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
+    )
+
+    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
   })
 
 export const callMcpServerTool = (

@@ -38,7 +38,7 @@ const makeHttpClientLayer = (
           contentType: 'text/plain'
         }
 
-        const body = typeof spec.body === 'string' ? spec.body : JSON.stringify(spec.body)
+        const body = Predicate.isString(spec.body) ? spec.body : JSON.stringify(spec.body)
 
         return HttpClientResponse.fromWeb(
           request,
@@ -141,7 +141,7 @@ describe('AnthropicClaudeOAuth', () => {
       }).pipe(Effect.provide(layer), Effect.flip)
 
       expect(requests).toEqual([])
-      expect(error).toMatchObject({ _tag: 'AnthropicClaudeOAuthError' })
+      expect(Predicate.isTagged(error, 'AnthropicClaudeOAuthError')).toBe(true)
       expect(error.message).toContain('state mismatch')
     })
   )
@@ -200,7 +200,8 @@ describe('AnthropicClaudeOAuth', () => {
         return yield* oauth.refreshToken('refresh_old')
       }).pipe(Effect.provide(layer), Effect.flip)
 
-      expect(error).toMatchObject({ _tag: 'AnthropicClaudeOAuthError', status: 500 })
+      expect(Predicate.isTagged(error, 'AnthropicClaudeOAuthError')).toBe(true)
+      expect(error).toMatchObject({ status: 500 })
       expect(error.message).toContain('Anthropic Claude token refresh failed: 500 bad')
     })
   )

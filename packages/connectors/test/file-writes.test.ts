@@ -61,7 +61,6 @@ const host = (r = response(dropbox)) => {
 
           return Effect.succeed(
             OAuthCredential.make({
-              _tag: 'OAuthCredential',
               provider: req.integration.connectorId,
               accessToken: 'secret',
               expiresAt: 4e12

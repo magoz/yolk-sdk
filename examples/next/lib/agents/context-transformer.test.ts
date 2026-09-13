@@ -1,3 +1,4 @@
+import { Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
@@ -49,10 +50,11 @@ describe('agent context transformer', () => {
     const messages: ReadonlyArray<AgentMessage> = [...oldMessages, ...recent]
     const result = compactAgentMessages(messages)
 
-    expect(result.events).toMatchObject([
-      { _tag: 'CompactionStart', strategy: contextCompactionStrategy },
-      { _tag: 'CompactionEnd', strategy: contextCompactionStrategy }
-    ])
+    expect(result.events).toHaveLength(2)
+    expect(Predicate.isTagged(result.events[0], 'CompactionStart')).toBe(true)
+    expect(Predicate.isTagged(result.events[1], 'CompactionEnd')).toBe(true)
+    expect(result.events[0]).toMatchObject({ strategy: contextCompactionStrategy })
+    expect(result.events[1]).toMatchObject({ strategy: contextCompactionStrategy })
     expect(result.messages.length).toBeLessThan(messages.length)
     expect(result.messages.slice(-recent.length)).toEqual(recent)
     expect(estimateAgentMessagesTokens(result.messages)).toBeLessThan(

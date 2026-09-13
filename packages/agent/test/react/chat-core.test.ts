@@ -31,6 +31,7 @@ import {
   reduceAgentChatState
 } from '../../src/react/chat-core.ts'
 import { Predicate } from 'effect'
+import { AgentChatPart, ChatToolState } from '../../src/react/chat-messages.ts'
 
 describe('agent chat core', () => {
   it('submits user messages through the headless reducer', () => {
@@ -102,7 +103,11 @@ describe('agent chat core', () => {
         sequence: 0,
         role: 'assistant',
         parts: [
-          { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+          AgentChatPart.Text({
+            id: 'message-0-assistant-text',
+            content: 'hello',
+            state: 'streaming'
+          })
         ]
       }
     ])
@@ -120,7 +125,7 @@ describe('agent chat core', () => {
 
     expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
     expect(state.chatMessages[0]?.parts).toEqual([
-      { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+      AgentChatPart.Text({ id: 'message-0-assistant-text', content: 'hello', state: 'streaming' })
     ])
   })
 
@@ -136,7 +141,7 @@ describe('agent chat core', () => {
 
     expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
     expect(state.chatMessages[0]?.parts).toEqual([
-      { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+      AgentChatPart.Text({ id: 'message-0-assistant-text', content: 'hello', state: 'streaming' })
     ])
   })
 
@@ -164,12 +169,11 @@ describe('agent chat core', () => {
         createdAtMs: 1781260200000,
         author: { displayName: 'Magoz' },
         parts: [
-          {
-            _tag: 'Text',
+          AgentChatPart.Text({
             id: 'message-0-user-text',
             content: 'Please steer toward the queued follow-up.',
             state: 'done'
-          }
+          })
         ]
       }
     ])
@@ -187,12 +191,11 @@ describe('agent chat core', () => {
 
     expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
     expect(state.chatMessages[0]?.parts).toEqual([
-      {
-        _tag: 'Reasoning',
+      AgentChatPart.Reasoning({
         id: 'message-0-reasoning',
         text: 'Think. Done.',
         state: 'streaming'
-      }
+      })
     ])
   })
 
@@ -207,7 +210,7 @@ describe('agent chat core', () => {
     )
 
     expect(state.chatMessages[0]?.parts).toEqual([
-      { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+      AgentChatPart.Text({ id: 'message-0-assistant-text', content: 'hello', state: 'streaming' })
     ])
   })
 
@@ -226,12 +229,11 @@ describe('agent chat core', () => {
     )
 
     expect(state.chatMessages[0]?.parts).toEqual([
-      {
-        _tag: 'Reasoning',
+      AgentChatPart.Reasoning({
         id: 'message-0-reasoning',
         text: 'Think done',
         state: 'streaming'
-      }
+      })
     ])
   })
 
@@ -252,8 +254,16 @@ describe('agent chat core', () => {
         sequence: 0,
         role: 'assistant',
         parts: [
-          { _tag: 'Reasoning', id: 'message-0-reasoning', text: 'Thinking.', state: 'streaming' },
-          { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+          AgentChatPart.Reasoning({
+            id: 'message-0-reasoning',
+            text: 'Thinking.',
+            state: 'streaming'
+          }),
+          AgentChatPart.Text({
+            id: 'message-0-assistant-text',
+            content: 'hello',
+            state: 'streaming'
+          })
         ]
       }
     ])
@@ -281,12 +291,14 @@ describe('agent chat core', () => {
       initialAgentChatState
     )
 
-    expect(state.chatMessages[0]?.parts.at(-1)).toEqual({
-      _tag: 'ToolCall',
-      id: 'message-0-tool-call-call_1',
-      call,
-      state: expect.objectContaining({ _tag: 'Completed', result })
-    })
+    expect(state.chatMessages[0]?.parts.at(-1)).toEqual(
+      expect.objectContaining({
+        id: 'message-0-tool-call-call_1',
+        call,
+        state: expect.objectContaining(ChatToolState.Completed({ result }))
+      })
+    )
+    expect(Predicate.isTagged(state.chatMessages[0]?.parts.at(-1), 'ToolCall')).toBe(true)
   })
 
   it('preserves tool execution timing when result event follows completion', () => {
@@ -309,13 +321,13 @@ describe('agent chat core', () => {
 
     const toolPart = state.chatMessages[0]?.parts.find(part => Predicate.isTagged(part, 'ToolCall'))
 
-    expect(toolPart).toMatchObject({
-      _tag: 'ToolCall',
-      state: {
-        _tag: 'Completed',
-        result
-      }
-    })
+    expect(toolPart).toMatchObject(
+      AgentChatPart.ToolCall({
+        id: 'tool-call-call_1',
+        call,
+        state: ChatToolState.Completed({ result })
+      })
+    )
 
     if (toolPart?._tag !== 'ToolCall' || !Predicate.isTagged(toolPart.state, 'Completed')) {
       throw new Error('Expected completed tool call part')
@@ -354,12 +366,13 @@ describe('agent chat core', () => {
     })
 
     expect(submitted.status).toBe('running')
-    expect(submitted.chatMessages[0]?.parts[0]).toEqual({
-      _tag: 'ToolCall',
-      id: 'tool-call-call_question',
-      call,
-      state: { _tag: 'QuestionAnswered', response, request }
-    })
+    expect(submitted.chatMessages[0]?.parts[0]).toEqual(
+      AgentChatPart.ToolCall({
+        id: 'tool-call-call_question',
+        call,
+        state: ChatToolState.QuestionAnswered({ response, request })
+      })
+    )
   })
 
   it('counts active text, tool, and voice work', () => {

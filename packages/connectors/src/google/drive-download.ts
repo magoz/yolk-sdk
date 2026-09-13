@@ -66,7 +66,7 @@ const Metadata = Schema.Struct({
 })
 
 // Focused, compatible standard exports. Vids, Forms, folders and shortcuts are not exports.
-const exportTypes: Readonly<Record<string, readonly string[]>> = {
+const exportTypes = {
   'application/vnd.google-apps.document': [
     'application/pdf',
     'text/plain',
@@ -100,6 +100,9 @@ const exportTypes: Readonly<Record<string, readonly string[]>> = {
     'image/svg+xml'
   ]
 }
+
+const isDriveExportSource = (mimeType: string): mimeType is keyof typeof exportTypes =>
+  Object.hasOwn(exportTypes, mimeType)
 
 const transfer = (
   integration: ConnectorIntegration,
@@ -153,8 +156,8 @@ const transfer = (
 
     if (
       mimeType !== undefined &&
-      (!Object.hasOwn(exportTypes, metadata.mimeType) ||
-        !exportTypes[metadata.mimeType]?.includes(mimeType))
+      (!isDriveExportSource(metadata.mimeType) ||
+        !exportTypes[metadata.mimeType].includes(mimeType))
     )
       return yield* failTransfer('not_downloadable')
     const size = metadata.size === undefined ? undefined : Number(metadata.size)

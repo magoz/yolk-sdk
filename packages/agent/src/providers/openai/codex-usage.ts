@@ -91,14 +91,37 @@ export const parseOpenAiCodexSubscriptionUsage = (
           ? wire.limit_window_seconds / 60
           : undefined
 
+        type OpenAiCodexUsageWindowFields = {
+          id: typeof id
+          usedPercent: number
+          resetsAt?: string
+          resetsAfterSeconds?: number
+          windowDurationMinutes?: number
+        }
+
         windows.push(
-          ProviderSubscriptionUsageWindow.make({
-            id,
-            usedPercent: wire.used_percent,
-            ...(resetsAt === undefined ? {} : { resetsAt }),
-            ...(resetsAfterSeconds === undefined ? {} : { resetsAfterSeconds }),
-            ...(windowDurationMinutes === undefined ? {} : { windowDurationMinutes })
-          })
+          ProviderSubscriptionUsageWindow.make(
+            (() => {
+              const fields: OpenAiCodexUsageWindowFields = {
+                id,
+                usedPercent: wire.used_percent
+              }
+
+              if (resetsAt !== undefined) {
+                fields.resetsAt = resetsAt
+              }
+
+              if (resetsAfterSeconds !== undefined) {
+                fields.resetsAfterSeconds = resetsAfterSeconds
+              }
+
+              if (windowDurationMinutes !== undefined) {
+                fields.windowDurationMinutes = windowDurationMinutes
+              }
+
+              return fields
+            })()
+          )
         )
       }
 

@@ -5,6 +5,7 @@ import {
   type AgentMessage,
   type Content
 } from '@yolk-sdk/agent/protocol'
+import { Match, Predicate } from 'effect'
 
 export type TokenEstimateOptions = {
   readonly charactersPerToken?: number
@@ -39,35 +40,38 @@ export const estimateTextTokens = (text: string, options: TokenEstimateOptions =
   )
 
 export const estimateContentTokens = (content: Content, options: TokenEstimateOptions = {}) => {
-  if (typeof content === 'string') {
+  if (Predicate.isString(content)) {
     return estimateTextTokens(content, options)
   }
 
-  return content.reduce((total, part) => {
-    switch (part._tag) {
-      case 'Text':
-        return total + estimateTextTokens(part.text, options)
-      case 'Image':
-      case 'Document':
-      case 'Audio':
-        return total + mediaPartTokens(options)
-    }
-  }, 0)
+  return content.reduce(
+    (total, part) =>
+      total +
+      Match.value(part).pipe(
+        Match.tag('Text', current => estimateTextTokens(current.text, options)),
+        Match.tag('Image', 'Document', 'Audio', () => mediaPartTokens(options)),
+        Match.exhaustive
+      ),
+    0
+  )
 }
 
 export const estimateAgentMessageTokens = (
   message: AgentMessage,
   options: TokenEstimateOptions = {}
 ) => {
-  switch (message._tag) {
-    case 'User':
-    case 'ToolResult':
-      return estimateContentTokens(message.content, options) + messageOverheadTokens(options)
-    case 'Assistant':
-      return (
-        estimateContentTokens(assistantContent(message), options) +
-        estimateTextTokens(assistantReasoningText(message), options) +
-        assistantHostToolCalls(message).reduce(
+  return Match.value(message).pipe(
+    Match.tag(
+      'User',
+      'ToolResult',
+      current => estimateContentTokens(current.content, options) + messageOverheadTokens(options)
+    ),
+    Match.tag(
+      'Assistant',
+      current =>
+        estimateContentTokens(assistantContent(current), options) +
+        estimateTextTokens(assistantReasoningText(current), options) +
+        assistantHostToolCalls(current).reduce(
           (total, call) =>
             total +
             estimateTextTokens(call.id, options) +
@@ -76,8 +80,9 @@ export const estimateAgentMessageTokens = (
           0
         ) +
         messageOverheadTokens(options)
-      )
-  }
+    ),
+    Match.exhaustive
+  )
 }
 
 export const estimateAgentMessagesTokens = (

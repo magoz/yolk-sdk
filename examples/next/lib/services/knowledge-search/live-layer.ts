@@ -1,5 +1,5 @@
 import { and, asc, cosineDistance, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
-import { Config, Context, Effect, Layer, Predicate, Redacted } from 'effect'
+import { Config, Context, Effect, Layer, Match, Predicate, Redacted } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -48,13 +48,13 @@ const OpenAiEmbeddingResponseSchema = Schema.Struct({
 type StorageSourceType = (typeof dbSchema.storageSourceType.enumValues)[number]
 
 const hasStringMessage = (error: unknown): error is { readonly message: string } =>
-  typeof error === 'object' &&
+  Predicate.isObjectOrArray(error) &&
   error !== null &&
   'message' in error &&
-  typeof error.message === 'string'
+  Predicate.isString(error.message)
 
 const hasTag = <Tag extends string>(error: unknown, tag: Tag): error is { readonly _tag: Tag } =>
-  typeof error === 'object' && error !== null && '_tag' in error && error._tag === tag
+  Predicate.isObjectOrArray(error) && error !== null && '_tag' in error && error._tag === tag
 
 const isSearchIndexStoreError = (error: unknown): error is SearchIndexStoreError =>
   hasTag(error, 'SearchIndexStoreError')
@@ -68,19 +68,16 @@ const unknownToMessage = (error: unknown) =>
 const metadataString = (metadata: KnowledgeMetadata | undefined, key: string) => {
   const value = metadata?.[key]
 
-  return typeof value === 'string' ? value : undefined
+  return Predicate.isString(value) ? value : undefined
 }
 
-const sourceTypeFromKnowledgeSource = (source: KnowledgeSource): StorageSourceType => {
-  switch (source._tag) {
-    case 'File':
-      return 'file'
-    case 'Url':
-      return 'url'
-    case 'Text':
-      return 'text'
-  }
-}
+const sourceTypeFromKnowledgeSource = (source: KnowledgeSource): StorageSourceType =>
+  Match.value(source).pipe(
+    Match.tag('File', (): StorageSourceType => 'file'),
+    Match.tag('Url', (): StorageSourceType => 'url'),
+    Match.tag('Text', (): StorageSourceType => 'text'),
+    Match.exhaustive
+  )
 
 const sourceFromRows = (input: {
   readonly sourceType: StorageSourceType
@@ -525,7 +522,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
 export const TextKnowledgeExtractorLayer = Layer.succeed(KnowledgeExtractor, {
   extract: source =>
     Effect.gen(function* () {
-      if (typeof source.content !== 'string') {
+      if (!Predicate.isString(source.content)) {
         return yield* Effect.fail(
           new KnowledgeExtractionError({ message: 'Text extractor requires string content' })
         )

@@ -19,6 +19,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { LLMError, LLMProvider, LLMTextDelta, type LLMRequest } from '@yolk-sdk/agent/loop'
 import { makeContextOverflowRetryProvider } from '@yolk-sdk/agent/compaction'
+import { ContextOverflowRetryCompactionResult } from '../../src/compaction/retry.ts'
 import { toAnthropicClaudeRequestBody } from '../../src/providers/anthropic/claude-provider.ts'
 import { toOpenAiCodexRequestBody } from '../../src/providers/openai/codex-provider.ts'
 
@@ -178,7 +179,7 @@ for (const provider of providers) {
               Effect.sync(() => {
                 compactCalls.push(messages)
 
-                return { _tag: 'Compacted', messages: compacted }
+                return ContextOverflowRetryCompactionResult.Compacted({ messages: compacted })
               })
           })
 
@@ -273,7 +274,7 @@ for (const provider of providers) {
             Effect.sync(() => {
               compactions++
 
-              return { _tag: 'Compacted', messages }
+              return ContextOverflowRetryCompactionResult.Compacted({ messages })
             })
         })
 

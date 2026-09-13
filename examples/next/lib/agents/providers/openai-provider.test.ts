@@ -1,4 +1,4 @@
-import { Effect, Layer, Redacted, Stream } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
@@ -207,8 +207,8 @@ describe('OpenAiProviderLayer', () => {
           .pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer), Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'rate_limit',
         retryable: true
       })
@@ -234,8 +234,8 @@ describe('OpenAiProviderLayer', () => {
           .pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer), Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         message: 'OpenAI response contained no choices',
         retryable: false

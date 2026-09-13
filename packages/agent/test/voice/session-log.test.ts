@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import * as Schema from 'effect/Schema'
 import { AssistantAgentMessage, AssistantTextPart, UserMessage } from '@yolk-sdk/agent/protocol'
@@ -125,13 +125,24 @@ describe('foldStoredVoiceEvents', () => {
       })
     ])
 
-    expect(flushed.messages).toMatchObject([
-      { _tag: 'Assistant', parts: [{ _tag: 'Text' }, { _tag: 'HostToolCall' }] },
-      { _tag: 'ToolResult', toolCallId: 'call-1' },
+    expect(flushed.messages).toHaveLength(3)
+    expect(Predicate.isTagged(flushed.messages[0], 'Assistant')).toBe(true)
+    expect(
+      Predicate.isTagged(flushed.messages[0], 'Assistant')
+        ? flushed.messages[0].parts.map(part => part._tag)
+        : []
+    ).toEqual(['Text', 'HostToolCall'])
+    expect(Predicate.isTagged(flushed.messages[1], 'ToolResult')).toBe(true)
+
+    if (Predicate.isTagged(flushed.messages[1], 'ToolResult')) {
+      expect(flushed.messages[1].toolCallId).toBe('call-1')
+    }
+
+    expect(flushed.messages[2]).toMatchObject(
       AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'It is sunny.' })]
       })
-    ])
+    )
   })
 
   it.effect('round-trips state through its schema between batches', () =>
@@ -183,10 +194,17 @@ describe('tool event identity', () => {
       voiceToolEventId('call-1', 'requested'),
       voiceToolEventId('call-2', 'requested')
     ])
-    expect(stored.map(entry => entry.event)).toMatchObject([
-      { _tag: 'ToolCallsRequested', calls: [{ callId: 'call-1' }] },
-      { _tag: 'ToolCallsRequested', calls: [{ callId: 'call-2' }] }
+    expect(stored.map(entry => entry.event._tag)).toEqual([
+      'ToolCallsRequested',
+      'ToolCallsRequested'
     ])
+    expect(
+      stored.map(entry =>
+        Predicate.isTagged(entry.event, 'ToolCallsRequested')
+          ? entry.event.calls.map(item => item.callId)
+          : []
+      )
+    ).toEqual([['call-1'], ['call-2']])
   })
 
   it('maps denied outcomes to failed events with the controller denial message', () => {
@@ -203,10 +221,11 @@ describe('tool event identity', () => {
       voiceToolEventId('call-1', 'requested'),
       voiceToolEventId('call-1', 'failed')
     ])
-    expect(stored[1]?.event).toMatchObject({
-      _tag: 'ToolCallFailed',
-      message: 'Tool was denied: not allowed'
-    })
+    expect(Predicate.isTagged(stored[1]?.event, 'ToolCallFailed')).toBe(true)
+
+    if (Predicate.isTagged(stored[1]?.event, 'ToolCallFailed')) {
+      expect(stored[1].event.message).toBe('Tool was denied: not allowed')
+    }
   })
 })
 

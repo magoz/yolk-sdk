@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { Effect, Exit, Predicate, Scope, Stream } from 'effect'
+import { Data, Effect, Exit, Match, Predicate, Scope, Stream } from 'effect'
 import type {
   HitlResponse,
   ToolApprovalRequest,
@@ -96,6 +96,8 @@ type VoiceHookAction =
   | { readonly _tag: 'Event'; readonly event: VoiceEvent }
   | { readonly _tag: 'ApprovalSubmitted'; readonly requestId: string }
 
+const VoiceHookAction = Data.taggedEnum<VoiceHookAction>()
+
 const initialVoiceHookState: VoiceHookState = {
   status: 'idle',
   error: null,
@@ -103,64 +105,56 @@ const initialVoiceHookState: VoiceHookState = {
   pendingApprovals: []
 }
 
-const applyEvent = (state: VoiceHookState, event: VoiceEvent): VoiceHookState => {
-  switch (event._tag) {
-    case 'UserTranscriptDelta':
-      return { ...state, userDraft: `${state.userDraft}${event.delta}` }
-    case 'UserTranscriptFinal':
-      return { ...state, userDraft: '' }
-    case 'AwaitingInput': {
-      const approvals = event.requests.filter(request =>
+const applyEvent = (state: VoiceHookState, event: VoiceEvent): VoiceHookState =>
+  Match.value(event).pipe(
+    Match.withReturnType<VoiceHookState>(),
+    Match.tag('UserTranscriptDelta', current => ({
+      ...state,
+      userDraft: `${state.userDraft}${current.delta}`
+    })),
+    Match.tag('UserTranscriptFinal', () => ({ ...state, userDraft: '' })),
+    Match.tag('AwaitingInput', current => {
+      const approvals = current.requests.filter(request =>
         Predicate.isTagged(request, 'ToolApprovalRequest')
       )
 
       return approvals.length === 0
         ? state
         : { ...state, pendingApprovals: [...state.pendingApprovals, ...approvals] }
-    }
+    }),
+    Match.tag('ToolCallCompleted', 'ToolCallFailed', current => ({
+      ...state,
+      pendingApprovals: state.pendingApprovals.filter(
+        request => request.toolCallId !== current.callId
+      )
+    })),
+    Match.tag('Error', current => ({
+      ...state,
+      status: 'error',
+      error: new VoiceSessionError({ code: current.code, message: current.message })
+    })),
+    Match.tag('SessionClosed', () =>
+      state.status === 'error' ? state : { ...state, status: 'idle', userDraft: '' }
+    ),
+    Match.orElse(() => state)
+  )
 
-    case 'ToolCallCompleted':
-    case 'ToolCallFailed':
-      return {
-        ...state,
-        pendingApprovals: state.pendingApprovals.filter(
-          request => request.toolCallId !== event.callId
-        )
-      }
-    case 'Error':
-      return {
-        ...state,
-        status: 'error',
-        error: new VoiceSessionError({ code: event.code, message: event.message })
-      }
-    case 'SessionClosed':
-      return state.status === 'error' ? state : { ...state, status: 'idle', userDraft: '' }
-    default:
-      return state
-  }
-}
-
-const reduceVoiceHookState = (state: VoiceHookState, action: VoiceHookAction): VoiceHookState => {
-  switch (action._tag) {
-    case 'Connecting':
-      return { ...initialVoiceHookState, status: 'connecting' }
-    case 'Live':
-      return { ...state, status: 'live', error: null }
-    case 'Stopped':
-      return { ...state, status: 'idle', userDraft: '' }
-    case 'Errored':
-      return { ...state, status: 'error', error: action.error }
-    case 'Event':
-      return applyEvent(state, action.event)
-    case 'ApprovalSubmitted':
-      return {
-        ...state,
-        pendingApprovals: state.pendingApprovals.filter(
-          request => request.requestId !== action.requestId
-        )
-      }
-  }
-}
+const reduceVoiceHookState = (state: VoiceHookState, action: VoiceHookAction): VoiceHookState =>
+  Match.value(action).pipe(
+    Match.withReturnType<VoiceHookState>(),
+    Match.tag('Connecting', () => ({ ...initialVoiceHookState, status: 'connecting' })),
+    Match.tag('Live', () => ({ ...state, status: 'live', error: null })),
+    Match.tag('Stopped', () => ({ ...state, status: 'idle', userDraft: '' })),
+    Match.tag('Errored', current => ({ ...state, status: 'error', error: current.error })),
+    Match.tag('Event', current => applyEvent(state, current.event)),
+    Match.tag('ApprovalSubmitted', current => ({
+      ...state,
+      pendingApprovals: state.pendingApprovals.filter(
+        request => request.requestId !== current.requestId
+      )
+    })),
+    Match.exhaustive
+  )
 
 const isDomMediaStream = (
   stream: WebRtcMediaStreamLike
@@ -206,7 +200,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
   const stop = useCallback(() => {
     attemptIdRef.current += 1
     closeSession()
-    dispatch({ _tag: 'Stopped' })
+    dispatch(VoiceHookAction.Stopped())
   }, [closeSession])
 
   const start = useCallback(() => {
@@ -216,7 +210,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
 
     const attemptId = attemptIdRef.current + 1
     attemptIdRef.current = attemptId
-    dispatch({ _tag: 'Connecting' })
+    dispatch(VoiceHookAction.Connecting())
 
     const program = Effect.gen(function* () {
       const scope = yield* Scope.make()
@@ -275,7 +269,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
       )
 
       if (attemptIdRef.current === attemptId) {
-        dispatch({ _tag: 'Live' })
+        dispatch(VoiceHookAction.Live())
       }
 
       yield* Stream.runForEach(session.events, event =>
@@ -289,7 +283,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
           }
 
           optionsRef.current.onEvent?.(event)
-          dispatch({ _tag: 'Event', event })
+          dispatch(VoiceHookAction.Event({ event }))
 
           if (Predicate.isTagged(event, 'Error')) {
             optionsRef.current.onError?.(
@@ -308,7 +302,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
               closeSession()
 
               if (attemptIdRef.current === attemptId) {
-                dispatch({ _tag: 'Errored', error })
+                dispatch(VoiceHookAction.Errored({ error }))
                 optionsRef.current.onError?.(error)
               }
             }),
@@ -316,7 +310,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
             Effect.sync(() => {
               if (attemptIdRef.current === attemptId) {
                 closeSession()
-                dispatch({ _tag: 'Stopped' })
+                dispatch(VoiceHookAction.Stopped())
               }
             })
         })
@@ -356,7 +350,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
     }
 
     if (Predicate.isTagged(response, 'ToolApprovalResponse')) {
-      dispatch({ _tag: 'ApprovalSubmitted', requestId: response.requestId })
+      dispatch(VoiceHookAction.ApprovalSubmitted({ requestId: response.requestId }))
     }
 
     Effect.runFork(controller.submitHitlResponse(response))
@@ -379,13 +373,22 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
   const denyTool = useCallback(
     (requestId: string, toolCallId: string, reason?: string) => {
       submitHitlResponse(
-        ToolApprovalResponseClass.make({
-          requestId,
-          toolCallId,
-          decision: 'denied',
-          source: 'user',
-          ...(reason === undefined ? {} : { reason })
-        })
+        ToolApprovalResponseClass.make(
+          reason === undefined
+            ? {
+                requestId,
+                toolCallId,
+                decision: 'denied',
+                source: 'user'
+              }
+            : {
+                requestId,
+                toolCallId,
+                decision: 'denied',
+                source: 'user',
+                reason
+              }
+        )
       )
     },
     [submitHitlResponse]

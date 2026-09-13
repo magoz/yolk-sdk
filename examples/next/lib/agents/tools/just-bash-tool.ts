@@ -50,13 +50,6 @@ const makeToolError = (message: string, cause: ToolError['cause']) =>
     cause
   })
 
-const decodeJustBashParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(JustBashParams)(params).pipe(
-    Effect.mapError(error =>
-      makeToolError(`Invalid just-bash arguments: ${unknownToMessage(error)}`, 'validation')
-    )
-  )
-
 const resolveTimeoutMs = (timeoutSeconds: number | undefined) => {
   const timeout = timeoutSeconds ?? defaultTimeoutSeconds
 
@@ -143,7 +136,12 @@ const justBashToolResult = (
 
 export const executeJustBashTool = (call: ToolCall) =>
   Effect.gen(function* () {
-    const params = yield* decodeJustBashParams(call.params)
+    const params = yield* Schema.decodeUnknownEffect(JustBashParams)(call.params).pipe(
+      Effect.mapError(error =>
+        makeToolError(`Invalid just-bash arguments: ${unknownToMessage(error)}`, 'validation')
+      )
+    )
+
     const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
     const result = yield* runWithTimeout(params, timeoutMs)
 

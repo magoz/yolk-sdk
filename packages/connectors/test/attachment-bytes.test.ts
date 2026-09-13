@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer, Predicate } from 'effect'
+import { Effect, Layer, Match, Predicate } from 'effect'
 import {
   ActionResult,
   ApiKeyCredential,
@@ -39,14 +39,12 @@ const integration = (connectorId: string, config = {}) =>
     config,
     credentialBindings: [
       makeCredentialBinding({
-        slotId:
-          connectorId === 'telegram'
-            ? 'telegram.bot_token'
-            : connectorId === 'todoist'
-              ? 'todoist.api_token'
-              : connectorId === 'email'
-                ? 'email.incoming'
-                : `${connectorId}.oauth`,
+        slotId: Match.value(connectorId).pipe(
+          Match.when('telegram', () => 'telegram.bot_token'),
+          Match.when('todoist', () => 'todoist.api_token'),
+          Match.when('email', () => 'email.incoming'),
+          Match.orElse(() => `${connectorId}.oauth`)
+        ),
         credentialRef: 'ref'
       })
     ]
@@ -65,20 +63,19 @@ const host = (responses: readonly ConnectorBinaryHttpResponse[]) => {
           slots.push({ id: req.slot.id, scopes: req.slot.requiredScopes })
 
           return Effect.succeed(
-            req.integration.connectorId === 'telegram'
-              ? ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: '123:SECRET' })
-              : req.integration.connectorId === 'email'
-                ? UsernamePasswordCredential.make({
-                    _tag: 'UsernamePasswordCredential',
-                    username: 'user',
-                    password: 'SECRET'
-                  })
-                : OAuthCredential.make({
-                    _tag: 'OAuthCredential',
-                    provider: req.integration.connectorId,
-                    accessToken: 'SECRET',
-                    expiresAt: 4e12
-                  })
+            Match.value(req.integration.connectorId).pipe(
+              Match.when('telegram', () => ApiKeyCredential.make({ key: '123:SECRET' })),
+              Match.when('email', () =>
+                UsernamePasswordCredential.make({ username: 'user', password: 'SECRET' })
+              ),
+              Match.orElse(() =>
+                OAuthCredential.make({
+                  provider: req.integration.connectorId,
+                  accessToken: 'SECRET',
+                  expiresAt: 4e12
+                })
+              )
+            )
           )
         }
       }),

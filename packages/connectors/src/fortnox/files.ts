@@ -95,15 +95,17 @@ export const fortnoxListSupplierInvoiceFilesAction = defineAction({
   }
 })
 
+const FortnoxDownloadTarget = Schema.Struct({ id: OpaqueId })
+
 const download = (
   integration: ConnectorIntegration,
-  input: unknown,
+  input: typeof FortnoxDownloadTarget.Type,
   budget: ConnectorFileTransferBudget,
   preview: boolean
 ) =>
   Effect.gen(function* () {
     const limits = yield* validateTransfer(integration, 'fortnox', budget)
-    const target = yield* decodeInput(Schema.Struct({ id: OpaqueId }), input)
+    const target = yield* decodeInput(FortnoxDownloadTarget, input)
 
     const credential = yield* resolveCredential(
       integration,

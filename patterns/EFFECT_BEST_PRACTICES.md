@@ -480,6 +480,8 @@ const entry = JournalEntry.make({ id, description: '...' })
 Dropping an explicit constructor `_tag` can append the default tag and change `Object.keys` / raw `JSON.stringify`, even when `Schema.encodeSync` still yields equal schema-order encoded data.
 Hold constructor migrations that change protected raw/wire key order until a compatible owner or explicit contract decision exists; this is not a lint exemption. Do not assume every Schema struct constructor behaves the same.
 
+**Nested constructor identity:** In pinned Effect 4.0.0-beta.80, a Class field in a struct maker can reconstruct a nested Class instance. `Schema.toType(Class)` does not prevent this: the maker restores Class constructor links after extracting the type-side AST. Check reference identity, getter reads, and raw key order—not just encoded equality—before wrapping existing values. `Schema.instanceOf(Class)` or a Class union is not an interchangeable fix: these can preserve real instances while rejecting structurally assignable plain objects/getter stand-ins. Keep compatibility-sensitive migrations held rather than disabling validation or using permissive schemas.
+
 ### Schema Decoding/Encoding - Use Effect Variants
 
 **NEVER** use `decodeUnknownSync` or `encodeUnknownSync` - they throw exceptions. Always use the Effect variants that return `Effect<A, ParseError>`:

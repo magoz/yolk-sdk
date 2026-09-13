@@ -11,13 +11,28 @@ export type WorkflowReadableRun = {
   readonly getReadable: (options?: WorkflowReadableOptions) => WorkflowReadableStream
 }
 
-export const workflowNdjsonHeaders = (runId: string, tailIndex?: number) => ({
-  'cache-control': 'no-cache, no-transform',
-  'content-type': 'application/x-ndjson; charset=utf-8',
-  'x-content-type-options': 'nosniff',
-  'x-workflow-run-id': runId,
-  ...(tailIndex === undefined ? {} : { 'x-workflow-stream-tail-index': String(tailIndex) })
-})
+type WorkflowNdjsonHeaders = {
+  'cache-control': string
+  'content-type': string
+  'x-content-type-options': string
+  'x-workflow-run-id': string
+  'x-workflow-stream-tail-index'?: string
+}
+
+export const workflowNdjsonHeaders = (runId: string, tailIndex?: number) => {
+  const headers: WorkflowNdjsonHeaders = {
+    'cache-control': 'no-cache, no-transform',
+    'content-type': 'application/x-ndjson; charset=utf-8',
+    'x-content-type-options': 'nosniff',
+    'x-workflow-run-id': runId
+  }
+
+  if (tailIndex !== undefined) {
+    headers['x-workflow-stream-tail-index'] = String(tailIndex)
+  }
+
+  return headers
+}
 
 export const workflowReadableResponse = (
   runId: string,

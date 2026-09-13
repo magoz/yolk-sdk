@@ -1,3 +1,4 @@
+import { Option } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentInputUsage,
@@ -16,7 +17,12 @@ import {
   formatUsageSummary,
   totalAgentUsageTokens
 } from './agent-usage-meter'
-import { contentFromInput, type AgentAttachment } from './attachment-content'
+import {
+  contentFromInput,
+  FailedAttachment,
+  ReadyDocumentAttachment,
+  ReadyImageAttachment
+} from './attachment-content'
 import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-edit-model'
 import {
   matchingSlashCommands,
@@ -28,44 +34,40 @@ import {
 } from './slash-command-model'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
-const imageAttachment: AgentAttachment = {
-  _tag: 'Ready',
+const imageAttachment = ReadyImageAttachment({
   kind: 'image',
   id: 'image-1',
   name: 'image.png',
   mimeType: 'image/png',
   previewUrl: 'data:image/png;base64,abc',
   data: 'abc'
-}
+})
 
-const secondImageAttachment: AgentAttachment = {
-  _tag: 'Ready',
+const secondImageAttachment = ReadyImageAttachment({
   kind: 'image',
   id: 'image-2',
   name: 'image-2.png',
   mimeType: 'image/png',
   previewUrl: 'data:image/png;base64,def',
   data: 'def'
-}
+})
 
-const documentAttachment: AgentAttachment = {
-  _tag: 'Ready',
+const documentAttachment = ReadyDocumentAttachment({
   kind: 'document',
   id: 'document-1',
   name: 'brief.pdf',
   mimeType: 'application/pdf',
   data: 'cGRm'
-}
+})
 
-const failedImageAttachment: AgentAttachment = {
-  _tag: 'Failed',
+const failedImageAttachment = FailedAttachment({
   kind: 'image',
   id: 'image-failed',
   name: 'bad.txt',
   mimeType: 'text/plain',
   reason: 'Unsupported file type.',
   file: new File(['bad'], 'bad.txt', { type: 'text/plain' })
-}
+})
 
 const usage = AgentUsage.make({
   input: AgentInputUsage.make({ total: 1_200, cacheRead: 300 }),
@@ -196,8 +198,8 @@ describe('agent playground', () => {
   })
 
   it('models slash command input', () => {
-    expect(slashCommandInput('hello')._tag).toBe('None')
-    expect(slashCommandInput('/review app/agent')._tag).toBe('Some')
+    expect(Option.isNone(slashCommandInput('hello'))).toBe(true)
+    expect(Option.isSome(slashCommandInput('/review app/agent'))).toBe(true)
     expect(matchingSlashCommands('/re', commands)).toEqual([commands[0], commands[1]])
     expect(matchingSlashCommands('/test now', commands)).toEqual([commands[2]])
     expect(normalizeSlashSelectionIndex(-1, 3)).toBe(2)

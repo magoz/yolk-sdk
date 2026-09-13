@@ -98,17 +98,30 @@ const makeSharedWindow = (
   usedPercent: number,
   period: XAiGrokSubscriptionUsagePeriodMetadata | undefined
 ) =>
-  ProviderSubscriptionUsageWindow.make({
-    id: 'shared',
-    usedPercent,
-    ...(period === undefined
-      ? {}
-      : {
-          resetsAt: period.resetsAt,
-          resetsAfterSeconds: period.resetsAfterSeconds,
-          windowDurationMinutes: period.windowDurationMinutes
-        })
-  })
+  ProviderSubscriptionUsageWindow.make(
+    (() => {
+      type XAiGrokSharedWindowFields = {
+        id: 'shared'
+        usedPercent: number
+        resetsAt?: string
+        resetsAfterSeconds?: number
+        windowDurationMinutes?: number
+      }
+
+      const fields: XAiGrokSharedWindowFields = {
+        id: 'shared',
+        usedPercent
+      }
+
+      if (period !== undefined) {
+        fields.resetsAt = period.resetsAt
+        fields.resetsAfterSeconds = period.resetsAfterSeconds
+        fields.windowDurationMinutes = period.windowDurationMinutes
+      }
+
+      return fields
+    })()
+  )
 
 const invalidResponse = () =>
   ProviderSubscriptionUsageResponseError.make({

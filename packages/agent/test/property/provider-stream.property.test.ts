@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
+import { Effect, Layer, Predicate, Result, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentInputUsage,
@@ -299,12 +299,17 @@ describe('provider stream property tests', () => {
         )
 
         expect(requests).toHaveLength(1)
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'LLMError', cause: 'invalid_response' }
-        })
+        expect(Result.isFailure(result)).toBe(true)
 
-        if (result._tag === 'Failure') {
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+
+          if (Predicate.isTagged(result.failure, 'LLMError')) {
+            expect(result.failure.cause).toBe('invalid_response')
+          }
+        }
+
+        if (Result.isFailure(result)) {
           expect('responseIssue' in result.failure ? result.failure.responseIssue : undefined).toBe(
             input.done === 'none' ? 'missing_done' : undefined
           )
@@ -341,10 +346,15 @@ describe('provider stream property tests', () => {
             expect(countTag(result.success, 'TurnEnd')).toBe(1)
           }
         } else {
-          expect(result).toMatchObject({
-            _tag: 'Failure',
-            failure: { _tag: 'LLMError', cause: input.cause }
-          })
+          expect(Result.isFailure(result)).toBe(true)
+
+          if (Result.isFailure(result)) {
+            expect(Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+
+            if (Predicate.isTagged(result.failure, 'LLMError')) {
+              expect(result.failure.cause).toBe(input.cause)
+            }
+          }
         }
       })
     },
@@ -374,10 +384,15 @@ describe('provider stream property tests', () => {
           expect(requests).toHaveLength(1)
         }
 
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'LLMError', cause: input.cause }
-        })
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+
+          if (Predicate.isTagged(result.failure, 'LLMError')) {
+            expect(result.failure.cause).toBe(input.cause)
+          }
+        }
       })
     },
     propertyOptions

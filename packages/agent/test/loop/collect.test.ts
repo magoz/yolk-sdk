@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer, Predicate, Ref, Stream } from 'effect'
+import { Cause, Context, Effect, Exit, Layer, Predicate, Ref, Result, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentInputUsage,
@@ -51,7 +51,7 @@ const expectOriginalTypedFail = <E>(cause: Cause.Cause<E>, typed: E) => {
   const fail = Cause.findFail(cause)
   expect(fail._tag).toBe('Success')
 
-  if (fail._tag !== 'Success') return
+  if (Result.isFailure(fail)) return
   expect(fail.success.error).toBe(typed)
   expect(Context.getOrUndefined(Cause.reasonAnnotations(fail.success), CollectTestRequestId)).toBe(
     'req-1'
@@ -62,7 +62,7 @@ const expectOriginalDefect = <E>(cause: Cause.Cause<E>, defect: unknown) => {
   const die = Cause.findDie(cause)
   expect(die._tag).toBe('Success')
 
-  if (die._tag !== 'Success') return
+  if (Result.isFailure(die)) return
   expect(die.success.defect).toBe(defect)
 }
 
@@ -211,9 +211,9 @@ describe('collectModelTurnAttempt', () => {
 
       expect(outcome._tag).toBe('StreamFailed')
 
-      if (outcome._tag !== 'StreamFailed') return
+      if (!Predicate.isTagged(outcome, 'StreamFailed')) return
+      expect(Predicate.isTagged(outcome.error, 'LLMError')).toBe(true)
       expect(outcome.error).toMatchObject({
-        _tag: 'LLMError',
         responseIssue: 'missing_done'
       })
       expect(outcome.collection.outputStarted).toBe(true)
@@ -245,7 +245,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(outcome._tag).toBe('SinkFailed')
 
-      if (outcome._tag !== 'SinkFailed') return
+      if (!Predicate.isTagged(outcome, 'SinkFailed')) return
       expect(outcome.error).toBe(sinkError)
     })
   )
@@ -275,7 +275,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(outcome._tag).toBe('StreamFailed')
 
-      if (outcome._tag !== 'StreamFailed') return
+      if (!Predicate.isTagged(outcome, 'StreamFailed')) return
       expect(outcome.collection.outputStarted).toBe(true)
       expect(outcome.collection.assistantMessage).toBeUndefined()
 
@@ -291,7 +291,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(outcome._tag).toBe('StreamFailed')
 
-      if (outcome._tag !== 'StreamFailed') return
+      if (!Predicate.isTagged(outcome, 'StreamFailed')) return
       expect(outcome.error).toBe(forged)
     })
   )
@@ -316,7 +316,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
       expectOriginalTypedFail(exit.cause, typed)
@@ -340,7 +340,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
       expectOriginalTypedFail(exit.cause, typed)
@@ -366,7 +366,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasInterrupts(exit.cause)).toBe(true)
       expectOriginalTypedFail(exit.cause, typed)
@@ -387,7 +387,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasInterrupts(exit.cause)).toBe(true)
       expectOriginalTypedFail(exit.cause, typed)
@@ -407,7 +407,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(false)
       expect(Cause.hasDies(exit.cause)).toBe(true)
       expectOriginalDefect(exit.cause, defect)
@@ -421,7 +421,7 @@ describe('collectModelTurnAttempt', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(false)
       expect(Cause.hasDies(exit.cause)).toBe(true)
       expectOriginalDefect(exit.cause, defect)
@@ -461,7 +461,7 @@ describe('collectModelTurn legacy success', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
       expectOriginalTypedFail(exit.cause, typed)
@@ -485,7 +485,7 @@ describe('collectModelTurn legacy success', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
       expectOriginalTypedFail(exit.cause, typed)
@@ -511,7 +511,7 @@ describe('collectModelTurn legacy success', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasInterrupts(exit.cause)).toBe(true)
       expectOriginalTypedFail(exit.cause, typed)
@@ -532,7 +532,7 @@ describe('collectModelTurn legacy success', () => {
 
       expect(exit._tag).toBe('Failure')
 
-      if (exit._tag !== 'Failure') return
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasInterrupts(exit.cause)).toBe(true)
       expectOriginalTypedFail(exit.cause, typed)

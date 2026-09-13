@@ -15,6 +15,7 @@ import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
 import * as Namespace from 'alchemy/Namespace'
 import * as Effect from 'effect/Effect'
+import * as Predicate from 'effect/Predicate'
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url))
 
@@ -25,7 +26,7 @@ const alchemyRoot = fileURLToPath(new URL('..', import.meta.resolve('alchemy')))
 const failures: string[] = []
 
 const expectFunction = (name: string, value: unknown) => {
-  if (typeof value !== 'function') {
+  if (!Predicate.isFunction(value)) {
     failures.push(`${name} is ${typeof value}, expected function`)
   }
 }
@@ -48,11 +49,11 @@ if (Namespace.CurrentNamespace === undefined) {
 
 const namespaceOption = Effect.serviceOption(Namespace.Namespace)
 
-if (typeof namespaceOption.pipe !== 'function') {
+if (!Predicate.isFunction(namespaceOption.pipe)) {
   failures.push('Effect.serviceOption(Namespace) is not a pipeable Effect')
 }
 
-if (typeof Reflect.get(namespaceOption, 'asEffect') === 'function') {
+if (Predicate.isFunction(Reflect.get(namespaceOption, 'asEffect'))) {
   failures.push(
     'Effect.serviceOption(Namespace).asEffect still exists; catalog Effect is too old for this Alchemy'
   )

@@ -33,12 +33,32 @@ const mapUpdateError = (error: unknown) => {
   })
 }
 
-const documentPatch = (fields: UpdateKnowledgeDocumentFields) => ({
-  updatedAt: sql`CURRENT_TIMESTAMP`,
-  ...(fields.title !== undefined ? { title: fields.title } : {}),
-  ...(fields.summary !== undefined ? { summary: fields.summary } : {}),
-  ...(fields.metadata !== undefined ? { metadata: fields.metadata } : {})
-})
+type KnowledgeDocumentPatch = {
+  updatedAt: ReturnType<typeof sql>
+  title?: string | null
+  summary?: string | null
+  metadata?: UpdateKnowledgeDocumentFields['metadata']
+}
+
+const documentPatch = (fields: UpdateKnowledgeDocumentFields) => {
+  const patch: KnowledgeDocumentPatch = {
+    updatedAt: sql`CURRENT_TIMESTAMP`
+  }
+
+  if (fields.title !== undefined) {
+    patch.title = fields.title
+  }
+
+  if (fields.summary !== undefined) {
+    patch.summary = fields.summary
+  }
+
+  if (fields.metadata !== undefined) {
+    patch.metadata = fields.metadata
+  }
+
+  return patch
+}
 
 export const updateKnowledgeDocument = (input: UpdateKnowledgeDocumentInput) =>
   Effect.gen(function* () {

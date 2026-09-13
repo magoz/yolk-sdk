@@ -291,16 +291,16 @@ const dropboxErrorDetail = (body: string) =>
       if (parsed === undefined) return undefined
       const summary = parsed.error_summary
 
-      if (typeof summary === 'string' && summary.trim() !== '') return summary
+      if (Predicate.isString(summary) && summary.trim() !== '') return summary
       const description = parsed.error_description
 
-      if (typeof description === 'string' && description.trim() !== '') return description
+      if (Predicate.isString(description) && description.trim() !== '') return description
       const userMessage = parsed.user_message
 
       if (!isJsonObject(userMessage)) return undefined
       const text = userMessage.text
 
-      return typeof text === 'string' && text.trim() !== '' ? text : undefined
+      return Predicate.isString(text) && text.trim() !== '' ? text : undefined
     })
   )
 
@@ -335,6 +335,14 @@ const retryAfterMs = (response: ConnectorHttpResponse) => {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined
 }
 
+type DropboxProviderFailureFields = {
+  readonly code: string
+  readonly message: string
+  readonly status: number
+  readonly underlying: string
+  retryAfterMs?: number
+}
+
 const dropboxProviderFailure = (input: {
   readonly code: string
   readonly message: string
@@ -345,13 +353,22 @@ const dropboxProviderFailure = (input: {
       const retry = retryAfterMs(input.response)
 
       return ActionResult.failure(
-        new ProviderFailure({
-          code: providerCode(input.code, input.response.status, detail),
-          message: detail === undefined ? input.message : `${input.message}: ${detail}`,
-          status: input.response.status,
-          underlying: input.response.body,
-          ...(retry === undefined ? {} : { retryAfterMs: retry })
-        })
+        new ProviderFailure(
+          (() => {
+            const fields: DropboxProviderFailureFields = {
+              code: providerCode(input.code, input.response.status, detail),
+              message: detail === undefined ? input.message : `${input.message}: ${detail}`,
+              status: input.response.status,
+              underlying: input.response.body
+            }
+
+            if (retry !== undefined) {
+              fields.retryAfterMs = retry
+            }
+
+            return fields
+          })()
+        )
       )
     })
   )

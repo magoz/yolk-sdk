@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Layer, Option, Predicate, Ref, Stream } from 'effect'
+import { Array as Arr, Effect, Layer, Match, Option, Predicate, Ref, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -264,25 +264,23 @@ const contentPartToText = (
   part: ContentPart,
   owner: string,
   providerName: string
-): Effect.Effect<string, LLMError> => {
-  switch (part._tag) {
-    case 'Text':
-      return Effect.succeed(part.text)
-    case 'Image':
-      return Effect.fail(unsupportedContentError(`${owner} image`, providerName))
-    case 'Document':
-      return Effect.fail(unsupportedContentError(`${owner} document`, providerName))
-    case 'Audio':
-      return Effect.fail(unsupportedContentError(`${owner} audio`, providerName))
-  }
-}
+): Effect.Effect<string, LLMError> =>
+  Match.value(part).pipe(
+    Match.tag('Text', current => Effect.succeed(current.text)),
+    Match.tag('Image', () => Effect.fail(unsupportedContentError(`${owner} image`, providerName))),
+    Match.tag('Document', () =>
+      Effect.fail(unsupportedContentError(`${owner} document`, providerName))
+    ),
+    Match.tag('Audio', () => Effect.fail(unsupportedContentError(`${owner} audio`, providerName))),
+    Match.exhaustive
+  )
 
 const contentToText = (
   content: Content,
   owner: string,
   providerName: string
 ): Effect.Effect<string, LLMError> =>
-  typeof content === 'string'
+  Predicate.isString(content)
     ? Effect.succeed(content)
     : Effect.forEach(content, part => contentPartToText(part, owner, providerName)).pipe(
         Effect.map(textParts => textParts.join('\n'))
@@ -294,12 +292,17 @@ const contentPartToResponsesInputPart = (
 ): Effect.Effect<
   OpenAiResponsesInputTextPart | OpenAiResponsesInputImagePart | OpenAiResponsesInputFilePart,
   LLMError
-> => {
-  switch (part._tag) {
-    case 'Text':
-      return Effect.succeed({ type: 'input_text', text: part.text })
-    case 'Image':
-      return Option.match(attachmentSourceUrl(part.source, part.mimeType), {
+> =>
+  Match.value(part).pipe(
+    Match.withReturnType<
+      Effect.Effect<
+        OpenAiResponsesInputTextPart | OpenAiResponsesInputImagePart | OpenAiResponsesInputFilePart,
+        LLMError
+      >
+    >(),
+    Match.tag('Text', current => Effect.succeed({ type: 'input_text', text: current.text })),
+    Match.tag('Image', current =>
+      Option.match(attachmentSourceUrl(current.source, current.mimeType), {
         onNone: () => Effect.fail(unsupportedContentError('Unresolved image source', providerName)),
         onSome: url =>
           Effect.succeed({
@@ -307,35 +310,45 @@ const contentPartToResponsesInputPart = (
             image_url: url
           })
       })
-    case 'Document':
-      switch (part.source._tag) {
-        case 'InlineBase64':
-          return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
+    ),
+    Match.tag('Document', current =>
+      Match.value(current.source).pipe(
+        Match.withReturnType<
+          Effect.Effect<
+            | OpenAiResponsesInputTextPart
+            | OpenAiResponsesInputImagePart
+            | OpenAiResponsesInputFilePart,
+            LLMError
+          >
+        >(),
+        Match.tag('InlineBase64', source =>
+          Option.match(attachmentSourceDataUrl(source, current.mimeType), {
             onNone: () =>
               Effect.fail(unsupportedContentError('Invalid document source', providerName)),
             onSome: url =>
               Effect.succeed({
                 type: 'input_file',
-                filename: part.filename,
+                filename: current.filename,
                 file_data: url
               })
           })
-        case 'Url':
-          return Effect.succeed({ type: 'input_file', file_url: part.source.url })
-        case 'Ref':
-          return Effect.fail(unsupportedContentError('Unresolved document source', providerName))
-      }
-
-    case 'Audio':
-      return Effect.fail(unsupportedContentError('Audio', providerName))
-  }
-}
+        ),
+        Match.tag('Url', source => Effect.succeed({ type: 'input_file', file_url: source.url })),
+        Match.tag('Ref', () =>
+          Effect.fail(unsupportedContentError('Unresolved document source', providerName))
+        ),
+        Match.exhaustive
+      )
+    ),
+    Match.tag('Audio', () => Effect.fail(unsupportedContentError('Audio', providerName))),
+    Match.exhaustive
+  )
 
 const contentToUserInput = (
   content: Content,
   providerName: string
 ): Effect.Effect<OpenAiResponsesMessageInput['content'], LLMError> => {
-  if (typeof content === 'string') {
+  if (Predicate.isString(content)) {
     return Effect.succeed(content)
   }
 
@@ -353,7 +366,7 @@ const contentToResponsesFunctionOutput = (
   content: Content,
   providerName: string
 ): Effect.Effect<OpenAiResponsesFunctionOutput, LLMError> =>
-  typeof content === 'string'
+  Predicate.isString(content)
     ? Effect.succeed(content)
     : Effect.forEach(content, part => contentPartToResponsesInputPart(part, providerName))
 
@@ -371,7 +384,7 @@ const responsesToolResultOutput = (
         text: 'Tool execution failed.'
       }
 
-      return typeof output === 'string' ? `${errorPart.text}\n\n${output}` : [errorPart, ...output]
+      return Predicate.isString(output) ? `${errorPart.text}\n\n${output}` : [errorPart, ...output]
     })
   )
 
@@ -394,27 +407,24 @@ const messageToResponsesInput = (
   message: AgentMessage,
   providerName: string
 ): Effect.Effect<ReadonlyArray<OpenAiResponsesInputItem>, LLMError> =>
-  Effect.gen(function* () {
-    switch (message._tag) {
-      case 'User':
-        return [
-          {
-            role: 'user',
-            content: yield* contentToUserInput(
-              prependMessageContextToContent(message.content, messageContextText(message)),
-              providerName
-            )
-          }
-        ]
-      case 'Assistant': {
+  Match.value(message).pipe(
+    Match.withReturnType<Effect.Effect<ReadonlyArray<OpenAiResponsesInputItem>, LLMError>>(),
+    Match.tag('User', current =>
+      contentToUserInput(
+        prependMessageContextToContent(current.content, messageContextText(current)),
+        providerName
+      ).pipe(Effect.map(content => [{ role: 'user' as const, content }]))
+    ),
+    Match.tag('Assistant', current =>
+      Effect.gen(function* () {
         const content = yield* contentToText(
-          prependMessageContextToContent(assistantContent(message), messageContextText(message)),
+          prependMessageContextToContent(assistantContent(current), messageContextText(current)),
           'Assistant',
           providerName
         )
 
         const toolCallInputs = yield* Effect.forEach(
-          assistantHostToolCalls(message),
+          assistantHostToolCalls(current),
           toolCallToResponsesInput
         )
 
@@ -425,22 +435,25 @@ const messageToResponsesInput = (
         }
 
         return toolCallInputs
-      }
-
-      case 'ToolResult':
-        return [
+      })
+    ),
+    Match.tag('ToolResult', current =>
+      responsesToolResultOutput(
+        prependMessageContextToContent(current.content, messageContextText(current)),
+        current.isError,
+        providerName
+      ).pipe(
+        Effect.map(output => [
           {
-            type: 'function_call_output',
-            call_id: message.toolCallId,
-            output: yield* responsesToolResultOutput(
-              prependMessageContextToContent(message.content, messageContextText(message)),
-              message.isError,
-              providerName
-            )
+            type: 'function_call_output' as const,
+            call_id: current.toolCallId,
+            output
           }
-        ]
-    }
-  })
+        ])
+      )
+    ),
+    Match.exhaustive
+  )
 
 const toOpenAiResponsesTool = (tool: ToolDef): OpenAiResponsesTool => ({
   type: 'function',
@@ -495,16 +508,30 @@ export const toOpenAiResponsesRequestBody = (
           }
         : undefined
 
-    const body: Omit<OpenAiResponsesRequestBody, 'tools'> = {
+    type OpenAiResponsesRequestBodyFields = {
+      model: string
+      instructions: string
+      input: ReadonlyArray<OpenAiResponsesInputItem>
+      store: false
+      stream: true
+      max_output_tokens?: number
+      reasoning?: OpenAiResponsesRequestBody['reasoning']
+    }
+
+    const body: OpenAiResponsesRequestBodyFields = {
       model: request.model,
       instructions: request.systemPrompt,
       input,
       store: false,
-      stream: true,
-      ...(config.maxOutputTokens === undefined
-        ? {}
-        : { max_output_tokens: config.maxOutputTokens }),
-      ...(reasoning === undefined ? {} : { reasoning })
+      stream: true
+    }
+
+    if (config.maxOutputTokens !== undefined) {
+      body.max_output_tokens = config.maxOutputTokens
+    }
+
+    if (reasoning !== undefined) {
+      body.reasoning = reasoning
     }
 
     if (request.tools.length === 0) {
@@ -546,7 +573,7 @@ export const toOpenAiResponsesRequestBodyWithReasoning = (
   )
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null
+  Predicate.isObjectOrArray(value) && value !== null
 
 const stringField = (value: unknown, key: string) => {
   if (!isRecord(value)) {
@@ -555,7 +582,7 @@ const stringField = (value: unknown, key: string) => {
 
   const field = Object.getOwnPropertyDescriptor(value, key)?.value
 
-  return typeof field === 'string' ? field : undefined
+  return Predicate.isString(field) ? field : undefined
 }
 
 const recordField = (value: unknown, key: string) => {
@@ -574,13 +601,41 @@ type OpenAiResponsesProviderDescriptor = {
   readonly allowEofCompletion: boolean
 }
 
+type OpenAiResponsesLlmErrorFields = {
+  cause: LLMError['cause']
+  message: string
+  retryable: boolean
+  provider?: LLMError['provider']
+}
+
 export const withOpenAiResponsesProviderName = (providerName: string, error: LLMError) =>
-  new LLMError({
-    cause: error.cause,
-    message: error.message.replaceAll('OpenAI Responses', providerName),
-    retryable: error.retryable,
-    ...(error.provider === undefined ? {} : { provider: error.provider })
-  })
+  new LLMError(
+    (() => {
+      const fields: OpenAiResponsesLlmErrorFields = {
+        cause: error.cause,
+        message: error.message.replaceAll('OpenAI Responses', providerName),
+        retryable: error.retryable
+      }
+
+      if (error.provider !== undefined) {
+        fields.provider = error.provider
+      }
+
+      return fields
+    })()
+  )
+
+type OpenAiResponsesClassifyFields = {
+  provider: string
+  message: string
+  providerCode?: string
+  fallbackKind?: ProviderFailureKind
+}
+
+type OpenAiResponsesSignalInputFields = {
+  message: string
+  providerCode?: string
+}
 
 const providerSignalError = (
   descriptor: OpenAiResponsesProviderDescriptor,
@@ -590,12 +645,24 @@ const providerSignalError = (
     readonly fallbackKind?: ProviderFailureKind
   }
 ) => {
-  const provider = classifyProviderFailure({
-    provider: descriptor.providerId,
-    message: input.message,
-    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
-    ...(input.fallbackKind === undefined ? {} : { fallbackKind: input.fallbackKind })
-  })
+  const provider = classifyProviderFailure(
+    (() => {
+      const fields: OpenAiResponsesClassifyFields = {
+        provider: descriptor.providerId,
+        message: input.message
+      }
+
+      if (input.providerCode !== undefined) {
+        fields.providerCode = input.providerCode
+      }
+
+      if (input.fallbackKind !== undefined) {
+        fields.fallbackKind = input.fallbackKind
+      }
+
+      return fields
+    })()
+  )
 
   return new LLMError({
     cause: providerFailureCause(provider.kind),
@@ -745,24 +812,22 @@ const toLlmEvents = (
     return events
   })
 
-const decodeOpenAiResponsesResponse = (json: unknown) =>
-  Schema.decodeUnknownEffect(OpenAiResponsesResponse)(json).pipe(
-    Effect.mapError(
-      error =>
-        new LLMError({
-          cause: 'invalid_response',
-          message: `Invalid OpenAI Responses response: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    )
-  )
-
 const parseOpenAiResponsesJsonResponse = (
   raw: string
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const json = yield* decodeJsonString(raw, 'Could not parse OpenAI Responses response JSON')
-    const parsed = yield* decodeOpenAiResponsesResponse(json)
+
+    const parsed = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(json).pipe(
+      Effect.mapError(
+        error =>
+          new LLMError({
+            cause: 'invalid_response',
+            message: `Invalid OpenAI Responses response: ${unknownToMessage(error)}`,
+            retryable: false
+          })
+      )
+    )
 
     return yield* toLlmEvents(parsed, { allowEmptyStop: false })
   })
@@ -867,18 +932,6 @@ const dataFromSseBlock = (block: string) => {
 const parseOpenAiResponsesSseJson = (data: string) =>
   decodeJsonString(data, 'Could not parse OpenAI Responses stream event JSON')
 
-const decodeOpenAiResponsesOutputItem = (value: unknown) =>
-  Schema.decodeUnknownEffect(OpenAiResponsesOutputItem)(value).pipe(
-    Effect.mapError(
-      error =>
-        new LLMError({
-          cause: 'invalid_response',
-          message: `Invalid OpenAI Responses output item: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    )
-  )
-
 const invalidFunctionCallSseItemError = () =>
   new LLMError({
     cause: 'invalid_response',
@@ -919,23 +972,6 @@ const eventsFromOutputItem = (
   }
 }
 
-const eventsFromOutputItemDone = (
-  event: Record<string, unknown>
-): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
-  Effect.gen(function* () {
-    if (event.type !== 'response.output_item.done') {
-      return []
-    }
-
-    const item = event.item
-
-    if (item === undefined) {
-      return yield* Effect.fail(invalidFunctionCallSseItemError())
-    }
-
-    return yield* decodeOpenAiResponsesOutputItem(item).pipe(Effect.flatMap(eventsFromOutputItem))
-  })
-
 const responseWithoutReplayedToolCalls = (
   response: OpenAiResponsesResponse,
   emittedCallIds: ReadonlySet<string>
@@ -947,13 +983,11 @@ const responseWithoutReplayedToolCalls = (
 })
 
 const finalResponseToEvents = (
-  response: unknown,
-  state: OpenAiResponsesSseState
+  parsedFinal: OpenAiResponsesResponse,
+  state: OpenAiResponsesSseState,
+  hasToolCalls: boolean
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const hasToolCalls = state.toolCallIds.size > 0
-    const parsedFinal = yield* decodeOpenAiResponsesResponse(response)
-
     const finalEvents = yield* toLlmEvents(
       responseWithoutReplayedToolCalls(parsedFinal, state.toolCallIds),
       { allowEmptyStop: state.hasTextDelta || hasToolCalls }
@@ -972,7 +1006,7 @@ const finalResponseToEvents = (
   })
 
 const reasoningSummaryPartKey = (event: Record<string, unknown>) => {
-  if (typeof event.item_id !== 'string' || typeof event.summary_index !== 'number') {
+  if (!Predicate.isString(event.item_id) || !Predicate.isNumber(event.summary_index)) {
     return undefined
   }
 
@@ -998,7 +1032,7 @@ const processSseData = (
     if (
       (parsed.type === 'response.output_text.delta' ||
         parsed.type === 'response.content_part.delta') &&
-      typeof parsed.delta === 'string'
+      Predicate.isString(parsed.delta)
     ) {
       return {
         state: { ...state, hasTextDelta: true },
@@ -1008,7 +1042,7 @@ const processSseData = (
 
     if (
       parsed.type === 'response.reasoning_summary_text.delta' &&
-      typeof parsed.delta === 'string'
+      Predicate.isString(parsed.delta)
     ) {
       const partKey = reasoningSummaryPartKey(parsed)
 
@@ -1027,14 +1061,36 @@ const processSseData = (
       }
     }
 
-    if (parsed.type === 'response.reasoning_text.delta' && typeof parsed.delta === 'string') {
+    if (parsed.type === 'response.reasoning_text.delta' && Predicate.isString(parsed.delta)) {
       return {
         state: { ...state, hasReasoningDelta: true },
         events: [LLMReasoningDelta.make({ text: parsed.delta })]
       }
     }
 
-    const outputItemDoneEvents = yield* eventsFromOutputItemDone(parsed)
+    const outputItemDoneEvents = yield* Effect.gen(function* () {
+      if (parsed.type !== 'response.output_item.done') {
+        return []
+      }
+
+      const item = parsed.item
+
+      if (item === undefined) {
+        return yield* Effect.fail(invalidFunctionCallSseItemError())
+      }
+
+      return yield* Schema.decodeUnknownEffect(OpenAiResponsesOutputItem)(item).pipe(
+        Effect.mapError(
+          error =>
+            new LLMError({
+              cause: 'invalid_response',
+              message: `Invalid OpenAI Responses output item: ${unknownToMessage(error)}`,
+              retryable: false
+            })
+        ),
+        Effect.flatMap(eventsFromOutputItem)
+      )
+    })
 
     if (outputItemDoneEvents.length > 0) {
       const events = dedupeSseEvents(state, outputItemDoneEvents)
@@ -1060,7 +1116,23 @@ const processSseData = (
         return { state, events: [] }
       }
 
-      const events = yield* finalResponseToEvents(parsed.response, state)
+      const responseInput = parsed.response
+      const hasToolCalls = state.toolCallIds.size > 0
+
+      const parsedFinal = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(
+        responseInput
+      ).pipe(
+        Effect.mapError(
+          error =>
+            new LLMError({
+              cause: 'invalid_response',
+              message: `Invalid OpenAI Responses response: ${unknownToMessage(error)}`,
+              retryable: false
+            })
+        )
+      )
+
+      const events = yield* finalResponseToEvents(parsedFinal, state, hasToolCalls)
       const emittedText = events.some(event => Predicate.isTagged(event, 'TextDelta'))
       const emittedReasoning = events.some(event => Predicate.isTagged(event, 'ReasoningDelta'))
       const emittedToolCallIds = toolCallIdsFromEvents(events)
@@ -1083,10 +1155,18 @@ const processSseData = (
       const providerCode = stringField(error, 'code') ?? stringField(error, 'type')
 
       return yield* Effect.fail(
-        providerSignalError(descriptor, {
-          message,
-          ...(providerCode === undefined ? {} : { providerCode })
-        })
+        providerSignalError(
+          descriptor,
+          (() => {
+            const fields: OpenAiResponsesSignalInputFields = { message }
+
+            if (providerCode !== undefined) {
+              fields.providerCode = providerCode
+            }
+
+            return fields
+          })()
+        )
       )
     }
 
@@ -1103,14 +1183,24 @@ const processSseData = (
       )
     }
 
-    if (parsed.type === 'error' && typeof parsed.message === 'string') {
+    if (parsed.type === 'error' && Predicate.isString(parsed.message)) {
       const providerCode = stringField(parsed, 'code') ?? stringField(parsed, 'type')
 
       return yield* Effect.fail(
-        providerSignalError(descriptor, {
-          message: parsed.message,
-          ...(providerCode === undefined ? {} : { providerCode })
-        })
+        providerSignalError(
+          descriptor,
+          (() => {
+            const fields: OpenAiResponsesSignalInputFields = {
+              message: parsed.message
+            }
+
+            if (providerCode !== undefined) {
+              fields.providerCode = providerCode
+            }
+
+            return fields
+          })()
+        )
       )
     }
 

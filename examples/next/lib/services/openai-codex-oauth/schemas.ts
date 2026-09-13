@@ -35,3 +35,7 @@ export const OpenAiCodexDeviceAuthTokenResponseSchema = Schema.Struct({
 
 export type OpenAiCodexDeviceAuthTokenResponse =
   typeof OpenAiCodexDeviceAuthTokenResponseSchema.Type
+
+export type OpenAiCodexJsonRequestBody =
+  | { readonly client_id: string }
+  | { readonly device_auth_id: string; readonly user_code: string }

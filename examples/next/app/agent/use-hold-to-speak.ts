@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Effect, Option, Predicate } from 'effect'
+import { Data, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -39,6 +39,8 @@ type SpeechRequestOutcome =
       readonly _tag: 'Failure'
       readonly error: unknown
     }
+
+const SpeechRequestOutcome = Data.taggedEnum<SpeechRequestOutcome>()
 
 type PlaybackCancel = {
   cancel: () => void
@@ -136,15 +138,11 @@ const requestSpeech = (text: string): Effect.Effect<SpeechAudio, HoldToSpeakErro
     return { audio, contentType }
   }).pipe(Effect.provide(FetchHttpClient.layer))
 
-const speechRequestSuccess = (speech: SpeechAudio): SpeechRequestOutcome => ({
-  _tag: 'Success',
-  speech
-})
+const speechRequestSuccess = (speech: SpeechAudio): SpeechRequestOutcome =>
+  SpeechRequestOutcome.Success({ speech })
 
-const speechRequestFailure = (error: unknown): SpeechRequestOutcome => ({
-  _tag: 'Failure',
-  error
-})
+const speechRequestFailure = (error: unknown): SpeechRequestOutcome =>
+  SpeechRequestOutcome.Failure({ error })
 
 const requestSpeechOutcome = (text: string): Promise<SpeechRequestOutcome> =>
   Effect.runPromise(requestSpeech(text)).then(speechRequestSuccess, speechRequestFailure)

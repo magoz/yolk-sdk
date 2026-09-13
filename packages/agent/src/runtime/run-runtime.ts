@@ -1,4 +1,4 @@
-import { Effect, Match, Predicate, Ref, Stream } from 'effect'
+import { Data, Effect, Match, Predicate, Ref, Stream } from 'effect'
 import type {
   AgentEvent,
   AgentMessage,
@@ -44,32 +44,35 @@ export type RuntimeConfig = {
   readonly capabilities?: AgentModelCapabilities
 }
 
-export type TranscriptRuntimeRequest = {
-  readonly _tag: 'Transcript'
-  readonly sessionId: string
-  readonly messages: RuntimeTranscript
-}
+export type RuntimeRequest = Data.TaggedEnum<{
+  readonly Transcript: {
+    readonly sessionId: string
+    readonly messages: RuntimeTranscript
+  }
+  readonly AppendInput: {
+    readonly sessionId: string
+    readonly input: AgentMessage
+    readonly runId: string
+    readonly expectedRevision?: SessionRevision
+  }
+  readonly AppendHitlResponse: {
+    readonly sessionId: string
+    readonly response: HitlResponse
+    readonly runId: string
+    readonly expectedRevision?: SessionRevision
+  }
+}>
 
-export type AppendInputRuntimeRequest = {
-  readonly _tag: 'AppendInput'
-  readonly sessionId: string
-  readonly input: AgentMessage
-  readonly runId: string
-  readonly expectedRevision?: SessionRevision
-}
+export const RuntimeRequest = Data.taggedEnum<RuntimeRequest>()
 
-export type AppendHitlResponseRuntimeRequest = {
-  readonly _tag: 'AppendHitlResponse'
-  readonly sessionId: string
-  readonly response: HitlResponse
-  readonly runId: string
-  readonly expectedRevision?: SessionRevision
-}
+export type TranscriptRuntimeRequest = Extract<RuntimeRequest, { readonly _tag: 'Transcript' }>
 
-export type RuntimeRequest =
-  | TranscriptRuntimeRequest
-  | AppendInputRuntimeRequest
-  | AppendHitlResponseRuntimeRequest
+export type AppendInputRuntimeRequest = Extract<RuntimeRequest, { readonly _tag: 'AppendInput' }>
+
+export type AppendHitlResponseRuntimeRequest = Extract<
+  RuntimeRequest,
+  { readonly _tag: 'AppendHitlResponse' }
+>
 
 type LoopRequirements = ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
 

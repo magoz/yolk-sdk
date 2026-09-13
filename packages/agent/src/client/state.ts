@@ -11,7 +11,8 @@ import {
   type ToolResult,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
-import { Predicate } from 'effect'
+import { Data, Match, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 
 export type AgentRunStatus = 'idle' | 'running' | 'waiting' | 'done' | 'error' | 'aborted'
 
@@ -63,6 +64,8 @@ export type AgentToolRun =
     }
   | { readonly _tag: 'ProviderCompleted'; readonly call: ToolCall; readonly result: ToolResult }
 
+export const AgentToolRun = Data.taggedEnum<AgentToolRun>()
+
 type StartedAgentToolRun = Extract<
   AgentToolRun,
   { readonly _tag: 'Executing' | 'Accepted' | 'Completed' }
@@ -84,6 +87,17 @@ export type AgentClientState = {
 export type ApplyAgentEventOptions = {
   readonly nowMs?: number
 }
+
+const AgentToolRunInputStreaming = Schema.TaggedStruct('InputStreaming', {
+  id: Schema.String,
+  name: Schema.UndefinedOr(Schema.String),
+  input: Schema.String
+})
+
+const AgentToolRunDenied = Schema.TaggedStruct('Denied', {
+  toolCallId: Schema.String,
+  reason: Schema.String
+})
 
 export type AgentTranscript = readonly [AgentMessage, ...Array<AgentMessage>]
 
@@ -111,27 +125,24 @@ const rememberEvent = (state: AgentClientState, event: AgentEvent): AgentClientS
     ? state
     : { ...state, seenEventIds: [...state.seenEventIds, event.eventId] }
 
-const toolRunId = (run: AgentToolRun) => {
-  switch (run._tag) {
-    case 'InputStreaming':
-      return run.id
-    case 'Denied':
-      return run.toolCallId
-    case 'QuestionRequested':
-      return run.request.toolCallId
-    case 'QuestionAnswered':
-    case 'QuestionCancelled':
-      return run.response.toolCallId
-    case 'InputReady':
-    case 'ApprovalRequested':
-    case 'Executing':
-    case 'Accepted':
-    case 'Completed':
-    case 'Errored':
-    case 'ProviderCompleted':
-      return run.call.id
-  }
-}
+const toolRunId = (run: AgentToolRun) =>
+  Match.value(run).pipe(
+    Match.tag('InputStreaming', current => current.id),
+    Match.tag('Denied', current => current.toolCallId),
+    Match.tag('QuestionRequested', current => current.request.toolCallId),
+    Match.tag('QuestionAnswered', 'QuestionCancelled', current => current.response.toolCallId),
+    Match.tag(
+      'InputReady',
+      'ApprovalRequested',
+      'Executing',
+      'Accepted',
+      'Completed',
+      'Errored',
+      'ProviderCompleted',
+      current => current.call.id
+    ),
+    Match.exhaustive
+  )
 
 export const isActiveToolRun = (run: AgentToolRun) =>
   !Predicate.isTagged(run, 'Accepted') &&
@@ -152,14 +163,18 @@ const retainedSettledToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
 export const toolRunsFromHitlRequests = (
   requests: ReadonlyArray<HitlRequest>
 ): ReadonlyArray<AgentToolRun> =>
-  requests.map(request => {
-    switch (request._tag) {
-      case 'QuestionRequest':
-        return { _tag: 'QuestionRequested', request }
-      case 'ToolApprovalRequest':
-        return { _tag: 'ApprovalRequested', call: request.call, request }
-    }
-  })
+  requests.map(request =>
+    Match.value(request).pipe(
+      Match.tag('QuestionRequest', current => AgentToolRun.QuestionRequested({ request: current })),
+      Match.tag('ToolApprovalRequest', current =>
+        AgentToolRun.ApprovalRequested({
+          call: current.call,
+          request: current
+        })
+      ),
+      Match.exhaustive
+    )
+  )
 
 const replaceToolRun = (
   runs: ReadonlyArray<AgentToolRun>,
@@ -212,23 +227,25 @@ const questionRequestForToolCall = (
       return []
     }
 
-    switch (run._tag) {
-      case 'QuestionRequested':
-        return [run.request]
-      case 'QuestionAnswered':
-      case 'QuestionCancelled':
-        return run.request === undefined ? [] : [run.request]
-      case 'InputStreaming':
-      case 'InputReady':
-      case 'ApprovalRequested':
-      case 'Denied':
-      case 'Executing':
-      case 'Accepted':
-      case 'Completed':
-      case 'Errored':
-      case 'ProviderCompleted':
-        return []
-    }
+    return Match.value(run).pipe(
+      Match.tag('QuestionRequested', current => [current.request]),
+      Match.tag('QuestionAnswered', 'QuestionCancelled', current =>
+        current.request === undefined ? [] : [current.request]
+      ),
+      Match.tag(
+        'InputStreaming',
+        'InputReady',
+        'ApprovalRequested',
+        'Denied',
+        'Executing',
+        'Accepted',
+        'Completed',
+        'Errored',
+        'ProviderCompleted',
+        () => []
+      ),
+      Match.exhaustive
+    )
   })[0]
 
 const questionAnsweredRun = (
@@ -236,16 +253,16 @@ const questionAnsweredRun = (
   request: QuestionRequest | undefined
 ): AgentToolRun =>
   request === undefined
-    ? { _tag: 'QuestionAnswered', response }
-    : { _tag: 'QuestionAnswered', response, request }
+    ? AgentToolRun.QuestionAnswered({ response })
+    : AgentToolRun.QuestionAnswered({ response, request })
 
 const questionCancelledRun = (
   response: QuestionResponse,
   request: QuestionRequest | undefined
 ): AgentToolRun =>
   request === undefined
-    ? { _tag: 'QuestionCancelled', response }
-    : { _tag: 'QuestionCancelled', response, request }
+    ? AgentToolRun.QuestionCancelled({ response })
+    : AgentToolRun.QuestionCancelled({ response, request })
 
 export const appendAgentMessage = (
   messages: ReadonlyArray<AgentMessage>,
@@ -280,21 +297,18 @@ export const applyAgentEventWithOptions = (
   return rememberEvent(applyAgentEventUnchecked(state, event, nowMs), event)
 }
 
-const activeEventToolCallId = (event: AgentEvent): string | undefined => {
-  switch (event._tag) {
-    case 'ToolInputStart':
-    case 'ToolInputDelta':
-      return event.id
-    case 'ToolInputEnd':
-    case 'ToolExecutionStarted':
-    case 'ToolApprovalRequested':
-      return event.call.id
-    case 'QuestionRequested':
-      return event.request.toolCallId
-    default:
-      return undefined
-  }
-}
+const activeEventToolCallId = (event: AgentEvent): string | undefined =>
+  Match.value(event).pipe(
+    Match.tag('ToolInputStart', 'ToolInputDelta', current => current.id),
+    Match.tag(
+      'ToolInputEnd',
+      'ToolExecutionStarted',
+      'ToolApprovalRequested',
+      current => current.call.id
+    ),
+    Match.tag('QuestionRequested', current => current.request.toolCallId),
+    Match.orElse(() => undefined)
+  )
 
 const applyAgentEventUnchecked = (
   state: AgentClientState,
@@ -321,9 +335,10 @@ const applyAgentEventUnchecked = (
     }
   }
 
-  switch (event._tag) {
-    case 'AgentStart':
-      return {
+  return Match.value(event)
+    .pipe(
+      Match.withReturnType<AgentClientState>(),
+      Match.tag('AgentStart', () => ({
         ...state,
         status: 'running',
         text: '',
@@ -333,172 +348,177 @@ const applyAgentEventUnchecked = (
         error: null,
         errorInfo: null,
         retryInfo: null
-      }
-    case 'AgentError':
-      return markAgentError(state, event.message, event)
-    case 'LLMTextDelta':
-      return clearRetryInfo({ ...state, text: `${state.text}${event.text}` })
-    case 'LLMReasoningDelta':
-      return clearRetryInfo({ ...state, reasoning: `${state.reasoning}${event.text}` })
-    case 'ToolInputStart':
-      return clearRetryInfo({
-        ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'InputStreaming',
-          id: event.id,
-          name: event.name,
-          input: ''
+      })),
+      Match.tag('AgentError', current => markAgentError(state, current.message, current)),
+      Match.tag('LLMTextDelta', current =>
+        clearRetryInfo({ ...state, text: `${state.text}${current.text}` })
+      ),
+      Match.tag('LLMReasoningDelta', current =>
+        clearRetryInfo({ ...state, reasoning: `${state.reasoning}${current.text}` })
+      ),
+      Match.tag('ToolInputStart', current =>
+        clearRetryInfo({
+          ...state,
+          toolRuns: replaceToolRun(
+            state.toolRuns,
+            AgentToolRunInputStreaming.make({ id: current.id, name: current.name, input: '' })
+          )
         })
-      })
-    case 'ToolInputDelta':
-      return clearRetryInfo({
-        ...state,
-        toolRuns: appendToolInputDelta(state.toolRuns, event.id, event.delta)
-      })
-    case 'ToolInputEnd':
-      return clearRetryInfo({
-        ...state,
-        toolRuns: replaceToolRun(state.toolRuns, { _tag: 'InputReady', call: event.call })
-      })
-    case 'ToolApprovalRequested':
-      return {
-        ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'ApprovalRequested',
-          call: event.call,
-          request: event.request
+      ),
+      Match.tag('ToolInputDelta', current =>
+        clearRetryInfo({
+          ...state,
+          toolRuns: appendToolInputDelta(state.toolRuns, current.id, current.delta)
         })
-      }
-    case 'ToolApprovalGranted':
-      return state
-    case 'ToolApprovalDenied':
-      return {
-        ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'Denied',
-          toolCallId: event.toolCallId,
-          reason: event.reason
+      ),
+      Match.tag('ToolInputEnd', current =>
+        clearRetryInfo({
+          ...state,
+          toolRuns: replaceToolRun(state.toolRuns, AgentToolRun.InputReady({ call: current.call }))
         })
-      }
-    case 'QuestionRequested':
-      return {
+      ),
+      Match.tag('ToolApprovalRequested', current => ({
         ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'QuestionRequested',
-          request: event.request
-        })
-      }
-    case 'QuestionAnswered':
-      return {
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRun.ApprovalRequested({
+            call: current.call,
+            request: current.request
+          })
+        )
+      })),
+      Match.tag('ToolApprovalGranted', () => state),
+      Match.tag('ToolApprovalDenied', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRunDenied.make({ toolCallId: current.toolCallId, reason: current.reason })
+        )
+      })),
+      Match.tag('QuestionRequested', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRun.QuestionRequested({ request: current.request })
+        )
+      }))
+    )
+    .pipe(
+      Match.tag('QuestionAnswered', current => ({
         ...state,
         toolRuns: replaceToolRun(
           state.toolRuns,
           questionAnsweredRun(
-            event.response,
-            questionRequestForToolCall(state.toolRuns, event.response.toolCallId)
+            current.response,
+            questionRequestForToolCall(state.toolRuns, current.response.toolCallId)
           )
         )
-      }
-    case 'QuestionCancelled':
-      return {
+      })),
+      Match.tag('QuestionCancelled', current => ({
         ...state,
         toolRuns: replaceToolRun(
           state.toolRuns,
           questionCancelledRun(
-            event.response,
-            questionRequestForToolCall(state.toolRuns, event.response.toolCallId)
+            current.response,
+            questionRequestForToolCall(state.toolRuns, current.response.toolCallId)
           )
         )
-      }
-    case 'ToolExecutionStarted':
-      return {
+      })),
+      Match.tag('ToolExecutionStarted', current => ({
         ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'Executing',
-          call: event.call,
-          startedAtMs: nowMs
-        })
-      }
-    case 'ToolExecutionAccepted':
-    case 'ToolExecutionCompleted': {
-      const endedAtMs = nowMs
-      const startedAtMs = startedAtMsFor(state.toolRuns, event.call.id) ?? endedAtMs
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRun.Executing({ call: current.call, startedAtMs: nowMs })
+        )
+      })),
+      Match.tag('ToolExecutionAccepted', 'ToolExecutionCompleted', current => {
+        const endedAtMs = nowMs
+        const startedAtMs = startedAtMsFor(state.toolRuns, current.call.id) ?? endedAtMs
 
-      return {
+        return {
+          ...state,
+          toolRuns: replaceToolRun(
+            state.toolRuns,
+            Predicate.isTagged(current, 'ToolExecutionAccepted')
+              ? AgentToolRun.Accepted({
+                  call: current.call,
+                  result: current.result,
+                  startedAtMs,
+                  endedAtMs
+                })
+              : AgentToolRun.Completed({
+                  call: current.call,
+                  result: current.result,
+                  startedAtMs,
+                  endedAtMs
+                })
+          )
+        }
+      }),
+      Match.tag('ToolExecutionError', current => ({
         ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: Predicate.isTagged(event, 'ToolExecutionAccepted') ? 'Accepted' : 'Completed',
-          call: event.call,
-          result: event.result,
-          startedAtMs,
-          endedAtMs
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRun.Errored({
+            call: current.call,
+            message: current.message,
+            endedAtMs: nowMs
+          })
+        )
+      })),
+      Match.tag('ProviderToolResult', current =>
+        clearRetryInfo({
+          ...state,
+          toolRuns: replaceToolRun(
+            state.toolRuns,
+            AgentToolRun.ProviderCompleted({ call: current.call, result: current.result })
+          )
         })
-      }
-    }
-
-    case 'ToolExecutionError':
-      return {
-        ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'Errored',
-          call: event.call,
-          message: event.message,
-          endedAtMs: nowMs
+      ),
+      Match.tag('UserMessage', 'AssistantMessage', current =>
+        clearRetryInfo({
+          ...state,
+          liveMessages: [...state.liveMessages, current.message],
+          text: '',
+          reasoning: ''
         })
-      }
-    case 'ProviderToolResult':
-      return clearRetryInfo({
-        ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'ProviderCompleted',
-          call: event.call,
-          result: event.result
-        })
-      })
-    case 'UserMessage':
-    case 'AssistantMessage':
-      return clearRetryInfo({
-        ...state,
-        liveMessages: [...state.liveMessages, event.message],
-        text: '',
-        reasoning: ''
-      })
-    case 'AgentEnd':
-      return {
+      ),
+      Match.tag('AgentEnd', current => ({
         ...state,
         status: 'done',
-        messages: [...state.messages, ...event.messages],
+        messages: [...state.messages, ...current.messages],
         liveMessages: [],
         text: '',
         reasoning: '',
         toolRuns: retainedSettledToolRuns(state.toolRuns),
         retryInfo: null
-      }
-    case 'AgentAwaitingInput':
-      return {
+      })),
+      Match.tag('AgentAwaitingInput', current => ({
         ...state,
         status: 'waiting',
-        messages: [...state.messages, ...event.messages],
+        messages: [...state.messages, ...current.messages],
         liveMessages: [],
         text: '',
         reasoning: '',
         error: null,
         errorInfo: null,
         retryInfo: null
-      }
-    case 'AgentRetry':
-      return { ...state, retryInfo: event }
-    case 'CompactionEnd':
-    case 'CompactionStart':
-    case 'LLMStreamEnd':
-    case 'LLMStreamStart':
-    case 'SubagentCompleted':
-    case 'SubagentStarted':
-    case 'TurnEnd':
-    case 'TurnStart':
-    case 'UsageUpdate':
-      return state
-  }
+      })),
+      Match.tag('AgentRetry', current => ({ ...state, retryInfo: current })),
+      Match.tag(
+        'CompactionEnd',
+        'CompactionStart',
+        'LLMStreamEnd',
+        'LLMStreamStart',
+        'SubagentCompleted',
+        'SubagentStarted',
+        'TurnEnd',
+        'TurnStart',
+        'UsageUpdate',
+        () => state
+      ),
+      Match.exhaustive
+    )
 }
 
 export const submitAgentUserMessage = (

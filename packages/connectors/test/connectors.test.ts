@@ -1,4 +1,4 @@
-import { Chunk, Effect, Layer, Predicate } from 'effect'
+import { Chunk, Effect, Layer, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { resolveTools } from '@yolk-sdk/agent/tools'
@@ -15,7 +15,8 @@ import {
   defineAction,
   defineConnector,
   makeCredentialBinding,
-  makeIntegration
+  makeIntegration,
+  ProviderFailure
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
@@ -58,7 +59,11 @@ import {
   GoogleOAuthCredentialSlot,
   googleGmailComposeScope,
   googleGmailReadonlyScope,
-  googleCalendarCreateEventAction
+  googleCalendarCreateEventAction,
+  googleDriveCreateFolderAction,
+  googleDriveFolderMimeType,
+  googleDriveGetFileAction,
+  googleDriveListFilesAction
 } from '@yolk-sdk/connectors/google'
 import {
   EnrichLayerApiKeySlot,
@@ -205,7 +210,6 @@ const DropboxCredentialResolverTest = Layer.succeed(
     resolve: () =>
       Effect.succeed(
         OAuthCredential.make({
-          _tag: 'OAuthCredential',
           provider: 'dropbox',
           accessToken: 'dropbox_token',
           expiresAt: Date.now() + 60_000
@@ -220,7 +224,6 @@ const GoogleCredentialResolverTest = Layer.succeed(
     resolve: () =>
       Effect.succeed(
         OAuthCredential.make({
-          _tag: 'OAuthCredential',
           provider: 'google',
           accessToken: 'google_token',
           expiresAt: Date.now() + 60_000
@@ -238,6 +241,20 @@ const microsoftIntegration = makeIntegration({
     })
   ]
 })
+
+const MicrosoftCredentialResolverTest = Layer.succeed(
+  CredentialResolver,
+  CredentialResolver.of({
+    resolve: () =>
+      Effect.succeed(
+        OAuthCredential.make({
+          provider: 'microsoft',
+          accessToken: 'microsoft_token',
+          expiresAt: Date.now() + 60_000
+        })
+      )
+  })
+)
 
 const microsoftApplicationIntegration = makeIntegration({
   connectorId: 'microsoft',
@@ -731,13 +748,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(
-              ApiKeyCredential.make({
-                _tag: 'ApiKeyCredential',
-                key: 'afloat_test_key'
-              })
-            )
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'afloat_test_key' }))
         })
       )
 
@@ -772,26 +783,14 @@ describe('@yolk-sdk/connectors', () => {
       const malformedKeyResolver = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(
-              ApiKeyCredential.make({
-                _tag: 'ApiKeyCredential',
-                key: 'invalid_key'
-              })
-            )
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'invalid_key' }))
         })
       )
 
       const bearerResolver = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(
-              BearerTokenCredential.make({
-                _tag: 'BearerTokenCredential',
-                token: 'afloat_bearer'
-              })
-            )
+          resolve: () => Effect.succeed(BearerTokenCredential.make({ token: 'afloat_bearer' }))
         })
       )
 
@@ -804,14 +803,19 @@ describe('@yolk-sdk/connectors', () => {
           .pipe(Effect.provide(bearerResolver), Effect.result)
       ])
 
-      expect(malformedKey).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'credential_invalid' }
-      })
-      expect(wrongKind).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'credential_invalid' }
-      })
+      expect(Result.isFailure(malformedKey)).toBe(true)
+
+      if (Result.isFailure(malformedKey)) {
+        expect(Predicate.isTagged(malformedKey.failure, 'ConnectorError')).toBe(true)
+        expect(malformedKey.failure).toMatchObject({ cause: 'credential_invalid' })
+      }
+
+      expect(Result.isFailure(wrongKind)).toBe(true)
+
+      if (Result.isFailure(wrongKind)) {
+        expect(Predicate.isTagged(wrongKind.failure, 'ConnectorError')).toBe(true)
+        expect(wrongKind.failure).toMatchObject({ cause: 'credential_invalid' })
+      }
     })
   )
 
@@ -833,7 +837,6 @@ describe('@yolk-sdk/connectors', () => {
           resolve: () =>
             Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'figma',
                 accessToken: 'figma_access',
                 refreshToken: 'figma_refresh',
@@ -875,7 +878,7 @@ describe('@yolk-sdk/connectors', () => {
         input: { text: 'hello' }
       })
 
-      expect(result).toEqual({ _tag: 'Success', value: { value: 'hello' } })
+      expect(result).toEqual(ActionResult.success({ value: 'hello' }))
     })
   )
 
@@ -887,10 +890,12 @@ describe('@yolk-sdk/connectors', () => {
         input: { text: 'hello' }
       }).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'connector_mismatch' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+        expect(result.failure).toMatchObject({ cause: 'connector_mismatch' })
+      }
     })
   )
 
@@ -902,10 +907,12 @@ describe('@yolk-sdk/connectors', () => {
         input: { text: 123 }
       }).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+        expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+      }
     })
   )
 
@@ -995,12 +1002,11 @@ describe('@yolk-sdk/connectors', () => {
               Effect.succeed(
                 requestCase.credentialKind === 'oauth'
                   ? OAuthCredential.make({
-                      _tag: 'OAuthCredential',
                       provider: requestCase.connectorId,
                       accessToken: 'api_token',
                       expiresAt: Date.now() + 60_000
                     })
-                  : ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' })
+                  : ApiKeyCredential.make({ key: 'api_token' })
               )
           })
         )
@@ -1098,7 +1104,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'dropbox',
                 accessToken: 'dropbox_token',
                 expiresAt: Date.now() + 60_000
@@ -1262,7 +1267,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'dropbox',
                 accessToken: 'dropbox_token',
                 expiresAt: Date.now() + 60_000
@@ -1372,8 +1376,7 @@ describe('@yolk-sdk/connectors', () => {
       const ApiKeyCredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_key' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_key' }))
         })
       )
 
@@ -1386,14 +1389,19 @@ describe('@yolk-sdk/connectors', () => {
           Effect.result
         )
 
-      expect(invalidInput).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(invalidCredential).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'credential_invalid' }
-      })
+      expect(Result.isFailure(invalidInput)).toBe(true)
+
+      if (Result.isFailure(invalidInput)) {
+        expect(Predicate.isTagged(invalidInput.failure, 'ConnectorError')).toBe(true)
+        expect(invalidInput.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(invalidCredential)).toBe(true)
+
+      if (Result.isFailure(invalidCredential)) {
+        expect(Predicate.isTagged(invalidCredential.failure, 'ConnectorError')).toBe(true)
+        expect(invalidCredential.failure).toMatchObject({ cause: 'credential_invalid' })
+      }
     })
   )
 
@@ -1411,10 +1419,12 @@ describe('@yolk-sdk/connectors', () => {
           Effect.result
         )
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+        expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+      }
     })
   )
 
@@ -1428,8 +1438,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1464,8 +1473,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1506,8 +1514,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1538,8 +1545,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1572,8 +1578,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1613,8 +1618,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1651,8 +1655,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1701,8 +1704,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1737,8 +1739,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -1782,7 +1783,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'google',
                 accessToken: 'google_token',
                 expiresAt: Date.now() + 60_000
@@ -1864,7 +1864,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2016,7 +2015,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2045,9 +2043,8 @@ describe('@yolk-sdk/connectors', () => {
       if (request === undefined) throw new Error('Expected Microsoft Graph attachment request')
       const url = new URL(request.url)
 
-      expect(result).toEqual({
-        _tag: 'Success',
-        value: {
+      expect(result).toEqual(
+        ActionResult.success({
           attachments: Chunk.fromIterable([
             {
               id: 'attachment/file',
@@ -2085,8 +2082,8 @@ describe('@yolk-sdk/connectors', () => {
             }
           ]),
           nextLink
-        }
-      })
+        })
+      )
       expect(url.pathname).toBe(
         '/v1.0/users/shared%40example.com/messages/message%2Fid/attachments'
       )
@@ -2120,32 +2117,19 @@ describe('@yolk-sdk/connectors', () => {
         ]
       )
 
-      const CredentialResolverTest = Layer.succeed(
-        CredentialResolver,
-        CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(
-              OAuthCredential.make({
-                _tag: 'OAuthCredential',
-                provider: 'microsoft',
-                accessToken: 'microsoft_token',
-                expiresAt: Date.now() + 60_000
-              })
-            )
-        })
-      )
-
       const result = yield* outlookListAttachmentsAction
         .execute({ integration: microsoftIntegration, input: { messageId: 'message_1' } })
         .pipe(
-          Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)),
+          Effect.provide(Layer.mergeAll(MicrosoftCredentialResolverTest, ConnectorHttpClientTest)),
           Effect.result
         )
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+        expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+      }
     })
   )
 
@@ -2176,7 +2160,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2193,9 +2176,8 @@ describe('@yolk-sdk/connectors', () => {
         })
         .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
 
-      expect(result).toEqual({
-        _tag: 'Success',
-        value: {
+      expect(result).toEqual(
+        ActionResult.success({
           attachment: {
             id: 'attachment/id',
             kind: 'file',
@@ -2205,8 +2187,8 @@ describe('@yolk-sdk/connectors', () => {
             isInline: false,
             contentBase64: 'JVBERg=='
           }
-        }
-      })
+        })
+      )
       expect(requests.at(0)).toMatchObject({
         method: 'GET',
         url: 'https://graph.microsoft.com/v1.0/me/messages/message%2Fid/attachments/attachment%2Fid',
@@ -2253,7 +2235,6 @@ describe('@yolk-sdk/connectors', () => {
           resolve: () =>
             Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2273,11 +2254,16 @@ describe('@yolk-sdk/connectors', () => {
           .pipe(Effect.provide(TestLayer), Effect.result)
       )
 
-      expect(results).toMatchObject([
-        { _tag: 'Failure', failure: { _tag: 'ConnectorError', cause: 'validation_failed' } },
-        { _tag: 'Failure', failure: { _tag: 'ConnectorError', cause: 'validation_failed' } },
-        { _tag: 'Failure', failure: { _tag: 'ConnectorError', cause: 'validation_failed' } }
-      ])
+      expect(results).toHaveLength(3)
+
+      for (const result of results) {
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+          expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+        }
+      }
     })
   )
 
@@ -2301,7 +2287,6 @@ describe('@yolk-sdk/connectors', () => {
           resolve: () =>
             Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2342,14 +2327,19 @@ describe('@yolk-sdk/connectors', () => {
           status: 403
         }
       })
-      expect(invalidNextLinkResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(malformedResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(invalidNextLinkResult)).toBe(true)
+
+      if (Result.isFailure(invalidNextLinkResult)) {
+        expect(Predicate.isTagged(invalidNextLinkResult.failure, 'ConnectorError')).toBe(true)
+        expect(invalidNextLinkResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(malformedResult)).toBe(true)
+
+      if (Result.isFailure(malformedResult)) {
+        expect(Predicate.isTagged(malformedResult.failure, 'ConnectorError')).toBe(true)
+        expect(malformedResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
     })
   )
 
@@ -2370,7 +2360,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_application_token',
                 expiresAt: Date.now() + 60_000
@@ -2396,10 +2385,13 @@ describe('@yolk-sdk/connectors', () => {
       expect(requests.at(0)?.url).toContain('/v1.0/users/finance%40example.com/messages')
       expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadScope)
       expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadSharedScope)
-      expect(missingMailboxResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(missingMailboxResult)).toBe(true)
+
+      if (Result.isFailure(missingMailboxResult)) {
+        expect(Predicate.isTagged(missingMailboxResult.failure, 'ConnectorError')).toBe(true)
+        expect(missingMailboxResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
       expect(requests).toHaveLength(1)
     })
   )
@@ -2427,7 +2419,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2474,8 +2465,8 @@ describe('@yolk-sdk/connectors', () => {
 
       expect(replyResult._tag).toBe('Success')
       expect(replyResult).toMatchObject({ value: { id: 'reply_draft_1', isDraft: true } })
-      expect(sendResult).toEqual({ _tag: 'Success', value: { accepted: true } })
-      expect(sendDraftResult).toEqual({ _tag: 'Success', value: { accepted: true } })
+      expect(sendResult).toEqual(ActionResult.success({ accepted: true }))
+      expect(sendDraftResult).toEqual(ActionResult.success({ accepted: true }))
       expect(requests.at(0)).toMatchObject({
         method: 'POST',
         url: 'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/source%2Fmessage/createReply',
@@ -2528,7 +2519,6 @@ describe('@yolk-sdk/connectors', () => {
           resolve: () =>
             Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2579,22 +2569,36 @@ describe('@yolk-sdk/connectors', () => {
           retryAfterMs: 2_000
         }
       })
-      expect(invalidNextLinkResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(mismatchedFolderNextLinkResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(invalidPageSizeResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(malformedResponseResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(invalidNextLinkResult)).toBe(true)
+
+      if (Result.isFailure(invalidNextLinkResult)) {
+        expect(Predicate.isTagged(invalidNextLinkResult.failure, 'ConnectorError')).toBe(true)
+        expect(invalidNextLinkResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(mismatchedFolderNextLinkResult)).toBe(true)
+
+      if (Result.isFailure(mismatchedFolderNextLinkResult)) {
+        expect(Predicate.isTagged(mismatchedFolderNextLinkResult.failure, 'ConnectorError')).toBe(
+          true
+        )
+        expect(mismatchedFolderNextLinkResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(invalidPageSizeResult)).toBe(true)
+
+      if (Result.isFailure(invalidPageSizeResult)) {
+        expect(Predicate.isTagged(invalidPageSizeResult.failure, 'ConnectorError')).toBe(true)
+        expect(invalidPageSizeResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(malformedResponseResult)).toBe(true)
+
+      if (Result.isFailure(malformedResponseResult)) {
+        expect(Predicate.isTagged(malformedResponseResult.failure, 'ConnectorError')).toBe(true)
+        expect(malformedResponseResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
       expect(requests.at(1)?.headers?.prefer).toBe(
         'IdType="ImmutableId", outlook.body-content-type="text"'
       )
@@ -2643,7 +2647,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2739,7 +2742,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_token',
                 expiresAt: Date.now() + 60_000
@@ -2778,7 +2780,7 @@ describe('@yolk-sdk/connectors', () => {
       expect(folderResult).toMatchObject({
         value: { id: 'folder_1', name: 'Reports', folder: { childCount: 0 } }
       })
-      expect(deleteResult).toEqual({ _tag: 'Success', value: { deleted: true } })
+      expect(deleteResult).toEqual(ActionResult.success({ deleted: true }))
       expect(requests.at(0)?.url).toContain(
         'https://graph.microsoft.com/v1.0/drives/shared%2Fdrive/items/item%2F1?'
       )
@@ -2805,6 +2807,49 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
+  it.effect('omits OneDrive delete if-match when the input omits ifMatch', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        ConnectorHttpResponse.make({ status: 204, headers: {}, body: '' })
+      ])
+
+      const deleteResult = yield* oneDriveDeleteItemAction
+        .execute({
+          integration: microsoftDriveDelegatedAllIntegration,
+          input: { driveId: 'shared/drive', itemId: 'folder/1' }
+        })
+        .pipe(
+          Effect.provide(Layer.mergeAll(MicrosoftCredentialResolverTest, ConnectorHttpClientTest))
+        )
+
+      const deleteRequest = requests.at(0)
+
+      if (deleteRequest === undefined) {
+        expect.fail('Expected OneDrive delete request')
+      }
+
+      if (!Predicate.isTagged(deleteResult, 'Success')) {
+        expect.fail('Expected OneDrive delete success')
+      }
+
+      expect(deleteResult.value).toEqual({ deleted: true })
+      expect(deleteRequest.method).toBe('DELETE')
+      expect(deleteRequest.url).toBe(
+        'https://graph.microsoft.com/v1.0/drives/shared%2Fdrive/items/folder%2F1'
+      )
+      expect(deleteRequest.headers).toEqual({
+        authorization: 'Bearer microsoft_token',
+        accept: 'application/json'
+      })
+      expect(Object.hasOwn(deleteRequest.headers ?? {}, 'if-match')).toBe(false)
+      expect(JSON.stringify(deleteRequest.headers)).toBe(
+        '{"authorization":"Bearer microsoft_token","accept":"application/json"}'
+      )
+    })
+  )
+
   it.effect('guards application OneDrive access, pagination, page size, and provider errors', () =>
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
@@ -2826,7 +2871,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'microsoft',
                 accessToken: 'microsoft_application_token',
                 expiresAt: Date.now() + 60_000
@@ -2873,18 +2917,27 @@ describe('@yolk-sdk/connectors', () => {
           retryAfterMs: 3_000
         }
       })
-      expect(missingDriveResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(invalidNextLinkResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(invalidPageSizeResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(missingDriveResult)).toBe(true)
+
+      if (Result.isFailure(missingDriveResult)) {
+        expect(Predicate.isTagged(missingDriveResult.failure, 'ConnectorError')).toBe(true)
+        expect(missingDriveResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(invalidNextLinkResult)).toBe(true)
+
+      if (Result.isFailure(invalidNextLinkResult)) {
+        expect(Predicate.isTagged(invalidNextLinkResult.failure, 'ConnectorError')).toBe(true)
+        expect(invalidNextLinkResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(invalidPageSizeResult)).toBe(true)
+
+      if (Result.isFailure(invalidPageSizeResult)) {
+        expect(Predicate.isTagged(invalidPageSizeResult.failure, 'ConnectorError')).toBe(true)
+        expect(invalidPageSizeResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
       expect(requests.at(0)?.url).toContain('/v1.0/drives/finance_drive/root/children?')
       expect(requestedScopes.at(0)).toContain(microsoftGraphFilesReadAllScope)
       expect(requestedScopes.at(0)).not.toContain(microsoftGraphFilesReadScope)
@@ -2934,7 +2987,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'google',
                 accessToken: 'google_token',
                 expiresAt: Date.now() + 60_000
@@ -2948,9 +3000,8 @@ describe('@yolk-sdk/connectors', () => {
         .execute({ integration: googleIntegration, input: { messageId: 'message/id' } })
         .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
 
-      expect(result).toEqual({
-        _tag: 'Success',
-        value: {
+      expect(result).toEqual(
+        ActionResult.success({
           attachments: Chunk.fromIterable([
             {
               partId: '1',
@@ -2967,8 +3018,8 @@ describe('@yolk-sdk/connectors', () => {
               contentId: '<logo@example.com>'
             }
           ])
-        }
-      })
+        })
+      )
       expect(requests.at(0)).toMatchObject({
         method: 'GET',
         url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/message%2Fid?format=full'
@@ -3015,17 +3066,17 @@ describe('@yolk-sdk/connectors', () => {
         })
         .pipe(Effect.provide(TestLayer))
 
-      const expected = sizes.map((size, index) => ({
-        filename: `${index}.pdf`,
-        mimeType: 'application/pdf',
-        attachmentId: `attachment_${index}`,
-        ...(size === 0 || size === 12 ? { size } : {})
-      }))
+      const expected = sizes.map((size, index) => {
+        const attachment = {
+          filename: `${index}.pdf`,
+          mimeType: 'application/pdf',
+          attachmentId: `attachment_${index}`
+        }
 
-      expect(listed).toEqual({
-        _tag: 'Success',
-        value: { attachments: Chunk.fromIterable(expected) }
+        return size === 0 || size === 12 ? { ...attachment, size } : attachment
       })
+
+      expect(listed).toEqual(ActionResult.success({ attachments: Chunk.fromIterable(expected) }))
 
       const expectedThreadFields = {
         value: { messages: [{ attachments: expected }] }
@@ -3058,7 +3109,6 @@ describe('@yolk-sdk/connectors', () => {
 
             return Effect.succeed(
               OAuthCredential.make({
-                _tag: 'OAuthCredential',
                 provider: 'google',
                 accessToken: 'google_token',
                 expiresAt: Date.now() + 60_000
@@ -3075,16 +3125,15 @@ describe('@yolk-sdk/connectors', () => {
         })
         .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
 
-      expect(result).toEqual({
-        _tag: 'Success',
-        value: {
+      expect(result).toEqual(
+        ActionResult.success({
           messageId: 'message/id',
           attachmentId: 'attachment/id',
           size: 3,
           data: '--__',
           contentBase64: '++//'
-        }
-      })
+        })
+      )
       expect(requests.at(0)).toMatchObject({
         method: 'GET',
         url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/message%2Fid/attachments/attachment%2Fid'
@@ -3117,10 +3166,10 @@ describe('@yolk-sdk/connectors', () => {
       )
 
       expect(results).toMatchObject([
-        { _tag: 'Success', value: { size: 1, data: 'Zg', contentBase64: 'Zg==' } },
-        { _tag: 'Success', value: { size: 2, data: 'Zm8', contentBase64: 'Zm8=' } },
-        { _tag: 'Success', value: { size: 1, data: 'Zg==', contentBase64: 'Zg==' } },
-        { _tag: 'Success', value: { size: 0, data: '', contentBase64: '' } }
+        ActionResult.success({ size: 1, data: 'Zg', contentBase64: 'Zg==' }),
+        ActionResult.success({ size: 2, data: 'Zm8', contentBase64: 'Zm8=' }),
+        ActionResult.success({ size: 1, data: 'Zg==', contentBase64: 'Zg==' }),
+        ActionResult.success({ size: 0, data: '', contentBase64: '' })
       ])
     })
   )
@@ -3163,23 +3212,27 @@ describe('@yolk-sdk/connectors', () => {
           Effect.result
         )
 
-      expect(providerResult).toEqual({
-        _tag: 'Failure',
-        error: {
+      expect(providerResult).toEqual(
+        ActionResult.failure({
           code: 'google_unauthorized',
           message: 'Gmail get attachment failed: Attachment access denied',
           status: 403,
           underlying: '{"error":{"message":"Attachment access denied"}}'
-        }
-      })
-      expect(invalidSizeResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(invalidDataResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+        })
+      )
+      expect(Result.isFailure(invalidSizeResult)).toBe(true)
+
+      if (Result.isFailure(invalidSizeResult)) {
+        expect(Predicate.isTagged(invalidSizeResult.failure, 'ConnectorError')).toBe(true)
+        expect(invalidSizeResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(invalidDataResult)).toBe(true)
+
+      if (Result.isFailure(invalidDataResult)) {
+        expect(Predicate.isTagged(invalidDataResult.failure, 'ConnectorError')).toBe(true)
+        expect(invalidDataResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
     })
   )
 
@@ -3402,8 +3455,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'api_token' }))
         })
       )
 
@@ -3434,7 +3486,6 @@ describe('@yolk-sdk/connectors', () => {
           resolve: request =>
             Effect.succeed(
               ApiKeyCredential.make({
-                _tag: 'ApiKeyCredential',
                 key: request.slot.id === R2SecretAccessKeySlot.id ? 'secret' : 'access'
               })
             )
@@ -3467,7 +3518,7 @@ describe('@yolk-sdk/connectors', () => {
 
       if (
         !Predicate.isTagged(result, 'Success') ||
-        typeof result.value !== 'object' ||
+        !Predicate.isObjectOrArray(result.value) ||
         result.value === null
       ) {
         throw new Error('Expected R2 success')
@@ -3662,8 +3713,7 @@ describe('@yolk-sdk/connectors', () => {
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
-          resolve: () =>
-            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'bot_token' }))
+          resolve: () => Effect.succeed(ApiKeyCredential.make({ key: 'bot_token' }))
         })
       )
 
@@ -3893,6 +3943,410 @@ describe('@yolk-sdk/connectors', () => {
       })
       expect(JSON.stringify(result)).toBe(
         '{"_tag":"Success","value":{"id":"thread_1","historyId":"history_1","messages":[{"id":"message_1","threadId":"thread_1","labelIds":["INBOX"],"snippet":"summary","internalDate":"0","headers":[{"name":"Subject","value":"Hi"}],"body":"Hello body","bodyMimeType":"text/plain","attachments":[{"partId":"2","mimeType":"image/png","size":4,"attachmentId":"inline_1","inline":true,"contentId":"<logo@example.com>"}]}]}}'
+      )
+    })
+  )
+
+  it.effect(
+    'omits Google Drive file, list, and create-folder optionals while keeping false zero and empty collections',
+    () =>
+      Effect.gen(function* () {
+        const requests: Array<ConnectorHttpRequest> = []
+
+        const layer = Layer.mergeAll(
+          GoogleCredentialResolverTest,
+          makeConnectorHttpClientTest(requests, [
+            jsonHttpResponse('{"id":"file_1","name":"Budget.xlsx","mimeType":"application/pdf"}'),
+            jsonHttpResponse(
+              '{"files":[{"id":"file_1","name":"Budget.xlsx","mimeType":"application/pdf"}]}'
+            ),
+            jsonHttpResponse('{}'),
+            jsonHttpResponse(
+              '{"id":"file_2","name":"Empty","mimeType":"text/plain","parents":[],"spaces":[],"size":"0","starred":false}'
+            ),
+            jsonHttpResponse(
+              `{"id":"folder_1","name":"Reports","mimeType":"${googleDriveFolderMimeType}"}`
+            )
+          ])
+        )
+
+        const getResult = yield* googleDriveGetFileAction
+          .execute({
+            integration: googleIntegration,
+            input: { fileId: 'file_1' }
+          })
+          .pipe(Effect.provide(layer))
+
+        const listResult = yield* googleDriveListFilesAction
+          .execute({
+            integration: googleIntegration,
+            input: {}
+          })
+          .pipe(Effect.provide(layer))
+
+        const emptyListResult = yield* googleDriveListFilesAction
+          .execute({
+            integration: googleIntegration,
+            input: {}
+          })
+          .pipe(Effect.provide(layer))
+
+        const emptyCollectionsResult = yield* googleDriveGetFileAction
+          .execute({
+            integration: googleIntegration,
+            input: { fileId: 'file_2' }
+          })
+          .pipe(Effect.provide(layer))
+
+        const createResult = yield* googleDriveCreateFolderAction
+          .execute({
+            integration: googleIntegration,
+            input: { name: 'Reports' }
+          })
+          .pipe(Effect.provide(layer))
+
+        expect(getResult._tag).toBe('Success')
+        expect(JSON.stringify(getResult)).toBe(
+          '{"_tag":"Success","value":{"id":"file_1","name":"Budget.xlsx","mimeType":"application/pdf"}}'
+        )
+        expect(listResult._tag).toBe('Success')
+        expect(JSON.stringify(listResult)).toBe(
+          '{"_tag":"Success","value":{"files":{"_id":"Chunk","values":[{"id":"file_1","name":"Budget.xlsx","mimeType":"application/pdf"}]}}}'
+        )
+        expect(emptyListResult._tag).toBe('Success')
+        expect(JSON.stringify(emptyListResult)).toBe(
+          '{"_tag":"Success","value":{"files":{"_id":"Chunk","values":[]}}}'
+        )
+        expect(emptyCollectionsResult._tag).toBe('Success')
+        expect(JSON.stringify(emptyCollectionsResult)).toBe(
+          '{"_tag":"Success","value":{"id":"file_2","name":"Empty","mimeType":"text/plain","starred":false,"size":"0","parents":{"_id":"Chunk","values":[]},"spaces":{"_id":"Chunk","values":[]}}}'
+        )
+        expect(createResult._tag).toBe('Success')
+        expect(JSON.stringify(createResult)).toBe(
+          `{"_tag":"Success","value":{"id":"folder_1","name":"Reports","mimeType":"${googleDriveFolderMimeType}"}}`
+        )
+        expect(requests.at(4)?.body).toBe(
+          `{"name":"Reports","mimeType":"${googleDriveFolderMimeType}"}`
+        )
+      })
+  )
+
+  it.effect(
+    'keeps Google Drive present optionals, HTTP parents JSON, false flags, and key order',
+    () =>
+      Effect.gen(function* () {
+        const requests: Array<ConnectorHttpRequest> = []
+
+        const layer = Layer.mergeAll(
+          GoogleCredentialResolverTest,
+          makeConnectorHttpClientTest(requests, [
+            jsonHttpResponse(
+              JSON.stringify({
+                kind: 'drive#fileList',
+                nextPageToken: 'page_2',
+                incompleteSearch: false,
+                files: [
+                  {
+                    kind: 'drive#file',
+                    id: 'file_1',
+                    name: 'Quarterly plan',
+                    mimeType: 'application/vnd.google-apps.document',
+                    parents: ['folder_1'],
+                    spaces: ['drive'],
+                    owners: [{ displayName: 'Alice', emailAddress: 'alice@example.com' }],
+                    permissionIds: ['perm_1'],
+                    contentRestrictions: [{ readOnly: true, reason: 'hold' }]
+                  }
+                ]
+              })
+            ),
+            jsonHttpResponse(
+              `{"id":"folder_1","name":"Reports","mimeType":"${googleDriveFolderMimeType}","parents":["parent_1"]}`
+            )
+          ])
+        )
+
+        const listResult = yield* googleDriveListFilesAction
+          .execute({
+            integration: googleIntegration,
+            input: {}
+          })
+          .pipe(Effect.provide(layer))
+
+        const createResult = yield* googleDriveCreateFolderAction
+          .execute({
+            integration: googleIntegration,
+            input: { name: 'Reports', parentId: 'parent_1' }
+          })
+          .pipe(Effect.provide(layer))
+
+        expect(listResult._tag).toBe('Success')
+        expect(JSON.stringify(listResult)).toBe(
+          '{"_tag":"Success","value":{"files":{"_id":"Chunk","values":[{"kind":"drive#file","id":"file_1","name":"Quarterly plan","mimeType":"application/vnd.google-apps.document","parents":{"_id":"Chunk","values":["folder_1"]},"spaces":{"_id":"Chunk","values":["drive"]},"owners":{"_id":"Chunk","values":[{"displayName":"Alice","emailAddress":"alice@example.com"}]},"permissionIds":{"_id":"Chunk","values":["perm_1"]},"contentRestrictions":{"_id":"Chunk","values":[{"readOnly":true,"reason":"hold"}]}}]},"nextPageToken":"page_2","incompleteSearch":false,"kind":"drive#fileList"}}'
+        )
+        expect(createResult._tag).toBe('Success')
+        expect(JSON.stringify(createResult)).toBe(
+          `{"_tag":"Success","value":{"id":"folder_1","name":"Reports","mimeType":"${googleDriveFolderMimeType}","parents":{"_id":"Chunk","values":["parent_1"]}}}`
+        )
+        expect(requests.at(1)?.body).toBe(
+          `{"name":"Reports","mimeType":"${googleDriveFolderMimeType}","parents":["parent_1"]}`
+        )
+      })
+  )
+
+  it('omits test.echo access, keeps test.fail write access, and preserves key order', () => {
+    expect(testAction).not.toHaveProperty('access')
+    expect(Object.hasOwn(testAction, 'access')).toBe(false)
+    expect(failureAction.access).toBe('write')
+    expect(Object.keys(testAction)).toEqual([
+      'id',
+      'description',
+      'inputSchema',
+      'outputSchema',
+      'execute'
+    ])
+    expect(Object.keys(failureAction)).toEqual([
+      'id',
+      'description',
+      'access',
+      'inputSchema',
+      'outputSchema',
+      'execute'
+    ])
+  })
+
+  it.effect(
+    'omits Dropbox 409 retryAfterMs, keeps 429 present and zero, and preserves ProviderFailure key order',
+    () =>
+      Effect.gen(function* () {
+        const notFoundHttp = makeConnectorHttpClientTest(
+          [],
+          [jsonStatusHttpResponse(409, '{"error_summary":"path/not_found/..."}')]
+        )
+
+        const conflictHttp = makeConnectorHttpClientTest(
+          [],
+          [jsonStatusHttpResponse(409, '{"error_summary":"path/conflict/folder/..."}')]
+        )
+
+        const rateLimitHttp = Layer.succeed(
+          ConnectorHttpClient,
+          ConnectorHttpClient.of({
+            request: () =>
+              Effect.succeed(
+                ConnectorHttpResponse.make({
+                  status: 429,
+                  headers: { 'Retry-After': '3' },
+                  body: '{"error_summary":"too_many_requests/..."}'
+                })
+              )
+          })
+        )
+
+        const zeroRetryHttp = Layer.succeed(
+          ConnectorHttpClient,
+          ConnectorHttpClient.of({
+            request: () =>
+              Effect.succeed(
+                ConnectorHttpResponse.make({
+                  status: 429,
+                  headers: { 'Retry-After': '0' },
+                  body: '{"error_summary":"too_many_requests/..."}'
+                })
+              )
+          })
+        )
+
+        const notFound = yield* dropboxGetMetadataAction
+          .execute({ integration: dropboxIntegration, input: { path: '/missing' } })
+          .pipe(Effect.provide(Layer.mergeAll(DropboxCredentialResolverTest, notFoundHttp)))
+
+        const conflict = yield* dropboxCreateFolderAction
+          .execute({ integration: dropboxIntegration, input: { path: '/existing' } })
+          .pipe(Effect.provide(Layer.mergeAll(DropboxCredentialResolverTest, conflictHttp)))
+
+        const rateLimited = yield* dropboxListFolderAction
+          .execute({ integration: dropboxIntegration, input: {} })
+          .pipe(Effect.provide(Layer.mergeAll(DropboxCredentialResolverTest, rateLimitHttp)))
+
+        const zeroRetry = yield* dropboxListFolderAction
+          .execute({ integration: dropboxIntegration, input: {} })
+          .pipe(Effect.provide(Layer.mergeAll(DropboxCredentialResolverTest, zeroRetryHttp)))
+
+        expect(notFound._tag).toBe('Failure')
+        expect(notFound).not.toHaveProperty('error.retryAfterMs')
+        expect(conflict).not.toHaveProperty('error.retryAfterMs')
+
+        if (
+          !Predicate.isTagged(notFound, 'Failure') ||
+          !Predicate.isTagged(rateLimited, 'Failure')
+        ) {
+          throw new Error('Expected Dropbox provider failures')
+        }
+
+        expect(notFound.error).toBeInstanceOf(ProviderFailure)
+        expect(rateLimited.error).toBeInstanceOf(ProviderFailure)
+        expect(JSON.stringify(notFound)).toBe(
+          String.raw`{"_tag":"Failure","error":{"code":"dropbox_not_found","message":"Dropbox get metadata failed: path/not_found/...","status":409,"underlying":"{\"error_summary\":\"path/not_found/...\"}"}}`
+        )
+        expect(JSON.stringify(conflict)).toBe(
+          String.raw`{"_tag":"Failure","error":{"code":"dropbox_conflict","message":"Dropbox create folder failed: path/conflict/folder/...","status":409,"underlying":"{\"error_summary\":\"path/conflict/folder/...\"}"}}`
+        )
+        expect(JSON.stringify(rateLimited)).toBe(
+          String.raw`{"_tag":"Failure","error":{"code":"dropbox_rate_limited","message":"Dropbox list folder failed: too_many_requests/...","status":429,"underlying":"{\"error_summary\":\"too_many_requests/...\"}","retryAfterMs":3000}}`
+        )
+        expect(JSON.stringify(zeroRetry)).toBe(
+          String.raw`{"_tag":"Failure","error":{"code":"dropbox_rate_limited","message":"Dropbox list folder failed: too_many_requests/...","status":429,"underlying":"{\"error_summary\":\"too_many_requests/...\"}","retryAfterMs":0}}`
+        )
+        expect(Object.keys(rateLimited.error)).toEqual([
+          'code',
+          'message',
+          'status',
+          'underlying',
+          'retryAfterMs'
+        ])
+      })
+  )
+
+  it.effect(
+    'omits OneDrive nextLink on empty Graph pages, keeps empty-string nextLink, and omits Microsoft retryAfterMs without Retry-After',
+    () =>
+      Effect.gen(function* () {
+        const listNextLink =
+          'https://graph.microsoft.com/v1.0/me/drive/root/children?%24skiptoken=list_page_2'
+
+        const present = yield* oneDriveListItemsAction
+          .execute({ integration: microsoftIntegration, input: {} })
+          .pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                MicrosoftCredentialResolverTest,
+                makeConnectorHttpClientTest(
+                  [],
+                  [
+                    jsonHttpResponse(
+                      JSON.stringify({
+                        value: [{ id: 'item_1', name: 'Plan.docx' }],
+                        '@odata.nextLink': listNextLink
+                      })
+                    )
+                  ]
+                )
+              )
+            )
+          )
+
+        const emptyPage = yield* oneDriveListItemsAction
+          .execute({ integration: microsoftIntegration, input: {} })
+          .pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                MicrosoftCredentialResolverTest,
+                makeConnectorHttpClientTest([], [jsonHttpResponse('{"value":[]}')])
+              )
+            )
+          )
+
+        const emptyStringLink = yield* oneDriveListItemsAction
+          .execute({ integration: microsoftIntegration, input: {} })
+          .pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                MicrosoftCredentialResolverTest,
+                makeConnectorHttpClientTest(
+                  [],
+                  [jsonHttpResponse('{"value":[],"@odata.nextLink":""}')]
+                )
+              )
+            )
+          )
+
+        const missingRetry = yield* outlookSearchMessagesAction
+          .execute({ integration: microsoftIntegration, input: { query: 'invoice' } })
+          .pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                MicrosoftCredentialResolverTest,
+                makeConnectorHttpClientTest(
+                  [],
+                  [
+                    ConnectorHttpResponse.make({
+                      status: 404,
+                      headers: { 'content-type': 'application/json' },
+                      body: '{"error":{"code":"ErrorItemNotFound","message":"Missing"}}'
+                    })
+                  ]
+                )
+              )
+            )
+          )
+
+        expect(present._tag).toBe('Success')
+        expect(JSON.stringify(present)).toBe(
+          `{"_tag":"Success","value":{"items":[{"id":"item_1","name":"Plan.docx"}],"nextLink":"${listNextLink}"}}`
+        )
+        expect(emptyPage._tag).toBe('Success')
+        expect(emptyPage).not.toHaveProperty('value.nextLink')
+        expect(JSON.stringify(emptyPage)).toBe('{"_tag":"Success","value":{"items":[]}}')
+        expect(emptyStringLink._tag).toBe('Success')
+        expect(JSON.stringify(emptyStringLink)).toBe(
+          '{"_tag":"Success","value":{"items":[],"nextLink":""}}'
+        )
+        expect(missingRetry._tag).toBe('Failure')
+
+        if (!Predicate.isTagged(missingRetry, 'Failure')) {
+          throw new Error('Expected Microsoft provider failure')
+        }
+
+        expect(missingRetry.error).toBeInstanceOf(ProviderFailure)
+        expect(missingRetry).not.toHaveProperty('error.retryAfterMs')
+        expect(JSON.stringify(missingRetry)).toBe(
+          String.raw`{"_tag":"Failure","error":{"code":"microsoft_not_found","message":"Microsoft Outlook search messages failed: Missing","status":404,"underlying":"{\"error\":{\"code\":\"ErrorItemNotFound\",\"message\":\"Missing\"}}"}}`
+        )
+        expect(Object.keys(missingRetry.error)).toEqual(['code', 'message', 'status', 'underlying'])
+      })
+  )
+
+  it.effect('skips null parts, ignores array-shaped parts, and keeps a real attachment', () =>
+    Effect.gen(function* () {
+      const message = {
+        id: 'message_1',
+        payload: {
+          mimeType: 'multipart/mixed',
+          parts: [
+            null,
+            ['not-a-part'],
+            12,
+            {
+              filename: 'invoice.pdf',
+              mimeType: 'application/pdf',
+              body: { size: 1024, attachmentId: 'attachment_1' }
+            }
+          ]
+        }
+      }
+
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(JSON.stringify(message))
+      ])
+
+      const result = yield* gmailListAttachmentsAction
+        .execute({ integration: googleIntegration, input: { messageId: message.id } })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toEqual(
+        ActionResult.success({
+          attachments: Chunk.fromIterable([
+            {
+              filename: 'invoice.pdf',
+              mimeType: 'application/pdf',
+              size: 1024,
+              attachmentId: 'attachment_1'
+            }
+          ])
+        })
       )
     })
   )

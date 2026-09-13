@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { BackgroundToolAccepted, ToolCall, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
@@ -54,6 +54,17 @@ const resolve = (tool: ToolRegistration<unknown>, host?: BackgroundToolHost<unkn
 
 const inline = (call: ToolCall) =>
   Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'done' }))
+
+const expectFailureCause = (
+  result: Result.Result<unknown, { readonly cause: string }>,
+  cause: string
+) => {
+  expect(Result.isFailure(result)).toBe(true)
+
+  if (Result.isFailure(result)) {
+    expect(result.failure.cause).toBe(cause)
+  }
+}
 
 describe('native background tools', () => {
   it.effect('retains exact original definitions and inline behavior without a host', () =>
@@ -189,10 +200,7 @@ describe('native background tools', () => {
         }
       )
 
-      expect(yield* set.execute(request('background')).pipe(Effect.result)).toMatchObject({
-        _tag: 'Failure',
-        failure: { cause: 'denied' }
-      })
+      expectFailureCause(yield* set.execute(request('background')).pipe(Effect.result), 'denied')
       expect(effects).toBe(0)
     })
   )
@@ -205,9 +213,10 @@ describe('native background tools', () => {
         execute: ({ call }) => inline(call)
       }
 
-      expect(
-        yield* resolve(tool, { accept: () => Effect.succeed(receipt) }).pipe(Effect.result)
-      ).toMatchObject({ _tag: 'Failure', failure: { cause: 'background_validation_required' } })
+      expectFailureCause(
+        yield* resolve(tool, { accept: () => Effect.succeed(receipt) }).pipe(Effect.result),
+        'background_validation_required'
+      )
       expect((yield* resolve(tool)).tools[0]).toBe(tool.def)
     })
   )
@@ -265,9 +274,9 @@ describe('native background tools', () => {
           })
       })
 
-      expect(yield* set.execute(request('background')).pipe(Effect.result)).toMatchObject({
-        _tag: 'Failure'
-      })
+      expect(Result.isFailure(yield* set.execute(request('background')).pipe(Effect.result))).toBe(
+        true
+      )
       expect((yield* set.execute(request('background'))).acceptance).toEqual(receipt)
       expect(launches).toBe(1)
 
@@ -275,10 +284,10 @@ describe('native background tools', () => {
         accept: () => Effect.succeed<BackgroundToolAccepted>({ version: 1, executionId: '' })
       })
 
-      expect(yield* invalid.execute(request('background')).pipe(Effect.result)).toMatchObject({
-        _tag: 'Failure',
-        failure: { cause: 'execution' }
-      })
+      expectFailureCause(
+        yield* invalid.execute(request('background')).pipe(Effect.result),
+        'execution'
+      )
     })
   )
 
@@ -291,17 +300,17 @@ describe('native background tools', () => {
       const def = activated.tools[0]
 
       if (def === undefined) return
-      expect(yield* resolve({ ...tool, def }).pipe(Effect.result)).toMatchObject({
-        _tag: 'Failure',
-        failure: { cause: 'background_definition_already_active' }
-      })
+      expectFailureCause(
+        yield* resolve({ ...tool, def }).pipe(Effect.result),
+        'background_definition_already_active'
+      )
 
       for (const name of [questionToolName, subagentToolName]) {
         const loopOwned = { ...tool, def: ToolDef.make({ ...tool.def, name }) }
-        expect(yield* resolve(loopOwned, host).pipe(Effect.result)).toMatchObject({
-          _tag: 'Failure',
-          failure: { cause: 'background_unsupported_tool' }
-        })
+        expectFailureCause(
+          yield* resolve(loopOwned, host).pipe(Effect.result),
+          'background_unsupported_tool'
+        )
         // Without a host the opt-in flag is inert and the original definition is exposed unchanged.
         expect((yield* resolve(loopOwned)).tools[0]).toBe(loopOwned.def)
       }
@@ -387,10 +396,12 @@ describe('native background tools', () => {
               }
             }
 
-            expect(yield* resolve(tool, host).pipe(Effect.result)).toMatchObject({
-              _tag: 'Failure',
-              failure: { _tag: 'ToolRegistryError', cause: 'background_unsupported_schema' }
-            })
+            const unsupported = yield* resolve(tool, host).pipe(Effect.result)
+            expectFailureCause(unsupported, 'background_unsupported_schema')
+            expect(
+              Result.isFailure(unsupported) &&
+                Predicate.isTagged(unsupported.failure, 'ToolRegistryError')
+            ).toBe(true)
             const plain = yield* resolve(tool)
             expect(plain.tools[0]).toBe(tool.def)
             expect(plain.tools[0]?.parameters).toBe(parameters)
@@ -520,27 +531,31 @@ it.effect(
       for (const custom of [false, true]) {
         const messages: unknown[] = []
 
-        const tool = makeTool({
+        const toolInput = {
           name: 'work',
           description: '',
-          access: 'write',
-          background: true,
+          access: 'write' as const,
+          background: true as const,
           parameters: paramsSchema,
-          ...(custom
+          execute: ({ call }: { readonly call: ToolCall }) => {
+            effects++
+
+            return inline(call)
+          }
+        }
+
+        const tool = makeTool(
+          custom
             ? {
+                ...toolInput,
                 invalidParamsMessage: (error: unknown) => {
                   messages.push(error)
 
                   return 'Please fix business input'
                 }
               }
-            : {}),
-          execute: ({ call }) => {
-            effects++
-
-            return inline(call)
-          }
-        })
+            : toolInput
+        )
 
         const plain = yield* resolve(tool)
 
@@ -624,10 +639,10 @@ it.effect(
       })
 
       for (const mode of ['foreground', 'background']) {
-        expect(yield* rawSet.execute(request(mode)).pipe(Effect.result)).toMatchObject({
-          _tag: 'Failure',
-          failure: rawError
-        })
+        const result = yield* rawSet.execute(request(mode)).pipe(Effect.result)
+
+        expect(Result.isFailure(result)).toBe(true)
+        expect(result).toMatchObject({ failure: rawError })
       }
 
       expect(admissions).toBe(0)
@@ -647,10 +662,10 @@ it.effect(
         }
       )
 
-      expect(yield* set.execute(request('background')).pipe(Effect.result)).toMatchObject({
-        _tag: 'Failure',
-        failure: hostError
-      })
+      const result = yield* set.execute(request('background')).pipe(Effect.result)
+
+      expect(Result.isFailure(result)).toBe(true)
+      expect(result).toMatchObject({ failure: hostError })
       expect(admissions).toBe(1)
       expect(business).toBe(0)
     })

@@ -1,4 +1,4 @@
-import { Duration, Effect, Fiber, Result, Tracer } from 'effect'
+import { Duration, Effect, Fiber, Predicate, Result, Tracer } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -103,8 +103,11 @@ describe('Anthropic Claude subscription usage', () => {
         })
       ).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.result)
 
+      expect(
+        Result.isFailure(result) &&
+          Predicate.isTagged(result.failure, 'ProviderSubscriptionUsageConfigurationError')
+      ).toBe(true)
       expect(Result.isFailure(result) && result.failure).toMatchObject({
-        _tag: 'ProviderSubscriptionUsageConfigurationError',
         reason: 'provider_mismatch'
       })
       expect(called).toBe(false)
@@ -226,4 +229,25 @@ describe('Anthropic Claude subscription usage', () => {
       expect(trace).not.toContain(anthropicClaudeSubscriptionUsageUrl)
     })
   })
+
+  it.effect('omits resetsAt when absent and preserves JSON key order when present', () =>
+    Effect.gen(function* () {
+      const snapshot = yield* parseAnthropicClaudeSubscriptionUsage(
+        {
+          five_hour: { utilization: 1 },
+          seven_day: { utilization: 2, resets_at: '2026-08-11T10:00:00Z' }
+        },
+        fetchedAt
+      )
+
+      const [fiveHour, sevenDay] = Array.from(snapshot.windows)
+
+      expect(Object.keys(fiveHour ?? {})).toEqual(['id', 'usedPercent'])
+      expect(JSON.stringify(fiveHour)).toBe('{"id":"five-hour","usedPercent":1}')
+      expect(Object.keys(sevenDay ?? {})).toEqual(['id', 'usedPercent', 'resetsAt'])
+      expect(JSON.stringify(sevenDay)).toBe(
+        '{"id":"seven-day","usedPercent":2,"resetsAt":"2026-08-11T10:00:00.000Z"}'
+      )
+    })
+  )
 })

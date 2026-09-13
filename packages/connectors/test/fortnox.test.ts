@@ -10,7 +10,8 @@ import {
   CredentialResolver,
   makeCredentialBinding,
   makeIntegration,
-  OAuthCredential
+  OAuthCredential,
+  ProviderFailure
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest, RuntimeCredential } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
@@ -28,6 +29,12 @@ import {
   fortnoxOAuthAuthorizeUrl,
   fortnoxOAuthTokenUrl
 } from '@yolk-sdk/connectors/fortnox'
+import {
+  FortnoxInvoiceApi,
+  FortnoxSupplierInvoiceApi,
+  invoiceFromApi,
+  supplierInvoiceFromApi
+} from '../src/fortnox/wire.ts'
 
 const integration = makeIntegration({
   connectorId: 'fortnox',
@@ -37,7 +44,6 @@ const integration = makeIntegration({
 })
 
 const oauth = OAuthCredential.make({
-  _tag: 'OAuthCredential',
   provider: 'fortnox',
   accessToken: 'test-access-token',
   expiresAt: 4_000_000_000_000
@@ -413,6 +419,30 @@ describe('Fortnox connector', () => {
     })
   )
 
+  it.effect('omits invoice and supplier invoice rows when the API omits them', () =>
+    Effect.gen(function* () {
+      const invoiceValue = yield* Schema.decodeUnknownEffect(FortnoxInvoiceApi)({
+        DocumentNumber: '2',
+        CustomerNumber: '1'
+      })
+
+      const supplierValue = yield* Schema.decodeUnknownEffect(FortnoxSupplierInvoiceApi)({
+        GivenNumber: '4',
+        SupplierNumber: '3',
+        Total: '100.2500',
+        Balance: '0.00'
+      })
+
+      const invoice = invoiceFromApi(invoiceValue)
+      const supplier = supplierInvoiceFromApi(supplierValue)
+
+      expect(Object.hasOwn(invoice, 'InvoiceRows')).toBe(false)
+      expect(Object.hasOwn(supplier, 'SupplierInvoiceRows')).toBe(false)
+      expect(JSON.stringify(invoice)).not.toContain('InvoiceRows')
+      expect(JSON.stringify(supplier)).not.toContain('SupplierInvoiceRows')
+    })
+  )
+
   const invalidInputs = [
     { action: 'fortnox.get_customer', input: {} },
     ...['', ' ', '.', '..', '\r\n', '\uD800'].map(customerNumber => ({
@@ -581,7 +611,7 @@ describe('Fortnox connector', () => {
   )
 
   for (const credential of [
-    ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'not-oauth' }),
+    ApiKeyCredential.make({ key: 'not-oauth' }),
     OAuthCredential.make({ ...oauth, provider: 'google' }),
     OAuthCredential.make({ ...oauth, accessToken: '' }),
     OAuthCredential.make({ ...oauth, accessToken: 'a\r\nb' })
@@ -672,4 +702,140 @@ it.effect(
       ])
       expect(JSON.stringify(value)).not.toContain('secret.example')
     })
+)
+
+it.effect('keeps Fortnox pagination and provider-failure omission, zero retry, and key order', () =>
+  Effect.gen(function* () {
+    const present = yield* invoke('fortnox.list_customers', { page: 2 }).pipe(
+      Effect.provide(
+        makeHarness([
+          response({
+            Customers: [{ CustomerNumber: '001', Name: 'Acme' }],
+            MetaInformation: meta(2, 3, 5)
+          })
+        ]).layer
+      )
+    )
+
+    const last = yield* invoke('fortnox.list_customers', { page: 3 }).pipe(
+      Effect.provide(
+        makeHarness([
+          response({
+            Customers: [],
+            MetaInformation: meta(3, 3, 5)
+          })
+        ]).layer
+      )
+    )
+
+    const emptyAccount = yield* invoke('fortnox.list_customers').pipe(
+      Effect.provide(
+        makeHarness([
+          response({
+            Customers: [],
+            MetaInformation: meta(1, 0, 0)
+          })
+        ]).layer
+      )
+    )
+
+    const rateLimited = yield* invoke('fortnox.get_company_information').pipe(
+      Effect.provide(
+        makeHarness([
+          response(
+            { ErrorInformation: { Code: 2000003, Error: 1, Message: 'Provider detail' } },
+            429,
+            { 'Retry-After': '5' }
+          )
+        ]).layer
+      )
+    )
+
+    const zeroRetry = yield* invoke('fortnox.get_company_information').pipe(
+      Effect.provide(
+        makeHarness([
+          response(
+            { ErrorInformation: { Code: 2000003, Error: 1, Message: 'Provider detail' } },
+            429,
+            { 'Retry-After': '0' }
+          )
+        ]).layer
+      )
+    )
+
+    const lowercase = yield* invoke('fortnox.get_company_information').pipe(
+      Effect.provide(
+        makeHarness([
+          response(
+            {
+              ErrorInformation: { error: 1, message: 'Kan inte hitta kontot.', code: 2000423 }
+            },
+            404
+          )
+        ]).layer
+      )
+    )
+
+    const malformed = yield* invoke('fortnox.get_company_information').pipe(
+      Effect.provide(
+        makeHarness([
+          ConnectorHttpResponse.make({
+            status: 502,
+            body: '<html>Unavailable</html>',
+            headers: { 'retry-after': 'invalid' }
+          })
+        ]).layer
+      )
+    )
+
+    expect(present._tag).toBe('Success')
+    expect(JSON.stringify(present)).toBe(
+      '{"_tag":"Success","value":{"customers":{"_id":"Chunk","values":[{"CustomerNumber":"001","Name":"Acme"}]},"pagination":{"currentPage":2,"totalPages":3,"totalResources":5,"nextPage":3}}}'
+    )
+    expect(last).not.toHaveProperty('value.pagination.nextPage')
+    expect(JSON.stringify(last)).toBe(
+      '{"_tag":"Success","value":{"customers":{"_id":"Chunk","values":[]},"pagination":{"currentPage":3,"totalPages":3,"totalResources":5}}}'
+    )
+    expect(emptyAccount).not.toHaveProperty('value.pagination.nextPage')
+    expect(JSON.stringify(emptyAccount)).toBe(
+      '{"_tag":"Success","value":{"customers":{"_id":"Chunk","values":[]},"pagination":{"currentPage":1,"totalPages":0,"totalResources":0}}}'
+    )
+
+    if (
+      !Predicate.isTagged(rateLimited, 'Failure') ||
+      !Predicate.isTagged(zeroRetry, 'Failure') ||
+      !Predicate.isTagged(lowercase, 'Failure') ||
+      !Predicate.isTagged(malformed, 'Failure')
+    ) {
+      throw new Error('Expected Fortnox provider failures')
+    }
+
+    expect(rateLimited.error).toBeInstanceOf(ProviderFailure)
+    expect(JSON.stringify(rateLimited)).toBe(
+      '{"_tag":"Failure","error":{"code":"fortnox_rate_limited","message":"Provider detail","status":429,"retryAfterMs":5000,"underlying":{"providerCode":2000003}}}'
+    )
+    expect(Object.keys(rateLimited.error)).toEqual([
+      'code',
+      'message',
+      'status',
+      'retryAfterMs',
+      'underlying'
+    ])
+
+    expect(JSON.stringify(zeroRetry)).toBe(
+      '{"_tag":"Failure","error":{"code":"fortnox_rate_limited","message":"Provider detail","status":429,"retryAfterMs":0,"underlying":{"providerCode":2000003}}}'
+    )
+    expect(lowercase.error).toBeInstanceOf(ProviderFailure)
+    expect(lowercase).not.toHaveProperty('error.retryAfterMs')
+    expect(JSON.stringify(lowercase)).toBe(
+      '{"_tag":"Failure","error":{"code":"fortnox_not_found","message":"Kan inte hitta kontot.","status":404,"underlying":{"providerCode":2000423}}}'
+    )
+    expect(malformed.error).toBeInstanceOf(ProviderFailure)
+    expect(malformed).not.toHaveProperty('error.underlying')
+    expect(malformed).not.toHaveProperty('error.retryAfterMs')
+    expect(JSON.stringify(malformed)).toBe(
+      '{"_tag":"Failure","error":{"code":"fortnox_request_failed","message":"Fortnox request failed (HTTP 502)","status":502}}'
+    )
+    expect(Object.keys(malformed.error)).toEqual(['code', 'message', 'status'])
+  })
 )

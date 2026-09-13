@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Data, Effect, Match, Option } from 'effect'
 import { backgroundVoiceUnsupportedMessage } from '../background-execution-internal.ts'
 import * as Schema from 'effect/Schema'
 import type { ToolExecutor } from '@yolk-sdk/agent/loop'
@@ -23,6 +23,8 @@ export type VoiceToolCallDecision =
   | { readonly _tag: 'Deny'; readonly reason: string }
   | { readonly _tag: 'RequireApproval'; readonly request: ToolApprovalRequest }
 
+export const VoiceToolCallDecision = Data.taggedEnum<VoiceToolCallDecision>()
+
 /** Matches the loop's deterministic approval request id convention. */
 export const voiceApprovalRequestId = (callId: string) => `approval:${callId}`
 
@@ -46,15 +48,14 @@ export const decideVoiceToolCall = (
 
   // Voice cannot bind activated approvals or represent background acceptance yet.
   if (def?.execution === 'background-v1') {
-    return { _tag: 'Deny', reason: backgroundVoiceUnsupportedMessage }
+    return VoiceToolCallDecision.Deny({ reason: backgroundVoiceUnsupportedMessage })
   }
 
   if (def?.approval?.mode !== 'manual') {
-    return { _tag: 'Execute' }
+    return VoiceToolCallDecision.Execute()
   }
 
-  return {
-    _tag: 'RequireApproval',
+  return VoiceToolCallDecision.RequireApproval({
     request: ToolApprovalRequest.make({
       requestId: voiceApprovalRequestId(call.callId),
       toolCallId: call.callId,
@@ -65,7 +66,7 @@ export const decideVoiceToolCall = (
       }),
       policy: def.approval
     })
-  }
+  })
 }
 
 const executeCall = (call: VoiceToolCall) =>
@@ -114,23 +115,23 @@ export const handleVoiceToolCall = (input: {
   Effect.suspend((): Effect.Effect<VoiceToolCallOutcome, never, ToolExecutor> => {
     const decision = decideVoiceToolCall(input.tools, input.call)
 
-    switch (decision._tag) {
-      case 'Deny':
-        return voiceToolDenialOutput(input.call, decision.reason).pipe(
+    return Match.value(decision).pipe(
+      Match.tag('Deny', current =>
+        voiceToolDenialOutput(input.call, current.reason).pipe(
           Effect.map(output =>
             VoiceToolCallDeniedOutcome.make({
               callId: input.call.callId,
               output,
-              reason: decision.reason
+              reason: current.reason
             })
           )
         )
-      case 'Execute':
-        return executeCall(input.call)
-      case 'RequireApproval': {
+      ),
+      Match.tag('Execute', () => executeCall(input.call)),
+      Match.tag('RequireApproval', current => {
         if (input.approval === undefined || !approvalMatchesCall(input.approval, input.call)) {
           return Effect.succeed(
-            VoiceToolCallApprovalRequiredOutcome.make({ request: decision.request })
+            VoiceToolCallApprovalRequiredOutcome.make({ request: current.request })
           )
         }
 
@@ -147,6 +148,7 @@ export const handleVoiceToolCall = (input: {
         }
 
         return executeCall(input.call)
-      }
-    }
+      }),
+      Match.exhaustive
+    )
   })

@@ -7,6 +7,7 @@ import {
   sequenceDurableAgentEvent,
   writeDurableAgentEvent
 } from '../src/workflow.ts'
+import { CommitThenWriteTerminalEventResult } from '../src/workflow-events.ts'
 
 describe('durable workflow agent events', () => {
   it('builds stable event ids from stream, turn, and sequence', () => {
@@ -45,6 +46,52 @@ describe('durable workflow agent events', () => {
       eventId: 'workflow:run-1:2:5'
     })
     expect(second.nextEventSequence).toBe(6)
+  })
+
+  it('omits createdAtMs unless supplied, keeps event createdAtMs when override is absent, and overwrites eventId in place', () => {
+    const omitted = sequenceDurableAgentEvent({
+      state: makeDurableAgentEventSequencerState(4),
+      streamId: 'workflow:run-1',
+      turn: 2,
+      event: { text: 'hej' }
+    })
+
+    expect(Object.keys(omitted.event)).toEqual(['text', 'eventId'])
+    expect(Object.hasOwn(omitted.event, 'createdAtMs')).toBe(false)
+    expect(JSON.stringify(omitted.event)).toBe('{"text":"hej","eventId":"workflow:run-1:2:4"}')
+
+    const present = sequenceDurableAgentEvent({
+      state: makeDurableAgentEventSequencerState(4),
+      streamId: 'workflow:run-1',
+      turn: 2,
+      event: { text: 'hej' },
+      createdAtMs: 123
+    })
+
+    expect(Object.keys(present.event)).toEqual(['text', 'eventId', 'createdAtMs'])
+    expect(JSON.stringify(present.event)).toBe(
+      '{"text":"hej","eventId":"workflow:run-1:2:4","createdAtMs":123}'
+    )
+
+    const kept = sequenceDurableAgentEvent({
+      state: makeDurableAgentEventSequencerState(4),
+      streamId: 'workflow:run-1',
+      turn: 2,
+      event: { text: 'hej', createdAtMs: 5 }
+    })
+
+    expect(kept.event.createdAtMs).toBe(5)
+    expect(Object.keys(kept.event)).toEqual(['text', 'createdAtMs', 'eventId'])
+
+    const overwritten = sequenceDurableAgentEvent({
+      state: makeDurableAgentEventSequencerState(4),
+      streamId: 'workflow:run-1',
+      turn: 2,
+      event: { eventId: 'stale', text: 'hej' }
+    })
+
+    expect(overwritten.event.eventId).toBe('workflow:run-1:2:4')
+    expect(Object.keys(overwritten.event)).toEqual(['eventId', 'text'])
   })
 
   it('sequences error events through the same path', () => {
@@ -152,11 +199,12 @@ describe('durable workflow agent events', () => {
     )
 
     expect(operations).toEqual(['commit', 'write-error:commit'])
-    expect(result).toMatchObject({
-      _tag: 'CommitFailed',
-      commitError,
-      writeResult: { _tag: 'AgentError' }
-    })
+    expect(result).toMatchObject(
+      CommitThenWriteTerminalEventResult.CommitFailed({
+        commitError,
+        writeResult: { _tag: 'AgentError' }
+      })
+    )
   })
 
   it('reports terminal write failures', async () => {
@@ -187,10 +235,9 @@ describe('durable workflow agent events', () => {
     )
 
     expect(operations).toEqual(['commit', 'write'])
-    expect(result).toEqual({
-      _tag: 'TerminalWriteFailed',
-      error: writeError
-    })
+    expect(result).toEqual(
+      CommitThenWriteTerminalEventResult.TerminalWriteFailed({ error: writeError })
+    )
   })
 
   it('reports commit error terminal write failures', async () => {
@@ -226,10 +273,11 @@ describe('durable workflow agent events', () => {
     )
 
     expect(operations).toEqual(['commit', 'write-error:commit'])
-    expect(result).toEqual({
-      _tag: 'CommitErrorWriteFailed',
-      commitError,
-      error: writeError
-    })
+    expect(result).toEqual(
+      CommitThenWriteTerminalEventResult.CommitErrorWriteFailed({
+        commitError,
+        error: writeError
+      })
+    )
   })
 })

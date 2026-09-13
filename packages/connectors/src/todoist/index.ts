@@ -54,7 +54,7 @@ const jsonMessageField = (body: string, keys: ReadonlyArray<string>) =>
       for (const key of keys) {
         const value = parsed[key]
 
-        if (typeof value === 'string' && value.trim() !== '') return value
+        if (Predicate.isString(value) && value.trim() !== '') return value
       }
 
       return undefined

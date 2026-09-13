@@ -39,7 +39,12 @@ const AgentCommandRenderResponse = Schema.Struct({
   content: Schema.String
 })
 
-const encodeJsonString = (value: unknown) =>
+type CommandRenderRequest = {
+  readonly command: string
+  readonly arguments: string
+}
+
+const encodeJsonString = (value: CommandRenderRequest) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
 
 export const loadAgentCommands = (

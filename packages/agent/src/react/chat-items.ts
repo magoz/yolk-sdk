@@ -1,4 +1,5 @@
-import { Array as Arr, Option, Predicate } from 'effect'
+import { Array as Arr, Data, Match, Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
   contentText,
   type AgentRetry,
@@ -14,6 +15,38 @@ import type { AgentChatMessage, ChatToolState } from './chat-messages.ts'
 export type ToolDuration =
   | { readonly _tag: 'Known'; readonly milliseconds: number }
   | { readonly _tag: 'Unknown' }
+
+export const ToolDurationKnown = Schema.TaggedStruct('Known', {
+  milliseconds: Schema.Number
+})
+
+export const ToolDurationUnknown = Schema.TaggedStruct('Unknown', {})
+
+const AgentChatItemReasoning = Schema.TaggedStruct('Reasoning', {
+  id: Schema.String,
+  messageId: Schema.String,
+  text: Schema.String
+})
+
+const AgentChatItemUserDraft = Schema.TaggedStruct('UserDraft', {
+  id: Schema.String,
+  text: Schema.String
+})
+
+const AgentChatItemAssistantDraft = Schema.TaggedStruct('AssistantDraft', {
+  id: Schema.String,
+  text: Schema.String
+})
+
+const AgentChatItemAssistantStatus = Schema.TaggedStruct('AssistantStatus', {
+  id: Schema.String,
+  label: Schema.String
+})
+
+const AgentChatItemError = Schema.TaggedStruct('Error', {
+  id: Schema.String,
+  message: Schema.String
+})
 
 type ToolRunNoTiming = {
   readonly duration: { readonly _tag: 'Unknown' }
@@ -65,6 +98,8 @@ export type ToolRunState =
       readonly result: ToolResult
     } & ToolRunNoTiming)
 
+export const ToolRunState = Data.taggedEnum<ToolRunState>()
+
 export type AgentChatItem =
   | {
       readonly _tag: 'UserMessage'
@@ -105,6 +140,8 @@ export type AgentChatItem =
   | { readonly _tag: 'Retry'; readonly id: string; readonly retry: AgentRetry }
   | { readonly _tag: 'AssistantStatus'; readonly id: string; readonly label: string }
   | { readonly _tag: 'Error'; readonly id: string; readonly message: string }
+
+export const AgentChatItem = Data.taggedEnum<AgentChatItem>()
 
 export type BuildAgentChatItemsInput = {
   readonly messages: ReadonlyArray<AgentChatMessage>
@@ -163,10 +200,10 @@ const activeStatusLabel = ({
   return 'Thinking'
 }
 
-const noTiming = (): ToolRunNoTiming => ({ duration: { _tag: 'Unknown' } })
+const noTiming = (): ToolRunNoTiming => ({ duration: ToolDurationUnknown.make({}) })
 
 const startedTiming = (startedAtMs: number): ToolRunStartedTiming => ({
-  duration: { _tag: 'Unknown' },
+  duration: ToolDurationUnknown.make({}),
   startedAtMs
 })
 
@@ -174,7 +211,7 @@ const unknownTerminalTiming = (startedAtMs?: number): ToolRunNoTiming | ToolRunS
   startedAtMs === undefined ? noTiming() : startedTiming(startedAtMs)
 
 const knownTiming = (startedAtMs: number, endedAtMs: number): ToolRunTiming => ({
-  duration: { _tag: 'Known', milliseconds: Math.max(0, endedAtMs - startedAtMs) },
+  duration: ToolDurationKnown.make({ milliseconds: Math.max(0, endedAtMs - startedAtMs) }),
   startedAtMs,
   endedAtMs
 })
@@ -191,56 +228,58 @@ const terminalTimingFromState = (
 
 const toolRunStateFor = (state: ChatToolState): ToolRunState => {
   if (Predicate.isTagged(state, 'Running')) {
-    return { _tag: 'Running', ...startedTiming(state.startedAtMs) }
+    return ToolRunState.Running({ ...startedTiming(state.startedAtMs) })
   }
 
-  if (Predicate.isTagged(state, 'Completed') || Predicate.isTagged(state, 'Accepted')) {
-    return { _tag: state._tag, ...terminalTimingFromState(state), result: state.result }
+  if (Predicate.isTagged(state, 'Completed')) {
+    return ToolRunState.Completed({ ...terminalTimingFromState(state), result: state.result })
+  }
+
+  if (Predicate.isTagged(state, 'Accepted')) {
+    return ToolRunState.Accepted({ ...terminalTimingFromState(state), result: state.result })
   }
 
   if (Predicate.isTagged(state, 'InputStreaming')) {
-    return { _tag: 'InputStreaming', ...noTiming(), input: state.input }
+    return ToolRunState.InputStreaming({ ...noTiming(), input: state.input })
   }
 
   if (Predicate.isTagged(state, 'ApprovalRequested')) {
-    return { _tag: 'ApprovalRequested', ...noTiming(), request: state.request }
+    return ToolRunState.ApprovalRequested({ ...noTiming(), request: state.request })
   }
 
   if (Predicate.isTagged(state, 'Denied')) {
-    return { _tag: 'Denied', ...noTiming(), reason: state.reason }
+    return ToolRunState.Denied({ ...noTiming(), reason: state.reason })
   }
 
   if (Predicate.isTagged(state, 'QuestionRequested')) {
-    return { _tag: 'QuestionRequested', ...noTiming(), request: state.request }
+    return ToolRunState.QuestionRequested({ ...noTiming(), request: state.request })
   }
 
   if (Predicate.isTagged(state, 'QuestionAnswered')) {
-    return {
-      _tag: 'QuestionAnswered',
+    return ToolRunState.QuestionAnswered({
       ...noTiming(),
       response: state.response,
       request: state.request
-    }
+    })
   }
 
   if (Predicate.isTagged(state, 'QuestionCancelled')) {
-    return {
-      _tag: 'QuestionCancelled',
+    return ToolRunState.QuestionCancelled({
       ...noTiming(),
       response: state.response,
       request: state.request
-    }
+    })
   }
 
   if (Predicate.isTagged(state, 'Errored')) {
-    return { _tag: 'Errored', ...terminalTimingFromState(state), message: state.message }
+    return ToolRunState.Errored({ ...terminalTimingFromState(state), message: state.message })
   }
 
   if (Predicate.isTagged(state, 'ProviderCompleted')) {
-    return { _tag: 'ProviderCompleted', ...noTiming(), result: state.result }
+    return ToolRunState.ProviderCompleted({ ...noTiming(), result: state.result })
   }
 
-  return { _tag: 'Called', ...noTiming() }
+  return ToolRunState.Called({ ...noTiming() })
 }
 
 const textItemFromPart = (
@@ -250,17 +289,19 @@ const textItemFromPart = (
   if (part.state === 'streaming') {
     switch (message.role) {
       case 'user':
-        return Option.some({
-          _tag: 'UserDraft',
-          id: part.id,
-          text: contentText(part.content)
-        })
+        return Option.some(
+          AgentChatItemUserDraft.make({
+            id: part.id,
+            text: contentText(part.content)
+          })
+        )
       case 'assistant':
-        return Option.some({
-          _tag: 'AssistantDraft',
-          id: part.id,
-          text: contentText(part.content)
-        })
+        return Option.some(
+          AgentChatItemAssistantDraft.make({
+            id: part.id,
+            text: contentText(part.content)
+          })
+        )
       case 'system':
         return Option.none()
     }
@@ -268,19 +309,21 @@ const textItemFromPart = (
 
   switch (message.role) {
     case 'user':
-      return Option.some({
-        _tag: 'UserMessage',
-        id: part.id,
-        messageId: message.id,
-        content: part.content
-      })
+      return Option.some(
+        AgentChatItem.UserMessage({
+          id: part.id,
+          messageId: message.id,
+          content: part.content
+        })
+      )
     case 'assistant':
-      return Option.some({
-        _tag: 'AssistantMessage',
-        id: part.id,
-        messageId: message.id,
-        content: part.content
-      })
+      return Option.some(
+        AgentChatItem.AssistantMessage({
+          id: part.id,
+          messageId: message.id,
+          content: part.content
+        })
+      )
     case 'system':
       return Option.none()
   }
@@ -289,34 +332,46 @@ const textItemFromPart = (
 const itemFromPart = (
   message: AgentChatMessage,
   part: AgentChatMessage['parts'][number]
-): Option.Option<AgentChatItem> => {
-  switch (part._tag) {
-    case 'Text':
-      return textItemFromPart(message, part)
-    case 'Reasoning':
-      return Option.some({ _tag: 'Reasoning', id: part.id, messageId: message.id, text: part.text })
-    case 'ToolCall':
-      return Option.some({
-        _tag: 'ToolRun',
-        id: part.id,
-        messageId: message.id,
-        call: part.call,
-        state: toolRunStateFor(part.state)
-      })
-    case 'ToolResult':
-      return Option.some({
-        _tag: 'ToolResult',
-        id: part.id,
-        messageId: message.id,
-        toolCallId: part.toolCallId,
-        name: part.name,
-        content: part.content,
-        isError: part.isError
-      })
-    case 'Error':
-      return Option.some({ _tag: 'Error', id: part.id, message: part.message })
-  }
-}
+): Option.Option<AgentChatItem> =>
+  Match.value(part).pipe(
+    Match.withReturnType<Option.Option<AgentChatItem>>(),
+    Match.tag('Text', current => textItemFromPart(message, current)),
+    Match.tag('Reasoning', current =>
+      Option.some(
+        AgentChatItemReasoning.make({
+          id: current.id,
+          messageId: message.id,
+          text: current.text
+        })
+      )
+    ),
+    Match.tag('ToolCall', current =>
+      Option.some(
+        AgentChatItem.ToolRun({
+          id: current.id,
+          messageId: message.id,
+          call: current.call,
+          state: toolRunStateFor(current.state)
+        })
+      )
+    ),
+    Match.tag('ToolResult', current =>
+      Option.some(
+        AgentChatItem.ToolResult({
+          id: current.id,
+          messageId: message.id,
+          toolCallId: current.toolCallId,
+          name: current.name,
+          content: current.content,
+          isError: current.isError
+        })
+      )
+    ),
+    Match.tag('Error', current =>
+      Option.some(AgentChatItemError.make({ id: current.id, message: current.message }))
+    ),
+    Match.exhaustive
+  )
 
 export const buildAgentChatItems = ({
   messages,
@@ -332,16 +387,15 @@ export const buildAgentChatItems = ({
 
   if (isRunning) {
     if (retryInfo !== undefined && retryInfo !== null) {
-      return [...items, { _tag: 'Retry', id: 'agent-retry', retry: retryInfo }]
+      return [...items, AgentChatItem.Retry({ id: 'agent-retry', retry: retryInfo })]
     }
 
     return [
       ...items,
-      {
-        _tag: 'AssistantStatus',
+      AgentChatItemAssistantStatus.make({
         id: 'assistant-status',
         label: activeStatusLabel({ messages, activeToolLabel })
-      }
+      })
     ]
   }
 

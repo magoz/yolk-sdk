@@ -1,4 +1,4 @@
-import { Chunk, Effect, Predicate, Result } from 'effect'
+import { Chunk, Effect, Match, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -233,7 +233,7 @@ export class GmailListSendAsOutput extends Schema.Class<GmailListSendAsOutput>(
 export const GmailUnknownOutput = Schema.Unknown
 
 const isUnknownRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null
+  Predicate.isObjectOrArray(value)
 
 const unknownField = (value: unknown, key: string) =>
   isUnknownRecord(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined
@@ -241,7 +241,7 @@ const unknownField = (value: unknown, key: string) =>
 const unknownStringField = (value: unknown, key: string) => {
   const field = unknownField(value, key)
 
-  return typeof field === 'string' ? field : undefined
+  return Predicate.isString(field) ? field : undefined
 }
 
 const unknownArrayField = (value: unknown, key: string) => {
@@ -729,12 +729,11 @@ const fetchSendAsEmails = (token: string) =>
   Effect.gen(function* () {
     const result = yield* fetchSendAsOutput(token)
 
-    switch (result._tag) {
-      case 'Failure':
-        return result
-      case 'Success':
-        return ActionResult.success(sendAsEmailsFromOutput(result.value))
-    }
+    return Match.value(result).pipe(
+      Match.tag('Failure', current => current),
+      Match.tag('Success', current => ActionResult.success(sendAsEmailsFromOutput(current.value))),
+      Match.exhaustive
+    )
   })
 
 const fetchOptionalSendAsEmails = (token: string) =>

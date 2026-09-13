@@ -547,15 +547,15 @@ describe('subagent tool', () => {
   })
 
   it('extracts text and usage when a subagent awaits input', () => {
+    const approvalRequest = ToolApprovalRequest.make({
+      requestId: 'approval_1',
+      toolCallId: 'call_approval_1',
+      call: ToolCall.make({ id: 'call_approval_1', name: 'write', params: {} })
+    })
+
     const summary = subagentResultFromEvents([
       AgentAwaitingInput.make({
-        requests: [
-          ToolApprovalRequest.make({
-            requestId: 'approval_1',
-            toolCallId: 'call_approval_1',
-            call: ToolCall.make({ id: 'call_approval_1', name: 'write', params: {} })
-          })
-        ],
+        requests: [approvalRequest],
         messages: [
           AssistantAgentMessage.make({
             parts: [AssistantTextPart.make({ content: 'I need approval.' })]
@@ -571,7 +571,7 @@ describe('subagent tool', () => {
       text: 'I need approval.',
       turns: 2,
       usage: { input: { total: 45 }, output: { total: 12 } },
-      requests: [{ _tag: 'ToolApprovalRequest', requestId: 'approval_1' }]
+      requests: [approvalRequest]
     })
 
     const result = makeSubagentToolResult({
@@ -589,7 +589,7 @@ describe('subagent tool', () => {
 
     expect(result.structuredContent).toMatchObject({
       status: 'awaiting_input',
-      hitl_requests: [{ _tag: 'ToolApprovalRequest', requestId: 'approval_1' }]
+      hitl_requests: [approvalRequest]
     })
   })
 

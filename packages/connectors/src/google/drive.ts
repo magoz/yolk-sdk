@@ -33,7 +33,10 @@ const parentResourceKeyRequiresParentId = Schema.makeFilter<{
 }>(input =>
   input.parentResourceKey === undefined || input.parentId !== undefined
     ? undefined
-    : { path: ['parentResourceKey'], issue: 'parentResourceKey requires parentId' }
+    : {
+        path: ['parentResourceKey'],
+        issue: 'parentResourceKey requires parentId'
+      }
 )
 
 export class GoogleDriveUser extends Schema.Class<GoogleDriveUser>('GoogleDriveUser')({
@@ -196,19 +199,55 @@ const GoogleDriveFileApi = Schema.Struct({
 
 type GoogleDriveFileApi = typeof GoogleDriveFileApi.Type
 
+type GoogleDriveFileFromApiFields = Omit<
+  GoogleDriveFileApi,
+  'parents' | 'spaces' | 'owners' | 'permissionIds' | 'contentRestrictions'
+> & {
+  parents?: NonNullable<GoogleDriveFile['parents']>
+  spaces?: NonNullable<GoogleDriveFile['spaces']>
+  owners?: NonNullable<GoogleDriveFile['owners']>
+  permissionIds?: NonNullable<GoogleDriveFile['permissionIds']>
+  contentRestrictions?: NonNullable<GoogleDriveFile['contentRestrictions']>
+}
+
+type GoogleDriveCreateFolderBodyFields = {
+  readonly name: string
+  readonly mimeType: string
+  parents?: Array<string>
+}
+
 const googleDriveFileFromApi = (file: GoogleDriveFileApi): GoogleDriveFile => {
   const { parents, spaces, owners, permissionIds, contentRestrictions, ...metadata } = file
 
-  return GoogleDriveFile.make({
-    ...metadata,
-    ...(parents === undefined ? {} : { parents: Chunk.fromIterable(parents) }),
-    ...(spaces === undefined ? {} : { spaces: Chunk.fromIterable(spaces) }),
-    ...(owners === undefined ? {} : { owners: Chunk.fromIterable(owners) }),
-    ...(permissionIds === undefined ? {} : { permissionIds: Chunk.fromIterable(permissionIds) }),
-    ...(contentRestrictions === undefined
-      ? {}
-      : { contentRestrictions: Chunk.fromIterable(contentRestrictions) })
-  })
+  return GoogleDriveFile.make(
+    (() => {
+      const fields: GoogleDriveFileFromApiFields = {
+        ...metadata
+      }
+
+      if (parents !== undefined) {
+        fields.parents = Chunk.fromIterable(parents)
+      }
+
+      if (spaces !== undefined) {
+        fields.spaces = Chunk.fromIterable(spaces)
+      }
+
+      if (owners !== undefined) {
+        fields.owners = Chunk.fromIterable(owners)
+      }
+
+      if (permissionIds !== undefined) {
+        fields.permissionIds = Chunk.fromIterable(permissionIds)
+      }
+
+      if (contentRestrictions !== undefined) {
+        fields.contentRestrictions = Chunk.fromIterable(contentRestrictions)
+      }
+
+      return fields
+    })()
+  )
 }
 
 export class GoogleDriveListFilesInput extends Schema.Class<GoogleDriveListFilesInput>(
@@ -260,15 +299,37 @@ const GoogleDriveListFilesApiOutput = Schema.Struct({
   kind: Schema.optional(Schema.String)
 })
 
+type GoogleDriveListFilesOutputFields = {
+  readonly files: GoogleDriveListFilesOutput['files']
+  nextPageToken?: string
+  incompleteSearch?: boolean
+  kind?: string
+}
+
 const googleDriveListFilesOutputFromApi = (
   output: typeof GoogleDriveListFilesApiOutput.Type
 ): GoogleDriveListFilesOutput =>
-  GoogleDriveListFilesOutput.make({
-    files: Chunk.fromIterable((output.files ?? []).map(googleDriveFileFromApi)),
-    ...(output.nextPageToken === undefined ? {} : { nextPageToken: output.nextPageToken }),
-    ...(output.incompleteSearch === undefined ? {} : { incompleteSearch: output.incompleteSearch }),
-    ...(output.kind === undefined ? {} : { kind: output.kind })
-  })
+  GoogleDriveListFilesOutput.make(
+    (() => {
+      const fields: GoogleDriveListFilesOutputFields = {
+        files: Chunk.fromIterable((output.files ?? []).map(googleDriveFileFromApi))
+      }
+
+      if (output.nextPageToken !== undefined) {
+        fields.nextPageToken = output.nextPageToken
+      }
+
+      if (output.incompleteSearch !== undefined) {
+        fields.incompleteSearch = output.incompleteSearch
+      }
+
+      if (output.kind !== undefined) {
+        fields.kind = output.kind
+      }
+
+      return fields
+    })()
+  )
 
 export class GoogleDriveFileIdInput extends Schema.Class<GoogleDriveFileIdInput>(
   'GoogleDriveFileIdInput'
@@ -561,11 +622,20 @@ export const googleDriveCreateFolderAction = defineAction({
             ...googleDriveWriteHeaders(token),
             ...googleDriveResourceKeyHeaders(input.parentId, input.parentResourceKey)
           },
-          body: JSON.stringify({
-            name: input.name,
-            mimeType: googleDriveFolderMimeType,
-            ...(input.parentId === undefined ? {} : { parents: [input.parentId] })
-          })
+          body: JSON.stringify(
+            (() => {
+              const fields: GoogleDriveCreateFolderBodyFields = {
+                name: input.name,
+                mimeType: googleDriveFolderMimeType
+              }
+
+              if (input.parentId !== undefined) {
+                fields.parents = [input.parentId]
+              }
+
+              return fields
+            })()
+          )
         })
       )
 
@@ -663,7 +733,10 @@ export const googleDriveDeleteFileAction = defineAction({
       }
 
       return ActionResult.success(
-        GoogleDriveDeleteFileOutput.make({ deleted: true, fileId: input.fileId })
+        GoogleDriveDeleteFileOutput.make({
+          deleted: true,
+          fileId: input.fileId
+        })
       )
     })
 })

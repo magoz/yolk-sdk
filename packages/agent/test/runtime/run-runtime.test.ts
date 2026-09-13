@@ -1,4 +1,4 @@
-import { Data, Effect, Exit, Layer, Option, Predicate, Result, Stream } from 'effect'
+import { Effect, Exit, Layer, Option, Predicate, Result, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
@@ -9,9 +9,7 @@ import {
   ToolApprovalResponse,
   ToolDef,
   UserMessage,
-  textOnlyModelCapabilities,
-  type AgentMessage,
-  type HitlResponse
+  textOnlyModelCapabilities
 } from '@yolk-sdk/agent/protocol'
 import {
   agentLoopErrorToAgentError,
@@ -29,34 +27,15 @@ import {
   SessionEventStore,
   type RuntimeConfig,
   type RuntimeSessionEventLog,
-  type RuntimeTranscript,
-  type SessionRevision
+  type RuntimeTranscript
 } from '../../src/runtime'
+import { RuntimeRequest } from '../../src/runtime/run-runtime.ts'
 
 const runtimeConfig: RuntimeConfig = {
   systemPrompt: 'Be brief.',
   tools: [],
   model: 'faux'
 }
-
-class TranscriptRuntimeRequest extends Data.TaggedClass('Transcript')<{
-  readonly sessionId: string
-  readonly messages: RuntimeTranscript
-}> {}
-
-class AppendInputRuntimeRequest extends Data.TaggedClass('AppendInput')<{
-  readonly sessionId: string
-  readonly input: AgentMessage
-  readonly runId: string
-  readonly expectedRevision?: SessionRevision
-}> {}
-
-class AppendHitlResponseRuntimeRequest extends Data.TaggedClass('AppendHitlResponse')<{
-  readonly sessionId: string
-  readonly response: HitlResponse
-  readonly runId: string
-  readonly expectedRevision?: SessionRevision
-}> {}
 
 const makeAgentLoopLayer = (
   requests: Array<LLMRequest> = [],
@@ -87,7 +66,7 @@ describe('runRuntime', () => {
       const messages: RuntimeTranscript = [UserMessage.make({ content: 'client owned transcript' })]
 
       const eventsChunk = yield* runRuntime(
-        new TranscriptRuntimeRequest({
+        RuntimeRequest.Transcript({
           sessionId: 'session_1',
           messages
         }),
@@ -104,7 +83,7 @@ describe('runRuntime', () => {
       const requests: Array<LLMRequest> = []
 
       yield* runRuntime(
-        new TranscriptRuntimeRequest({
+        RuntimeRequest.Transcript({
           sessionId: 'session_1',
           messages: [UserMessage.make({ content: 'reason about this' })]
         }),
@@ -144,7 +123,7 @@ describe('runRuntime', () => {
 
     return Effect.gen(function* () {
       const eventsChunk = yield* runRuntime(
-        new AppendInputRuntimeRequest({
+        RuntimeRequest.AppendInput({
           sessionId: 'session_1',
           input,
           runId: 'run_1',
@@ -201,7 +180,7 @@ describe('runRuntime', () => {
 
     return Effect.gen(function* () {
       const pausedChunk = yield* runRuntime(
-        new AppendInputRuntimeRequest({
+        RuntimeRequest.AppendInput({
           sessionId: 'session_1',
           input,
           runId: 'run_1'
@@ -228,7 +207,7 @@ describe('runRuntime', () => {
       })
 
       const resumedChunk = yield* runRuntime(
-        new AppendHitlResponseRuntimeRequest({
+        RuntimeRequest.AppendHitlResponse({
           sessionId: 'session_1',
           response,
           runId: 'run_2',
@@ -307,7 +286,7 @@ describe('runRuntime', () => {
 
     return Effect.gen(function* () {
       const firstChunk = yield* runRuntime(
-        new AppendInputRuntimeRequest({
+        RuntimeRequest.AppendInput({
           sessionId: 'session_1',
           input,
           runId: 'run_1'
@@ -335,7 +314,7 @@ describe('runRuntime', () => {
       })
 
       const secondChunk = yield* runRuntime(
-        new AppendHitlResponseRuntimeRequest({
+        RuntimeRequest.AppendHitlResponse({
           sessionId: 'session_1',
           response: firstResponse,
           runId: 'run_2',
@@ -366,7 +345,7 @@ describe('runRuntime', () => {
       })
 
       const finalChunk = yield* runRuntime(
-        new AppendHitlResponseRuntimeRequest({
+        RuntimeRequest.AppendHitlResponse({
           sessionId: 'session_1',
           response: secondResponse,
           runId: 'run_3',
@@ -400,7 +379,7 @@ describe('runRuntime', () => {
 
     return Effect.gen(function* () {
       const exit = yield* runRuntime(
-        new AppendInputRuntimeRequest({
+        RuntimeRequest.AppendInput({
           sessionId: 'session_1',
           input,
           runId: 'run_1'
@@ -455,7 +434,7 @@ describe('runRuntime', () => {
       }
 
       const result = yield* runRuntime(
-        new AppendInputRuntimeRequest({
+        RuntimeRequest.AppendInput({
           sessionId: 'session_1',
           input: UserMessage.make({ content: 'new' }),
           runId: 'run_1',

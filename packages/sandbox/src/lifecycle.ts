@@ -1,4 +1,4 @@
-import { Effect, Option, Predicate } from 'effect'
+import { Effect, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { SandboxInputError } from './errors.ts'
 import {
@@ -35,20 +35,25 @@ export const defaultSandboxInitialSource = EmptySandboxInitialSource.make({})
 
 export type SandboxRecreateReason = 'idle_expired' | 'max_expired' | 'name_mismatch'
 
+const SandboxUseExistingDecision = Schema.TaggedStruct('UseExisting', {
+  state: Schema.Unknown
+})
+
+const SandboxCreateDecision = Schema.TaggedStruct('Create', {
+  workspaceReset: Schema.Boolean,
+  reason: Schema.optionalKey(Schema.Literals(['idle_expired', 'max_expired', 'name_mismatch']))
+})
+
 export type SandboxStateDecision =
   | {
       readonly _tag: 'UseExisting'
       readonly state: SandboxState
     }
-  | {
-      readonly _tag: 'Create'
-      readonly workspaceReset: boolean
-      readonly reason?: SandboxRecreateReason
-    }
+  | typeof SandboxCreateDecision.Type
 
-const SandboxCreateDecision = Schema.TaggedStruct('Create', {
-  workspaceReset: Schema.Boolean,
-  reason: Schema.optionalKey(Schema.Literals(['idle_expired', 'max_expired', 'name_mismatch']))
+const existingSandboxStateDecision = (state: SandboxState): SandboxStateDecision => ({
+  ...SandboxUseExistingDecision.make({ state }),
+  state
 })
 
 const positiveOr = (value: number | undefined, fallback: number) =>
@@ -129,47 +134,53 @@ export const initialSandboxState = (input: {
   readonly name: string
   readonly nowMs: number
   readonly lifecycle: SandboxLifecycle
-}) => {
-  switch (input.lifecycle._tag) {
-    case 'Disposable':
-      return VercelSandboxState.make({
+}) =>
+  Match.value(input.lifecycle).pipe(
+    Match.withReturnType<SandboxState>(),
+    Match.tag('Disposable', lifecycle =>
+      VercelSandboxState.make({
         name: input.name,
         createdAtMs: input.nowMs,
         lastUsedAtMs: input.nowMs,
-        expiresAtMs: input.nowMs + input.lifecycle.idleTtlMs,
-        maxExpiresAtMs: input.nowMs + input.lifecycle.maxLifetimeMs
+        expiresAtMs: input.nowMs + lifecycle.idleTtlMs,
+        maxExpiresAtMs: input.nowMs + lifecycle.maxLifetimeMs
       })
-    case 'Persistent':
-      return VercelSandboxState.make({
+    ),
+    Match.tag('Persistent', lifecycle =>
+      VercelSandboxState.make({
         name: input.name,
         createdAtMs: input.nowMs,
         lastUsedAtMs: input.nowMs,
-        expiresAtMs: input.nowMs + input.lifecycle.idleTtlMs,
+        expiresAtMs: input.nowMs + lifecycle.idleTtlMs,
         maxExpiresAtMs: Number.MAX_SAFE_INTEGER
       })
-  }
-}
+    ),
+    Match.exhaustive
+  )
 
 export const touchSandboxState = (input: {
   readonly state: SandboxState
   readonly nowMs: number
   readonly lifecycle: SandboxLifecycle
-}) => {
-  switch (input.lifecycle._tag) {
-    case 'Disposable':
-      return VercelSandboxState.make({
+}) =>
+  Match.value(input.lifecycle).pipe(
+    Match.withReturnType<SandboxState>(),
+    Match.tag('Disposable', lifecycle =>
+      VercelSandboxState.make({
         ...input.state,
         lastUsedAtMs: input.nowMs,
-        expiresAtMs: Math.min(input.nowMs + input.lifecycle.idleTtlMs, input.state.maxExpiresAtMs)
+        expiresAtMs: Math.min(input.nowMs + lifecycle.idleTtlMs, input.state.maxExpiresAtMs)
       })
-    case 'Persistent':
-      return VercelSandboxState.make({
+    ),
+    Match.tag('Persistent', lifecycle =>
+      VercelSandboxState.make({
         ...input.state,
         lastUsedAtMs: input.nowMs,
-        expiresAtMs: input.nowMs + input.lifecycle.idleTtlMs
+        expiresAtMs: input.nowMs + lifecycle.idleTtlMs
       })
-  }
-}
+    ),
+    Match.exhaustive
+  )
 
 export const sandboxTimeoutExtendDeltaMs = (input: {
   readonly before: SandboxState
@@ -193,7 +204,7 @@ export const sandboxStateDecision = (input: {
   }
 
   if (Predicate.isTagged(input.lifecycle, 'Persistent')) {
-    return { _tag: 'UseExisting', state }
+    return existingSandboxStateDecision(state)
   }
 
   if (input.nowMs >= state.maxExpiresAtMs) {
@@ -204,5 +215,5 @@ export const sandboxStateDecision = (input: {
     return SandboxCreateDecision.make({ workspaceReset: true, reason: 'idle_expired' })
   }
 
-  return { _tag: 'UseExisting', state }
+  return existingSandboxStateDecision(state)
 }

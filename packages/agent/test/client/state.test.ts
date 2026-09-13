@@ -40,6 +40,7 @@ import {
   reduceAgentEvents,
   submitAgentUserMessage
 } from '../../src/client'
+import { AgentToolRun } from '../../src/client/state.ts'
 
 describe('reduceAgentEvents', () => {
   it('builds client state from streamed events', () => {
@@ -78,7 +79,9 @@ describe('reduceAgentEvents', () => {
     expect(state.text).toBe('')
     expect(state.liveMessages).toEqual([])
     expect(state.toolRuns).toEqual([
-      expect.objectContaining({ _tag: 'Completed', call, result, startedAtMs: 123, endedAtMs: 123 })
+      expect.objectContaining(
+        AgentToolRun.Completed({ call, result, startedAtMs: 123, endedAtMs: 123 })
+      )
     ])
     expect(state.messages).toEqual([message, toolResultMessage])
     expect(state.error).toBeNull()
@@ -101,7 +104,11 @@ describe('reduceAgentEvents', () => {
     ])
 
     expect(state.liveMessages).toEqual([message])
-    expect(state.toolRuns).toEqual([expect.objectContaining({ _tag: 'Completed', call, result })])
+    expect(state.toolRuns).toEqual([
+      expect.objectContaining(
+        AgentToolRun.Completed({ call, result, startedAtMs: 0, endedAtMs: 0 })
+      )
+    ])
   })
 
   it('keeps replayed durable user messages in live run state once', () => {
@@ -130,11 +137,15 @@ describe('reduceAgentEvents', () => {
     ])
 
     expect(inputStreaming.toolRuns).toEqual([
-      { _tag: 'InputStreaming', id: call.id, name: call.name, input: '{"url":"https://e.com"}' }
+      AgentToolRun.InputStreaming({
+        id: call.id,
+        name: call.name,
+        input: '{"url":"https://e.com"}'
+      })
     ])
 
     const approval = reduceAgentEvents([AgentStart.make({}), ToolApprovalRequested.make({ call })])
-    expect(approval.toolRuns).toEqual([{ _tag: 'ApprovalRequested', call }])
+    expect(approval.toolRuns).toEqual([AgentToolRun.ApprovalRequested({ call })])
 
     const questionRequest = QuestionRequest.make({
       requestId: 'question:call_1',
@@ -148,7 +159,9 @@ describe('reduceAgentEvents', () => {
       QuestionRequested.make({ request: questionRequest })
     ])
 
-    expect(question.toolRuns).toEqual([{ _tag: 'QuestionRequested', request: questionRequest }])
+    expect(question.toolRuns).toEqual([
+      AgentToolRun.QuestionRequested({ request: questionRequest })
+    ])
 
     const questionResponse = QuestionResponse.make({
       requestId: questionRequest.requestId,
@@ -164,7 +177,7 @@ describe('reduceAgentEvents', () => {
     ])
 
     expect(answeredQuestion.toolRuns).toEqual([
-      { _tag: 'QuestionAnswered', response: questionResponse, request: questionRequest }
+      AgentToolRun.QuestionAnswered({ response: questionResponse, request: questionRequest })
     ])
 
     const denied = reduceAgentEvents([
@@ -173,7 +186,9 @@ describe('reduceAgentEvents', () => {
       ToolApprovalDenied.make({ toolCallId: call.id, reason: 'policy' })
     ])
 
-    expect(denied.toolRuns).toEqual([{ _tag: 'Denied', toolCallId: call.id, reason: 'policy' }])
+    expect(denied.toolRuns).toEqual([
+      AgentToolRun.Denied({ toolCallId: call.id, reason: 'policy' })
+    ])
 
     const errored = reduceAgentEvents(
       [
@@ -185,7 +200,7 @@ describe('reduceAgentEvents', () => {
     )
 
     expect(errored.toolRuns).toEqual([
-      { _tag: 'Errored', call, message: 'safe failure', endedAtMs: 42 }
+      AgentToolRun.Errored({ call, message: 'safe failure', endedAtMs: 42 })
     ])
 
     const providerCompleted = reduceAgentEvents([
@@ -193,7 +208,7 @@ describe('reduceAgentEvents', () => {
       ProviderToolResult.make({ call, result })
     ])
 
-    expect(providerCompleted.toolRuns).toEqual([{ _tag: 'ProviderCompleted', call, result }])
+    expect(providerCompleted.toolRuns).toEqual([AgentToolRun.ProviderCompleted({ call, result })])
   })
 
   it('marks client state waiting on HITL input', () => {

@@ -35,14 +35,19 @@ const rowToSkillInfo = (row: AgentSkillManifestRow): SkillInfo => ({
   source: dbSkillSource
 })
 
-const rowToCommandInfo = (row: AgentCommandManifestRow): CommandInfo => ({
-  name: row.name,
-  ...(row.description.length === 0 ? {} : { description: row.description }),
-  template: row.template,
-  hints: commandHints(row.template),
-  location: `db:agentCommand:${row.id}`,
-  source: dbCommandSource
-})
+const rowToCommandInfo = (row: AgentCommandManifestRow): CommandInfo => {
+  const name = row.name
+
+  const fields = row.description.length === 0 ? { name } : { name, description: row.description }
+
+  return {
+    ...fields,
+    template: row.template,
+    hints: commandHints(row.template),
+    location: `db:agentCommand:${row.id}`,
+    source: dbCommandSource
+  }
+}
 
 export const agentRowsToManifest = (
   skillRows: ReadonlyArray<AgentSkillManifestRow>,

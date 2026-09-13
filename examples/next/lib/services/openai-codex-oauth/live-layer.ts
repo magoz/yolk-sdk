@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, Option } from 'effect'
+import { Clock, Context, Effect, Layer, Option, Predicate } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -22,6 +22,7 @@ import {
   OpenAiCodexDeviceAuthUserCodeResponseSchema,
   OpenAiCodexTokenResponseSchema,
   type OpenAiCodexDeviceAuthTokenResponse,
+  type OpenAiCodexJsonRequestBody,
   type OpenAiCodexOAuthToken,
   type OpenAiCodexTokenResponse
 } from './schemas'
@@ -40,11 +41,8 @@ export const OPENAI_TOKEN_ENDPOINT = openAiCodexTokenEndpoint
 
 export const OPENAI_CODEX_REFRESH_BUFFER_MS = openAiCodexRefreshBufferMs
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null
+  Predicate.isObjectOrArray(value) && value !== null
 
 const parseJwtPayload = (token: string): unknown | undefined => {
   const parts = token.split('.')
@@ -68,13 +66,13 @@ const accountIdFromPayload = (payload: unknown): string | undefined => {
 
   const direct = payload.chatgpt_account_id
 
-  if (typeof direct === 'string') {
+  if (Predicate.isString(direct)) {
     return direct
   }
 
   const auth = payload['https://api.openai.com/auth']
 
-  if (isRecord(auth) && typeof auth.chatgpt_account_id === 'string') {
+  if (isRecord(auth) && Predicate.isString(auth.chatgpt_account_id)) {
     return auth.chatgpt_account_id
   }
 
@@ -82,7 +80,7 @@ const accountIdFromPayload = (payload: unknown): string | undefined => {
 
   if (Array.isArray(organizations)) {
     for (const organization of organizations) {
-      if (isRecord(organization) && typeof organization.id === 'string') {
+      if (isRecord(organization) && Predicate.isString(organization.id)) {
         return organization.id
       }
     }
@@ -152,7 +150,11 @@ const failOpenAiResponse = (response: HttpClientResponse.HttpClientResponse, ope
     )
   })
 
-const parseResponseJson = (response: HttpClientResponse.HttpClientResponse, operation: string) =>
+const parseResponseJson = <S extends Schema.Top>(
+  response: HttpClientResponse.HttpClientResponse,
+  schema: S,
+  operation: string
+) =>
   response.json.pipe(
     Effect.mapError(
       error =>
@@ -160,17 +162,17 @@ const parseResponseJson = (response: HttpClientResponse.HttpClientResponse, oper
           message: `Could not parse OpenAI Codex ${operation} JSON: ${error.message}`,
           cause: error
         })
-    )
-  )
-
-const decodeJson = <S extends Schema.Top>(schema: S, value: unknown, operation: string) =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
-    Effect.mapError(
-      error =>
-        new OpenAiCodexOAuthError({
-          message: `Invalid OpenAI Codex ${operation} response: ${unknownToMessage(error)}`,
-          cause: error
-        })
+    ),
+    Effect.flatMap(value =>
+      Schema.decodeUnknownEffect(schema)(value).pipe(
+        Effect.mapError(
+          error =>
+            new OpenAiCodexOAuthError({
+              message: `Invalid OpenAI Codex ${operation} response: ${error instanceof Error ? error.message : String(error)}`,
+              cause: error
+            })
+        )
+      )
     )
   )
 
@@ -181,7 +183,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
     const execute = (request: HttpClientRequest.HttpClientRequest, operation: string) =>
       client.execute(request).pipe(Effect.mapError(toRequestError(operation)))
 
-    const postJson = (url: string, body: unknown, operation: string) =>
+    const postJson = (url: string, body: OpenAiCodexJsonRequestBody, operation: string) =>
       Effect.gen(function* () {
         const request = yield* HttpClientRequest.post(url).pipe(
           HttpClientRequest.setHeaders({
@@ -192,7 +194,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           Effect.mapError(
             error =>
               new OpenAiCodexOAuthError({
-                message: `Could not serialize OpenAI Codex ${operation} request: ${unknownToMessage(error)}`,
+                message: `Could not serialize OpenAI Codex ${operation} request: ${error instanceof Error ? error.message : String(error)}`,
                 cause: error
               })
           )
@@ -217,7 +219,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           return yield* failOpenAiResponse(response, operation)
         }
 
-        return yield* parseResponseJson(response, operation)
+        return yield* parseResponseJson(response, OpenAiCodexTokenResponseSchema, operation)
       })
 
     const startDeviceFlow = () =>
@@ -232,11 +234,9 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           return yield* failOpenAiResponse(response, 'device authorization')
         }
 
-        const json = yield* parseResponseJson(response, 'device authorization')
-
-        const deviceAuth = yield* decodeJson(
+        const deviceAuth = yield* parseResponseJson(
+          response,
           OpenAiCodexDeviceAuthUserCodeResponseSchema,
-          json,
           'device authorization'
         )
 
@@ -274,11 +274,9 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           }
         }
 
-        const json = yield* parseResponseJson(response, 'device token poll')
-
-        const deviceToken = yield* decodeJson(
+        const deviceToken = yield* parseResponseJson(
+          response,
           OpenAiCodexDeviceAuthTokenResponseSchema,
-          json,
           'device token poll'
         )
 
@@ -287,7 +285,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
 
     const exchangeDeviceToken = (deviceToken: OpenAiCodexDeviceAuthTokenResponse) =>
       Effect.gen(function* () {
-        const json = yield* postForm(
+        const tokens = yield* postForm(
           OPENAI_TOKEN_ENDPOINT,
           new URLSearchParams({
             grant_type: 'authorization_code',
@@ -298,8 +296,6 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           }),
           'token exchange'
         )
-
-        const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token exchange')
 
         if (tokens.refresh_token === undefined) {
           return yield* new OpenAiCodexOAuthError({
@@ -314,7 +310,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
 
     const refreshToken = (refreshTokenValue: string, currentAccountId: string | undefined) =>
       Effect.gen(function* () {
-        const json = yield* postForm(
+        const tokens = yield* postForm(
           OPENAI_TOKEN_ENDPOINT,
           new URLSearchParams({
             grant_type: 'refresh_token',
@@ -324,7 +320,6 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           'token refresh'
         )
 
-        const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token refresh')
         const nowMs = yield* Clock.currentTimeMillis
 
         return toOAuthToken(tokens, currentAccountId, refreshTokenValue, nowMs)

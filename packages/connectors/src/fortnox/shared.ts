@@ -17,13 +17,29 @@ export const FortnoxMetaInformation = Schema.Struct({
   '@TotalResources': Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 })
 
+type FortnoxPaginationFields = {
+  readonly currentPage: number
+  readonly totalPages: number
+  readonly totalResources: number
+  nextPage?: number
+}
+
 export const paginationFromApi = (meta: typeof FortnoxMetaInformation.Type) =>
-  FortnoxPagination.make({
-    currentPage: meta['@CurrentPage'],
-    totalPages: meta['@TotalPages'],
-    totalResources: meta['@TotalResources'],
-    ...(meta['@CurrentPage'] < meta['@TotalPages'] ? { nextPage: meta['@CurrentPage'] + 1 } : {})
-  })
+  FortnoxPagination.make(
+    (() => {
+      const fields: FortnoxPaginationFields = {
+        currentPage: meta['@CurrentPage'],
+        totalPages: meta['@TotalPages'],
+        totalResources: meta['@TotalResources']
+      }
+
+      if (meta['@CurrentPage'] < meta['@TotalPages']) {
+        fields.nextPage = meta['@CurrentPage'] + 1
+      }
+
+      return fields
+    })()
+  )
 
 export const listPath = (
   resource: string,
@@ -82,6 +98,14 @@ const failureCode = (status: number) => {
   }
 }
 
+type FortnoxProviderFailureFields = {
+  readonly code: string
+  readonly message: string
+  readonly status: number
+  retryAfterMs?: number
+  underlying?: { readonly providerCode: number | string }
+}
+
 const providerFailure = (response: ConnectorHttpResponse) =>
   Effect.gen(function* () {
     const parsed = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(
@@ -103,13 +127,25 @@ const providerFailure = (response: ConnectorHttpResponse) =>
     const retryAfterMs =
       seconds !== undefined && Number.isSafeInteger(seconds * 1000) ? seconds * 1000 : undefined
 
-    return ActionResult.failure({
-      code: failureCode(response.status),
-      message: message?.trim() ? message : `Fortnox request failed (HTTP ${response.status})`,
-      status: response.status,
-      ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
-      ...(providerCode === undefined ? {} : { underlying: { providerCode } })
-    })
+    return ActionResult.failure(
+      (() => {
+        const fields: FortnoxProviderFailureFields = {
+          code: failureCode(response.status),
+          message: message?.trim() ? message : `Fortnox request failed (HTTP ${response.status})`,
+          status: response.status
+        }
+
+        if (retryAfterMs !== undefined) {
+          fields.retryAfterMs = retryAfterMs
+        }
+
+        if (providerCode !== undefined) {
+          fields.underlying = { providerCode }
+        }
+
+        return fields
+      })()
+    )
   })
 
 export const readFortnox = <A, B>(

@@ -42,7 +42,6 @@ const makeHost = (body = '{"id":"updated-id","isRead":true}', status = 200) => {
 
         return Effect.succeed(
           OAuthCredential.make({
-            _tag: 'OAuthCredential',
             provider: 'microsoft',
             accessToken: 'token',
             expiresAt: 4_000_000_000_000

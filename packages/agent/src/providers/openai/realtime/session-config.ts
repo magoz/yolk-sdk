@@ -1,4 +1,4 @@
-import { Effect, Option, Result } from 'effect'
+import { Effect, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolDef } from '@yolk-sdk/agent/protocol'
 import { VoiceToolBridgeError, type VoiceSessionConfig } from '@yolk-sdk/agent/voice'
@@ -106,7 +106,7 @@ const makeOpenAiRealtimeInputTranscription = (
 type JsonSchemaRecord = Record<string, unknown>
 
 const isJsonSchemaRecord = (value: unknown): value is JsonSchemaRecord =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
 type ObjectVariant = {
   readonly properties: JsonSchemaRecord
@@ -125,7 +125,7 @@ const asObjectVariant = (value: unknown): ObjectVariant | undefined => {
   }
 
   const required = Array.isArray(value['required'])
-    ? value['required'].filter((key): key is string => typeof key === 'string')
+    ? value['required'].filter((key): key is string => Predicate.isString(key))
     : []
 
   return { properties, required }
@@ -138,7 +138,7 @@ const stringEnumValues = (schema: unknown): ReadonlyArray<string> | undefined =>
 
   const values = schema['enum']
 
-  if (!Array.isArray(values) || !values.every(value => typeof value === 'string')) {
+  if (!Array.isArray(values) || !values.every(value => Predicate.isString(value))) {
     return undefined
   }
 
@@ -200,12 +200,22 @@ export const openAiRealtimeToolParameters = (parameters: unknown): unknown => {
     .map(variant => variant.required)
     .reduce((shared, keys) => shared.filter(key => keys.includes(key)))
 
-  return {
-    type: 'object',
-    properties,
-    ...(required.length > 0 ? { required } : {}),
-    additionalProperties: false
+  type OpenAiRealtimeLoweredParametersFields = {
+    type: 'object'
+    properties: typeof properties
+    required?: typeof required
   }
+
+  const fields: OpenAiRealtimeLoweredParametersFields = {
+    type: 'object',
+    properties
+  }
+
+  if (required.length > 0) {
+    fields.required = required
+  }
+
+  return { ...fields, additionalProperties: false }
 }
 
 const realtimeToolResult = (

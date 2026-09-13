@@ -58,16 +58,19 @@ const runProvider = (
   Effect.gen(function* () {
     const provider = yield* LLMProvider
 
+    const streamInput = {
+      model: request.model ?? 'anthropic/claude-sonnet',
+      systemPrompt: 'Be concise.',
+      messages: [UserMessage.make({ content: 'Hello' })],
+      tools: []
+    }
+
     return yield* provider
-      .stream({
-        model: request.model ?? 'anthropic/claude-sonnet',
-        systemPrompt: 'Be concise.',
-        messages: [UserMessage.make({ content: 'Hello' })],
-        tools: [],
-        ...(request.reasoningEffort === undefined
-          ? {}
-          : { reasoningEffort: request.reasoningEffort })
-      })
+      .stream(
+        request.reasoningEffort === undefined
+          ? streamInput
+          : { ...streamInput, reasoningEffort: request.reasoningEffort }
+      )
       .pipe(Stream.runCollect)
   }).pipe(
     Effect.provide(

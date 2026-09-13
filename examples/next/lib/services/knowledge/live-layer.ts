@@ -1,6 +1,6 @@
 import { S3Service } from '@effect-aws/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { Config, Context, DateTime, Effect, Layer, Option, Redacted } from 'effect'
+import { Config, Context, DateTime, Effect, Layer, Option, Predicate, Redacted } from 'effect'
 import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'
 import { KnowledgeStore } from '@yolk-sdk/knowledge/store'
 import { KnowledgeFileError, KnowledgeStoreError } from '@yolk-sdk/knowledge/errors'
@@ -102,7 +102,7 @@ const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
 const propertyValue = (input: unknown, key: string) => {
-  if (typeof input !== 'object' || input === null) {
+  if (!Predicate.isObjectOrArray(input) || input === null) {
     return undefined
   }
 
@@ -112,13 +112,13 @@ const propertyValue = (input: unknown, key: string) => {
 const stringProperty = (input: unknown, key: string) => {
   const value = propertyValue(input, key)
 
-  return typeof value === 'string' && value.length > 0 ? value : undefined
+  return Predicate.isString(value) && value.length > 0 ? value : undefined
 }
 
 const numberProperty = (input: unknown, key: string) => {
   const value = propertyValue(input, key)
 
-  return typeof value === 'number' ? value : undefined
+  return Predicate.isNumber(value) ? value : undefined
 }
 
 const externalErrorMessage = (error: unknown) => {

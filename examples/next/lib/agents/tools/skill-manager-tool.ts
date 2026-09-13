@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Data, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -41,28 +41,31 @@ const SkillManagerParams = Schema.Struct({
 
 type SkillManagerParams = typeof SkillManagerParams.Type
 
-export type SkillManagerAction =
-  | { readonly _tag: 'List'; readonly userId: string }
-  | {
-      readonly _tag: 'Create'
-      readonly userId: string
-      readonly name: string
-      readonly description: string
-      readonly content: string
-      readonly createCommand: boolean
-      readonly commandName?: string
-    }
-  | {
-      readonly _tag: 'Update'
-      readonly userId: string
-      readonly id?: string
-      readonly name?: string
-      readonly description: string
-      readonly content: string
-      readonly enabled?: boolean
-      readonly createCommand: boolean
-      readonly commandName?: string
-    }
+export type SkillManagerAction = Data.TaggedEnum<{
+  readonly List: {
+    readonly userId: string
+  }
+  readonly Create: {
+    readonly userId: string
+    readonly name: string
+    readonly description: string
+    readonly content: string
+    readonly createCommand: boolean
+    readonly commandName?: string
+  }
+  readonly Update: {
+    readonly userId: string
+    readonly id?: string
+    readonly name?: string
+    readonly description: string
+    readonly content: string
+    readonly enabled?: boolean
+    readonly createCommand: boolean
+    readonly commandName?: string
+  }
+}>
+
+export const SkillManagerAction = Data.taggedEnum<SkillManagerAction>()
 
 export type SkillManagerResult = {
   readonly message: string
@@ -106,29 +109,27 @@ const paramsToAction = (params: SkillManagerParams, userId: string) =>
   Effect.gen(function* () {
     switch (params.action) {
       case 'list':
-        return { _tag: 'List', userId } satisfies SkillManagerAction
+        return SkillManagerAction.List({ userId })
       case 'create': {
         const name = yield* requiredText(params, 'name')
         const description = yield* requiredText(params, 'description')
         const content = yield* requiredText(params, 'content')
 
-        return {
-          _tag: 'Create',
+        return SkillManagerAction.Create({
           userId,
           name,
           description,
           content,
           createCommand: params.createCommand ?? true,
           commandName: optionalText(params.commandName)
-        } satisfies SkillManagerAction
+        })
       }
 
       case 'update': {
         const description = yield* requiredText(params, 'description')
         const content = yield* requiredText(params, 'content')
 
-        return {
-          _tag: 'Update',
+        return SkillManagerAction.Update({
           userId,
           id: optionalText(params.id),
           name: optionalText(params.name),
@@ -137,7 +138,7 @@ const paramsToAction = (params: SkillManagerParams, userId: string) =>
           enabled: optionalBoolean(params.enabled),
           createCommand: params.createCommand ?? true,
           commandName: optionalText(params.commandName)
-        } satisfies SkillManagerAction
+        })
       }
     }
   })

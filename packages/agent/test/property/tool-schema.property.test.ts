@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Effect, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { EmptyToolParams, makeTool } from '../../src/tools'
@@ -28,7 +28,7 @@ const invalidSchemaVariant = Schema.Literals([
 const invalidSchemaVariantArbitrary = Schema.toArbitrary(invalidSchemaVariant)
 
 const isJsonObject = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && typeof input === 'object' && !Array.isArray(input)
+  input !== null && Predicate.isObjectOrArray(input) && !Array.isArray(input)
 
 const field = (input: unknown, key: string) =>
   isJsonObject(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined

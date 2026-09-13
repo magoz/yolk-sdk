@@ -43,7 +43,9 @@ import {
   buildAgentChatMessages,
   toAgentMessages
 } from '@yolk-sdk/agent/react'
+import { AgentToolRun } from '../../src/client/state.ts'
 import { buildAgentChatItems } from '../../src/react/chat-items.ts'
+import { ChatToolState } from '../../src/react/chat-messages.ts'
 import { getActiveChatToolParts, getCompletedChatToolParts } from '../../src/react/chat-core.ts'
 
 const call = ToolCall.make({
@@ -81,7 +83,14 @@ describe('background acceptance projection', () => {
 
   it('settles client pending input without claiming execution completion and deduplicates receipt replay', () => {
     const state = applyAgentEvent(applyAgentEvent(initialAgentClientState, started), accepted)
-    expect(state.toolRuns[0]).toMatchObject({ _tag: 'Accepted', result })
+    expect(state.toolRuns[0]).toMatchObject(
+      AgentToolRun.Accepted({
+        call,
+        result,
+        startedAtMs: 0,
+        endedAtMs: 0
+      })
+    )
     expect(state.toolRuns.some(isActiveToolRun)).toBe(false)
     expect(completedToolRuns(state.toolRuns)).toEqual([])
     expect(applyAgentEvent(state, accepted)).toEqual(state)
@@ -97,7 +106,7 @@ describe('background acceptance projection', () => {
     })
 
     expect(items.filter(item => Predicate.isTagged(item, 'ToolRun'))).toMatchObject([
-      { state: { _tag: 'Accepted', result } }
+      { state: ChatToolState.Accepted({ result }) }
     ])
     // Acceptance settles the card: it is neither an active spinner nor a completed execution.
     expect(getActiveChatToolParts(chat)).toEqual([])
@@ -123,7 +132,7 @@ describe('background acceptance projection', () => {
     })
 
     expect(replayItems.filter(item => Predicate.isTagged(item, 'ToolRun'))).toMatchObject([
-      { state: { _tag: 'Accepted', result } }
+      { state: ChatToolState.Accepted({ result }) }
     ])
     expect(
       toAgentMessages(replay).filter(message => Predicate.isTagged(message, 'ToolResult'))
@@ -200,7 +209,7 @@ it('preserves the whole accepted call across all active replays, end and a new t
         .filter(part => Predicate.isTagged(part, 'ToolCall') && part.call.id === call.id)
 
       expect(parts).toHaveLength(1)
-      expect(parts[0]).toMatchObject({ call, state: { _tag: 'Accepted', result } })
+      expect(parts[0]).toMatchObject({ call, state: ChatToolState.Accepted({ result }) })
       expect(
         toAgentMessages(chat).filter(message => Predicate.isTagged(message, 'ToolResult'))
       ).toEqual(transcript.filter(message => Predicate.isTagged(message, 'ToolResult')))
@@ -299,7 +308,7 @@ it('preserves accepted calls and active siblings through mixed assistant replays
           .filter(part => Predicate.isTagged(part, 'ToolCall'))
 
         expect(calls.filter(part => part.call.id === call.id)).toMatchObject([
-          { call, state: { _tag: 'Accepted', result } }
+          { call, state: ChatToolState.Accepted({ result }) }
         ])
         expect(getActiveChatToolParts(state.chatMessages)).toMatchObject([{ call: sibling }])
         const transcript = toAgentMessages(state.chatMessages)
@@ -338,7 +347,7 @@ it('hydrates accepted receipts through the public hook reducer and fences subseq
     const parts = state.chatMessages.flatMap(message => message.parts)
     expect(parts.filter(part => Predicate.isTagged(part, 'ToolResult'))).toEqual([])
     expect(parts.filter(part => Predicate.isTagged(part, 'ToolCall'))).toMatchObject([
-      { call, state: { _tag: 'Accepted', result } }
+      { call, state: ChatToolState.Accepted({ result }) }
     ])
     expect(getActiveChatToolParts(state.chatMessages)).toEqual([])
     expect(getCompletedChatToolParts(state.chatMessages)).toEqual([])

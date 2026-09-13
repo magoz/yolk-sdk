@@ -74,13 +74,6 @@ const makeModelVisibleError = (message: string, reason: ModelVisibleToolErrorRea
     reason
   })
 
-const decodeWebFetchParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(WebFetchParams)(params).pipe(
-    Effect.mapError(error =>
-      makeModelVisibleError(`Invalid web fetch arguments: ${unknownToMessage(error)}`, 'validation')
-    )
-  )
-
 const normalizeFormat = (format: WebFetchFormat | undefined): WebFetchFormat => format ?? 'markdown'
 
 const resolveTimeoutMs = (timeoutSeconds: number | undefined) => {
@@ -498,7 +491,15 @@ export const executeWebFetchTool = (call: ToolCall, deps: WebFetchToolDependenci
   }
 
   return Effect.gen(function* () {
-    const params = yield* decodeWebFetchParams(call.params)
+    const params = yield* Schema.decodeUnknownEffect(WebFetchParams)(call.params).pipe(
+      Effect.mapError(error =>
+        makeModelVisibleError(
+          `Invalid web fetch arguments: ${unknownToMessage(error)}`,
+          'validation'
+        )
+      )
+    )
+
     const content = yield* fetchWebPage(params, deps)
 
     return ToolResult.make({ toolCallId: call.id, content })
@@ -531,3 +532,10 @@ export const makeWebFetchToolModule = (
   id: 'browser',
   tools: [makeWebFetchToolRegistration(deps)]
 })
+
+export const workerWebFetchToolDependencies: WebFetchToolDependencies = {
+  ensurePublicUrl: ensurePublicUrlWithoutDns,
+  request: requestWithHttpClient
+}
+
+export const webFetchWorkerToolModule = makeWebFetchToolModule(workerWebFetchToolDependencies)
