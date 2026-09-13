@@ -335,6 +335,7 @@ export const matchHitlResponse = (
   response: HitlResponse
 ): HitlMatch => {
   const matched = pending.find(request => hitlResponseMatchesRequest(response, request))
+
   return matched === undefined
     ? { _tag: 'Mismatch' }
     : { _tag: 'Match', requestId: matched.requestId }
@@ -346,6 +347,8 @@ export const resumeHitlIfMatched = <A, E, R>(input: {
   readonly resume: (requestId: string) => Effect.Effect<A, E, R>
 }): Effect.Effect<A | { readonly _tag: 'Mismatch' }, E, R> => {
   const matched = matchHitlResponse(input.pending, input.response)
+
   if (matched._tag === 'Mismatch') return Effect.succeed(matched)
+
   return input.resume(matched.requestId)
 }

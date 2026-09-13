@@ -108,6 +108,7 @@ export type InboxApi = {
 
 const isPromotableAt = (item: InboxItem, scope: Promotable) => {
   if (scope === 'steer') return item.delivery === 'steer'
+
   return item.delivery === 'steer' || item.delivery === 'input' || item.delivery === 'queue'
 }
 
@@ -180,8 +181,10 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
         const writeControl = (runId: string, next: RunControl) =>
           Ref.update(controls, current => {
             const copy = new Map(current)
+
             if (isPrunable(next)) copy.delete(runId)
             else copy.set(runId, next)
+
             return copy
           })
 
@@ -190,9 +193,13 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
 
         const acceptHitlPure = (control: RunControl, admission: HitlAdmission): HitlDecision => {
           const park = control.park
+
           if (park === undefined) return { _tag: 'NotParked' }
+
           if (park.generation !== admission.generation) return { _tag: 'Stale' }
+
           if (!park.requestIds.includes(admission.requestId)) return { _tag: 'UnknownRequest' }
+
           if (
             park.responses.some(
               response =>
@@ -201,11 +208,14 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
           ) {
             return { _tag: 'Duplicate' }
           }
+
           if (park.readyWoken) return { _tag: 'Duplicate' }
+
           const responses = [
             ...park.responses,
             { itemId: admission.itemId, requestId: admission.requestId }
           ]
+
           return parkComplete({ ...park, responses }) ? { _tag: 'Ready' } : { _tag: 'Accepted' }
         }
 
@@ -216,15 +226,19 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
               Effect.uninterruptible(
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
+
                   if (control.liveToken === undefined || control.liveToken !== drainToken) {
                     return undefined
                   }
+
                   return yield* Ref.modify(items, current => {
                     const index = current.findIndex(
                       item => item.runId === runId && isPromotableAt(item, scope)
                     )
+
                     if (index < 0) return [undefined, current] as const
                     const taken = current[index]
+
                     return [taken, current.filter((_, itemIndex) => itemIndex !== index)] as const
                   })
                 })
@@ -245,6 +259,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
               Effect.uninterruptible(
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
+
                   if (control.liveToken !== drainToken) return { _tag: 'Stale' } as const
                   generationSeq += 1
                   const generation = String(generationSeq)
@@ -259,6 +274,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                       readyWoken: false
                     }
                   })
+
                   return { _tag: 'Parked', generation } as const
                 })
               )
@@ -269,11 +285,15 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
                   const decision = acceptHitlPure(control, admission)
+
                   if (decision._tag !== 'Accepted' && decision._tag !== 'Ready') {
                     return decision
                   }
+
                   const park = control.park
+
                   if (park === undefined) return { _tag: 'NotParked' } as const
+
                   const nextPark: Park = {
                     ...park,
                     responses: [
@@ -282,6 +302,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     ],
                     readyWoken: decision._tag === 'Ready'
                   }
+
                   yield* writeControl(runId, {
                     pending:
                       decision._tag === 'Ready'
@@ -291,7 +312,9 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     leasedGeneration: control.leasedGeneration,
                     park: nextPark
                   })
+
                   if (decision._tag === 'Ready') yield* onReady
+
                   return decision
                 })
               )
@@ -301,15 +324,18 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
               Effect.uninterruptible(
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
+
                   if (control.park === undefined || control.park.generation !== generation) {
                     return false
                   }
+
                   yield* writeControl(runId, {
                     pending: control.pending,
                     liveToken: control.liveToken,
                     leasedGeneration: control.leasedGeneration,
                     park: undefined
                   })
+
                   return true
                 })
               )
@@ -320,9 +346,11 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
                   const pending = control.pending
+
                   if (parkBlocked(control.park) || pending === undefined) {
                     return { _tag: 'Skip' } as const
                   }
+
                   drainSeq += 1
                   const drainToken = `d${drainSeq}`
                   const park = control.park
@@ -333,6 +361,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     park,
                     leasedGeneration: ready?.generation
                   })
+
                   return {
                     _tag: 'Run',
                     drainToken,
@@ -346,14 +375,17 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
               Effect.uninterruptible(
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
+
                   if (control.liveToken !== drainToken) return
                   const leased = control.leasedGeneration
                   const park = control.park
+
                   const clearPark =
                     acknowledged &&
                     leased !== undefined &&
                     park !== undefined &&
                     park.generation === leased
+
                   yield* writeControl(runId, {
                     pending: control.pending,
                     liveToken: undefined,
@@ -372,7 +404,9 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                   yield* dropQueued(runId)
                   yield* writeControl(runId, emptyControl)
                   const interrupted = yield* interrupt
+
                   if (!interrupted) yield* releaseIdleClaim
+
                   return { hadPark, interrupted }
                 })
               )
@@ -383,6 +417,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 Effect.gen(function* () {
                   yield* Ref.update(items, current => [...current, item])
                   const control = yield* getControl(item.runId)
+
                   if (parkBlocked(control.park)) return
                   yield* writeControl(item.runId, {
                     pending: widerPending(control.pending, itemScope(item)),
@@ -399,6 +434,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
               Effect.uninterruptible(
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
+
                   if (parkBlocked(control.park)) return false
                   yield* writeControl(runId, {
                     pending: widerPending(control.pending, scope),
@@ -407,6 +443,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     park: control.park
                   })
                   yield* wake
+
                   return true
                 })
               )
@@ -416,8 +453,10 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
               Effect.uninterruptible(
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
+
                   if (parkBlocked(control.park)) return undefined
                   const ticket = yield* start
+
                   if (ticket._tag === 'Started') {
                     yield* writeControl(runId, {
                       pending: widerPending(control.pending, 'input'),
@@ -426,6 +465,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                       park: control.park
                     })
                   }
+
                   return ticket
                 })
               )
@@ -436,8 +476,10 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 Effect.flatMap(() =>
                   Effect.gen(function* () {
                     const control = yield* getControl(runId)
+
                     if (parkBlocked(control.park)) return { _tag: 'Skip' } as const
                     const decision = yield* attempt
+
                     if (decision._tag !== 'Resume') return decision
                     yield* writeControl(runId, {
                       pending: widerPending(control.pending, 'input'),
@@ -446,6 +488,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                       park: control.park
                     })
                     yield* wake
+
                     return { _tag: 'Resumed' } as const
                   }).pipe(Effect.ensuring(gate.release(1)))
                 )

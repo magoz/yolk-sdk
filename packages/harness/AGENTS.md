@@ -37,7 +37,7 @@ decoration, not hooks. There is no `World`.
 - `makeHarness` only merges driver + store + inbox Layers. It is not a compiler.
 - Service ownership: `RunStore.inMemoryLayer()/snapshotLayer()`, `Inbox.layer()`,
   `RunCoordinator.layer()` (claims via the contextual `RunStore`), and `Driver.layer()`
-  (requires `RunStore` + `RunCoordinator`) hold the real construction logic. The public
+  (requires `RunStore` + `Inbox` + `RunCoordinator`) hold the real construction logic. The public
   `make*` factories keep their signatures and delegate to these owners; composition roots
   (`driver/memory`, `driver/durable-object`) wire owners consciously and share one store
   instance per composed harness. Every factory call builds fresh layers.

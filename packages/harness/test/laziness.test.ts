@@ -62,7 +62,7 @@ describe('option laziness', () => {
       }
 
       const layer = makeDriverLayer(trackedDriverOptions(reads, backing)).pipe(
-        Layer.provide(RunStore.inMemoryLayer())
+        Layer.provide(Layer.mergeAll(RunStore.inMemoryLayer(), Inbox.layer()))
       )
 
       expect(reads).toEqual([])
@@ -81,7 +81,7 @@ describe('option laziness', () => {
       const backing: DriverBacking = { drain: recordDrain(seen, 'ran'), max: 1 }
 
       const layer = makeDriverLayer(trackedDriverOptions([], backing)).pipe(
-        Layer.provide(RunStore.inMemoryLayer())
+        Layer.provide(Layer.mergeAll(RunStore.inMemoryLayer(), Inbox.layer()))
       )
 
       backing.drain = recordDrain(seen, 'mutated')

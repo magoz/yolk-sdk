@@ -37,7 +37,9 @@ const questionCall = ToolCall.make({
 })
 
 const tools = [weatherTool, questionTool]
+
 const calls = [weatherCall, questionCall]
+
 const loopLayer = Layer.mergeAll(
   TestToolExecutor.layer({ weather: '72F' }),
   LoopConfig.defaultLayer
@@ -49,26 +51,34 @@ describe('HITL loop bridge', () => {
       const pending = yield* Ref.make<ReadonlyArray<HitlRequest>>([])
       const payloads = yield* Ref.make<ReadonlyMap<string, HitlResponse>>(new Map())
       const executed = yield* Ref.make<ReadonlyArray<string>>([])
+
       const completions = yield* Ref.make<
         ReadonlyArray<{ readonly id: string; readonly content: string; readonly isError: boolean }>
       >([])
+
       const drains = yield* Ref.make(0)
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(drains, count => count + 1)
             const inbox = yield* Inbox
+
             if (context.readyResponses.length > 0) {
               const stored = yield* Ref.get(payloads)
+
               const hitlResponses = context.readyResponses.flatMap(item => {
                 const payload = stored.get(item.itemId)
+
                 return payload === undefined ? [] : [payload]
               })
+
               const outcome = yield* attemptToolBatch(
                 { calls, tools, hitlResponses },
                 {
                   onEvent: event => {
                     if (event._tag !== 'ToolExecutionCompleted') return Effect.void
+
                     return Ref.update(completions, current => [
                       ...current,
                       {
@@ -80,18 +90,22 @@ describe('HITL loop bridge', () => {
                   }
                 }
               ).pipe(Effect.provide(loopLayer), Effect.orDie)
+
               if (outcome._tag === 'Completed') {
                 yield* Ref.set(
                   executed,
                   outcome.toolCalls.map(call => call.id)
                 )
               }
+
               return
             }
+
             const outcome = yield* attemptToolBatch({ calls, tools }).pipe(
               Effect.provide(loopLayer),
               Effect.orDie
             )
+
             if (outcome._tag !== 'AwaitingInput') return
             yield* Ref.set(pending, outcome.requests)
             yield* inbox.park(
@@ -113,14 +127,17 @@ describe('HITL loop bridge', () => {
         const requests = yield* Ref.get(pending)
         expect(parked).toBeDefined()
         expect(parked?.requestIds).toHaveLength(2)
+
         if (parked === undefined) return
         const approval = requests.find(request => request._tag === 'ToolApprovalRequest')
         const question = requests.find(request => request._tag === 'QuestionRequest')
         expect(approval).toBeDefined()
         expect(question).toBeDefined()
+
         if (approval === undefined || question === undefined) return
 
         const resumed = yield* Ref.make(false)
+
         const mismatch = yield* resumeHitlIfMatched({
           pending: requests,
           response: ToolApprovalResponse.make({
@@ -140,6 +157,7 @@ describe('HITL loop bridge', () => {
               )
             )
         })
+
         expect(mismatch._tag).toBe('Mismatch')
         expect(yield* Ref.get(resumed)).toBe(false)
         expect(yield* Ref.get(drains)).toBe(1)
@@ -150,7 +168,9 @@ describe('HITL loop bridge', () => {
           decision: 'approved',
           source: 'user'
         })
+
         yield* Ref.update(payloads, current => new Map(current).set('item_a', approvalResponse))
+
         const first = yield* resumeHitlIfMatched({
           pending: requests,
           response: approvalResponse,
@@ -161,6 +181,7 @@ describe('HITL loop bridge', () => {
               generation: parked.generation
             })
         })
+
         expect(first._tag).toBe('Accepted')
         expect(yield* Ref.get(drains)).toBe(1)
 
@@ -171,7 +192,9 @@ describe('HITL loop bridge', () => {
           source: 'user',
           answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
         })
+
         yield* Ref.update(payloads, current => new Map(current).set('item_q', questionResponse))
+
         const ready = yield* resumeHitlIfMatched({
           pending: requests,
           response: questionResponse,
@@ -182,6 +205,7 @@ describe('HITL loop bridge', () => {
               generation: parked.generation
             })
         })
+
         expect(ready._tag).toBe('Ready')
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(drains)).toBe(2)
@@ -210,15 +234,20 @@ describe('HITL loop bridge', () => {
         calls: [weatherCall],
         tools: [weatherTool]
       })
+
       expect(paused._tag).toBe('AwaitingInput')
+
       if (paused._tag !== 'AwaitingInput') return
       const request = paused.requests[0]
       expect(request).toBeDefined()
+
       if (request === undefined) return
       const started = yield* Ref.make<ReadonlyArray<string>>([])
+
       const errorResults = yield* Ref.make<
         ReadonlyArray<{ readonly callId: string; readonly content: string }>
       >([])
+
       const denied = yield* attemptToolBatch(
         {
           calls: [weatherCall],
@@ -238,16 +267,19 @@ describe('HITL loop bridge', () => {
             if (event._tag === 'ToolExecutionStarted') {
               return Ref.update(started, current => [...current, event.call.id])
             }
+
             if (event._tag === 'ToolExecutionCompleted' && event.result.isError === true) {
               return Ref.update(errorResults, current => [
                 ...current,
                 { callId: event.call.id, content: String(event.result.content) }
               ])
             }
+
             return Effect.void
           }
         }
       )
+
       expect(denied._tag).toBe('Completed')
       expect(yield* Ref.get(started)).toEqual([])
       const errors = yield* Ref.get(errorResults)
@@ -263,12 +295,16 @@ describe('HITL loop bridge', () => {
         calls: [questionCall],
         tools: [questionTool]
       })
+
       expect(paused._tag).toBe('AwaitingInput')
+
       if (paused._tag !== 'AwaitingInput') return
       const request = paused.requests[0]
       expect(request).toBeDefined()
+
       if (request === undefined) return
       const started = yield* Ref.make<ReadonlyArray<string>>([])
+
       const cancelled = yield* attemptToolBatch(
         {
           calls: [questionCall],
@@ -295,6 +331,7 @@ describe('HITL loop bridge', () => {
                 : Effect.void
         }
       )
+
       expect(cancelled._tag).toBe('Completed')
       const recorded = yield* Ref.get(started)
       expect(recorded.some(item => item.startsWith('error:') && item.includes('cancelled'))).toBe(

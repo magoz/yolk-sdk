@@ -31,6 +31,7 @@ export function makeInMemoryHarnessLayer(
 export function makeInMemoryHarnessLayer(options?: DriverLayerOptions) {
   const driver =
     options === undefined ? Driver.coordinatedLayer() : Driver.coordinatedLayer(options)
+
   return driver.pipe(
     Layer.provideMerge(RunStore.inMemoryLayer()),
     Layer.provideMerge(Inbox.layer())

@@ -81,9 +81,11 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
       Driver,
       Effect.gen(function* () {
         const maxResumeAttempts = options?.maxResumeAttempts ?? defaultMaxResumeAttempts
+
         if (!isValidMaxResumeAttempts(maxResumeAttempts)) {
           return yield* Effect.fail(new InvalidMaxResumeAttempts({ maxResumeAttempts }))
         }
+
         const store = yield* RunStore
         const inbox = yield* Inbox
         const sweep = yield* Semaphore.make(1)
@@ -100,17 +102,23 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
                 runId,
                 Effect.gen(function* () {
                   if (yield* coordinator.isActive(runId)) return { _tag: 'Skip' } as const
+
                   if (!(yield* store.isClaimed(runId))) return { _tag: 'Skip' } as const
                   const count = yield* store.resumeCount(runId)
+
                   if (count >= maxResumeAttempts) {
                     yield* store.release(runId)
+
                     return { _tag: 'Exhausted' } as const
                   }
+
                   yield* store.incrementResumeCount(runId)
+
                   return { _tag: 'Resume' } as const
                 }),
                 coordinator.wake(runId, 'input')
               )
+
               if (admission._tag === 'Resumed') resumed.push(runId)
               else if (admission._tag === 'Exhausted') exhausted.push(runId)
             }
@@ -127,12 +135,15 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
               inbox.startIfUnblocked(runId, coordinator.captureRun(runId)).pipe(
                 Effect.flatMap(ticket => {
                   if (ticket === undefined) return Effect.void
+
                   if (ticket._tag === 'Stopping') {
                     return ticket.awaitSettlement.pipe(Effect.andThen(Effect.suspend(continueRun)))
                   }
+
                   return ticket.join
                 })
               )
+
             return continueRun()
           },
           wake: (runId, scope = 'input') =>
@@ -167,7 +178,9 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
               .pipe(
                 Effect.map(result => {
                   if (result.interrupted) return { _tag: 'Interrupted' } as const
+
                   if (result.hadPark) return { _tag: 'ParkCleared' } as const
+
                   return { _tag: 'Idle' } as const
                 })
               )
@@ -194,11 +207,13 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
         const maxResumeAttempts = options?.maxResumeAttempts ?? defaultMaxResumeAttempts
         const storeLayer = Layer.succeed(RunStore, store)
         const inboxLayer = Layer.succeed(Inbox, inbox)
+
         const coordinator = RunCoordinator.layer({
           drain: (runId, force, scope) =>
             inbox.beginDrain(runId, scope).pipe(
               Effect.flatMap(begun => {
                 if (begun._tag === 'Skip') return Effect.void
+
                 return Effect.suspend(() =>
                   hostDrain(runId, force, scope, {
                     drainToken: begun.drainToken,

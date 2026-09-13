@@ -141,6 +141,7 @@ describe('in-memory harness', () => {
       expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
       const begun = yield* inbox.beginDrain('run_1', 'input')
       expect(begun._tag).toBe('Run')
+
       if (begun._tag !== 'Run') return
 
       const first = yield* inbox.takePromotable('run_1', 'steer', begun.drainToken)
@@ -166,6 +167,7 @@ describe('in-memory harness', () => {
       expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
       const begun = yield* inbox.beginDrain('run_1', 'input')
       expect(begun._tag).toBe('Run')
+
       if (begun._tag !== 'Run') return
 
       expect(yield* inbox.takePromotable('run_1', 'input', '')).toBeUndefined()
@@ -181,6 +183,7 @@ describe('in-memory harness', () => {
       expect(yield* inbox.wakeIfUnblocked('run_2', 'input', Effect.void)).toBe(true)
       const other = yield* inbox.beginDrain('run_2', 'input')
       expect(other._tag).toBe('Run')
+
       if (other._tag !== 'Run') return
       expect(yield* inbox.takePromotable('run_2', 'input', begun.drainToken)).toBeUndefined()
       expect(yield* inbox.takePromotable('run_1', 'input', other.drainToken)).toBeUndefined()
@@ -202,6 +205,7 @@ describe('in-memory harness', () => {
       expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
       const again = yield* inbox.beginDrain('run_1', 'input')
       expect(again._tag).toBe('Run')
+
       if (again._tag !== 'Run') return
       expect(again.drainToken).not.toBe(begun.drainToken)
       expect(yield* inbox.takePromotable('run_1', 'input', begun.drainToken)).toBeUndefined()

@@ -83,7 +83,7 @@ describe('owner layer topology', () => {
         makeDriverLayer({
           drain: () =>
             Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
-        }).pipe(Layer.provide(store))
+        }).pipe(Layer.provide(store), Layer.provide(Inbox.layer()))
       )
 
       yield* Effect.gen(function* () {
@@ -106,7 +106,11 @@ describe('owner layer topology', () => {
 
       const layer = Layer.mergeAll(
         store,
-        Driver.layer({}).pipe(Layer.provide(RunCoordinator.layer({})), Layer.provide(store))
+        Driver.layer({}).pipe(
+          Layer.provide(RunCoordinator.layer({})),
+          Layer.provide(store),
+          Layer.provide(Inbox.layer())
+        )
       )
 
       yield* Effect.gen(function* () {

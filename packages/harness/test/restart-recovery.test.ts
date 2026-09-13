@@ -31,29 +31,42 @@ import {
 } from '../src/store.ts'
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+
 type LayerE<L> = L extends Layer.Layer<infer _A, infer E, infer _R> ? E : never
+
 type LayerR<L> = L extends Layer.Layer<infer _A, infer _E, infer R> ? R : never
 
 const configuredMax: { readonly maxResumeAttempts?: number } = {}
+
 const maybeMax: number | undefined = undefined
+
 const optionalObject: DriverLayerOptions | undefined = undefined
+
 const forwardDriverOptions = (options?: DriverLayerOptions) => makeDriverLayer(options)
+
 const forwardMemoryOptions = (options?: DriverLayerOptions) => makeInMemoryDriverLayer(options)
+
 const forwardHarnessOptions = (options?: DriverLayerOptions) => makeInMemoryHarnessLayer(options)
+
 const forwardDefaultDriver = (options?: {
   readonly drain?: Drain
   readonly maxResumeAttempts?: undefined
 }) => makeDriverLayer(options)
+
 const forwardDefaultMemory = (options?: {
   readonly drain?: Drain
   readonly maxResumeAttempts?: undefined
 }) => makeInMemoryDriverLayer(options)
+
 const forwardDefaultHarness = (options?: {
   readonly drain?: Drain
   readonly maxResumeAttempts?: undefined
 }) => makeInMemoryHarnessLayer(options)
+
 const durableLoad = Effect.succeed<DurableRunStoreSnapshot | undefined>(undefined)
+
 const durableSave = (_snapshot: DurableRunStoreSnapshot) => Effect.void
+
 const forwardDurableOptions = (options: {
   readonly load: Effect.Effect<DurableRunStoreSnapshot | undefined>
   readonly save: (snapshot: DurableRunStoreSnapshot) => Effect.Effect<void>
@@ -62,20 +75,35 @@ const forwardDurableOptions = (options: {
 }) => makeDurableObjectDriverLayer(options)
 
 const _omittedDriver = () => makeDriverLayer()
+
 const _wholeUndefinedDriver = () => makeDriverLayer(undefined)
+
 const _drainOnlyDriver = () => makeDriverLayer({ drain: () => Effect.void })
+
 const _explicitUndefinedDriver = () => makeDriverLayer({ maxResumeAttempts: undefined })
+
 const _numericDriver = () => makeDriverLayer({ maxResumeAttempts: 1 })
+
 const _configuredMaxDriver = () => makeDriverLayer(configuredMax)
+
 const numberOrUndefinedOptions: DriverLayerOptions = { maxResumeAttempts: maybeMax }
+
 const _numberOrUndefinedDriver = () => makeDriverLayer(numberOrUndefinedOptions)
+
 const _omittedMemoryDriver = () => makeInMemoryDriverLayer()
+
 const _wholeUndefinedMemoryDriver = () => makeInMemoryDriverLayer(undefined)
+
 const _numericMemoryDriver = () => makeInMemoryDriverLayer({ maxResumeAttempts: 0 })
+
 const _omittedHarness = () => makeInMemoryHarnessLayer()
+
 const _wholeUndefinedHarness = () => makeInMemoryHarnessLayer(undefined)
+
 const _numericHarness = () => makeInMemoryHarnessLayer({ maxResumeAttempts: 0 })
+
 const _omittedDurable = () => makeDurableObjectDriverLayer({ load: durableLoad, save: durableSave })
+
 const _numericDurable = () =>
   makeDurableObjectDriverLayer({
     load: durableLoad,
@@ -84,68 +112,92 @@ const _numericDurable = () =>
   })
 
 const _omittedDriverE: Equal<LayerE<ReturnType<typeof _omittedDriver>>, never> = true
+
 const _omittedDriverR: Equal<LayerR<ReturnType<typeof _omittedDriver>>, RunStore | Inbox> = true
+
 const _wholeUndefinedDriverE: Equal<LayerE<ReturnType<typeof _wholeUndefinedDriver>>, never> = true
+
 const _forwardDefaultDriverE: Equal<LayerE<ReturnType<typeof forwardDefaultDriver>>, never> = true
+
 const _drainOnlyDriverE: Equal<LayerE<ReturnType<typeof _drainOnlyDriver>>, never> = true
+
 const _explicitUndefinedDriverE: Equal<
   LayerE<ReturnType<typeof _explicitUndefinedDriver>>,
   never
 > = true
+
 const _numericDriverE: Equal<
   LayerE<ReturnType<typeof _numericDriver>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _configuredMaxDriverE: Equal<
   LayerE<ReturnType<typeof _configuredMaxDriver>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _numberOrUndefinedDriverE: Equal<
   LayerE<ReturnType<typeof _numberOrUndefinedDriver>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _forwardDriverE: Equal<
   LayerE<ReturnType<typeof forwardDriverOptions>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _forwardDriverR: Equal<
   LayerR<ReturnType<typeof forwardDriverOptions>>,
   RunStore | Inbox
 > = true
+
 const _omittedMemoryDriverE: Equal<LayerE<ReturnType<typeof _omittedMemoryDriver>>, never> = true
+
 const _wholeUndefinedMemoryDriverE: Equal<
   LayerE<ReturnType<typeof _wholeUndefinedMemoryDriver>>,
   never
 > = true
+
 const _forwardDefaultMemoryE: Equal<LayerE<ReturnType<typeof forwardDefaultMemory>>, never> = true
+
 const _numericMemoryDriverE: Equal<
   LayerE<ReturnType<typeof _numericMemoryDriver>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _forwardMemoryE: Equal<
   LayerE<ReturnType<typeof forwardMemoryOptions>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _omittedHarnessE: Equal<LayerE<ReturnType<typeof _omittedHarness>>, never> = true
+
 const _omittedHarnessR: Equal<LayerR<ReturnType<typeof _omittedHarness>>, never> = true
+
 const _wholeUndefinedHarnessE: Equal<
   LayerE<ReturnType<typeof _wholeUndefinedHarness>>,
   never
 > = true
+
 const _forwardDefaultHarnessE: Equal<LayerE<ReturnType<typeof forwardDefaultHarness>>, never> = true
+
 const _numericHarnessE: Equal<
   LayerE<ReturnType<typeof _numericHarness>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _forwardHarnessE: Equal<
   LayerE<ReturnType<typeof forwardHarnessOptions>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _omittedDurableE: Equal<LayerE<ReturnType<typeof _omittedDurable>>, never> = true
+
 const _numericDurableE: Equal<
   LayerE<ReturnType<typeof _numericDurable>>,
   InvalidMaxResumeAttempts
 > = true
+
 const _forwardDurableE: Equal<
   LayerE<ReturnType<typeof forwardDurableOptions>>,
   InvalidMaxResumeAttempts
@@ -238,6 +290,7 @@ const annotatedInterrupt = (fiberId: number, id: string) =>
 const expectAnnotatedDie = <E>(cause: Cause.Cause<E>, defect: unknown, id: string) => {
   const found = cause.reasons.filter(Cause.isDieReason).find(reason => reason.defect === defect)
   expect(found).toBeDefined()
+
   if (found === undefined) return
   expect(found.defect).toBe(defect)
   expect(Context.getOrUndefined(Cause.reasonAnnotations(found), CompoundFailureId)).toBe(id)
@@ -247,7 +300,9 @@ const expectAnnotatedInterrupt = <E>(cause: Cause.Cause<E>, fiberId: number, id:
   const found = cause.reasons
     .filter(Cause.isInterruptReason)
     .find(reason => reason.fiberId === fiberId)
+
   expect(found).toBeDefined()
+
   if (found === undefined) return
   expect(found.fiberId).toBe(fiberId)
   expect(Context.getOrUndefined(Cause.reasonAnnotations(found), CompoundFailureId)).toBe(id)
@@ -260,23 +315,31 @@ const makeRequestHoldScheduler = () => {
   let holdNext = false
   let skippedNew = 0
   const held: Array<() => void> = []
+
   const scheduler: Scheduler.Scheduler = {
     executionMode: 'async',
     shouldYield(fiber) {
       if (armed && !known.has(fiber.id)) {
         known.add(fiber.id)
+
         if (skippedNew === 0) {
           skippedNew = 1
+
           return base.shouldYield(fiber)
         }
+
         holdNext = true
+
         return true
       }
+
       known.add(fiber.id)
+
       return base.shouldYield(fiber)
     },
     makeDispatcher() {
       const inner = base.makeDispatcher()
+
       return {
         scheduleTask(task, priority) {
           if (holdNext) {
@@ -290,6 +353,7 @@ const makeRequestHoldScheduler = () => {
       }
     }
   }
+
   return {
     scheduler,
     arm: () => {
@@ -302,6 +366,7 @@ const makeRequestHoldScheduler = () => {
     held,
     releaseHeld: () => {
       const tasks = held.splice(0)
+
       for (const task of tasks) task()
     }
   }
@@ -311,20 +376,26 @@ describe('restart recovery', () => {
   it.effect('rejects invalid maxResumeAttempts at layer init', () =>
     Effect.gen(function* () {
       const invalid = [-1, 1.5, Number.NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1]
+
       for (const maxResumeAttempts of invalid) {
         const exit = yield* Effect.void.pipe(
           Effect.provide(makeInMemoryHarnessLayer({ maxResumeAttempts })),
           Effect.exit
         )
+
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected InvalidMaxResumeAttempts layer failure')
         }
+
         const found = Cause.findError(exit.cause)
         expect(found._tag).toBe('Success')
+
         if (found._tag !== 'Success') {
           throw new Error('expected tagged InvalidMaxResumeAttempts')
         }
+
         expect(found.success).toBeInstanceOf(InvalidMaxResumeAttempts)
         expect(found.success.maxResumeAttempts).toBe(maxResumeAttempts)
       }
@@ -336,6 +407,7 @@ describe('restart recovery', () => {
       const backing = yield* makeBacking({ claimed: ['run_1'], resumes: [] })
       const counts: Array<ReadonlyArray<readonly [string, number]>> = []
       const drains = yield* Ref.make(0)
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
@@ -343,6 +415,7 @@ describe('restart recovery', () => {
             counts.push(snapshot.resumes.map(pair => [...pair] as const))
           }).pipe(Effect.andThen(backing.save(snapshot)))
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -366,6 +439,7 @@ describe('restart recovery', () => {
     Effect.gen(function* () {
       const backing = yield* makeBacking()
       const drains = yield* Ref.make(0)
+
       const shutdownOnce = () =>
         Effect.gen(function* () {
           const started = yield* Deferred.make<void>()
@@ -374,12 +448,14 @@ describe('restart recovery', () => {
             Effect.gen(function* () {
               const driver = yield* Driver
               const store = yield* RunStore
+
               if (yield* store.isClaimed('run_1')) {
                 const resumed = yield* driver.resumeSuspended
                 expect(resumed.resumed).toEqual(['run_1'])
               } else {
                 yield* driver.wake('run_1')
               }
+
               yield* Deferred.await(started)
               yield* driver.interrupt('run_1', { reason: 'shutdown' })
               yield* Deferred.succeed(release, undefined)
@@ -435,10 +511,12 @@ describe('restart recovery', () => {
       const entered = yield* Deferred.make<void>()
       const hold = yield* Deferred.make<void>()
       const increments = yield* Ref.make(0)
+
       const delayedStore = Layer.effect(
         RunStore,
         Effect.gen(function* () {
           const inner = yield* RunStore
+
           return RunStore.of({
             ...inner,
             incrementResumeCount: runId =>
@@ -450,6 +528,7 @@ describe('restart recovery', () => {
           })
         })
       ).pipe(Layer.provide(makeInMemoryRunStoreLayer()))
+
       const layer = makeDriverLayer({
         drain: () => Effect.void
       }).pipe(Layer.provideMerge(delayedStore), Layer.provideMerge(makeInMemoryInboxLayer()))
@@ -480,22 +559,26 @@ describe('restart recovery', () => {
       const release = yield* Deferred.make<void>()
       const scanned = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
+
       const wrap = (base: Layer.Layer<RunStore>) =>
         Layer.effect(
           RunStore,
           Effect.gen(function* () {
             const store = yield* RunStore
+
             return RunStore.of({
               ...store,
               claimed: store.claimed.pipe(Effect.tap(() => Deferred.succeed(scanned, undefined)))
             })
           })
         ).pipe(Layer.provide(base))
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const inbox = yield* Inbox
         const store = yield* RunStore
         yield* store.claim('run_1')
+
         const holder = yield* inbox
           .wakeIfUnblocked(
             'holder',
@@ -503,6 +586,7 @@ describe('restart recovery', () => {
             Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
           )
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(entered)
         const sweep = yield* driver.resumeSuspended.pipe(Effect.forkChild)
         yield* Deferred.await(scanned)
@@ -535,25 +619,30 @@ describe('restart recovery', () => {
       const entered = yield* Deferred.make<void>()
       const hold = yield* Deferred.make<void>()
       const reads = yield* Ref.make(0)
+
       const wrap = (base: Layer.Layer<RunStore>) =>
         Layer.effect(
           RunStore,
           Effect.gen(function* () {
             const store = yield* RunStore
+
             return RunStore.of({
               ...store,
               claimed: Effect.gen(function* () {
                 const count = yield* Ref.get(reads)
                 yield* Ref.set(reads, count + 1)
+
                 if (count === 0) {
                   yield* Deferred.succeed(entered, undefined)
                   yield* Deferred.await(hold)
                 }
+
                 return yield* store.claimed
               })
             })
           })
         ).pipe(Layer.provide(base))
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -586,20 +675,24 @@ describe('restart recovery', () => {
       const release = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
       let holdOnce = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (holdOnce && snapshot.resumes.some(([id, count]) => id === 'run_1' && count === 1)) {
               holdOnce = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(backing.save(snapshot))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -635,11 +728,13 @@ describe('restart recovery', () => {
       const release = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
       let holdOnce = true
+
       const wrap = (base: Layer.Layer<RunStore>) =>
         Layer.effect(
           RunStore,
           Effect.gen(function* () {
             const store = yield* RunStore
+
             return RunStore.of({
               ...store,
               claimed: store.claimed.pipe(
@@ -647,6 +742,7 @@ describe('restart recovery', () => {
                   Effect.suspend(() => {
                     if (!holdOnce) return Effect.void
                     holdOnce = false
+
                     return Deferred.succeed(captured, undefined).pipe(
                       Effect.andThen(Deferred.await(release))
                     )
@@ -656,6 +752,7 @@ describe('restart recovery', () => {
             })
           })
         ).pipe(Layer.provide(base))
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -688,11 +785,13 @@ describe('restart recovery', () => {
       const marker = yield* Ref.make('stale')
       const drains = yield* Ref.make<ReadonlyArray<string>>([])
       let holdOnce = true
+
       const wrap = (base: Layer.Layer<RunStore>) =>
         Layer.effect(
           RunStore,
           Effect.gen(function* () {
             const store = yield* RunStore
+
             return RunStore.of({
               ...store,
               claimed: store.claimed.pipe(
@@ -700,6 +799,7 @@ describe('restart recovery', () => {
                   Effect.suspend(() => {
                     if (!holdOnce) return Effect.void
                     holdOnce = false
+
                     return Deferred.succeed(captured, undefined).pipe(
                       Effect.andThen(Deferred.await(release))
                     )
@@ -709,6 +809,7 @@ describe('restart recovery', () => {
             })
           })
         ).pipe(Layer.provide(base))
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -746,10 +847,12 @@ describe('restart recovery', () => {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const increments = yield* Ref.make(0)
+
       const delayedStore = Layer.effect(
         RunStore,
         Effect.gen(function* () {
           const inner = yield* RunStore
+
           return RunStore.of({
             ...inner,
             incrementResumeCount: runId =>
@@ -759,14 +862,18 @@ describe('restart recovery', () => {
           })
         })
       ).pipe(Layer.provide(makeInMemoryRunStoreLayer()))
+
       const layer = makeDriverLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             const inbox = yield* Inbox
+
             if (runId === 'blocked') {
               yield* inbox.park(runId, ['req_a'], context.drainToken)
+
               return
             }
+
             yield* Deferred.succeed(started, undefined)
             yield* Deferred.await(release)
           })
@@ -799,10 +906,12 @@ describe('restart recovery', () => {
       const releaseEntered = yield* Deferred.make<void>()
       const releaseHold = yield* Deferred.make<void>()
       const increments = yield* Ref.make(0)
+
       const delayedStore = Layer.effect(
         RunStore,
         Effect.gen(function* () {
           const inner = yield* RunStore
+
           return RunStore.of({
             ...inner,
             incrementResumeCount: runId =>
@@ -817,6 +926,7 @@ describe('restart recovery', () => {
           })
         })
       ).pipe(Layer.provide(makeInMemoryRunStoreLayer()))
+
       const layer = makeDriverLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(releaseDrain)))
@@ -844,6 +954,7 @@ describe('restart recovery', () => {
     Effect.gen(function* () {
       const backing = yield* makeBacking()
       const failure = { phase: 'increment' }
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
@@ -851,15 +962,18 @@ describe('restart recovery', () => {
             ? Effect.die(failure)
             : backing.save(snapshot)
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
         yield* store.claim('run_1')
         const exit = yield* driver.resumeSuspended.pipe(Effect.exit)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected increment save defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -889,20 +1003,24 @@ describe('restart recovery', () => {
     Effect.gen(function* () {
       const backing = yield* makeBacking()
       const failure = { phase: 'exhaustion' }
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           snapshot.claimed.length === 0 ? Effect.die(failure) : backing.save(snapshot)
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
         yield* store.claim('run_1')
         const exit = yield* driver.resumeSuspended.pipe(Effect.exit)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected exhaustion release save defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -919,20 +1037,24 @@ describe('restart recovery', () => {
       const failure = { phase: 'claim' }
       let saves = 0
       const drains = yield* Ref.make(0)
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => (++saves === 1 ? Effect.die(failure) : backing.save(snapshot)))
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
         const exit = yield* driver.run('run_1').pipe(Effect.exit)
         yield* driver.awaitIdle('run_1')
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected claim save defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -954,12 +1076,14 @@ describe('restart recovery', () => {
       const failure = { phase: 'never-acquired' }
       const drains = yield* Ref.make(0)
       let claims = 0
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (snapshot.claimed.includes('run_1') && snapshot.resumes.length === 0) {
               claims += 1
+
               if (claims === 1) {
                 return Deferred.succeed(entered, undefined).pipe(
                   Effect.andThen(Deferred.await(release)),
@@ -967,9 +1091,11 @@ describe('restart recovery', () => {
                 )
               }
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -981,9 +1107,11 @@ describe('restart recovery', () => {
         yield* Deferred.succeed(release, undefined)
         const exit = yield* Fiber.await(waiter)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected never-acquired claim defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -1003,24 +1131,29 @@ describe('restart recovery', () => {
       const backing = yield* makeBacking()
       const failure = { phase: 'final-release' }
       let sawClaim = false
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (snapshot.claimed.includes('run_1')) sawClaim = true
+
             return sawClaim && snapshot.claimed.length === 0
               ? Effect.die(failure)
               : backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
         const exit = yield* driver.run('run_1').pipe(Effect.exit)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected final-release save defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -1053,20 +1186,24 @@ describe('restart recovery', () => {
       const drains = yield* Ref.make(0)
       const ready = yield* Ref.make<ReadonlyArray<string>>([])
       let holdOnce = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (holdOnce && snapshot.resumes.some(([id, count]) => id === 'run_1' && count === 1)) {
               holdOnce = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(backing.save(snapshot))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const inbox = yield* Inbox
@@ -1074,6 +1211,7 @@ describe('restart recovery', () => {
         yield* store.claim('run_1')
         const sweep = yield* driver.resumeSuspended.pipe(Effect.forkChild)
         yield* Deferred.await(entered)
+
         const admitting = yield* driver
           .admit({
             id: 'input_1',
@@ -1082,6 +1220,7 @@ describe('restart recovery', () => {
             kind: 'input'
           })
           .pipe(Effect.forkChild)
+
         yield* Effect.yieldNow
         expect(admitting.pollUnsafe()).toBeUndefined()
         expect(yield* inbox.pending('run_1')).toEqual([])
@@ -1108,6 +1247,7 @@ describe('restart recovery', () => {
               yield* Deferred.await(drainHold)
               const inbox = yield* Inbox
               const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+
               if (item !== undefined) {
                 yield* Ref.update(ready, current => [...current, item.id])
               }
@@ -1127,20 +1267,24 @@ describe('restart recovery', () => {
       const holdDrain = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
       let holdOnce = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (holdOnce && snapshot.claimed.length === 0) {
               holdOnce = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(backing.save(snapshot))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1189,17 +1333,20 @@ describe('restart recovery', () => {
       const claimEntered = yield* Deferred.make<void>()
       const claimHold = yield* Deferred.make<void>()
       const drains = yield* Ref.make<ReadonlyArray<string>>([])
+
       const delayedStore = Layer.effect(
         RunStore,
         Effect.gen(function* () {
           const inner = yield* RunStore
           let first = true
+
           return RunStore.of({
             ...inner,
             claim: runId =>
               Effect.suspend(() => {
                 if (!first) return inner.claim(runId)
                 first = false
+
                 return Deferred.succeed(claimEntered, undefined).pipe(
                   Effect.andThen(Deferred.await(claimHold)),
                   Effect.andThen(inner.claim(runId))
@@ -1208,6 +1355,7 @@ describe('restart recovery', () => {
           })
         })
       ).pipe(Layer.provide(makeInMemoryRunStoreLayer()))
+
       const layer = makeDriverLayer({
         drain: runId => Ref.update(drains, current => [...current, runId])
       }).pipe(Layer.provideMerge(delayedStore), Layer.provideMerge(makeInMemoryInboxLayer()))
@@ -1230,20 +1378,24 @@ describe('restart recovery', () => {
       const entered = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       let begins = 0
+
       const taken: Array<{
         readonly begin: number
         readonly item: string | undefined
         readonly token: string
       }> = []
+
       const inboxLayer = Layer.effect(
         Inbox,
         Effect.gen(function* () {
           const inner = yield* Inbox
+
           return Inbox.of({
             ...inner,
             beginDrain: (id, scope) =>
               Effect.suspend(() => {
                 begins += 1
+
                 return begins === 1
                   ? Deferred.succeed(entered, undefined).pipe(
                       Effect.andThen(Deferred.await(release)),
@@ -1254,6 +1406,7 @@ describe('restart recovery', () => {
           })
         })
       ).pipe(Layer.provide(makeInMemoryInboxLayer()))
+
       const layer = makeDriverLayer({
         drain: (id, _force, scope, ctx) =>
           Effect.gen(function* () {
@@ -1262,6 +1415,7 @@ describe('restart recovery', () => {
             taken.push({ begin: begins, item: item?.id, token: ctx.drainToken })
           })
       }).pipe(Layer.provideMerge(inboxLayer), Layer.provideMerge(makeInMemoryRunStoreLayer()))
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const inbox = yield* Inbox
@@ -1291,25 +1445,30 @@ describe('restart recovery', () => {
   const overlappingLateBegin = async (cancelGeneric: boolean) => {
     const hold = makeRequestHoldScheduler()
     let begins = 0
+
     const taken: Array<{
       readonly begin: number
       readonly item: string | undefined
       readonly token: string
     }> = []
+
     const exit = await Effect.runPromiseExit(
       Effect.scoped(
         Effect.gen(function* () {
           const entered = yield* Deferred.make<void>()
           const release = yield* Deferred.make<void>()
+
           const inboxLayer = Layer.effect(
             Inbox,
             Effect.gen(function* () {
               const inner = yield* Inbox
+
               return Inbox.of({
                 ...inner,
                 beginDrain: (id, scope) =>
                   Effect.suspend(() => {
                     begins += 1
+
                     return begins === 1
                       ? Deferred.succeed(entered, undefined).pipe(
                           Effect.andThen(Deferred.await(release)),
@@ -1320,6 +1479,7 @@ describe('restart recovery', () => {
               })
             })
           ).pipe(Layer.provide(makeInMemoryInboxLayer()))
+
           const layer = makeDriverLayer({
             drain: (id, _force, scope, ctx) =>
               Effect.gen(function* () {
@@ -1328,23 +1488,30 @@ describe('restart recovery', () => {
                 taken.push({ begin: begins, item: item?.id, token: ctx.drainToken })
               })
           }).pipe(Layer.provideMerge(inboxLayer), Layer.provideMerge(makeInMemoryRunStoreLayer()))
+
           yield* Effect.gen(function* () {
             const driver = yield* Driver
             const inbox = yield* Inbox
             yield* driver.wake('r')
             yield* Deferred.await(entered)
             hold.arm()
+
             const generic = yield* driver
               .interrupt('r', { reason: 'shutdown' })
               .pipe(Effect.forkChild({ startImmediately: true }))
+
             hold.disarm()
             expect(hold.held.length).toBeGreaterThan(0)
             expect(generic.pollUnsafe()).toBeUndefined()
+
             if (cancelGeneric) yield* Fiber.interrupt(generic)
+
             const stopFiber = yield* driver
               .stop('r')
               .pipe(Effect.forkChild({ startImmediately: true }))
+
             expect(stopFiber.pollUnsafe()).toBeUndefined()
+
             const admitting = yield* driver
               .admit({
                 id: 'successor',
@@ -1353,6 +1520,7 @@ describe('restart recovery', () => {
                 kind: 'input'
               })
               .pipe(Effect.forkChild)
+
             yield* Effect.yieldNow
             expect(admitting.pollUnsafe()).toBeUndefined()
             yield* Deferred.succeed(release, undefined)
@@ -1363,6 +1531,7 @@ describe('restart recovery', () => {
             hold.releaseHeld()
             const stop = yield* Fiber.join(stopFiber)
             expect(stop._tag).toBe('Interrupted')
+
             if (!cancelGeneric) expect(yield* Fiber.join(generic)).toBe(true)
             yield* Fiber.join(admitting)
             yield* driver.awaitIdle('r')
@@ -1382,6 +1551,7 @@ describe('restart recovery', () => {
         })
       ).pipe(Effect.provideService(Scheduler.Scheduler, hold.scheduler))
     )
+
     expect(exit._tag).toBe('Success')
   }
 
@@ -1408,24 +1578,29 @@ describe('restart recovery', () => {
         const releaseBody = yield* Deferred.make<void>()
         const hostClaims = yield* Ref.make<ReadonlyArray<boolean>>([])
         let holdOnce = true
+
         const storage = {
           ...backing,
           save: (snapshot: DurableRunStoreSnapshot) =>
             Effect.suspend(() => {
               if (holdOnce && snapshot.resumes.some(([id, n]) => id === 'r' && n === 1)) {
                 holdOnce = false
+
                 return Deferred.succeed(charging, undefined).pipe(
                   Effect.andThen(Deferred.await(releaseCharge)),
                   Effect.andThen(backing.save(snapshot))
                 )
               }
+
               return backing.save(snapshot)
             })
         }
+
         const wrapInbox = Layer.effect(
           Inbox,
           Effect.gen(function* () {
             const inner = yield* Inbox
+
             return Inbox.of({
               ...inner,
               invalidate: (id, interrupt, release) =>
@@ -1497,20 +1672,24 @@ describe('restart recovery', () => {
       const failure = { phase: 'claim' }
       const drains = yield* Ref.make(0)
       let first = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (first) {
               first = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(Effect.die(failure))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1521,9 +1700,11 @@ describe('restart recovery', () => {
         yield* Deferred.succeed(release, undefined)
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected claim save defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -1553,20 +1734,24 @@ describe('restart recovery', () => {
       const failure = { phase: 'claim' }
       const drains = yield* Ref.make(0)
       let first = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (first) {
               first = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(Effect.die(failure))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1578,9 +1763,11 @@ describe('restart recovery', () => {
         yield* Deferred.succeed(release, undefined)
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected claim save defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -1604,20 +1791,24 @@ describe('restart recovery', () => {
       const failure = { phase: 'claim' }
       const drains = yield* Ref.make(0)
       let first = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (first) {
               first = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(Effect.die(failure))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1647,20 +1838,24 @@ describe('restart recovery', () => {
       const failure = { phase: 'claim' }
       const drains = yield* Ref.make(0)
       let first = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (first) {
               first = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(Effect.die(failure))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1689,20 +1884,24 @@ describe('restart recovery', () => {
       const release = yield* Deferred.make<void>()
       const failure = { phase: 'claim' }
       let first = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (first) {
               first = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(Effect.die(failure))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1728,6 +1927,7 @@ describe('restart recovery', () => {
       const release = yield* Deferred.make<void>()
       const failure = { phase: 'never-acquired' }
       const saves = yield* Ref.make(0)
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
@@ -1739,11 +1939,13 @@ describe('restart recovery', () => {
                 Effect.andThen(Effect.die(failure))
               )
             }
+
             return Ref.update(saves, count => count + 1).pipe(
               Effect.andThen(backing.save(snapshot))
             )
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1753,9 +1955,11 @@ describe('restart recovery', () => {
         yield* Deferred.succeed(release, undefined)
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected never-acquired claim defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -1784,26 +1988,31 @@ describe('restart recovery', () => {
       const failure = { phase: 'claim' }
       const drains = yield* Ref.make(0)
       let claimOnce = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (claimOnce && snapshot.claimed.includes('r') && snapshot.resumes.length > 0) {
               claimOnce = false
+
               return Deferred.succeed(claimEntered, undefined).pipe(
                 Effect.andThen(Deferred.await(claimHold)),
                 Effect.andThen(Effect.die(failure))
               )
             }
+
             if (snapshot.claimed.length === 0) {
               return Deferred.succeed(releaseEntered, undefined).pipe(
                 Effect.andThen(Deferred.await(releaseHold)),
                 Effect.andThen(backing.save(snapshot))
               )
             }
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1826,9 +2035,11 @@ describe('restart recovery', () => {
         yield* Deferred.succeed(releaseHold, undefined)
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected original claim defect')
         }
+
         expect(Cause.findDefect(exit.cause)).toMatchObject({
           _tag: 'Success',
           success: failure
@@ -1872,28 +2083,35 @@ describe('restart recovery', () => {
       const claimFailure = { phase: 'claim' }
       const releaseFailure = { phase: 'release' }
       const claimInterruptFiberId = 7
+
       const incomingCause = Cause.combine(
         annotatedDie(claimFailure, 'claim'),
         annotatedInterrupt(claimInterruptFiberId, 'claim-interrupt')
       )
+
       const releaseCause = annotatedDie(releaseFailure, 'release')
       const drains = yield* Ref.make(0)
       let claimOnce = true
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (claimOnce && snapshot.claimed.includes('r') && snapshot.resumes.length > 0) {
               claimOnce = false
+
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
                 Effect.andThen(Effect.failCause(incomingCause))
               )
             }
+
             if (snapshot.claimed.length === 0) return Effect.failCause(releaseCause)
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1903,9 +2121,11 @@ describe('restart recovery', () => {
         yield* Deferred.succeed(release, undefined)
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected combined claim and release defects')
         }
+
         expect(Cause.hasFails(exit.cause)).toBe(false)
         expectAnnotatedDie(exit.cause, claimFailure, 'claim')
         expectAnnotatedDie(exit.cause, releaseFailure, 'release')
@@ -1934,20 +2154,25 @@ describe('restart recovery', () => {
       const hostFailure = { phase: 'host' }
       const releaseFailure = { phase: 'release' }
       const hostInterruptFiberId = 42
+
       const hostCause = Cause.combine(
         annotatedDie(hostFailure, 'host'),
         annotatedInterrupt(hostInterruptFiberId, 'host-interrupt')
       )
+
       const releaseCause = annotatedDie(releaseFailure, 'release')
       const hostEntries = yield* Ref.make<ReadonlyArray<boolean>>([])
+
       const storage = {
         ...backing,
         save: (snapshot: DurableRunStoreSnapshot) =>
           Effect.suspend(() => {
             if (snapshot.claimed.length === 0) return Effect.failCause(releaseCause)
+
             return backing.save(snapshot)
           })
       }
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -1960,9 +2185,11 @@ describe('restart recovery', () => {
         yield* Deferred.succeed(allowFail, undefined)
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
+
         if (exit._tag !== 'Failure') {
           throw new Error('expected combined host and release causes')
         }
+
         expect(Cause.hasFails(exit.cause)).toBe(false)
         expectAnnotatedDie(exit.cause, hostFailure, 'host')
         expectAnnotatedDie(exit.cause, releaseFailure, 'release')
@@ -1984,6 +2211,7 @@ describe('restart recovery', () => {
               yield* Ref.update(hostEntries, current => [...current, claimed])
               yield* Deferred.succeed(hostEntered, undefined)
               yield* Deferred.await(allowFail)
+
               return yield* Effect.failCause(hostCause)
             }).pipe(Effect.uninterruptible)
           )
@@ -2000,8 +2228,10 @@ describe('host-owned waiting checkpoint restoration', () => {
     parameters: {},
     approval: ToolApprovalPolicy.make({ mode: 'manual', reason: 'external lookup' })
   })
+
   const questionTool = ToolDef.make({ name: 'question', description: 'Ask', parameters: {} })
   const weatherCall = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
+
   const questionCall = ToolCall.make({
     id: 'call_q',
     name: 'question',
@@ -2009,6 +2239,7 @@ describe('host-owned waiting checkpoint restoration', () => {
       questions: [{ id: 'choice', prompt: 'Pick one', options: [{ id: 'a', label: 'A' }] }]
     }
   })
+
   const tools = [weatherTool, questionTool]
   const calls = [weatherCall, questionCall]
 
@@ -2016,9 +2247,11 @@ describe('host-owned waiting checkpoint restoration', () => {
     Effect.gen(function* () {
       const backing = yield* makeBacking()
       const executed = yield* Ref.make<ReadonlyArray<string>>([])
+
       const completions = yield* Ref.make<
         ReadonlyArray<{ readonly id: string; readonly content: string; readonly isError: boolean }>
       >([])
+
       const host = yield* Ref.make<
         | {
             readonly requestIds: ReadonlyArray<string>
@@ -2028,11 +2261,13 @@ describe('host-owned waiting checkpoint restoration', () => {
           }
         | undefined
       >(undefined)
+
       const loopLayer = Layer.mergeAll(
         Layer.effect(
           ToolExecutor,
           Effect.gen(function* () {
             const inner = yield* ToolExecutor
+
             return ToolExecutor.of({
               execute: call =>
                 Ref.update(executed, current => [...current, call.id]).pipe(
@@ -2043,23 +2278,29 @@ describe('host-owned waiting checkpoint restoration', () => {
         ).pipe(Layer.provide(TestToolExecutor.layer({ weather: '72F' }))),
         LoopConfig.defaultLayer
       )
+
       const makeDrain =
         (life: 'first' | 'second' | 'third'): Drain =>
         (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             const inbox = yield* Inbox
             const checkpoint = yield* Ref.get(host)
+
             if (checkpoint?.completed === true) return
+
             if (context.readyResponses.length > 0) {
               const hitlResponses = context.readyResponses.flatMap(item => {
                 const payload = checkpoint?.payloads.get(item.itemId)
+
                 return payload === undefined ? [] : [payload]
               })
+
               const outcome = yield* attemptToolBatch(
                 { calls, tools, hitlResponses },
                 {
                   onEvent: event => {
                     if (event._tag !== 'ToolExecutionCompleted') return Effect.void
+
                     return Ref.update(completions, current => [
                       ...current,
                       {
@@ -2071,36 +2312,49 @@ describe('host-owned waiting checkpoint restoration', () => {
                   }
                 }
               ).pipe(Effect.provide(loopLayer), Effect.orDie)
+
               expect(outcome._tag).toBe('Completed')
+
               if (outcome._tag !== 'Completed') {
                 throw new Error(`unexpected ready outcome: ${outcome._tag}`)
               }
+
               yield* Ref.update(host, current =>
                 current === undefined ? current : { ...current, completed: true }
               )
+
               return
             }
+
             if (life !== 'first' && checkpoint !== undefined) {
               yield* inbox.park(runId, checkpoint.requestIds, context.drainToken)
+
               return
             }
+
             const outcome = yield* attemptToolBatch({ calls, tools }).pipe(
               Effect.provide(loopLayer),
               Effect.orDie
             )
+
             expect(outcome._tag).toBe('AwaitingInput')
+
             if (outcome._tag !== 'AwaitingInput') {
               throw new Error(`unexpected park outcome: ${outcome._tag}`)
             }
+
             const parked = yield* inbox.park(
               runId,
               outcome.requests.map(request => request.requestId),
               context.drainToken
             )
+
             expect(parked._tag).toBe('Parked')
+
             if (parked._tag !== 'Parked') {
               throw new Error(`unexpected pause decision: ${parked._tag}`)
             }
+
             yield* Ref.set(host, {
               requestIds: outcome.requests.map(request => request.requestId),
               requests: outcome.requests,
@@ -2119,27 +2373,35 @@ describe('host-owned waiting checkpoint restoration', () => {
           expect(yield* store.isClaimed('run_1')).toBe(false)
           const parked = yield* inbox.parked('run_1')
           expect(parked).toBeDefined()
+
           if (parked === undefined) {
             throw new Error('expected first-lifetime park')
           }
+
           const checkpoint = yield* Ref.get(host)
           expect(checkpoint).toBeDefined()
+
           if (checkpoint === undefined) {
             throw new Error('expected host checkpoint after first park')
           }
+
           const approval = checkpoint.requests.find(
             request => request._tag === 'ToolApprovalRequest'
           )
+
           expect(approval?._tag).toBe('ToolApprovalRequest')
+
           if (approval?._tag !== 'ToolApprovalRequest') {
             throw new Error(`unexpected request tag: ${approval?._tag}`)
           }
+
           const approvalResponse = ToolApprovalResponse.make({
             requestId: approval.requestId,
             toolCallId: approval.toolCallId,
             decision: 'approved',
             source: 'user'
           })
+
           const accepted = yield* resumeHitlIfMatched({
             pending: checkpoint.requests,
             response: approvalResponse,
@@ -2150,6 +2412,7 @@ describe('host-owned waiting checkpoint restoration', () => {
                 generation: parked.generation
               })
           })
+
           expect(accepted._tag).toBe('Accepted')
           yield* driver.awaitIdle('run_1')
           yield* Ref.update(host, current =>
@@ -2178,9 +2441,11 @@ describe('host-owned waiting checkpoint restoration', () => {
         const store = yield* RunStore
         const checkpoint = yield* Ref.get(host)
         expect(checkpoint).toBeDefined()
+
         if (checkpoint === undefined) {
           throw new Error('expected host checkpoint after first lifetime')
         }
+
         expect(yield* store.isClaimed('run_1')).toBe(false)
         expect(yield* inbox.parked('run_1')).toBeUndefined()
         const sweep = yield* driver.resumeSuspended
@@ -2189,26 +2454,33 @@ describe('host-owned waiting checkpoint restoration', () => {
         yield* driver.awaitIdle('run_1')
         const parked = yield* inbox.parked('run_1')
         expect(parked).toBeDefined()
+
         if (parked === undefined) {
           throw new Error('expected restored park')
         }
+
         expect(yield* Ref.get(executed)).toEqual([])
         const approval = checkpoint.requests.find(request => request._tag === 'ToolApprovalRequest')
         const question = checkpoint.requests.find(request => request._tag === 'QuestionRequest')
         expect(approval?._tag).toBe('ToolApprovalRequest')
         expect(question?._tag).toBe('QuestionRequest')
+
         if (approval?._tag !== 'ToolApprovalRequest' || question?._tag !== 'QuestionRequest') {
           throw new Error('expected sibling approval and question requests')
         }
+
         const persisted = checkpoint.payloads.get('item_a')
         expect(persisted?._tag).toBe('ToolApprovalResponse')
+
         if (persisted?._tag !== 'ToolApprovalResponse') {
           throw new Error(`unexpected persisted payload: ${persisted?._tag}`)
         }
+
         expect(matchHitlResponse(checkpoint.requests, persisted)).toEqual({
           _tag: 'Match',
           requestId: approval.requestId
         })
+
         const replayed = yield* resumeHitlIfMatched({
           pending: checkpoint.requests,
           response: persisted,
@@ -2219,6 +2491,7 @@ describe('host-owned waiting checkpoint restoration', () => {
               generation: parked.generation
             })
         })
+
         expect(replayed._tag).toBe('Accepted')
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(executed)).toEqual([])
@@ -2230,9 +2503,11 @@ describe('host-owned waiting checkpoint restoration', () => {
           decision: 'approved',
           source: 'user'
         })
+
         expect(matchHitlResponse(checkpoint.requests, mismatchedResponse)).toEqual({
           _tag: 'Mismatch'
         })
+
         const mismatch = yield* resumeHitlIfMatched({
           pending: checkpoint.requests,
           response: mismatchedResponse,
@@ -2243,6 +2518,7 @@ describe('host-owned waiting checkpoint restoration', () => {
               generation: parked.generation
             })
         })
+
         expect(mismatch._tag).toBe('Mismatch')
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(executed)).toEqual([])
@@ -2254,6 +2530,7 @@ describe('host-owned waiting checkpoint restoration', () => {
           source: 'user',
           answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
         })
+
         yield* Ref.update(host, current =>
           current === undefined
             ? current
@@ -2262,6 +2539,7 @@ describe('host-owned waiting checkpoint restoration', () => {
                 payloads: new Map(current.payloads).set('item_q', questionResponse)
               }
         )
+
         const ready = yield* resumeHitlIfMatched({
           pending: checkpoint.requests,
           response: questionResponse,
@@ -2272,6 +2550,7 @@ describe('host-owned waiting checkpoint restoration', () => {
               generation: parked.generation
             })
         })
+
         expect(ready._tag).toBe('Ready')
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(executed)).toEqual(['call_1'])

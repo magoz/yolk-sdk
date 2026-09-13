@@ -10,17 +10,21 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const drains = yield* Ref.make(0)
       const readyItemIds = yield* Ref.make<ReadonlyArray<string>>([])
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(drains, count => count + 1)
+
             if (context.readyResponses.length > 0) {
               yield* Ref.set(
                 readyItemIds,
                 context.readyResponses.map(response => response.itemId)
               )
+
               return
             }
+
             const inbox = yield* Inbox
             yield* inbox.park(runId, ['req_a', 'req_b'], context.drainToken)
           })
@@ -38,6 +42,7 @@ describe('HITL park lifecycle', () => {
         expect(yield* store.isClaimed('run_1')).toBe(false)
         const parked = yield* inbox.parked('run_1')
         expect(parked).toBeDefined()
+
         if (parked === undefined) return
         expect(parked.requestIds).toEqual(['req_a', 'req_b'])
         expect(parked.ready).toBe(false)
@@ -49,6 +54,7 @@ describe('HITL park lifecycle', () => {
           requestId: 'req_a',
           generation
         })
+
         expect(first._tag).toBe('Accepted')
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(drains)).toBe(1)
@@ -61,6 +67,7 @@ describe('HITL park lifecycle', () => {
           requestId: 'req_a',
           generation
         })
+
         expect(duplicatePartial._tag).toBe('Duplicate')
         expect(yield* Ref.get(drains)).toBe(1)
 
@@ -69,6 +76,7 @@ describe('HITL park lifecycle', () => {
           requestId: 'req_b',
           generation: '0'
         })
+
         expect(stale._tag).toBe('Stale')
         expect(yield* Ref.get(drains)).toBe(1)
 
@@ -77,6 +85,7 @@ describe('HITL park lifecycle', () => {
           requestId: 'req_z',
           generation
         })
+
         expect(unknown._tag).toBe('UnknownRequest')
         expect(yield* Ref.get(drains)).toBe(1)
 
@@ -85,6 +94,7 @@ describe('HITL park lifecycle', () => {
           requestId: 'req_b',
           generation
         })
+
         expect(wrongRun._tag).toBe('NotParked')
         expect(yield* Ref.get(drains)).toBe(1)
 
@@ -93,6 +103,7 @@ describe('HITL park lifecycle', () => {
           requestId: 'req_b',
           generation
         })
+
         expect(second._tag).toBe('Ready')
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(drains)).toBe(2)
@@ -105,6 +116,7 @@ describe('HITL park lifecycle', () => {
           requestId: 'req_b',
           generation
         })
+
         expect(afterReady._tag).toBe('NotParked')
         expect(yield* Ref.get(drains)).toBe(2)
       }).pipe(Effect.provide(layer))
@@ -114,10 +126,12 @@ describe('HITL park lifecycle', () => {
   it.effect('stop while parked invalidates responses; new input wakes a successor', () =>
     Effect.gen(function* () {
       const drains = yield* Ref.make(0)
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(drains, count => count + 1)
+
             if (context.readyResponses.length > 0) return
             const inbox = yield* Inbox
             yield* inbox.park(runId, ['req_a'], context.drainToken)
@@ -133,6 +147,7 @@ describe('HITL park lifecycle', () => {
         yield* driver.awaitIdle('run_1')
         const parked = yield* inbox.parked('run_1')
         expect(parked).toBeDefined()
+
         if (parked === undefined) return
         const generation = parked.generation
 
@@ -147,6 +162,7 @@ describe('HITL park lifecycle', () => {
           requestId: 'req_a',
           generation
         })
+
         expect(stale._tag).toBe('NotParked')
         expect(yield* Ref.get(drains)).toBe(1)
 
@@ -168,10 +184,12 @@ describe('HITL park lifecycle', () => {
   it.effect('records input/steer while parked without running the host drain', () =>
     Effect.gen(function* () {
       const drains = yield* Ref.make(0)
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(drains, count => count + 1)
+
             if (context.readyResponses.length > 0) return
             const inbox = yield* Inbox
             yield* inbox.park(runId, ['req_a'], context.drainToken)
@@ -186,6 +204,7 @@ describe('HITL park lifecycle', () => {
         yield* driver.awaitIdle('run_1')
         const parked = yield* inbox.parked('run_1')
         expect(parked).toBeDefined()
+
         if (parked === undefined) return
 
         yield* admit({
@@ -215,6 +234,7 @@ describe('HITL park lifecycle', () => {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const latePark = yield* Ref.make<string | undefined>(undefined)
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.uninterruptible(
@@ -251,6 +271,7 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
@@ -274,10 +295,12 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -303,10 +326,12 @@ describe('HITL park lifecycle', () => {
       const drains = yield* Ref.make(0)
       const committed = yield* Deferred.make<void>()
       const allowWake = yield* Deferred.make<void>()
+
       const wrapWake = Layer.effect(
         Inbox,
         Effect.gen(function* () {
           const inner = yield* Inbox
+
           return Inbox.of({
             enqueue: inner.enqueue,
             takePromotable: inner.takePromotable,
@@ -332,6 +357,7 @@ describe('HITL park lifecycle', () => {
           })
         })
       )
+
       const layer = makeDriverLayer({
         drain: () => Ref.update(drains, count => count + 1)
       }).pipe(
@@ -349,6 +375,7 @@ describe('HITL park lifecycle', () => {
           delivery: 'input',
           kind: 'input'
         }).pipe(Effect.forkChild)
+
         yield* Deferred.await(committed)
         const interrupting = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild)
         yield* Deferred.succeed(allowWake, undefined)
@@ -401,14 +428,17 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const startedReady = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             if (context.readyResponses.length > 0) {
               yield* Deferred.succeed(startedReady, undefined)
               yield* Deferred.await(release)
+
               return
             }
+
             const inbox = yield* Inbox
             yield* inbox.park(runId, ['req_a'], context.drainToken)
           })
@@ -422,12 +452,15 @@ describe('HITL park lifecycle', () => {
         yield* driver.awaitIdle('run_1')
         const parked = yield* inbox.parked('run_1')
         expect(parked).toBeDefined()
+
         if (parked === undefined) return
+
         const ready = yield* driver.resumeHitl('run_1', {
           itemId: 'item_a',
           requestId: 'req_a',
           generation: parked.generation
         })
+
         expect(ready._tag).toBe('Ready')
         yield* Deferred.await(startedReady)
         yield* driver.interrupt('run_1', { reason: 'shutdown' })
@@ -447,17 +480,21 @@ describe('HITL park lifecycle', () => {
       const release = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
       const readyItemIds = yield* Ref.make<ReadonlyArray<string>>([])
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(drains, count => count + 1)
+
             if (context.readyResponses.length > 0) {
               yield* Ref.set(
                 readyItemIds,
                 context.readyResponses.map(response => response.itemId)
               )
+
               return
             }
+
             const inbox = yield* Inbox
             yield* inbox.park(runId, ['req_a', 'req_b'], context.drainToken)
             yield* Deferred.succeed(started, undefined)
@@ -472,6 +509,7 @@ describe('HITL park lifecycle', () => {
         yield* Deferred.await(started)
         const parked = yield* inbox.parked('run_1')
         expect(parked).toBeDefined()
+
         if (parked === undefined) return
         expect(
           (yield* driver.resumeHitl('run_1', {
@@ -501,15 +539,19 @@ describe('HITL park lifecycle', () => {
       const readyStarted = yield* Deferred.make<void>()
       const readyRelease = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(drains, count => count + 1)
+
             if (context.readyResponses.length > 0) {
               yield* Deferred.succeed(readyStarted, undefined)
               yield* Deferred.await(readyRelease)
+
               return
             }
+
             const inbox = yield* Inbox
             yield* inbox.park(runId, ['req_a'], context.drainToken)
           })
@@ -522,6 +564,7 @@ describe('HITL park lifecycle', () => {
         yield* driver.awaitIdle('run_1')
         const parked = yield* inbox.parked('run_1')
         expect(parked).toBeDefined()
+
         if (parked === undefined) return
         expect(
           (yield* driver.resumeHitl('run_1', {
@@ -549,9 +592,11 @@ describe('HITL park lifecycle', () => {
   it.effect('explicit run uses force=true and one drain even when settlement is fast', () =>
     Effect.gen(function* () {
       const forces = yield* Ref.make<ReadonlyArray<boolean>>([])
+
       const layer = makeInMemoryHarnessLayer({
         drain: (_runId, force) => Ref.update(forces, current => [...current, force])
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         yield* driver.run('run_1')
@@ -569,6 +614,7 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
@@ -578,6 +624,7 @@ describe('HITL park lifecycle', () => {
             yield* Deferred.await(release)
           })
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const inbox = yield* Inbox
@@ -603,12 +650,14 @@ describe('HITL park lifecycle', () => {
   it.effect('clears the drain token after a synchronous drain defect', () =>
     Effect.gen(function* () {
       let captured = ''
+
       const layer = makeInMemoryHarnessLayer({
         drain: (_runId, _force, _scope, context) => {
           captured = context.drainToken
           throw new Error('sync-defect')
         }
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const inbox = yield* Inbox
@@ -627,6 +676,7 @@ describe('HITL park lifecycle', () => {
       const startedReady = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const token = yield* Ref.make('')
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
           Effect.gen(function* () {
@@ -634,12 +684,15 @@ describe('HITL park lifecycle', () => {
               yield* Ref.set(token, context.drainToken)
               yield* Deferred.succeed(startedReady, undefined)
               yield* Deferred.await(release)
+
               return
             }
+
             const inbox = yield* Inbox
             yield* inbox.park(runId, ['req_a'], context.drainToken)
           })
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const inbox = yield* Inbox
@@ -648,6 +701,7 @@ describe('HITL park lifecycle', () => {
         yield* driver.awaitIdle('run_1')
         const parked = yield* inbox.parked('run_1')
         expect(parked).toBeDefined()
+
         if (parked === undefined) return
         expect(
           (yield* driver.resumeHitl('run_1', {
@@ -675,12 +729,14 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Effect.uninterruptible(
             Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
           )
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -704,12 +760,14 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Effect.uninterruptible(
             Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
           )
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -733,12 +791,14 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Effect.uninterruptible(
             Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
           )
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const store = yield* RunStore
@@ -762,6 +822,7 @@ describe('HITL park lifecycle', () => {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const forces = yield* Ref.make<ReadonlyArray<boolean>>([])
+
       const layer = makeInMemoryHarnessLayer({
         drain: (_runId, force) =>
           Ref.update(forces, current => [...current, force]).pipe(
@@ -780,6 +841,7 @@ describe('HITL park lifecycle', () => {
             )
           )
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         yield* driver.wake('run_1')
@@ -799,6 +861,7 @@ describe('HITL park lifecycle', () => {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Ref.update(drains, count => count + 1).pipe(
@@ -817,6 +880,7 @@ describe('HITL park lifecycle', () => {
             )
           )
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const inbox = yield* Inbox
@@ -840,6 +904,7 @@ describe('HITL park lifecycle', () => {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Ref.update(drains, count => count + 1).pipe(
@@ -847,6 +912,7 @@ describe('HITL park lifecycle', () => {
             Effect.andThen(Deferred.await(release))
           )
       })
+
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const inbox = yield* Inbox
@@ -873,13 +939,16 @@ describe('HITL park lifecycle', () => {
       const secondBeginRelease = yield* Deferred.make<void>()
       const beginCount = yield* Ref.make(0)
       const scopes = yield* Ref.make<ReadonlyArray<string>>([])
+
       const taken = yield* Ref.make<ReadonlyArray<{ readonly scope: string; readonly id: string }>>(
         []
       )
+
       const wrapBegin = Layer.effect(
         Inbox,
         Effect.gen(function* () {
           const inner = yield* Inbox
+
           return Inbox.of({
             ...inner,
             beginDrain: (runId, scope) =>
@@ -897,21 +966,26 @@ describe('HITL park lifecycle', () => {
           })
         })
       )
+
       const layer = makeDriverLayer({
         drain: (runId, _force, scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(scopes, current => [...current, scope])
             const inbox = yield* Inbox
             const collected: Array<string> = []
+
             while (true) {
               const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+
               if (item === undefined) break
               collected.push(item.id)
             }
+
             yield* Ref.update(taken, current => [
               ...current,
               ...collected.map(id => ({ scope, id }))
             ])
+
             if (!(yield* Deferred.isDone(firstStarted))) {
               yield* Deferred.succeed(firstStarted, undefined)
               yield* Deferred.await(firstRelease)
@@ -961,13 +1035,16 @@ describe('HITL park lifecycle', () => {
       const secondBeginRelease = yield* Deferred.make<void>()
       const beginCount = yield* Ref.make(0)
       const scopes = yield* Ref.make<ReadonlyArray<string>>([])
+
       const taken = yield* Ref.make<ReadonlyArray<{ readonly scope: string; readonly id: string }>>(
         []
       )
+
       const wrapBegin = Layer.effect(
         Inbox,
         Effect.gen(function* () {
           const inner = yield* Inbox
+
           return Inbox.of({
             ...inner,
             beginDrain: (runId, scope) =>
@@ -985,21 +1062,26 @@ describe('HITL park lifecycle', () => {
           })
         })
       )
+
       const layer = makeDriverLayer({
         drain: (runId, _force, scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(scopes, current => [...current, scope])
             const inbox = yield* Inbox
             const collected: Array<string> = []
+
             while (true) {
               const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+
               if (item === undefined) break
               collected.push(item.id)
             }
+
             yield* Ref.update(taken, current => [
               ...current,
               ...collected.map(id => ({ scope, id }))
             ])
+
             if (!(yield* Deferred.isDone(firstStarted))) {
               yield* Deferred.succeed(firstStarted, undefined)
               yield* Deferred.await(firstRelease)
@@ -1050,13 +1132,16 @@ describe('HITL park lifecycle', () => {
       const secondBeginRelease = yield* Deferred.make<void>()
       const beginCount = yield* Ref.make(0)
       const scopes = yield* Ref.make<ReadonlyArray<string>>([])
+
       const taken = yield* Ref.make<ReadonlyArray<{ readonly scope: string; readonly id: string }>>(
         []
       )
+
       const wrapBegin = Layer.effect(
         Inbox,
         Effect.gen(function* () {
           const inner = yield* Inbox
+
           return Inbox.of({
             ...inner,
             beginDrain: (runId, scope) =>
@@ -1074,21 +1159,26 @@ describe('HITL park lifecycle', () => {
           })
         })
       )
+
       const layer = makeDriverLayer({
         drain: (runId, _force, scope, context) =>
           Effect.gen(function* () {
             yield* Ref.update(scopes, current => [...current, scope])
             const inbox = yield* Inbox
             const collected: Array<string> = []
+
             while (true) {
               const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+
               if (item === undefined) break
               collected.push(item.id)
             }
+
             yield* Ref.update(taken, current => [
               ...current,
               ...collected.map(id => ({ scope, id }))
             ])
+
             if (!(yield* Deferred.isDone(firstStarted))) {
               yield* Deferred.succeed(firstStarted, undefined)
               yield* Deferred.await(firstRelease)
@@ -1135,9 +1225,11 @@ describe('HITL park lifecycle', () => {
       const firstStarted = yield* Deferred.make<void>()
       const firstRelease = yield* Deferred.make<void>()
       const drains = yield* Ref.make(0)
+
       const taken = yield* Ref.make<
         ReadonlyArray<{ readonly drain: number; readonly id: string | undefined }>
       >([])
+
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, scope, context) =>
           Effect.uninterruptible(
@@ -1145,10 +1237,12 @@ describe('HITL park lifecycle', () => {
               yield* Ref.update(drains, count => count + 1)
               const drain = yield* Ref.get(drains)
               const inbox = yield* Inbox
+
               if (drain === 1) {
                 yield* Deferred.succeed(firstStarted, undefined)
                 yield* Deferred.await(firstRelease)
               }
+
               const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
               yield* Ref.update(taken, current => [...current, { drain, id: item?.id }])
             })

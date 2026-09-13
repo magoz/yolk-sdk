@@ -863,11 +863,14 @@ describe('attemptToolBatch', () => {
           ToolDef.make({ name: 'question', description: 'Ask', parameters: {} })
         ]
       })
+
       expect(outcome._tag).toBe('AwaitingInput')
+
       if (outcome._tag !== 'AwaitingInput') return
       const approval = outcome.requests.find(request => request._tag === 'ToolApprovalRequest')
       const question = outcome.requests.find(request => request._tag === 'QuestionRequest')
       expect(approval !== undefined && question !== undefined).toBe(true)
+
       if (approval === undefined || question === undefined) return
 
       expect(
@@ -908,6 +911,7 @@ describe('attemptToolBatch', () => {
       ).toEqual({ _tag: 'Match', requestId: question.requestId })
 
       const resumed = yield* Ref.make(false)
+
       const skipped = yield* resumeHitlIfMatched({
         pending: outcome.requests,
         response: ToolApprovalResponse.make({
@@ -918,6 +922,7 @@ describe('attemptToolBatch', () => {
         }),
         resume: () => Ref.set(resumed, true).pipe(Effect.as({ _tag: 'Resumed' as const }))
       })
+
       expect(skipped).toEqual({ _tag: 'Mismatch' })
       expect(yield* Ref.get(resumed)).toBe(false)
     }).pipe(
@@ -941,6 +946,7 @@ describe('attemptToolBatch', () => {
             }
           })
         ]
+
         const tools = [
           ToolDef.make({
             name: 'weather',
@@ -950,13 +956,16 @@ describe('attemptToolBatch', () => {
           }),
           ToolDef.make({ name: 'question', description: 'Ask', parameters: {} })
         ]
+
         const paused = yield* attemptToolBatch({ calls, tools })
         expect(paused._tag).toBe('AwaitingInput')
+
         if (paused._tag !== 'AwaitingInput') return
         const approval = paused.requests.find(request => request._tag === 'ToolApprovalRequest')
         const question = paused.requests.find(request => request._tag === 'QuestionRequest')
         expect(approval).toBeDefined()
         expect(question).toBeDefined()
+
         if (approval === undefined || question === undefined) return
 
         const partial = yield* attemptToolBatch({
@@ -971,7 +980,9 @@ describe('attemptToolBatch', () => {
             })
           ]
         })
+
         expect(partial._tag).toBe('AwaitingInput')
+
         if (partial._tag !== 'AwaitingInput') return
         expect('toolCalls' in partial).toBe(false)
 
@@ -994,7 +1005,9 @@ describe('attemptToolBatch', () => {
             })
           ]
         })
+
         expect(completed._tag).toBe('Completed')
+
         if (completed._tag !== 'Completed') return
         expect(completed.toolCalls.some(call => call.id === 'call_1')).toBe(true)
       }).pipe(
