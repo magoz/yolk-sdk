@@ -18,8 +18,13 @@ export const notifyRejectedStart = <E, R>(
 
 type LiveOwner = {
   readonly token: LiveToken
-  readonly done: Deferred.Deferred<void, unknown>
+  // Private receipt: succeed with Exit so interrupt fan-out reaches every waiter.
+  // Public waiters flatten; this is not a global Effect Deferred fix.
+  readonly done: Deferred.Deferred<Exit.Exit<void, unknown>>
 }
+
+const awaitDone = (done: Deferred.Deferred<Exit.Exit<void, unknown>>) =>
+  Deferred.await(done).pipe(Effect.flatMap(exit => exit))
 
 export type LiveDrainOptions = {
   readonly afterInterrupt?: Effect.Effect<void>
@@ -29,7 +34,7 @@ const userInterrupt = (driver: DriverShape, sessionId: string) =>
   driver.interrupt(sessionId, { reason: 'user', awaitSettlement: true })
 
 const awaitOwner = (owner: LiveOwner) =>
-  Deferred.await(owner.done).pipe(
+  awaitDone(owner.done).pipe(
     Effect.exit,
     Effect.flatMap(exit =>
       Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)
@@ -122,11 +127,11 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
         if (admitted._tag !== 'Accepted') {
           return admitted
         }
-        const done = yield* Deferred.make<void, unknown>()
+        const done = yield* Deferred.make<Exit.Exit<void, unknown>>()
         yield* driver.run(sessionId).pipe(
           Effect.interruptible,
           Effect.exit,
-          Effect.flatMap(exit => Deferred.done(done, exit)),
+          Effect.flatMap(exit => Deferred.succeed(done, exit)),
           Effect.forkDetach({ startImmediately: true, uninterruptible: false })
         )
         yield* Ref.set(liveOwner, { token: admitted.token, done })
@@ -157,7 +162,7 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
             const exit = yield* restore(
               done === undefined
                 ? Effect.void
-                : Effect.onInterrupt(Deferred.await(done), () =>
+                : Effect.onInterrupt(awaitDone(done), () =>
                     interruptIfToken(started.token, driver, sessionId).pipe(
                       Effect.flatMap(captured =>
                         captured === undefined ? Effect.void : awaitOwner(captured)

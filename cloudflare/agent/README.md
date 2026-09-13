@@ -14,6 +14,20 @@ Alchemy state is local under `.alchemy/state` for now.
 - Bootstrapped sessions select Anthropic Claude or OpenAI Codex from app-provided model/token broker configuration.
 - Anthropic receives the selected host model's required output-token configuration; the Worker does not infer limits. ChatGPT Codex rejects `max_output_tokens`, so Codex construction does not accept or send an output-token limit.
 
+## Reconstruction contract
+
+This is the current Cloudflare adapter contract, not a platform hibernation guarantee and not a new recovery policy.
+
+- One instance-scoped snapshot Driver. Occupancy, live owner/epoch, closures, and Inbox are memory-only. Driver claims use the session id; runtime append runs use separate run ids.
+- The runtime append log owns persisted inputs, HITL responses, waits, and terminal messages. Streamed deltas are not checkpoints. Replayed snapshots hydrate protocol messages with Schema because Durable Object storage returns structured-clone plain objects.
+- GET reconnect interrupts a live owner with user authority, waits for Driver settlement, then finalizes the latest incomplete runtime log. Close targets an already admitted matching socket owner only; it does not finalize the log and does not fence pending preparation. Coordinator and LiveOwner use private successful-`Exit` settlement receipts so interruption can reach every waiter; that is not a global Effect `Deferred` fix and does not add automatic recovery.
+- After a fresh isolate over a persisted claim and incomplete log, construction does no autonomous drain. Reconnect can finalize the old log while leaving the orphan claim until a later explicit run settles. `resumeSuspended` is not used: a fresh `live.runHeld` cannot reconstruct work, and sweeping empty occupancy could clear a claim without recovering the runtime operation.
+- Restored sockets that send without GET can still hit the incomplete-log conflict check. Hibernation/eviction delivery is unproven here.
+- HITL is `AppendHitlResponse` against the runtime log, not harness `pause` / `resumeHitl`. `RunAwaitingInput` is terminal for incomplete-log detection, so reconnect preserves a waiting checkpoint. Stale revision or wrong request/tool identity neither mutates the log nor executes tools.
+- Missing LLM `Done` is the existing nonretryable loop error: `runRuntime` persists `RunFailed`. Driver settlement releases the claim. There is no Cloudflare durable compaction or automatic continuation.
+
+Deterministic composition coverage lives in `test/drain-runtime-integration.test.ts`. Direct WebSocket E2E is a separate platform path and is not that suite.
+
 ## Commands
 
 ```sh
