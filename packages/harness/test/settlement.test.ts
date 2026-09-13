@@ -162,4 +162,85 @@ describe('terminal settlement', () => {
       }).pipe(Effect.provide(layer))
     )
   })
+
+  it('stop returns while reentrant cleanup waits for the inbox gate', async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const cleanupEntered = yield* Deferred.make<void>()
+        const releaseHold = yield* Deferred.make<void>()
+        const releaseEntered = yield* Deferred.make<void>()
+        const successorStarted = yield* Deferred.make<void>()
+        const successorRelease = yield* Deferred.make<void>()
+        const wrapInbox = Layer.effect(
+          Inbox,
+          Effect.gen(function* () {
+            const inner = yield* Inbox
+            return Inbox.of({
+              ...inner,
+              endDrain: (runId, token, ack) =>
+                Deferred.succeed(cleanupEntered, undefined).pipe(
+                  Effect.andThen(inner.endDrain(runId, token, ack))
+                )
+            })
+          })
+        ).pipe(Layer.provide(makeInMemoryInboxLayer()))
+        const delayedStore = Layer.effect(
+          RunStore,
+          Effect.gen(function* () {
+            const inner = yield* RunStore
+            return RunStore.of({
+              ...inner,
+              release: runId =>
+                Deferred.succeed(releaseEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseHold)),
+                  Effect.andThen(inner.release(runId))
+                )
+            })
+          })
+        ).pipe(Layer.provide(makeInMemoryRunStoreLayer()))
+        const layer = makeDriverLayer({
+          drain: () =>
+            Effect.gen(function* () {
+              if (yield* Deferred.isDone(started)) {
+                yield* Deferred.succeed(successorStarted, undefined)
+                yield* Deferred.await(successorRelease)
+                return
+              }
+              yield* Deferred.succeed(started, undefined)
+              yield* Effect.never
+            })
+        }).pipe(Layer.provideMerge(wrapInbox), Layer.provideMerge(delayedStore))
+        yield* Effect.gen(function* () {
+          const driver = yield* Driver
+          const store = yield* RunStore
+          yield* driver.wake('run')
+          yield* Deferred.await(started)
+          const stop = yield* driver.stop('run')
+          expect(stop._tag).toBe('Interrupted')
+          yield* Deferred.await(cleanupEntered)
+          yield* Deferred.await(releaseEntered)
+          const waking = yield* driver.wake('run').pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          expect(yield* Deferred.isDone(successorStarted)).toBe(false)
+          yield* Deferred.succeed(releaseHold, undefined)
+          yield* Deferred.await(successorStarted)
+          yield* Fiber.join(waking)
+          expect(yield* driver.isActive('run')).toBe(true)
+          expect(yield* store.isClaimed('run')).toBe(true)
+          yield* Deferred.succeed(successorRelease, undefined)
+          yield* driver.awaitIdle('run')
+          expect(yield* store.isClaimed('run')).toBe(false)
+        }).pipe(
+          Effect.ensuring(
+            Deferred.succeed(releaseHold, undefined).pipe(
+              Effect.andThen(Deferred.succeed(successorRelease, undefined)),
+              Effect.asVoid
+            )
+          ),
+          Effect.provide(layer)
+        )
+      })
+    )
+  })
 })

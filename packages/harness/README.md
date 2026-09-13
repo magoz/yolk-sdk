@@ -44,6 +44,18 @@ Hosts still own tools, prompts, auth, HITL payload persistence, and `'use workfl
 
 `Driver.pause` / `resumeHitl` / `stop` compose HITL onto the existing coordinator. Inbox items have no payload. Protocol match helpers live in `@yolk-sdk/harness/outcome`. Parked waits are not durable and are not shutdown claims.
 
+## Restart contract
+
+Ownership is per shared Driver instance. The host or platform supplies cross-process exclusivity and quiesces producers before closing that instance. Raw administrative `RunStore` mutations must be quiesced with Driver; runtime claim ownership belongs to Driver.
+
+Startup is explicit: build the shared Driver/Inbox/Store, restore host-owned waiting checkpoints through `run` / `pause`, then call `Driver.resumeSuspended` before exposing ingress.
+
+`resumeSuspended` is a finite current-snapshot sweep. Candidate IDs are hints, not durable incarnation IDs. Under the Inbox admission gate it rechecks live coordinator activity then the current claim, skips blocked parks, and charges a validated `maxResumeAttempts` budget before granting pending input. Stop with no newer intent skips; a later idle claimed run with the same id may recover the current host checkpoint only. The sweep does not wait for drain settlement while holding that gate.
+
+`maxResumeAttempts` is a finite nonnegative safe integer. The default is 10. `0` means no recovery attempts. Omitted args, whole options `undefined`, or explicit `undefined` `maxResumeAttempts` keeps Layer `E = never`. A numeric or `number | undefined` config types `InvalidMaxResumeAttempts` and fails Layer init for invalid values.
+
+`wake` / `resumeSuspended` schedule work; `awaitIdle` is quiescence, not a success receipt. `run` observes start and settlement failures. A failed `started` claim must not automatically release a prior or never-acquired claim. Explicit user-terminal authority (`Driver.stop` or generic `interrupt` defaulting to `user`) still releases a leftover claim after that owner has actually settled. Shutdown interrupt keeps the claim.
+
 ### HITL contract
 
 - Hosts persist typed HITL payloads by `itemId`. Inbox stores only opaque generation, request ids, and response item ids.
@@ -53,6 +65,7 @@ Hosts still own tools, prompts, auth, HITL payload persistence, and `'use workfl
 - `Inbox.beginDrain(runId, scope)` and `wakeIfUnblocked(runId, scope, wake)` are scope-aware. Pending input subsumes steer. A steer drain does not consume a later input intent, so an input admitted after Coordinator captures steer still drains.
 - A successful drain that leased a Ready generation acknowledges and clears those refs. Failure or interruption keeps them (at-least-once). Host side effects must be idempotent.
 - Human pause releases the busy claim. User `stop` is terminal at the captured owner's settlement (including shutdown then user-stop). Shutdown interrupt keeps the claim. The Durable Object snapshot claim store does not make Inbox durable.
+- After process restart, hosts enumerate their own persisted waiting checkpoints and rebuild a fresh park with the current drain token. Do not import old Inbox parks, drain tokens, or generation strings. Correlate later responses to the new park and host identity policy. Persisted partial responses may be re-admitted only after protocol/host validation against that fresh park.
 
 ## Step outcomes
 

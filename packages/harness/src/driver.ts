@@ -1,4 +1,4 @@
-import { Context, Effect, Exit, Layer } from 'effect'
+import { Cause, Context, Data, Effect, Exit, Layer, Semaphore } from 'effect'
 import { makeCoordinator, type Promotable } from './coordinator.ts'
 import {
   Inbox,
@@ -13,6 +13,12 @@ import { RunStore } from './store.ts'
 export type InterruptReason = 'user' | 'shutdown'
 
 export const defaultMaxResumeAttempts = 10
+
+export class InvalidMaxResumeAttempts extends Data.TaggedError('InvalidMaxResumeAttempts')<{
+  readonly maxResumeAttempts: number
+}> {}
+
+const isValidMaxResumeAttempts = (value: number) => Number.isSafeInteger(value) && value >= 0
 
 export type ResumeSuspendedResult = {
   readonly resumed: ReadonlyArray<string>
@@ -30,6 +36,11 @@ export type Drain = (
   scope: Promotable,
   context: DrainContext
 ) => Effect.Effect<void, never, Inbox | RunStore>
+
+export type DriverLayerOptions = {
+  readonly drain?: Drain
+  readonly maxResumeAttempts?: number
+}
 
 export type StopDecision =
   | { readonly _tag: 'Interrupted' }
@@ -68,17 +79,17 @@ export const makeHarness = <DE, DR, SE, SR, IE, IR>(input: {
 
 export const admit = (item: InboxItem) => Effect.flatMap(Driver, driver => driver.admit(item))
 
-export const makeDriverLayer = (options?: {
-  readonly drain?: Drain
-  readonly maxResumeAttempts?: number
-}): Layer.Layer<Driver, never, RunStore | Inbox> =>
+const makeValidatedDriverLayer = (
+  maxResumeAttempts: number,
+  hostDrain: Drain
+): Layer.Layer<Driver, never, RunStore | Inbox> =>
   Layer.effect(
     Driver,
     Effect.gen(function* () {
       const store = yield* RunStore
       const inbox = yield* Inbox
-      const hostDrain = options?.drain ?? ((_runId, _force, _scope, _context) => Effect.void)
-      const maxResumeAttempts = options?.maxResumeAttempts ?? defaultMaxResumeAttempts
+      const sweep = yield* Semaphore.make(1)
+      const acquired = new Set<string>()
       const coordinator = yield* makeCoordinator<string, never, InterruptReason>({
         drain: (runId, force, scope) =>
           inbox.beginDrain(runId, scope).pipe(
@@ -96,34 +107,74 @@ export const makeDriverLayer = (options?: {
               )
             })
           ),
-        started: runId => store.claim(runId),
+        started: runId =>
+          store.claim(runId).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                acquired.add(runId)
+              })
+            )
+          ),
         settled: (runId, exit, reason) =>
-          reason === 'user' || (reason === undefined && !Exit.hasInterrupts(exit))
-            ? store.release(runId)
-            : Effect.void
+          Effect.suspend(() => {
+            const owned = acquired.delete(runId)
+            if (
+              owned &&
+              (reason === 'user' || (reason === undefined && !Exit.hasInterrupts(exit)))
+            ) {
+              return store.release(runId)
+            }
+            // Acquisition receipt guards automatic failed-start settlement only.
+            // Explicit user-terminal authority still releases a leftover claim
+            // after this owner has actually settled, matching Idle/Settling stop.
+            if (reason === 'user' && !owned) {
+              return store
+                .isClaimed(runId)
+                .pipe(Effect.flatMap(claimed => (claimed ? store.release(runId) : Effect.void)))
+            }
+            return Effect.void
+          }).pipe(
+            Effect.exit,
+            Effect.flatMap(settledExit => {
+              if (Exit.isSuccess(settledExit)) return Effect.void
+              return Effect.failCause(
+                Exit.isFailure(exit)
+                  ? Cause.combine(exit.cause, settledExit.cause)
+                  : settledExit.cause
+              )
+            })
+          )
       })
 
-      const resumeSuspended = Effect.gen(function* () {
-        const claimed = yield* store.claimed
-        const resumed: Array<string> = []
-        const exhausted: Array<string> = []
+      const resumeSuspended = sweep.withPermits(1)(
+        Effect.gen(function* () {
+          const claimed = yield* store.claimed
+          const resumed: Array<string> = []
+          const exhausted: Array<string> = []
 
-        for (const runId of claimed) {
-          if (yield* coordinator.isActive(runId)) continue
-          const parked = yield* inbox.parked(runId)
-          if (parked !== undefined && !parked.ready) continue
-          const count = yield* store.incrementResumeCount(runId)
-          if (count > maxResumeAttempts) {
-            yield* store.release(runId)
-            exhausted.push(runId)
-            continue
+          for (const runId of claimed) {
+            const admission = yield* inbox.admitRecovery(
+              runId,
+              Effect.gen(function* () {
+                if (yield* coordinator.isActive(runId)) return { _tag: 'Skip' } as const
+                if (!(yield* store.isClaimed(runId))) return { _tag: 'Skip' } as const
+                const count = yield* store.resumeCount(runId)
+                if (count >= maxResumeAttempts) {
+                  yield* store.release(runId)
+                  return { _tag: 'Exhausted' } as const
+                }
+                yield* store.incrementResumeCount(runId)
+                return { _tag: 'Resume' } as const
+              }),
+              coordinator.wake(runId, 'input')
+            )
+            if (admission._tag === 'Resumed') resumed.push(runId)
+            else if (admission._tag === 'Exhausted') exhausted.push(runId)
           }
-          const woke = yield* inbox.wakeIfUnblocked(runId, 'input', coordinator.wake(runId))
-          if (woke) resumed.push(runId)
-        }
 
-        return { resumed, exhausted }
-      })
+          return { resumed, exhausted }
+        })
+      )
 
       return Driver.of({
         active: coordinator.active,
@@ -180,3 +231,20 @@ export const makeDriverLayer = (options?: {
       })
     })
   )
+
+export function makeDriverLayer(): Layer.Layer<Driver, never, RunStore | Inbox>
+export function makeDriverLayer(options?: {
+  readonly drain?: Drain
+  readonly maxResumeAttempts?: undefined
+}): Layer.Layer<Driver, never, RunStore | Inbox>
+export function makeDriverLayer(
+  options?: DriverLayerOptions
+): Layer.Layer<Driver, InvalidMaxResumeAttempts, RunStore | Inbox>
+export function makeDriverLayer(options?: DriverLayerOptions) {
+  const hostDrain = options?.drain ?? ((_runId, _force, _scope, _context) => Effect.void)
+  const maxResumeAttempts = options?.maxResumeAttempts ?? defaultMaxResumeAttempts
+  if (!isValidMaxResumeAttempts(maxResumeAttempts)) {
+    return Layer.effect(Driver, Effect.fail(new InvalidMaxResumeAttempts({ maxResumeAttempts })))
+  }
+  return makeValidatedDriverLayer(maxResumeAttempts, hostDrain)
+}

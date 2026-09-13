@@ -40,6 +40,16 @@ export type PauseDecision =
   | { readonly _tag: 'Parked'; readonly generation: string }
   | { readonly _tag: 'Stale' }
 
+export type RecoveryAttempt =
+  | { readonly _tag: 'Skip' }
+  | { readonly _tag: 'Exhausted' }
+  | { readonly _tag: 'Resume' }
+
+export type RecoveryAdmission =
+  | { readonly _tag: 'Skip' }
+  | { readonly _tag: 'Exhausted' }
+  | { readonly _tag: 'Resumed' }
+
 export type DrainBegin =
   | { readonly _tag: 'Skip' }
   | {
@@ -89,6 +99,11 @@ export type InboxShape = {
     runId: string,
     start: Effect.Effect<CapturedRun<E>, E, R>
   ) => Effect.Effect<CapturedRun<E> | undefined, E, R>
+  readonly admitRecovery: <E, R>(
+    runId: string,
+    attempt: Effect.Effect<RecoveryAttempt, E, R>,
+    wake: Effect.Effect<void>
+  ) => Effect.Effect<RecoveryAdmission, E, R>
 }
 
 export class Inbox extends Context.Service<Inbox, InboxShape>()('@yolk-sdk/harness/Inbox') {}
@@ -411,6 +426,27 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
                 }
                 return ticket
               })
+            )
+          ),
+        admitRecovery: (runId, attempt, wake) =>
+          Effect.uninterruptibleMask(restore =>
+            restore(gate.take(1)).pipe(
+              Effect.flatMap(() =>
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  if (parkBlocked(control.park)) return { _tag: 'Skip' } as const
+                  const decision = yield* attempt
+                  if (decision._tag !== 'Resume') return decision
+                  yield* writeControl(runId, {
+                    pending: widerPending(control.pending, 'input'),
+                    liveToken: control.liveToken,
+                    leasedGeneration: control.leasedGeneration,
+                    park: control.park
+                  })
+                  yield* wake
+                  return { _tag: 'Resumed' } as const
+                }).pipe(Effect.ensuring(gate.release(1)))
+              )
             )
           )
       })

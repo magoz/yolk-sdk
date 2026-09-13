@@ -327,7 +327,8 @@ describe('HITL park lifecycle', () => {
                 )
               ),
             wakeIfUnblocked: inner.wakeIfUnblocked,
-            startIfUnblocked: inner.startIfUnblocked
+            startIfUnblocked: inner.startIfUnblocked,
+            admitRecovery: inner.admitRecovery
           })
         })
       )
