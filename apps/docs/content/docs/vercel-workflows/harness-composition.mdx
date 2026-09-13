@@ -1,0 +1,198 @@
+---
+title: Harness composition
+description: Compose a finalized model collector with Vercel Workflows, and why harness outcomes are not drop-in.
+---
+
+Use this recipe when a durable Vercel Workflow should run one **finalized** model turn per step. The
+Next example already does that. `@yolk-sdk/harness/outcome` is an optional classification API for
+hosts that choose recovery policy explicitly. It is not the current Next Workflow implementation,
+not a line-reduction adapter, and not a Workflow Driver.
+
+## Two compositions
+
+| Path                  | What it does                                                                                                        | Status             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| Finalized collector   | `collectModelTurn(runModelTurn(...))` inside a host `'use step'`, then `runVercelAgentWorkflow`                     | Current Next host  |
+| Optional outcome seam | `attemptModelTurn` / `attemptToolBatch` inside a host step, plus explicit recovery, checkpoint, and wire projection | Future host policy |
+
+Do not mix them accidentally. Substituting harness outcomes into the current Next model step would
+change failure handling, tool admission, retry scheduling, and compaction, not merely wrap the same
+collector.
+
+The Next host lives in `examples/next/lib/agents/workflow-runtime/`. Read
+[`agent-workflow-steps.ts`](https://github.com/magoz/yolk-sdk/blob/main/examples/next/lib/agents/workflow-runtime/agent-workflow-steps.ts)
+for the collector and
+[`run-agent-workflow.ts`](https://github.com/magoz/yolk-sdk/blob/main/examples/next/lib/agents/workflow-runtime/run-agent-workflow.ts)
+for orchestration rather than copying that host into your app.
+
+## Current Next recipe
+
+`runVercelAgentWorkflow` is generic orchestration over host callbacks. The package does not import
+agent protocol types or `@yolk-sdk/harness`. The host owns:
+
+- finalized model collection
+- provider admission
+- transcript, usage, and tool-call serialization onto plain wire state
+- tool-batch aggregation and independent children
+- HITL hook tokens and response validation
+
+The `'use workflow'` body stays the [generic wrapper](./step-contracts#wrapper). Concrete `'use step'`
+functions live in the host. Next's directive wrappers dynamically import the runtime implementation
+so Node-only provider, MCP, and tool dependencies stay out of the Workflow bundle. See
+[`run-agent-workflow.ts`](https://github.com/magoz/yolk-sdk/blob/main/examples/next/lib/agents/workflow-runtime/run-agent-workflow.ts).
+
+Fragment. `HostModelStepRuntime` and `./host-model-step-runtime` are host-owned placeholders, not
+SDK exports:
+
+```ts
+export async function runHostModelStep(
+  ...args: Parameters<HostModelStepRuntime['runHostModelStep']>
+) {
+  'use step'
+  const runtime = await import('./host-model-step-runtime')
+  return await runtime.runHostModelStep(...args)
+}
+runHostModelStep.maxRetries = 0
+```
+
+Inside that runtime step, fold one finalized turn with decoded cumulative usage. Fragment.
+`hostDecodeUsage`, `hostModelTurnConfig`, `hostWriteEvent`, and `hostLoopLayer` are host-owned:
+
+```ts
+import { Effect } from 'effect'
+import { collectModelTurn, runModelTurn } from '@yolk-sdk/agent/loop'
+
+const initialUsage = yield * hostDecodeUsage(input.state.usage)
+const { assistantMessage, toolCalls, usage, stopReason } =
+  yield *
+  collectModelTurn(runModelTurn(hostModelTurnConfig), {
+    initialUsage,
+    onEvent: hostWriteEvent
+  }).pipe(Effect.provide(hostLoopLayer))
+```
+
+`collectModelTurn` projects a successful collection to a finalized `ModelTurnResult` and re-fails
+unsuccessful collection outcomes. Partial output is not a continuation.
+
+The step must project **accumulated** wire state, not the new assistant message alone: prior
+`messages` and `createdMessages` plus the current assistant, cumulative `usage` (decoded
+`initialUsage` plus this turn), carried `eventSequence` after durable writes, and `done` from the
+finalized stop reason. Decode those fields from the incoming step state; encode the next values onto
+the Workflow result. Protocol classes and Effects stay inside the step.
+
+Keep provider clients and tool closures inside `'use step'` functions. Workflow args and state stay
+JSON-serializable wire data. Do not call `Effect.runPromise` in the `'use workflow'` body. Do not
+construct `@yolk-sdk/harness` Driver, Inbox, or Coordinator there.
+
+Host tool orchestration may call `orchestrateWorkflowToolBatch` and independent Workflow `start`
+children. Whole-batch preflight, ordered `ToolResultMessage` merge, child admission, and Stop policy
+stay host-owned. See [Independent child orchestration](./step-contracts#independent-child-orchestration)
+and [HITL resume](./hitl-resume).
+
+## Missing Done is a model-step failure
+
+A provider stream that ends without `Done` fails as `LLMError` `invalid_response` /
+`retryable: false` with `responseIssue: 'missing_done'`. The current Next collector surfaces that as
+the existing structured `ModelStepFailed` path:
+
+- partial text does not become a Workflow continuation or a second provider request
+- a completed tool-call input does not dispatch that tool or start a child
+- `writeError` owns the terminal `AgentError` and close; `closeStream` is not used
+
+A model result with `done: false` and no tool calls is only a generic transport capability for
+host-promoted input. It does not define retry timing, partial-assistant repair, recovery budgets, or
+safe tool admission. See [Model step](./step-contracts#model-step).
+
+## Inner retries versus host scheduling
+
+| Layer                                      | What it retries                                                                         |
+| ------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/loop` `runModelTurn`      | Retryable LLM errors inside one invocation (`LoopConfig.maxRetries`)                    |
+| Workflow step `maxRetries`                 | Platform re-execution of the whole step; Next streamed steps set `0`                    |
+| `attemptModelTurn` `Retry` / `RecoverFull` | Classification after the inner stream; the host must schedule the next physical attempt |
+
+Incomplete `missing_done` streams are not retryable, so they do not consume the inner
+`runModelTurn` budget. `attemptModelTurn` classifies **one** `runModelTurn` invocation after that
+stream's configured loop/provider retries. It does not add another retry loop. Hosts that own
+physical-attempt scheduling should pass `LoopConfig.maxRetries: 0` and skip retry decorators.
+Looping on `Retry` / `RecoverFull` inside the same Workflow step would stack scheduling on top of
+retries the collector already ran. See [Retry policy](./step-contracts#retry-policy).
+
+## Continue is not tool execution
+
+`attemptModelTurn` may return `Continue` with partial text/reasoning and completed tool calls after
+output has started. Harness continuation **does not execute those tools** and does not invent
+message IDs.
+
+Mapping `Continue.toolCalls` into a Workflow model result (`done: false` plus `toolCalls`) would
+dispatch tools from an incomplete model turn. If a host opts into `Continue`, it must keep those
+calls off the ordinary `runToolBatchStep` path until a later finalized turn.
+
+## Optional outcome seam
+
+You may call `attemptModelTurn` / `attemptToolBatch` **inside a host `'use step'`** only when that
+host also owns:
+
+- recovery scheduling (retry, continue without tools, or fail)
+- a checkpoint that can persist compacted messages **and** `overflowCompactionAttempt`
+- a projection from outcomes onto the Workflow wire result (`done`, ordered tool results, HITL
+  `awaitingInput`)
+
+This is not current Next policy. Next keeps the finalized collector visible in the model step.
+Workflow loop state is transcript, usage, turn, sequence, and `done`. It is not a harness recovery
+checkpoint.
+
+Fragment. `hostPersistCompacted`, `hostScheduleRetry`, `hostLoopLayer`, and `hostCheckpoint` are
+host-owned placeholders, not SDK exports. Keep this inside a `'use step'` function:
+
+```ts
+import { Effect } from 'effect'
+import { attemptModelTurn } from '@yolk-sdk/harness/outcome'
+
+const outcome = await Effect.runPromise(
+  attemptModelTurn(hostModelTurnConfig, {
+    onEvent: hostWriteEvent,
+    overflowCompactionAttempt: hostCheckpoint.overflowCompactionAttempt,
+    compact: hostCompact
+  }).pipe(Effect.provide(hostLoopLayer))
+)
+
+switch (outcome._tag) {
+  case 'Completed':
+    return hostProjectCompleted(outcome)
+  case 'Continue':
+    return hostScheduleContinueWithoutTools(outcome)
+  case 'Retry':
+  case 'RecoverFull':
+    return hostScheduleRetry(outcome)
+  case 'Compacted':
+    await hostPersistCompacted({
+      messages: outcome.messages,
+      overflowCompactionAttempt: outcome.overflowCompactionAttempt
+    })
+    return hostScheduleRetry(outcome)
+}
+```
+
+Durable `Compacted` is persist-then-retry. Store the compacted messages and the incremented count,
+then pass that count on the next attempt. Omitting or resetting the count has no cross-invocation
+budget. Compact is allowed once by default (`overflowCompactionAttempt` `0` → `1`). Overflow after
+published output, or after the budget is spent, is terminal. Do not also wrap the same path with
+`makeContextOverflowRetryProvider` from `@yolk-sdk/agent/compaction`; that helper is in-process
+silent compact-and-retry before published output.
+
+`attemptToolBatch` returns completed calls or pending HITL plus usage. It does not return ordered
+`ToolResultMessage`s, event sequence, child lifecycle, or this host's nested-usage rules. Keep host
+aggregation if you need those. Pending HITL fences the whole batch.
+
+HITL still uses Workflow `createHook` plus host token/auth/validation.
+`matchHitlResponse` / `resumeHitlIfMatched` only check protocol identity. They do not replace hook
+lifecycle. See [HITL resume](./hitl-resume) and [Add human-in-the-loop](../guides/hitl).
+
+## Terminal close and tests
+
+Successful `AgentEnd` closes through `closeStream`. Failure `AgentError` closes through
+`writeError`. See [Terminal barrier](./step-contracts#terminal-barrier).
+
+Host tests should drive the actual Workflow entrypoint with fake provider, store, and platform
+boundaries, and assert execution traces rather than source strings. See [Test Workflows](./testing).

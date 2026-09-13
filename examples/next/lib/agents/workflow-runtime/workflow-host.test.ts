@@ -85,6 +85,7 @@ vi.mock('workflow', async () => {
 })
 vi.mock('workflow/api', () => ({
   start: async <A extends unknown[], R>(fn: (...args: A) => Promise<R>, args: A) => {
+    workflowStarts++
     if (rejectStart) throw new Error('launch transport failed')
     const run = await world.sdk.start(fn, args)
     if (loseStartResponse) throw new Error('start response lost')
@@ -147,7 +148,11 @@ let gated = false
 let waitAfterFailure = false
 let previousParent: string | undefined
 let childToolCalls = 0
+let workflowStarts = 0
 let requests: LLMRequest[] = []
+let parentStream:
+  | ((request: LLMRequest) => Stream.Stream<LLMTextDelta | LLMToolCall | LLMUsage | LLMDone>)
+  | undefined
 let registries = new Map<string, { userId: string; state: WorkflowRegistry }>()
 const originalStoreLayer = AgentWorkflowStore.layer
 
@@ -180,6 +185,7 @@ const provider = (child: boolean) =>
   Layer.succeed(LLMProvider, {
     stream: (request: LLMRequest) => {
       requests.push(request)
+      if (!child && parentStream !== undefined) return parentStream(request)
       const results = request.messages.filter(message => message._tag === 'ToolResult')
       if (child) {
         if (results.length > 0) return finished('Child final answer')
@@ -334,7 +340,9 @@ beforeEach(() => {
   waitAfterFailure = false
   previousParent = undefined
   childToolCalls = 0
+  workflowStarts = 0
   requests = []
+  parentStream = undefined
   const row = (
     runId: string,
     userId: string
@@ -427,6 +435,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const parent = await launch()
     await childEntered.promise
     await world.settled(parent)
+    expect(workflowStarts).toBe(1)
     expect(world.inspect(parent).status).toBe('completed')
     const id = childId(parent)
     expect(world.inspect(id).status).toBe('running')
@@ -882,5 +891,198 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     childGate.release()
     await world.settled(childId(parent))
     expect(childToolCalls).toBe(0)
+  })
+
+  it('fails a partial text stream with missing Done without continuing or retrying the provider', async () => {
+    parentStream = () => Stream.fromIterable([LLMTextDelta.make({ text: 'partial' })])
+    const parent = await launch()
+    await world.settled(parent)
+    const inspection = world.inspect(parent)
+    const output = await events(parent)
+    const result = await world.sdk.getRun(parent).returnValue
+
+    expect(inspection.status).toBe('completed')
+    expect(inspection.streamClosed).toBe(true)
+    expect(result).toMatchObject({ _tag: 'ModelStepFailed', turn: 1 })
+    expect(requests).toHaveLength(1)
+    expect(workflowStarts).toBe(0)
+    expect(childToolCalls).toBe(0)
+    expect(output.some(event => event._tag === 'AgentEnd')).toBe(false)
+    expect(output.some(event => event._tag === 'ToolExecutionCompleted')).toBe(false)
+    expect(output.some(event => event._tag === 'AssistantMessage')).toBe(false)
+    expect(output.filter(event => event._tag === 'TurnStart')).toHaveLength(1)
+    expect(output.find(event => event._tag === 'LLMTextDelta')).toMatchObject({ text: 'partial' })
+    expect(output.find(event => event._tag === 'AgentError')).toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+      message: 'Expected exactly one LLM done event, received 0'
+    })
+  })
+
+  it('does not dispatch a completed tool call when Done is missing', async () => {
+    parentStream = () => Stream.fromIterable([LLMToolCall.make({ call: childCall() })])
+    const parent = await launch()
+    await world.settled(parent)
+    const output = await events(parent)
+    const result = await world.sdk.getRun(parent).returnValue
+
+    expect(world.inspect(parent).status).toBe('completed')
+    expect(result).toMatchObject({ _tag: 'ModelStepFailed', turn: 1 })
+    expect(requests).toHaveLength(1)
+    expect(workflowStarts).toBe(0)
+    expect(childToolCalls).toBe(0)
+    expect(output.find(event => event._tag === 'ToolInputEnd')).toMatchObject({
+      call: { id: 'child-call', name: 'subagent' }
+    })
+    expect(output.some(event => event._tag === 'ToolExecutionStarted')).toBe(false)
+    expect(output.some(event => event._tag === 'ToolExecutionCompleted')).toBe(false)
+    expect(output.some(event => event._tag === 'SubagentStarted')).toBe(false)
+    expect(output.some(event => event._tag === 'AgentEnd')).toBe(false)
+    expect(output.find(event => event._tag === 'AgentError')).toMatchObject({
+      code: 'invalid_response',
+      retryable: false,
+      message: 'Expected exactly one LLM done event, received 0'
+    })
+  })
+
+  it('preserves transcript, cumulative usage, and unique durable event ids on a successful tool turn', async () => {
+    const firstUsage = AgentUsage.make({ input: { total: 3 }, output: { total: 1 } })
+    const secondUsage = AgentUsage.make({ input: { total: 5 }, output: { total: 2 } })
+    parentStream = request => {
+      const results = request.messages.filter(message => message._tag === 'ToolResult')
+      return results.length === 0
+        ? Stream.fromIterable([
+            LLMToolCall.make({
+              call: ToolCall.make({ id: 'read-call', name: 'read', params: {} })
+            }),
+            LLMUsage.make({ usage: firstUsage }),
+            LLMDone.make({ stopReason: 'tool_use' })
+          ])
+        : Stream.fromIterable([
+            LLMTextDelta.make({ text: 'Parent done' }),
+            LLMUsage.make({ usage: secondUsage }),
+            LLMDone.make({ stopReason: 'stop' })
+          ])
+    }
+    const parent = await launch()
+    await world.settled(parent)
+    const inspection = world.inspect(parent)
+    const output = await events(parent)
+    const result = await world.sdk.getRun(parent).returnValue
+    const eventIds = output.map(event => event.eventId)
+    const end = output.find(event => event._tag === 'AgentEnd')
+
+    expect(inspection.status).toBe('completed')
+    expect(inspection.streamClosed).toBe(true)
+    expect(result).toMatchObject({
+      _tag: 'Completed',
+      turns: 2,
+      state: {
+        messages: [
+          UserMessage.make({ content: 'Parent private context' }),
+          expect.objectContaining({
+            _tag: 'Assistant',
+            parts: [
+              expect.objectContaining({
+                _tag: 'HostToolCall',
+                call: expect.objectContaining({ id: 'read-call', name: 'read' })
+              })
+            ]
+          }),
+          expect.objectContaining({
+            _tag: 'ToolResult',
+            toolCallId: 'read-call',
+            content: 'read result'
+          }),
+          expect.objectContaining({
+            _tag: 'Assistant',
+            parts: [expect.objectContaining({ _tag: 'Text', content: 'Parent done' })]
+          })
+        ],
+        createdMessages: [
+          expect.objectContaining({
+            _tag: 'Assistant',
+            parts: [
+              expect.objectContaining({
+                _tag: 'HostToolCall',
+                call: expect.objectContaining({ id: 'read-call', name: 'read' })
+              })
+            ]
+          }),
+          expect.objectContaining({
+            _tag: 'ToolResult',
+            toolCallId: 'read-call',
+            content: 'read result'
+          }),
+          expect.objectContaining({
+            _tag: 'Assistant',
+            parts: [expect.objectContaining({ _tag: 'Text', content: 'Parent done' })]
+          })
+        ],
+        usage: { input: { total: 8 }, output: { total: 3 } }
+      }
+    })
+    expect(requests).toHaveLength(2)
+    expect(childToolCalls).toBe(1)
+    expect(workflowStarts).toBe(0)
+    expect(requests[1]?.messages).toEqual([
+      UserMessage.make({ content: 'Parent private context' }),
+      expect.objectContaining({
+        _tag: 'Assistant',
+        parts: [
+          expect.objectContaining({
+            _tag: 'HostToolCall',
+            call: expect.objectContaining({ id: 'read-call', name: 'read' })
+          })
+        ]
+      }),
+      expect.objectContaining({
+        _tag: 'ToolResult',
+        toolCallId: 'read-call',
+        content: 'read result'
+      })
+    ])
+    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      result: { toolCallId: 'read-call', content: 'read result' }
+    })
+    expect(end).toMatchObject({
+      turns: 2,
+      usage: { input: { total: 8 }, output: { total: 3 } }
+    })
+    expect(end?.messages).toEqual([
+      expect.objectContaining({ _tag: 'Assistant' }),
+      expect.objectContaining({ _tag: 'ToolResult', toolCallId: 'read-call' }),
+      expect.objectContaining({
+        _tag: 'Assistant',
+        parts: [expect.objectContaining({ _tag: 'Text', content: 'Parent done' })]
+      })
+    ])
+    const tags = output.map(event => event._tag)
+    expect(tags.indexOf('ToolInputEnd')).toBeGreaterThan(-1)
+    expect(tags.indexOf('ToolExecutionCompleted')).toBeGreaterThan(tags.indexOf('ToolInputEnd'))
+    expect(tags.lastIndexOf('LLMTextDelta')).toBeGreaterThan(tags.indexOf('ToolExecutionCompleted'))
+    expect(tags.indexOf('AgentEnd')).toBeGreaterThan(tags.lastIndexOf('LLMTextDelta'))
+    expect(output.some(event => event._tag === 'AgentError')).toBe(false)
+    expect(
+      eventIds.every(
+        eventId => typeof eventId === 'string' && eventId.startsWith(`workflow:${parent}:`)
+      )
+    ).toBe(true)
+    expect(new Set(eventIds).size).toBe(eventIds.length)
+    const sequenced = eventIds.flatMap(eventId => {
+      if (typeof eventId !== 'string') return []
+      const rest = eventId.slice(`workflow:${parent}:`.length)
+      const [turn, sequence] = rest.split(':')
+      const parsedTurn = Number(turn)
+      const parsedSequence = Number(sequence)
+      return Number.isInteger(parsedTurn) && Number.isInteger(parsedSequence)
+        ? [{ turn: parsedTurn, sequence: parsedSequence }]
+        : []
+    })
+    const firstTurn = sequenced.filter(event => event.turn === 1).map(event => event.sequence)
+    const secondTurn = sequenced.filter(event => event.turn === 2).map(event => event.sequence)
+    expect(firstTurn.length).toBeGreaterThan(0)
+    expect(secondTurn.length).toBeGreaterThan(0)
+    expect(Math.max(...firstTurn)).toBeLessThan(Math.min(...secondTurn))
   })
 })

@@ -62,6 +62,11 @@ Rules:
 - Put assistant/model-created messages in `createdMessages`.
 - Carry `eventSequence` if the model step wrote durable stream events.
 
+The Next example keeps that model result finalized: it folds `collectModelTurn(runModelTurn(...))`
+and does not promote a missing `Done` into a Workflow continuation. See
+[Harness composition](./harness-composition) for that recipe versus an optional
+`@yolk-sdk/harness/outcome` policy.
+
 ## Tool batch step
 
 Fragment:
