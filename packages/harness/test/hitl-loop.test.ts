@@ -49,6 +49,9 @@ describe('HITL loop bridge', () => {
       const pending = yield* Ref.make<ReadonlyArray<HitlRequest>>([])
       const payloads = yield* Ref.make<ReadonlyMap<string, HitlResponse>>(new Map())
       const executed = yield* Ref.make<ReadonlyArray<string>>([])
+      const completions = yield* Ref.make<
+        ReadonlyArray<{ readonly id: string; readonly content: string; readonly isError: boolean }>
+      >([])
       const drains = yield* Ref.make(0)
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>
@@ -61,10 +64,22 @@ describe('HITL loop bridge', () => {
                 const payload = stored.get(item.itemId)
                 return payload === undefined ? [] : [payload]
               })
-              const outcome = yield* attemptToolBatch({ calls, tools, hitlResponses }).pipe(
-                Effect.provide(loopLayer),
-                Effect.orDie
-              )
+              const outcome = yield* attemptToolBatch(
+                { calls, tools, hitlResponses },
+                {
+                  onEvent: event => {
+                    if (event._tag !== 'ToolExecutionCompleted') return Effect.void
+                    return Ref.update(completions, current => [
+                      ...current,
+                      {
+                        id: event.call.id,
+                        content: String(event.result.content),
+                        isError: event.result.isError === true
+                      }
+                    ])
+                  }
+                }
+              ).pipe(Effect.provide(loopLayer), Effect.orDie)
               if (outcome._tag === 'Completed') {
                 yield* Ref.set(
                   executed,
@@ -170,7 +185,20 @@ describe('HITL loop bridge', () => {
         expect(ready._tag).toBe('Ready')
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(drains)).toBe(2)
-        expect(yield* Ref.get(executed)).toContain('call_1')
+        const executedIds = yield* Ref.get(executed)
+        expect(executedIds).toHaveLength(2)
+        expect([...executedIds].sort()).toEqual(['call_1', 'call_q'])
+        const completed = yield* Ref.get(completions)
+        expect(completed).toHaveLength(2)
+        expect(completed.map(item => item.id).sort()).toEqual(['call_1', 'call_q'])
+        const weather = completed.find(item => item.id === 'call_1')
+        const answered = completed.find(item => item.id === 'call_q')
+        expect(weather).toBeDefined()
+        expect(answered).toBeDefined()
+        expect(weather?.isError).toBe(false)
+        expect(weather?.content).toBe('72F')
+        expect(answered?.isError).toBe(false)
+        expect(answered?.content.includes('A')).toBe(true)
         expect(yield* inbox.parked('run_1')).toBeUndefined()
       }).pipe(Effect.provide(layer))
     })

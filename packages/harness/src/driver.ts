@@ -81,7 +81,7 @@ export const makeDriverLayer = (options?: {
       const maxResumeAttempts = options?.maxResumeAttempts ?? defaultMaxResumeAttempts
       const coordinator = yield* makeCoordinator<string, never, InterruptReason>({
         drain: (runId, force, scope) =>
-          inbox.beginDrain(runId).pipe(
+          inbox.beginDrain(runId, scope).pipe(
             Effect.flatMap(begun => {
               if (begun._tag === 'Skip') return Effect.void
               return Effect.suspend(() =>
@@ -118,7 +118,7 @@ export const makeDriverLayer = (options?: {
             exhausted.push(runId)
             continue
           }
-          const woke = yield* inbox.wakeIfUnblocked(runId, coordinator.wake(runId))
+          const woke = yield* inbox.wakeIfUnblocked(runId, 'input', coordinator.wake(runId))
           if (woke) resumed.push(runId)
         }
 
@@ -142,7 +142,7 @@ export const makeDriverLayer = (options?: {
           return continueRun()
         },
         wake: (runId, scope = 'input') =>
-          inbox.wakeIfUnblocked(runId, coordinator.wake(runId, scope)).pipe(Effect.asVoid),
+          inbox.wakeIfUnblocked(runId, scope, coordinator.wake(runId, scope)).pipe(Effect.asVoid),
         interrupt: (runId, interruptOptions) =>
           coordinator.interrupt(runId, interruptOptions?.reason ?? 'user', interruptOptions),
         awaitIdle: coordinator.awaitIdle,

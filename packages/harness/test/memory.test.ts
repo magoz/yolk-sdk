@@ -135,12 +135,77 @@ describe('in-memory harness', () => {
         delivery: 'steer',
         kind: 'input'
       })
+      expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
+      const begun = yield* inbox.beginDrain('run_1', 'input')
+      expect(begun._tag).toBe('Run')
+      if (begun._tag !== 'Run') return
 
-      const first = yield* inbox.takePromotable('run_1', 'steer')
-      const second = yield* inbox.takePromotable('run_1', 'input')
+      const first = yield* inbox.takePromotable('run_1', 'steer', begun.drainToken)
+      const second = yield* inbox.takePromotable('run_1', 'input', begun.drainToken)
 
       expect(first?.id).toBe('s1')
       expect(second?.id).toBe('q1')
+    }).pipe(Effect.provide(makeInMemoryHarnessLayer()))
+  )
+
+  it.effect('takePromotable requires a live drain token and does not dequeue otherwise', () =>
+    Effect.gen(function* () {
+      const inbox = yield* Inbox
+      yield* inbox.enqueue({
+        id: 'item_1',
+        runId: 'run_1',
+        delivery: 'input',
+        kind: 'input'
+      })
+      expect(yield* inbox.takePromotable('run_1', 'input', 'd1')).toBeUndefined()
+      expect(yield* inbox.pending('run_1')).toHaveLength(1)
+
+      expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
+      const begun = yield* inbox.beginDrain('run_1', 'input')
+      expect(begun._tag).toBe('Run')
+      if (begun._tag !== 'Run') return
+
+      expect(yield* inbox.takePromotable('run_1', 'input', '')).toBeUndefined()
+      expect(yield* inbox.takePromotable('run_1', 'input', 'nope')).toBeUndefined()
+      expect(yield* inbox.pending('run_1')).toHaveLength(1)
+
+      yield* inbox.enqueue({
+        id: 'other_1',
+        runId: 'run_2',
+        delivery: 'input',
+        kind: 'input'
+      })
+      expect(yield* inbox.wakeIfUnblocked('run_2', 'input', Effect.void)).toBe(true)
+      const other = yield* inbox.beginDrain('run_2', 'input')
+      expect(other._tag).toBe('Run')
+      if (other._tag !== 'Run') return
+      expect(yield* inbox.takePromotable('run_2', 'input', begun.drainToken)).toBeUndefined()
+      expect(yield* inbox.takePromotable('run_1', 'input', other.drainToken)).toBeUndefined()
+      expect((yield* inbox.pending('run_2')).map(item => item.id)).toEqual(['other_1'])
+      expect((yield* inbox.pending('run_1')).map(item => item.id)).toEqual(['item_1'])
+
+      const taken = yield* inbox.takePromotable('run_1', 'input', begun.drainToken)
+      expect(taken?.id).toBe('item_1')
+      yield* inbox.endDrain('run_1', begun.drainToken, true)
+      yield* inbox.enqueue({
+        id: 'item_2',
+        runId: 'run_1',
+        delivery: 'input',
+        kind: 'input'
+      })
+      expect(yield* inbox.takePromotable('run_1', 'input', begun.drainToken)).toBeUndefined()
+      expect((yield* inbox.pending('run_1')).map(item => item.id)).toEqual(['item_2'])
+
+      expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
+      const again = yield* inbox.beginDrain('run_1', 'input')
+      expect(again._tag).toBe('Run')
+      if (again._tag !== 'Run') return
+      expect(again.drainToken).not.toBe(begun.drainToken)
+      expect(yield* inbox.takePromotable('run_1', 'input', begun.drainToken)).toBeUndefined()
+      expect((yield* inbox.pending('run_1')).map(item => item.id)).toEqual(['item_2'])
+      const next = yield* inbox.takePromotable('run_1', 'input', again.drainToken)
+      expect(next?.id).toBe('item_2')
+      expect(yield* inbox.pending('run_1')).toEqual([])
     }).pipe(Effect.provide(makeInMemoryHarnessLayer()))
   )
 })

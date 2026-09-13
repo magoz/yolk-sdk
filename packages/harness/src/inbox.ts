@@ -52,7 +52,8 @@ export type InboxShape = {
   readonly enqueue: (item: InboxItem) => Effect.Effect<void>
   readonly takePromotable: (
     runId: string,
-    scope: Promotable
+    scope: Promotable,
+    drainToken: string
   ) => Effect.Effect<InboxItem | undefined>
   readonly pending: (runId: string) => Effect.Effect<ReadonlyArray<InboxItem>>
   readonly parked: (runId: string) => Effect.Effect<ParkedState | undefined>
@@ -67,7 +68,7 @@ export type InboxShape = {
     onReady: Effect.Effect<void>
   ) => Effect.Effect<HitlDecision>
   readonly clearPark: (runId: string, generation: string) => Effect.Effect<boolean>
-  readonly beginDrain: (runId: string) => Effect.Effect<DrainBegin>
+  readonly beginDrain: (runId: string, scope: Promotable) => Effect.Effect<DrainBegin>
   readonly endDrain: (
     runId: string,
     drainToken: string,
@@ -79,7 +80,11 @@ export type InboxShape = {
     releaseIdleClaim: Effect.Effect<void>
   ) => Effect.Effect<{ readonly hadPark: boolean; readonly interrupted: boolean }>
   readonly enqueueAndWake: (item: InboxItem, wake: Effect.Effect<void>) => Effect.Effect<void>
-  readonly wakeIfUnblocked: (runId: string, wake: Effect.Effect<void>) => Effect.Effect<boolean>
+  readonly wakeIfUnblocked: (
+    runId: string,
+    scope: Promotable,
+    wake: Effect.Effect<void>
+  ) => Effect.Effect<boolean>
   readonly startIfUnblocked: <E, R>(
     runId: string,
     start: Effect.Effect<CapturedRun<E>, E, R>
@@ -101,18 +106,26 @@ type Park = {
 }
 
 type RunControl = {
-  readonly allowed: boolean
+  readonly pending: Promotable | undefined
   readonly liveToken: string | undefined
   readonly park: Park | undefined
   readonly leasedGeneration: string | undefined
 }
 
 const emptyControl: RunControl = {
-  allowed: false,
+  pending: undefined,
   liveToken: undefined,
   park: undefined,
   leasedGeneration: undefined
 }
+
+const widerPending = (current: Promotable | undefined, next: Promotable): Promotable =>
+  current === 'input' || next === 'input' ? 'input' : 'steer'
+
+const remainingPending = (pending: Promotable, scope: Promotable): Promotable | undefined =>
+  scope === 'steer' && pending === 'input' ? 'input' : undefined
+
+const itemScope = (item: InboxItem): Promotable => (item.delivery === 'steer' ? 'steer' : 'input')
 
 const parkComplete = (park: Park) =>
   park.requestIds.every(requestId =>
@@ -129,7 +142,7 @@ const parkedState = (park: Park): ParkedState => ({
 })
 
 const isPrunable = (control: RunControl) =>
-  !control.allowed &&
+  control.pending === undefined &&
   control.liveToken === undefined &&
   control.park === undefined &&
   control.leasedGeneration === undefined
@@ -183,15 +196,25 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
 
       return Inbox.of({
         enqueue: item => Ref.update(items, current => [...current, item]),
-        takePromotable: (runId, scope) =>
-          Ref.modify(items, current => {
-            const index = current.findIndex(
-              item => item.runId === runId && isPromotableAt(item, scope)
+        takePromotable: (runId, scope, drainToken) =>
+          withGate(
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                const control = yield* getControl(runId)
+                if (control.liveToken === undefined || control.liveToken !== drainToken) {
+                  return undefined
+                }
+                return yield* Ref.modify(items, current => {
+                  const index = current.findIndex(
+                    item => item.runId === runId && isPromotableAt(item, scope)
+                  )
+                  if (index < 0) return [undefined, current] as const
+                  const taken = current[index]
+                  return [taken, current.filter((_, itemIndex) => itemIndex !== index)] as const
+                })
+              })
             )
-            if (index < 0) return [undefined, current] as const
-            const taken = current[index]
-            return [taken, current.filter((_, itemIndex) => itemIndex !== index)] as const
-          }),
+          ),
         pending: runId =>
           Ref.get(items).pipe(Effect.map(current => current.filter(item => item.runId === runId))),
         parked: runId =>
@@ -209,7 +232,7 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
                 generationSeq += 1
                 const generation = String(generationSeq)
                 yield* writeControl(runId, {
-                  allowed: control.allowed,
+                  pending: control.pending,
                   liveToken: control.liveToken,
                   leasedGeneration: control.leasedGeneration,
                   park: {
@@ -243,7 +266,10 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
                   readyWoken: decision._tag === 'Ready'
                 }
                 yield* writeControl(runId, {
-                  allowed: decision._tag === 'Ready' ? true : control.allowed,
+                  pending:
+                    decision._tag === 'Ready'
+                      ? widerPending(control.pending, 'input')
+                      : control.pending,
                   liveToken: control.liveToken,
                   leasedGeneration: control.leasedGeneration,
                   park: nextPark
@@ -262,7 +288,7 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
                   return false
                 }
                 yield* writeControl(runId, {
-                  allowed: control.allowed,
+                  pending: control.pending,
                   liveToken: control.liveToken,
                   leasedGeneration: control.leasedGeneration,
                   park: undefined
@@ -271,18 +297,21 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
               })
             )
           ),
-        beginDrain: runId =>
+        beginDrain: (runId, scope) =>
           withGate(
             Effect.uninterruptible(
               Effect.gen(function* () {
                 const control = yield* getControl(runId)
-                if (parkBlocked(control.park) || !control.allowed) return { _tag: 'Skip' } as const
+                const pending = control.pending
+                if (parkBlocked(control.park) || pending === undefined) {
+                  return { _tag: 'Skip' } as const
+                }
                 drainSeq += 1
                 const drainToken = `d${drainSeq}`
                 const park = control.park
                 const ready = park !== undefined && parkComplete(park) ? park : undefined
                 yield* writeControl(runId, {
-                  allowed: false,
+                  pending: remainingPending(pending, scope),
                   liveToken: drainToken,
                   park,
                   leasedGeneration: ready?.generation
@@ -309,7 +338,7 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
                   park !== undefined &&
                   park.generation === leased
                 yield* writeControl(runId, {
-                  allowed: control.allowed,
+                  pending: control.pending,
                   liveToken: undefined,
                   leasedGeneration: undefined,
                   park: clearPark ? undefined : park
@@ -339,7 +368,7 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
                 const control = yield* getControl(item.runId)
                 if (parkBlocked(control.park)) return
                 yield* writeControl(item.runId, {
-                  allowed: true,
+                  pending: widerPending(control.pending, itemScope(item)),
                   liveToken: control.liveToken,
                   leasedGeneration: control.leasedGeneration,
                   park: control.park
@@ -348,14 +377,14 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
               })
             )
           ),
-        wakeIfUnblocked: (runId, wake) =>
+        wakeIfUnblocked: (runId, scope, wake) =>
           withGate(
             Effect.uninterruptible(
               Effect.gen(function* () {
                 const control = yield* getControl(runId)
                 if (parkBlocked(control.park)) return false
                 yield* writeControl(runId, {
-                  allowed: true,
+                  pending: widerPending(control.pending, scope),
                   liveToken: control.liveToken,
                   leasedGeneration: control.leasedGeneration,
                   park: control.park
@@ -374,7 +403,7 @@ export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
                 const ticket = yield* start
                 if (ticket._tag === 'Started') {
                   yield* writeControl(runId, {
-                    allowed: true,
+                    pending: widerPending(control.pending, 'input'),
                     liveToken: control.liveToken,
                     leasedGeneration: control.leasedGeneration,
                     park: control.park

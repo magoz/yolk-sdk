@@ -49,7 +49,8 @@ Hosts still own tools, prompts, auth, HITL payload persistence, and `'use workfl
 - Hosts persist typed HITL payloads by `itemId`. Inbox stores only opaque generation, request ids, and response item ids.
 - Resume requires the current park generation plus `outcome.matchHitlResponse` / `resumeHitlIfMatched` kind/request/tool-call identity. Mismatch never wakes.
 - All sibling request ids must be answered before continuation. Partial accepts do not start a tool drain.
-- Host drain receives `DrainContext.drainToken` and `readyResponses`. Pause with that token; do not park from a stale token.
+- Host drain receives `DrainContext.drainToken` and `readyResponses`. Pause with that token; do not park from a stale token. `Inbox.takePromotable(runId, scope, drainToken)` also requires that live token and dequeues only while it still owns the run. Missing, empty, inactive, stale, or wrong-run tokens return `undefined` and leave the queue unchanged. This canary signature is intentionally required; there is no optional/unchecked take.
+- `Inbox.beginDrain(runId, scope)` and `wakeIfUnblocked(runId, scope, wake)` are scope-aware. Pending input subsumes steer. A steer drain does not consume a later input intent, so an input admitted after Coordinator captures steer still drains.
 - A successful drain that leased a Ready generation acknowledges and clears those refs. Failure or interruption keeps them (at-least-once). Host side effects must be idempotent.
 - Human pause releases the busy claim. User `stop` is terminal at the captured owner's settlement (including shutdown then user-stop). Shutdown interrupt keeps the claim. The Durable Object snapshot claim store does not make Inbox durable.
 

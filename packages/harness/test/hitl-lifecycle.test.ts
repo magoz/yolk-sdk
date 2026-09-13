@@ -828,7 +828,7 @@ describe('HITL park lifecycle', () => {
         yield* Deferred.succeed(release, undefined)
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(drains)).toBe(1)
-        const begun = yield* inbox.beginDrain('run_1')
+        const begun = yield* inbox.beginDrain('run_1', 'input')
         expect(begun._tag).toBe('Skip')
       }).pipe(Effect.provide(layer))
     })
@@ -858,8 +858,321 @@ describe('HITL park lifecycle', () => {
         yield* Fiber.join(joiner)
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(drains)).toBe(1)
-        const begun = yield* inbox.beginDrain('run_1')
+        const begun = yield* inbox.beginDrain('run_1', 'input')
         expect(begun._tag).toBe('Skip')
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
+  it.effect('input admitted after captured steer drain still drains once', () =>
+    Effect.gen(function* () {
+      const firstStarted = yield* Deferred.make<void>()
+      const firstRelease = yield* Deferred.make<void>()
+      const secondBeginStarted = yield* Deferred.make<void>()
+      const secondBeginRelease = yield* Deferred.make<void>()
+      const beginCount = yield* Ref.make(0)
+      const scopes = yield* Ref.make<ReadonlyArray<string>>([])
+      const taken = yield* Ref.make<ReadonlyArray<{ readonly scope: string; readonly id: string }>>(
+        []
+      )
+      const wrapBegin = Layer.effect(
+        Inbox,
+        Effect.gen(function* () {
+          const inner = yield* Inbox
+          return Inbox.of({
+            ...inner,
+            beginDrain: (runId, scope) =>
+              Ref.update(beginCount, count => count + 1).pipe(
+                Effect.andThen(Ref.get(beginCount)),
+                Effect.flatMap(count =>
+                  count === 2
+                    ? Deferred.succeed(secondBeginStarted, undefined).pipe(
+                        Effect.andThen(Deferred.await(secondBeginRelease)),
+                        Effect.andThen(inner.beginDrain(runId, scope))
+                      )
+                    : inner.beginDrain(runId, scope)
+                )
+              )
+          })
+        })
+      )
+      const layer = makeDriverLayer({
+        drain: (runId, _force, scope, context) =>
+          Effect.gen(function* () {
+            yield* Ref.update(scopes, current => [...current, scope])
+            const inbox = yield* Inbox
+            const collected: Array<string> = []
+            while (true) {
+              const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+              if (item === undefined) break
+              collected.push(item.id)
+            }
+            yield* Ref.update(taken, current => [
+              ...current,
+              ...collected.map(id => ({ scope, id }))
+            ])
+            if (!(yield* Deferred.isDone(firstStarted))) {
+              yield* Deferred.succeed(firstStarted, undefined)
+              yield* Deferred.await(firstRelease)
+            }
+          })
+      }).pipe(
+        Layer.provideMerge(makeInMemoryRunStoreLayer()),
+        Layer.provideMerge(wrapBegin.pipe(Layer.provideMerge(makeInMemoryInboxLayer())))
+      )
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const inbox = yield* Inbox
+        yield* driver.wake('run_1')
+        yield* Deferred.await(firstStarted)
+        yield* admit({
+          id: 'steer_1',
+          runId: 'run_1',
+          delivery: 'steer',
+          kind: 'input'
+        })
+        yield* Deferred.succeed(firstRelease, undefined)
+        yield* Deferred.await(secondBeginStarted)
+        yield* admit({
+          id: 'input_1',
+          runId: 'run_1',
+          delivery: 'input',
+          kind: 'input'
+        })
+        yield* Deferred.succeed(secondBeginRelease, undefined)
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(scopes)).toEqual(['input', 'steer', 'input'])
+        expect(yield* Ref.get(taken)).toEqual([
+          { scope: 'steer', id: 'steer_1' },
+          { scope: 'input', id: 'input_1' }
+        ])
+        expect(yield* inbox.pending('run_1')).toEqual([])
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
+  it.effect('explicit input wake after captured steer drain still drains once', () =>
+    Effect.gen(function* () {
+      const firstStarted = yield* Deferred.make<void>()
+      const firstRelease = yield* Deferred.make<void>()
+      const secondBeginStarted = yield* Deferred.make<void>()
+      const secondBeginRelease = yield* Deferred.make<void>()
+      const beginCount = yield* Ref.make(0)
+      const scopes = yield* Ref.make<ReadonlyArray<string>>([])
+      const taken = yield* Ref.make<ReadonlyArray<{ readonly scope: string; readonly id: string }>>(
+        []
+      )
+      const wrapBegin = Layer.effect(
+        Inbox,
+        Effect.gen(function* () {
+          const inner = yield* Inbox
+          return Inbox.of({
+            ...inner,
+            beginDrain: (runId, scope) =>
+              Ref.update(beginCount, count => count + 1).pipe(
+                Effect.andThen(Ref.get(beginCount)),
+                Effect.flatMap(count =>
+                  count === 2
+                    ? Deferred.succeed(secondBeginStarted, undefined).pipe(
+                        Effect.andThen(Deferred.await(secondBeginRelease)),
+                        Effect.andThen(inner.beginDrain(runId, scope))
+                      )
+                    : inner.beginDrain(runId, scope)
+                )
+              )
+          })
+        })
+      )
+      const layer = makeDriverLayer({
+        drain: (runId, _force, scope, context) =>
+          Effect.gen(function* () {
+            yield* Ref.update(scopes, current => [...current, scope])
+            const inbox = yield* Inbox
+            const collected: Array<string> = []
+            while (true) {
+              const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+              if (item === undefined) break
+              collected.push(item.id)
+            }
+            yield* Ref.update(taken, current => [
+              ...current,
+              ...collected.map(id => ({ scope, id }))
+            ])
+            if (!(yield* Deferred.isDone(firstStarted))) {
+              yield* Deferred.succeed(firstStarted, undefined)
+              yield* Deferred.await(firstRelease)
+            }
+          })
+      }).pipe(
+        Layer.provideMerge(makeInMemoryRunStoreLayer()),
+        Layer.provideMerge(wrapBegin.pipe(Layer.provideMerge(makeInMemoryInboxLayer())))
+      )
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const inbox = yield* Inbox
+        yield* driver.wake('run_1')
+        yield* Deferred.await(firstStarted)
+        yield* admit({
+          id: 'steer_1',
+          runId: 'run_1',
+          delivery: 'steer',
+          kind: 'input'
+        })
+        yield* Deferred.succeed(firstRelease, undefined)
+        yield* Deferred.await(secondBeginStarted)
+        yield* inbox.enqueue({
+          id: 'input_1',
+          runId: 'run_1',
+          delivery: 'input',
+          kind: 'input'
+        })
+        yield* driver.wake('run_1', 'input')
+        yield* Deferred.succeed(secondBeginRelease, undefined)
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(scopes)).toEqual(['input', 'steer', 'input'])
+        expect(yield* Ref.get(taken)).toEqual([
+          { scope: 'steer', id: 'steer_1' },
+          { scope: 'input', id: 'input_1' }
+        ])
+        expect(yield* inbox.pending('run_1')).toEqual([])
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
+  it.effect('captured input drain subsumes a later steer and empties the queue', () =>
+    Effect.gen(function* () {
+      const firstStarted = yield* Deferred.make<void>()
+      const firstRelease = yield* Deferred.make<void>()
+      const secondBeginStarted = yield* Deferred.make<void>()
+      const secondBeginRelease = yield* Deferred.make<void>()
+      const beginCount = yield* Ref.make(0)
+      const scopes = yield* Ref.make<ReadonlyArray<string>>([])
+      const taken = yield* Ref.make<ReadonlyArray<{ readonly scope: string; readonly id: string }>>(
+        []
+      )
+      const wrapBegin = Layer.effect(
+        Inbox,
+        Effect.gen(function* () {
+          const inner = yield* Inbox
+          return Inbox.of({
+            ...inner,
+            beginDrain: (runId, scope) =>
+              Ref.update(beginCount, count => count + 1).pipe(
+                Effect.andThen(Ref.get(beginCount)),
+                Effect.flatMap(count =>
+                  count === 2
+                    ? Deferred.succeed(secondBeginStarted, undefined).pipe(
+                        Effect.andThen(Deferred.await(secondBeginRelease)),
+                        Effect.andThen(inner.beginDrain(runId, scope))
+                      )
+                    : inner.beginDrain(runId, scope)
+                )
+              )
+          })
+        })
+      )
+      const layer = makeDriverLayer({
+        drain: (runId, _force, scope, context) =>
+          Effect.gen(function* () {
+            yield* Ref.update(scopes, current => [...current, scope])
+            const inbox = yield* Inbox
+            const collected: Array<string> = []
+            while (true) {
+              const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+              if (item === undefined) break
+              collected.push(item.id)
+            }
+            yield* Ref.update(taken, current => [
+              ...current,
+              ...collected.map(id => ({ scope, id }))
+            ])
+            if (!(yield* Deferred.isDone(firstStarted))) {
+              yield* Deferred.succeed(firstStarted, undefined)
+              yield* Deferred.await(firstRelease)
+            }
+          })
+      }).pipe(
+        Layer.provideMerge(makeInMemoryRunStoreLayer()),
+        Layer.provideMerge(wrapBegin.pipe(Layer.provideMerge(makeInMemoryInboxLayer())))
+      )
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const inbox = yield* Inbox
+        yield* driver.wake('run_1')
+        yield* Deferred.await(firstStarted)
+        yield* admit({
+          id: 'input_1',
+          runId: 'run_1',
+          delivery: 'input',
+          kind: 'input'
+        })
+        yield* Deferred.succeed(firstRelease, undefined)
+        yield* Deferred.await(secondBeginStarted)
+        yield* admit({
+          id: 'steer_1',
+          runId: 'run_1',
+          delivery: 'steer',
+          kind: 'input'
+        })
+        yield* Deferred.succeed(secondBeginRelease, undefined)
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(scopes)).toEqual(['input', 'input'])
+        expect(yield* Ref.get(taken)).toEqual([
+          { scope: 'input', id: 'input_1' },
+          { scope: 'input', id: 'steer_1' }
+        ])
+        expect(yield* inbox.pending('run_1')).toEqual([])
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
+  it.effect('stopped owner cannot dequeue successor input', () =>
+    Effect.gen(function* () {
+      const firstStarted = yield* Deferred.make<void>()
+      const firstRelease = yield* Deferred.make<void>()
+      const drains = yield* Ref.make(0)
+      const taken = yield* Ref.make<
+        ReadonlyArray<{ readonly drain: number; readonly id: string | undefined }>
+      >([])
+      const layer = makeInMemoryHarnessLayer({
+        drain: (runId, _force, scope, context) =>
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              yield* Ref.update(drains, count => count + 1)
+              const drain = yield* Ref.get(drains)
+              const inbox = yield* Inbox
+              if (drain === 1) {
+                yield* Deferred.succeed(firstStarted, undefined)
+                yield* Deferred.await(firstRelease)
+              }
+              const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+              yield* Ref.update(taken, current => [...current, { drain, id: item?.id }])
+            })
+          )
+      })
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const inbox = yield* Inbox
+        yield* driver.wake('run_1')
+        yield* Deferred.await(firstStarted)
+        expect((yield* driver.stop('run_1'))._tag).toBe('Interrupted')
+        yield* admit({
+          id: 'successor',
+          runId: 'run_1',
+          delivery: 'input',
+          kind: 'input'
+        })
+        yield* Deferred.succeed(firstRelease, undefined)
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(taken)).toEqual([
+          { drain: 1, id: undefined },
+          { drain: 2, id: 'successor' }
+        ])
+        expect(yield* inbox.pending('run_1')).toEqual([])
       }).pipe(Effect.provide(layer))
     })
   )
