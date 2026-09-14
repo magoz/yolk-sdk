@@ -87,6 +87,11 @@ const ProviderLayer = makeOpenAiCodexProviderLayer({
 The ChatGPT subscription endpoint rejects vendor `max_output_tokens`, so the adapter does not expose
 an output-token limit. The optional deprecated `maxOutputTokens` field is ignored for compatibility.
 
+Codex synthesizes `Done` only for the specific missing-final-`output` invalid response (the error
+message includes `Missing key` and `["output"]`). The stop reason is `tool_use` if a tool call was
+already emitted, otherwise `stop`. Unrelated invalid responses still fail. This is not generic
+kernel `missing_done` recovery and does not replay tools.
+
 OAuth helpers live in `@yolk-sdk/agent/providers/openai` and the exact `@yolk-sdk/agent/providers/openai/codex` subpath:
 
 - `makeOpenAiCodexBrokerRequest`

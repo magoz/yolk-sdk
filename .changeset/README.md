@@ -26,6 +26,7 @@ Canary release prep:
    - `npm view @yolk-sdk/connectors dist-tags`
    - `npm view @yolk-sdk/sandbox dist-tags`
    - `npm view @yolk-sdk/vercel-workflows dist-tags`
+   - `npm view @yolk-sdk/harness dist-tags`
    - `git fetch --tags`
    - `git tag --list "v<version>"`
    - `git ls-remote --tags origin "refs/tags/v<version>"`

@@ -11,6 +11,7 @@ description: Package roles and explicit public subpaths.
 | `@yolk-sdk/connectors`       | external API actions, credentials, connector-to-agent-tool adapter                     |
 | `@yolk-sdk/sandbox`          | sandbox execution plane, Vercel adapter, agent sandbox tool                            |
 | `@yolk-sdk/vercel-workflows` | durable Workflow orchestration contracts                                               |
+| `@yolk-sdk/harness`          | run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)   |
 
 Package roots stay tiny. Import feature APIs from explicit subpaths.
 
@@ -58,6 +59,7 @@ Package roots stay tiny. Import feature APIs from explicit subpaths.
 | `@yolk-sdk/connectors`       | `agent`, `afloat`, `dropbox`, `email`, `figma`, `fortnox`, `google`, `linkedin-search`, `microsoft`, `notion`, `r2-storage`, `telegram`, `todoist` |
 | `@yolk-sdk/sandbox`          | `agent`, `vercel`, `testing`                                                                                                                       |
 | `@yolk-sdk/vercel-workflows` | root, `workflow`, `effect`, `testing`                                                                                                              |
+| `@yolk-sdk/harness`          | `coordinator`, `store`, `inbox`, `driver`, `driver/memory`, `driver/durable-object`, `outcome`                                                     |
 
 ## Import rule
 
@@ -77,3 +79,4 @@ See the package pages for deeper API notes:
 - [Connectors](../connectors)
 - [Sandbox](../sandbox)
 - [Vercel Workflows](../vercel-workflows)
+- [Harness](../harness)

@@ -1,4 +1,4 @@
 {
   "title": "API reference",
-  "pages": ["agent", "integrations", "workflows"]
+  "pages": ["agent", "harness", "integrations", "workflows"]
 }

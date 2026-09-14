@@ -114,6 +114,13 @@ version, the `./effect` host boundary, and the `./testing` behavioral emulator. 
 must cover `TestWorkflowWorld`, `testWorkflowModule`, and the Node Vitest environment required by
 Workflow 5 imports.
 
+### Harness
+
+Document run lifecycle, not the agent loop. Cover coordinator, store, inbox, driver, memory driver,
+snapshot Durable Object driver, and outcome subpaths. Show a custom `drain` (default is no-op),
+required `drainToken`, host `load`/`save` for claim snapshots, in-memory Inbox even on the Durable
+Object adapter, at-least-once recovery, and that outcomes do not add an outer retry loop.
+
 ## Style
 
 - Concise, public-facing.

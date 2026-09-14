@@ -131,6 +131,22 @@ Streams reach a logical client boundary after `AgentEnd`, `AgentError`, or `Agen
 `isTerminalAgentEvent` when writing custom consumers, but do not treat resumable
 `AgentAwaitingInput` as a final Workflow close.
 
+### Collector failed versus host-chosen recovery
+
+`collectModelTurn` returns a finalized `ModelTurnResult` or re-fails. `collectModelTurnAttempt`
+keeps a partial `ModelTurnCollection` on typed `StreamFailed` or `SinkFailed`. An `onEvent` sink
+error is not a model-recovery outcome. Defects, interrupts, and mixed Causes stay Causes rather than
+those tags.
+
+Kernel `responseIssue: 'missing_done'` is an incomplete stream, not automatic provider/tool replay.
+Codex may synthesize `Done` only for its missing-final-`output` error; see
+[OpenAI Codex](./integrations/model-providers#openai-codex).
+
+`@yolk-sdk/harness/outcome` classifies one invocation after inner loop/provider retries. It does not
+add an outer retry loop. Hosts that opt in choose whether to schedule another physical attempt. See
+[Loop and runtime](./agent/loop-runtime#compose-the-loop-layer) and
+[Harness composition](./vercel-workflows/harness-composition).
+
 ## MCP errors
 
 ### Remote MCP URL rejected

@@ -13,6 +13,8 @@ Keep every public package on the same canary version:
 pnpm add @yolk-sdk/agent@canary @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary
 ```
 
+`@yolk-sdk/harness` is introduced after `0.1.0-canary.76`. It is unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available, and keep it on the same lockstep version as the other public packages.
+
 Check installed versions:
 
 ```bash
@@ -22,6 +24,18 @@ pnpm list '@yolk-sdk/*'
 Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
+
+### Next canary: optional harness and collector recovery
+
+`@yolk-sdk/harness` is a new optional run-lifecycle package (coordinator, store, inbox, drivers, outcomes). It is not the agent loop and does not add a Workflow driver. It is introduced after `0.1.0-canary.76` and unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available.
+
+Loop composition now names `makeAgentLoopLayer`, `decorateLLMProvider`, `collectModelTurn`, and `collectModelTurnAttempt`. Omitted tools use `ToolExecutor.unavailable`.
+
+Kernel streams that end with zero `Done` events fail as `LLMError` `invalid_response` / `retryable: false` with `responseIssue: 'missing_done'`. That is not automatic provider or tool replay. Codex additionally synthesizes `Done` only for the specific missing-final-`output` error; see [OpenAI Codex](./integrations/model-providers#openai-codex).
+
+Overflow compact now refuses to run after published output (`overflowCompactionMayRun`). Durable persist-then-retry stays host-owned.
+
+`attemptModelTurn` classifies one `runModelTurn` after that stream's inner retries. It does not add an outer retry loop. A finalized collector failure (`collectModelTurn` / `collectModelTurnAttempt`) is not host-chosen recovery; see [Troubleshooting](./troubleshooting#collector-failed-versus-host-chosen-recovery) and [Harness composition](./vercel-workflows/harness-composition).
 
 ### Next canary: host-only connector file retrieval and writes
 
@@ -225,6 +239,7 @@ from normalized thread output and cannot be fetched through that action.
 | Connectors   | action ids, input/output schemas, credential slots, config keys      |
 | Sandbox      | lifecycle defaults, command result shape, provider adapter options   |
 | Workflows    | callback contracts, terminal status, retry/default behavior          |
+| Harness      | drain/token contracts, claim vs Inbox persistence, recovery budgets  |
 
 ## Safe migration pattern
 

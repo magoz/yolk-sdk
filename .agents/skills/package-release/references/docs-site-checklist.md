@@ -39,7 +39,7 @@ Always check these in `apps/docs/content/docs`:
 - `quickstart.mdx` if first-success flow changed
 - `guides/*` for task guides
 - `integrations/*` for providers/connectors/MCP/knowledge/sandbox/workflow
-- package pages: `agent`, `mcp`, `knowledge`, `connectors`, `sandbox`, `vercel-workflows`
+- package pages: `agent`, `mcp`, `knowledge`, `connectors`, `sandbox`, `vercel-workflows`, `harness`
 - `api-reference/*` for public exports
 - `reference/packages.mdx` for subpaths
 - `troubleshooting.mdx` for known failure modes
@@ -90,6 +90,15 @@ Workflow/runtime changes require:
 - `vercel-workflows/*`
 - `integrations/vercel-workflow.mdx`
 - `api-reference/agent.mdx` or `api-reference/workflows.mdx`
+- troubleshooting/migration
+
+Harness/lifecycle changes require:
+
+- `harness/index.mdx`
+- `api-reference/harness.mdx`
+- `reference/packages.mdx`
+- `integrations/index.mdx`
+- `agent/loop-runtime.mdx` when collectors/composition changed
 - troubleshooting/migration
 
 ## 6. Validation matrix

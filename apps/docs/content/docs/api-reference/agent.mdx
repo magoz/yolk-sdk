@@ -47,16 +47,24 @@ for fresh signing inside retries.
 
 `@yolk-sdk/agent/loop`
 
-| Export                                                                              | Purpose                                            |
-| ----------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `run`                                                                               | stateless agent loop, returns `Stream<AgentEvent>` |
-| `runModelTurn`, `runToolBatch`                                                      | lower-level model/tool-turn primitives             |
-| `LLMProvider`                                                                       | provider service contract                          |
-| `ToolExecutor`                                                                      | host tool execution service                        |
-| `ContextTransformer`                                                                | host context compaction/injection service          |
-| `LoopConfig`                                                                        | loop limits/retry config service                   |
-| `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                   |
-| `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                         |
+| Export                                                                              | Purpose                                                                              |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `run`                                                                               | stateless agent loop, returns `Stream<AgentEvent>`                                   |
+| `runModelTurn`, `runToolBatch`                                                      | lower-level model/tool-turn primitives                                               |
+| `makeAgentLoopLayer`                                                                | merge provider plus optional tools/transformer/config layers                         |
+| `decorateLLMProvider`                                                               | wrap an existing `LLMProvider` service                                               |
+| `collectModelTurn`                                                                  | success-only fold of a model-turn stream to `ModelTurnResult`                        |
+| `collectModelTurnAttempt`                                                           | `Collected` / `StreamFailed` / `SinkFailed` with `ModelTurnCollection`               |
+| `ModelTurnResult`                                                                   | finalized `{ assistantMessage, toolCalls, usage, stopReason }`                       |
+| `ModelTurnCollection`                                                               | result plus `outputStarted` and `partialAssistantMessage`                            |
+| `CollectModelTurnAttemptResult`                                                     | collector tagged union                                                               |
+| `LLMProvider`                                                                       | provider service contract                                                            |
+| `ToolExecutor`                                                                      | host tool execution service; `ToolExecutor.unavailable` is the omitted-tools default |
+| `ContextTransformer`                                                                | host context compaction/injection service                                            |
+| `LoopConfig`                                                                        | loop limits/retry config service                                                     |
+| `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                                                     |
+| `LLMResponseIssue`                                                                  | kernel-only `'missing_done'` literal                                                 |
+| `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                                                           |
 
 ### Whole-batch preflight
 
@@ -340,6 +348,10 @@ ceiling.
 | `CompactionMessageFormatOptions`                                                                             | reasoning/tool formatting controls       |
 | `compactionSummarySourceMessages`, `dropLeadingCompactionCheckpointMessage`                                  | repeated-summary helper                  |
 | `makeContextOverflowRetryProvider`                                                                           | one-shot provider overflow retry wrapper |
+| `applyOverflowCompaction`                                                                                    | shared compact-or-skip decision          |
+| `overflowCompactionMayRun`                                                                                   | compact only before published output     |
+| `overflowCompactionAttemptAllowed`, `overflowCompactionMaxAttempts`, `isOverflowCompactionAttemptCount`      | durable compact-once budget helpers      |
+| `OverflowCompactionDecision`                                                                                 | `Compacted` / `Skipped`                  |
 | `ContextOverflowRetryCompactionResult`, `ContextOverflowRetryCompactor`, `ContextOverflowRetryProviderInput` | retry wrapper contracts                  |
 
 `TokenEstimateOptions.countTextTokens` accepts a synchronous host tokenizer for message text,

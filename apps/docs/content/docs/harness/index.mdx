@@ -1,0 +1,128 @@
+---
+title: Harness package
+description: Own agent run lifecycle with a host drain, claims, inbox admission, and optional recovery.
+---
+
+Use `@yolk-sdk/harness` when you need process-local run ownership, coalesced wakes, and crash claims. The model/tool loop stays in `@yolk-sdk/agent/loop`. This package does not add a Vercel Workflow driver.
+
+`@yolk-sdk/harness` is introduced after `0.1.0-canary.76`. It is unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available. Keep every `@yolk-sdk/*` dependency on the same version.
+
+```bash
+pnpm add @yolk-sdk/harness@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
+```
+
+## Run a memory host with a custom drain
+
+Omitting `drain` uses a no-op (`Effect.void`). `driver.run` then only claims and releases ownership. Attach host work with a custom drain. `Inbox.takePromotable` requires that drain's live `drainToken`.
+
+Setup:
+
+```bash
+pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
+pnpm add -D tsx
+```
+
+Filename: `drain-example.mts`
+
+```ts
+import { Effect } from 'effect'
+import { admit, Driver, type Drain } from '@yolk-sdk/harness/driver'
+import { makeInMemoryHarnessLayer } from '@yolk-sdk/harness/driver/memory'
+import { Inbox } from '@yolk-sdk/harness/inbox'
+
+const drain: Drain = (runId, _force, scope, context) =>
+  Effect.gen(function* () {
+    const inbox = yield* Inbox
+    const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+    if (item === undefined) {
+      yield* Effect.sync(() => {
+        console.log(`no work for ${runId}`)
+      })
+      return
+    }
+    yield* Effect.sync(() => {
+      console.log(`drained ${item.id} for ${runId}`)
+    })
+  })
+
+const program = Effect.gen(function* () {
+  yield* admit({
+    id: 'item_1',
+    runId: 'run_1',
+    delivery: 'input',
+    kind: 'input'
+  })
+  const driver = yield* Driver
+  yield* driver.awaitIdle('run_1')
+}).pipe(Effect.provide(makeInMemoryHarnessLayer({ drain })))
+
+await Effect.runPromise(program)
+```
+
+Run:
+
+```bash
+pnpm exec tsx drain-example.mts
+```
+
+Expected output:
+
+```txt
+drained item_1 for run_1
+```
+
+## Feature subpaths
+
+| Subpath                                   | Purpose                                                               |
+| ----------------------------------------- | --------------------------------------------------------------------- |
+| `@yolk-sdk/harness`                       | Tiny root                                                             |
+| `@yolk-sdk/harness/coordinator`           | Process-local doorbell coordinator                                    |
+| `@yolk-sdk/harness/store`                 | `RunStore` claim/release                                              |
+| `@yolk-sdk/harness/inbox`                 | Admission / steer / queue items; in-memory HITL park tokens           |
+| `@yolk-sdk/harness/driver`                | `Driver`, `makeHarness`, `makeDriverLayer`, `admit`                   |
+| `@yolk-sdk/harness/driver/memory`         | In-memory driver and harness layer                                    |
+| `@yolk-sdk/harness/driver/durable-object` | Snapshot claim store plus driver for Durable Object storage           |
+| `@yolk-sdk/harness/outcome`               | Classify one model/tool attempt after that invocation's inner retries |
+
+See [Harness APIs](../api-reference/harness) for export tables.
+
+## Shared instance, ack, and stop
+
+Ownership is per shared Driver instance. The host or platform supplies cross-process exclusivity and quiesces producers before closing that instance.
+
+`interrupt` / `stop` acknowledge **request delivery** when the interruption-request fiber is joined. That is not owner settlement. `awaitIdle` is quiescence, not a success receipt. `run` observes start and settlement failures.
+
+- User `stop` (or generic `interrupt` with reason `user`) is terminal at the captured owner's settlement and releases a leftover claim after that owner has actually settled.
+- Shutdown interrupt keeps the claim.
+
+## Setup and recovery
+
+Startup is explicit:
+
+1. Build one shared Driver / Inbox / Store.
+2. Restore host-owned waiting checkpoints through `run` / `pause`.
+3. Call `Driver.resumeSuspended` before exposing ingress.
+
+`resumeSuspended` is a finite current-snapshot sweep, not a Layer boot loop. Candidate IDs are hints, not durable incarnation IDs. Recovery is at-least-once, never exactly-once. Active candidates and candidates with blocked parks are skipped; the sweep does not release every persisted claim.
+
+`maxResumeAttempts` is a finite nonnegative safe integer. The default is `10`. Exhausted eligible claims are released and those IDs are returned in `exhausted`. `0` schedules, drains, and increments nothing: the sweep still releases eligible candidates as exhausted. Zero is not a nonmutating pause that preserves those claims.
+
+## Drain token, HITL, and storage
+
+Host drains receive `DrainContext.drainToken` and must pass it to `pause` and `Inbox.takePromotable`. `takePromotable` rejects missing, empty, inactive, stale, or wrong-run tokens by returning `undefined` and leaving the queue unchanged. `pause` returns `Parked` or `Stale`; wrong or stale tokens are `Stale`.
+
+Hosts persist typed HITL payloads by item id. Inbox stores only opaque generation, request ids, and response item ids. Memory Inbox park state is process-lifetime only.
+
+Claim snapshots are not transcript storage. `makeDurableObjectDriverLayer` requires host `load` / `save` callbacks and persists claimed ids plus resume counts. That adapter still constructs an in-memory Inbox. It does not persist queued input, parked HITL, host closures, or automatically reconstruct work.
+
+## Outcomes
+
+`attemptModelTurn` classifies **one `runModelTurn` invocation** after that stream's configured loop/provider retries. It does not add an outer retry loop. Hosts that own physical-attempt scheduling should pass `LoopConfig.maxRetries: 0` and skip retry decorators.
+
+Incomplete streams (`LLMError.responseIssue === 'missing_done'`) become `RecoverFull` before output or `Continue` after partial text/reasoning/completed calls. Content-filter and other nonretryable terminals stay failed. `onEvent` sink errors, compact errors, Abort, and mixed defect/interrupt Causes are not classified as provider `Retry` / `Continue`.
+
+See [Loop and runtime](../agent/loop-runtime) for collectors and [Harness composition](../vercel-workflows/harness-composition) for Workflow hosts.
+
+## What the host provides
+
+Your app owns tools, prompts, auth, concrete Store/Inbox adapters, HITL payload persistence, transcript storage, cross-process exclusivity, and `'use workflow'` / `'use step'` files. Cloudflare and Next example policy is host-owned, not SDK surface.
