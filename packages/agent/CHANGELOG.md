@@ -1,5 +1,19 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.77
+
+### Minor Changes
+
+- 7827908: Add optional `LLMError.responseIssue: 'missing_done'` for kernel zero-Done completions, `collectModelTurnAttempt` for partial-failure model-turn collection, and shared overflow compaction that runs only before published output. `collectModelTurn` still finalizes `assistantMessage` only from `AssistantMessage` events. Pure typed sink/stream failures stay `SinkFailed`/`StreamFailed`; Causes that also contain a defect or interruption stay on the error channel, including Fail annotations.
+
+### Patch Changes
+
+- 978ea8f: Recover Codex streams that omit a final `output` payload and normalize context-window errors in the provider.
+- 978ea8f: Name the loop composition kernel: `makeAgentLoopLayer`, `decorateLLMProvider`, `collectModelTurn`, and `collectModelTurnAttempt`. Omitted tools use `ToolExecutor.unavailable`.
+- 6b9c60b: Release all seven public packages together.
+
+  This canary introduces `@yolk-sdk/harness` run lifecycle and related agent loop composition, collection, Codex missing-final-output, and overflow-after-output changes. `@yolk-sdk/connectors`, `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, `@yolk-sdk/sandbox`, and `@yolk-sdk/vercel-workflows` are unchanged except for lockstep compatibility.
+
 ## 0.1.0-canary.76
 
 ### Patch Changes
