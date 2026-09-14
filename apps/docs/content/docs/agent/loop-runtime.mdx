@@ -38,6 +38,37 @@ Provide these Effect services from your host:
 - `ContextTransformer`
 - `LoopConfig`
 
+## Compose the loop layer
+
+`makeAgentLoopLayer` merges those four Layers. The provider layer is required. Omitted tools use `ToolExecutor.unavailable` (calls fail with `ToolError` `cause: 'execution'`). Omitted transformer/config use `ContextTransformer.identity` and `LoopConfig.defaultLayer`.
+
+Fragment. This constructs a layer and does not run a provider call:
+
+```ts
+import { makeAgentLoopLayer } from '@yolk-sdk/agent/loop'
+import { FauxProvider, Reply } from '@yolk-sdk/agent/loop/testing'
+
+const LoopLayer = makeAgentLoopLayer({
+  provider: FauxProvider.layer(Reply.text('ok'))
+})
+```
+
+Intercept by decorating a service (`decorateLLMProvider`), not with hooks. Pass the decorator layer as `provider` after providing the inner provider.
+
+`collectModelTurn(stream, { initialUsage, onEvent })` is the success-only wrapper: it returns a finalized `ModelTurnResult` or re-fails. `initialUsage` is the starting cumulative usage; `UsageUpdate` events add to it.
+
+`collectModelTurnAttempt` keeps a `ModelTurnCollection` on typed stream or sink failure:
+
+| Tag            | Meaning                                             |
+| -------------- | --------------------------------------------------- |
+| `Collected`    | stream completed; collection is finalized           |
+| `StreamFailed` | typed provider/loop error; partial collection kept  |
+| `SinkFailed`   | typed `onEvent` error; not a model-recovery outcome |
+
+`onEvent` sink errors are not model-recovery outcomes. Defects, interrupts, and mixed typed+defect/interrupt Causes are re-failed as Causes rather than `StreamFailed` / `SinkFailed`.
+
+For durable Workflow hosts, use the existing [Harness composition](../vercel-workflows/harness-composition) cookbook rather than duplicating collector/recovery policy here.
+
 ## Stateless transcript runtime
 
 Use this when your route receives the whole transcript from a client:

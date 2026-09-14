@@ -1,0 +1,135 @@
+---
+title: Harness APIs
+description: Public harness subpaths and commonly used exports.
+---
+
+Import feature APIs from explicit subpaths. The root package is intentionally empty.
+
+`@yolk-sdk/harness` is introduced after `0.1.0-canary.76`. See [Harness package](../harness) for installation and a runnable memory-host drain.
+
+## Coordinator
+
+`@yolk-sdk/harness/coordinator`
+
+| Export            | Purpose                                                          |
+| ----------------- | ---------------------------------------------------------------- |
+| `Promotable`      | `'input' \| 'steer'`; input subsumes steer when coalescing wakes |
+| `CapturedRun`     | `Started` / `Joined` / `Stopping` waiter                         |
+| `StopReceipt`     | `Idle` / `Interrupted` / `LiveStopping` / `Settling`             |
+| `Coordinator`     | Process-local doorbell coordinator shape                         |
+| `makeCoordinator` | Build a process-local coordinator                                |
+
+## Store
+
+`@yolk-sdk/harness/store`
+
+| Export                      | Purpose                                              |
+| --------------------------- | ---------------------------------------------------- |
+| `RunStore`                  | Claim/release service                                |
+| `RunStoreShape`             | Claim, release, claimed-id, and resume-count methods |
+| `DurableRunStoreSnapshot`   | `{ claimed, resumes }` snapshot                      |
+| `makeInMemoryRunStoreLayer` | Process-local claim store                            |
+| `makeSnapshotRunStoreLayer` | Persist claims through host `load` / `save`          |
+
+The snapshot stores claimed ids and resume counts. It is not transcript storage and does not persist Inbox items or HITL parks.
+
+## Inbox
+
+`@yolk-sdk/harness/inbox`
+
+| Export                   | Purpose                                                           |
+| ------------------------ | ----------------------------------------------------------------- |
+| `Inbox`                  | Admission, park, and drain-token service                          |
+| `InboxItem`              | Queued input/HITL item (`id`, `runId`, `delivery`, `kind`)        |
+| `InboxKind`              | `'input' \| 'hitl'`                                               |
+| `ParkedResponse`         | `{ itemId, requestId }`                                           |
+| `ParkedState`            | Generation, request ids, responses, ready                         |
+| `HitlAdmission`          | `{ itemId, requestId, generation }`                               |
+| `HitlDecision`           | Accepted / Ready / Duplicate / Stale / UnknownRequest / NotParked |
+| `PauseDecision`          | `Parked` or `Stale`                                               |
+| `DrainBegin`             | `Skip` or `Run` with `drainToken` and ready responses             |
+| `makeInMemoryInboxLayer` | Process-lifetime Inbox                                            |
+
+`takePromotable(runId, scope, drainToken)` requires the live `beginDrain` token. Missing, empty, inactive, stale, or wrong-run tokens return `undefined` and do not dequeue.
+
+## Driver
+
+`@yolk-sdk/harness/driver`
+
+| Export                     | Purpose                                          |
+| -------------------------- | ------------------------------------------------ |
+| `Driver`                   | Run, wake, interrupt, admit, pause, resume, stop |
+| `Drain`                    | Host execution; see signature below              |
+| `DrainContext`             | `{ drainToken, readyResponses }`                 |
+| `makeDriverLayer`          | Driver layer; default drain is `Effect.void`     |
+| `makeHarness`              | Merge driver + store + inbox layers              |
+| `admit`                    | Enqueue an inbox item and wake                   |
+| `defaultMaxResumeAttempts` | `10`                                             |
+| `InvalidMaxResumeAttempts` | Layer-init failure for invalid budgets           |
+| `ResumeSuspendedResult`    | `{ resumed, exhausted }`                         |
+| `StopDecision`             | `Interrupted` / `ParkCleared` / `Idle`           |
+| `InterruptReason`          | `'user' \| 'shutdown'`                           |
+
+Fragment. Exported `Drain` type:
+
+```ts
+type Drain = (
+  runId: string,
+  force: boolean,
+  scope: Promotable,
+  context: DrainContext
+) => Effect.Effect<void, never, Inbox | RunStore>
+```
+
+The driver provides `Inbox` and `RunStore` to the drain. Provide any additional host dependencies before passing `drain`.
+
+`interrupt` acknowledges request delivery, not owner settlement. User stop releases a leftover claim after that owner has settled. Shutdown interrupt keeps the claim.
+
+`@yolk-sdk/harness/driver/memory`
+
+| Export                     | Purpose                           |
+| -------------------------- | --------------------------------- |
+| `makeInMemoryDriverLayer`  | In-memory driver over Store/Inbox |
+| `makeInMemoryHarnessLayer` | In-memory driver + store + inbox  |
+
+`@yolk-sdk/harness/driver/durable-object`
+
+| Export                         | Purpose                                                |
+| ------------------------------ | ------------------------------------------------------ |
+| `makeDurableObjectDriverLayer` | Snapshot `RunStore` plus driver; Inbox stays in-memory |
+| `DurableRunStoreSnapshot`      | Re-exported claim snapshot                             |
+
+Fragment. Hosts supply `load` / `save`; this is not a Cloudflare runtime API:
+
+```ts
+import { Effect, Ref } from 'effect'
+import { makeDurableObjectDriverLayer } from '@yolk-sdk/harness/driver/durable-object'
+import type { DurableRunStoreSnapshot } from '@yolk-sdk/harness/store'
+
+const snapshot = await Effect.runPromise(Ref.make<DurableRunStoreSnapshot | undefined>(undefined))
+
+const DurableLayer = makeDurableObjectDriverLayer({
+  load: Ref.get(snapshot),
+  save: next => Ref.set(snapshot, next)
+})
+```
+
+That adapter does not persist Inbox, closures, or automatically reconstruct work.
+
+## Outcome
+
+`@yolk-sdk/harness/outcome`
+
+| Export                | Purpose                                                          |
+| --------------------- | ---------------------------------------------------------------- |
+| `attemptModelTurn`    | Classify one `runModelTurn` after that stream's inner retries    |
+| `attemptToolBatch`    | Classify one `runToolBatch`; pending HITL fences the whole batch |
+| `ModelTurnOutcome`    | `Completed` / `Retry` / `Continue` / `RecoverFull` / `Compacted` |
+| `ToolBatchOutcome`    | `Completed` / `AwaitingInput`                                    |
+| `StepOutcome`         | Model or tool-batch outcome                                      |
+| `matchHitlResponse`   | Protocol identity match for a HITL response                      |
+| `resumeHitlIfMatched` | Resume only when kind/request/tool-call identity matches         |
+
+`attemptModelTurn` does not add an outer retry loop. Configured `LoopConfig.maxRetries` and provider retry decorators still apply inside that invocation. Hosts that own physical-attempt scheduling should pass `maxRetries: 0` and skip retry decorators.
+
+`onEvent` sink errors, compact errors, Abort, and mixed defect/interrupt Causes are not classified as provider `Retry` / `Continue`. Incomplete streams use kernel `responseIssue: 'missing_done'` only.

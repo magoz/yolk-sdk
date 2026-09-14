@@ -4,12 +4,12 @@ Map changed code to docs that must be inspected or updated.
 
 ## Repo-wide docs
 
-| Change                            | Docs                                                                           |
-| --------------------------------- | ------------------------------------------------------------------------------ |
-| workspace/package list            | `README.md`, root `AGENTS.md`, `apps/docs/content/docs/reference/packages.mdx` |
-| docs IA/philosophy                | `apps/docs/AGENTS.md`, `apps/docs/content/docs/meta.json`                      |
-| package release/versioning policy | `apps/docs/content/docs/migration.mdx`, `patterns/PACKAGE_DISTRIBUTION.md`     |
-| recurring failure                 | `apps/docs/content/docs/troubleshooting.mdx`                                   |
+| Change                            | Docs                                                                                                                                    |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| workspace/package list            | `README.md`, root `AGENTS.md`, `apps/docs/content/docs/index.mdx`, `apps/docs/content/docs/reference/packages.mdx`, `harness/index.mdx` |
+| docs IA/philosophy                | `apps/docs/AGENTS.md`, `apps/docs/content/docs/meta.json`                                                                               |
+| package release/versioning policy | `apps/docs/content/docs/migration.mdx`, `patterns/PACKAGE_DISTRIBUTION.md`                                                              |
+| recurring failure                 | `apps/docs/content/docs/troubleshooting.mdx`                                                                                            |
 
 ## Agent package
 
@@ -58,6 +58,16 @@ Map changed code to docs that must be inspected or updated.
 | Vercel adapter config         | `integrations/sandbox.mdx`, `sandbox/lifecycle-safety.mdx`                        |
 | agent sandbox tool            | `sandbox/index.mdx`, `integrations/sandbox.mdx`, `api-reference/integrations.mdx` |
 | testing fakes                 | `guides/testing.mdx`, `api-reference/integrations.mdx`                            |
+
+## Harness package
+
+| Change                         | Docs                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| coordinator/store/inbox/driver | `harness/index.mdx`, `api-reference/harness.mdx`, `reference/packages.mdx`                        |
+| memory/durable-object drivers  | `harness/index.mdx`, `api-reference/harness.mdx`                                                  |
+| drain/token/HITL park          | `harness/index.mdx`, `api-reference/harness.mdx`, `troubleshooting.mdx`                           |
+| resume budgets/recovery        | `harness/index.mdx`, `migration.mdx`, `troubleshooting.mdx`                                       |
+| step outcomes                  | `api-reference/harness.mdx`, `vercel-workflows/harness-composition.mdx`, `agent/loop-runtime.mdx` |
 
 ## Vercel Workflows package
 

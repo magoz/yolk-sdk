@@ -14,6 +14,7 @@ Yolk SDK gives you the reusable parts of an agent product without taking over yo
 - connector actions
 - sandbox execution
 - Vercel Workflow orchestration helpers
+- a run-lifecycle harness for ownership, wakes, and recovery
 
 You bring your app: auth, routes, DB, storage, provider credentials, UI, and product policy.
 
@@ -58,6 +59,7 @@ This uses the test provider so you can learn the loop without a provider account
 | add MCP tools              | [Add MCP tools](./integrations/mcp-tools)               |
 | add knowledge search       | [Add knowledge search](./integrations/knowledge-search) |
 | run commands safely        | [Add sandbox execution](./integrations/sandbox)         |
+| own run lifecycle          | [Harness package](./harness)                            |
 
 ## Public packages
 
@@ -69,6 +71,7 @@ This uses the test provider so you can learn the loop without a provider account
 | `@yolk-sdk/connectors`       | define reusable external API actions                |
 | `@yolk-sdk/sandbox`          | run commands in sandbox sessions                    |
 | `@yolk-sdk/vercel-workflows` | orchestrate durable agent loops on Vercel Workflows |
+| `@yolk-sdk/harness`          | own run lifecycle, claims, inbox, and recovery      |
 
 ## How docs are organized
 

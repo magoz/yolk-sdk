@@ -2,6 +2,6 @@
 '@yolk-sdk/harness': minor
 ---
 
-Classify one model-turn attempt into Compacted, Retry, Continue, and RecoverFull without retrying.
+Classify one model-turn attempt into Compacted, Retry, Continue, and RecoverFull without adding an outer retry loop; configured loop/provider retries still apply.
 
-`attemptModelTurn` isolates state per Effect execution. Incomplete streams recover only via kernel `responseIssue: 'missing_done'`. Continue keeps partial text/reasoning/completed calls without new IDs or tool execution. Durable overflow compact is persist-then-retry through `overflowCompactionAttempt` (once per logical step). Sink, compact, Abort, and mixed defect/interrupt Causes are not classified as provider failures.
+`attemptModelTurn` isolates state per Effect execution. Incomplete streams recover only via kernel `responseIssue: 'missing_done'`. Continue keeps partial text/reasoning/completed calls without new IDs or tool execution. Durable overflow compact is persist-then-retry through `overflowCompactionAttempt` (once per logical step). Sink, compact, Abort, and mixed defect/interrupt Causes are not classified as provider failures. Hosts that own physical-attempt scheduling should use `LoopConfig.maxRetries: 0` and skip retry decorators.

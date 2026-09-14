@@ -26,21 +26,69 @@ pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
 
 ## Example
 
-```ts
-import { Effect } from 'effect'
-import { Driver } from '@yolk-sdk/harness/driver'
-import { makeInMemoryHarnessLayer } from '@yolk-sdk/harness/driver/memory'
-import { RunStore } from '@yolk-sdk/harness/store'
+Omitting `drain` uses a no-op (`Effect.void`): `driver.run` only claims and releases ownership. Attach host work with a custom drain. `Inbox.takePromotable` requires that drain's live `drainToken`.
 
-const program = Effect.gen(function* () {
-  const driver = yield* Driver
-  yield* driver.run('run_1')
-  const store = yield* RunStore
-  yield* store.isClaimed('run_1')
-}).pipe(Effect.provide(makeInMemoryHarnessLayer()))
+`@yolk-sdk/harness` is introduced after `0.1.0-canary.76`. It is unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available.
+
+Setup:
+
+```bash
+pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
+pnpm add -D tsx
 ```
 
-Hosts still own tools, prompts, auth, HITL payload persistence, and `'use workflow'` / `'use step'` files. Durable Object claims ship as `@yolk-sdk/harness/driver/durable-object`; that factory's Inbox is still in-memory. There is no Vercel Workflow driver in this package and no hook registry or `World`.
+Filename: `drain-example.mts`
+
+```ts
+import { Effect } from 'effect'
+import { admit, Driver, type Drain } from '@yolk-sdk/harness/driver'
+import { makeInMemoryHarnessLayer } from '@yolk-sdk/harness/driver/memory'
+import { Inbox } from '@yolk-sdk/harness/inbox'
+
+const drain: Drain = (runId, _force, scope, context) =>
+  Effect.gen(function* () {
+    const inbox = yield* Inbox
+    const item = yield* inbox.takePromotable(runId, scope, context.drainToken)
+    if (item === undefined) {
+      yield* Effect.sync(() => {
+        console.log(`no work for ${runId}`)
+      })
+      return
+    }
+    yield* Effect.sync(() => {
+      console.log(`drained ${item.id} for ${runId}`)
+    })
+  })
+
+const program = Effect.gen(function* () {
+  yield* admit({
+    id: 'item_1',
+    runId: 'run_1',
+    delivery: 'input',
+    kind: 'input'
+  })
+  const driver = yield* Driver
+  yield* driver.awaitIdle('run_1')
+}).pipe(Effect.provide(makeInMemoryHarnessLayer({ drain })))
+
+await Effect.runPromise(program)
+```
+
+Run:
+
+```bash
+pnpm exec tsx drain-example.mts
+```
+
+Expected output:
+
+```txt
+drained item_1 for run_1
+```
+
+Durable Object claim persistence requires host `load` / `save` callbacks on `makeDurableObjectDriverLayer`. That snapshot stores claimed ids and resume counts. Its Inbox is still in-memory and does not persist queued input, parked HITL, host closures, or transcript storage.
+
+Hosts still own tools, prompts, auth, HITL payload persistence, and `'use workflow'` / `'use step'` files. Durable Object claims ship as `@yolk-sdk/harness/driver/durable-object`. There is no Vercel Workflow driver in this package and no hook registry or `World`.
 
 `Driver.pause` / `resumeHitl` / `stop` compose HITL onto the existing coordinator. Inbox items have no payload. Protocol match helpers live in `@yolk-sdk/harness/outcome`. Parked waits are not durable and are not shutdown claims.
 
@@ -52,7 +100,7 @@ Startup is explicit: build the shared Driver/Inbox/Store, restore host-owned wai
 
 `resumeSuspended` is a finite current-snapshot sweep. Candidate IDs are hints, not durable incarnation IDs. Under the Inbox admission gate it rechecks live coordinator activity then the current claim, skips blocked parks, and charges a validated `maxResumeAttempts` budget before granting pending input. Stop with no newer intent skips; a later idle claimed run with the same id may recover the current host checkpoint only. The sweep does not wait for drain settlement while holding that gate.
 
-`maxResumeAttempts` is a finite nonnegative safe integer. The default is 10. `0` means no recovery attempts. Omitted args, whole options `undefined`, or explicit `undefined` `maxResumeAttempts` keeps Layer `E = never`. A numeric or `number | undefined` config types `InvalidMaxResumeAttempts` and fails Layer init for invalid values.
+`maxResumeAttempts` is a finite nonnegative safe integer. The default is 10. Exhausted eligible claims are released and those IDs are returned in `exhausted`. Active candidates and candidates with blocked parks are skipped and are not released. `0` schedules, drains, and increments nothing: the sweep still releases eligible candidates as exhausted. Zero is not a nonmutating pause that preserves those claims. Omitted args, whole options `undefined`, or explicit `undefined` `maxResumeAttempts` keeps Layer `E = never`. A numeric or `number | undefined` config types `InvalidMaxResumeAttempts` and fails Layer init for invalid values.
 
 `wake` / `resumeSuspended` schedule work; `awaitIdle` is quiescence, not a success receipt. `run` observes start and settlement failures. A failed `started` claim must not automatically release a prior or never-acquired claim. Explicit user-terminal authority (`Driver.stop` or generic `interrupt` defaulting to `user`) still releases a leftover claim after that owner has actually settled. Shutdown interrupt keeps the claim.
 

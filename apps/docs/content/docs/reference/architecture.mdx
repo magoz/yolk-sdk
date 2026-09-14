@@ -13,6 +13,7 @@ host app / runtime / UI
   -> @yolk-sdk/connectors
   -> @yolk-sdk/sandbox
   -> @yolk-sdk/vercel-workflows
+  -> @yolk-sdk/harness
 ```
 
 Rules of thumb:
@@ -30,5 +31,6 @@ Rules of thumb:
 - `mcp` adapts MCP tools/results to agent protocol, but the loop stays MCP-agnostic.
 - `knowledge`, `connectors`, and `sandbox` expose optional agent adapters behind explicit subpaths.
 - `vercel-workflows` stays generic over serializable `unknown` payloads and does not import agent protocol.
+- `harness` owns run lifecycle (claims, inbox, drains). It is not the agent loop and does not add a Workflow driver.
 
 Strict boundaries let the packages fit many hosts: Next.js, Workers, Durable Objects, Workflows, CLIs, and tests.
