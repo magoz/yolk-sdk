@@ -67,7 +67,15 @@ class FakeWebSocket implements WebSocket {
 
   close(code?: number, reason?: string): void {
     this.readyState = 3
-    this.dispatchEvent(new CloseEvent('close', { code: code ?? 1000, reason }))
+
+    // Node 22 has Event/WebSocket but no global CloseEvent constructor.
+    const event: CloseEvent = Object.assign(new Event('close'), {
+      code: code ?? 1000,
+      reason: reason ?? '',
+      wasClean: false
+    })
+
+    this.dispatchEvent(event)
   }
 
   fireOpen(): void {
