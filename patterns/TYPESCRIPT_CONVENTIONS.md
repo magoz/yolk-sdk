@@ -144,9 +144,15 @@ Before reaching for `as` or `any`, try these alternatives:
 // WRONG
 const id = rawId as AccountId
 
-// CORRECT
-const id = AccountId.make(rawId)
+// CORRECT - trusted constant/minted value (validates synchronously)
+const id = AccountId.make('acc_123')
+
+// CORRECT - external/persisted input (typed failure instead of throwing)
+const decodedId = yield * Schema.decodeUnknownEffect(AccountId)(rawId)
 ```
+
+See [branded boundary guidance](./EFFECT_BEST_PRACTICES.md#branded-types-at-domain-boundaries)
+for brand selection, runtime guarantees, wire compatibility, and nominal type tests.
 
 ### 2. Schema.decodeUnknownEffect() for Parsing
 
@@ -215,7 +221,9 @@ if (isUser(data)) {
 
 ## Database Row Types
 
-When working with database queries, usually no cast is needed if types are properly defined:
+When working with database queries, usually no cast is needed if types are properly defined.
+This does not establish runtime validation: decode persisted strings before admitting them as
+branded domain IDs. Do not use Drizzle `$type<BrandedId>()` to pretend decoding occurred:
 
 ```typescript
 // If your Drizzle schema is properly typed:

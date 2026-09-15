@@ -38,7 +38,7 @@
 - Stale or max-expired disposable state recreates before command and reports `workspaceReset: true`.
 - Persistent idle expiry reattaches the stable named sandbox; only a provider-missing sandbox
   recreates and reports `workspaceReset: true`.
-- `cwd` is workspace-relative; absolute paths and `..` escape are rejected.
+- `cwd` is workspace-relative; absolute paths and `..` escape are rejected. `normalizeWorkspaceCwd` returns `NormalizedWorkspaceCwd`; the internal absolute-path helper requires it. The schema validates normalized segments, not filesystem confinement. Preserve directory-name whitespace exposed when removing dot segments (`./ name` → ` name`, `name /.` → `name `); do not trim the normalized result again.
 - Stdin uses wrapper files because Vercel SDK commands have no stdin param.
 - Timeout is Yolk-owned: run detached, wait with Effect timeout, kill on expiry; do not rely on Vercel `timeoutMs` exit `137`.
 - Long-running commands use `background: true`: quick probe, return `backgroundId`, and expose configured preview URLs.

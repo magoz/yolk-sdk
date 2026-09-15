@@ -26,7 +26,10 @@ import { AppLayer } from '@/lib/layers'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
-import { AgentWorkflowStore } from '@/lib/services/agent-workflow/live-layer'
+import {
+  AgentWorkflowStore,
+  decodeWorkflowOwnership
+} from '@/lib/services/agent-workflow/live-layer'
 import { WorkflowChildRecord, WorkflowRegistryError } from '@/lib/services/agent-workflow/registry'
 import { AgentTextRuntimeFactory, ChildWorkflowIdentity } from './child-runtime-host'
 import { AgentTextRuntimeFactoryLive, ChildWorkflowIdentityLive } from './child-runtime-live'
@@ -111,7 +114,12 @@ export const assertChildAdmission = (context: WorkflowAgentContext, physicalRunI
     const store = yield* AgentWorkflowStore
 
     if (context.parentRunId === undefined || context.callId === undefined) {
-      const registry = yield* store.read(physicalRunId, context.userId)
+      const ownership = yield* decodeWorkflowOwnership({
+        runId: physicalRunId,
+        userId: context.userId
+      })
+
+      const registry = yield* store.read(ownership.runId, ownership.userId)
 
       if (registry.stopped)
         return yield* Effect.fail(
@@ -121,7 +129,12 @@ export const assertChildAdmission = (context: WorkflowAgentContext, physicalRunI
       return
     }
 
-    const registry = yield* store.read(context.parentRunId, context.userId)
+    const ownership = yield* decodeWorkflowOwnership({
+      runId: context.parentRunId,
+      userId: context.userId
+    })
+
+    const registry = yield* store.read(ownership.runId, ownership.userId)
 
     if (
       registry.stopped ||
@@ -141,7 +154,13 @@ export async function registerWorkflowStep(userId: string) {
     Effect.gen(function* () {
       const identity = yield* ChildWorkflowIdentity
       const store = yield* AgentWorkflowStore
-      yield* store.register(identity.workflowRunId(), userId)
+
+      const ownership = yield* decodeWorkflowOwnership({
+        runId: identity.workflowRunId(),
+        userId
+      })
+
+      yield* store.register(ownership.runId, ownership.userId)
     }).pipe(runChildControl)
   )
 }
@@ -269,6 +288,11 @@ export const planWorkflowCall = (input: {
 
       const store = yield* AgentWorkflowStore
 
+      const ownership = yield* decodeWorkflowOwnership({
+        runId: parentRunId,
+        userId: context.userId
+      })
+
       const reservation = WorkflowChildRecord.make({
         callId: call.id,
         request: yield* Schema.encodeEffect(AgentRouteRequest)(childRequest),
@@ -281,7 +305,7 @@ export const planWorkflowCall = (input: {
 
       reservationAttempted = true
 
-      const registry = yield* store.change(parentRunId, context.userId, {
+      const registry = yield* store.change(ownership.runId, ownership.userId, {
         type: 'reserve',
         child: reservation
       })
@@ -336,8 +360,14 @@ export const planWorkflowCall = (input: {
             // A commit response can be lost; an immutable duplicate reservation may
             // already have launched. Never free/reuse it or persist a terminal failure.
             const store = yield* AgentWorkflowStore
+
+            const ownership = yield* decodeWorkflowOwnership({
+              runId: parentRunId,
+              userId: context.userId
+            })
+
             yield* store
-              .change(parentRunId, context.userId, {
+              .change(ownership.runId, ownership.userId, {
                 type: 'launch-uncertain',
                 callId: call.id
               })
@@ -396,7 +426,12 @@ export const admitChildWorkflow = (input: ChildLaunch) =>
     const workflowRunId = identity.workflowRunId()
     const store = yield* AgentWorkflowStore
 
-    const registry = yield* store.change(input.parentRunId, input.userId, {
+    const ownership = yield* decodeWorkflowOwnership({
+      runId: input.parentRunId,
+      userId: input.userId
+    })
+
+    const registry = yield* store.change(ownership.runId, ownership.userId, {
       type: 'admit',
       callId: input.callId,
       workflowRunId
@@ -430,7 +465,13 @@ export const persistChildTerminal = (
     const identity = yield* ChildWorkflowIdentity
     const workflowRunId = identity.workflowRunId()
     const store = yield* AgentWorkflowStore
-    const registry = yield* store.read(input.parentRunId, input.userId)
+
+    const ownership = yield* decodeWorkflowOwnership({
+      runId: input.parentRunId,
+      userId: input.userId
+    })
+
+    const registry = yield* store.read(ownership.runId, ownership.userId)
     const child = registry.children.find(child => child.callId === input.callId)
 
     if (child === undefined)
@@ -466,7 +507,7 @@ export const persistChildTerminal = (
     })
 
     const encoded = yield* Schema.encodeEffect(ToolResult)(result)
-    yield* store.change(input.parentRunId, input.userId, {
+    yield* store.change(ownership.runId, ownership.userId, {
       type: 'complete',
       callId: input.callId,
       workflowRunId,
@@ -510,7 +551,12 @@ export const attachChildWorkflow = (input: ChildLaunch, workflowRunId: string) =
     // start response is also safe because the child's own admission does not depend on it.
     const store = yield* AgentWorkflowStore
 
-    const registry = yield* store.change(input.parentRunId, input.userId, {
+    const ownership = yield* decodeWorkflowOwnership({
+      runId: input.parentRunId,
+      userId: input.userId
+    })
+
+    const registry = yield* store.change(ownership.runId, ownership.userId, {
       type: 'admit',
       callId: input.callId,
       workflowRunId
@@ -586,7 +632,13 @@ export async function uncertainChildLaunchStep(input: ChildLaunch) {
   await Effect.runPromise(
     Effect.gen(function* () {
       const store = yield* AgentWorkflowStore
-      yield* store.change(input.parentRunId, input.userId, {
+
+      const ownership = yield* decodeWorkflowOwnership({
+        runId: input.parentRunId,
+        userId: input.userId
+      })
+
+      yield* store.change(ownership.runId, ownership.userId, {
         type: 'launch-uncertain',
         callId: input.callId
       })

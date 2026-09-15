@@ -103,7 +103,11 @@ supplier InvoiceNumber. The new file scopes grant both reads and writes like oth
 
 Pass identifier strings returned by the provider, preserving leading zeros. `givenNumber` is the
 numeric-string **GivenNumber**, not the supplier's `InvoiceNumber`. Identifiers are validated and
-encoded as path segments; returned provider URLs are never followed.
+encoded as path segments; returned provider URLs are never followed. Typed file-discovery inputs
+and outputs use `FortnoxGivenNumber`; `downloadFortnoxInvoicePreview` takes
+`FortnoxDocumentNumber`. Decode raw provider/request values with those exported schemas, or use
+`.make` for trusted constants. Dynamic `FortnoxConnector.invoke` still accepts plain JSON and
+decodes it at runtime.
 
 Resource fields retain Fortnox spelling, including `CustomerNumber`, `DocumentNumber`,
 `GivenNumber`, `CompanyName`, and `OrganisationNumber` (company information uses

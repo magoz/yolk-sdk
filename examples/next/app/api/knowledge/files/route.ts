@@ -1,5 +1,8 @@
 import { Array as Arr, Data, Effect, Layer, Option } from 'effect'
+import * as Schema from 'effect/Schema'
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { KnowledgeDocumentId, KnowledgeScopeId } from '@yolk-sdk/knowledge/documents'
+import { KnowledgeStoreError } from '@yolk-sdk/knowledge/errors'
 import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'
 import { KnowledgeStore } from '@yolk-sdk/knowledge/store'
 import { AppLayer } from '@/lib/layers'
@@ -69,9 +72,21 @@ const downloadFile = Effect.gen(function* () {
     'knowledge.file_id': fileId
   })
 
+  const scopeId = yield* Schema.decodeUnknownEffect(KnowledgeScopeId)(session.user.id).pipe(
+    Effect.mapError(
+      error => new KnowledgeStoreError({ message: 'Invalid knowledge scope id', cause: error })
+    )
+  )
+
+  const validDocumentId = yield* Schema.decodeUnknownEffect(KnowledgeDocumentId)(documentId).pipe(
+    Effect.mapError(
+      error => new KnowledgeStoreError({ message: 'Invalid knowledge document id', cause: error })
+    )
+  )
+
   const store = yield* KnowledgeStore
   const fileStore = yield* KnowledgeFileBlobStore
-  const files = yield* store.listFiles({ scope: { id: session.user.id }, id: documentId })
+  const files = yield* store.listFiles({ scope: { id: scopeId }, id: validDocumentId })
 
   const file = yield* Option.match(
     Arr.findFirst(files, item => item.id === fileId),

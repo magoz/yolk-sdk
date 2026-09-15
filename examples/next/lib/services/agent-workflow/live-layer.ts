@@ -20,17 +20,38 @@ export class WorkflowRunForbidden extends Schema.TaggedError<WorkflowRunForbidde
 
 const forbidden = () => new WorkflowRunForbidden({ message: 'Workflow run not found' })
 
+const NonEmptyTrimmedId = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
+export const WorkflowRunId = NonEmptyTrimmedId.pipe(Schema.brand('WorkflowRunId'))
+
+export type WorkflowRunId = typeof WorkflowRunId.Type
+
+export const UserId = NonEmptyTrimmedId.pipe(Schema.brand('UserId'))
+
+export type UserId = typeof UserId.Type
+
+export const decodeWorkflowOwnership = (input: {
+  readonly runId: string
+  readonly userId: string
+}) =>
+  Effect.gen(function* () {
+    const runId = yield* Schema.decodeUnknownEffect(WorkflowRunId)(input.runId)
+    const userId = yield* Schema.decodeUnknownEffect(UserId)(input.userId)
+
+    return { runId, userId } as const
+  })
+
 export class AgentWorkflowStore extends Context.Service<AgentWorkflowStore>()(
   '@app/AgentWorkflowStore',
   {
     make: Effect.gen(function* () {
       const db = yield* Db
 
-      const owned = (runId: string, userId: string) =>
+      const owned = (runId: WorkflowRunId, userId: UserId) =>
         and(eq(agentWorkflowRun.runId, runId), eq(agentWorkflowRun.userId, userId))
 
       return {
-        register: (runId: string, userId: string) =>
+        register: (runId: WorkflowRunId, userId: UserId) =>
           Effect.gen(function* () {
             const registry = yield* Schema.encodeEffect(WorkflowRegistry)(emptyWorkflowRegistry())
             yield* db
@@ -41,7 +62,7 @@ export class AgentWorkflowStore extends Context.Service<AgentWorkflowStore>()(
 
             if (row === undefined) return yield* Effect.fail(forbidden())
           }).pipe(Effect.withSpan('AgentWorkflowStore.register')),
-        read: (runId: string, userId: string) =>
+        read: (runId: WorkflowRunId, userId: UserId) =>
           Effect.gen(function* () {
             const [row] = yield* db.select().from(agentWorkflowRun).where(owned(runId, userId))
 
@@ -49,7 +70,7 @@ export class AgentWorkflowStore extends Context.Service<AgentWorkflowStore>()(
 
             return yield* Schema.decodeUnknownEffect(WorkflowRegistry)(row.registry)
           }).pipe(Effect.withSpan('AgentWorkflowStore.read')),
-        change: (runId: string, userId: string, command: RegistryCommand) =>
+        change: (runId: WorkflowRunId, userId: UserId, command: RegistryCommand) =>
           db
             .transaction(tx =>
               Effect.gen(function* () {

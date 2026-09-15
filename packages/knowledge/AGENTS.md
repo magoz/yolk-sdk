@@ -60,6 +60,11 @@ the search-index document through `SearchIndexStore`; hosts coordinate it with `
 - Schema-modeled ids/slugs/titles/purpose/origin/content are non-empty. Use the exported positive
   and non-negative integer schemas where counts are schema-modeled; runtime search/chunking helpers
   validate their own numeric options, while hosts parse typed store inputs at their boundary.
+- `KnowledgeScopeId` and `KnowledgeDocumentId` are non-empty trimmed branded strings.
+  Scope/document references in document, file, chunk, search-scope, store, chunking, and ingestion
+  contracts use these brands; chunk/file row ids, titles, contents, and agent tool wire params stay
+  plain strings. Hosts mint with `.make` for trusted values and Effect-decode raw external/persisted
+  ids at their boundary.
 - Keep root exports explicit; do not use broad `export *` barrels.
 - Keep package APIs generic; host apps own all policy and IO.
 - Do not reintroduce previous graph-model concepts into core knowledge without explicit product need.

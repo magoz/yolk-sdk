@@ -25,9 +25,12 @@ pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
 
 ## Ingest a document
 
+Fragment; supply the host layers and `loadedSource` below:
+
 ```ts
 import { Effect, Layer } from 'effect'
 import { DefaultKnowledgeChunkerLive } from '@yolk-sdk/knowledge/chunking'
+import { KnowledgeDocumentId, KnowledgeScopeId } from '@yolk-sdk/knowledge/documents'
 import { NoopKnowledgeSummarizerLive } from '@yolk-sdk/knowledge/summarization'
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 
@@ -41,8 +44,8 @@ const KnowledgeLayer = Layer.mergeAll(
 
 await Effect.runPromise(
   ingestKnowledgeDocument({
-    scopeId: 'workspace-docs',
-    documentId: 'doc_123',
+    scopeId: KnowledgeScopeId.make('workspace-docs'),
+    documentId: KnowledgeDocumentId.make('doc_123'),
     source: loadedSource,
     contentHash: 'sha256:...'
   }).pipe(Effect.provide(KnowledgeLayer))
@@ -72,14 +75,22 @@ example, a later `markDocumentReady` failure may leave replaced chunks beside an
 unless the adapter coordinates those writes. Ingestion does not update the separate
 `KnowledgeStore` document automatically.
 
+Use `.make` for these trusted example constants. Decode request/persisted IDs with
+`Schema.decodeUnknownEffect(KnowledgeScopeId)` / `Schema.decodeUnknownEffect(KnowledgeDocumentId)`;
+your store adapter must return those branded types too. JSON remains plain strings, and host
+permission checks remain necessary.
+
 ## Search after ingestion
 
+Fragment continuing the setup above:
+
 ```ts
+import { KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
 import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 
 const results = await Effect.runPromise(
   searchKnowledge({
-    scope: { _tag: 'KnowledgeScope', id: 'workspace-docs' },
+    scope: KnowledgeSearchScope.make({ id: KnowledgeScopeId.make('workspace-docs') }),
     query: 'How do approvals work?',
     mode: 'hybrid',
     limit: 5,

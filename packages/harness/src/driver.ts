@@ -5,6 +5,7 @@ import {
   DrainBegin,
   Inbox,
   RecoveryAttempt,
+  type DrainToken,
   type HitlAdmission,
   type HitlDecision,
   type InboxItem,
@@ -29,7 +30,7 @@ export type ResumeSuspendedResult = {
 }
 
 export type DrainContext = {
-  readonly drainToken: string
+  readonly drainToken: DrainToken
   readonly readyResponses: ReadonlyArray<ParkedResponse>
 }
 
@@ -67,7 +68,7 @@ export type DriverApi = {
   readonly pause: (
     runId: string,
     requestIds: ReadonlyArray<string>,
-    drainToken: string
+    drainToken: DrainToken
   ) => Effect.Effect<PauseDecision>
   readonly resumeHitl: (runId: string, admission: HitlAdmission) => Effect.Effect<HitlDecision>
   readonly stop: (runId: string) => Effect.Effect<StopDecision>

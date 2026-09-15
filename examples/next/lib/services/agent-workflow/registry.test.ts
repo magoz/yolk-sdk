@@ -7,7 +7,7 @@ import {
   VercelWorkflowsSdk,
   type VercelWorkflowsSdkClient
 } from '@yolk-sdk/vercel-workflows/effect'
-import { AgentWorkflowStore, WorkflowRunForbidden } from './live-layer'
+import { AgentWorkflowStore, UserId, WorkflowRunForbidden, WorkflowRunId } from './live-layer'
 import { stopAgentWorkflow } from './stop'
 import { readWorkflowChild } from './read-child'
 import { maxWorkflowChildren } from './policy'
@@ -126,12 +126,12 @@ describe('durable host registry (transactional behavioral fake)', () => {
     for (const [runId, userId] of [
       ['parent', 'intruder'],
       ['other-parent', 'owner']
-    ]) {
+    ] as const) {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           const service = yield* AgentWorkflowStore
 
-          return yield* service.read(runId ?? '', userId ?? '')
+          return yield* service.read(WorkflowRunId.make(runId), UserId.make(userId))
         }).pipe(Effect.provide(store.layer), Effect.result)
       )
 

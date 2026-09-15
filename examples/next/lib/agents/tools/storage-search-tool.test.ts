@@ -3,7 +3,9 @@ import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { modelVisibleToolError } from '@yolk-sdk/agent/tools'
 import {
+  KnowledgeDocumentId,
   KnowledgeFileSource,
+  KnowledgeScopeId,
   KnowledgeTextSource,
   KnowledgeUrlSource
 } from '@yolk-sdk/knowledge/documents'
@@ -14,16 +16,16 @@ import { makeStorageSearchToolModule } from './storage-search-tool'
 const searchResult: KnowledgeSearchResult = {
   chunk: {
     id: 'chunk_1',
-    scopeId: 'set_1',
-    documentId: 'doc_1',
+    scopeId: KnowledgeScopeId.make('set_1'),
+    documentId: KnowledgeDocumentId.make('doc_1'),
     content: 'matched chunk',
     position: 0,
     tokenCount: 2
   },
   score: 0.87,
   document: {
-    id: 'doc_1',
-    scopeId: 'set_1',
+    id: KnowledgeDocumentId.make('doc_1'),
+    scopeId: KnowledgeScopeId.make('set_1'),
     source: KnowledgeTextSource.make({ label: 'Project note' }),
     status: 'ready',
     title: 'Project note'
@@ -31,8 +33,8 @@ const searchResult: KnowledgeSearchResult = {
   context: [
     {
       id: 'chunk_1',
-      scopeId: 'set_1',
-      documentId: 'doc_1',
+      scopeId: KnowledgeScopeId.make('set_1'),
+      documentId: KnowledgeDocumentId.make('doc_1'),
       content: 'context chunk',
       position: 0,
       tokenCount: 2
@@ -87,7 +89,7 @@ describe('storage knowledge search tool', () => {
       ...searchResult,
       document: {
         ...searchResult.document,
-        id: 'doc_file',
+        id: KnowledgeDocumentId.make('doc_file'),
         title: undefined,
         source: KnowledgeFileSource.make({
           ref: 'uploads/user/notes.bin',
@@ -100,7 +102,7 @@ describe('storage knowledge search tool', () => {
       ...searchResult,
       document: {
         ...searchResult.document,
-        id: 'doc_url',
+        id: KnowledgeDocumentId.make('doc_url'),
         title: undefined,
         source: KnowledgeUrlSource.make({ url: 'https://example.test/doc' })
       }
@@ -110,7 +112,7 @@ describe('storage knowledge search tool', () => {
       ...searchResult,
       document: {
         ...searchResult.document,
-        id: 'doc_file_ref',
+        id: KnowledgeDocumentId.make('doc_file_ref'),
         title: undefined,
         source: KnowledgeFileSource.make({ ref: 'uploads/user/opaque-key' })
       }

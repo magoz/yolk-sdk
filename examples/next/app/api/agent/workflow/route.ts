@@ -2,7 +2,10 @@ import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstab
 import { Data, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
-import { AgentWorkflowStore } from '@/lib/services/agent-workflow/live-layer'
+import {
+  AgentWorkflowStore,
+  decodeWorkflowOwnership
+} from '@/lib/services/agent-workflow/live-layer'
 import { AppLayer } from '@/lib/layers'
 import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import { getSession } from '@/lib/services/auth/get-session'
@@ -28,7 +31,13 @@ const handler = Effect.gen(function* () {
   ])
 
   const store = yield* AgentWorkflowStore
-  yield* store.register(run.runId, session.user.id)
+
+  const ownership = yield* decodeWorkflowOwnership({
+    runId: run.runId,
+    userId: session.user.id
+  })
+
+  yield* store.register(ownership.runId, ownership.userId)
   const readable = yield* run.getReadable<Uint8Array>()
 
   return HttpServerResponse.raw(readable, {

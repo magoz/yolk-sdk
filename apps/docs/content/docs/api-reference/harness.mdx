@@ -56,6 +56,12 @@ The snapshot stores claimed ids and resume counts. It is not transcript storage 
 | `DrainBegin`             | `Skip` or `Run` with `drainToken` and ready responses                 |
 | `makeInMemoryInboxLayer` | Process-lifetime Inbox                                                |
 
+`DrainToken` and `ParkGeneration` are also schema/type exports from this subpath. `DrainContext`,
+dequeue/pause/end-drain contracts use `DrainToken`; park state, admission, and `clearPark` use
+`ParkGeneration`. Forward values returned by the live Inbox. Custom adapters must construct/decode
+these types; they still serialize as strings. The schemas intentionally validate only string shape,
+not token format, freshness, or authorization.
+
 `Inbox.layer()` owns a fresh process-local queue, admission gate, and HITL generations with no
 service dependencies. `makeInMemoryInboxLayer` delegates to it.
 

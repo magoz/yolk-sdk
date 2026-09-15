@@ -1,6 +1,10 @@
 import { DateTime, Effect } from 'effect'
-import type * as Schema from 'effect/Schema'
-import type { KnowledgeDocument, KnowledgeFile } from '@yolk-sdk/knowledge/documents'
+import * as Schema from 'effect/Schema'
+import {
+  KnowledgeDocumentId,
+  type KnowledgeDocument,
+  type KnowledgeFile
+} from '@yolk-sdk/knowledge/documents'
 import { KnowledgeStoreError } from '@yolk-sdk/knowledge/errors'
 import type * as dbSchema from '@/lib/services/db/schema'
 import {
@@ -16,12 +20,23 @@ const metadataError = (error: Schema.SchemaError) =>
     cause: error
   })
 
+const documentIdError = (error: Schema.SchemaError) =>
+  new KnowledgeStoreError({ message: 'Invalid knowledge document id', cause: error })
+
 export const knowledgeDocumentFromRow = (input: {
   readonly document: typeof dbSchema.userKnowledgeDocument.$inferSelect
 }): Effect.Effect<KnowledgeDocument, KnowledgeStoreError> =>
-  decodePersistedJsonObject(input.document.metadata).pipe(
-    Effect.map(metadata => ({
-      id: input.document.id,
+  Effect.gen(function* () {
+    const id = yield* Schema.decodeUnknownEffect(KnowledgeDocumentId)(input.document.id).pipe(
+      Effect.mapError(documentIdError)
+    )
+
+    const metadata = yield* decodePersistedJsonObject(input.document.metadata).pipe(
+      Effect.mapError(metadataError)
+    )
+
+    return {
+      id,
       slug: input.document.slug,
       title: input.document.title,
       purpose: input.document.purpose,
@@ -36,23 +51,29 @@ export const knowledgeDocumentFromRow = (input: {
       metadata,
       createdAt: toDateTime(input.document.createdAt),
       updatedAt: toDateTime(input.document.updatedAt)
-    })),
-    Effect.mapError(metadataError)
-  )
+    }
+  })
 
 export const knowledgeFileFromRow = (
   row: typeof dbSchema.userKnowledgeFile.$inferSelect
 ): Effect.Effect<KnowledgeFile, KnowledgeStoreError> =>
-  decodePersistedJsonObject(row.metadata).pipe(
-    Effect.map(metadata => ({
+  Effect.gen(function* () {
+    const documentId = yield* Schema.decodeUnknownEffect(KnowledgeDocumentId)(row.documentId).pipe(
+      Effect.mapError(documentIdError)
+    )
+
+    const metadata = yield* decodePersistedJsonObject(row.metadata).pipe(
+      Effect.mapError(metadataError)
+    )
+
+    return {
       id: row.id,
-      documentId: row.documentId,
+      documentId,
       storageKey: row.storageKey,
       mediaType: row.mediaType ?? undefined,
       byteSize: row.byteSize ?? undefined,
       checksum: row.checksum ?? undefined,
       metadata,
       createdAt: toDateTime(row.createdAt)
-    })),
-    Effect.mapError(metadataError)
-  )
+    }
+  })

@@ -28,6 +28,8 @@ App-owned concrete adapters for the domain-free knowledge search contracts.
 - Opaque locators (`id`, url) are not trimmed. Surrounding whitespace fails rather than mutating identity.
 - Optional File `name` / `mediaType` and Text `label` come from filename/mediaType display metadata: use an absent optional value when the column is null or blank (after trim for those display strings only); constructor inputs may contain `undefined` keys. Do not pass empty strings.
 - Invalid rows fail the store Effect (`getDocument` / search). Matching rows are not dropped.
+- Persisted collection/document ids are Effect-decoded into `KnowledgeScopeId` /
+  `KnowledgeDocumentId` in `indexed-rows.ts` before constructing package models.
 - jsonb `metadata` is `$type<unknown>()` and decoded/encoded with `persisted-json-object` at store and app CRUD boundaries. Invalid metadata fails `SearchIndexStoreError` / `AppSearchIndexStoreError`; hits are not omitted and `{}` is not substituted. Open keys such as `storageObjectId` and `title` are preserved.
 - This adapter policy is app-owned. Package `KnowledgeFileSource.ref` remains an opaque string; hosts still must not invent locators to satisfy `.make`.
 

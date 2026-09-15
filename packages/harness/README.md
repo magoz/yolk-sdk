@@ -120,6 +120,16 @@ Hosts still own tools, prompts, auth, HITL payload persistence, and `'use workfl
 
 `Driver.pause` / `resumeHitl` / `stop` compose HITL onto the existing coordinator. Inbox items have no payload. Protocol match helpers live in `@yolk-sdk/harness/outcome`. Parked waits are not durable and are not shutdown claims.
 
+## Token types
+
+`DrainToken` and `ParkGeneration` are distinct branded string schemas/types exported from
+`@yolk-sdk/harness/inbox`. Forward `context.drainToken` into dequeue/pause and the returned park
+generation into HITL admission. Custom adapters and typed fixtures must now construct or decode
+these types rather than return raw strings. JSON stays unchanged.
+
+The brands are nominal only: even an empty or forged string can decode. Inbox still checks live
+ownership and freshness; decoding does not authorize a token or make an old park restorable.
+
 ## Restart contract
 
 Ownership is per shared Driver instance. The host or platform supplies cross-process exclusivity and quiesces producers before closing that instance. Raw administrative `RunStore` mutations must be quiesced with Driver; runtime claim ownership belongs to Driver.

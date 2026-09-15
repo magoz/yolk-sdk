@@ -148,6 +148,19 @@ const program = Todoist.invoke({
 }).pipe(Effect.provide(CredentialResolverLive))
 ```
 
+`defineAction` also returns an additive typed entrypoint, `executeTyped`, alongside the dynamic
+`execute` used by `invoke` and the agent adapter. It preserves `InputSchema.Type` and the output
+type for direct host callers. It validates **decoded** input with `Schema.toType(inputSchema)`,
+without replaying wire transformations. For example, a `NumberFromString` field accepts a number
+through `executeTyped` and a string through dynamic `execute`. Implementations still own validation
+of external output data; the generic executor does not automatically decode `outputSchema`.
+
+Fragment using the action and integration above:
+
+```ts
+const typed = listTasks.executeTyped({ integration, input: {} })
+```
+
 ## Generic email connector
 
 ```ts
@@ -370,8 +383,14 @@ one `search: { field, value }` pair with resource-specific fields. Customers acc
 Effect Chunks. `pagination` contains `currentPage`, `totalPages`, `totalResources`, and optional
 `nextPage`; repeat the same selection and limit with `page: nextPage` until it is absent.
 
-Get inputs use string `customerNumber`, `documentNumber`, `supplierNumber`, or numeric-string
-`givenNumber`. The latter is Fortnox's **GivenNumber**, not the supplier's InvoiceNumber. Get outputs
+Get inputs use branded `customerNumber` (`FortnoxCustomerNumber`), `documentNumber`
+(`FortnoxDocumentNumber`), `supplierNumber` (`FortnoxSupplierNumber`), or numeric-string
+`givenNumber` (`FortnoxGivenNumber`). The latter is Fortnox's **GivenNumber**, not the supplier's
+plain-string InvoiceNumber; the brands are nominally incompatible and keep their string wire
+representation. File discovery (`fortnox.list_supplier_invoice_files`) filters by GivenNumber and
+returns it on each file entry. Preview downloads take the canonical `FortnoxDocumentNumber` (URL
+encoded, without archive-ID restrictions); archive downloads take the opaque discovery file ID.
+Get outputs
 unwrap the resource. Resource fields retain Fortnox spelling and selected contact, status, reference,
 amount, and row data; they are bounded read models, not lossless accounting exports. Unknown fields
 and supplier bank details are omitted. Optional fields can be absent from list responses; use get

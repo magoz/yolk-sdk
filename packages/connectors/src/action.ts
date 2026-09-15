@@ -31,6 +31,21 @@ export type ConnectorAction<Env = never, Error = never> = {
   ) => Effect.Effect<ActionResult<unknown>, Error | ConnectorError, Env>
 }
 
+export type TypedConnectorAction<
+  InputSchema extends ActionInputSchema,
+  Output,
+  Env = never,
+  Error = never
+> = ConnectorAction<Env, Error> & {
+  readonly inputSchema: InputSchema
+  readonly outputSchema: Schema.Schema<Output> & { readonly EncodingServices: never }
+  /** Validates decoded input on the type side, without replaying wire transforms.
+   * Implementations remain responsible for validating external output data. */
+  readonly executeTyped: (
+    input: ActionExecutionInput<InputSchema['Type']>
+  ) => Effect.Effect<ActionResult<Output>, Error | ConnectorError, Env>
+}
+
 export type DefineActionOptions<InputSchema extends ActionInputSchema, Output, Env, Error> = {
   readonly id: string
   readonly description?: string
@@ -63,7 +78,7 @@ export const defineAction = <
   Error = never
 >(
   options: DefineActionOptions<InputSchema, Output, Env, Error>
-): ConnectorAction<Env, Error> =>
+): TypedConnectorAction<InputSchema, Output, Env, Error> =>
   (() => {
     const fields: ConnectorActionPrefixFields = {
       id: options.id,
@@ -74,19 +89,25 @@ export const defineAction = <
       fields.access = options.access
     }
 
+    const run = (
+      input: UnknownActionExecutionInput,
+      schema: Schema.Schema<InputSchema['Type']> & { readonly DecodingServices: never }
+    ): Effect.Effect<ActionResult<Output>, Error | ConnectorError, Env> =>
+      Schema.decodeUnknownEffect(schema)(input.input).pipe(
+        Effect.mapError(error => validationError(options.id, error)),
+        Effect.flatMap(params =>
+          options.execute({
+            integration: input.integration,
+            input: params
+          })
+        )
+      )
+
     return {
       ...fields,
       inputSchema: options.inputSchema,
       outputSchema: options.outputSchema,
-      execute: input =>
-        Schema.decodeUnknownEffect(options.inputSchema)(input.input).pipe(
-          Effect.mapError(error => validationError(options.id, error)),
-          Effect.flatMap(params =>
-            options.execute({
-              integration: input.integration,
-              input: params
-            })
-          )
-        )
+      execute: input => run(input, options.inputSchema),
+      executeTyped: input => run(input, Schema.toType(options.inputSchema))
     }
   })()

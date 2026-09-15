@@ -68,13 +68,22 @@ Compatibility helpers `makeJsonRpcRequest`, `makeInitializeParams`, and
 | `KnowledgeSearchScopes.make` | `KnowledgeScopes`: non-empty `ids`           |
 
 The type `KnowledgeSearchScope` remains the union of both scope variants; its value constructor
-creates only the single-id variant. Hosts still enforce access to those scopes.
+creates only the single-id variant. `KnowledgeScopeId` and `KnowledgeDocumentId` are exported
+schema/type companions from `@yolk-sdk/knowledge/documents`; scope/document references throughout
+stores, chunking, ingestion, and search use them. Decode external IDs, use `.make` for trusted
+constants, and keep host access checks. Encoded identities remain strings.
 
 ## Connectors
 
 `defineAction` accepts optional `access: 'read' | 'write' | 'destructive'` metadata, exported as
 `ConnectorActionAccess`. `makeConnectorToolModule` uses it unless the host supplies an access
 override.
+
+`defineAction` returns `TypedConnectorAction<InputSchema, Output, Env, Error>` (type exported from
+`@yolk-sdk/connectors`). Its additive `executeTyped` method accepts decoded `InputSchema.Type`
+and retains `ActionResult<Output>`. It validates the type-side schema without replaying wire
+transforms. Existing `execute` and connector `invoke` remain dynamic decoding boundaries;
+implementations still validate external outputs themselves.
 
 | Subpath                                | Main exports                                                                                                                                                                                                                                                                       |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -103,7 +112,9 @@ are `FortnoxCustomerNumber`, `FortnoxDocumentNumber`, `FortnoxSupplierNumber`, a
 `fortnoxListSupplierInvoicesAction`, `fortnoxGetSupplierInvoiceAction`, and
 `fortnoxListSupplierInvoiceFilesAction`. Matching file schemas are
 `FortnoxListSupplierInvoiceFilesInput`, `FortnoxListSupplierInvoiceFilesOutput`, and
-`FortnoxSupplierInvoiceFile`. Opt-in file slots are `FortnoxConnectFileOAuthCredentialSlot` and
+`FortnoxSupplierInvoiceFile`; both discovery input/output use `FortnoxGivenNumber`.
+`downloadFortnoxInvoicePreview` requires `FortnoxDocumentNumber`; archive file IDs stay strings.
+Opt-in file slots are `FortnoxConnectFileOAuthCredentialSlot` and
 `FortnoxArchiveOAuthCredentialSlot`; they are not on the combined slot. All listed actions declare `read`.
 See [Read Fortnox records](../connectors/fortnox) for OAuth constants, consent limitations,
 pagination, selected fields, and monetary wire types.

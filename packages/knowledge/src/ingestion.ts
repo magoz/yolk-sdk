@@ -1,6 +1,7 @@
 import { Array as Arr, Effect } from 'effect'
 import { KnowledgeChunker } from './chunking.ts'
 import { defaultKnowledgeChunkMaxTokens } from './documents.ts'
+import type { KnowledgeDocumentId, KnowledgeScopeId } from './documents.ts'
 import { KnowledgeEmbedder } from './embeddings.ts'
 import { KnowledgeExtractor } from './extraction.ts'
 import { KnowledgeSummarizer } from './summarization.ts'
@@ -9,8 +10,8 @@ import { KnowledgeIngestionError } from './errors.ts'
 import { SearchIndexStore } from './store.ts'
 
 export type IngestKnowledgeDocumentInput = {
-  readonly scopeId: string
-  readonly documentId: string
+  readonly scopeId: KnowledgeScopeId
+  readonly documentId: KnowledgeDocumentId
   readonly source: LoadedKnowledgeSource
   readonly contentHash?: string
   readonly maxTokens?: number

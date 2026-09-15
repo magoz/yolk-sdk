@@ -2,7 +2,10 @@ import { Data, Effect, Layer, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HitlResponse } from '@yolk-sdk/agent/protocol'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
-import { AgentWorkflowStore } from '@/lib/services/agent-workflow/live-layer'
+import {
+  AgentWorkflowStore,
+  decodeWorkflowOwnership
+} from '@/lib/services/agent-workflow/live-layer'
 import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
 import { AppLayer } from '@/lib/layers'
 import { agentWorkflowHitlHookToken } from '@/lib/agents/workflow-runtime/run-agent-workflow'
@@ -53,6 +56,17 @@ const invalidHitlRequest = (message: string, cause?: unknown) =>
 const getRunId = (context: RouteContext) =>
   Effect.promise(() => context.params).pipe(Effect.map(params => params.runId))
 
+const decodeRouteOwnership = (runId: string, userId: string) =>
+  decodeWorkflowOwnership({ runId, userId }).pipe(
+    Effect.mapError(
+      error =>
+        new AgentWorkflowRunRequestError({
+          message: 'Invalid workflow run request',
+          cause: error
+        })
+    )
+  )
+
 const readRequestJson = (request: Request) =>
   Effect.tryPromise({
     try: () => request.json(),
@@ -94,7 +108,8 @@ const resumeProgram = (request: Request, context: RouteContext) =>
     const workflows = yield* VercelWorkflows
     const runId = yield* getRunId(context)
     const store = yield* AgentWorkflowStore
-    yield* store.read(runId, session.user.id)
+    const ownership = yield* decodeRouteOwnership(runId, session.user.id)
+    yield* store.read(ownership.runId, ownership.userId)
     const startIndex = yield* parseStartIndex(request)
 
     const readable = yield* workflows.getReadable<Uint8Array>(
@@ -139,7 +154,8 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
     const workflows = yield* VercelWorkflows
     const runId = yield* getRunId(context)
     const store = yield* AgentWorkflowStore
-    yield* store.read(runId, session.user.id)
+    const ownership = yield* decodeRouteOwnership(runId, session.user.id)
+    yield* store.read(ownership.runId, ownership.userId)
     const body = yield* decodeHitlRequest(request)
     const response = yield* hitlResponse(body)
     const encodedResponse = yield* encodeHitlResponse(response)
@@ -189,8 +205,9 @@ const cancelProgram = (context: RouteContext) =>
     const session = yield* getSession()
     const runId = yield* getRunId(context)
     const store = yield* AgentWorkflowStore
-    yield* store.read(runId, session.user.id)
-    yield* stopAgentWorkflow(runId, session.user.id)
+    const ownership = yield* decodeRouteOwnership(runId, session.user.id)
+    yield* store.read(ownership.runId, ownership.userId)
+    yield* stopAgentWorkflow(ownership.runId, ownership.userId)
 
     return workflowCancelResponse()
   }).pipe(

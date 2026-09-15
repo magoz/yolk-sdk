@@ -4425,7 +4425,8 @@ describe('@yolk-sdk/connectors', () => {
       'description',
       'inputSchema',
       'outputSchema',
-      'execute'
+      'execute',
+      'executeTyped'
     ])
     expect(Object.keys(failureAction)).toEqual([
       'id',
@@ -4433,7 +4434,8 @@ describe('@yolk-sdk/connectors', () => {
       'access',
       'inputSchema',
       'outputSchema',
-      'execute'
+      'execute',
+      'executeTyped'
     ])
   })
 

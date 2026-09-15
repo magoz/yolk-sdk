@@ -17,7 +17,7 @@ import {
   validateTransfer
 } from '../transfer-internal.ts'
 import { FortnoxInvoiceOAuthCredentialSlot, fortnoxOAuthSlotId } from './oauth.ts'
-import { FortnoxPagination } from './schemas.ts'
+import { FortnoxDocumentNumber, FortnoxGivenNumber, FortnoxPagination } from './schemas.ts'
 import { FortnoxMetaInformation, paginationFromApi, readFortnox } from './shared.ts'
 
 export const fortnoxArchiveScope = 'archive'
@@ -39,14 +39,14 @@ export const FortnoxConnectFileOAuthCredentialSlot = CredentialSlot.make({
 export class FortnoxListSupplierInvoiceFilesInput extends Schema.Class<FortnoxListSupplierInvoiceFilesInput>(
   'FortnoxListSupplierInvoiceFilesInput'
 )({
-  givenNumber: Schema.String.check(Schema.isPattern(/^[0-9]+$/)),
+  givenNumber: FortnoxGivenNumber,
   page: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })))
 }) {}
 
 export class FortnoxSupplierInvoiceFile extends Schema.Class<FortnoxSupplierInvoiceFile>(
   'FortnoxSupplierInvoiceFile'
-)({ fileId: OpaqueId, name: SafeText, givenNumber: SafeText }) {}
+)({ fileId: OpaqueId, name: SafeText, givenNumber: FortnoxGivenNumber }) {}
 
 export class FortnoxListSupplierInvoiceFilesOutput extends Schema.Class<FortnoxListSupplierInvoiceFilesOutput>(
   'FortnoxListSupplierInvoiceFilesOutput'
@@ -54,7 +54,7 @@ export class FortnoxListSupplierInvoiceFilesOutput extends Schema.Class<FortnoxL
 
 const Connections = Schema.Struct({
   SupplierInvoiceFileConnections: Schema.Array(
-    Schema.Struct({ FileId: OpaqueId, Name: SafeText, SupplierInvoiceNumber: SafeText })
+    Schema.Struct({ FileId: OpaqueId, Name: SafeText, SupplierInvoiceNumber: FortnoxGivenNumber })
   ),
   MetaInformation: FortnoxMetaInformation
 })
@@ -95,17 +95,18 @@ export const fortnoxListSupplierInvoiceFilesAction = defineAction({
   }
 })
 
-const FortnoxDownloadTarget = Schema.Struct({ id: OpaqueId })
+const FortnoxPreviewDownloadInput = Schema.Struct({ documentNumber: FortnoxDocumentNumber })
 
-const download = (
+const FortnoxArchiveDownloadInput = Schema.Struct({ fileId: OpaqueId })
+
+const download = <Id extends string>(
   integration: ConnectorIntegration,
-  input: typeof FortnoxDownloadTarget.Type,
+  id: Id,
   budget: ConnectorFileTransferBudget,
   preview: boolean
 ) =>
   Effect.gen(function* () {
     const limits = yield* validateTransfer(integration, 'fortnox', budget)
-    const target = yield* decodeInput(FortnoxDownloadTarget, input)
 
     const credential = yield* resolveCredential(
       integration,
@@ -117,8 +118,8 @@ const download = (
     const token = yield* safeToken(credential.accessToken)
 
     const path = preview
-      ? `invoices/${encodeURIComponent(target.id)}/preview`
-      : `archive/${encodeURIComponent(target.id)}`
+      ? `invoices/${encodeURIComponent(id)}/preview`
+      : `archive/${encodeURIComponent(id)}`
 
     const response = yield* readBytes(
       `https://api.fortnox.se/3/${path}`,
@@ -136,19 +137,19 @@ const download = (
     )
       return yield* failTransfer('invalid_metadata')
 
-    return { ...fileBytes(response.bytes), source: { id: target.id, generatedPreview: preview } }
+    return { ...fileBytes(response.bytes), source: { id, generatedPreview: preview } }
   })
 
 /** Generated PDF; unlike /print, /preview does not mark the invoice Sent. */
 export const downloadFortnoxInvoicePreview = (
   integration: ConnectorIntegration,
-  input: { readonly documentNumber: string },
+  input: { readonly documentNumber: FortnoxDocumentNumber },
   budget: ConnectorFileTransferBudget
 ) =>
   Effect.gen(function* () {
-    const target = yield* decodeInput(Schema.Struct({ documentNumber: OpaqueId }), input)
+    const target = yield* decodeInput(FortnoxPreviewDownloadInput, input)
 
-    return yield* download(integration, { id: target.documentNumber }, budget, true)
+    return yield* download(integration, target.documentNumber, budget, true)
   })
 
 /** Archive ID from discovery, not an external supplier-invoice URL connection. */
@@ -158,7 +159,7 @@ export const downloadFortnoxArchiveFile = (
   budget: ConnectorFileTransferBudget
 ) =>
   Effect.gen(function* () {
-    const target = yield* decodeInput(Schema.Struct({ fileId: OpaqueId }), input)
+    const target = yield* decodeInput(FortnoxArchiveDownloadInput, input)
 
-    return yield* download(integration, { id: target.fileId }, budget, false)
+    return yield* download(integration, target.fileId, budget, false)
   })

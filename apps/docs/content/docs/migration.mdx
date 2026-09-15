@@ -25,6 +25,44 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: selected branded identities and typed connector actions
+
+These source changes target a future matching canary. Identity wire representations stay strings,
+but typed host implementations and fixtures must migrate; this is a breaking pre-1.0 minor change.
+
+| Surface                         | Migration                                                                                                                          |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/knowledge/documents` | Use `KnowledgeScopeId` and `KnowledgeDocumentId` in models, store adapters, chunking, ingestion, and search scopes.                |
+| `@yolk-sdk/harness/inbox`       | Forward live `DrainToken` and `ParkGeneration` values; custom Inbox/Driver adapters must return the corresponding brands.          |
+| `@yolk-sdk/sandbox`             | `normalizeWorkspaceCwd` now returns `NormalizedWorkspaceCwd`; raw command `cwd` remains a string.                                  |
+| `@yolk-sdk/connectors/fortnox`  | File discovery uses canonical `FortnoxGivenNumber`; preview downloads require `FortnoxDocumentNumber`. Archive IDs remain strings. |
+
+Effect-decode external/persisted strings with the exported schema; `.make` is synchronous and is
+appropriate for trusted constants or freshly minted values. Do not cast raw IDs or annotate ORM
+columns to bypass decoding. For example, inside an Effect program:
+
+```ts
+import * as Schema from 'effect/Schema'
+import { KnowledgeDocumentId } from '@yolk-sdk/knowledge/documents'
+
+const documentId = yield * Schema.decodeUnknownEffect(KnowledgeDocumentId)(rawDocumentId)
+```
+
+This is a fragment; `rawDocumentId` is host-owned input. Brands do not establish authorization,
+ownership, existence, or freshness. Harness token schemas remain nominal-only and accept arbitrary
+strings; runtime stale/foreign-token decisions remain authoritative. Do not restore old in-memory
+park generations by decoding them after restart.
+
+Fortnox file metadata now rejects nonnumeric `givenNumber` values through the canonical schema.
+Preview identifiers use the same validator as invoice reads and complete-segment URL encoding,
+rather than unrelated archive-ID restrictions.
+
+`defineAction` additionally returns `TypedConnectorAction` with `executeTyped`. It accepts decoded
+`InputSchema.Type`, validates using `Schema.toType(inputSchema)`, and retains the output type. It
+does not reapply wire transformations: a `NumberFromString` field is a number at this entrypoint.
+Existing dynamic `execute`/`invoke` paths remain compatible and decode encoded input as before.
+External output validation remains the implementation's responsibility.
+
 ### Next canary: Effect rc.115
 
 This source upgrade targets `effect@4.0.0-rc.115`; it is not a claim that an already-published canary uses that version. Upgrade matching Yolk packages and Effect together when the corresponding canary is available.
