@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Array as Arr, Data, Effect, Match, Option, Predicate, Stream } from 'effect'
+import { Array as Arr, Effect, Match, Option, Predicate, Stream } from 'effect'
 import {
   UserMessage,
   addAgentUsage,
@@ -66,23 +66,7 @@ import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 import { playRecordingStartEarcon, playVoiceReadyEarcon, primeVoiceEarcon } from './voice-earcon'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
-export type AgentRuntimeInfo = Data.TaggedEnum<{
-  readonly Next: {
-    readonly label: string
-    readonly detail: string
-  }
-  readonly Cloudflare: {
-    readonly label: string
-    readonly detail: string
-    readonly webSocketUrl: string
-  }
-  readonly Workflow: {
-    readonly label: string
-    readonly detail: string
-  }
-}>
-
-export const AgentRuntimeInfo = Data.taggedEnum<AgentRuntimeInfo>()
+import type { AgentRuntimeInfo } from './agent-runtime-info'
 
 type AgentPlaygroundProps = {
   readonly sessionId: string

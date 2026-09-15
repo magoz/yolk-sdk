@@ -17,7 +17,8 @@ import {
 } from '@/lib/agents/skillset/project-source'
 import type { SkillsetManifest } from '@yolk-sdk/agent/skillset'
 import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
-import { AgentPlayground, AgentRuntimeInfo } from './playground'
+import { AgentPlayground } from './playground'
+import { AgentRuntimeInfo } from './agent-runtime-info'
 
 export type AgentRuntime = 'next' | 'cloudflare' | 'workflow'
 

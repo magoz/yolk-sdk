@@ -12,12 +12,12 @@ One sentence: what this package provides.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/<name>@canary [related @yolk-sdk deps] effect@4.0.0-beta.80
+pnpm add @yolk-sdk/<name>@canary [related @yolk-sdk deps] effect@4.0.0-rc.115
 ```
 ````
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Match the host's Effect version to the SDK dependency (currently `4.0.0-beta.80`); update install
+Match the host's Effect version to the SDK dependency (currently `4.0.0-rc.115`); update install
 snippets when the workspace Effect catalog changes.
 
 ## Subpaths

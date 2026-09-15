@@ -84,8 +84,8 @@ owned values; it does not allocate/finalize resources. These are breaking 0.x ch
 `(error: Schema.SchemaError) => string` (was `(error: unknown) => string`). Only
 `Schema.decodeUnknownEffect` on `parameters` invokes it (validate and execute). The decode error
 is passed through unwrapped. Default remains `Invalid ${name} arguments: ${String(error)}`,
-including the `SchemaError(...)` wrapper. `SchemaError` does not extend `Error`; do not switch the
-default to `.message`. Existing `(error: unknown) => string` callbacks remain assignable. No new
+including the `SchemaError(...)` wrapper. In Effect rc.115, `SchemaError` extends native `Error`,
+but the wrapper remains part of this tool-message contract; do not switch the default to `.message`. Existing `(error: unknown) => string` callbacks remain assignable. No new
 export subpath; `MakeToolOptions` is still not barreled from `@yolk-sdk/agent/tools`.
 
 `commitThenWriteTerminalEvent({ writeCommitError })` on `@yolk-sdk/vercel-workflows` is now

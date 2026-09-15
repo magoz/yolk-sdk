@@ -108,48 +108,56 @@ const awaitFakeSocket = Effect.gen(function* () {
 })
 
 describe('makeWebSocketVoiceTransport', () => {
-  it.live('connects, sends open payloads, decodes messages, and ends on close', () =>
-    Effect.gen(function* () {
-      FakeWebSocket.instances = []
-      const scope = yield* Scope.make()
+  for (const code of [1000, 1005]) {
+    const title =
+      code === 1000
+        ? 'connects, sends open payloads, decodes messages, and ends on close'
+        : 'ends with SessionClosed for clean close code 1005'
 
-      const transportFiber = yield* Effect.forkChild(
-        Scope.provide(
-          makeWebSocketVoiceTransport({
-            url: 'wss://example.com/voice',
-            decodeMessage,
-            openPayloads: ['session-config'],
-            readyTimeoutMs: 2_000
-          }),
-          scope
-        ).pipe(Effect.provide(fakeConstructorLayer))
-      )
+    it.live(title, () =>
+      Effect.gen(function* () {
+        FakeWebSocket.instances = []
+        const scope = yield* Scope.make()
 
-      const fakeSocket = yield* awaitFakeSocket
+        const transportFiber = yield* Effect.forkChild(
+          Scope.provide(
+            makeWebSocketVoiceTransport({
+              url: 'wss://example.com/voice',
+              decodeMessage,
+              openPayloads: ['session-config'],
+              readyTimeoutMs: 2_000
+            }),
+            scope
+          ).pipe(Effect.provide(fakeConstructorLayer))
+        )
 
-      fakeSocket.fireOpen()
+        const fakeSocket = yield* awaitFakeSocket
 
-      const transport = yield* Fiber.join(transportFiber)
-      const collected = yield* Effect.forkChild(Stream.runCollect(transport.events))
+        fakeSocket.fireOpen()
 
-      yield* transport.send('client-payload')
-      fakeSocket.fireMessage('hello')
-      yield* Effect.sleep('10 millis')
-      fakeSocket.close(1000)
+        const transport = yield* Fiber.join(transportFiber)
+        const collected = yield* Effect.forkChild(Stream.runCollect(transport.events))
 
-      const events = yield* Fiber.join(collected)
+        yield* transport.send('client-payload')
+        fakeSocket.fireMessage('hello')
+        yield* Effect.sleep('10 millis')
+        fakeSocket.close(code)
 
-      expect([...events].map(event => event._tag)).toEqual([
-        'SessionOpening',
-        'UserTranscriptFinal',
-        'SessionClosed'
-      ])
-      expect(fakeSocket.sent[0]).toBe('session-config')
-      expect(fakeSocket.sent).toContain('client-payload')
+        const events = yield* Fiber.join(collected)
 
-      yield* Scope.close(scope, Exit.void)
-    })
-  )
+        expect([...events].map(event => event._tag)).toEqual([
+          'SessionOpening',
+          'UserTranscriptFinal',
+          'SessionClosed'
+        ])
+        expect(events.at(-1)).toMatchObject({ _tag: 'SessionClosed', reason: 'socket_closed' })
+        expect(fakeSocket.sent[0]).toBe('session-config')
+        expect(fakeSocket.sent).toContain('client-payload')
+
+        yield* Scope.close(scope, Exit.void)
+      })
+    )
+  }
 
   it.live('fails acquisition when the socket never opens', () =>
     Effect.gen(function* () {
@@ -197,8 +205,8 @@ describe('makeWebSocketVoiceTransport', () => {
       const events = yield* Fiber.join(collected)
       const tags = [...events].map(event => event._tag)
 
-      expect(tags[0]).toBe('SessionOpening')
-      expect(tags.at(-1) === 'Error' || tags.at(-1) === 'SessionClosed').toBe(true)
+      expect(tags).toEqual(['SessionOpening', 'Error'])
+      expect(events.at(-1)).toMatchObject({ _tag: 'Error', code: 'transport_failed' })
 
       yield* Scope.close(scope, Exit.void)
     })

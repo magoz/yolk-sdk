@@ -34,8 +34,9 @@ export const echoTool = makeTool({
 Optional `invalidParamsMessage: (error: Schema.SchemaError) => string` customizes the
 model-visible validation text. Only `Schema.decodeUnknownEffect` on `parameters` invokes it, and
 the decode error is passed through unwrapped. Default:
-`Invalid ${name} arguments: ${String(error)}`. `SchemaError` does not extend `Error`; do not
-default to `.message` (that drops the `SchemaError(...)` wrapper). Existing
+`Invalid ${name} arguments: ${String(error)}`. In Effect rc.115, `SchemaError` extends native
+`Error`, but do not default to `.message`: that drops the `SchemaError(...)` wrapper required by
+this tool-message contract. Existing
 `(error: unknown) => string` callbacks remain assignable.
 
 ## Resolve tools for a request

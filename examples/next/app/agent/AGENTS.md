@@ -5,7 +5,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 ## Boundaries
 
 - `page.tsx` is a runtime chooser; runtime pages live at `/agent/next`, `/agent/cloudflare`, and `/agent/workflow`; config lives at `/agent/connectors` and `/agent/skills`.
-- `runtime-page.tsx` owns shared server bootstrap/session wiring for runtime pages.
+- `runtime-page.tsx` owns shared server bootstrap/session wiring for runtime pages. Shared runtime constructors live in `agent-runtime-info.ts`, outside `'use client'` modules; the server must not call constructors exported through a client boundary.
 - `/agent/next` uses `/api/agent` NDJSON only.
 - `/agent/cloudflare` bootstraps direct Cloudflare WS only; missing env/bootstrap shows explicit error, no Next fallback; remote MCP config is loaded by Next and passed in bootstrap.
 - `/agent/workflow` uses `/api/agent/workflow`; the route starts via `VercelWorkflows.start(...)`, and the UI reads the returned durable NDJSON stream.
@@ -22,7 +22,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - Slash command parsing/selection helpers stay pure in `slash-command-model.ts`; test keyboard/index/hint behavior there.
 - Keep attachment conversion and activity mapping pure/testable outside the full playground.
 - Keep auth/status/config/debug controls in console chrome, not the chat layout.
-- Activity rows include `SubagentStarted`/`SubagentCompleted`; conversation tool cards render subagent metadata from structured content only.
+- Activity rows include `SubagentStarted`/`SubagentCompleted`; conversation tool cards render structured subagent metadata with description/type fallback to tool params.
 - `agent-usage-meter.tsx` formats provider-normalized usage/context budget from `lib/agents/context-budget`; do not duplicate threshold/status logic in UI.
 
 ## Chat Model
@@ -36,7 +36,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` across lifecycle events.
 - Only terminal tool rows show elapsed duration; called/input/approval/question states remain status labels.
 - Question tool rows show original prompt/options from tool input and selected answer from HITL response; assistant recaps are normal model text, not the source of truth.
-- Subagent tool rows should show subagent type/status/timing from structured result metadata; do not infer subagent state from text content.
+- Subagent tool rows should show subagent type/status/timing from structured result metadata; do not infer subagent state from text content. `subagent-metadata.ts` projects each own data field independently so malformed siblings do not hide valid labels; do not read inherited/accessor fields.
 - Tool-origin error results (`ToolResult.isError`) render as failed tool output; `ToolExecutionError` is a lifecycle event, not necessarily a terminal transport error.
 - Render standalone `ToolResult` only for orphan results.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.

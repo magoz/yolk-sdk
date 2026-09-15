@@ -24,7 +24,7 @@ import {
   WrenchIcon
 } from 'lucide-react'
 import { Match, Option, Predicate } from 'effect'
-import * as Schema from 'effect/Schema'
+import { subagentMetadata } from './subagent-metadata'
 import {
   QuestionAnswer,
   QuestionResponse,
@@ -234,34 +234,6 @@ const toolResultRole = (isError: boolean) => (isError ? 'error' : 'tool')
 
 const toolResultBadgeVariant = (isError: boolean) => (isError ? 'destructive' : 'outline')
 
-const presentText = (value: string | undefined) =>
-  value !== undefined && value.length > 0 ? value : undefined
-
-const presentFinite = (value: number | undefined) =>
-  value !== undefined && Number.isFinite(value) ? value : undefined
-
-const SubagentConversationParams = Schema.Struct({
-  description: Schema.optional(Schema.String),
-  subagent_type: Schema.optional(Schema.String)
-})
-
-const SubagentConversationStructuredContent = Schema.Struct({
-  description: Schema.optional(Schema.String),
-  subagent_type: Schema.optional(Schema.String),
-  subagent_run_id: Schema.optional(Schema.String),
-  started_at_ms: Schema.optional(Schema.Number),
-  ended_at_ms: Schema.optional(Schema.Number),
-  duration_ms: Schema.optional(Schema.Number),
-  status: Schema.optional(Schema.String),
-  model: Schema.optional(Schema.String)
-})
-
-const decodeSubagentConversationParams = Schema.decodeUnknownOption(SubagentConversationParams)
-
-const decodeSubagentConversationStructuredContent = Schema.decodeUnknownOption(
-  SubagentConversationStructuredContent
-)
-
 const resultStructuredContent = (state: ToolRunState) =>
   Match.value(state).pipe(
     Match.tagsExhaustive({
@@ -279,29 +251,6 @@ const resultStructuredContent = (state: ToolRunState) =>
       Running: () => undefined
     })
   )
-
-const subagentMetadata = (call: ToolCall, state: ToolRunState) => {
-  if (call.name !== 'subagent') {
-    return undefined
-  }
-
-  const structured = Option.getOrUndefined(
-    decodeSubagentConversationStructuredContent(resultStructuredContent(state))
-  )
-
-  const params = Option.getOrUndefined(decodeSubagentConversationParams(call.params))
-
-  return {
-    description: presentText(structured?.description) ?? presentText(params?.description),
-    subagentType: presentText(structured?.subagent_type) ?? presentText(params?.subagent_type),
-    subagentRunId: presentText(structured?.subagent_run_id),
-    startedAtMs: presentFinite(structured?.started_at_ms),
-    endedAtMs: presentFinite(structured?.ended_at_ms),
-    durationMs: presentFinite(structured?.duration_ms),
-    status: presentText(structured?.status),
-    model: presentText(structured?.model)
-  }
-}
 
 const timestampLabel = (milliseconds: number) => new Date(milliseconds).toLocaleTimeString()
 
@@ -594,7 +543,7 @@ function ToolRunCard({
   const isRunning = Predicate.isTagged(state, 'Running')
   const isError = toolStateHasError(state)
   const output = toolStateContent(state)
-  const subagent = subagentMetadata(call, state)
+  const subagent = subagentMetadata(call, resultStructuredContent(state))
 
   const title =
     subagent?.description === undefined ? call.name : `Subagent: ${subagent.description}`
