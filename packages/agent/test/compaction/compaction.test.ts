@@ -445,7 +445,7 @@ describe('agent compaction', () => {
     })
 
     expect(omitted).toBeInstanceOf(UserMessage)
-    expect(Object.keys(omitted)).toEqual(['content', '_tag'])
+    expect(Object.keys(omitted)).toEqual(['_tag', 'content'])
     expect(Object.hasOwn(omitted, 'createdAtMs')).toBe(false)
 
     const zero = makeCompactionCheckpointMessage({
@@ -454,7 +454,7 @@ describe('agent compaction', () => {
       createdAtMs: 0
     })
 
-    expect(Object.keys(zero)).toEqual(['content', 'createdAtMs', '_tag'])
+    expect(Object.keys(zero)).toEqual(['_tag', 'createdAtMs', 'content'])
     expect(zero.createdAtMs).toBe(0)
   })
 })

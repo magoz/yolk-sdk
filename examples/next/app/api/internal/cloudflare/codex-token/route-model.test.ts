@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { anthropicClaudeProviderId } from '@yolk-sdk/agent/providers/anthropic/claude'
@@ -10,7 +11,7 @@ import {
   tokenBrokerMinTtlMs
 } from './route-model'
 
-const minTtlSecondsArbitrary = Schema.toArbitrary(Schema.Number)
+const minTtlSecondsArbitrary = Arbitrary.schema(Schema.Number)
 
 describe('Cloudflare token broker route model', () => {
   it('uses the bridge secret header contract', () => {

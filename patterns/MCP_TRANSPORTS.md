@@ -14,7 +14,7 @@ Patterns for MCP client/server transport boundaries.
 Decode wire JSON in two steps:
 
 ```typescript
-const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 const decodeJsonRpcMessage = Schema.decodeUnknownEffect(JsonRpcMessageSchema)
 
 const decodeMessage = (line: string) => decodeJson(line).pipe(Effect.flatMap(decodeJsonRpcMessage))
@@ -22,7 +22,7 @@ const decodeMessage = (line: string) => decodeJson(line).pipe(Effect.flatMap(dec
 
 Rules:
 
-- Use `Schema.UnknownFromJsonString` for JSON encode/decode.
+- Use `Schema.fromJsonString(Schema.Unknown)` for JSON encode/decode.
 - Do not use raw `JSON.parse/stringify` in production MCP paths.
 - Parse errors map to JSON-RPC `-32700`.
 - Invalid JSON-RPC shape or params map to `-32600`.
@@ -70,7 +70,7 @@ Rules:
 Keep MCP errors typed and granular enough to map protocol codes:
 
 ```typescript
-export class McpServerError extends Schema.TaggedErrorClass<McpServerError>()('McpServerError', {
+export class McpServerError extends Schema.TaggedError<McpServerError>()('McpServerError', {
   message: Schema.String,
   cause: Schema.Literals(['parse', 'validation', 'protocol', 'tool_error', 'encoding'])
 }) {}

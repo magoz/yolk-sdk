@@ -5,11 +5,11 @@ Domain-free knowledge document/source/file/context, ingestion, hybrid search, an
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Model

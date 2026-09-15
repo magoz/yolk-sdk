@@ -352,7 +352,7 @@ describe('generic email message actions', () => {
         expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
 
         if (Predicate.isTagged(result, 'Failure')) {
-          expect(result.failure.underlying instanceof Error).toBe(false)
+          expect(result.failure.underlying).toBeInstanceOf(Error)
           expect(Schema.isSchemaError(result.failure.underlying)).toBe(true)
         }
       })

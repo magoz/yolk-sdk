@@ -1415,7 +1415,7 @@ describe('telemetry context admission', () => {
 
     const business = decoded.failure
 
-    expect(business).not.toBeInstanceOf(Error)
+    expect(business).toBeInstanceOf(Error)
 
     const exploding = {
       get operation(): never {

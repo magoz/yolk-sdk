@@ -12,7 +12,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { McpServerError, makeMcpToolServer } from '../../src/server'
 
-const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const server = makeMcpToolServer({
   name: 'test-server',

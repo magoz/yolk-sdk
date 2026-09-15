@@ -3,7 +3,7 @@ import type { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 
 /** Host-only transport failure. Do not attach URLs, headers, bodies, or wrapped causes. */
-export class ConnectorBinaryHttpError extends Schema.TaggedErrorClass<ConnectorBinaryHttpError>()(
+export class ConnectorBinaryHttpError extends Schema.TaggedError<ConnectorBinaryHttpError>()(
   'ConnectorBinaryHttpError',
   { code: Schema.Literals(['transport_failed', 'response_too_large', 'network_policy_rejected']) }
 ) {}

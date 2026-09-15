@@ -1,5 +1,6 @@
 import { Array as Arr, Effect, Layer, Option, Predicate, Result, type JsonSchema } from 'effect'
 import * as Schema from 'effect/Schema'
+import * as SchemaAST from 'effect/SchemaAST'
 import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
   isToolJsonSchemaObject,
@@ -23,7 +24,7 @@ export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
 export type ToolAccess = typeof ToolAccess.Type
 
-export class ToolRegistryError extends Schema.TaggedErrorClass<ToolRegistryError>()(
+export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
   'ToolRegistryError',
   {
     message: Schema.String,
@@ -49,7 +50,7 @@ export const ModelVisibleToolErrorReason = Schema.Literals([
 
 export type ModelVisibleToolErrorReason = typeof ModelVisibleToolErrorReason.Type
 
-export class ModelVisibleToolError extends Schema.TaggedErrorClass<ModelVisibleToolError>()(
+export class ModelVisibleToolError extends Schema.TaggedError<ModelVisibleToolError>()(
   'ModelVisibleToolError',
   {
     tool: Schema.String,
@@ -217,7 +218,9 @@ const requireToolJsonSchema = (
     return result.success
   }
 
-  throw new Error(result.failure.issue.toString(), { cause: result.failure.issue })
+  throw new Error(new Schema.SchemaError(result.failure.issue).message, {
+    cause: result.failure.issue
+  })
 }
 
 const requireToolJsonSchemaObject = (
@@ -229,7 +232,9 @@ const requireToolJsonSchemaObject = (
     return result.success
   }
 
-  throw new Error(result.failure.issue.toString(), { cause: result.failure.issue })
+  throw new Error(new Schema.SchemaError(result.failure.issue).message, {
+    cause: result.failure.issue
+  })
 }
 
 const localDefinitionName = (ref: string) => {
@@ -244,18 +249,13 @@ const hasJsonSchemaType = (input: Schema.Json, type: string) => {
   return schema !== undefined && jsonField(schema, 'type') === type
 }
 
-const isEmptyStructJsonSchema = (schema: typeof ToolJsonSchema.Type) => {
-  if (!isToolJsonSchemaObject(schema)) {
-    return false
-  }
-
-  const anyOf = jsonField(schema, 'anyOf')
+const isEmptyStructSchema = (schema: Schema.Top) => {
+  const ast = Schema.toEncoded(schema).ast
 
   return (
-    Array.isArray(anyOf) &&
-    anyOf.length === 2 &&
-    anyOf.some(item => hasJsonSchemaType(item, 'object')) &&
-    anyOf.some(item => hasJsonSchemaType(item, 'array'))
+    SchemaAST.isObjects(ast) &&
+    ast.propertySignatures.length === 0 &&
+    ast.indexSignatures.length === 0
   )
 }
 
@@ -274,7 +274,7 @@ const emptyObjectJsonSchema: typeof ToolJsonSchemaObject.Type = {
 }
 
 const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type => {
-  const document = Schema.toJsonSchemaDocument(schema)
+  const document = Schema.toJsonSchemaDocument(schema, { onExcessProperty: 'error' })
   const documentSchema = requireToolJsonSchema(document.schema)
 
   const rootRef = isToolJsonSchemaObject(documentSchema)
@@ -295,7 +295,7 @@ const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
       : Object.fromEntries(Object.entries(definitions).filter(([name]) => name !== definitionName))
 
   const jsonSchema =
-    isEmptyStructJsonSchema(rootSchema) || isEmptyRecordJsonSchema(rootSchema)
+    isEmptyStructSchema(schema) || isEmptyRecordJsonSchema(rootSchema)
       ? emptyObjectJsonSchema
       : rootSchema
 

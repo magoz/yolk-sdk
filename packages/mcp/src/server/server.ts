@@ -94,14 +94,14 @@ const decodedResponse = (response: Option.Option<string>): DecodedLine => ({
   response
 })
 
-const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const decodeJsonRpcMessage = Schema.decodeUnknownEffect(JsonRpcMessageSchema)
 
 const decodeCallToolParams = Schema.decodeUnknownEffect(CallToolParamsSchema)
 
 const encodeJson = (value: JsonRpcResponse) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
     Effect.mapError(
       error =>
         new McpServerError({

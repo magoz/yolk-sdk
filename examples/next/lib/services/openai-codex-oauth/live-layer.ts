@@ -60,7 +60,7 @@ export const extractAccountId = (token: string): string | undefined => {
     parts.length !== 3 || encodedPayload === undefined
       ? undefined
       : Option.getOrUndefined(
-          Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
+          Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(
             Buffer.from(encodedPayload, 'base64url').toString()
           )
         )

@@ -4341,7 +4341,7 @@ describe('@yolk-sdk/connectors', () => {
         )
         expect(emptyCollectionsResult._tag).toBe('Success')
         expect(JSON.stringify(emptyCollectionsResult)).toBe(
-          '{"_tag":"Success","value":{"id":"file_2","name":"Empty","mimeType":"text/plain","starred":false,"size":"0","parents":{"_id":"Chunk","values":[]},"spaces":{"_id":"Chunk","values":[]}}}'
+          '{"_tag":"Success","value":{"id":"file_2","name":"Empty","mimeType":"text/plain","starred":false,"parents":{"_id":"Chunk","values":[]},"spaces":{"_id":"Chunk","values":[]},"size":"0"}}'
         )
         expect(createResult._tag).toBe('Success')
         expect(JSON.stringify(createResult)).toBe(
@@ -4515,17 +4515,17 @@ describe('@yolk-sdk/connectors', () => {
           String.raw`{"_tag":"Failure","error":{"code":"dropbox_conflict","message":"Dropbox create folder failed: path/conflict/folder/...","status":409,"underlying":"{\"error_summary\":\"path/conflict/folder/...\"}"}}`
         )
         expect(JSON.stringify(rateLimited)).toBe(
-          String.raw`{"_tag":"Failure","error":{"code":"dropbox_rate_limited","message":"Dropbox list folder failed: too_many_requests/...","status":429,"underlying":"{\"error_summary\":\"too_many_requests/...\"}","retryAfterMs":3000}}`
+          String.raw`{"_tag":"Failure","error":{"code":"dropbox_rate_limited","message":"Dropbox list folder failed: too_many_requests/...","status":429,"retryAfterMs":3000,"underlying":"{\"error_summary\":\"too_many_requests/...\"}"}}`
         )
         expect(JSON.stringify(zeroRetry)).toBe(
-          String.raw`{"_tag":"Failure","error":{"code":"dropbox_rate_limited","message":"Dropbox list folder failed: too_many_requests/...","status":429,"underlying":"{\"error_summary\":\"too_many_requests/...\"}","retryAfterMs":0}}`
+          String.raw`{"_tag":"Failure","error":{"code":"dropbox_rate_limited","message":"Dropbox list folder failed: too_many_requests/...","status":429,"retryAfterMs":0,"underlying":"{\"error_summary\":\"too_many_requests/...\"}"}}`
         )
         expect(Object.keys(rateLimited.error)).toEqual([
           'code',
           'message',
           'status',
-          'underlying',
-          'retryAfterMs'
+          'retryAfterMs',
+          'underlying'
         ])
       })
   )

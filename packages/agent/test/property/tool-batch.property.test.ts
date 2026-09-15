@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
@@ -17,7 +18,7 @@ const toolBatchCase = Schema.Struct({
   calls: Schema.Array(toolCallSpec)
 })
 
-const toolBatchCaseArbitrary = Schema.toArbitrary(toolBatchCase)
+const toolBatchCaseArbitrary = Arbitrary.schema(toolBatchCase)
 
 const toolCallFromSpec = (spec: typeof toolCallSpec.Type) =>
   ToolCall.make({ id: spec.id, name: spec.name, params: {} })

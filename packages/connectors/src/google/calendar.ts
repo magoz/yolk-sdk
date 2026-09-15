@@ -1,5 +1,8 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
+import * as SchemaAST from 'effect/SchemaAST'
+import * as SchemaParser from 'effect/SchemaParser'
+import * as SchemaTransformation from 'effect/SchemaTransformation'
 import { defineAction } from '../action.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../http.ts'
 import { ActionResult } from '../result.ts'
@@ -18,15 +21,32 @@ import {
 
 export const googleCalendarApiBaseUrl = 'https://www.googleapis.com/calendar/v3'
 
-const GoogleCalendarEventDate = Schema.Struct({
-  date: Schema.Trimmed.check(Schema.isNonEmpty()),
-  timeZone: Schema.optionalKey(Schema.String)
-}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+// Parse options are call-scoped in Effect rc.115, not schema annotations.
+// Keep strictness inside each union member so mixed boundary kinds cannot pass.
+const strictBoundary = <S extends Schema.Constraint>(schema: S) =>
+  Schema.declareConstructor<S['Type'], S['Encoded']>()(
+    [schema],
+    ([member]) =>
+      (input, _ast, options) =>
+        SchemaParser.decodeUnknownEffect(member, { ...options, onExcessProperty: 'error' })(input),
+    {
+      toCodecJson: ([member]) => new SchemaAST.Link(member.ast, SchemaTransformation.passthrough())
+    }
+  )
 
-const GoogleCalendarEventTime = Schema.Struct({
-  dateTime: Schema.Trimmed.check(Schema.isNonEmpty()),
-  timeZone: Schema.optionalKey(Schema.String)
-}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+const GoogleCalendarEventDate = strictBoundary(
+  Schema.Struct({
+    date: Schema.Trimmed.check(Schema.isNonEmpty()),
+    timeZone: Schema.optionalKey(Schema.String)
+  })
+)
+
+const GoogleCalendarEventTime = strictBoundary(
+  Schema.Struct({
+    dateTime: Schema.Trimmed.check(Schema.isNonEmpty()),
+    timeZone: Schema.optionalKey(Schema.String)
+  })
+)
 
 export const GoogleCalendarEventDateTime = Schema.Union([
   GoogleCalendarEventDate,

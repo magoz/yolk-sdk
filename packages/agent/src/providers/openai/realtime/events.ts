@@ -274,7 +274,7 @@ const readFunctionCalls = (
     ]
   })
 
-const decodeJsonString = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 const isSessionConfigEventType = (eventType: string) =>
   eventType === 'session.created' || eventType === 'session.updated'

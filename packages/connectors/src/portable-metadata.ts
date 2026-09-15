@@ -1,4 +1,4 @@
-import { Effect, Option, Predicate } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 
@@ -148,7 +148,7 @@ export const PortableMetadata = Schema.declareConstructor<PortableJsonObject>()(
 
     return snapshot === undefined
       ? Effect.fail(
-          new SchemaIssue.InvalidValue(Option.none(), {
+          new SchemaIssue.InvalidValue({
             message: 'Expected a plain JSON metadata object'
           })
         )

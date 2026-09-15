@@ -68,7 +68,7 @@ export type VoiceSessionErrorCode = typeof VoiceSessionErrorCode.Type
  * Safe, host-visible voice session failure. Never carries raw provider
  * payloads; providers must map failures into `code` + safe `message`.
  */
-export class VoiceSessionError extends Schema.TaggedErrorClass<VoiceSessionError>()(
+export class VoiceSessionError extends Schema.TaggedError<VoiceSessionError>()(
   'VoiceSessionError',
   {
     code: VoiceSessionErrorCode,

@@ -40,7 +40,7 @@ export const decodeJsonResponse = <A>(
   schema: JsonResponseSchema<A>,
   response: ConnectorHttpResponse
 ) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(response.body).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(response.body).pipe(
     Effect.mapError(
       error =>
         new ConnectorError({

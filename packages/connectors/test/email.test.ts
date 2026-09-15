@@ -266,7 +266,7 @@ describe('generic email connector', () => {
       if (Result.isFailure(result)) {
         expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
         expect(result.failure).toMatchObject({ cause: 'validation_failed' })
-        expect(result.failure.underlying instanceof Error).toBe(false)
+        expect(result.failure.underlying).toBeInstanceOf(Error)
         expect(Schema.isSchemaError(result.failure.underlying)).toBe(true)
       }
     })

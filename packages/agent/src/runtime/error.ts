@@ -3,30 +3,24 @@ import * as Schema from 'effect/Schema'
 import { agentLoopErrorToAgentError, type AgentLoopError } from '@yolk-sdk/agent/loop'
 import { AgentError } from '@yolk-sdk/agent/protocol'
 
-export class SessionNotFoundError extends Schema.TaggedErrorClass<SessionNotFoundError>()(
+export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundError>()(
   'SessionNotFoundError',
   {
     sessionId: Schema.String
   }
 ) {}
 
-export class SessionLoadError extends Schema.TaggedErrorClass<SessionLoadError>()(
-  'SessionLoadError',
-  {
-    sessionId: Schema.String,
-    message: Schema.String
-  }
-) {}
+export class SessionLoadError extends Schema.TaggedError<SessionLoadError>()('SessionLoadError', {
+  sessionId: Schema.String,
+  message: Schema.String
+}) {}
 
-export class SessionSaveError extends Schema.TaggedErrorClass<SessionSaveError>()(
-  'SessionSaveError',
-  {
-    sessionId: Schema.String,
-    message: Schema.String
-  }
-) {}
+export class SessionSaveError extends Schema.TaggedError<SessionSaveError>()('SessionSaveError', {
+  sessionId: Schema.String,
+  message: Schema.String
+}) {}
 
-export class SessionConflictError extends Schema.TaggedErrorClass<SessionConflictError>()(
+export class SessionConflictError extends Schema.TaggedError<SessionConflictError>()(
   'SessionConflictError',
   {
     sessionId: Schema.String,

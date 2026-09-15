@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Effect, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -14,7 +15,7 @@ const schemaVariant = Schema.Literals([
   'literalField'
 ])
 
-const schemaVariantArbitrary = Schema.toArbitrary(schemaVariant)
+const schemaVariantArbitrary = Arbitrary.schema(schemaVariant)
 
 const invalidSchemaVariant = Schema.Literals([
   'emptyParams',
@@ -25,7 +26,7 @@ const invalidSchemaVariant = Schema.Literals([
   'literalField'
 ])
 
-const invalidSchemaVariantArbitrary = Schema.toArbitrary(invalidSchemaVariant)
+const invalidSchemaVariantArbitrary = Arbitrary.schema(invalidSchemaVariant)
 
 const isJsonObject = (input: Schema.Json | undefined): input is Schema.JsonObject =>
   Predicate.isObjectOrArray(input) && !Array.isArray(input)

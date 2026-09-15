@@ -45,7 +45,7 @@ type CommandRenderRequest = {
 }
 
 const encodeJsonString = (value: CommandRenderRequest) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value)
 
 export const loadAgentCommands = (
   options: CommandClientOptions = {}

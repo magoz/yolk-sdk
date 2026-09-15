@@ -9,7 +9,7 @@ import {
   toolCallResultToToolResult
 } from '../../src/client'
 
-const decodeJsonRpcPacket = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodeJsonRpcPacket = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const decodeJsonRpcMessage = Schema.decodeUnknownOption(JsonRpcMessage)
 

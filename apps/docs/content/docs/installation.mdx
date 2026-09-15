@@ -6,10 +6,10 @@ description: Install canary Yolk packages with matching lockstep versions.
 Yolk packages currently publish on the `canary` channel and release in lockstep. Keep every `@yolk-sdk/*` dependency on the same version.
 
 ```bash
-pnpm add @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
-Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code. An unversioned `effect`
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code. An unversioned `effect`
 install can resolve a different API/type version; check this dependency when upgrading canaries.
 
 Add sibling packages as needed:

@@ -4,10 +4,10 @@ import { SqlError } from 'effect/unstable/sql/SqlError'
 // Exponential backoff
 // Handles network issues, cold starts, and transient cloud infrastructure problems
 // Retries: immediate, +500ms, +1s, +2s (max 3 retries, ~3.5s total)
-export const retryPolicy = Schedule.exponential('500 millis', 2.0).pipe(
-  Schedule.both(Schedule.recurs(3)),
-  Schedule.jittered
-)
+export const retryPolicy = Schedule.max([
+  Schedule.exponential('500 millis', 2.0),
+  Schedule.recurs(3)
+]).pipe(Schedule.jittered)
 
 const hasIsTransient = (error: unknown): error is { isTransient: true } =>
   Predicate.isObjectOrArray(error) &&

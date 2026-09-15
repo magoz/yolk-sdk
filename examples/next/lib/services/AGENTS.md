@@ -27,7 +27,7 @@ examples/next/lib/services/[service-name]/
 ## Config
 
 - Use Effect `Config.*` in service/layer construction; see `patterns/EFFECT_BEST_PRACTICES.md#config-pattern`.
-- Use `Config.redacted` for secrets.
+- Use `Config.Redacted` for secrets.
 - Use `Config.option` + `Option` helpers for optional env.
 - Raw `process.env` only in sync infra callbacks/config boundaries; document exceptions inline.
 
@@ -45,7 +45,7 @@ examples/next/lib/services/[service-name]/
 - Service-owned integration errors live beside the service.
 - Domain-owned errors live in `examples/next/lib/core/errors` or beside the owning domain file.
 - Use `Data.TaggedError` for simple internal service errors.
-- Use `Schema.TaggedErrorClass` when `Schema.is`, serialization, or schema-boundary validation is needed.
+- Use `Schema.TaggedError` when `Schema.is`, serialization, or schema-boundary validation is needed.
 - Prefix service errors with the service name; common suffixes: `ApiError`, `ConfigError`, `ValidationError`.
 
 ## Observability

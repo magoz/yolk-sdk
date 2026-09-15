@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
 
-export class OpenAiCodexOAuthError extends Schema.TaggedErrorClass<OpenAiCodexOAuthError>()(
+export class OpenAiCodexOAuthError extends Schema.TaggedError<OpenAiCodexOAuthError>()(
   'OpenAiCodexOAuthError',
   {
     message: Schema.String,
@@ -9,14 +9,14 @@ export class OpenAiCodexOAuthError extends Schema.TaggedErrorClass<OpenAiCodexOA
   }
 ) {}
 
-export class OpenAiCodexAuthNotFoundError extends Schema.TaggedErrorClass<OpenAiCodexAuthNotFoundError>()(
+export class OpenAiCodexAuthNotFoundError extends Schema.TaggedError<OpenAiCodexAuthNotFoundError>()(
   'OpenAiCodexAuthNotFoundError',
   {
     message: Schema.String
   }
 ) {}
 
-export class OpenAiCodexAuthInvalidError extends Schema.TaggedErrorClass<OpenAiCodexAuthInvalidError>()(
+export class OpenAiCodexAuthInvalidError extends Schema.TaggedError<OpenAiCodexAuthInvalidError>()(
   'OpenAiCodexAuthInvalidError',
   {
     message: Schema.String,

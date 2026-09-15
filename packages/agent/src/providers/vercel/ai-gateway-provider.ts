@@ -93,11 +93,11 @@ export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProvider
   )
 
 const vercelAiGatewayEnvironmentConfig = Effect.gen(function* () {
-  const apiKey = yield* Config.redacted('AI_GATEWAY_API_KEY').pipe(
-    Config.orElse(() => Config.redacted('VERCEL_OIDC_TOKEN'))
+  const apiKey = yield* Config.Redacted('AI_GATEWAY_API_KEY').pipe(
+    Config.orElse(() => Config.Redacted('VERCEL_OIDC_TOKEN'))
   )
 
-  const maxCompletionTokens = yield* Config.int('AI_GATEWAY_MAX_COMPLETION_TOKENS')
+  const maxCompletionTokens = yield* Config.Int('AI_GATEWAY_MAX_COMPLETION_TOKENS')
 
   return { apiKey, maxCompletionTokens }
 }).pipe(

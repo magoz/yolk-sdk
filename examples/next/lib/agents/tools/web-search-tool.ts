@@ -208,9 +208,9 @@ const providerOverrideFromString = (provider: string | undefined): WebSearchProv
   provider === 'exa' || provider === 'parallel' ? provider : undefined
 
 const loadWebSearchConfig: Effect.Effect<WebSearchConfig, ToolError> = Effect.gen(function* () {
-  const providerOption = yield* Config.option(Config.string('YOLK_WEBSEARCH_PROVIDER'))
-  const exaApiKeyOption = yield* Config.option(Config.string('EXA_API_KEY'))
-  const parallelApiKeyOption = yield* Config.option(Config.string('PARALLEL_API_KEY'))
+  const providerOption = yield* Config.option(Config.String('YOLK_WEBSEARCH_PROVIDER'))
+  const exaApiKeyOption = yield* Config.option(Config.String('EXA_API_KEY'))
+  const parallelApiKeyOption = yield* Config.option(Config.String('PARALLEL_API_KEY'))
   const provider = optionString(providerOption)
   const exaApiKey = optionString(exaApiKeyOption)
   const parallelApiKey = optionString(parallelApiKeyOption)

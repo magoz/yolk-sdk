@@ -85,7 +85,7 @@ const executeCall = (call: VoiceToolCall) =>
     )
   )
 
-const encodeDenialOutput = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeDenialOutput = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 /** Model-visible denial output for a denied voice tool call. */
 export const voiceToolDenialOutput = (call: VoiceToolCall, reason?: string) =>

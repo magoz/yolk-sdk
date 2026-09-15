@@ -14,7 +14,7 @@ export const McpErrorCause = Schema.Literals([
 
 export type McpErrorCause = typeof McpErrorCause.Type
 
-export class McpError extends Schema.TaggedErrorClass<McpError>()('McpError', {
+export class McpError extends Schema.TaggedError<McpError>()('McpError', {
   server: Schema.String,
   message: Schema.String,
   cause: McpErrorCause

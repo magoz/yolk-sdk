@@ -108,7 +108,7 @@ type FortnoxProviderFailureFields = {
 
 const providerFailure = (response: ConnectorHttpResponse) =>
   Effect.gen(function* () {
-    const parsed = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(
+    const parsed = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
       response.body
     ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(ErrorEnvelope)), Effect.result)
 

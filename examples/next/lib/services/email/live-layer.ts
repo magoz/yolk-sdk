@@ -20,7 +20,7 @@ class EmailConfig extends Context.Service<
 const EmailConfigLive = Layer.effect(
   EmailConfig,
   Effect.gen(function* () {
-    const apiKey = yield* Config.redacted('RESEND_API_KEY')
+    const apiKey = yield* Config.Redacted('RESEND_API_KEY')
 
     return { apiKey }
   }).pipe(Effect.mapError(() => new EmailConfigError({ message: 'RESEND_API_KEY not found' })))

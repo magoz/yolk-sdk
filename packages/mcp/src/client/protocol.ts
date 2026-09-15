@@ -369,7 +369,7 @@ export const encodeJsonRpcMessage = (
   server: string,
   message: JsonRpcRequest | JsonRpcNotification
 ) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(message).pipe(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(message).pipe(
     Effect.mapError(
       error =>
         new McpError({
@@ -381,7 +381,7 @@ export const encodeJsonRpcMessage = (
   )
 
 const decodeJsonString = (server: string, text: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
     Effect.mapError(
       error =>
         new McpError({

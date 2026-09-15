@@ -10,4 +10,4 @@ export const propertyRuns =
     ? parsedPropertyRuns
     : defaultPropertyRuns
 
-export const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
+export const propertyOptions = { arbitrary: { runs: propertyRuns } }

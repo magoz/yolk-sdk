@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Effect, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
@@ -18,7 +19,7 @@ const propertyRuns =
     ? parsedPropertyRuns
     : defaultPropertyRuns
 
-const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
+const propertyOptions = { arbitrary: { runs: propertyRuns } }
 
 const schemaVariant = Schema.Literals([
   'emptyParams',
@@ -35,7 +36,7 @@ const schemaVariant = Schema.Literals([
   'unionField'
 ])
 
-const schemaVariantArbitrary = Schema.toArbitrary(schemaVariant)
+const schemaVariantArbitrary = Arbitrary.schema(schemaVariant)
 
 const isJsonObject = (input: Schema.Json): input is Schema.JsonObject =>
   Predicate.isObjectOrArray(input) && !Array.isArray(input)

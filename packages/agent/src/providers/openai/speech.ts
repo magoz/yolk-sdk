@@ -106,7 +106,7 @@ const OpenAiTranscriptionResponse = Schema.Struct({
 
 const decodeTranscriptionResponse = Schema.decodeUnknownEffect(OpenAiTranscriptionResponse)
 
-const encodeSpeechBody = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeSpeechBody = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 type OpenAiSpeechJsonBodyFields = {
   model: string

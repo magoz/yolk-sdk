@@ -33,7 +33,7 @@ export const DropboxDownloadErrorCode = Schema.Literals([
 export type DropboxDownloadErrorCode = typeof DropboxDownloadErrorCode.Type
 
 /** Safe boundary: deliberately contains no upstream message, URL, headers, body or cause. */
-export class DropboxDownloadError extends Schema.TaggedErrorClass<DropboxDownloadError>()(
+export class DropboxDownloadError extends Schema.TaggedError<DropboxDownloadError>()(
   'DropboxDownloadError',
   { code: DropboxDownloadErrorCode }
 ) {}
@@ -162,7 +162,7 @@ const errorSummary = (bytes: Uint8Array) =>
     try: () => new TextDecoder('utf-8', { fatal: true }).decode(bytes),
     catch: () => new DropboxDownloadError({ code: 'upstream_failed' })
   }).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
     Effect.flatMap(Schema.decodeUnknownEffect(ErrorBody)),
     Effect.result,
     Effect.map(result =>
@@ -249,7 +249,9 @@ export const downloadDropboxFile = (
 
     if (result === undefined) return yield* fail('invalid_metadata')
 
-    const metadata = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(result).pipe(
+    const metadata = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+      result
+    ).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(Metadata)),
       Effect.mapError(() => new DropboxDownloadError({ code: 'invalid_metadata' }))
     )

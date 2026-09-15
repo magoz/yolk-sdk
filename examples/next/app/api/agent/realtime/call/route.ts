@@ -82,7 +82,7 @@ const makeSessionConfigJson = (input: {
       transcriptionModel: input.transcriptionModel
     })
 
-    return yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(config).pipe(
+    return yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(config).pipe(
       Effect.mapError(
         error =>
           new OpenAiRealtimeCallError({
@@ -172,7 +172,7 @@ const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const sdp = yield* readSdp
   const transcriptionModel = yield* readTranscriptionModel
-  const apiKey = yield* Config.redacted('OPENAI_API_KEY')
+  const apiKey = yield* Config.Redacted('OPENAI_API_KEY')
   const telegramConnectorConfig = yield* getTelegramConnectorConfig(session.user.id)
 
   const telegramToolModules =

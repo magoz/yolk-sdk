@@ -39,7 +39,7 @@ expectFunction('Cloudflare.Worker', Cloudflare.Worker)
 
 expectFunction('Cloudflare.providers', Cloudflare.providers)
 
-expectFunction('Cloudflare.DurableObjectNamespace', Cloudflare.DurableObjectNamespace)
+expectFunction('Cloudflare.DurableObject', Cloudflare.DurableObject)
 
 expectFunction('Cloudflare.upgrade', Cloudflare.upgrade)
 

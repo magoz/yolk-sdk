@@ -704,8 +704,7 @@ const makeCodexSocket = (config: CodexWsConfig) =>
       Effect.sync(() => {
         ws.close(1000, 'stream ended')
       })
-    ),
-    { closeCodeIsError: code => code !== 1000 && code !== 1005 }
+    )
   )
 
 const socketErrorToLlmError = (error: Socket.SocketError) =>
@@ -879,15 +878,21 @@ const makeDirectCodexWsProvider = (config: CodexWsConfig) =>
           const socketErrorToQueueFailure = (error: Socket.SocketError) =>
             Queue.failCause(queue, Cause.fail(socketErrorToLlmError(error)))
 
-          yield* socket
-            .runString(handleMessage, {
-              onOpen: write(bodyJson).pipe(Effect.ignore)
-            })
-            .pipe(
-              Effect.catchTag('SocketError', socketErrorToQueueFailure),
-              Effect.ensuring(Queue.shutdown(queue)),
-              Effect.forkScoped
+          yield* Stream.fromPull(
+            Socket.readerString(socket).pipe(
+              Effect.tap(() => write.write(bodyJson).pipe(Effect.ignore))
             )
+          ).pipe(
+            Stream.runForEach(handleMessage),
+            Effect.catchTag('SocketError', error =>
+              Predicate.isTagged(error.reason, 'SocketCloseError') &&
+              (error.reason.code === 1000 || error.reason.code === 1005)
+                ? Effect.void
+                : socketErrorToQueueFailure(error)
+            ),
+            Effect.ensuring(Queue.shutdown(queue)),
+            Effect.forkScoped
+          )
 
           return Stream.fromQueue(queue)
         })

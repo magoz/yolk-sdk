@@ -4,10 +4,10 @@ import { AuthConfigError } from './errors'
 
 export const getAuthOriginConfig = () =>
   Effect.gen(function* () {
-    const nodeEnv = yield* Config.string('NODE_ENV').pipe(Config.withDefault('production'))
+    const nodeEnv = yield* Config.String('NODE_ENV').pipe(Config.withDefault('production'))
 
     if (nodeEnv === 'development') {
-      const portlessUrl = yield* Config.option(Config.string('PORTLESS_URL'))
+      const portlessUrl = yield* Config.option(Config.String('PORTLESS_URL'))
 
       if (Option.isSome(portlessUrl)) {
         const baseURL = yield* Effect.try({
@@ -20,13 +20,13 @@ export const getAuthOriginConfig = () =>
     }
 
     // Preserve deployed and direct-Next/E2E behavior without trusting request headers.
-    const projectUrl = yield* Config.string('NEXT_PUBLIC_PROJECT_URL')
+    const projectUrl = yield* Config.String('NEXT_PUBLIC_PROJECT_URL')
 
-    const vercelUrl = yield* Config.option(Config.string('VERCEL_URL')).pipe(
+    const vercelUrl = yield* Config.option(Config.String('VERCEL_URL')).pipe(
       Effect.map(Option.filter(value => value.length > 0))
     )
 
-    const vercelBranchUrl = yield* Config.option(Config.string('VERCEL_BRANCH_URL')).pipe(
+    const vercelBranchUrl = yield* Config.option(Config.String('VERCEL_BRANCH_URL')).pipe(
       Effect.map(Option.filter(value => value.length > 0))
     )
 

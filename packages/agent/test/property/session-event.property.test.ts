@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Effect, Match, Option, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -37,21 +38,21 @@ const sessionCommand = Schema.Struct({
   runId
 })
 
-const sessionCommandsArbitrary = Schema.toArbitrary(Schema.Array(sessionCommand))
+const sessionCommandsArbitrary = Arbitrary.schema(Schema.Array(sessionCommand))
 
 const revisionCase = Schema.Struct({
   initialEvents: Schema.Array(sessionCommand),
   staleRevision: Schema.Number
 })
 
-const revisionCaseArbitrary = Schema.toArbitrary(revisionCase)
+const revisionCaseArbitrary = Arbitrary.schema(revisionCase)
 
 const appendCommand = Schema.Struct({
   expectation: Schema.Literals(['current', 'stale', 'none']),
   event: sessionCommand
 })
 
-const appendCommandsArbitrary = Schema.toArbitrary(Schema.Array(appendCommand))
+const appendCommandsArbitrary = Arbitrary.schema(Schema.Array(appendCommand))
 
 const emptyLog = (): RuntimeSessionEventLog => ({
   sessionId: 'session_1',

@@ -217,7 +217,7 @@ export const collectSubagentEvents = (
 
 const getAgentTextConfig = () =>
   Effect.gen(function* () {
-    const systemPrompt = yield* Config.option(Config.string('AGENT_SYSTEM_PROMPT'))
+    const systemPrompt = yield* Config.option(Config.String('AGENT_SYSTEM_PROMPT'))
 
     return {
       model: agentTextModel,

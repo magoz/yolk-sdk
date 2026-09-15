@@ -574,8 +574,8 @@ describe('Google Drive connector', () => {
         'code',
         'message',
         'status',
-        'underlying',
-        'retryAfterMs'
+        'retryAfterMs',
+        'underlying'
       ])
       expect(permissionResult._tag).toBe('Failure')
 

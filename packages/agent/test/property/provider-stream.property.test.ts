@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Effect, Layer, Predicate, Result, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -43,21 +44,21 @@ const validProviderCase = Schema.Struct({
   fragments: Schema.Array(providerFragment)
 })
 
-const validProviderCaseArbitrary = Schema.toArbitrary(validProviderCase)
+const validProviderCaseArbitrary = Arbitrary.schema(validProviderCase)
 
 const invalidProviderCase = Schema.Struct({
   fragments: Schema.Array(providerFragment),
   done: Schema.Literals(['none', 'duplicate', 'wrongReason'])
 })
 
-const invalidProviderCaseArbitrary = Schema.toArbitrary(invalidProviderCase)
+const invalidProviderCaseArbitrary = Arbitrary.schema(invalidProviderCase)
 
 const retryableFailureCase = Schema.Struct({
   failuresBeforeSuccess: Schema.Literals([0, 1, 2, 3, 4]),
   cause: Schema.Literals(['provider_error', 'rate_limit'])
 })
 
-const retryableFailureCaseArbitrary = Schema.toArbitrary(retryableFailureCase)
+const retryableFailureCaseArbitrary = Arbitrary.schema(retryableFailureCase)
 
 const nonRetryableFailureCase = Schema.Struct({
   cause: Schema.Literals(['provider_error', 'context_overflow']),
@@ -65,7 +66,7 @@ const nonRetryableFailureCase = Schema.Struct({
   emitsBeforeFailure: Schema.Boolean
 })
 
-const nonRetryableFailureCaseArbitrary = Schema.toArbitrary(nonRetryableFailureCase)
+const nonRetryableFailureCaseArbitrary = Arbitrary.schema(nonRetryableFailureCase)
 
 const weatherCall = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
 

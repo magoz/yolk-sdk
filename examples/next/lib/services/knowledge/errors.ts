@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
 
-export class AppKnowledgeError extends Schema.TaggedErrorClass<AppKnowledgeError>()(
+export class AppKnowledgeError extends Schema.TaggedError<AppKnowledgeError>()(
   'AppKnowledgeError',
   {
     message: Schema.String,

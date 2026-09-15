@@ -1,4 +1,4 @@
-import { Data, Effect, Match, Option, Predicate } from 'effect'
+import { Data, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 import { Content } from './content.ts'
@@ -148,7 +148,7 @@ export const ToolJsonSchemaObject = Schema.declareConstructor<Schema.JsonObject>
     isPortableJsonObject(input)
       ? Effect.succeed(input)
       : Effect.fail(
-          new SchemaIssue.InvalidValue(Option.none(), {
+          new SchemaIssue.InvalidValue({
             message: 'Expected a plain JSON Schema object'
           })
         ),
@@ -172,7 +172,7 @@ export const ToolJsonSchema = Schema.declareConstructor<boolean | Schema.JsonObj
     Predicate.isBoolean(input) || isPortableJsonObject(input)
       ? Effect.succeed(input)
       : Effect.fail(
-          new SchemaIssue.InvalidValue(Option.none(), {
+          new SchemaIssue.InvalidValue({
             message: 'Expected a boolean or plain JSON Schema object'
           })
         ),

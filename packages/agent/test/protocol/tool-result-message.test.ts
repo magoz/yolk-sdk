@@ -57,9 +57,9 @@ describe('toolResultMessageFromResult', () => {
     const omitted = repairDanglingHostToolCalls(messages)[1]
 
     expect(omitted).toBeInstanceOf(ToolResultMessage)
-    expect(Object.keys(omitted ?? {})).toEqual(['toolCallId', 'content', 'isError', '_tag'])
+    expect(Object.keys(omitted ?? {})).toEqual(['_tag', 'toolCallId', 'content', 'isError'])
     expect(JSON.stringify(omitted)).toBe(
-      '{"toolCallId":"call_1","content":"Tool lookup did not return a result before the transcript continued.","isError":true,"_tag":"ToolResult"}'
+      '{"_tag":"ToolResult","toolCallId":"call_1","content":"Tool lookup did not return a result before the transcript continued.","isError":true}'
     )
 
     const present = repairDanglingHostToolCalls(messages, {
@@ -67,14 +67,14 @@ describe('toolResultMessageFromResult', () => {
     })[1]
 
     expect(Object.keys(present ?? {})).toEqual([
+      '_tag',
       'toolCallId',
       'content',
       'isError',
-      'structuredContent',
-      '_tag'
+      'structuredContent'
     ])
     expect(JSON.stringify(present)).toBe(
-      '{"toolCallId":"call_1","content":"Tool lookup did not return a result before the transcript continued.","isError":true,"structuredContent":{"repaired":true},"_tag":"ToolResult"}'
+      '{"_tag":"ToolResult","toolCallId":"call_1","content":"Tool lookup did not return a result before the transcript continued.","isError":true,"structuredContent":{"repaired":true}}'
     )
   })
 })

@@ -1,3 +1,4 @@
+import { RuntimeContext } from 'alchemy/RuntimeContext'
 import * as Cloudflare from 'alchemy/Cloudflare'
 import { Clock, Context, Effect, Predicate } from 'effect'
 import * as Scope from 'effect/Scope'
@@ -127,10 +128,10 @@ const encodeSessionSnapshotJson = Schema.encodeEffect(Schema.fromJsonString(Sess
 
 const encodeTokenBrokerRequestJson = Schema.encodeEffect(Schema.fromJsonString(TokenBrokerRequest))
 
-const sendSnapshot = (socket: Cloudflare.DurableWebSocket, snapshot: SessionSnapshot) =>
+const sendSnapshot = (socket: Cloudflare.WebSocket, snapshot: SessionSnapshot) =>
   encodeSessionSnapshotJson(snapshot).pipe(Effect.flatMap(encoded => socket.send(encoded)))
 
-const sendEvent = (socket: Cloudflare.DurableWebSocket, event: AgentEvent) =>
+const sendEvent = (socket: Cloudflare.WebSocket, event: AgentEvent) =>
   encodeAgentEventJson(event).pipe(Effect.flatMap(encoded => socket.send(encoded)))
 
 const toAgentError = (
@@ -182,22 +183,24 @@ const toolRegistryErrorToAgentError = (error: ToolRegistryError) =>
     retryable: false
   })
 
-export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAgent>()(
+export default class YolkAgent extends Cloudflare.DurableObject<YolkAgent>()(
   'YolkAgent',
   Effect.gen(function* () {
     return Effect.gen(function* () {
       const state = yield* Cloudflare.DurableObjectState
-      const sockets = new Map<string, Cloudflare.DurableWebSocket>()
+      const withRuntime = Effect.provideService(RuntimeContext, yield* RuntimeContext)
+      const sockets = new Map<string, Cloudflare.WebSocket>()
 
       const runtimeEventLogStorage: RuntimeEventLogStorage = {
-        get: () => state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey),
-        put: log => state.storage.put(runtimeEventsStorageKey, log)
+        get: () =>
+          state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey).pipe(withRuntime),
+        put: log => state.storage.put(runtimeEventsStorageKey, log).pipe(withRuntime)
       }
 
       const instanceScope = yield* Scope.make()
       const live = yield* Scope.provide(makeLiveDrain(), instanceScope)
 
-      const sendConflict = (socket: Cloudflare.DurableWebSocket) =>
+      const sendConflict = (socket: Cloudflare.WebSocket) =>
         sendEvent(
           socket,
           AgentError.make({
@@ -209,8 +212,8 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
       const harnessContext = yield* Layer.buildWithScope(
         makeDurableObjectDriverLayer({
-          load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey),
-          save: snapshot => state.storage.put(harnessStoreKey, snapshot),
+          load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey).pipe(withRuntime),
+          save: snapshot => state.storage.put(harnessStoreKey, snapshot).pipe(withRuntime),
           drain: () => live.runHeld
         }),
         instanceScope
@@ -223,6 +226,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
       const loadBootstrap = () =>
         state.storage.get<BootstrapRequestType>(bootstrapKey).pipe(
+          withRuntime,
           Effect.flatMap(bootstrap =>
             bootstrap === undefined
               ? Effect.fail(
@@ -379,7 +383,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const getCodexToken = () =>
         Effect.gen(function* () {
           const nowMs = yield* Clock.currentTimeMillis
-          const cached = yield* state.storage.get<CodexAccessTokenType>(codexTokenKey)
+
+          const cached = yield* state.storage
+            .get<CodexAccessTokenType>(codexTokenKey)
+            .pipe(withRuntime)
 
           if (cached !== undefined && isCodexTokenFresh(cached, nowMs)) {
             return cached
@@ -387,7 +394,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
           const bootstrap = yield* loadBootstrap()
           const token = yield* requestCodexToken(bootstrap)
-          yield* state.storage.put(codexTokenKey, token)
+          yield* state.storage.put(codexTokenKey, token).pipe(withRuntime)
 
           return token
         })
@@ -395,7 +402,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const getAnthropicToken = () =>
         Effect.gen(function* () {
           const nowMs = yield* Clock.currentTimeMillis
-          const cached = yield* state.storage.get<CodexAccessTokenType>(anthropicTokenKey)
+
+          const cached = yield* state.storage
+            .get<CodexAccessTokenType>(anthropicTokenKey)
+            .pipe(withRuntime)
 
           if (cached !== undefined && isAnthropicTokenFresh(cached, nowMs)) {
             return cached
@@ -403,14 +413,16 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
           const bootstrap = yield* loadBootstrap()
           const token = yield* requestAnthropicToken(bootstrap)
-          yield* state.storage.put(anthropicTokenKey, token)
+          yield* state.storage.put(anthropicTokenKey, token).pipe(withRuntime)
 
           return token
         })
 
       const resolveCloudflareToolSet = (sessionId: string) =>
         Effect.gen(function* () {
-          const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
+          const bootstrap = yield* state.storage
+            .get<BootstrapRequestType>(bootstrapKey)
+            .pipe(withRuntime)
 
           const modules = yield* makeCloudflareTextToolModules(bootstrap?.mcpServers ?? [])
           const skillset = skillsetFromBootstrap(bootstrap)
@@ -433,6 +445,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       ) =>
         Layer.unwrap(
           state.storage.get<BootstrapRequestType>(bootstrapKey).pipe(
+            withRuntime,
             Effect.flatMap(bootstrap =>
               bootstrap === undefined
                 ? Effect.succeed(makeFauxProviderLayer)
@@ -471,7 +484,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         )
 
       const handleRuntimeAppend = Effect.fnUntraced(function* (
-        socket: Cloudflare.DurableWebSocket,
+        socket: Cloudflare.WebSocket,
         sessionId: string,
         socketId: string,
         input: {
@@ -501,7 +514,11 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         }
 
         const toolSet = resolvedToolSet.success
-        const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
+
+        const bootstrap = yield* state.storage
+          .get<BootstrapRequestType>(bootstrapKey)
+          .pipe(withRuntime)
+
         const skillset = skillsetFromBootstrap(bootstrap)
         const selectedModel = input.model ?? runtimeBaseConfig.model
         const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
@@ -524,7 +541,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       })
 
       const handleUserInput = (
-        socket: Cloudflare.DurableWebSocket,
+        socket: Cloudflare.WebSocket,
         sessionId: string,
         socketId: string,
         input: UserInput
@@ -543,7 +560,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       }
 
       const handleHitlResponse = (
-        socket: Cloudflare.DurableWebSocket,
+        socket: Cloudflare.WebSocket,
         sessionId: string,
         socketId: string,
         input: {
@@ -580,9 +597,9 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
           if (request.method === 'POST') {
             const bootstrap = yield* HttpServerRequest.schemaBodyJson(BootstrapRequest)
-            yield* state.storage.put(bootstrapKey, bootstrap)
-            yield* state.storage.delete(codexTokenKey)
-            yield* state.storage.delete(anthropicTokenKey)
+            yield* state.storage.put(bootstrapKey, bootstrap).pipe(withRuntime)
+            yield* state.storage.delete(codexTokenKey).pipe(withRuntime)
+            yield* state.storage.delete(anthropicTokenKey).pipe(withRuntime)
 
             return yield* HttpServerResponse.json({ ok: true })
           }
@@ -611,7 +628,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           return response
         }),
         webSocketMessage: Effect.fnUntraced(function* (
-          socket: Cloudflare.DurableWebSocket,
+          socket: Cloudflare.WebSocket,
           message: string | ArrayBuffer
         ) {
           const attachment = socket.deserializeAttachment<SocketAttachment>()
@@ -650,7 +667,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
           yield* handleHitlResponse(socket, attachment.sessionId, attachment.socketId, input)
         }),
-        webSocketClose: Effect.fnUntraced(function* (socket: Cloudflare.DurableWebSocket) {
+        webSocketClose: Effect.fnUntraced(function* (socket: Cloudflare.WebSocket) {
           const attachment = socket.deserializeAttachment<SocketAttachment>()
 
           if (attachment !== null) {

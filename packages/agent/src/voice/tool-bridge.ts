@@ -23,7 +23,7 @@ export class VoiceToolExecutionResult extends Schema.Class<VoiceToolExecutionRes
   output: Schema.String
 }) {}
 
-export class VoiceToolBridgeError extends Schema.TaggedErrorClass<VoiceToolBridgeError>()(
+export class VoiceToolBridgeError extends Schema.TaggedError<VoiceToolBridgeError>()(
   'VoiceToolBridgeError',
   {
     message: Schema.String
@@ -33,7 +33,7 @@ export class VoiceToolBridgeError extends Schema.TaggedErrorClass<VoiceToolBridg
 const unknownToMessage = (error: Schema.SchemaError) => String(error)
 
 const parseToolArguments = (raw: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(raw).pipe(
     Effect.mapError(
       error =>
         new VoiceToolBridgeError({
@@ -59,7 +59,7 @@ const contentToSerializable = (content: Content): Content =>
   Predicate.isString(content) ? truncateVoiceToolResult(content) : content
 
 const stringifyToolSuccessOutput = (content: Content) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))({
     result: contentToSerializable(content)
   }).pipe(Effect.mapError(toolOutputSerializeError))
 
@@ -67,7 +67,7 @@ const makeVoiceToolExecutionResult = (toolCallId: string, output: string) =>
   VoiceToolExecutionResult.make({ toolCallId, output })
 
 const makeToolErrorResult = (toolCallId: string, error: ToolError | VoiceToolBridgeError) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({ error: error.message }).pipe(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))({ error: error.message }).pipe(
     Effect.mapError(toolOutputSerializeError),
     Effect.catchTag('VoiceToolBridgeError', () => Effect.succeed('{"error":"Tool failed"}')),
     Effect.map(output => makeVoiceToolExecutionResult(toolCallId, output))

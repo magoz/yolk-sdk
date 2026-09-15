@@ -84,9 +84,9 @@ import {
   type AgentMessage as AgentMessageType
 } from '../../src/protocol'
 
-const encodeJson = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
-const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const decodeAgentEvent = Schema.decodeUnknownEffect(AgentEvent)
 

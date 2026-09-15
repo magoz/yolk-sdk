@@ -11,7 +11,7 @@ import {
   type RegistryCommand
 } from './registry'
 
-export class WorkflowRunForbidden extends Schema.TaggedErrorClass<WorkflowRunForbidden>()(
+export class WorkflowRunForbidden extends Schema.TaggedError<WorkflowRunForbidden>()(
   'WorkflowRunForbidden',
   {
     message: Schema.String

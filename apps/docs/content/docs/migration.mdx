@@ -25,6 +25,15 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: Effect rc.115
+
+This source upgrade targets `effect@4.0.0-rc.115`; it is not a claim that an already-published canary uses that version. Upgrade matching Yolk packages and Effect together when the corresponding canary is available.
+
+- Use `Schema.TaggedError`, `Schema.fromJsonString(Schema.Unknown)` and capitalized `Config.String` / `Config.Int` / `Config.Redacted` APIs.
+- Schema construction now follows schema field order, including `_tag` first. JSON field values and optional presence are unchanged, but raw serialized bytes can differ. Do not depend on beta.80's property insertion order.
+- `Schema.SchemaError` is now a native `Error`. Synchronous schema makers throw a native error with a `SchemaIssue.Issue` cause; Effectful makers fail with the issue. Keep typed owner errors and inspect retained causes rather than matching old diagnostic text.
+- Tool schemas use Effect's canonical JSON representation. Prefer finite-number schemas for JSON inputs; definition references may acquire an `Encoded` suffix. Empty-struct tools still advertise a closed empty object. Custom JSON Schema output must still pass Yolk's portable-data boundary.
+
 ### Next canary: optional harness and collector recovery
 
 `@yolk-sdk/harness` is a new optional run-lifecycle package (coordinator, store, inbox, drivers, outcomes). It is not the agent loop and does not add a Workflow driver. It is introduced after `0.1.0-canary.76` and unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available.

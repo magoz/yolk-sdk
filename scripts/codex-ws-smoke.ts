@@ -16,11 +16,11 @@ const codexHost = 'chatgpt.com'
 
 const codexPath = '/backend-api/codex/responses'
 
-class SmokeConfigError extends Schema.TaggedErrorClass<SmokeConfigError>()('SmokeConfigError', {
+class SmokeConfigError extends Schema.TaggedError<SmokeConfigError>()('SmokeConfigError', {
   message: Schema.String
 }) {}
 
-class SmokeHttpError extends Schema.TaggedErrorClass<SmokeHttpError>()('SmokeHttpError', {
+class SmokeHttpError extends Schema.TaggedError<SmokeHttpError>()('SmokeHttpError', {
   message: Schema.String
 }) {}
 

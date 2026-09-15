@@ -348,8 +348,8 @@ class OpenAiConfig extends Context.Service<OpenAiConfig, OpenAiProviderConfig>()
 const OpenAiConfigLayer = Layer.effect(
   OpenAiConfig,
   Effect.gen(function* () {
-    const apiKey = yield* Config.redacted('OPENAI_API_KEY')
-    const maxCompletionTokens = yield* Config.int('OPENAI_MAX_COMPLETION_TOKENS')
+    const apiKey = yield* Config.Redacted('OPENAI_API_KEY')
+    const maxCompletionTokens = yield* Config.Int('OPENAI_MAX_COMPLETION_TOKENS')
 
     return { apiKey, maxCompletionTokens }
   }).pipe(

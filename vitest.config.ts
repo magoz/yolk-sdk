@@ -1,4 +1,5 @@
 import './examples/next/lib/dotenv'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
@@ -7,7 +8,17 @@ import tsconfigPaths from 'vite-tsconfig-paths'
 
 const workspaceRoot = dirname(fileURLToPath(import.meta.url))
 
+const requireFromExample = createRequire(join(workspaceRoot, 'examples/next/package.json'))
+
 export default defineConfig({
+  // pnpm peer contexts can install multiple copies of Workflow. Its mocked
+  // platform boundary must resolve to the same module from app and SDK code.
+  resolve: {
+    alias: [
+      { find: /^workflow$/, replacement: requireFromExample.resolve('workflow') },
+      { find: /^workflow\/api$/, replacement: requireFromExample.resolve('workflow/api') }
+    ]
+  },
   plugins: [
     tsconfigPaths({
       projects: [

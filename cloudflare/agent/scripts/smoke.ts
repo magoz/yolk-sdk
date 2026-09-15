@@ -1,5 +1,16 @@
 import { readFile } from 'node:fs/promises'
-import { Clock, Config, Data, Deferred, Effect, Match, Option, Ref } from 'effect'
+import {
+  Clock,
+  Config,
+  Data,
+  Deferred,
+  Effect,
+  Match,
+  Option,
+  Predicate,
+  Ref,
+  Stream
+} from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import * as Socket from 'effect/unstable/socket/Socket'
@@ -48,7 +59,7 @@ const readStateFile = Effect.tryPromise({
 })
 
 const readDeployedUrl = Effect.gen(function* () {
-  const configuredUrl = yield* Config.option(Config.string('CLOUDFLARE_AGENT_URL'))
+  const configuredUrl = yield* Config.option(Config.String('CLOUDFLARE_AGENT_URL'))
 
   if (Option.isSome(configuredUrl)) {
     return configuredUrl.value
@@ -117,9 +128,7 @@ const smokeWebSocket = (
 
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const socket = yield* Socket.makeWebSocket(wsUrl, {
-          closeCodeIsError: code => code !== 1000
-        })
+        const socket = yield* Socket.makeWebSocket(wsUrl)
 
         const write = yield* socket.writer
         const eventsRef = yield* Ref.make<ReadonlyArray<SmokeEvent>>([])
@@ -141,7 +150,7 @@ const smokeWebSocket = (
               Match.tag('AgentError', current =>
                 Effect.gen(function* () {
                   yield* failDone(current.message)
-                  yield* write(new Socket.CloseEvent(1000))
+                  yield* write.write(new Socket.CloseEvent(1000))
                 })
               ),
               Match.tag('AgentEnd', () =>
@@ -150,32 +159,38 @@ const smokeWebSocket = (
 
                   if (collectedText !== expectedText) {
                     yield* failDone(`Unexpected text: ${collectedText}`)
-                    yield* write(new Socket.CloseEvent(1000))
+                    yield* write.write(new Socket.CloseEvent(1000))
 
                     return
                   }
 
                   yield* Deferred.succeed(done, events)
-                  yield* write(new Socket.CloseEvent(1000))
+                  yield* write.write(new Socket.CloseEvent(1000))
                 })
               ),
               Match.orElse(() => Effect.void)
             )
           })
 
-        const runSocket = socket
-          .runString(handleMessage, { onOpen: Effect.ignore(write(input)) })
-          .pipe(
-            Effect.flatMap(() => Deferred.await(done)),
-            Effect.catchTag('SocketError', error =>
-              Effect.fail(
-                new SmokeProtocolError({
-                  message: `WebSocket failed before AgentEnd: ${error.message}`,
-                  cause: error
-                })
-              )
+        const runSocket = Stream.fromPull(
+          Socket.readerString(socket).pipe(Effect.tap(() => Effect.ignore(write.write(input))))
+        ).pipe(
+          Stream.runForEach(handleMessage),
+          Effect.catchTag('SocketError', error =>
+            Predicate.isTagged(error.reason, 'SocketCloseError') && error.reason.code === 1000
+              ? Effect.void
+              : Effect.fail(error)
+          ),
+          Effect.flatMap(() => Deferred.await(done)),
+          Effect.catchTag('SocketError', error =>
+            Effect.fail(
+              new SmokeProtocolError({
+                message: `WebSocket failed before AgentEnd: ${error.message}`,
+                cause: error
+              })
             )
           )
+        )
 
         return yield* Effect.raceFirst(Deferred.await(done), runSocket).pipe(
           Effect.timeoutOrElse({

@@ -526,7 +526,7 @@ class OpenAiEmbeddingsConfig extends Context.Service<
 const OpenAiEmbeddingsConfigLayer = Layer.effect(
   OpenAiEmbeddingsConfig,
   Effect.gen(function* () {
-    const apiKey = yield* Config.redacted('OPENAI_API_KEY')
+    const apiKey = yield* Config.Redacted('OPENAI_API_KEY')
 
     return { apiKey, model: 'text-embedding-3-small' }
   }).pipe(

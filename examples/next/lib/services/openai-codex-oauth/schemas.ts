@@ -1,21 +1,34 @@
+import * as Predicate from 'effect/Predicate'
 import * as Schema from 'effect/Schema'
 
+const ownClaim = (key: string) =>
+  Schema.Unknown.check(
+    Schema.makeFilter(input => {
+      if (!Predicate.isObjectOrArray(input)) return false
+
+      const descriptor = Object.getOwnPropertyDescriptor(input, key)
+
+      return descriptor !== undefined && Object.hasOwn(descriptor, 'value')
+    })
+  )
+
+// Guard before Struct decoding: claim accessors and inherited fields are not claims.
 // Separate partial claims keep extraction best-effort and precedence-driven.
-export const OpenAiCodexAccountIdClaimSchema = Schema.Struct({
-  chatgpt_account_id: Schema.String
-})
+export const OpenAiCodexAccountIdClaimSchema = ownClaim('chatgpt_account_id').pipe(
+  Schema.decodeTo(Schema.Struct({ chatgpt_account_id: Schema.String }))
+)
 
-export const OpenAiCodexAuthClaimSchema = Schema.Struct({
-  'https://api.openai.com/auth': OpenAiCodexAccountIdClaimSchema
-})
+export const OpenAiCodexAuthClaimSchema = ownClaim('https://api.openai.com/auth').pipe(
+  Schema.decodeTo(Schema.Struct({ 'https://api.openai.com/auth': OpenAiCodexAccountIdClaimSchema }))
+)
 
-export const OpenAiCodexOrganizationsClaimSchema = Schema.Struct({
-  organizations: Schema.Array(Schema.Unknown)
-})
+export const OpenAiCodexOrganizationsClaimSchema = ownClaim('organizations').pipe(
+  Schema.decodeTo(Schema.Struct({ organizations: Schema.Array(Schema.Unknown) }))
+)
 
-export const OpenAiCodexOrganizationIdClaimSchema = Schema.Struct({
-  id: Schema.String
-})
+export const OpenAiCodexOrganizationIdClaimSchema = ownClaim('id').pipe(
+  Schema.decodeTo(Schema.Struct({ id: Schema.String }))
+)
 
 export const OpenAiCodexOAuthTokenSchema = Schema.Struct({
   type: Schema.Literal('oauth'),

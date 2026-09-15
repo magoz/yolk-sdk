@@ -1,7 +1,7 @@
 import * as Schema from 'effect/Schema'
 
 /** Code-only host boundary. Never attach provider bodies, URLs, credentials or causes. */
-export class ConnectorFileTransferError extends Schema.TaggedErrorClass<ConnectorFileTransferError>()(
+export class ConnectorFileTransferError extends Schema.TaggedError<ConnectorFileTransferError>()(
   'ConnectorFileTransferError',
   {
     code: Schema.Literals([

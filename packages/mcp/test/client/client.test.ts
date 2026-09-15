@@ -101,7 +101,7 @@ const makeFakeLocalMcpLayer = (lines: ReadonlyArray<string>) =>
     )
   )
 
-const decodeJsonRpcPacket = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodeJsonRpcPacket = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const decodeJsonRpcMessage = Schema.decodeUnknownOption(JsonRpcMessage)
 

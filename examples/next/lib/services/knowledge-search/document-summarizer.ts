@@ -63,10 +63,10 @@ const optionString = (option: Option.Option<string>) =>
 const KnowledgeDocumentSummarizerConfigLayer = Layer.effect(
   KnowledgeDocumentSummarizerConfig,
   Effect.gen(function* () {
-    const apiKey = yield* Config.redacted('OPENAI_API_KEY')
+    const apiKey = yield* Config.Redacted('OPENAI_API_KEY')
 
     const model = optionString(
-      yield* Config.option(Config.string('KNOWLEDGE_SEARCH_SUMMARIZATION_MODEL'))
+      yield* Config.option(Config.String('KNOWLEDGE_SEARCH_SUMMARIZATION_MODEL'))
     )
 
     return { apiKey, model: model ?? DEFAULT_MODEL }

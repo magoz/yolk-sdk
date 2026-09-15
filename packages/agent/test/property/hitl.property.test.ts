@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -54,14 +55,14 @@ const approvalCase = Schema.Struct({
   reason: Schema.optional(Schema.String)
 })
 
-const approvalCaseArbitrary = Schema.toArbitrary(approvalCase)
+const approvalCaseArbitrary = Arbitrary.schema(approvalCase)
 
 const mismatchedApprovalCase = Schema.Struct({
   approval: approvalCase,
   mismatch: Schema.Literals(['requestId', 'toolCallId'])
 })
 
-const mismatchedApprovalCaseArbitrary = Schema.toArbitrary(mismatchedApprovalCase)
+const mismatchedApprovalCaseArbitrary = Arbitrary.schema(mismatchedApprovalCase)
 
 const mismatchedQuestionCase = Schema.Struct({
   outcome: QuestionResponseOutcome,
@@ -69,7 +70,7 @@ const mismatchedQuestionCase = Schema.Struct({
   mismatch: Schema.Literals(['requestId', 'toolCallId'])
 })
 
-const mismatchedQuestionCaseArbitrary = Schema.toArbitrary(mismatchedQuestionCase)
+const mismatchedQuestionCaseArbitrary = Arbitrary.schema(mismatchedQuestionCase)
 
 const testLayer = Layer.mergeAll(
   LoopConfig.defaultLayer,

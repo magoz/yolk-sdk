@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Effect, Layer, Match, Option, Predicate, Result, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -37,7 +38,7 @@ const approvalCase = Schema.Struct({
   mismatch: Schema.Literals(['requestId', 'toolCallId'])
 })
 
-const approvalCaseArbitrary = Schema.toArbitrary(approvalCase)
+const approvalCaseArbitrary = Arbitrary.schema(approvalCase)
 
 const approvalCommand = Schema.Struct({
   kind: Schema.Literals(['valid', 'stale', 'mismatchedRequestId', 'mismatchedToolCallId']),
@@ -45,7 +46,7 @@ const approvalCommand = Schema.Struct({
   source: HitlResponseSource
 })
 
-const approvalCommandsArbitrary = Schema.toArbitrary(Schema.Array(approvalCommand))
+const approvalCommandsArbitrary = Arbitrary.schema(Schema.Array(approvalCommand))
 
 const questionCase = Schema.Struct({
   outcome: QuestionResponseOutcome,
@@ -53,7 +54,7 @@ const questionCase = Schema.Struct({
   mismatch: Schema.Literals(['requestId', 'toolCallId'])
 })
 
-const questionCaseArbitrary = Schema.toArbitrary(questionCase)
+const questionCaseArbitrary = Arbitrary.schema(questionCase)
 
 const questionCommand = Schema.Struct({
   kind: Schema.Literals(['valid', 'stale', 'mismatchedRequestId', 'mismatchedToolCallId']),
@@ -61,7 +62,7 @@ const questionCommand = Schema.Struct({
   source: HitlResponseSource
 })
 
-const questionCommandsArbitrary = Schema.toArbitrary(Schema.Array(questionCommand))
+const questionCommandsArbitrary = Arbitrary.schema(Schema.Array(questionCommand))
 
 const mixedFirstResponse = Schema.Struct({
   first: Schema.Literals(['approval', 'question']),
@@ -70,7 +71,7 @@ const mixedFirstResponse = Schema.Struct({
   source: HitlResponseSource
 })
 
-const mixedFirstResponseArbitrary = Schema.toArbitrary(mixedFirstResponse)
+const mixedFirstResponseArbitrary = Arbitrary.schema(mixedFirstResponse)
 
 const stateMachineCommand = Schema.Struct({
   kind: Schema.Literals([
@@ -86,7 +87,7 @@ const stateMachineCommand = Schema.Struct({
   source: HitlResponseSource
 })
 
-const stateMachineCommandsArbitrary = Schema.toArbitrary(Schema.Array(stateMachineCommand))
+const stateMachineCommandsArbitrary = Arbitrary.schema(Schema.Array(stateMachineCommand))
 
 const weatherTool = ToolDef.make({
   name: 'weather',

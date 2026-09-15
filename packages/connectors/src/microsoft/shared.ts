@@ -39,7 +39,7 @@ export const resolveMicrosoftAccessToken = (
   })
 
 const decodeJsonObject = (body: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(body).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(body).pipe(
     Effect.result,
     Effect.map(result => {
       if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined

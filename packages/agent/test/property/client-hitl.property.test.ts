@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Match, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -40,7 +41,7 @@ import { propertyOptions } from './property-options'
 
 const terminalKind = Schema.Literals(['approvalDenied', 'questionAnswered', 'questionCancelled'])
 
-const terminalKindArbitrary = Schema.toArbitrary(terminalKind)
+const terminalKindArbitrary = Arbitrary.schema(terminalKind)
 
 const clientEventKind = Schema.Literals([
   'text',
@@ -60,7 +61,7 @@ const clientEventCase = Schema.Struct({
   kinds: Schema.Array(clientEventKind)
 })
 
-const clientEventCaseArbitrary = Schema.toArbitrary(clientEventCase)
+const clientEventCaseArbitrary = Arbitrary.schema(clientEventCase)
 
 const clientEventTarget = Schema.Literals(['one', 'two'])
 
@@ -73,7 +74,7 @@ const multiClientEventCase = Schema.Struct({
   commands: Schema.Array(multiClientEventCommand)
 })
 
-const multiClientEventCaseArbitrary = Schema.toArbitrary(multiClientEventCase)
+const multiClientEventCaseArbitrary = Arbitrary.schema(multiClientEventCase)
 
 const call = ToolCall.make({ id: 'call_1', name: 'question', params: {} })
 

@@ -38,7 +38,7 @@ const decodeServerMessage = Schema.decodeUnknownEffect(
 )
 
 const encodeUserInput = (input: string, expectedRevision: number) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
     UserInput.make({
       expectedRevision,
       message: UserMessage.make({ content: input })

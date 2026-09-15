@@ -756,11 +756,11 @@ describe('native background tools', () => {
                   execution: { type: 'string' },
                   arguments: { type: 'number' },
                   background: { type: 'boolean' },
-                  nested: { $ref: '#/$defs/Nested' }
+                  nested: { $ref: '#/$defs/NestedEncoded' }
                 }
               }
             },
-            $defs: { Nested: { type: 'object', required: ['value'] } }
+            $defs: { NestedEncoded: { type: 'object', required: ['value'] } }
           })
           expect(parameters).not.toHaveProperty('$ref')
         }

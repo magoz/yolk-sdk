@@ -166,11 +166,14 @@ describe('resolveTools', () => {
     })
   )
 
-  it('rejects non-portable schema annotations with the synchronous constructor error owner', () => {
-    const fields = [
-      Schema.Number.annotate({ examples: [Infinity] }),
-      Schema.Number.annotate({ identifier: 'NonfiniteExample', examples: [Infinity] })
-    ]
+  it('rejects non-portable custom JSON Schema output with the synchronous constructor error owner', () => {
+    // rc.115 drops invalid ordinary examples; a custom compiler hook can still
+    // produce non-portable output. Exercise the constructor's own boundary.
+    const nonfiniteExample = Schema.Finite.check(
+      Schema.makeFilter(() => true, { toJsonSchema: () => ({ examples: [Infinity] }) })
+    )
+
+    const fields = [nonfiniteExample, nonfiniteExample.annotate({ identifier: 'NonfiniteExample' })]
 
     for (const field of fields) {
       let caught: unknown

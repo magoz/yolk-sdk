@@ -17,7 +17,7 @@ const bridgeSecretHeader = 'x-yolk-cloudflare-secret'
 
 const handler = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest
-  const secret = yield* Config.redacted('YOLK_CLOUDFLARE_BRIDGE_SECRET')
+  const secret = yield* Config.Redacted('YOLK_CLOUDFLARE_BRIDGE_SECRET')
   const provided = request.headers[bridgeSecretHeader]
 
   if (provided !== Redacted.value(secret)) {

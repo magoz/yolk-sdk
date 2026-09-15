@@ -38,7 +38,7 @@ export class KnowledgeSearchError extends Data.TaggedError('KnowledgeSearchError
   readonly cause?: unknown
 }> {}
 
-export class KnowledgeStoreError extends Schema.TaggedErrorClass<KnowledgeStoreError>()(
+export class KnowledgeStoreError extends Schema.TaggedError<KnowledgeStoreError>()(
   'KnowledgeStoreError',
   {
     message: Schema.String,
@@ -46,7 +46,7 @@ export class KnowledgeStoreError extends Schema.TaggedErrorClass<KnowledgeStoreE
   }
 ) {}
 
-export class KnowledgeFileError extends Schema.TaggedErrorClass<KnowledgeFileError>()(
+export class KnowledgeFileError extends Schema.TaggedError<KnowledgeFileError>()(
   'KnowledgeFileError',
   {
     message: Schema.String,
@@ -54,7 +54,7 @@ export class KnowledgeFileError extends Schema.TaggedErrorClass<KnowledgeFileErr
   }
 ) {}
 
-export class KnowledgeContextError extends Schema.TaggedErrorClass<KnowledgeContextError>()(
+export class KnowledgeContextError extends Schema.TaggedError<KnowledgeContextError>()(
   'KnowledgeContextError',
   {
     message: Schema.String,

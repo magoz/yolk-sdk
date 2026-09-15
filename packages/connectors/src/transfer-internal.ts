@@ -86,7 +86,7 @@ export const decodeMetadata = <A>(
     try: () => new TextDecoder('utf-8', { fatal: true }).decode(bytes),
     catch: () => new ConnectorFileTransferError({ code: 'invalid_metadata' })
   }).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
     Effect.flatMap(Schema.decodeUnknownEffect(schema)),
     Effect.mapError(() => new ConnectorFileTransferError({ code: 'invalid_metadata' }))
   )

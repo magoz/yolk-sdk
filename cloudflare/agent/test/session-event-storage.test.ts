@@ -1,3 +1,4 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Effect, Layer, Match, Option, Predicate, Ref, Result, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk-sdk/agent/loop'
@@ -92,7 +93,7 @@ const storageCommand = Schema.Struct({
   event: storageEventCommand
 })
 
-const storageCommandsArbitrary = Schema.toArbitrary(Schema.Array(storageCommand))
+const storageCommandsArbitrary = Arbitrary.schema(Schema.Array(storageCommand))
 
 const wsCommand = Schema.Struct({
   kind: Schema.Literals([
@@ -109,7 +110,7 @@ const wsCommand = Schema.Struct({
   ])
 })
 
-const wsCommandsArbitrary = Schema.toArbitrary(Schema.Array(wsCommand))
+const wsCommandsArbitrary = Arbitrary.schema(Schema.Array(wsCommand))
 
 const toolCall = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
 

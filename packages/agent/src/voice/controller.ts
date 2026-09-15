@@ -78,7 +78,7 @@ type PendingApproval = {
   readonly deferred: Deferred.Deferred<ToolApprovalResponse>
 }
 
-const encodeErrorOutput = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeErrorOutput = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const errorOutputJson = (message: string) =>
   encodeErrorOutput({ error: message }).pipe(Effect.orElseSucceed(() => '{"error":"Tool failed"}'))

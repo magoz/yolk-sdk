@@ -144,6 +144,44 @@ describe('OpenAiCodexOAuth', () => {
     ).toEqual(Option.none())
   })
 
+  it('rejects own claim accessors without invoking them', () => {
+    let reads = 0
+
+    const accessors = {
+      get chatgpt_account_id() {
+        reads++
+
+        return 'getter'
+      },
+      get ['https://api.openai.com/auth']() {
+        reads++
+
+        return {}
+      },
+      get organizations() {
+        reads++
+
+        return []
+      },
+      get id() {
+        reads++
+
+        return 'getter'
+      }
+    }
+
+    for (const schema of [
+      OpenAiCodexAccountIdClaimSchema,
+      OpenAiCodexAuthClaimSchema,
+      OpenAiCodexOrganizationsClaimSchema,
+      OpenAiCodexOrganizationIdClaimSchema
+    ]) {
+      expect(Schema.decodeUnknownOption(schema)(accessors)).toEqual(Option.none())
+    }
+
+    expect(reads).toBe(0)
+  })
+
   it('extracts own claims in direct, nested and first-valid-organization order', () => {
     expect(
       extractAccountId(

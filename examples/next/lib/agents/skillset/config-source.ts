@@ -6,12 +6,9 @@ import {
   type SkillsetManifest as SkillsetManifestType
 } from '@yolk-sdk/agent/skillset'
 
-class ConfigSkillsetError extends Schema.TaggedErrorClass<ConfigSkillsetError>()(
-  'ConfigSkillsetError',
-  {
-    message: Schema.String
-  }
-) {}
+class ConfigSkillsetError extends Schema.TaggedError<ConfigSkillsetError>()('ConfigSkillsetError', {
+  message: Schema.String
+}) {}
 
 const configSourceId = 'config'
 
@@ -41,7 +38,7 @@ export const loadConfigSkillsetManifest = (): Effect.Effect<
   ConfigSkillsetError
 > =>
   Effect.gen(function* () {
-    const raw = yield* Config.option(Config.string('YOLK_SKILLSET'))
+    const raw = yield* Config.option(Config.String('YOLK_SKILLSET'))
 
     if (Option.isNone(raw)) {
       return emptySkillsetManifest

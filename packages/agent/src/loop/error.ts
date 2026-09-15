@@ -6,7 +6,7 @@ export const LLMResponseIssue = Schema.Literal('missing_done')
 
 export type LLMResponseIssue = typeof LLMResponseIssue.Type
 
-export class LLMError extends Schema.TaggedErrorClass<LLMError>()('LLMError', {
+export class LLMError extends Schema.TaggedError<LLMError>()('LLMError', {
   cause: Schema.Literals([
     'validation_error',
     'provider_error',
@@ -21,14 +21,14 @@ export class LLMError extends Schema.TaggedErrorClass<LLMError>()('LLMError', {
   responseIssue: Schema.optional(LLMResponseIssue)
 }) {}
 
-export class FauxExhaustedError extends Schema.TaggedErrorClass<FauxExhaustedError>()(
+export class FauxExhaustedError extends Schema.TaggedError<FauxExhaustedError>()(
   'FauxExhaustedError',
   {
     message: Schema.String
   }
 ) {}
 
-export class ToolError extends Schema.TaggedErrorClass<ToolError>()('ToolError', {
+export class ToolError extends Schema.TaggedError<ToolError>()('ToolError', {
   tool: Schema.String,
   message: Schema.String,
   cause: Schema.Literals([
@@ -43,7 +43,7 @@ export class ToolError extends Schema.TaggedErrorClass<ToolError>()('ToolError',
   ])
 }) {}
 
-export class ContextTransformError extends Schema.TaggedErrorClass<ContextTransformError>()(
+export class ContextTransformError extends Schema.TaggedError<ContextTransformError>()(
   'ContextTransformError',
   {
     cause: Schema.Literals(['context_overflow', 'invalid_response']),
@@ -52,7 +52,7 @@ export class ContextTransformError extends Schema.TaggedErrorClass<ContextTransf
   }
 ) {}
 
-export class AbortError extends Schema.TaggedErrorClass<AbortError>()('AbortError', {
+export class AbortError extends Schema.TaggedError<AbortError>()('AbortError', {
   reason: Schema.Literals(['user', 'system', 'max_turns'])
 }) {}
 

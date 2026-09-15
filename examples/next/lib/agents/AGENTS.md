@@ -55,7 +55,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## JSON Boundaries
 
-- Use Effect Schema at production JSON boundaries; prefer `Schema.UnknownFromJsonString` for unknown JSON strings.
+- Use Effect Schema at production JSON boundaries; prefer `Schema.fromJsonString(Schema.Unknown)` for unknown JSON strings.
 - Avoid raw `JSON.parse/stringify` and `Effect.try` wrappers in providers/routes/packages when Schema/HTTP helpers fit.
 - Web-native Workflow run routes may use `request.json()`/`Effect.tryPromise` at the route boundary.
 - Browser-only Realtime hook may use raw JSON for data-channel payloads; HTTP uses Effect `HttpClient`.

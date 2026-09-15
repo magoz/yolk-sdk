@@ -1,4 +1,14 @@
-import { Cause, Deferred, Duration, Effect, Layer, Queue, Stream, type Scope } from 'effect'
+import {
+  Cause,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Predicate,
+  Queue,
+  Stream,
+  type Scope
+} from 'effect'
 import * as Socket from 'effect/unstable/socket/Socket'
 import {
   VoiceErrorEvent,
@@ -64,8 +74,7 @@ export const makeWebSocketVoiceTransport = (
 
     const socket = yield* Socket.makeWebSocket(options.url, {
       protocols: options.protocols === undefined ? undefined : [...options.protocols],
-      openTimeout: Duration.millis(options.readyTimeoutMs ?? defaultReadyTimeoutMs),
-      closeCodeIsError: code => code !== 1000 && code !== 1005
+      openTimeout: Duration.millis(options.readyTimeoutMs ?? defaultReadyTimeoutMs)
     })
 
     const write = yield* socket.writer
@@ -76,7 +85,7 @@ export const makeWebSocketVoiceTransport = (
         discard: true
       })
 
-    const onOpen = Effect.forEach(options.openPayloads ?? [], payload => write(payload), {
+    const onOpen = Effect.forEach(options.openPayloads ?? [], payload => write.write(payload), {
       discard: true
     }).pipe(
       Effect.mapError(socketErrorToVoiceError),
@@ -85,7 +94,14 @@ export const makeWebSocketVoiceTransport = (
       Effect.asVoid
     )
 
-    yield* socket.runString(handleMessage, { onOpen }).pipe(
+    yield* Stream.fromPull(Socket.readerString(socket).pipe(Effect.tap(() => onOpen))).pipe(
+      Stream.runForEach(handleMessage),
+      Effect.catchTag('SocketError', error =>
+        Predicate.isTagged(error.reason, 'SocketCloseError') &&
+        (error.reason.code === 1000 || error.reason.code === 1005)
+          ? Effect.void
+          : Effect.fail(error)
+      ),
       Effect.matchCauseEffect({
         onFailure: cause =>
           Effect.gen(function* () {
@@ -126,7 +142,7 @@ export const makeWebSocketVoiceTransport = (
       })
     )
 
-    const send = (data: string) => write(data).pipe(Effect.mapError(socketErrorToVoiceError))
+    const send = (data: string) => write.write(data).pipe(Effect.mapError(socketErrorToVoiceError))
 
     return {
       send,

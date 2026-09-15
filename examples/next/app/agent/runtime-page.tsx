@@ -25,7 +25,7 @@ type AgentRuntimePageProps = {
   readonly runtime: AgentRuntime
 }
 
-class CloudflareAgentUnavailableError extends Schema.TaggedErrorClass<CloudflareAgentUnavailableError>()(
+class CloudflareAgentUnavailableError extends Schema.TaggedError<CloudflareAgentUnavailableError>()(
   'CloudflareAgentUnavailableError',
   {
     message: Schema.String
@@ -91,7 +91,7 @@ type CloudflareBootstrapPayload = {
 }
 
 const encodeJson = (value: CloudflareBootstrapPayload) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value)
 
 const cloudflareWebSocketUrl = (url: string, sessionId: string) =>
   Effect.try({
@@ -122,17 +122,17 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
   Effect.gen(function* () {
     const workerUrl = yield* requireConfigOption(
       'CLOUDFLARE_AGENT_URL',
-      yield* Config.option(Config.string('CLOUDFLARE_AGENT_URL'))
+      yield* Config.option(Config.String('CLOUDFLARE_AGENT_URL'))
     )
 
     const appUrl = yield* requireConfigOption(
       'YOLK_APP_URL',
-      yield* Config.option(Config.string('YOLK_APP_URL'))
+      yield* Config.option(Config.String('YOLK_APP_URL'))
     )
 
     const bridgeSecret = yield* requireConfigOption(
       'YOLK_CLOUDFLARE_BRIDGE_SECRET',
-      yield* Config.option(Config.string('YOLK_CLOUDFLARE_BRIDGE_SECRET'))
+      yield* Config.option(Config.String('YOLK_CLOUDFLARE_BRIDGE_SECRET'))
     )
 
     const mcpServers = yield* loadProjectMcpServers()

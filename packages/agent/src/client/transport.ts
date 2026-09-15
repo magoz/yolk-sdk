@@ -43,7 +43,7 @@ import type {
 } from '@yolk-sdk/agent/protocol'
 import type { AgentTranscript } from './state.ts'
 
-export class AgentTransportError extends Schema.TaggedErrorClass<AgentTransportError>()(
+export class AgentTransportError extends Schema.TaggedError<AgentTransportError>()(
   'AgentTransportError',
   {
     message: Schema.String,
@@ -388,7 +388,7 @@ type TransportJsonStringInput =
   | AgentHttpHitlResponseRequestJson
 
 const encodeJsonString = (value: TransportJsonStringInput, message: string) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
     Effect.mapError(
       error =>
         new AgentTransportError({
@@ -399,7 +399,7 @@ const encodeJsonString = (value: TransportJsonStringInput, message: string) =>
   )
 
 const decodeJsonString = (raw: string, message: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(raw).pipe(
     Effect.mapError(
       error =>
         new AgentTransportError({

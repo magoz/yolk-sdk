@@ -15,11 +15,11 @@ Tool arguments/results remain opaque until their execution/provider boundary.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
 Published package metadata requires Node.js 22+; `client/node` and `server/node` are Node-only.
 
 ## Subpaths

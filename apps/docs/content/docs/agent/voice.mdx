@@ -8,7 +8,7 @@ Use the voice subpaths when you want a speech-to-speech agent session that runs 
 Install:
 
 ```bash
-pnpm add @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 Add `react` for `@yolk-sdk/agent/voice/react`.
@@ -167,7 +167,7 @@ Effect programs so advertisement failures stay in the typed error channel. Unexp
 
 Union-root lowering merges own `__proto__` / `constructor` fields with a `Map` plus
 `Object.fromEntries` (first-seen / string-enum union). Required intersection, empty-required
-omission, and object-root identity are unchanged. `events.ts` still uses `UnknownFromJsonString`.
+omission, and object-root identity are unchanged. `events.ts` uses `Schema.fromJsonString(Schema.Unknown)`.
 
 ## Host responsibilities
 

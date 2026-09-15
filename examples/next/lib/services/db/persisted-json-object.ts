@@ -1,4 +1,4 @@
-import { Effect, Option, Predicate } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 
@@ -190,7 +190,7 @@ const snapshotPersistedJsonObject = (
  * Undefined object keys are omitted on write; they are not valid nested JSON.
  */
 const invalidJsonObject = () =>
-  new SchemaIssue.InvalidValue(Option.none(), { message: 'Expected a plain JSON object' })
+  new SchemaIssue.InvalidValue({ message: 'Expected a plain JSON object' })
 
 const persistedJsonObjectSchema = (omitUndefined: boolean) =>
   Schema.declareConstructor<PersistedJsonObject>()(

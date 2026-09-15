@@ -31,7 +31,7 @@ export const OneDriveDownloadErrorCode = Schema.Literals([
 export type OneDriveDownloadErrorCode = typeof OneDriveDownloadErrorCode.Type
 
 /** Safe boundary: deliberately contains no upstream message, URL, headers, body or cause. */
-export class OneDriveDownloadError extends Schema.TaggedErrorClass<OneDriveDownloadError>()(
+export class OneDriveDownloadError extends Schema.TaggedError<OneDriveDownloadError>()(
   'OneDriveDownloadError',
   { code: OneDriveDownloadErrorCode }
 ) {}
@@ -297,7 +297,7 @@ export const downloadOneDriveItem = (
         try: () => new TextDecoder('utf-8', { fatal: true }).decode(response.bytes),
         catch: () => new OneDriveDownloadError({ code: 'invalid_metadata' })
       }).pipe(
-        Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
         Effect.flatMap(Schema.decodeUnknownEffect(Metadata)),
         Effect.mapError(() => new OneDriveDownloadError({ code: 'invalid_metadata' }))
       )

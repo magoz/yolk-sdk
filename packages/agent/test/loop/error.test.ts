@@ -159,9 +159,9 @@ describe('LLMError', () => {
       })
     )
 
-    expect(Object.keys(omitted)).toEqual(['code', 'message', 'retryable', '_tag'])
+    expect(Object.keys(omitted)).toEqual(['_tag', 'code', 'message', 'retryable'])
     expect(JSON.stringify(omitted)).toBe(
-      '{"code":"provider_error","message":"down","retryable":true,"_tag":"AgentError"}'
+      '{"_tag":"AgentError","code":"provider_error","message":"down","retryable":true}'
     )
     expect(Object.hasOwn(omitted, 'provider')).toBe(false)
   })

@@ -119,7 +119,7 @@ const transcribeAudio = (audio: Uint8Array, mimeType: string) =>
     )
   }).pipe(Effect.provide(FetchHttpClient.layer))
 
-const encodeSpeakBody = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeSpeakBody = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const requestSpeech = (text: string): Effect.Effect<SpeechAudio, HoldToSpeakError> =>
   Effect.gen(function* () {

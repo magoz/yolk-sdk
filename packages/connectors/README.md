@@ -5,11 +5,11 @@ Effect-native connector primitives and reusable provider actions for hosts that 
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Subpaths
@@ -299,7 +299,7 @@ unchanged. Public action classes, `GmailUnknownOutput`, and `gmail.get_attachmen
 base64url `data`) are unchanged.
 
 `gmail.get_thread` and `gmail.list_attachments` admit internal MIME `payload` as `Schema.Json` after
-`UnknownFromJsonString`. `Schema.Json` requires finite numbers: raw HTTP JSON `1e999` parses to
+`Schema.fromJsonString(Schema.Unknown)`. `Schema.Json` requires finite numbers: raw HTTP JSON `1e999` parses to
 `Infinity` and rejects the **whole** thread/message payload (`ConnectorError` `validation_failed`,
 `Invalid response shape`). That is not a general collapse of malformed optional MIME fields. Do not
 demonstrate overflow with `JSON.stringify(Infinity)` — that becomes `null` and would hit the

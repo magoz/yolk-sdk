@@ -23,21 +23,21 @@ import {
   type RuntimeError
 } from '@yolk-sdk/agent/runtime'
 
-export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentResponseEncodingError>()(
+export class AgentResponseEncodingError extends Schema.TaggedError<AgentResponseEncodingError>()(
   'AgentResponseEncodingError',
   {
     message: Schema.String
   }
 ) {}
 
-export class AgentImageLimitError extends Schema.TaggedErrorClass<AgentImageLimitError>()(
+export class AgentImageLimitError extends Schema.TaggedError<AgentImageLimitError>()(
   'AgentImageLimitError',
   {
     message: Schema.String
   }
 ) {}
 
-export class AgentDocumentLimitError extends Schema.TaggedErrorClass<AgentDocumentLimitError>()(
+export class AgentDocumentLimitError extends Schema.TaggedError<AgentDocumentLimitError>()(
   'AgentDocumentLimitError',
   {
     message: Schema.String
@@ -259,7 +259,7 @@ const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStre
   )
 
 export const encodeAgentNdjsonEvent = (event: AgentEvent) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(event).pipe(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(event).pipe(
     Effect.mapError(
       error =>
         new AgentResponseEncodingError({

@@ -62,11 +62,11 @@ const optionString = (option: Option.Option<string>) =>
 const R2KnowledgeFileStoreConfigLayer = Layer.effect(
   R2KnowledgeFileStoreConfig,
   Effect.gen(function* () {
-    const endpoint = yield* Config.string('R2_ENDPOINT')
-    const bucketName = yield* Config.string('R2_BUCKET_NAME')
-    const accessKeyId = yield* Config.redacted('R2_ACCESS_KEY_ID')
-    const secretAccessKey = yield* Config.redacted('R2_SECRET_ACCESS_KEY')
-    const region = optionString(yield* Config.option(Config.string('R2_REGION'))) ?? 'auto'
+    const endpoint = yield* Config.String('R2_ENDPOINT')
+    const bucketName = yield* Config.String('R2_BUCKET_NAME')
+    const accessKeyId = yield* Config.Redacted('R2_ACCESS_KEY_ID')
+    const secretAccessKey = yield* Config.Redacted('R2_SECRET_ACCESS_KEY')
+    const region = optionString(yield* Config.option(Config.String('R2_REGION'))) ?? 'auto'
 
     return { endpoint, bucketName, accessKeyId, secretAccessKey, region }
   }).pipe(

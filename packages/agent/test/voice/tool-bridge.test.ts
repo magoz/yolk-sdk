@@ -168,7 +168,7 @@ describe('executeVoiceToolCall', () => {
         )
 
         expect(response.output).toBe(
-          '{"result":[{"text":"hello","_tag":"Text","extraHostKey":"keep","hostGetter":"seen","hostInfinity":null}]}'
+          '{"result":[{"_tag":"Text","text":"hello","extraHostKey":"keep","hostGetter":"seen","hostInfinity":null}]}'
         )
         expect(hostGetterReads).toBe(1)
       })
@@ -201,7 +201,7 @@ describe('executeVoiceToolCall', () => {
         )
       )
 
-      expect(response.output).toBe(`{"result":[{"text":"${text}","_tag":"Text"}]}`)
+      expect(response.output).toBe(`{"result":[{"_tag":"Text","text":"${text}"}]}`)
     })
   )
 

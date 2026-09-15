@@ -23,7 +23,7 @@ const globalSetup = async () => {
     yield* ensureTestEnv('Global Setup')
 
     yield* Effect.log('Resetting database')
-    const databaseUrl = yield* Config.string('DATABASE_URL')
+    const databaseUrl = yield* Config.String('DATABASE_URL')
     const sql = neon(databaseUrl)
     const resetDb = drizzle({ client: sql, relations: schema.relations })
 

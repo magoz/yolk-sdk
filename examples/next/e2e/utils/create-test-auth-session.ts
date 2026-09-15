@@ -29,7 +29,7 @@ export const createTestAuthSession = (userId: string) =>
   Effect.gen(function* () {
     yield* ensureTestEnv('Create Test Auth Session')
     const db = yield* Db
-    const secret = yield* Config.string('BETTER_AUTH_SECRET')
+    const secret = yield* Config.String('BETTER_AUTH_SECRET')
 
     const token = createId()
     const now = new Date()

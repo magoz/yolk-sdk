@@ -1,5 +1,6 @@
 import { Effect, Match } from 'effect'
-import type * as Schema from 'effect/Schema'
+import * as Schema from 'effect/Schema'
+import type * as SchemaIssue from 'effect/SchemaIssue'
 import {
   KnowledgeFileSource,
   KnowledgeTextSource,
@@ -24,11 +25,14 @@ const optionalSourceText = (value: string | null) => {
   return trimmed.length > 0 ? trimmed : undefined
 }
 
-const sourceSchemaError = (label: string) => (error: Schema.SchemaError) =>
-  new SearchIndexStoreError({
+const sourceSchemaError = (label: string) => (issue: SchemaIssue.Issue) => {
+  const error = new Schema.SchemaError(issue)
+
+  return new SearchIndexStoreError({
     message: `Invalid ${label}: ${error.message}`,
     cause: error
   })
+}
 
 const presentOpaqueLocator = (input: {
   readonly value: string | null

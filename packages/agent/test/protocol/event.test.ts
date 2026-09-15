@@ -61,7 +61,7 @@ describe('agent protocol events', () => {
     }
 
     expect(JSON.stringify(omitted)).toBe(
-      '{"response":{"_tag":"QuestionResponse","requestId":"req","toolCallId":"call","outcome":"answered","source":"user"},"_tag":"QuestionAnswered"}'
+      '{"_tag":"QuestionAnswered","response":{"_tag":"QuestionResponse","requestId":"req","toolCallId":"call","outcome":"answered","source":"user"}}'
     )
     expect(Object.keys(omitted.response)).toEqual([
       '_tag',
@@ -131,7 +131,7 @@ describe('agent protocol events', () => {
     }
 
     expect(JSON.stringify(omitted.response)).toBe(
-      '{"requestId":"req","toolCallId":"call","decision":"approved","source":"user","_tag":"ToolApprovalResponse"}'
+      '{"_tag":"ToolApprovalResponse","requestId":"req","toolCallId":"call","decision":"approved","source":"user"}'
     )
 
     const present = hitlResponseEvent(
@@ -157,15 +157,15 @@ describe('agent protocol events', () => {
     }
 
     expect(Object.keys(deniedResponse)).toEqual([
+      '_tag',
       'requestId',
       'toolCallId',
       'decision',
       'source',
-      'reason',
-      '_tag'
+      'reason'
     ])
     expect(JSON.stringify(deniedResponse)).toBe(
-      '{"requestId":"req","toolCallId":"call","decision":"denied","source":"user","reason":"no","_tag":"ToolApprovalResponse"}'
+      '{"_tag":"ToolApprovalResponse","requestId":"req","toolCallId":"call","decision":"denied","source":"user","reason":"no"}'
     )
   })
 })

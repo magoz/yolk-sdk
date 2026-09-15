@@ -41,7 +41,7 @@ const bad: Effect.Effect<Result, Error> = Effect.fail(new Error('failed'))
 Effect.catch(e => Effect.fail(new Error(`Wrapped: ${e}`)))
 
 // CORRECT - use a tagged error in the typed error channel
-export class ValidationError extends Schema.TaggedErrorClass<ValidationError>()('ValidationError', {
+export class ValidationError extends Schema.TaggedError<ValidationError>()('ValidationError', {
   message: Schema.String
 }) {
   // Optional: custom message getter
@@ -62,7 +62,7 @@ Using the global `Error` type:
 - Makes error discrimination impossible
 - Prevents the compiler from tracking which errors are handled
 
-Always use tagged errors with a unique `_tag`. Use `Schema.TaggedErrorClass` when the error crosses a Schema/wire boundary; use `Data.TaggedError` for simple internal typed failures.
+Always use tagged errors with a unique `_tag`. Use `Schema.TaggedError` when the error crosses a Schema/wire boundary; use `Data.TaggedError` for simple internal typed failures.
 
 ### 3.1 `Effect.die` Is for Defects Only
 
@@ -368,16 +368,16 @@ export class Account extends Schema.Class<Account>('Account')({
 
 The ESLint rule `local/no-schema-from-self` catches any accidental use of stale v3 `*FromSelf` patterns.
 
-### Schema.TaggedErrorClass for Wire-Boundary Errors
+### Schema.TaggedError for Wire-Boundary Errors
 
-Use `Schema.TaggedErrorClass` when an error crosses a Schema/wire boundary or needs schema-derived guards/serialization. Use `Data.TaggedError` for simple internal typed failures.
+Use `Schema.TaggedError` when an error crosses a Schema/wire boundary or needs schema-derived guards/serialization. Use `Data.TaggedError` for simple internal typed failures.
 
 ```typescript
 import * as Schema from 'effect/Schema'
 import * as Effect from 'effect/Effect'
 
 // Simple error with fields
-export class AccountNotFound extends Schema.TaggedErrorClass<AccountNotFound>()('AccountNotFound', {
+export class AccountNotFound extends Schema.TaggedError<AccountNotFound>()('AccountNotFound', {
   accountId: Schema.String
 }) {
   // Optional: custom message getter
@@ -387,13 +387,10 @@ export class AccountNotFound extends Schema.TaggedErrorClass<AccountNotFound>()(
 }
 
 // Error with cause (for wrapping other errors)
-export class PersistenceError extends Schema.TaggedErrorClass<PersistenceError>()(
-  'PersistenceError',
-  {
-    operation: Schema.String,
-    cause: Schema.Unknown
-  }
-) {
+export class PersistenceError extends Schema.TaggedError<PersistenceError>()('PersistenceError', {
+  operation: Schema.String,
+  cause: Schema.Unknown
+}) {
   get message(): string {
     return `Persistence error during ${this.operation}`
   }
@@ -482,13 +479,15 @@ export class JournalEntry extends Schema.Class<JournalEntry>('JournalEntry')({
 const entry = JournalEntry.make({ id, description: '...' })
 ```
 
-**Constructor vs encoded key order:** In currently pinned Effect 4.0.0-beta.80, `Schema.Class` / `Schema.TaggedClass` constructors merge `{ ...input, ...validated }`.
-Dropping an explicit constructor `_tag` can append the default tag and change `Object.keys` / raw `JSON.stringify`, even when `Schema.encodeSync` still yields equal schema-order encoded data.
-Hold constructor migrations that change protected raw/wire key order until a compatible owner or explicit contract decision exists; this is not a lint exemption. Do not assume every Schema struct constructor behaves the same.
+**Constructor vs encoded key order:** The rc.115 migration explicitly adopts schema-order construction (including `_tag` first), replacing beta.80's input-order merge. Raw JSON golden fixtures record that changed byte order; field values, optional presence, array order and snapshot identity must remain intact. Effect does not guarantee input key-order preservation during decoding/encoding. Future changes to protected raw/wire order still need an explicit contract decision; do not silently remove ordering assertions.
 
-**Nested constructor identity:** In pinned Effect 4.0.0-beta.80, a Class field in a struct maker can reconstruct a nested Class instance. `Schema.toType(Class)` does not prevent this: the maker restores Class constructor links after extracting the type-side AST. Check reference identity, getter reads, and raw key order—not just encoded equality—before wrapping existing values. `Schema.instanceOf(Class)` or a Class union is not an interchangeable fix: these can preserve real instances while rejecting structurally assignable plain objects/getter stand-ins. Keep compatibility-sensitive migrations held rather than disabling validation or using permissive schemas.
+**Nested constructor identity:** In Effect beta.80 (the original reason for these snapshots), a Class field in a struct maker can reconstruct a nested Class instance. `Schema.toType(Class)` does not prevent this: the maker restores Class constructor links after extracting the type-side AST. Check reference identity, getter reads, and raw key order—not just encoded equality—before wrapping existing values. `Schema.instanceOf(Class)` or a Class union is not an interchangeable fix: these can preserve real instances while rejecting structurally assignable plain objects/getter stand-ins. Keep compatibility-sensitive migrations held rather than disabling validation or using permissive schemas.
 
 ### Schema Decoding/Encoding - Use Effect Variants
+
+On rc.115, `Schema.SchemaError` is a native `Error`; `makeEffect` fails with `SchemaIssue.Issue`, while synchronous makers throw a native `Error` whose `cause` is that issue. Format a retained issue with `new Schema.SchemaError(issue).message`; do not rely on `issue.toString()`. Input values are omitted from diagnostics by default—do not enable input reporting just to restore old error strings.
+
+`parseOptions` annotations no longer enforce strictness. Use decoder options; strict union members such as Calendar boundaries must enforce excess-property rejection inside each member. Struct decoding alone is not an own-data-property guard: reject inherited/accessor claims before decoding when the boundary promises getter safety.
 
 **NEVER** use `decodeUnknownSync` or `encodeUnknownSync` - they throw exceptions. Always use the Effect variants that return `Effect<A, ParseError>`:
 
@@ -663,7 +662,7 @@ const handleError = Match.type<AccountError>().pipe(
 
 **Do not blindly replace `_tag` switches with `Match.tagsExhaustive`.**
 
-- In currently pinned Effect 4.0.0-beta.80, `Match.tagsExhaustive` / `Match.discriminators` read the discriminator twice: predicate (`arg[field] in fields`) then dispatch (`fields[data[field]]`).
+- In Effect beta.80 (the original reason for discriminator snapshots), `Match.tagsExhaustive` / `Match.discriminators` read the discriminator twice: predicate (`arg[field] in fields`) then dispatch (`fields[data[field]]`).
 - That extra read can change valid structural SDK getter input. Review before/after property-read sequences (including copies of `_tag` into returned fields).
 - Not every Match API double-reads object fields. Two-case `when`/`orElse` or matching a scalar (`Match.value(state._tag)`) can differ from `tagsExhaustive` on the object.
 
@@ -673,20 +672,20 @@ const handleError = Match.type<AccountError>().pipe(
 
 - `Config.*` values are yieldable; yield them directly inside `Effect.gen`.
 - Map config errors around the whole block, not on individual `Config` values.
-- Use `Config.redacted` for secrets.
+- Use `Config.Redacted` for secrets.
 - Use `Config.option(...)` with `Option` helpers for optional env.
 
 ```typescript
 Effect.gen(function* () {
-  const url = yield* Config.string('DATABASE_URL')
-  const apiKey = yield* Config.redacted('API_KEY')
-  const optional = yield* Config.option(Config.string('OPTIONAL_VAR'))
+  const url = yield* Config.String('DATABASE_URL')
+  const apiKey = yield* Config.Redacted('API_KEY')
+  const optional = yield* Config.option(Config.String('OPTIONAL_VAR'))
 
   return { url, apiKey, optional } as const
 }).pipe(Effect.mapError(() => new ConfigError({ message: 'Config missing' })))
 ```
 
-Do not pipe `Config.string('URL')` through `Effect.mapError`; `Config` is not an `Effect` subtype.
+Do not pipe `Config.String('URL')` through `Effect.mapError`; `Config` is not an `Effect` subtype.
 
 ---
 
@@ -699,7 +698,7 @@ import { Effect, Layer, Context, Config } from 'effect'
 export class AccountService extends Context.Service<AccountService>()('@app/AccountService', {
   make: Effect.gen(function* () {
     const db = yield* Db
-    const connectionString = yield* Config.string('DATABASE_URL')
+    const connectionString = yield* Config.String('DATABASE_URL')
 
     return {
       findById: (id: AccountId): Effect.Effect<Account, AccountNotFound> =>

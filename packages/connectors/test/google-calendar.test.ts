@@ -42,7 +42,9 @@ describe('Google Calendar event date/time boundaries', () => {
         ['whitespace dateTime', { dateTime: '   ' }],
         ['neither boundary', {}],
         ['timezone only', { timeZone: 'UTC' }],
-        ['both boundary kinds', { date: '2026-05-21', dateTime: '2026-05-21T10:00:00Z' }]
+        ['both boundary kinds', { date: '2026-05-21', dateTime: '2026-05-21T10:00:00Z' }],
+        ['date with excess field', { date: '2026-05-21', extra: true }],
+        ['dateTime with excess field', { dateTime: '2026-05-21T10:00:00Z', extra: true }]
       ]
 
       for (const [label, input] of invalidBoundaries) {
@@ -51,6 +53,12 @@ describe('Google Calendar event date/time boundaries', () => {
         )
 
         expect(result._tag, label).toBe('Failure')
+
+        const encoded = yield* Schema.encodeUnknownEffect(GoogleCalendarEventDateTime)(input).pipe(
+          Effect.result
+        )
+
+        expect(encoded._tag, `${label} during encoding`).toBe('Failure')
       }
     })
   )

@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Layer, Stream } from 'effect'
+import { Cause, Effect, Exit, Layer, Schema, SchemaIssue, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { makeSubagentRunId, ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
 import { LoopConfig, runToolBatch, ToolExecutor } from '@yolk-sdk/agent/loop'
@@ -443,8 +443,16 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
         expect(failure).toBeInstanceOf(Error)
 
         if (failure instanceof Error) {
-          expect(failure.message).toContain('subagentType')
-          expect(failure.message).toContain('  general  ')
+          expect(failure.message).toBe('Schema validation failed')
+          expect(SchemaIssue.isIssue(failure.cause)).toBe(true)
+
+          if (SchemaIssue.isIssue(failure.cause)) {
+            const detail = new Schema.SchemaError(failure.cause).message
+
+            expect(detail).toContain('subagentType')
+            expect(detail).toContain('no leading or trailing whitespace')
+            expect(detail).not.toContain('  general  ')
+          }
         }
       }
     })
