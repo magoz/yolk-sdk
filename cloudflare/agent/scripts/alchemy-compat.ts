@@ -27,7 +27,7 @@ const failures: string[] = []
 
 const expectFunction = (name: string, value: unknown) => {
   if (!Predicate.isFunction(value)) {
-    failures.push(`${name} is ${typeof value}, expected function`)
+    failures.push(`${name} is not a function`)
   }
 }
 
@@ -53,7 +53,7 @@ if (!Predicate.isFunction(namespaceOption.pipe)) {
   failures.push('Effect.serviceOption(Namespace) is not a pipeable Effect')
 }
 
-if (Predicate.isFunction(Reflect.get(namespaceOption, 'asEffect'))) {
+if ('asEffect' in namespaceOption && Predicate.isFunction(namespaceOption.asEffect)) {
   failures.push(
     'Effect.serviceOption(Namespace).asEffect still exists; catalog Effect is too old for this Alchemy'
   )
