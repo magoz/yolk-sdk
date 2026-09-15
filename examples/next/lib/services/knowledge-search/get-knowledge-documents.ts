@@ -2,8 +2,8 @@ import { and, desc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import { AppSearchIndexStoreError } from './errors'
-import type { AppKnowledgeDocumentRecord } from './document-records'
+import { AppSearchIndexStoreError, isAppSearchIndexStoreError } from './errors'
+import { decodeAppKnowledgeDocumentRecord } from './document-records'
 
 export const getKnowledgeDocuments = (input: {
   readonly userId: string
@@ -27,14 +27,15 @@ export const getKnowledgeDocuments = (input: {
       )
       .orderBy(desc(schema.knowledgeDocument.createdAt))
 
-    return rows satisfies ReadonlyArray<AppKnowledgeDocumentRecord>
+    return yield* Effect.forEach(rows, decodeAppKnowledgeDocumentRecord)
   }).pipe(
     Effect.withSpan('knowledge_search.documents.get'),
-    Effect.mapError(
-      error =>
-        new AppSearchIndexStoreError({
-          message: 'Could not get knowledge search documents',
-          cause: error
-        })
+    Effect.mapError(error =>
+      isAppSearchIndexStoreError(error)
+        ? error
+        : new AppSearchIndexStoreError({
+            message: 'Could not get knowledge search documents',
+            cause: error
+          })
     )
   )

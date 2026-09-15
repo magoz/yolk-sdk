@@ -127,9 +127,6 @@ const toolError = (message: string, cause: ToolError['cause']) =>
 const toolRegistryErrorToToolError = (error: { readonly message: string }) =>
   toolError(error.message, 'execution')
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
 const unexpectedSubagentFailureMessage = 'Unexpected subagent failure'
 
 const subagentRunErrorFromUnknown = (error: unknown): SubagentRunError => {
@@ -428,7 +425,7 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
           ? error
           : new ToolError({
               tool: 'manage_skills',
-              message: unknownToMessage(error),
+              message: error instanceof Error ? error.message : String(error),
               cause: 'execution'
             })
       )

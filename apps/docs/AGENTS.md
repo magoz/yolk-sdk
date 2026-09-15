@@ -29,3 +29,4 @@ Private Fumadocs/Next site for public `@yolk-sdk/*` package documentation.
 - Run `pnpm docs:check` after docs changes.
 - Run `pnpm build:docs` after routing/config changes.
 - Run docs checks/builds serially; both regenerate `.source`/`.next` types, and concurrent runs can produce transient TS6053 missing-file failures.
+- Keep the explicit `fumadocs-mdx` command **after** `next typegen` in `typegen`. The Fumadocs Next plugin starts async generation during config loading without awaiting it; Next's typegen process may exit with a truncated `.source/server.ts`. The final awaited MDX CLI regenerates complete modules before TypeScript reads them.

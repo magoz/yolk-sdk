@@ -4,7 +4,7 @@ import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { AppKnowledgeDocumentNotFoundError, AppSearchIndexStoreError } from './errors'
-import type { AppKnowledgeDocumentRecord } from './document-records'
+import { decodeAppKnowledgeDocumentRecord } from './document-records'
 
 const sqlStoreError = (error: EffectDrizzleQueryError) =>
   new AppSearchIndexStoreError({
@@ -42,7 +42,7 @@ export const getKnowledgeDocument = (input: {
       )
     }
 
-    return row satisfies AppKnowledgeDocumentRecord
+    return yield* decodeAppKnowledgeDocumentRecord(row)
   }).pipe(
     Effect.withSpan('knowledge_search.document.get'),
     Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))

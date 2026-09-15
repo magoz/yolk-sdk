@@ -12,6 +12,8 @@ Schema, generic, type-guard, `identity`, and database-row alternatives—live in
 
 At Effect boundaries, decode unknown data with `Schema.decodeUnknownEffect`. For nullable values,
 use `Option.fromNullishOr` rather than manually branching into `Option.some`/`Option.none`.
+Keep `unknown` / `object` at decode, JSON-walk, and opaque-reject contracts; do not introduce
+aliases or casts to satisfy retired syntax-only lint.
 
 ### 2. NEVER Use `catch` When Error Type Is `never`
 
@@ -437,6 +439,10 @@ export class Account extends Schema.Class<Account>('Account')({
 export const isAccount = Schema.is(Account)
 ```
 
+Production tagged values use Schema tagged `.make`, tagged class/error constructors, or
+`Data.taggedEnum` variants—not raw `{ _tag }` literals. Independent/negative wire fixtures in
+standard test files may use raw `_tag` objects; positive typed fixtures still use real constructors.
+
 **Always use `.make()` - never `new`:**
 
 ```typescript
@@ -716,6 +722,11 @@ export class AccountService extends Context.Service<AccountService>()('@app/Acco
   static layer = Layer.effect(this, this.make).pipe(Layer.provide(Db.layer))
 }
 ```
+
+Callers should import owning Layers and yield contextual services rather than leaking
+`Context.Service` constructors. Oxlint no longer uses `/^make[A-Z]/` import-name matching as a
+lifetime guard; Layer composition, tool/DTO `make*` factories, and type-only `make*` imports are
+legitimate. Review still prefers dependency injection over imported service constructors.
 
 ### Layer Pattern
 

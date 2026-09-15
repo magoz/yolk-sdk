@@ -101,22 +101,26 @@ type SubagentCallMetadata = {
   readonly description: string
 }
 
-const objectField = (input: unknown, key: string) =>
-  Predicate.isObjectOrArray(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+const objectField = (input: unknown, key: string): string | undefined => {
+  if (!Predicate.isObjectOrArray(input)) {
+    return undefined
+  }
 
-const nonEmptyStringField = (input: unknown, key: string) => {
-  const value = objectField(input, key)
+  const value: unknown = Object.getOwnPropertyDescriptor(input, key)?.value
 
-  return Predicate.isString(value) && value.trim().length > 0 ? value : undefined
+  return Predicate.isString(value) ? value : undefined
 }
+
+const nonEmptyStringField = (value: string | undefined): string | undefined =>
+  value !== undefined && value.trim().length > 0 ? value : undefined
 
 const subagentCallMetadata = (call: ToolCall): SubagentCallMetadata | undefined => {
   if (call.name !== subagentToolName) {
     return undefined
   }
 
-  const subagentType = nonEmptyStringField(call.params, 'subagent_type')
-  const description = nonEmptyStringField(call.params, 'description')
+  const subagentType = nonEmptyStringField(objectField(call.params, 'subagent_type'))
+  const description = nonEmptyStringField(objectField(call.params, 'description'))
 
   if (subagentType === undefined || description === undefined) {
     return undefined

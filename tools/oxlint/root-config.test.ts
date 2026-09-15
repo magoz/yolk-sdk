@@ -39,6 +39,15 @@ const UNPROVEN_COMPILER_RULES = [
   'use-memo'
 ]
 
+// Explicit root-policy retirement of syntax-only blankets. Not an unproven
+// React-compat gap: vendor visitors and RuleTester suites stay in force.
+const RETIRED_UNSOUND_BLANKETS = [
+  'anti-slop(no-unknown-parameters)',
+  'anti-slop(no-unknown-returns)',
+  'anti-slop(no-object-parameters)',
+  'anti-slop-effect(no-service-constructor-imports)'
+]
+
 const tempDirs: Array<string> = []
 
 const makeTempDir = (prefix: string) => {
@@ -482,5 +491,100 @@ describe('root Oxlint config reachability', () => {
       decodedUnproven.value['unsupported-syntax']
     )
     expect(hooksCompat.rules['use-memo']).toBe(decodedUnproven.value['use-memo'])
+  })
+
+  it('retires four unsound anti-slop blankets while duals and runtime tagged/mocks stay errors', () => {
+    expect(RETIRED_UNSOUND_BLANKETS).toEqual([
+      'anti-slop(no-unknown-parameters)',
+      'anti-slop(no-unknown-returns)',
+      'anti-slop(no-object-parameters)',
+      'anti-slop-effect(no-service-constructor-imports)'
+    ])
+
+    const honest = writeTemp(
+      'decoder-runtime.ts',
+      `import { makeTool } from './registry.ts'
+       import type { makeAgentTextRuntime } from './runtime-factory.ts'
+       export const propertyValue = (input: unknown, _key: string): unknown => input
+       export const onError = (error: unknown) => error
+       export const isPlain = (value: object) => Object.getPrototypeOf(value) === Object.prototype
+       export type AgentTextRuntimeMake = ReturnType<typeof makeAgentTextRuntime>
+       export const tool = makeTool`
+    )
+
+    const honestDiagnostics = lintRoot(honest).diagnostics
+
+    for (const code of RETIRED_UNSOUND_BLANKETS) {
+      expect(hasCode(honestDiagnostics, code)).toBe(false)
+    }
+
+    const duals = writeTemp(
+      'duals-runtime.ts',
+      `import { vi } from 'vitest'
+       export const widened: unknown = {}
+       export type Payload = unknown
+       export const chained = input as unknown as string
+       export const value: any = 1
+       export const asserted = 1 as string
+       export const tagged = { _tag: 'Ready' }
+       vi.mock('example')`
+    )
+
+    const dualDiagnostics = lintRoot(duals).diagnostics
+
+    expect(hasCode(dualDiagnostics, 'anti-slop(no-known-value-widening)')).toBe(true)
+    expect(hasCode(dualDiagnostics, 'anti-slop(no-unknown-type-aliases)')).toBe(true)
+    expect(hasCode(dualDiagnostics, 'anti-slop(no-chained-type-assertions)')).toBe(true)
+    expect(hasCode(dualDiagnostics, 'typescript(no-explicit-any)')).toBe(true)
+    expect(hasCode(dualDiagnostics, 'typescript(consistent-type-assertions)')).toBe(true)
+    expect(hasCode(dualDiagnostics, 'anti-slop-effect(no-manual-tagged-construction)')).toBe(true)
+    expect(hasCode(dualDiagnostics, 'anti-slop(no-module-mocking)')).toBe(true)
+
+    const testWire = writeTemp(
+      'wire.test.ts',
+      `import { vi } from 'vitest'
+       export const invalidWire = { _tag: 'Nope' }
+       vi.mock('example')`
+    )
+
+    const testWireDiagnostics = lintRoot(testWire).diagnostics
+
+    expect(hasCode(testWireDiagnostics, 'anti-slop-effect(no-manual-tagged-construction)')).toBe(
+      false
+    )
+    expect(hasCode(testWireDiagnostics, 'anti-slop(no-module-mocking)')).toBe(false)
+
+    const lookalike = writeTemp(
+      'runtime.test-like.ts',
+      `import { vi } from 'vitest'
+       export const tagged = { _tag: 'Ready' }
+       vi.mock('example')`
+    )
+
+    const lookalikeDiagnostics = lintRoot(lookalike).diagnostics
+
+    expect(hasCode(lookalikeDiagnostics, 'anti-slop-effect(no-manual-tagged-construction)')).toBe(
+      true
+    )
+    expect(hasCode(lookalikeDiagnostics, 'anti-slop(no-module-mocking)')).toBe(true)
+
+    const testDuals = writeTemp(
+      'duals.test.ts',
+      `export const widened: unknown = {}
+       export type Payload = unknown
+       export type Values = Record<string, unknown>
+       export const chained = input as unknown as string
+       export const value: any = 1
+       export const asserted = 1 as string`
+    )
+
+    const testDualDiagnostics = lintRoot(testDuals).diagnostics
+
+    expect(hasCode(testDualDiagnostics, 'anti-slop(no-known-value-widening)')).toBe(true)
+    expect(hasCode(testDualDiagnostics, 'anti-slop(no-unknown-type-aliases)')).toBe(true)
+    expect(hasCode(testDualDiagnostics, 'anti-slop(no-unsafe-dictionary-type)')).toBe(true)
+    expect(hasCode(testDualDiagnostics, 'anti-slop(no-chained-type-assertions)')).toBe(true)
+    expect(hasCode(testDualDiagnostics, 'typescript(no-explicit-any)')).toBe(true)
+    expect(hasCode(testDualDiagnostics, 'typescript(consistent-type-assertions)')).toBe(true)
   })
 })

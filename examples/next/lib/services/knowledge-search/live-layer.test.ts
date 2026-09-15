@@ -18,6 +18,7 @@ import { getKnowledgeChunks } from './get-knowledge-chunks'
 import { getKnowledgeDocument } from './get-knowledge-document'
 import { getKnowledgeDocuments } from './get-knowledge-documents'
 import { getKnowledgeDocumentsContent } from './get-knowledge-documents-content'
+import { toKnowledgeChunk, toKnowledgeDocument } from './indexed-rows'
 import { DrizzleSearchIndexStoreLayer, TextKnowledgeExtractorLayer } from './live-layer'
 import { knowledgeSourceFromStorageRow } from './storage-source'
 import { searchAppKnowledge } from './search-app-knowledge'
@@ -178,6 +179,96 @@ describe('knowledgeSourceFromStorageRow', () => {
 
       expect(labeled).toEqual(KnowledgeTextSource.make({ label: 'Test note' }))
       expect(unlabeled).toEqual(KnowledgeTextSource.make({}))
+    })
+  )
+})
+
+describe('toKnowledgeDocument metadata', () => {
+  const storage = {
+    id: 'file_obj_1',
+    sourceType: 'text' as const,
+    r2Key: null,
+    url: null,
+    filename: 'notes.txt',
+    mediaType: 'text/plain'
+  }
+
+  const document = {
+    id: 'doc_1',
+    collectionId: 'col_1',
+    status: 'ready' as const,
+    title: 'Notes',
+    summary: null,
+    errorMessage: null,
+    contentHash: null,
+    tokenCount: 2,
+    chunkCount: 1,
+    metadata: { storageObjectId: 'file_obj_1', title: 'Notes' }
+  }
+
+  it.effect('reconstructs valid open-key metadata including storageObjectId and title', () =>
+    Effect.gen(function* () {
+      const reconstructed = yield* toKnowledgeDocument({ document, storage })
+
+      expect(reconstructed.metadata).toEqual({
+        storageObjectId: 'file_obj_1',
+        title: 'Notes'
+      })
+      expect(reconstructed.id).toBe('doc_1')
+    })
+  )
+
+  it.effect('fails invalid document metadata as SearchIndexStoreError instead of {}', () =>
+    Effect.gen(function* () {
+      const error = yield* toKnowledgeDocument({
+        document: { ...document, metadata: [] },
+        storage
+      }).pipe(Effect.flip)
+
+      expect(error._tag).toBe('SearchIndexStoreError')
+      expect(error.message).toContain('Invalid knowledge metadata')
+      expect(error.message).not.toContain('[]')
+    })
+  )
+})
+
+describe('toKnowledgeChunk metadata', () => {
+  const chunk = {
+    id: 'chunk_1',
+    collectionId: 'col_1',
+    documentId: 'doc_1',
+    content: 'alpha',
+    position: 0,
+    tokenCount: 1,
+    metadata: { heading: 'A' }
+  }
+
+  it.effect('reconstructs valid chunk metadata', () =>
+    Effect.gen(function* () {
+      const reconstructed = yield* toKnowledgeChunk(chunk)
+
+      expect(reconstructed.metadata).toEqual({ heading: 'A' })
+    })
+  )
+
+  it.effect('fails invalid chunk metadata as SearchIndexStoreError without dropping the row', () =>
+    Effect.gen(function* () {
+      let reads = 0
+
+      const accessor = {
+        get secret() {
+          reads += 1
+
+          return 's3cret'
+        }
+      }
+
+      const error = yield* toKnowledgeChunk({ ...chunk, metadata: accessor }).pipe(Effect.flip)
+
+      expect(error._tag).toBe('SearchIndexStoreError')
+      expect(error.message).toContain('Invalid knowledge metadata')
+      expect(error.message).not.toContain('s3cret')
+      expect(reads).toBe(0)
     })
   )
 })

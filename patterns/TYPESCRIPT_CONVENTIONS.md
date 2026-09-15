@@ -115,6 +115,8 @@ const data: unknown = externalLib.getData()
 const parsedEffect = Schema.decodeUnknownEffect(ExternalData)(data)
 ```
 
+`unknown` and `object` at decode, JSON-walk, and opaque-reject contracts are required honesty, not slop. Do not "fix" lint with `type X = unknown` aliases, casts, or tagged constructors on independent/negative wire. Known-value widening, `any`, and chained assertions stay banned, including in tests.
+
 ### Valid Reasons for Disabling Rules
 
 | Rule                                                   | Valid Reason                                      |

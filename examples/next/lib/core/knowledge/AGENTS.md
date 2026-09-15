@@ -14,6 +14,7 @@ App-owned knowledge use-cases and agent context helpers.
 - File upload is presigned R2 PUT + finalize action; finalize clones downloaded bytes before extraction because PDF parsing may detach ArrayBuffers.
 - `listUserKnowledgeDocuments` returns document summaries for agent discovery before search/traversal.
 - Search ingestion uses `KnowledgeChunker` + `KnowledgeEmbedder` and writes chunk rows.
+- Core create/index writers encode jsonb metadata with `encodePersistedMetadata` before insert. Invalid metadata fails `PersistenceError` for the owning table entity.
 - Hybrid vector + FTS search filters to authenticated user, ready documents, active availability.
 - `getKnowledgeContext` traverses a chunk window around a search citation/document position for “show more/continue” flows.
 - Pinned knowledge context loading for text agents; unavailable context logs warning and proceeds.

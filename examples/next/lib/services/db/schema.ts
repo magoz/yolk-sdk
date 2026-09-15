@@ -260,7 +260,7 @@ export const storageObject = pgTable(
     byteSize: integer('byteSize'),
     contentHash: text('contentHash'),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
@@ -300,7 +300,7 @@ export const knowledgeCollection = pgTable(
       .default('sentence-token'),
     chunkMaxTokens: integer('chunkMaxTokens').notNull().default(512),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
@@ -345,7 +345,7 @@ export const knowledgeDocument = pgTable(
     tokenCount: integer('tokenCount').notNull().default(0),
     chunkCount: integer('chunkCount').notNull().default(0),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     processedAt: timestamp('processedAt'),
@@ -388,7 +388,7 @@ export const knowledgeChunk = pgTable(
     position: integer('position').notNull(),
     tokenCount: integer('tokenCount').notNull().default(0),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow()
@@ -439,7 +439,7 @@ export const userKnowledgeDocument = pgTable(
     errorMessage: text('errorMessage'),
     reviewedAt: timestamp('reviewedAt'),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
@@ -490,7 +490,7 @@ export const userKnowledgeFile = pgTable(
     byteSize: integer('byteSize'),
     checksum: text('checksum'),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow()
@@ -528,7 +528,7 @@ export const userKnowledgeChunk = pgTable(
     position: integer('position').notNull(),
     tokenCount: integer('tokenCount').notNull().default(0),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow()

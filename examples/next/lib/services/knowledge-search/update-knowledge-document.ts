@@ -1,8 +1,14 @@
 import { eq, sql } from 'drizzle-orm'
 import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import { Effect } from 'effect'
+import type * as Schema from 'effect/Schema'
 import type { KnowledgeMetadata } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
+import {
+  encodePersistedJsonObject,
+  persistedJsonObjectErrorMessage,
+  type PersistedJsonObject
+} from '@/lib/services/db/persisted-json-object'
 import * as schema from '@/lib/services/db/schema'
 import { AppKnowledgeDocumentNotFoundError, AppSearchIndexStoreError } from './errors'
 import { getKnowledgeDocument } from './get-knowledge-document'
@@ -29,28 +35,37 @@ type KnowledgeDocumentPatch = {
   updatedAt: ReturnType<typeof sql>
   title?: string | null
   summary?: string | null
-  metadata?: UpdateKnowledgeDocumentFields['metadata']
+  metadata?: PersistedJsonObject
 }
 
-const documentPatch = (fields: UpdateKnowledgeDocumentFields) => {
-  const patch: KnowledgeDocumentPatch = {
-    updatedAt: sql`CURRENT_TIMESTAMP`
-  }
+const metadataStoreError = (error: Schema.SchemaError) =>
+  new AppSearchIndexStoreError({
+    message: persistedJsonObjectErrorMessage(error),
+    cause: error
+  })
 
-  if (fields.title !== undefined) {
-    patch.title = fields.title
-  }
+const documentPatch = (fields: UpdateKnowledgeDocumentFields) =>
+  Effect.gen(function* () {
+    const patch: KnowledgeDocumentPatch = {
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    }
 
-  if (fields.summary !== undefined) {
-    patch.summary = fields.summary
-  }
+    if (fields.title !== undefined) {
+      patch.title = fields.title
+    }
 
-  if (fields.metadata !== undefined) {
-    patch.metadata = fields.metadata
-  }
+    if (fields.summary !== undefined) {
+      patch.summary = fields.summary
+    }
 
-  return patch
-}
+    if (fields.metadata !== undefined) {
+      patch.metadata = yield* encodePersistedJsonObject(fields.metadata).pipe(
+        Effect.mapError(metadataStoreError)
+      )
+    }
+
+    return patch
+  })
 
 export const updateKnowledgeDocument = (input: UpdateKnowledgeDocumentInput) =>
   Effect.gen(function* () {
@@ -60,7 +75,7 @@ export const updateKnowledgeDocument = (input: UpdateKnowledgeDocumentInput) =>
 
     const [document] = yield* db
       .update(schema.knowledgeDocument)
-      .set(documentPatch(input.fields))
+      .set(yield* documentPatch(input.fields))
       .where(eq(schema.knowledgeDocument.id, input.documentId))
       .returning({ id: schema.knowledgeDocument.id })
 

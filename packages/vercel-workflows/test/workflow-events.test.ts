@@ -187,10 +187,11 @@ describe('durable workflow agent events', () => {
   it('writes terminal error when commit fails', async () => {
     const operations: Array<string> = []
     const commitError = new Error('commit failed')
+    const terminal = { text: 'end' }
 
     const result = await Effect.runPromise(
       commitThenWriteTerminalEvent({
-        terminal: { _tag: 'AgentEnd' },
+        terminal,
         commit: Effect.gen(function* () {
           yield* Effect.sync(() => {
             operations.push('commit')
@@ -199,7 +200,7 @@ describe('durable workflow agent events', () => {
         }),
         write: event =>
           Effect.sync(() => {
-            operations.push(`write:${event._tag}`)
+            operations.push(`write:${event.text}`)
 
             return event
           }),
@@ -207,7 +208,7 @@ describe('durable workflow agent events', () => {
           Effect.sync(() => {
             operations.push(error === commitError ? 'write-error:commit' : 'write-error:unknown')
 
-            return { _tag: 'AgentError' }
+            return { written: true }
           })
       })
     )
@@ -216,7 +217,7 @@ describe('durable workflow agent events', () => {
     expect(result).toMatchObject(
       CommitThenWriteTerminalEventResult.CommitFailed({
         commitError,
-        writeResult: { _tag: 'AgentError' }
+        writeResult: { written: true }
       })
     )
   })
@@ -224,10 +225,11 @@ describe('durable workflow agent events', () => {
   it('reports terminal write failures', async () => {
     const operations: Array<string> = []
     const writeError = new Error('write failed')
+    const terminal = { text: 'end' }
 
     const result = await Effect.runPromise(
       commitThenWriteTerminalEvent({
-        terminal: { _tag: 'AgentEnd' },
+        terminal,
         commit: Effect.sync(() => {
           operations.push('commit')
         }),
@@ -243,7 +245,7 @@ describe('durable workflow agent events', () => {
           Effect.sync(() => {
             operations.push('write-error')
 
-            return { _tag: 'AgentError' }
+            return { written: true }
           })
       })
     )
@@ -258,10 +260,11 @@ describe('durable workflow agent events', () => {
     const operations: Array<string> = []
     const commitError = new Error('commit failed')
     const writeError = new Error('write commit error failed')
+    const terminal = { text: 'end' }
 
     const result = await Effect.runPromise(
       commitThenWriteTerminalEvent({
-        terminal: { _tag: 'AgentEnd' },
+        terminal,
         commit: Effect.gen(function* () {
           yield* Effect.sync(() => {
             operations.push('commit')
@@ -271,7 +274,7 @@ describe('durable workflow agent events', () => {
         }),
         write: event =>
           Effect.sync(() => {
-            operations.push(`write:${event._tag}`)
+            operations.push(`write:${event.text}`)
 
             return event
           }),

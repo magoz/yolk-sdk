@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "typegen": "node -e \"require('node:fs').rmSync('.source',{recursive:true,force:true})\" && fumadocs-mdx && next typegen",
+    "typegen": "node -e \"require('node:fs').rmSync('.source',{recursive:true,force:true})\" && next typegen && fumadocs-mdx",
     "build": "pnpm typegen && next build",
     "start": "next start",
     "check": "pnpm typegen && tsc -p tsconfig.json --noEmit",

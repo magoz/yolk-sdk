@@ -19,8 +19,10 @@ import {
   CredentialBinding,
   makeCredentialBinding,
   makeIntegration,
+  optionalStringConfig,
   PortableMetadata,
-  ProviderFailure
+  ProviderFailure,
+  requiredStringConfig
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
@@ -4670,4 +4672,70 @@ describe('@yolk-sdk/connectors', () => {
       )
     })
   )
+})
+
+describe('connector string config own-data admission', () => {
+  it.effect('requiredStringConfig reads only own data properties and keeps padded strings', () =>
+    Effect.gen(function* () {
+      const padded = makeIntegration({ connectorId: 'test', config: { chatId: ' a ' } })
+      expect(yield* requiredStringConfig(padded, 'chatId')).toBe(' a ')
+
+      const inherited = makeIntegration({ connectorId: 'test', config: {} })
+      Object.setPrototypeOf(inherited.config, { chatId: 'inherited' })
+      const inheritedResult = yield* requiredStringConfig(inherited, 'chatId').pipe(Effect.result)
+      expect(Result.isFailure(inheritedResult)).toBe(true)
+
+      if (Result.isFailure(inheritedResult)) {
+        expect(Predicate.isTagged(inheritedResult.failure, 'ConnectorError')).toBe(true)
+        expect(inheritedResult.failure).toMatchObject({
+          cause: 'validation_failed',
+          message: 'Missing integration config: chatId',
+          connectorId: 'test'
+        })
+      }
+
+      let getterCalls = 0
+      const accessors = makeIntegration({ connectorId: 'test', config: {} })
+      Object.defineProperty(accessors.config, 'chatId', {
+        configurable: true,
+        enumerable: true,
+        get: () => {
+          getterCalls += 1
+
+          return 'from-getter'
+        }
+      })
+
+      const getterResult = yield* requiredStringConfig(accessors, 'chatId').pipe(Effect.result)
+      expect(Result.isFailure(getterResult)).toBe(true)
+      expect(getterCalls).toBe(0)
+    })
+  )
+
+  it('optionalStringConfig ignores inherited keys and getters', () => {
+    const inherited = makeIntegration({ connectorId: 'test', config: {} })
+    Object.setPrototypeOf(inherited.config, { publicUrl: 'https://example.test' })
+    expect(optionalStringConfig(inherited, 'publicUrl')).toBeUndefined()
+
+    let getterCalls = 0
+    const accessors = makeIntegration({ connectorId: 'test', config: {} })
+    Object.defineProperty(accessors.config, 'publicUrl', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        getterCalls += 1
+
+        return 'https://example.test'
+      }
+    })
+
+    expect(optionalStringConfig(accessors, 'publicUrl')).toBeUndefined()
+    expect(getterCalls).toBe(0)
+    expect(
+      optionalStringConfig(
+        makeIntegration({ connectorId: 'test', config: { publicUrl: 'https://example.test' } }),
+        'publicUrl'
+      )
+    ).toBe('https://example.test')
+  })
 })

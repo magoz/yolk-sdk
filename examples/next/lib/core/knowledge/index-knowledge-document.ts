@@ -6,6 +6,7 @@ import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
+import { encodePersistedMetadata } from './encode-persisted-metadata'
 
 export const indexKnowledgeDocument = (input: {
   readonly userId: string
@@ -41,27 +42,34 @@ export const indexKnowledgeDocument = (input: {
       )
     }
 
+    const indexedChunks = Arr.zip(chunks, embeddings)
+
+    const chunkRows = yield* Effect.forEach(indexedChunks, ([chunk, embedding]) =>
+      encodePersistedMetadata({
+        value: chunk.metadata === undefined ? {} : chunk.metadata,
+        entity: 'userKnowledgeChunk'
+      }).pipe(
+        Effect.map(metadata => ({
+          id: chunk.id,
+          scopeId: input.userId,
+          documentId: input.documentId,
+          content: chunk.content,
+          embedding: Array.from(embedding),
+          position: chunk.position,
+          tokenCount: chunk.tokenCount,
+          metadata
+        }))
+      )
+    )
+
     return yield* db.transaction(tx =>
       Effect.gen(function* () {
         yield* tx
           .delete(schema.userKnowledgeChunk)
           .where(eq(schema.userKnowledgeChunk.documentId, input.documentId))
 
-        const indexedChunks = Arr.zip(chunks, embeddings)
-
-        if (indexedChunks.length > 0) {
-          yield* tx.insert(schema.userKnowledgeChunk).values(
-            indexedChunks.map(([chunk, embedding]) => ({
-              id: chunk.id,
-              scopeId: input.userId,
-              documentId: input.documentId,
-              content: chunk.content,
-              embedding: Array.from(embedding),
-              position: chunk.position,
-              tokenCount: chunk.tokenCount,
-              metadata: chunk.metadata ?? {}
-            }))
-          )
+        if (chunkRows.length > 0) {
+          yield* tx.insert(schema.userKnowledgeChunk).values(chunkRows)
         }
 
         return yield* tx

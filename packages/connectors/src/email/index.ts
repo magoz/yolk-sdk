@@ -13,6 +13,7 @@ import {
 import { Context, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
+import { requiredStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
 import {
   CredentialSlot,
@@ -401,9 +402,6 @@ export class EmailClient extends Context.Service<EmailClient, EmailClientApi>()(
   '@yolk-sdk/connectors/EmailClient'
 ) {}
 
-const configValue = (integration: ConnectorIntegration, key: string) =>
-  Object.getOwnPropertyDescriptor(integration.config, key)?.value
-
 const validationError = (integration: ConnectorIntegration, message: string) =>
   new ConnectorError({
     cause: 'validation_failed',
@@ -423,15 +421,8 @@ const invalidHostOutput = (
     underlying: error
   })
 
-const requiredHost = (integration: ConnectorIntegration, key: string) => {
-  const value = configValue(integration, key)
-
-  if (Predicate.isString(value) && value.trim() !== '') {
-    return Effect.succeed(value.trim())
-  }
-
-  return Effect.fail(validationError(integration, `Missing integration config: ${key}`))
-}
+const requiredHost = (integration: ConnectorIntegration, key: string) =>
+  Effect.map(requiredStringConfig(integration, key), value => value.trim())
 
 const enumConfig = <Value extends string>(input: {
   readonly integration: ConnectorIntegration
@@ -439,7 +430,7 @@ const enumConfig = <Value extends string>(input: {
   readonly allowed: ReadonlyArray<Value>
   readonly fallback: Value
 }) => {
-  const value = configValue(input.integration, input.key)
+  const value: unknown = Object.getOwnPropertyDescriptor(input.integration.config, input.key)?.value
 
   if (value === undefined) return Effect.succeed(input.fallback)
 
@@ -464,7 +455,7 @@ const portConfig = (
   key: string,
   fallback: number
 ): Effect.Effect<number, ConnectorError> => {
-  const value = configValue(integration, key)
+  const value: unknown = Object.getOwnPropertyDescriptor(integration.config, key)?.value
 
   if (value === undefined) return Effect.succeed(fallback)
 

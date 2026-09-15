@@ -219,6 +219,10 @@ let failReadArmed = false
 
 let failChild = false
 
+let failComplete = false
+
+let completionAttempts = 0
+
 let statusReads = 0
 
 let preparationFailure: WorkflowRegistryError | WorkflowRunForbidden | undefined
@@ -445,6 +449,8 @@ beforeEach(() => {
   failRead = false
   failReadArmed = false
   failChild = false
+  failComplete = false
+  completionAttempts = 0
   statusReads = 0
   preparationFailure = undefined
   capturedLogs.clear()
@@ -507,6 +513,16 @@ beforeEach(() => {
           return yield* Effect.fail(
             new WorkflowRegistryError({ message: 'Attachment response unavailable' })
           )
+
+        if (command.type === 'complete') {
+          completionAttempts += 1
+
+          if (failComplete) {
+            return yield* Effect.fail(
+              new WorkflowRegistryError({ message: 'Terminal storage unavailable' })
+            )
+          }
+        }
 
         if (command.type === 'reserve' && preparationFailure !== undefined) {
           return yield* Effect.fail(preparationFailure)
@@ -1013,6 +1029,54 @@ describe('actual Next Workflow host with fake external boundaries', () => {
         result: { isError: true, content: expect.stringContaining('Child workflow failed') }
       }
     )
+  })
+
+  it('reports failed child terminal persistence without inventing success or charging usage', async () => {
+    background = false
+    failComplete = true
+    childGate.release()
+
+    const parent = await launch()
+
+    await childEntered.promise
+
+    const id = childId(parent)
+
+    await world.settled(id)
+    sleepers.forEach(resume => resume())
+    await world.settled(parent)
+
+    expect(completionAttempts).toBeGreaterThan(0)
+    expect(world.inspect(id).status).toBe('failed')
+    expect(registries.get(parent)?.state.children[0]?.result).toBeNull()
+    expect(world.inspect(parent).status).toBe('completed')
+    expect(world.inspect(parent).streamClosed).toBe(true)
+
+    const childEvents = await events(id)
+    const output = await events(parent)
+
+    expect(childEvents.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
+      usage: childUsage
+    })
+    expect(output.filter(event => Predicate.isTagged(event, 'SubagentCompleted'))).toMatchObject([
+      { status: 'error' }
+    ])
+    expect(output.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))).toMatchObject(
+      {
+        result: {
+          isError: true,
+          content: 'Child workflow failed without a stored outcome'
+        }
+      }
+    )
+    expect(output.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
+      usage: { input: { total: 0 }, output: { total: 0 } }
+    })
+
+    const ids = output.map(event => event.eventId)
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids.every(id => id?.startsWith(`workflow:${parent}:`))).toBe(true)
   })
 
   it('Stop while foreground waiting fences both later provider and child tool work', async () => {

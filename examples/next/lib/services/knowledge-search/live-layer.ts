@@ -19,28 +19,29 @@ import {
   SearchIndexStoreError
 } from '@yolk-sdk/knowledge/errors'
 import { SearchIndexStore } from '@yolk-sdk/knowledge/store'
-import type {
-  SearchIndexStoreApi,
-  UpsertIndexedKnowledgeDocumentInput
-} from '@yolk-sdk/knowledge/store'
+import type { SearchIndexStoreApi } from '@yolk-sdk/knowledge/store'
 import type {
   ExtractedKnowledgeDocument,
-  KnowledgeChunk,
   KnowledgeMetadata,
   KnowledgeSearchScope,
   KnowledgeSource
 } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
+import {
+  encodePersistedJsonObject,
+  persistedJsonObjectErrorMessage
+} from '@/lib/services/db/persisted-json-object'
 import * as dbSchema from '@/lib/services/db/schema'
 import { isTransientError, retryPolicy } from '@/lib/services/retry'
 import { OpenAiKnowledgeDocumentSummarizerLayer } from './document-summarizer'
 import { AppKnowledgeEmbedderError } from './errors'
-import { knowledgeSourceFromStorageRow } from './storage-source'
+import { toKnowledgeChunk, toKnowledgeDocument } from './indexed-rows'
 
 const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings'
 
 const OpenAiEmbeddingDataSchema = Schema.Struct({
-  embedding: Schema.Array(Schema.Number)
+  index: Schema.Int,
+  embedding: Schema.Array(Schema.Finite).pipe(Schema.check(Schema.isLengthBetween(1536, 1536)))
 })
 
 const OpenAiEmbeddingResponseSchema = Schema.Struct({
@@ -71,45 +72,11 @@ const searchScopeIds = (scope: KnowledgeSearchScope) =>
     })
   )
 
-const toKnowledgeDocument = (input: {
-  readonly document: typeof dbSchema.knowledgeDocument.$inferSelect
-  readonly storage: typeof dbSchema.storageObject.$inferSelect
-}) =>
-  knowledgeSourceFromStorageRow({
-    id: input.storage.id,
-    sourceType: input.storage.sourceType,
-    r2Key: input.storage.r2Key,
-    url: input.storage.url,
-    filename: input.storage.filename,
-    mediaType: input.storage.mediaType
-  }).pipe(
-    Effect.map(source => ({
-      id: input.document.id,
-      scopeId: input.document.collectionId,
-      source,
-      status: input.document.status,
-      title: input.document.title ?? undefined,
-      summary: input.document.summary ?? undefined,
-      errorMessage: input.document.errorMessage ?? undefined,
-      contentHash: input.document.contentHash ?? undefined,
-      tokenCount: input.document.tokenCount,
-      chunkCount: input.document.chunkCount,
-      metadata: input.document.metadata
-    }))
-  )
-
-const toKnowledgeChunk = (row: typeof dbSchema.knowledgeChunk.$inferSelect): KnowledgeChunk => ({
-  id: row.id,
-  scopeId: row.collectionId,
-  documentId: row.documentId,
-  content: row.content,
-  position: row.position,
-  tokenCount: row.tokenCount,
-  metadata: row.metadata
-})
-
-const storageObjectIdForDocument = (input: UpsertIndexedKnowledgeDocumentInput) =>
-  metadataString(input.document.metadata, 'storageObjectId') ?? input.document.id
+const metadataStoreError = (error: Schema.SchemaError) =>
+  new SearchIndexStoreError({
+    message: persistedJsonObjectErrorMessage(error),
+    cause: error
+  })
 
 const notFound = (label: string) => new SearchIndexStoreError({ message: `${label} not found` })
 
@@ -151,10 +118,7 @@ const parseOpenAiResponse = (response: HttpClientResponse.HttpClientResponse) =>
     Effect.flatMap(value =>
       Schema.decodeUnknownEffect(OpenAiEmbeddingResponseSchema)(value).pipe(
         Effect.mapError(
-          error =>
-            new AppKnowledgeEmbedderError({
-              message: `Invalid OpenAI embeddings response: ${error.message}`
-            })
+          () => new AppKnowledgeEmbedderError({ message: 'Invalid OpenAI embeddings response' })
         )
       )
     )
@@ -189,7 +153,11 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
     const api: SearchIndexStoreApi = {
       upsertDocument: input =>
         Effect.gen(function* () {
-          const storageObjectId = storageObjectIdForDocument(input)
+          const metadata = yield* encodePersistedJsonObject(
+            input.document.metadata === undefined ? {} : input.document.metadata
+          ).pipe(Effect.mapError(metadataStoreError))
+
+          const storageObjectId = metadataString(metadata, 'storageObjectId') ?? input.document.id
 
           const [row] = yield* db
             .insert(dbSchema.knowledgeDocument)
@@ -205,7 +173,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
               contentHash: input.document.contentHash,
               tokenCount: input.document.tokenCount ?? 0,
               chunkCount: input.document.chunkCount ?? 0,
-              metadata: input.document.metadata ?? {}
+              metadata
             })
             .onConflictDoUpdate({
               target: dbSchema.knowledgeDocument.id,
@@ -215,7 +183,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
                 summary: input.document.summary,
                 errorMessage: input.document.errorMessage,
                 contentHash: input.document.contentHash,
-                metadata: input.document.metadata ?? {},
+                metadata,
                 updatedAt: sql`CURRENT_TIMESTAMP`
               }
             })
@@ -253,6 +221,24 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
 
       replaceDocumentChunks: input =>
         Effect.gen(function* () {
+          const chunks = yield* Effect.forEach(input.chunks, item =>
+            encodePersistedJsonObject(
+              item.chunk.metadata === undefined ? {} : item.chunk.metadata
+            ).pipe(
+              Effect.map(metadata => ({
+                id: item.chunk.id,
+                collectionId: input.scopeId,
+                documentId: input.documentId,
+                content: item.chunk.content,
+                embedding: Array.from(item.embedding),
+                position: item.chunk.position,
+                tokenCount: item.chunk.tokenCount,
+                metadata
+              })),
+              Effect.mapError(metadataStoreError)
+            )
+          )
+
           yield* db.transaction(tx =>
             Effect.gen(function* () {
               yield* tx
@@ -264,22 +250,11 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
                   )
                 )
 
-              if (input.chunks.length === 0) {
+              if (chunks.length === 0) {
                 return
               }
 
-              yield* tx.insert(dbSchema.knowledgeChunk).values(
-                input.chunks.map(item => ({
-                  id: item.chunk.id,
-                  collectionId: input.scopeId,
-                  documentId: input.documentId,
-                  content: item.chunk.content,
-                  embedding: Array.from(item.embedding),
-                  position: item.chunk.position,
-                  tokenCount: item.chunk.tokenCount,
-                  metadata: item.chunk.metadata ?? {}
-                }))
-              )
+              yield* tx.insert(dbSchema.knowledgeChunk).values(chunks)
             })
           )
         }).pipe(
@@ -401,13 +376,20 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .limit(input.limit)
 
           return yield* Effect.forEach(matches, match =>
-            toKnowledgeDocument({ document: match.document, storage: match.storage }).pipe(
-              Effect.map(document => ({
-                chunk: toKnowledgeChunk(match.chunk),
+            Effect.gen(function* () {
+              const document = yield* toKnowledgeDocument({
+                document: match.document,
+                storage: match.storage
+              })
+
+              const chunk = yield* toKnowledgeChunk(match.chunk)
+
+              return {
+                chunk,
                 score: match.score,
                 document
-              }))
-            )
+              }
+            })
           )
         }).pipe(
           Effect.withSpan('SearchIndexStore.searchChunks'),
@@ -455,13 +437,20 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .limit(input.limit)
 
           return yield* Effect.forEach(matches, match =>
-            toKnowledgeDocument({ document: match.document, storage: match.storage }).pipe(
-              Effect.map(document => ({
-                chunk: toKnowledgeChunk(match.chunk),
+            Effect.gen(function* () {
+              const document = yield* toKnowledgeDocument({
+                document: match.document,
+                storage: match.storage
+              })
+
+              const chunk = yield* toKnowledgeChunk(match.chunk)
+
+              return {
+                chunk,
                 score: match.score,
                 document
-              }))
-            )
+              }
+            })
           )
         }).pipe(
           Effect.withSpan('SearchIndexStore.searchChunksByText'),
@@ -486,7 +475,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             )
             .orderBy(asc(dbSchema.knowledgeChunk.position))
 
-          return rows.map(toKnowledgeChunk)
+          return yield* Effect.forEach(rows, toKnowledgeChunk)
         }).pipe(
           Effect.withSpan('SearchIndexStore.getContextChunks'),
           Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
@@ -552,51 +541,93 @@ const toRequestError = (error: HttpClientError.HttpClientError) =>
     cause: error
   })
 
-export const OpenAiKnowledgeEmbedderLayer = Layer.effect(
-  KnowledgeEmbedder,
-  Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient
-    const config = yield* OpenAiEmbeddingsConfig
+export const makeOpenAiKnowledgeEmbedderLayer = (
+  httpClientLayer: Layer.Layer<HttpClient.HttpClient>
+) =>
+  Layer.effect(
+    KnowledgeEmbedder,
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      const config = yield* OpenAiEmbeddingsConfig
 
-    const embedTexts = (texts: ReadonlyArray<string>) =>
-      Effect.gen(function* () {
-        const request = yield* HttpClientRequest.post(OPENAI_EMBEDDINGS_URL).pipe(
-          HttpClientRequest.setHeaders({
-            accept: 'application/json',
-            authorization: `Bearer ${Redacted.value(config.apiKey)}`,
-            'content-type': 'application/json'
-          }),
-          HttpClientRequest.bodyJson({ model: config.model, input: texts }),
-          Effect.mapError(
-            error =>
-              new AppKnowledgeEmbedderError({
-                message: `Could not encode embeddings request: ${error.message}`
-              })
+      const embedTexts = (texts: ReadonlyArray<string>) =>
+        Effect.suspend(() => {
+          const inputs = texts.slice()
+
+          return Effect.gen(function* () {
+            if (inputs.length === 0) {
+              return []
+            }
+
+            const request = yield* HttpClientRequest.post(OPENAI_EMBEDDINGS_URL).pipe(
+              HttpClientRequest.setHeaders({
+                accept: 'application/json',
+                authorization: `Bearer ${Redacted.value(config.apiKey)}`,
+                'content-type': 'application/json'
+              }),
+              HttpClientRequest.bodyJson({ model: config.model, input: inputs }),
+              Effect.mapError(
+                error =>
+                  new AppKnowledgeEmbedderError({
+                    message: `Could not encode embeddings request: ${error.message}`
+                  })
+              )
+            )
+
+            const response = yield* client.execute(request).pipe(Effect.mapError(toRequestError))
+
+            if (!isOkStatus(response.status)) {
+              return yield* failOpenAiResponse(response)
+            }
+
+            const parsed = yield* parseOpenAiResponse(response)
+
+            if (parsed.data.length !== inputs.length) {
+              return yield* Effect.fail(
+                new AppKnowledgeEmbedderError({
+                  message: 'OpenAI embeddings response count does not match input count'
+                })
+              )
+            }
+
+            const ordered = parsed.data.toSorted((left, right) => left.index - right.index)
+
+            if (ordered.some((item, index) => item.index !== index)) {
+              return yield* Effect.fail(
+                new AppKnowledgeEmbedderError({
+                  message: 'OpenAI embeddings response indices do not match inputs'
+                })
+              )
+            }
+
+            return ordered.map(item => item.embedding)
+          }).pipe(
+            Effect.retry({ while: isTransientError, schedule: retryPolicy }),
+            Effect.catchTag('AppKnowledgeEmbedderError', error =>
+              Effect.fail(new KnowledgeEmbeddingError({ message: error.message, cause: error }))
+            )
           )
-        )
+        })
 
-        const response = yield* client.execute(request).pipe(Effect.mapError(toRequestError))
+      return {
+        embedTexts,
+        embedQuery: query =>
+          embedTexts([query]).pipe(
+            Effect.flatMap(embeddings => {
+              const embedding = embeddings[0]
 
-        if (!isOkStatus(response.status)) {
-          return yield* failOpenAiResponse(response)
-        }
+              return embedding === undefined
+                ? Effect.fail(
+                    new KnowledgeEmbeddingError({ message: 'OpenAI query embedding is missing' })
+                  )
+                : Effect.succeed(embedding)
+            })
+          )
+      }
+    })
+  ).pipe(Layer.provide(OpenAiEmbeddingsConfigLayer), Layer.provide(httpClientLayer))
 
-        const parsed = yield* parseOpenAiResponse(response)
-
-        return parsed.data.map(item => item.embedding)
-      }).pipe(
-        Effect.retry({ while: isTransientError, schedule: retryPolicy }),
-        Effect.catchTag('AppKnowledgeEmbedderError', error =>
-          Effect.fail(new KnowledgeEmbeddingError({ message: error.message, cause: error }))
-        )
-      )
-
-    return {
-      embedTexts,
-      embedQuery: query => embedTexts([query]).pipe(Effect.map(embeddings => embeddings[0] ?? []))
-    }
-  })
-).pipe(Layer.provide(OpenAiEmbeddingsConfigLayer), Layer.provide(FetchHttpClient.layer))
+export const OpenAiKnowledgeEmbedderLayer = makeOpenAiKnowledgeEmbedderLayer(FetchHttpClient.layer)
 
 export const AppKnowledgeSearchLayer = Layer.mergeAll(
   DrizzleSearchIndexStoreLayer,

@@ -34,6 +34,7 @@ const OxlintRuleConfig = Schema.Union([OxlintRuleSeverity, Schema.Array(Schema.U
 const OxlintRules = Schema.Record(Schema.String, OxlintRuleConfig)
 
 const OxlintConfigOverride = Schema.Struct({
+  files: Schema.optionalKey(Schema.Array(Schema.String)),
   rules: Schema.optionalKey(OxlintRules)
 })
 
@@ -112,6 +113,28 @@ const probes = [
   }))
 ]
 
+// Root policy retires four syntax-only blankets that cannot see ownership,
+// validation, or lifetimes. Vendor RuleTester suites for these rules still run.
+const retiredRootRuleNames = new Set([
+  'no-unknown-parameters',
+  'no-unknown-returns',
+  'no-object-parameters',
+  'no-service-constructor-imports'
+])
+
+const testFileOffRuleNames = new Set(['no-module-mocking', 'no-manual-tagged-construction'])
+
+const testFileGlobs = [
+  '**/*.test.{js,jsx,mjs,cjs,ts,tsx,mts,cts}',
+  '**/*.spec.{js,jsx,mjs,cjs,ts,tsx,mts,cts}'
+]
+
+const activeProbes = probes.filter(probe => retiredRootRuleNames.has(probe.rule) === false)
+
+const retiredProbes = probes.filter(probe => retiredRootRuleNames.has(probe.rule))
+
+const testFileOffProbes = probes.filter(probe => testFileOffRuleNames.has(probe.rule))
+
 const representativeRepoDirs = [
   'packages/agent/src',
   'examples/next/lib',
@@ -186,6 +209,23 @@ const expectRuleHit = (
   ).toContainEqual(expected)
 }
 
+const expectRuleAbsent = (
+  diagnostics: ReadonlyArray<OxlintDiagnostic>,
+  probe: (typeof probes)[number],
+  filename: string
+) => {
+  const unexpected = {
+    code: `${probe.namespace}(${probe.rule})`,
+    severity: 'error',
+    filename: path.resolve(filename)
+  }
+
+  expect(
+    diagnostics.map(resolvedDiagnostic),
+    `${probe.namespace}/${probe.rule} must not fire in ${filename}`
+  ).not.toContainEqual(unexpected)
+}
+
 describe('vendored anti-slop integration', () => {
   it('pins Node 24 and the plugin API pair and accounts for every upstream suite', () => {
     expect(process.versions.node.split('.')[0]).toBe('24')
@@ -200,6 +240,9 @@ describe('vendored anti-slop integration', () => {
     expect(pkg.devDependencies['eslint-plugin-react-hooks']).toBe('7.0.1')
     expect(pkg.devDependencies['eslint-plugin-react']).toBe('7.37.5')
     expect(probes).toHaveLength(23)
+    expect(retiredProbes).toHaveLength(4)
+    expect(activeProbes).toHaveLength(19)
+    expect(testFileOffProbes).toHaveLength(2)
 
     const files = readdirSync(vendor, { encoding: 'utf8', recursive: true })
       .filter(file => file.endsWith('.test.ts'))
@@ -216,17 +259,40 @@ describe('vendored anti-slop integration', () => {
       probes.map(probe => `${probe.namespace}/${probe.rule}`).toSorted()
     )
 
-    for (const rule of enabled) {
+    for (const probe of probes) {
+      const rule = `${probe.namespace}/${probe.rule}`
+
+      if (retiredRootRuleNames.has(probe.rule)) {
+        expect(config.rules[rule]).toBe('off')
+        continue
+      }
+
       expect(config.rules[rule]).toBe('error')
     }
 
     expect(config.rules['oxc/no-accumulating-spread']).toBe('error')
 
-    for (const override of config.overrides ?? []) {
-      expect(
-        Object.keys(override.rules ?? {}).filter(rule => rule.startsWith('anti-slop'))
-      ).toEqual([])
-    }
+    const antiSlopOverrides = (config.overrides ?? []).flatMap(override => {
+      const rules = Object.fromEntries(
+        Object.entries(override.rules ?? {}).filter(([rule]) => rule.startsWith('anti-slop'))
+      )
+
+      if (Object.keys(rules).length === 0) {
+        return []
+      }
+
+      return [{ files: override.files, rules }]
+    })
+
+    expect(antiSlopOverrides).toEqual([
+      {
+        files: testFileGlobs,
+        rules: {
+          'anti-slop/no-module-mocking': 'off',
+          'anti-slop-effect/no-manual-tagged-construction': 'off'
+        }
+      }
+    ])
   })
 
   it('rejects malformed oxlint reports, package manifests, and oxlint configs', () => {
@@ -270,27 +336,51 @@ describe('vendored anti-slop integration', () => {
     }
   )
 
-  it.each(probes)('reaches $namespace/$rule as an error through the actual root config', probe => {
-    const directory = mkdtempSync(path.join(tmpdir(), 'yolk-anti-slop-reachability-'))
-    const filename = path.join(directory, 'runtime.ts')
+  it.each(activeProbes)(
+    'reaches $namespace/$rule as an error through the actual root config',
+    probe => {
+      const directory = mkdtempSync(path.join(tmpdir(), 'yolk-anti-slop-reachability-'))
+      const filename = path.join(directory, 'runtime.ts')
 
-    try {
-      writeFileSync(filename, `${probe.source}\n`)
+      try {
+        writeFileSync(filename, `${probe.source}\n`)
 
-      const result = execute(oxlint, ['--config', rootConfig, '--format', 'json', filename])
+        const result = execute(oxlint, ['--config', rootConfig, '--format', 'json', filename])
 
-      expect(result.error).toBeUndefined()
-      expect(result.signal).toBeNull()
-      expect(result.status, result.stderr).toBe(1)
+        expect(result.error).toBeUndefined()
+        expect(result.signal).toBeNull()
+        expect(result.status, result.stderr).toBe(1)
 
-      expectRuleHit(parseOxlintJson(result).diagnostics, probe, filename)
-    } finally {
-      rmSync(directory, { recursive: true, force: true })
+        expectRuleHit(parseOxlintJson(result).diagnostics, probe, filename)
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
     }
-  })
+  )
+
+  it.each(retiredProbes)(
+    'does not fire retired $namespace/$rule through the actual root config',
+    probe => {
+      const directory = mkdtempSync(path.join(tmpdir(), 'yolk-anti-slop-retired-'))
+      const filename = path.join(directory, 'runtime.ts')
+
+      try {
+        writeFileSync(filename, `${probe.source}\n`)
+
+        const result = execute(oxlint, ['--config', rootConfig, '--format', 'json', filename])
+
+        expect(result.error).toBeUndefined()
+        expect(result.signal).toBeNull()
+
+        expectRuleAbsent(parseOxlintJson(result).diagnostics, probe, filename)
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    }
+  )
 
   it.each(representativeRepoDirs)(
-    'reaches every anti-slop rule through root config in %s',
+    'reaches every active anti-slop rule through root config in %s',
     directory => {
       const scratch = mkdtempSync(path.join(root, directory, 'yolk-anti-slop-'))
 
@@ -318,6 +408,11 @@ describe('vendored anti-slop integration', () => {
         const diagnostics = parseOxlintJson(result).diagnostics
 
         for (const file of files) {
+          if (retiredRootRuleNames.has(file.probe.rule)) {
+            expectRuleAbsent(diagnostics, file.probe, file.filename)
+            continue
+          }
+
           expectRuleHit(diagnostics, file.probe, file.filename)
         }
       } finally {
@@ -340,6 +435,240 @@ describe('vendored anti-slop integration', () => {
 
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
       expect(parseOxlintJson(result).diagnostics).toEqual([])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts decoder, opaque rejection, object walker, makeTool, and type-only make imports without retired codes', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'yolk-anti-slop-retired-clean-'))
+    const filename = path.join(directory, 'runtime.ts')
+
+    try {
+      writeFileSync(
+        filename,
+        [
+          "import { makeTool } from './registry.ts'",
+          "import type { makeAgentTextRuntime } from './runtime-factory.ts'",
+          '',
+          'export const propertyValue = (input: unknown, _key: string): unknown => input',
+          'export const onError = (error: unknown) => error',
+          'export const isPlain = (value: object) => Object.getPrototypeOf(value) === Object.prototype',
+          'export type AgentTextRuntimeMake = ReturnType<typeof makeAgentTextRuntime>',
+          'export const tool = makeTool',
+          ''
+        ].join('\n')
+      )
+
+      const result = execute(oxlint, ['--config', rootConfig, '--format', 'json', filename])
+      const diagnostics = parseOxlintJson(result).diagnostics
+
+      expect(result.error).toBeUndefined()
+      expect(result.signal).toBeNull()
+
+      for (const probe of retiredProbes) {
+        expectRuleAbsent(diagnostics, probe, filename)
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('still rejects known-value widening, aliases, casts, any, runtime tagged objects, and module mocks', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'yolk-anti-slop-duals-'))
+    const filename = path.join(directory, 'runtime.ts')
+
+    try {
+      writeFileSync(
+        filename,
+        [
+          "import { vi } from 'vitest'",
+          '',
+          'export const widened: unknown = {}',
+          'export type Payload = unknown',
+          'export const chained = input as unknown as string',
+          'export const value: any = 1',
+          'export const asserted = 1 as string',
+          "export const tagged = { _tag: 'Ready' }",
+          "vi.mock('example')",
+          ''
+        ].join('\n')
+      )
+
+      const result = execute(oxlint, ['--config', rootConfig, '--format', 'json', filename])
+      const diagnostics = parseOxlintJson(result).diagnostics
+
+      expect(result.error).toBeUndefined()
+      expect(result.signal).toBeNull()
+      expect(result.status, result.stderr).toBe(1)
+      expect(diagnostics.map(resolvedDiagnostic)).toEqual(
+        expect.arrayContaining([
+          {
+            code: 'anti-slop(no-known-value-widening)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'anti-slop(no-unknown-type-aliases)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'anti-slop(no-chained-type-assertions)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'typescript(no-explicit-any)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'typescript(consistent-type-assertions)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'anti-slop-effect(no-manual-tagged-construction)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'anti-slop(no-module-mocking)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          }
+        ])
+      )
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('turns off tagged construction and module mocking only in standard test files', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'yolk-anti-slop-test-policy-'))
+
+    const testFiles = [
+      path.join(directory, 'service.test.ts'),
+      path.join(directory, 'service.spec.tsx'),
+      path.join(directory, 'service.test.mts'),
+      path.join(directory, 'service.test.mjs')
+    ]
+
+    const coveredRuntimeFiles = [
+      path.join(directory, 'runtime.ts'),
+      path.join(directory, 'runtime.test-like.ts'),
+      path.join(directory, 'test.ts')
+    ]
+
+    const source = [
+      "import { vi } from 'vitest'",
+      '',
+      "export const invalidWire = { _tag: 'Nope' }",
+      "vi.mock('example')",
+      ''
+    ].join('\n')
+
+    try {
+      for (const filename of [...testFiles, ...coveredRuntimeFiles]) {
+        writeFileSync(filename, source)
+      }
+
+      const result = execute(oxlint, [
+        '--config',
+        rootConfig,
+        '--format',
+        'json',
+        ...testFiles,
+        ...coveredRuntimeFiles
+      ])
+
+      const diagnostics = parseOxlintJson(result).diagnostics
+
+      expect(result.error).toBeUndefined()
+      expect(result.signal).toBeNull()
+      expect(result.status, result.stderr).toBe(1)
+
+      for (const filename of testFiles) {
+        for (const probe of testFileOffProbes) {
+          expectRuleAbsent(diagnostics, probe, filename)
+        }
+      }
+
+      for (const filename of coveredRuntimeFiles) {
+        for (const probe of testFileOffProbes) {
+          expectRuleHit(diagnostics, probe, filename)
+        }
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps type-widening, any, assertions, and other anti-slop rules as errors inside test files', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'yolk-anti-slop-test-duals-'))
+    const filename = path.join(directory, 'service.test.ts')
+
+    try {
+      writeFileSync(
+        filename,
+        [
+          'export const widened: unknown = {}',
+          'export type Payload = unknown',
+          'export type Values = Record<string, unknown>',
+          'export const chained = input as unknown as string',
+          'export const value: any = 1',
+          'export const asserted = 1 as string',
+          "export const result = typeof value === 'string'",
+          ''
+        ].join('\n')
+      )
+
+      const result = execute(oxlint, ['--config', rootConfig, '--format', 'json', filename])
+      const diagnostics = parseOxlintJson(result).diagnostics
+
+      expect(result.error).toBeUndefined()
+      expect(result.signal).toBeNull()
+      expect(result.status, result.stderr).toBe(1)
+      expect(diagnostics.map(resolvedDiagnostic)).toEqual(
+        expect.arrayContaining([
+          {
+            code: 'anti-slop(no-known-value-widening)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'anti-slop(no-unknown-type-aliases)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'anti-slop(no-unsafe-dictionary-type)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'anti-slop(no-chained-type-assertions)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'typescript(no-explicit-any)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'typescript(consistent-type-assertions)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          },
+          {
+            code: 'anti-slop(no-runtime-typeof)',
+            severity: 'error',
+            filename: path.resolve(filename)
+          }
+        ])
+      )
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }

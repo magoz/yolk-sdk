@@ -18,6 +18,13 @@ App-owned concrete adapters for the domain-free `@yolk-sdk/knowledge` package.
 - R2 key layout is app-owned and must not leak into package contracts.
 - Use `@effect-aws/client-s3@2.0.0-beta.4` for Effect v4-compatible R2/S3 calls; avoid raw AWS SDK calls in app code.
 
+## Metadata persistence
+
+- jsonb `metadata` columns are stored as `unknown` and admitted through `persisted-json-object`.
+- `knowledgeDocumentFromRow` / `knowledgeFileFromRow` decode before constructing package documents/files.
+- Invalid pre-existing metadata fails `KnowledgeStoreError`; it is not coerced to `{}`.
+- Writes encode through the same codec before insert/update.
+
 ## Current scope
 
 - V0 implements object catalog reads/writes, file blob IO, presigned PUT upload URLs, pinned context loading, and file download support.

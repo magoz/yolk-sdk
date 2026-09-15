@@ -109,6 +109,7 @@ rules into pure model/service tests before adding many route/action edge cases.
 - Do not duplicate every Schema invalid-input case across every action.
 - Mock only external framework/protocol seams: cookies/cache, workflow runtime, provider IO, webhooks.
 - Avoid mocking several own modules to test one action; that means the seam is too internal.
+- Standard `*.test.*` / `*.spec.*` files may use independent raw/negative wire `_tag` fixtures and faithful external framework module doubles (`vi.mock` / `jest.mock`). That is an explicit test-policy boundary, not a claim that every literal or mock is good. Prefer dependency injection; do not mock own-domain facades. Positive typed fixtures still use actual constructors, not success constructors for invalid tags.
 
 ### Property and simulation tests
 

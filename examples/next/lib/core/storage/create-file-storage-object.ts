@@ -5,6 +5,7 @@ import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
+import { encodePersistedMetadata } from './encode-persisted-metadata'
 import { ensureUserKnowledgeCollection } from './ensure-user-knowledge-collection'
 
 const presentSourceText = (value: string | null) => {
@@ -30,6 +31,11 @@ export const createFileStorageObject = (input: {
     const db = yield* Db
     const collection = yield* ensureUserKnowledgeCollection({ userId: input.userId })
 
+    const metadata = yield* encodePersistedMetadata({
+      value: { title: input.filename, ...extracted.metadata },
+      entity: 'storageObject'
+    })
+
     const [object] = yield* db
       .insert(schema.storageObject)
       .values({
@@ -39,7 +45,7 @@ export const createFileStorageObject = (input: {
         filename: input.filename,
         mediaType: input.mediaType.length > 0 ? input.mediaType : extracted.metadata.format,
         byteSize: input.bytes.byteLength,
-        metadata: { title: input.filename, ...extracted.metadata }
+        metadata
       })
       .returning()
 

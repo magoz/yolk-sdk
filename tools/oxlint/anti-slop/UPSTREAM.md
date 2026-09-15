@@ -8,11 +8,11 @@
   `vendor/eslint-stylistic/LICENSE` and `vendor/eslint-stylistic/UPSTREAM.md` are retained
   verbatim and describe the separately adapted Stylistic engine and its copyright notices.
 - Runtime: Node 24, exact `oxlint@1.78.0` and `@oxlint/plugins@1.78.0`.
-- Both entry points are registered in the root `.oxlintrc.json`: all 18 generic and
-  all 5 Effect rules are errors at upstream defaults, plus native
-  `oxc/no-accumulating-spread`. Oxlint 1.78.0 is the lint engine; Oxfmt 0.63.0 is the
-  formatter. Default unrelated Oxlint categories stay off. ESLint is not a lint engine
-  in this tree. No anti-slop rule-policy changes or legacy off overrides.
+- Both entry points are registered in the root `.oxlintrc.json`. Vendor production and
+  test TypeScript stay at upstream defaults; root severity is a separate policy (see
+  Local deviations). Native `oxc/no-accumulating-spread` stays an error. Oxlint 1.78.0
+  is the lint engine; Oxfmt 0.63.0 is the formatter. Default unrelated Oxlint categories
+  stay off. ESLint is not a lint engine in this tree.
 
 ## Local deviations
 
@@ -21,6 +21,15 @@
    pnpm 11's temporary-package dependency guard otherwise attempts installation and aborts
    without a TTY. All original rejection, exact fix, re-lint, and idempotence assertions remain.
 2. This provenance file and the separately copied upstream root license are additions.
+3. Root `.oxlintrc.json` policy only (vendored production/test TypeScript unchanged, no
+   pin bump): explicit `"off"` for four unsound generic heuristics that cannot determine
+   ownership, validation, or lifetimes from type/name syntax:
+   `anti-slop/no-unknown-parameters`, `anti-slop/no-unknown-returns`,
+   `anti-slop/no-object-parameters`, `anti-slop-effect/no-service-constructor-imports`.
+   `anti-slop-effect/no-manual-tagged-construction` and `anti-slop/no-module-mocking`
+   remain errors in runtime source and are `"off"` only for standard `*.test.*` /
+   `*.spec.*` globs. All 23 upstream RuleTester suites still execute. This does not
+   modify vendored production bytes.
 
 Yolk does **not** take 10x's production `shared/dictionary-types.ts` `unsafeMembers[0] ?? null`
 adjustment. That existed only for 10x `noUncheckedIndexedAccess`; this tree does not enable
