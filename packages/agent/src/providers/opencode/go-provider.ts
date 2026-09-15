@@ -104,6 +104,7 @@ const makeOpenCodeGoProtocolLayer = (
             alwaysIncludeReasoning: false,
             allowEofCompletion: false,
             requireJsonCompletion: true,
+            commentaryPhaseBeforeToolCalls: true,
             extraHeaders,
             ...reasoningOptions
           })

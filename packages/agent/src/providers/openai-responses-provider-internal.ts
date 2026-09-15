@@ -30,6 +30,7 @@ import {
   replaceLoneSurrogatesDeep,
   prependMessageContextToContent,
   type AgentMessage,
+  type AssistantAgentMessage,
   type AgentReasoningEffort,
   type Content,
   type ContentPart,
@@ -87,11 +88,19 @@ export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
   readonly extraHeaders?: Readonly<Record<string, string>>
   readonly defaultReasoningEffort?: AgentReasoningEffort
   readonly reasoningSummary?: OpenAiResponsesReasoningSummary
+  /**
+   * When true, assistant text that precedes host `function_call` items is tagged
+   * `phase: commentary` without moving later text ahead of those calls. Final
+   * answers omit phase. Default false so Codex and Grok keep untagged assistant
+   * messages.
+   */
+  readonly commentaryPhaseBeforeToolCalls?: boolean
 }
 
 type OpenAiResponsesMessageInput = {
   readonly role: 'user' | 'assistant'
   readonly content: string | ReadonlyArray<OpenAiResponsesInputContentPart>
+  readonly phase?: 'commentary'
 }
 
 type OpenAiResponsesInputTextPart = {
@@ -427,9 +436,121 @@ const toolCallToResponsesInput = (
     }
   })
 
+const assistantResponsesMessage = (
+  content: string,
+  phase: 'commentary' | undefined
+): OpenAiResponsesMessageInput =>
+  phase === 'commentary'
+    ? { role: 'assistant', content, phase: 'commentary' }
+    : { role: 'assistant', content }
+
+const combinedAssistantContent = (contents: ReadonlyArray<Content>): Content => {
+  const first = contents[0]
+
+  if (contents.length === 0) {
+    return ''
+  }
+
+  if (contents.length === 1 && first !== undefined) {
+    return first
+  }
+
+  return contents.flatMap(contentParts)
+}
+
+const flattenAssistantToResponsesInput = (
+  current: AssistantAgentMessage,
+  providerName: string
+): Effect.Effect<ReadonlyArray<OpenAiResponsesInputItem>, LLMError> =>
+  Effect.gen(function* () {
+    const content = yield* contentToText(
+      prependMessageContextToContent(assistantContent(current), messageContextText(current)),
+      'Assistant',
+      providerName
+    )
+
+    const toolCallInputs = yield* Effect.forEach(
+      assistantHostToolCalls(current),
+      toolCallToResponsesInput
+    )
+
+    if (content.length > 0) {
+      return [assistantResponsesMessage(content, undefined), ...toolCallInputs]
+    }
+
+    return toolCallInputs
+  })
+
+const orderedAssistantToResponsesInput = (
+  current: AssistantAgentMessage,
+  providerName: string
+): Effect.Effect<ReadonlyArray<OpenAiResponsesInputItem>, LLMError> =>
+  Effect.gen(function* () {
+    const items: Array<OpenAiResponsesInputItem> = []
+    const context = messageContextText(current)
+    let pending: Array<Content> = []
+    let contextApplied = false
+
+    const flushPendingText = (phase: 'commentary' | undefined) =>
+      Effect.gen(function* () {
+        if (pending.length === 0) {
+          return
+        }
+
+        const content = yield* contentToText(
+          prependMessageContextToContent(
+            combinedAssistantContent(pending),
+            contextApplied ? '' : context
+          ),
+          'Assistant',
+          providerName
+        )
+
+        pending = []
+        contextApplied = true
+
+        if (content.length > 0) {
+          items.push(assistantResponsesMessage(content, phase))
+        }
+      })
+
+    for (const part of current.parts) {
+      if (Predicate.isTagged(part, 'Text')) {
+        pending = [...pending, part.content]
+        continue
+      }
+
+      if (Predicate.isTagged(part, 'HostToolCall')) {
+        yield* flushPendingText('commentary')
+        items.push(yield* toolCallToResponsesInput(part.call))
+      }
+    }
+
+    yield* flushPendingText(undefined)
+
+    if (!contextApplied && context.length > 0) {
+      const content = yield* contentToText(
+        prependMessageContextToContent('', context),
+        'Assistant',
+        providerName
+      )
+
+      if (content.length > 0) {
+        const hasHostToolCall = items.some(item => 'type' in item && item.type === 'function_call')
+
+        items.unshift(
+          assistantResponsesMessage(content, hasHostToolCall ? 'commentary' : undefined)
+        )
+      }
+    }
+
+    return items
+  })
+
 const messageToResponsesInput = (
   message: AgentMessage,
-  providerName: string
+  providerName: string,
+  commentaryPhaseBeforeToolCalls: boolean
 ): Effect.Effect<ReadonlyArray<OpenAiResponsesInputItem>, LLMError> =>
   Match.value(message).pipe(
     Match.withReturnType<Effect.Effect<ReadonlyArray<OpenAiResponsesInputItem>, LLMError>>(),
@@ -440,26 +561,9 @@ const messageToResponsesInput = (
       ).pipe(Effect.map(content => [{ role: 'user' as const, content }]))
     ),
     Match.tag('Assistant', current =>
-      Effect.gen(function* () {
-        const content = yield* contentToText(
-          prependMessageContextToContent(assistantContent(current), messageContextText(current)),
-          'Assistant',
-          providerName
-        )
-
-        const toolCallInputs = yield* Effect.forEach(
-          assistantHostToolCalls(current),
-          toolCallToResponsesInput
-        )
-
-        if (content.length > 0) {
-          const assistantMessage: OpenAiResponsesInputItem = { role: 'assistant', content }
-
-          return [assistantMessage, ...toolCallInputs]
-        }
-
-        return toolCallInputs
-      })
+      commentaryPhaseBeforeToolCalls
+        ? orderedAssistantToResponsesInput(current, providerName)
+        : flattenAssistantToResponsesInput(current, providerName)
     ),
     Match.tag('ToolResult', current =>
       responsesToolResultOutput(
@@ -501,6 +605,7 @@ export const toOpenAiResponsesRequestBody = (
     readonly maxOutputTokens?: number
     readonly defaultReasoningEffort?: AgentReasoningEffort
     readonly reasoningSummary?: OpenAiResponsesReasoningSummary
+    readonly commentaryPhaseBeforeToolCalls?: boolean
   }
 ): Effect.Effect<OpenAiResponsesRequestBody, LLMError> =>
   Effect.gen(function* () {
@@ -523,7 +628,8 @@ export const toOpenAiResponsesRequestBody = (
       yield* Effect.forEach(request.messages, message =>
         messageToResponsesInput(
           message,
-          config.unsupportedContentProviderName ?? config.providerName
+          config.unsupportedContentProviderName ?? config.providerName,
+          config.commentaryPhaseBeforeToolCalls === true
         )
       )
     )

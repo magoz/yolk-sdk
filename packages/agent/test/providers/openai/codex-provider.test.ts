@@ -9,6 +9,7 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,
   AssistantAgentMessage,
+  AssistantTextPart,
   DocumentPart,
   HostToolCallPart,
   ImagePart,
@@ -233,6 +234,40 @@ describe('OpenAI Codex provider', () => {
         ],
         parallel_tool_calls: true
       })
+    })
+  )
+
+  it.effect('replays assistant text before host tools without a commentary phase', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'search' }),
+          AssistantAgentMessage.make({
+            parts: [
+              AssistantTextPart.make({ content: 'I will search now.' }),
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'search', params: { query: 'yolk' } })
+              })
+            ]
+          }),
+          ToolResultMessage.make({ toolCallId: 'call-1', content: 'result' })
+        ],
+        tools: []
+      })
+
+      expect(body.input).toEqual([
+        { role: 'user', content: 'search' },
+        { role: 'assistant', content: 'I will search now.' },
+        {
+          type: 'function_call',
+          call_id: 'call-1',
+          name: 'search',
+          arguments: '{"query":"yolk"}'
+        },
+        { type: 'function_call_output', call_id: 'call-1', output: 'result' }
+      ])
     })
   )
 
