@@ -134,6 +134,7 @@ vi.mock('workflow', async () => {
 vi.mock('workflow/api', () => ({
   start: async <A extends unknown[], R>(fn: (...args: A) => Promise<R>, args: A) => {
     workflowStarts++
+
     if (rejectStart) throw new Error('launch transport failed')
     const run = await world.sdk.start(fn, args)
 
@@ -1126,6 +1127,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const secondUsage = AgentUsage.make({ input: { total: 5 }, output: { total: 2 } })
     parentStream = request => {
       const results = request.messages.filter(message => message._tag === 'ToolResult')
+
       return results.length === 0
         ? Stream.fromIterable([
             LLMToolCall.make({
@@ -1140,6 +1142,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
             LLMDone.make({ stopReason: 'stop' })
           ])
     }
+
     const parent = await launch()
     await world.settled(parent)
     const inspection = world.inspect(parent)
@@ -1245,16 +1248,19 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       )
     ).toBe(true)
     expect(new Set(eventIds).size).toBe(eventIds.length)
+
     const sequenced = eventIds.flatMap(eventId => {
       if (typeof eventId !== 'string') return []
       const rest = eventId.slice(`workflow:${parent}:`.length)
       const [turn, sequence] = rest.split(':')
       const parsedTurn = Number(turn)
       const parsedSequence = Number(sequence)
+
       return Number.isInteger(parsedTurn) && Number.isInteger(parsedSequence)
         ? [{ turn: parsedTurn, sequence: parsedSequence }]
         : []
     })
+
     const firstTurn = sequenced.filter(event => event.turn === 1).map(event => event.sequence)
     const secondTurn = sequenced.filter(event => event.turn === 2).map(event => event.sequence)
     expect(firstTurn.length).toBeGreaterThan(0)

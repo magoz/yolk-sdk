@@ -795,6 +795,7 @@ describe('delayed Driver.run report', () => {
         const queuedWorkStarted = yield* Ref.make(false)
         const delaySave = yield* Ref.make(false)
         const finalized = yield* Ref.make(false)
+
         const layer = makeDurableObjectDriverLayer({
           load: Ref.get(snapshot),
           save: next =>
@@ -813,6 +814,7 @@ describe('delayed Driver.run report', () => {
 
         yield* Effect.gen(function* () {
           const raw = yield* Driver
+
           const driver = {
             ...raw,
             run: (runId: string) =>
@@ -826,7 +828,9 @@ describe('delayed Driver.run report', () => {
                   )
                 )
           }
+
           const prepare = yield* live.beginPrepare()
+
           const running = yield* live
             .runOwned(
               prepare,
@@ -836,16 +840,20 @@ describe('delayed Driver.run report', () => {
               'session_1'
             )
             .pipe(Effect.forkChild)
+
           yield* Deferred.await(started)
           yield* Ref.set(delaySave, true)
 
           const reconnecting = yield* live
             .reconnect(driver, 'session_1', Ref.set(finalized, true))
             .pipe(Effect.forkChild)
+
           yield* Deferred.await(saveEntered)
+
           const queued = yield* live
             .runOwned(prepare, 'sock_queued', Ref.set(queuedWorkStarted, true), driver, 'session_1')
             .pipe(Effect.forkChild)
+
           yield* Effect.yieldNow
           expect(reconnecting.pollUnsafe()).toBeUndefined()
           expect(queued.pollUnsafe()).toBeUndefined()
