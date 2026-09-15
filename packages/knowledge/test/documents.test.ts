@@ -15,8 +15,9 @@ import { ingestKnowledgeDocument } from '../src/ingestion.ts'
 import { SearchIndexStore } from '../src/store.ts'
 import {
   KnowledgeChunkSchema,
+  KnowledgeDocumentId,
   KnowledgeDocumentSchema,
-  KnowledgeFileSource,
+  KnowledgeScopeId,
   KnowledgeSearchScope,
   KnowledgeSearchScopeSchema,
   KnowledgeSearchScopes,
@@ -34,15 +35,19 @@ import {
 import { KnowledgeSummarizer } from '../src/summarization.ts'
 import type { SearchIndexStoreApi } from '../src/store.ts'
 
+const scopeId = KnowledgeScopeId.make('scope_1')
+
+const documentId = KnowledgeDocumentId.make('doc_1')
+
 const document: IndexedKnowledgeDocument = {
-  id: 'doc_1',
-  scopeId: 'scope_1',
+  id: documentId,
+  scopeId,
   source: KnowledgeTextSource.make({ label: 'note' }),
   status: 'ready'
 }
 
 const durableDocument: KnowledgeDocument = {
-  id: 'doc_1',
+  id: documentId,
   slug: 'project.memory',
   title: 'Project memory',
   purpose: 'Answer project questions.',
@@ -70,8 +75,8 @@ describe('knowledge searching', () => {
     expect(documents.KnowledgeTextSource.make({ label: 'note' })._tag).toBe('Text')
     expect(documents.KnowledgeFileSource.make({ ref: 'file_1' })._tag).toBe('File')
     expect(documents.KnowledgeUrlSource.make({ url: 'https://example.test' })._tag).toBe('Url')
-    expect(documents.KnowledgeSearchScope.make({ id: 'scope_1' })._tag).toBe('KnowledgeScope')
-    expect(documents.KnowledgeSearchScopes.make({ ids: ['scope_1'] })._tag).toBe('KnowledgeScopes')
+    expect(documents.KnowledgeSearchScope.make({ id: scopeId })._tag).toBe('KnowledgeScope')
+    expect(documents.KnowledgeSearchScopes.make({ ids: [scopeId] })._tag).toBe('KnowledgeScopes')
     expect(embeddings.KnowledgeEmbedder).toBeDefined()
     expect(errors.SearchIndexStoreError).toBeDefined()
     expect(extraction.KnowledgeExtractor).toBeDefined()
@@ -103,17 +108,17 @@ describe('knowledge searching', () => {
       }).pipe(Effect.result)
 
       const invalidScope = yield* Schema.decodeUnknownEffect(KnowledgeSearchScopeSchema)({
-        ...KnowledgeSearchScope.make({ id: 'scope_1' }),
+        _tag: 'KnowledgeScope',
         id: ' scope_1 '
       }).pipe(Effect.result)
 
       const emptyScopes = yield* Schema.decodeUnknownEffect(KnowledgeSearchScopeSchema)({
-        ...KnowledgeSearchScopes.make({ ids: ['scope_1'] }),
+        _tag: 'KnowledgeScopes',
         ids: []
       }).pipe(Effect.result)
 
       const invalidFileSource = yield* Schema.decodeUnknownEffect(KnowledgeSourceSchema)({
-        ...KnowledgeFileSource.make({ ref: 'file_1' }),
+        _tag: 'File',
         ref: ''
       }).pipe(Effect.result)
 
@@ -129,8 +134,8 @@ describe('knowledge searching', () => {
     Effect.gen(function* () {
       const chunks = yield* chunkKnowledgeText(
         {
-          scopeId: 'scope_1',
-          documentId: 'doc_1',
+          scopeId,
+          documentId,
           content: 'Alpha beta. Gamma delta. Epsilon zeta.'
         },
         5
@@ -148,7 +153,7 @@ describe('knowledge searching', () => {
   it.effect('rejects invalid chunking config', () =>
     Effect.gen(function* () {
       const result = yield* Effect.flip(
-        chunkKnowledgeText({ scopeId: 'scope_1', documentId: 'doc_1', content: 'text' }, 0)
+        chunkKnowledgeText({ scopeId, documentId, content: 'text' }, 0)
       )
 
       expect(result).toBeInstanceOf(KnowledgeChunkingError)
@@ -201,8 +206,8 @@ describe('knowledge searching', () => {
 
     return Effect.gen(function* () {
       const indexed = yield* ingestKnowledgeDocument({
-        scopeId: 'scope_1',
-        documentId: 'doc_1',
+        scopeId,
+        documentId,
         source: { source: KnowledgeTextSource.make({ label: 'note' }), content: 'ignored' }
       })
 
@@ -226,8 +231,8 @@ describe('knowledge searching', () => {
           {
             chunk: {
               id: 'chunk_2',
-              scopeId: 'scope_1',
-              documentId: 'doc_1',
+              scopeId,
+              documentId,
               content: 'match',
               position: 1,
               tokenCount: 1
@@ -241,16 +246,16 @@ describe('knowledge searching', () => {
         Effect.succeed([
           {
             id: 'chunk_1',
-            scopeId: 'scope_1',
-            documentId: 'doc_1',
+            scopeId,
+            documentId,
             content: 'before',
             position: 0,
             tokenCount: 1
           },
           {
             id: 'chunk_2',
-            scopeId: 'scope_1',
-            documentId: 'doc_1',
+            scopeId,
+            documentId,
             content: 'match',
             position: 1,
             tokenCount: 1
@@ -268,7 +273,7 @@ describe('knowledge searching', () => {
 
     return Effect.gen(function* () {
       const results = yield* searchKnowledge({
-        scope: KnowledgeSearchScope.make({ id: 'scope_1' }),
+        scope: KnowledgeSearchScope.make({ id: scopeId }),
         query: 'alpha',
         mode: 'vector',
         contextChunks: 1
@@ -301,7 +306,7 @@ describe('knowledge searching', () => {
       )
 
       const error = yield* searchKnowledge({
-        scope: KnowledgeSearchScope.make({ id: 'scope_1' }),
+        scope: KnowledgeSearchScope.make({ id: scopeId }),
         query: '   '
       }).pipe(Effect.flip, Effect.provide(layer))
 
@@ -334,12 +339,14 @@ describe('knowledge searching', () => {
 
     return Effect.gen(function* () {
       const one = yield* searchKnowledge({
-        scope: KnowledgeSearchScope.make({ id: 'scope_1' }),
+        scope: KnowledgeSearchScope.make({ id: scopeId }),
         query: '   '
       }).pipe(Effect.flip, Effect.provide(layer))
 
       const many = yield* searchKnowledge({
-        scope: KnowledgeSearchScopes.make({ ids: ['scope_1', 'scope_2'] }),
+        scope: KnowledgeSearchScopes.make({
+          ids: [scopeId, KnowledgeScopeId.make('scope_2')]
+        }),
         query: '   '
       }).pipe(Effect.flip, Effect.provide(layer))
 
@@ -464,8 +471,8 @@ describe('knowledge searching', () => {
           {
             chunk: {
               id: 'chunk_2',
-              scopeId: 'scope_1',
-              documentId: 'doc_1',
+              scopeId,
+              documentId,
               content: 'match',
               position: 1,
               tokenCount: 1
@@ -488,7 +495,7 @@ describe('knowledge searching', () => {
 
     return Effect.gen(function* () {
       const results = yield* searchKnowledge({
-        scope: KnowledgeSearchScopes.make({ ids: ['scope_1', 'scope_2'] }),
+        scope: KnowledgeSearchScopes.make({ ids: [scopeId, KnowledgeScopeId.make('scope_2')] }),
         query: 'alpha',
         mode: 'vector'
       })

@@ -1,5 +1,17 @@
 import { Context, Data, Effect, Layer, Predicate, Ref, Semaphore } from 'effect'
+import * as Schema from 'effect/Schema'
 import type { CapturedRun, Promotable } from './coordinator.ts'
+
+/** Nominal identity only. All strings stay admissible so stale/empty/foreign
+ * tokens retain the inbox's existing no-op decisions rather than parse failures. */
+export const DrainToken = Schema.String.pipe(Schema.brand('DrainToken'))
+
+export type DrainToken = typeof DrainToken.Type
+
+/** Nominal identity only; freshness and instance ownership are checked by Inbox. */
+export const ParkGeneration = Schema.String.pipe(Schema.brand('ParkGeneration'))
+
+export type ParkGeneration = typeof ParkGeneration.Type
 
 export type InboxKind = 'input' | 'hitl'
 
@@ -16,7 +28,7 @@ export type ParkedResponse = {
 }
 
 export type ParkedState = {
-  readonly generation: string
+  readonly generation: ParkGeneration
   readonly requestIds: ReadonlyArray<string>
   readonly responses: ReadonlyArray<ParkedResponse>
   readonly ready: boolean
@@ -25,7 +37,7 @@ export type ParkedState = {
 export type HitlAdmission = {
   readonly itemId: string
   readonly requestId: string
-  readonly generation: string
+  readonly generation: ParkGeneration
 }
 
 export type HitlDecision =
@@ -37,7 +49,7 @@ export type HitlDecision =
   | { readonly _tag: 'NotParked' }
 
 export type PauseDecision =
-  | { readonly _tag: 'Parked'; readonly generation: string }
+  | { readonly _tag: 'Parked'; readonly generation: ParkGeneration }
   | { readonly _tag: 'Stale' }
 
 export type RecoveryAttempt =
@@ -54,7 +66,7 @@ export type DrainBegin =
   | { readonly _tag: 'Skip' }
   | {
       readonly _tag: 'Run'
-      readonly drainToken: string
+      readonly drainToken: DrainToken
       readonly readyResponses: ReadonlyArray<ParkedResponse>
     }
 
@@ -73,25 +85,25 @@ export type InboxApi = {
   readonly takePromotable: (
     runId: string,
     scope: Promotable,
-    drainToken: string
+    drainToken: DrainToken
   ) => Effect.Effect<InboxItem | undefined>
   readonly pending: (runId: string) => Effect.Effect<ReadonlyArray<InboxItem>>
   readonly parked: (runId: string) => Effect.Effect<ParkedState | undefined>
   readonly park: (
     runId: string,
     requestIds: ReadonlyArray<string>,
-    drainToken: string
+    drainToken: DrainToken
   ) => Effect.Effect<PauseDecision>
   readonly acceptHitl: (
     runId: string,
     admission: HitlAdmission,
     onReady: Effect.Effect<void>
   ) => Effect.Effect<HitlDecision>
-  readonly clearPark: (runId: string, generation: string) => Effect.Effect<boolean>
+  readonly clearPark: (runId: string, generation: ParkGeneration) => Effect.Effect<boolean>
   readonly beginDrain: (runId: string, scope: Promotable) => Effect.Effect<DrainBegin>
   readonly endDrain: (
     runId: string,
-    drainToken: string,
+    drainToken: DrainToken,
     acknowledged: boolean
   ) => Effect.Effect<void>
   readonly invalidate: (
@@ -123,7 +135,7 @@ const isPromotableAt = (item: InboxItem, scope: Promotable) => {
 }
 
 type Park = {
-  readonly generation: string
+  readonly generation: ParkGeneration
   readonly requestIds: ReadonlyArray<string>
   readonly responses: ReadonlyArray<ParkedResponse>
   readonly readyWoken: boolean
@@ -131,9 +143,9 @@ type Park = {
 
 type RunControl = {
   readonly pending: Promotable | undefined
-  readonly liveToken: string | undefined
+  readonly liveToken: DrainToken | undefined
   readonly park: Park | undefined
-  readonly leasedGeneration: string | undefined
+  readonly leasedGeneration: ParkGeneration | undefined
 }
 
 const emptyControl: RunControl = {
@@ -274,7 +286,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
 
                   if (control.liveToken !== drainToken) return PauseDecision.Stale()
                   generationSeq += 1
-                  const generation = String(generationSeq)
+                  const generation = ParkGeneration.make(String(generationSeq))
                   yield* writeControl(runId, {
                     pending: control.pending,
                     liveToken: control.liveToken,
@@ -366,7 +378,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                   }
 
                   drainSeq += 1
-                  const drainToken = `d${drainSeq}`
+                  const drainToken = DrainToken.make(`d${drainSeq}`)
                   const park = control.park
                   const ready = park !== undefined && parkComplete(park) ? park : undefined
                   yield* writeControl(runId, {

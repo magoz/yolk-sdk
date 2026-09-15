@@ -3,7 +3,7 @@ import { WorkflowRunNotFoundError } from 'workflow/errors'
 import * as Schema from 'effect/Schema'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
-import { AgentWorkflowStore } from './live-layer'
+import { AgentWorkflowStore, decodeWorkflowOwnership } from './live-layer'
 import { childAdmissionWaitMs } from './policy'
 
 export type WorkflowChildRead = {
@@ -36,7 +36,13 @@ export const readWorkflowChild = (
 ) =>
   Effect.gen(function* () {
     const store = yield* AgentWorkflowStore
-    const registry = yield* store.read(input.parentRunId, input.userId)
+
+    const ownership = yield* decodeWorkflowOwnership({
+      runId: input.parentRunId,
+      userId: input.userId
+    })
+
+    const registry = yield* store.read(ownership.runId, ownership.userId)
     const child = registry.children.find(child => child.callId === input.callId)
 
     if (child !== undefined && child.result !== null)
@@ -87,7 +93,7 @@ export const readWorkflowChild = (
 
     if (status === 'failed' || status === 'cancelled' || status === 'completed') {
       // Terminal persistence precedes platform completion; reread to avoid racing that commit.
-      const latest = yield* store.read(input.parentRunId, input.userId)
+      const latest = yield* store.read(ownership.runId, ownership.userId)
       const result = latest.children.find(child => child.callId === input.callId)?.result
 
       return {

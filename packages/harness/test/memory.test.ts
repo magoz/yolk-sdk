@@ -2,7 +2,14 @@ import { Deferred, Effect, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { admit, Driver } from '../src/driver.ts'
 import { makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
-import { DrainBegin, HitlDecision, Inbox, PauseDecision } from '../src/inbox.ts'
+import {
+  DrainBegin,
+  DrainToken,
+  HitlDecision,
+  Inbox,
+  ParkGeneration,
+  PauseDecision
+} from '../src/inbox.ts'
 import { RunStore } from '../src/store.ts'
 
 describe('in-memory harness', () => {
@@ -161,7 +168,7 @@ describe('in-memory harness', () => {
         delivery: 'input',
         kind: 'input'
       })
-      expect(yield* inbox.takePromotable('run_1', 'input', 'd1')).toBeUndefined()
+      expect(yield* inbox.takePromotable('run_1', 'input', DrainToken.make('d1'))).toBeUndefined()
       expect(yield* inbox.pending('run_1')).toHaveLength(1)
 
       expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
@@ -170,8 +177,8 @@ describe('in-memory harness', () => {
 
       if (!Predicate.isTagged(begun, 'Run')) return
 
-      expect(yield* inbox.takePromotable('run_1', 'input', '')).toBeUndefined()
-      expect(yield* inbox.takePromotable('run_1', 'input', 'nope')).toBeUndefined()
+      expect(yield* inbox.takePromotable('run_1', 'input', DrainToken.make(''))).toBeUndefined()
+      expect(yield* inbox.takePromotable('run_1', 'input', DrainToken.make('nope'))).toBeUndefined()
       expect(yield* inbox.pending('run_1')).toHaveLength(1)
 
       yield* inbox.enqueue({
@@ -220,11 +227,13 @@ describe('in-memory harness', () => {
     Effect.gen(function* () {
       const inbox = yield* Inbox
       expect(yield* inbox.beginDrain('run_1', 'input')).toEqual(DrainBegin.Skip())
-      expect(yield* inbox.park('run_1', ['req_1'], 'd1')).toEqual(PauseDecision.Stale())
+      expect(yield* inbox.park('run_1', ['req_1'], DrainToken.make('d1'))).toEqual(
+        PauseDecision.Stale()
+      )
       expect(
         yield* inbox.acceptHitl(
           'run_1',
-          { itemId: 'item_1', requestId: 'req_1', generation: '1' },
+          { itemId: 'item_1', requestId: 'req_1', generation: ParkGeneration.make('1') },
           Effect.void
         )
       ).toEqual(HitlDecision.NotParked())
@@ -245,7 +254,7 @@ describe('in-memory harness', () => {
       expect(
         yield* inbox.acceptHitl(
           'run_1',
-          { itemId: 'item_1', requestId: 'req_1', generation: 'stale' },
+          { itemId: 'item_1', requestId: 'req_1', generation: ParkGeneration.make('stale') },
           Effect.void
         )
       ).toEqual(HitlDecision.Stale())

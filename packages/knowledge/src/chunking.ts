@@ -1,6 +1,11 @@
 import { Context, Effect, Layer } from 'effect'
 import { countTokens, decode, encode } from 'gpt-tokenizer/encoding/o200k_base'
-import type { KnowledgeChunk, KnowledgeMetadata } from './documents.ts'
+import type {
+  KnowledgeChunk,
+  KnowledgeDocumentId,
+  KnowledgeMetadata,
+  KnowledgeScopeId
+} from './documents.ts'
 import { KnowledgeChunkingError } from './errors.ts'
 
 const SENTENCE_PATTERN = /[^.!?]+[.!?]+(?:["')\]]+)?\s*|[^.!?]+$/g
@@ -10,8 +15,8 @@ const PARAGRAPH_BREAK_PATTERN = /(\n{2,})/
 const WORD_PATTERN = /\S+\s*/g
 
 export type ChunkKnowledgeDocumentInput = {
-  readonly scopeId: string
-  readonly documentId: string
+  readonly scopeId: KnowledgeScopeId
+  readonly documentId: KnowledgeDocumentId
   readonly content: string
   readonly maxTokens?: number
   readonly metadata?: KnowledgeMetadata

@@ -1,6 +1,6 @@
 import { Data, Effect, Predicate } from 'effect'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
-import { AgentWorkflowStore } from './live-layer'
+import { AgentWorkflowStore, decodeWorkflowOwnership } from './live-layer'
 
 export class WorkflowStopIncomplete extends Data.TaggedError('WorkflowStopIncomplete')<{
   readonly message: string
@@ -12,8 +12,9 @@ export const stopAgentWorkflow = (runId: string, userId: string) =>
   Effect.gen(function* () {
     const store = yield* AgentWorkflowStore
     const workflows = yield* VercelWorkflows
+    const ownership = yield* decodeWorkflowOwnership({ runId, userId })
     // Durable barrier first. Late reservations/admissions are now rejected, even if cancel fails.
-    const registry = yield* store.change(runId, userId, { type: 'stop' })
+    const registry = yield* store.change(ownership.runId, ownership.userId, { type: 'stop' })
 
     const runIds = [
       runId,

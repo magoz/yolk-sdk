@@ -69,12 +69,15 @@ Add the resulting text to your system prompt. Your app chooses which documents a
 chunks, embeds and summarizes, replaces chunks, then marks the index record `ready`. It does not
 update `KnowledgeStore` automatically.
 
+Fragment; `loadedSource` and service layers are host-owned:
+
 ```ts
+import { KnowledgeDocumentId, KnowledgeScopeId } from '@yolk-sdk/knowledge/documents'
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 
 const program = ingestKnowledgeDocument({
-  scopeId: 'workspace-docs',
-  documentId: 'doc_123',
+  scopeId: KnowledgeScopeId.make('workspace-docs'),
+  documentId: KnowledgeDocumentId.make('doc_123'),
   source: loadedSource
 })
 ```
@@ -95,12 +98,12 @@ replacement, rollback policy, and ready/error filtering. Failures retain their s
 
 ```ts
 import { Effect } from 'effect'
-import { KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
+import { KnowledgeScopeId, KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
 import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 
 const results = await Effect.runPromise(
   searchKnowledge({
-    scope: KnowledgeSearchScope.make({ id: 'workspace-docs' }),
+    scope: KnowledgeSearchScope.make({ id: KnowledgeScopeId.make('workspace-docs') }),
     query: 'How do agent tools work?',
     limit: 5,
     mode: 'hybrid',
@@ -111,6 +114,12 @@ const results = await Effect.runPromise(
 
 The value `KnowledgeSearchScope` is the single-id constructor (tag `KnowledgeScope`).
 `KnowledgeSearchScopes.make({ ids })` covers multiple ids. The type `KnowledgeSearchScope` is the union.
+
+Scope and document identities use distinct `KnowledgeScopeId` / `KnowledgeDocumentId` schemas
+from `@yolk-sdk/knowledge/documents`. `.make` is for trusted values; Effect-decode request and
+persisted IDs with `Schema.decodeUnknownEffect` before entering store, chunking, or ingestion
+contracts. Both remain non-empty trimmed strings on the wire. Branding does not prove scope
+membership or authorization.
 
 The package defines the search contract. Your app implements the store and embedding provider.
 

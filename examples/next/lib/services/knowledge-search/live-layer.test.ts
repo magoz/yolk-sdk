@@ -3,7 +3,9 @@ import { eq } from 'drizzle-orm'
 import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  KnowledgeDocumentId,
   KnowledgeFileSource,
+  KnowledgeScopeId,
   KnowledgeSearchScope,
   KnowledgeTextSource,
   KnowledgeUrlSource
@@ -218,6 +220,22 @@ describe('toKnowledgeDocument metadata', () => {
     })
   )
 
+  it.effect('rejects malformed persisted scope and document ids', () =>
+    Effect.gen(function* () {
+      for (const invalid of [
+        { ...document, id: '' },
+        { ...document, id: ' doc_1 ' },
+        { ...document, collectionId: '' },
+        { ...document, collectionId: ' col_1 ' }
+      ]) {
+        const error = yield* toKnowledgeDocument({ document: invalid, storage }).pipe(Effect.flip)
+
+        expect(error._tag).toBe('SearchIndexStoreError')
+        expect(error.message).toBe('Invalid knowledge search id')
+      }
+    })
+  )
+
   it.effect('fails invalid document metadata as SearchIndexStoreError instead of {}', () =>
     Effect.gen(function* () {
       const error = yield* toKnowledgeDocument({
@@ -251,6 +269,22 @@ describe('toKnowledgeChunk metadata', () => {
     })
   )
 
+  it.effect('rejects malformed persisted chunk scope and document references', () =>
+    Effect.gen(function* () {
+      for (const invalid of [
+        { ...chunk, documentId: '' },
+        { ...chunk, documentId: ' doc_1 ' },
+        { ...chunk, collectionId: '' },
+        { ...chunk, collectionId: ' col_1 ' }
+      ]) {
+        const error = yield* toKnowledgeChunk(invalid).pipe(Effect.flip)
+
+        expect(error._tag).toBe('SearchIndexStoreError')
+        expect(error.message).toBe('Invalid knowledge search id')
+      }
+    })
+  )
+
   it.effect('fails invalid chunk metadata as SearchIndexStoreError without dropping the row', () =>
     Effect.gen(function* () {
       let reads = 0
@@ -279,9 +313,9 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
     () => {
       const userId = createId()
       const otherUserId = createId()
-      const collectionId = createId()
+      const collectionId = KnowledgeScopeId.make(createId())
       const storageObjectId = createId()
-      const documentId = createId()
+      const documentId = KnowledgeDocumentId.make(createId())
 
       const cleanup = Effect.gen(function* () {
         const db = yield* Db

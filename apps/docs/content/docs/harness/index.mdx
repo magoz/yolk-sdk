@@ -109,7 +109,10 @@ Startup is explicit:
 
 ## Drain token, HITL, and storage
 
-Host drains receive `DrainContext.drainToken` and must pass it to `pause` and `Inbox.takePromotable`. `takePromotable` rejects missing, empty, inactive, stale, or wrong-run tokens by returning `undefined` and leaving the queue unchanged. `pause` returns `Parked` or `Stale`; wrong or stale tokens are `Stale`.
+Host drains receive `DrainContext.drainToken` (branded `DrainToken`) and must pass it to `pause`
+and `Inbox.takePromotable`. Park state/admission use a distinct `ParkGeneration`; both schema/type
+companions are exported from `@yolk-sdk/harness/inbox`. They remain plain strings on the wire and
+are nominal distinctions only—not proof of freshness or ownership. `takePromotable` rejects missing, empty, inactive, stale, or wrong-run tokens by returning `undefined` and leaving the queue unchanged. `pause` returns `Parked` or `Stale`; wrong or stale tokens are `Stale`.
 
 Hosts persist typed HITL payloads by item id. Inbox stores only opaque generation, request ids, and response item ids. Memory Inbox park state is process-lifetime only.
 

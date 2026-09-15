@@ -5,8 +5,10 @@ import type {
   IndexedKnowledgeDocument,
   KnowledgeChunk,
   KnowledgeDocument,
+  KnowledgeDocumentId,
   KnowledgeFile,
   KnowledgeScope,
+  KnowledgeScopeId,
   KnowledgeSearchScope,
   UpdateKnowledgeDocumentInput
 } from './documents.ts'
@@ -15,7 +17,7 @@ import type { KnowledgeStoreError, SearchIndexStoreError } from './errors.ts'
 
 export type GetKnowledgeDocumentInput = {
   readonly scope: KnowledgeScope
-  readonly id: string
+  readonly id: KnowledgeDocumentId
 }
 
 export type GetKnowledgeDocumentBySlugInput = {
@@ -78,8 +80,8 @@ export type UpsertIndexedKnowledgeDocumentInput = {
 }
 
 export type ReplaceKnowledgeDocumentChunksInput = {
-  readonly scopeId: string
-  readonly documentId: string
+  readonly scopeId: KnowledgeScopeId
+  readonly documentId: KnowledgeDocumentId
   readonly chunks: ReadonlyArray<{
     readonly chunk: KnowledgeChunk
     readonly embedding: KnowledgeEmbedding
@@ -87,8 +89,8 @@ export type ReplaceKnowledgeDocumentChunksInput = {
 }
 
 export type MarkKnowledgeDocumentReadyInput = {
-  readonly scopeId: string
-  readonly documentId: string
+  readonly scopeId: KnowledgeScopeId
+  readonly documentId: KnowledgeDocumentId
   readonly title?: string
   readonly summary?: string
   readonly contentHash?: string
@@ -97,8 +99,8 @@ export type MarkKnowledgeDocumentReadyInput = {
 }
 
 export type MarkKnowledgeDocumentErrorInput = {
-  readonly scopeId: string
-  readonly documentId: string
+  readonly scopeId: KnowledgeScopeId
+  readonly documentId: KnowledgeDocumentId
   readonly message: string
 }
 
@@ -122,8 +124,8 @@ export type KnowledgeChunkSearchResult = {
 }
 
 export type KnowledgeSearchContextChunksInput = {
-  readonly scopeId: string
-  readonly documentId: string
+  readonly scopeId: KnowledgeScopeId
+  readonly documentId: KnowledgeDocumentId
   readonly position: number
   readonly contextChunks: number
 }
@@ -133,8 +135,8 @@ export type SearchIndexStoreApi = {
     input: UpsertIndexedKnowledgeDocumentInput
   ) => Effect.Effect<IndexedKnowledgeDocument, SearchIndexStoreError>
   readonly markDocumentProcessing: (input: {
-    readonly scopeId: string
-    readonly documentId: string
+    readonly scopeId: KnowledgeScopeId
+    readonly documentId: KnowledgeDocumentId
   }) => Effect.Effect<IndexedKnowledgeDocument, SearchIndexStoreError>
   readonly replaceDocumentChunks: (
     input: ReplaceKnowledgeDocumentChunksInput
@@ -146,8 +148,8 @@ export type SearchIndexStoreApi = {
     input: MarkKnowledgeDocumentErrorInput
   ) => Effect.Effect<void, SearchIndexStoreError>
   readonly deleteDocument: (input: {
-    readonly scopeId: string
-    readonly documentId: string
+    readonly scopeId: KnowledgeScopeId
+    readonly documentId: KnowledgeDocumentId
   }) => Effect.Effect<void, SearchIndexStoreError>
   readonly searchChunks: (
     input: KnowledgeChunkSearchInput

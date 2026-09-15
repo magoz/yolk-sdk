@@ -54,6 +54,19 @@ describe('knowledgeDocumentFromRow metadata', () => {
     })
   )
 
+  it.effect('rejects malformed persisted document ids in the typed error channel', () =>
+    Effect.gen(function* () {
+      for (const id of ['', '   ', ' doc_1 ']) {
+        const error = yield* knowledgeDocumentFromRow({
+          document: { ...document, id }
+        }).pipe(Effect.flip)
+
+        expect(error._tag).toBe('KnowledgeStoreError')
+        expect(error.message).toBe('Invalid knowledge document id')
+      }
+    })
+  )
+
   it.effect('fails invalid metadata as KnowledgeStoreError instead of {}', () =>
     Effect.gen(function* () {
       const error = yield* knowledgeDocumentFromRow({
@@ -84,6 +97,17 @@ describe('knowledgeFileFromRow metadata', () => {
       const reconstructed = yield* knowledgeFileFromRow(file)
 
       expect(reconstructed.metadata).toEqual({ filename: 'a.pdf', format: 'pdf' })
+    })
+  )
+
+  it.effect('rejects malformed persisted file document references', () =>
+    Effect.gen(function* () {
+      for (const documentId of ['', '   ', ' doc_1 ']) {
+        const error = yield* knowledgeFileFromRow({ ...file, documentId }).pipe(Effect.flip)
+
+        expect(error._tag).toBe('KnowledgeStoreError')
+        expect(error.message).toBe('Invalid knowledge document id')
+      }
     })
   )
 

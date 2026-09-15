@@ -7,18 +7,25 @@ Use this when agents need access to app documents, notes, files, or durable memo
 
 ## Ingest documents
 
+Fragment; supply `loadedSource` and `HostKnowledgeLayer` from your app:
+
 ```ts
 import { Effect } from 'effect'
+import { KnowledgeDocumentId, KnowledgeScopeId } from '@yolk-sdk/knowledge/documents'
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 
 await Effect.runPromise(
   ingestKnowledgeDocument({
-    scopeId: 'workspace-docs',
-    documentId: 'doc_123',
+    scopeId: KnowledgeScopeId.make('workspace-docs'),
+    documentId: KnowledgeDocumentId.make('doc_123'),
     source: loadedSource
   }).pipe(Effect.provide(HostKnowledgeLayer))
 )
 ```
+
+These are trusted example constants. Decode external/persisted IDs with
+`Schema.decodeUnknownEffect` before passing them to branded contracts; see
+[Knowledge identities](../knowledge#search-documents). Your app still checks permissions.
 
 Your app provides extraction, chunking, embedding, summarization, and store layers.
 The pipeline updates `SearchIndexStore`, not `KnowledgeStore`, and is not a cross-operation

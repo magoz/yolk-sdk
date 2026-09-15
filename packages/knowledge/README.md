@@ -69,6 +69,9 @@ construct and enforce them; the package does not infer identity, tenancy, or per
 ids or kinds. The **value** `KnowledgeSearchScope` is the single-id constructor
 (`KnowledgeSearchScope.make({ id })`, tag `KnowledgeScope`). `KnowledgeSearchScopes.make({ ids })`
 is the non-empty-ids variant. The **type** `KnowledgeSearchScope` remains the union of both.
+Scope and document references use the branded `KnowledgeScopeId` and `KnowledgeDocumentId`
+(non-empty trimmed strings, same wire representation). Hosts Effect-decode raw external/persisted
+ids at their boundary and use `.make` for trusted constants and minted values.
 
 ## Subpaths
 

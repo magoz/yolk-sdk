@@ -1,12 +1,13 @@
 import { Effect, Layer } from 'effect'
+import * as Schema from 'effect/Schema'
 import type { ConfigError } from 'effect/Config'
 import type { SqlError } from 'effect/unstable/sql/SqlError'
 import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ModelVisibleToolError, modelVisibleToolError } from '@yolk-sdk/agent/tools'
-import { KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
+import { KnowledgeScopeId, KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
 import { ensureUserKnowledgeCollection } from '@/lib/core/storage/ensure-user-knowledge-collection'
-import type { NotFoundError, PersistenceError } from '@/lib/core/errors'
+import { PersistenceError, type NotFoundError } from '@/lib/core/errors'
 import { getStorageObject } from '@/lib/core/storage/get-storage-object'
 import { getUserStorage } from '@/lib/core/storage/get-user-storage'
 import { Db } from '@/lib/services/db/live-layer'
@@ -73,9 +74,20 @@ const searchStorageForAgent = (input: {
   Effect.gen(function* () {
     const collection = yield* ensureUserKnowledgeCollection({ userId: input.userId })
 
+    const scopeId = yield* Schema.decodeUnknownEffect(KnowledgeScopeId)(collection.id).pipe(
+      Effect.mapError(
+        error =>
+          new PersistenceError({
+            message: 'Invalid knowledge scope id',
+            entity: 'knowledgeCollection',
+            cause: error
+          })
+      )
+    )
+
     return yield* searchAppKnowledge({
       userId: input.userId,
-      scope: KnowledgeSearchScope.make({ id: collection.id }),
+      scope: KnowledgeSearchScope.make({ id: scopeId }),
       query: input.query,
       options: {
         limit: input.limit,

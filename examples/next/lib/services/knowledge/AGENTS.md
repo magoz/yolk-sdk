@@ -22,6 +22,8 @@ App-owned concrete adapters for the domain-free `@yolk-sdk/knowledge` package.
 
 - jsonb `metadata` columns are stored as `unknown` and admitted through `persisted-json-object`.
 - `knowledgeDocumentFromRow` / `knowledgeFileFromRow` decode before constructing package documents/files.
+- Persisted row ids are Effect-decoded into `KnowledgeDocumentId` in the same row constructors;
+  unchecked Drizzle `$type` narrowing is not a substitute for validation.
 - Invalid pre-existing metadata fails `KnowledgeStoreError`; it is not coerced to `{}`.
 - Writes encode through the same codec before insert/update.
 

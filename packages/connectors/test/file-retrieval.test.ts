@@ -12,7 +12,8 @@ import type { ConnectorBinaryHttpRequest, ConnectorBinaryHttpResponse } from '@y
 import { downloadGoogleDriveFile, exportGoogleDriveFile } from '@yolk-sdk/connectors/google'
 import {
   downloadFortnoxArchiveFile,
-  downloadFortnoxInvoicePreview
+  downloadFortnoxInvoicePreview,
+  FortnoxDocumentNumber
 } from '@yolk-sdk/connectors/fortnox'
 import { downloadNotionFile } from '@yolk-sdk/connectors/notion'
 
@@ -215,7 +216,7 @@ describe('bounded document retrieval', () => {
       expect(
         (yield* downloadFortnoxInvoicePreview(
           integration('fortnox'),
-          { documentNumber: '12' },
+          { documentNumber: FortnoxDocumentNumber.make('12') },
           budget
         ).pipe(Effect.provide(h.layer))).source.generatedPreview
       ).toBe(true)

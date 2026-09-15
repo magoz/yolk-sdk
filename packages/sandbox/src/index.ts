@@ -8,6 +8,7 @@ export {
   defaultSandboxPorts,
   defaultSandboxWorkspaceRoot,
   maxSandboxCommandTimeoutMs,
+  NormalizedWorkspaceCwd,
   normalizeWorkspaceCwd,
   sandboxCommandTimeoutMs,
   sandboxLifecycleOrDefault,

@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { DateTime } from 'effect'
 import { buildKnowledgeContext } from '../src/context.ts'
+import { KnowledgeDocumentId } from '../src/documents.ts'
 import type { KnowledgeDocument } from '../src/documents.ts'
 
 const now = DateTime.nowUnsafe()
 
 const document: KnowledgeDocument = {
-  id: 'knowledge_1',
+  id: KnowledgeDocumentId.make('knowledge_1'),
   slug: 'big.vision',
   title: 'Big vision',
   purpose: 'Guide product work.',

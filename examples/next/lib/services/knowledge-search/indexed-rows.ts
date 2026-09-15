@@ -1,6 +1,11 @@
 import { Effect } from 'effect'
-import type * as Schema from 'effect/Schema'
-import type { KnowledgeChunk, IndexedKnowledgeDocument } from '@yolk-sdk/knowledge/documents'
+import * as Schema from 'effect/Schema'
+import {
+  KnowledgeDocumentId,
+  KnowledgeScopeId,
+  type KnowledgeChunk,
+  type IndexedKnowledgeDocument
+} from '@yolk-sdk/knowledge/documents'
 import { SearchIndexStoreError } from '@yolk-sdk/knowledge/errors'
 import type * as dbSchema from '@/lib/services/db/schema'
 import {
@@ -14,6 +19,9 @@ const metadataError = (error: Schema.SchemaError) =>
     message: persistedJsonObjectErrorMessage(error),
     cause: error
   })
+
+const idError = (error: Schema.SchemaError) =>
+  new SearchIndexStoreError({ message: 'Invalid knowledge search id', cause: error })
 
 export type IndexedDocumentRow = Pick<
   typeof dbSchema.knowledgeDocument.$inferSelect,
@@ -51,13 +59,21 @@ export const toKnowledgeDocument = (input: {
       mediaType: input.storage.mediaType
     })
 
+    const id = yield* Schema.decodeUnknownEffect(KnowledgeDocumentId)(input.document.id).pipe(
+      Effect.mapError(idError)
+    )
+
+    const scopeId = yield* Schema.decodeUnknownEffect(KnowledgeScopeId)(
+      input.document.collectionId
+    ).pipe(Effect.mapError(idError))
+
     const metadata = yield* decodePersistedJsonObject(input.document.metadata).pipe(
       Effect.mapError(metadataError)
     )
 
     return {
-      id: input.document.id,
-      scopeId: input.document.collectionId,
+      id,
+      scopeId,
       source,
       status: input.document.status,
       title: input.document.title ?? undefined,
@@ -73,15 +89,26 @@ export const toKnowledgeDocument = (input: {
 export const toKnowledgeChunk = (
   row: IndexedChunkRow
 ): Effect.Effect<KnowledgeChunk, SearchIndexStoreError> =>
-  decodePersistedJsonObject(row.metadata).pipe(
-    Effect.map(metadata => ({
+  Effect.gen(function* () {
+    const scopeId = yield* Schema.decodeUnknownEffect(KnowledgeScopeId)(row.collectionId).pipe(
+      Effect.mapError(idError)
+    )
+
+    const documentId = yield* Schema.decodeUnknownEffect(KnowledgeDocumentId)(row.documentId).pipe(
+      Effect.mapError(idError)
+    )
+
+    const metadata = yield* decodePersistedJsonObject(row.metadata).pipe(
+      Effect.mapError(metadataError)
+    )
+
+    return {
       id: row.id,
-      scopeId: row.collectionId,
-      documentId: row.documentId,
+      scopeId,
+      documentId,
       content: row.content,
       position: row.position,
       tokenCount: row.tokenCount,
       metadata
-    })),
-    Effect.mapError(metadataError)
-  )
+    }
+  })

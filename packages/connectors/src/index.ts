@@ -13,6 +13,7 @@ export type {
   ConnectorAction,
   ConnectorActionAccess,
   DefineActionOptions,
+  TypedConnectorAction,
   UnknownActionExecutionInput
 } from './action.ts'
 

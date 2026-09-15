@@ -70,6 +70,14 @@ const lifecycle = DisposableSandboxLifecycle.make({
 })
 ```
 
+## Workspace paths
+
+`normalizeWorkspaceCwd(rawCwd)` returns an Effect with a `NormalizedWorkspaceCwd` branded string
+(exported from `@yolk-sdk/sandbox`). Raw `Sandbox.run({ cwd })` inputs stay strings. The normalizer
+trims raw outer whitespace, resolves dot segments, and rejects absolute/NUL/escaping paths.
+Whitespace belonging to remaining directory names is preserved. The brand records lexical path
+validation, not filesystem or symlink confinement.
+
 ## Initial source model
 
 `SandboxInitialSource` is a tagged union:

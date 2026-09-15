@@ -85,3 +85,6 @@ the parent row so reservation/admission/Stop serialize atomically; pure transiti
 with DB-free behavioral tests. `read-child.ts` performs owned short platform status reads,
 `stop.ts` preserves the tombstone and exposes incomplete sweeps, and `policy.ts` is safe for
 Workflow orchestration imports. No DB operations are needed for these fake tests.
+Store methods distinguish app-owned `WorkflowRunId` from `UserId`; wire/orchestration boundaries
+use `decodeWorkflowOwnership` before calling them. These brands do not replace the paired row
+ownership predicate and do not narrow unrelated Better Auth or SDK contracts.

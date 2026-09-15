@@ -326,7 +326,18 @@ export class Account extends Schema.Class<Account>('Account')({
 }
 ```
 
-### Branded Types for IDs
+### Branded types at domain boundaries
+
+Use `Schema.brand` for identities that are plausibly confused (scope/document, run/owner,
+drain token/park generation) or to preserve a completed validation step. Do not brand every
+string, count, timestamp, or vendor value merely because it has a name. Keep each brand in its
+owning package/app and export it through an existing public subpath—not a shared all-IDs package.
+
+A brand prevents accidental TypeScript interchange; it does not add runtime checks. Put required
+checks on the underlying schema. Nominal-only brands are appropriate when format is deliberately
+opaque: harness tokens accept strings and retain the inbox's stale/foreign-token decisions.
+Neither a brand nor a successful decode proves authorization, ownership, existence, freshness,
+network safety, or filesystem confinement.
 
 Use `Schema.brand` to create type-safe IDs:
 
@@ -345,9 +356,24 @@ export type AccountId = typeof AccountId.Type
 // Use .make() to create instances (validates by default)
 const id = AccountId.make('acc_123')
 
-// For DB rows, if the row type is properly defined, no cast needed
-// The value is already validated when it was written to the DB
+// Decode external input and persisted rows into the domain type at the boundary.
+const decodedId = yield * Schema.decodeUnknownEffect(AccountId)(rawId)
 ```
+
+- `.make` validates synchronously and throws. Use it for trusted constants/minted values;
+  use Effect decoding and owner error mapping for external or persisted input. ORM `$type`
+  annotations are not validation, and a prior write does not prove all stored rows are valid.
+- Preserve brands through schemas **and** handwritten service/store contracts. Widening back to
+  `string` (or accepting `string | BrandedId`) forfeits input-side interchange protection.
+  Dynamic wire dispatch can intentionally accept `unknown` and decode it.
+- Typed entrypoints accept decoded `Schema.Type`; validate those with `Schema.toType(schema)`
+  rather than replaying wire transformations. Encoded JSON remains plain strings.
+- Adding brands to public inputs is a TypeScript API migration even when wire formats are unchanged.
+  Separate nominal typing changes from stricter validation/normalization changes.
+- Include nominal incompatibility assertions in a real TypeScript check (root `pnpm tsc` includes
+  the test files); Vitest transpilation alone does not check `@ts-expect-error` or `expectTypeOf`.
+  Also test boundary rejection and encoded roundtrips. Do not execute ill-typed service calls just
+  to prove a compile-time distinction; separate intentional JavaScript boundary tests.
 
 ### Never Use \*FromSelf Schemas
 

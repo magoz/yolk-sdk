@@ -60,6 +60,14 @@ Resolve `sandboxTools` with `@yolk-sdk/agent/tools`, pass the tool definitions i
 - timeout sets `timedOut`
 - workspace recreation sets `workspaceReset`
 
+## Workspace path types
+
+Raw command `cwd` inputs remain strings. `normalizeWorkspaceCwd` returns a
+`NormalizedWorkspaceCwd` branded string; both are exported from `@yolk-sdk/sandbox`. The normalizer
+resolves dot segments and rejects absolute paths, NUL, and workspace escape. It preserves whitespace
+that belongs to remaining directory names. The brand records lexical validation, not filesystem
+or symlink confinement.
+
 ## Agent tool results
 
 The `@yolk-sdk/sandbox/agent` adapter converts command failures into agent tool results:

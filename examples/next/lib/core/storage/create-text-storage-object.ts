@@ -1,5 +1,10 @@
 import { Effect } from 'effect'
-import { KnowledgeTextSource } from '@yolk-sdk/knowledge/documents'
+import * as Schema from 'effect/Schema'
+import {
+  KnowledgeDocumentId,
+  KnowledgeScopeId,
+  KnowledgeTextSource
+} from '@yolk-sdk/knowledge/documents'
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 import { PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
@@ -52,9 +57,31 @@ export const createTextStorageObject = (input: {
       )
     }
 
+    const scopeId = yield* Schema.decodeUnknownEffect(KnowledgeScopeId)(collection.id).pipe(
+      Effect.mapError(
+        error =>
+          new PersistenceError({
+            message: 'Invalid knowledge scope id',
+            entity: 'knowledgeCollection',
+            cause: error
+          })
+      )
+    )
+
+    const documentId = yield* Schema.decodeUnknownEffect(KnowledgeDocumentId)(object.id).pipe(
+      Effect.mapError(
+        error =>
+          new PersistenceError({
+            message: 'Invalid knowledge document id',
+            entity: 'storageObject',
+            cause: error
+          })
+      )
+    )
+
     yield* ingestKnowledgeDocument({
-      scopeId: collection.id,
-      documentId: object.id,
+      scopeId,
+      documentId,
       maxTokens: collection.chunkMaxTokens,
       source: {
         source: KnowledgeTextSource.make({

@@ -18,15 +18,23 @@ export const KnowledgeDocumentStatusSchema = Schema.Literals(['processing', 'rea
 
 export type KnowledgeDocumentStatus = Schema.Schema.Type<typeof KnowledgeDocumentStatusSchema>
 
+export const KnowledgeScopeId = NonEmptyTrimmedString.pipe(Schema.brand('KnowledgeScopeId'))
+
+export type KnowledgeScopeId = typeof KnowledgeScopeId.Type
+
+export const KnowledgeDocumentId = NonEmptyTrimmedString.pipe(Schema.brand('KnowledgeDocumentId'))
+
+export type KnowledgeDocumentId = typeof KnowledgeDocumentId.Type
+
 export const KnowledgeScopeSchema = Schema.Struct({
-  id: NonEmptyTrimmedString,
+  id: KnowledgeScopeId,
   kind: Schema.optional(NonEmptyTrimmedString)
 })
 
 export type KnowledgeScope = Schema.Schema.Type<typeof KnowledgeScopeSchema>
 
 export const KnowledgeDocumentSchema = Schema.Struct({
-  id: NonEmptyTrimmedString,
+  id: KnowledgeDocumentId,
   slug: NonEmptyTrimmedString,
   title: NonEmptyTrimmedString,
   purpose: NonEmptyTrimmedString,
@@ -62,7 +70,7 @@ export type CreateKnowledgeDocumentInput = Schema.Schema.Type<
 
 export const UpdateKnowledgeDocumentInputSchema = Schema.Struct({
   scope: KnowledgeScopeSchema,
-  id: NonEmptyTrimmedString,
+  id: KnowledgeDocumentId,
   slug: Schema.optional(NonEmptyTrimmedString),
   title: Schema.optional(NonEmptyTrimmedString),
   purpose: Schema.optional(NonEmptyTrimmedString),
@@ -82,7 +90,7 @@ export type UpdateKnowledgeDocumentInput = Schema.Schema.Type<
 
 export const KnowledgeFileSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
-  documentId: NonEmptyTrimmedString,
+  documentId: KnowledgeDocumentId,
   storageKey: NonEmptyTrimmedString,
   mediaType: Schema.optional(NonEmptyTrimmedString),
   byteSize: Schema.optional(NonNegativeInteger),
@@ -95,8 +103,8 @@ export type KnowledgeFile = Schema.Schema.Type<typeof KnowledgeFileSchema>
 
 export const KnowledgeChunkSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
-  scopeId: NonEmptyTrimmedString,
-  documentId: NonEmptyTrimmedString,
+  scopeId: KnowledgeScopeId,
+  documentId: KnowledgeDocumentId,
   content: NonEmptyTrimmedString,
   position: NonNegativeInteger,
   tokenCount: PositiveInteger,
@@ -106,11 +114,11 @@ export const KnowledgeChunkSchema = Schema.Struct({
 export type KnowledgeChunk = Schema.Schema.Type<typeof KnowledgeChunkSchema>
 
 export const KnowledgeSearchScope = Schema.TaggedStruct('KnowledgeScope', {
-  id: NonEmptyTrimmedString
+  id: KnowledgeScopeId
 })
 
 export const KnowledgeSearchScopes = Schema.TaggedStruct('KnowledgeScopes', {
-  ids: Schema.NonEmptyArray(NonEmptyTrimmedString)
+  ids: Schema.NonEmptyArray(KnowledgeScopeId)
 })
 
 export const KnowledgeSearchScopeSchema = Schema.Union([
@@ -143,8 +151,8 @@ export const KnowledgeSourceSchema = Schema.Union([
 export type KnowledgeSource = typeof KnowledgeSourceSchema.Type
 
 export const IndexedKnowledgeDocumentSchema = Schema.Struct({
-  id: NonEmptyTrimmedString,
-  scopeId: NonEmptyTrimmedString,
+  id: KnowledgeDocumentId,
+  scopeId: KnowledgeScopeId,
   source: KnowledgeSourceSchema,
   status: KnowledgeDocumentStatusSchema,
   title: Schema.optional(NonEmptyTrimmedString),

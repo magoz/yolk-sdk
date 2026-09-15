@@ -2,7 +2,7 @@ import { Deferred, Effect, Fiber, Layer, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { admit, Driver, makeDriverLayer, StopDecision } from '../src/driver.ts'
 import { makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
-import { Inbox, makeInMemoryInboxLayer } from '../src/inbox.ts'
+import { DrainToken, Inbox, makeInMemoryInboxLayer, ParkGeneration } from '../src/inbox.ts'
 import { makeInMemoryRunStoreLayer, RunStore } from '../src/store.ts'
 
 describe('HITL park lifecycle', () => {
@@ -74,7 +74,7 @@ describe('HITL park lifecycle', () => {
         const stale = yield* driver.resumeHitl('run_1', {
           itemId: 'item_b',
           requestId: 'req_b',
-          generation: '0'
+          generation: ParkGeneration.make('0')
         })
 
         expect(stale._tag).toBe('Stale')
@@ -649,7 +649,7 @@ describe('HITL park lifecycle', () => {
 
   it.effect('clears the drain token after a synchronous drain defect', () =>
     Effect.gen(function* () {
-      let captured = ''
+      let captured: DrainToken = DrainToken.make('pre-drain')
 
       const layer = makeInMemoryHarnessLayer({
         drain: (_runId, _force, _scope, context) => {
@@ -675,7 +675,7 @@ describe('HITL park lifecycle', () => {
     Effect.gen(function* () {
       const startedReady = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
-      const token = yield* Ref.make('')
+      const token = yield* Ref.make<DrainToken>(DrainToken.make('pre-drain'))
 
       const layer = makeInMemoryHarnessLayer({
         drain: (runId, _force, _scope, context) =>

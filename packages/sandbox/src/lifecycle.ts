@@ -26,6 +26,27 @@ export const defaultSandboxPorts: ReadonlyArray<number> = [3000, 5173, 4321, 800
 
 export const defaultSandboxWorkspaceRoot = '/vercel/sandbox'
 
+const isNormalizedWorkspaceCwd = (value: string): boolean => {
+  if (value.length === 0 || value.includes('\0')) return false
+
+  if (value === '.') return true
+
+  // Segment whitespace is a valid filename: removing './' or a trailing '/.'
+  // can expose it even though the raw input was trimmed before normalization.
+  if (value.startsWith('/') || value.endsWith('/') || value.includes('//')) return false
+
+  return value.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..')
+}
+
+export const NormalizedWorkspaceCwd = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter(isNormalizedWorkspaceCwd, { identifier: 'NormalizedWorkspaceCwd' })
+  ),
+  Schema.brand('NormalizedWorkspaceCwd')
+)
+
+export type NormalizedWorkspaceCwd = typeof NormalizedWorkspaceCwd.Type
+
 export const defaultSandboxLifecycle = DisposableSandboxLifecycle.make({
   idleTtlMs: defaultSandboxIdleTtlMs,
   maxLifetimeMs: defaultSandboxMaxLifetimeMs
@@ -83,9 +104,9 @@ export const validateSandboxCommand = (command: string) => {
 
 export const normalizeWorkspaceCwd = (
   cwd?: string | null
-): Effect.Effect<string, SandboxInputError> => {
+): Effect.Effect<NormalizedWorkspaceCwd, SandboxInputError> => {
   if (cwd === undefined || cwd === null || cwd.trim().length === 0) {
-    return Effect.succeed('.')
+    return Effect.succeed(NormalizedWorkspaceCwd.make('.'))
   }
 
   const trimmed = cwd.trim()
@@ -124,10 +145,20 @@ export const normalizeWorkspaceCwd = (
     parts.push(segment)
   }
 
-  return Effect.succeed(parts.length === 0 ? '.' : parts.join('/'))
+  return Schema.decodeUnknownEffect(NormalizedWorkspaceCwd)(
+    parts.length === 0 ? '.' : parts.join('/')
+  ).pipe(
+    Effect.mapError(
+      () =>
+        new SandboxInputError({
+          cause: 'invalid_cwd',
+          message: 'cwd must be workspace-relative'
+        })
+    )
+  )
 }
 
-export const absoluteSandboxCwd = (workspaceRoot: string, normalizedCwd: string) =>
+export const absoluteSandboxCwd = (workspaceRoot: string, normalizedCwd: NormalizedWorkspaceCwd) =>
   normalizedCwd === '.' ? workspaceRoot : `${workspaceRoot}/${normalizedCwd}`
 
 export const initialSandboxState = (input: {
