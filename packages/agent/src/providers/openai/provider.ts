@@ -16,6 +16,7 @@ import {
   attachmentSourceUrl,
   assistantContent,
   assistantHostToolCalls,
+  assistantReasoningText,
   isTextDocumentMimeType,
   messageContextText,
   replaceLoneSurrogatesDeep,
@@ -30,6 +31,7 @@ import {
   LLMError,
   LLMDone,
   LLMProvider,
+  LLMReasoningDelta,
   LLMTextDelta,
   LLMToolCall,
   LLMUsage,
@@ -207,8 +209,10 @@ export type OpenAiProviderConfig = {
    * without reading values.
    */
   readonly extraBody?: OpenAiRequestExtras
-  /** Opts into a compatible endpoint's `{ reasoning: { effort } }` request extension. */
-  readonly reasoningEffortFormat?: 'reasoning-object'
+  /** Opts into a compatible endpoint's reasoning object or reasoning_effort request field. */
+  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
+  /** Preserve compatible models' reasoning_content output and assistant replay. */
+  readonly reasoningContent?: boolean
   /** Customizes safe error metadata for a branded OpenAI-compatible endpoint. */
   readonly providerIdentity?: OpenAiProviderIdentity
   readonly apiKey: Redacted.Redacted<string>
@@ -244,6 +248,7 @@ type OpenAiMessage =
       readonly role: 'assistant'
       readonly content: string | null
       readonly tool_calls?: ReadonlyArray<OpenAiToolCall>
+      readonly reasoning_content?: string
     }
   | { readonly role: 'tool'; readonly tool_call_id: string; readonly content: string }
 
@@ -265,6 +270,7 @@ type OpenAiRequestBody = {
   readonly reasoning?: {
     readonly effort: AgentReasoningEffort
   }
+  readonly reasoning_effort?: AgentReasoningEffort
   readonly tools?: ReadonlyArray<OpenAiTool>
   readonly parallel_tool_calls?: true
 }
@@ -273,7 +279,8 @@ type OpenAiRequestBodyConfig = {
   readonly maxCompletionTokens: number
   readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
   readonly extraBody?: unknown
-  readonly reasoningEffortFormat?: 'reasoning-object'
+  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
+  readonly reasoningContent?: boolean
   readonly providerName?: string
 }
 
@@ -283,6 +290,7 @@ type OpenAiRequestBodyConfigFields = {
   completionTokenField?: OpenAiRequestBodyConfig['completionTokenField']
   extraBody?: OpenAiRequestBodyConfig['extraBody']
   reasoningEffortFormat?: OpenAiRequestBodyConfig['reasoningEffortFormat']
+  reasoningContent?: boolean
 }
 
 const defaultOpenAiProviderIdentity: OpenAiProviderIdentity = {
@@ -307,6 +315,7 @@ class OpenAiToolCallResponse extends Schema.Class<OpenAiToolCallResponse>('OpenA
 
 class OpenAiMessageResponse extends Schema.Class<OpenAiMessageResponse>('OpenAiMessageResponse')({
   content: Schema.NullOr(Schema.String),
+  reasoning_content: Schema.optional(Schema.Unknown),
   tool_calls: Schema.optional(Schema.Array(OpenAiToolCallResponse))
 }) {}
 
@@ -390,7 +399,8 @@ const invalidExtraBodyError = (providerName: string) =>
 
 const isOpenAiCanonicalRequestKey = (key: string, config: OpenAiRequestBodyConfig) =>
   openAiCanonicalRequestKeys.has(key) ||
-  (config.reasoningEffortFormat === 'reasoning-object' && key === 'reasoning')
+  (config.reasoningEffortFormat === 'reasoning-object' && key === 'reasoning') ||
+  (config.reasoningEffortFormat === 'reasoning-effort' && key === 'reasoning_effort')
 
 const snapshotOpenAiRequestExtras = (
   extraBody: unknown,
@@ -561,7 +571,8 @@ const toolCallToOpenAiToolCall = (
 
 const toOpenAiMessage = (
   message: AgentMessage,
-  providerName: string
+  providerName: string,
+  reasoningContent: boolean
 ): Effect.Effect<OpenAiMessage, LLMError> =>
   Match.value(message).pipe(
     Match.withReturnType<Effect.Effect<OpenAiMessage, LLMError>>(),
@@ -577,6 +588,9 @@ const toOpenAiMessage = (
         messageContextText(current)
       )
 
+      const reasoning = reasoningContent ? assistantReasoningText(current) : ''
+      const reasoningFields = reasoning.length > 0 ? { reasoning_content: reasoning } : {}
+
       return Effect.forEach(assistantHostToolCalls(current), call =>
         toolCallToOpenAiToolCall(call, providerName)
       ).pipe(
@@ -587,11 +601,13 @@ const toOpenAiMessage = (
                 ? {
                     role: 'assistant' as const,
                     content: text,
-                    tool_calls: toolCalls
+                    tool_calls: toolCalls,
+                    ...reasoningFields
                   }
                 : {
                     role: 'assistant' as const,
-                    content: text
+                    content: text,
+                    ...reasoningFields
                   }
             )
           )
@@ -650,7 +666,7 @@ export const toOpenAiRequestBody = (
     const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
 
     const requestMessages = yield* Effect.forEach(request.messages, message =>
-      toOpenAiMessage(message, providerName)
+      toOpenAiMessage(message, providerName, config.reasoningContent ?? false)
     )
 
     const messages = [systemMessage, ...requestMessages]
@@ -661,9 +677,13 @@ export const toOpenAiRequestBody = (
         : { max_completion_tokens: config.maxCompletionTokens }
 
     const reasoning =
-      config.reasoningEffortFormat === 'reasoning-object' && request.reasoningEffort !== undefined
-        ? { reasoning: { effort: request.reasoningEffort } }
-        : {}
+      request.reasoningEffort === undefined
+        ? {}
+        : config.reasoningEffortFormat === 'reasoning-object'
+          ? { reasoning: { effort: request.reasoningEffort } }
+          : config.reasoningEffortFormat === 'reasoning-effort'
+            ? { reasoning_effort: request.reasoningEffort }
+            : {}
 
     const extraBody =
       config.extraBody === undefined
@@ -696,7 +716,8 @@ const parseToolArguments = (raw: string, providerName: string) =>
 
 const toLlmEvents = (
   choice: OpenAiChoiceResponse,
-  providerIdentity: OpenAiProviderIdentity
+  providerIdentity: OpenAiProviderIdentity,
+  reasoningContent: boolean
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     if (choice.finish_reason === 'length' || choice.finish_reason === 'content_filter') {
@@ -715,7 +736,25 @@ const toLlmEvents = (
     }
 
     const content = choice.message.content ?? ''
-    const textEvents = content.length > 0 ? [LLMTextDelta.make({ text: content })] : []
+
+    const reasoning = reasoningContent
+      ? ((yield* Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(
+          choice.message.reasoning_content ?? null
+        ).pipe(
+          Effect.mapError(
+            schemaErrorToLlmError(
+              'invalid_response',
+              `Invalid ${providerIdentity.name} reasoning content`
+            )
+          )
+        )) ?? '')
+      : ''
+
+    const textEvents: Array<LLMEvent> = []
+
+    if (reasoning.length > 0) textEvents.push(LLMReasoningDelta.make({ text: reasoning }))
+
+    if (content.length > 0) textEvents.push(LLMTextDelta.make({ text: content }))
 
     const toolCallEvents = yield* Effect.forEach(choice.message.tool_calls ?? [], call =>
       parseToolArguments(call.function.arguments, providerIdentity.name).pipe(
@@ -816,6 +855,10 @@ const sendOpenAiRequest = (
           fields.reasoningEffortFormat = config.reasoningEffortFormat
         }
 
+        if (config.reasoningContent !== undefined) {
+          fields.reasoningContent = config.reasoningContent
+        }
+
         return fields
       })()
     )
@@ -901,7 +944,7 @@ const sendOpenAiRequest = (
       )
     }
 
-    const events = yield* toLlmEvents(choice, providerIdentity)
+    const events = yield* toLlmEvents(choice, providerIdentity, config.reasoningContent ?? false)
 
     if (parsed.usage === undefined) {
       return events

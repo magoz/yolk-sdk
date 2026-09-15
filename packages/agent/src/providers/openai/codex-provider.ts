@@ -226,7 +226,7 @@ export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) 
         providerId: openAiCodexProviderDescriptor.providerId,
         providerName: openAiCodexProviderDescriptor.providerName,
         responsesUrl: config.responsesUrl ?? openAiCodexResponsesUrl,
-        authorizationHeaders: token => openAiCodexAuthorizationHeaders(token),
+        authorizationHeaders: (token: OAuthAccessToken) => openAiCodexAuthorizationHeaders(token),
         alwaysIncludeReasoning: true,
         allowEofCompletion: true,
         unsupportedContentProviderName: 'OpenAI Codex OAuth'

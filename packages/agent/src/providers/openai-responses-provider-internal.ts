@@ -1,4 +1,14 @@
-import { Array as Arr, Effect, Layer, Match, Option, Predicate, Ref, Stream } from 'effect'
+import {
+  Array as Arr,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Predicate,
+  Redacted,
+  Ref,
+  Stream
+} from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -48,19 +58,30 @@ import { validateProviderTranscript } from './transcript.ts'
 
 type OpenAiResponsesReasoningSummary = 'auto' | 'concise' | 'detailed'
 
-export type OpenAiResponsesProviderConfig = {
-  readonly token: OAuthAccessToken
+type OpenAiResponsesAuthentication =
+  | {
+      readonly token: OAuthAccessToken
+      readonly authorizationHeaders: (
+        token: OAuthAccessToken,
+        model: string
+      ) => Readonly<Record<string, string>>
+      readonly expectedTokenProvider?: string
+      readonly apiKey?: never
+    }
+  | {
+      readonly apiKey: Redacted.Redacted<string>
+      readonly token?: never
+      readonly authorizationHeaders?: never
+      readonly expectedTokenProvider?: never
+    }
+
+export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
   readonly providerId: string
   readonly providerName: string
   readonly responsesUrl: string
-  readonly authorizationHeaders: (
-    token: OAuthAccessToken,
-    model: string
-  ) => Readonly<Record<string, string>>
   readonly alwaysIncludeReasoning: boolean
   readonly allowEofCompletion: boolean
   readonly unsupportedContentProviderName?: string
-  readonly expectedTokenProvider?: string
   readonly maxOutputTokens?: number
   readonly extraHeaders?: Readonly<Record<string, string>>
   readonly defaultReasoningEffort?: AgentReasoningEffort
@@ -1420,7 +1441,9 @@ const sendOpenAiResponsesRequest = (
       ...config.extraHeaders,
       accept: 'text/event-stream',
       'content-type': 'application/json',
-      ...config.authorizationHeaders(config.token, request.model)
+      ...(config.apiKey !== undefined
+        ? { authorization: `Bearer ${Redacted.value(config.apiKey)}` }
+        : config.authorizationHeaders(config.token, request.model))
     }
 
     const httpRequest = HttpClientRequest.post(config.responsesUrl).pipe(

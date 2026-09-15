@@ -99,6 +99,14 @@
       "types": "./src/providers/vercel/ai-gateway-provider.ts",
       "default": "./src/providers/vercel/ai-gateway-provider.ts"
     },
+    "./providers/opencode/go-provider": {
+      "types": "./src/providers/opencode/go-provider.ts",
+      "default": "./src/providers/opencode/go-provider.ts"
+    },
+    "./providers/opencode/usage": {
+      "types": "./src/providers/opencode/usage.ts",
+      "default": "./src/providers/opencode/usage.ts"
+    },
     "./providers/anthropic": {
       "types": "./src/providers/anthropic/index.ts",
       "default": "./src/providers/anthropic/index.ts"
@@ -253,6 +261,16 @@
         "types": "./dist/providers/vercel/ai-gateway-provider.d.mts",
         "import": "./dist/providers/vercel/ai-gateway-provider.mjs",
         "default": "./dist/providers/vercel/ai-gateway-provider.mjs"
+      },
+      "./providers/opencode/go-provider": {
+        "types": "./dist/providers/opencode/go-provider.d.mts",
+        "import": "./dist/providers/opencode/go-provider.mjs",
+        "default": "./dist/providers/opencode/go-provider.mjs"
+      },
+      "./providers/opencode/usage": {
+        "types": "./dist/providers/opencode/usage.d.mts",
+        "import": "./dist/providers/opencode/usage.mjs",
+        "default": "./dist/providers/opencode/usage.mjs"
       },
       "./providers/anthropic": {
         "types": "./dist/providers/anthropic/index.d.mts",

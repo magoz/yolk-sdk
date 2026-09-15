@@ -37,6 +37,8 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/providers/openai/realtime`            | OpenAI Realtime session config and event codecs                |
 | `@yolk-sdk/agent/providers/openai/speech`              | OpenAI text-to-speech and transcription adapters               |
 | `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | Vercel AI Gateway Chat Completions provider factory            |
+| `@yolk-sdk/agent/providers/opencode/go-provider`       | OpenCode Go Chat Completions, Messages, and Responses provider |
+| `@yolk-sdk/agent/providers/opencode/usage`             | OpenCode Go subscription-allowance snapshots                   |
 | `@yolk-sdk/agent/providers/anthropic`                  | Anthropic/Claude OAuth and broker helpers                      |
 | `@yolk-sdk/agent/providers/anthropic/claude`           | Claude request and auth helpers                                |
 | `@yolk-sdk/agent/providers/anthropic/usage`            | Claude subscription-allowance snapshots                        |
@@ -189,6 +191,7 @@ limits or apply hidden fallbacks.
 | ---------------------------------- | --------------------- |
 | `makeOpenAiProviderLayer`          | `maxCompletionTokens` |
 | `makeVercelAiGatewayProviderLayer` | `maxCompletionTokens` |
+| `makeOpenCodeGoProviderLayer`      | `maxOutputTokens`     |
 | `makeOpenAiCodexProviderLayer`     | none                  |
 | `makeAnthropicClaudeProviderLayer` | `maxTokens`           |
 | `makeXAiGrokProviderLayer`         | `maxOutputTokens`     |
@@ -198,6 +201,56 @@ require the matching limit configuration. ChatGPT subscription Codex rejects ven
 `max_output_tokens`, so `makeOpenAiCodexProviderLayer` and `toOpenAiCodexRequestBody` ignore the
 optional deprecated `maxOutputTokens` compatibility field. `OpenAiProviderLayer` reads both
 `OPENAI_API_KEY` and integer `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+
+OpenCode Go uses API-key authentication with an explicit host-selected `protocol`:
+`chat-completions`, `messages`, or `responses`. Model IDs stay opaque: pass the Go API model ID
+without OpenCode's `opencode-go/` CLI prefix. The SDK does not fetch a catalog or guess the protocol
+from a model name. Check the [Go endpoint catalog](https://opencode.ai/docs/go/#endpoints).
+
+Server-side configuration fragment (the host supplies credentials and model policy):
+
+```ts
+import { Layer, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeOpenCodeGoProviderLayer } from '@yolk-sdk/agent/providers/opencode/go-provider'
+
+const GoLayer = makeOpenCodeGoProviderLayer({
+  apiKey: Redacted.make(hostOpenCodeGoApiKey),
+  protocol: 'messages',
+  maxOutputTokens: hostModelConfig.maxOutputTokens
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+The default base URL is `https://opencode.ai/zen/go/v1`. Chat uses non-streamed JSON and Bearer auth;
+Messages uses SSE and `x-api-key`; Responses uses SSE and Bearer auth. All normalize to `LLMEvent`s.
+Messages retains native tool names and system instructions, without Claude OAuth fingerprinting.
+Responses sends `max_output_tokens`, unlike Codex. Go requires a nonempty key and positive safe-integer
+limit at layer construction. `extraHeaders` cannot override required protocol headers, regardless of
+case. Only override `baseUrl` with a trusted proxy because it receives the credential.
+
+Request `reasoningEffort` becomes chat `reasoning_effort`, Messages `output_config.effort` (omitting
+`minimal`), or Responses `reasoning.effort` with `summary: 'auto'`. `reasoningSummary` changes the
+Responses summary mode. Hosts must offer only model-supported efforts and media capabilities.
+Chat preserves provider `reasoning_content` in events and assistant replay. No OAuth, model discovery,
+automatic polling, or example-app UI integration is included.
+
+Read Go subscription allowance separately from per-request token usage (server-side fragment):
+
+```ts
+import { Effect, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { fetchOpenCodeGoSubscriptionUsage } from '@yolk-sdk/agent/providers/opencode/usage'
+
+const usageEffect = fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeGoApiKey), {
+  requestTimeoutMs: 10_000
+}).pipe(Effect.provide(FetchHttpClient.layer))
+```
+
+The fixed API-key endpoint returns used percentages/reset instants for `five-hour`, `seven-day`, and
+`monthly` windows. Monthly resets follow the subscription's anniversary, not the first of the month;
+the adapter preserves the provider's timestamp. Missing/invalid percentages are omitted, not treated
+as zero. Treat snapshots as best-effort; hosts own polling, stale-data policy, persistence, and UI.
+The fetcher blocks redirects and sanitizes failures using the shared subscription-usage error types.
 
 Vercel AI Gateway uses its OpenAI-compatible JSON Chat Completions endpoint. Pass either an AI
 Gateway API key or Vercel OIDC token as `apiKey`; `maxCompletionTokens` is sent as Gateway

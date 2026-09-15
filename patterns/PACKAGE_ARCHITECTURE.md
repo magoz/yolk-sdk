@@ -26,6 +26,8 @@ metadata.
   - `@yolk-sdk/agent/providers/openai/realtime`
   - `@yolk-sdk/agent/providers/openai/speech`
   - `@yolk-sdk/agent/providers/vercel/ai-gateway-provider`
+  - `@yolk-sdk/agent/providers/opencode/go-provider`
+  - `@yolk-sdk/agent/providers/opencode/usage`
   - `@yolk-sdk/agent/providers/anthropic`
   - `@yolk-sdk/agent/providers/anthropic/claude`
   - `@yolk-sdk/agent/providers/anthropic/usage`
@@ -52,7 +54,7 @@ metadata.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, `./testing` exports the `TestWorkflowWorld` behavioral emulator, and hosts own concrete Workflow directives.
 - `@yolk-sdk/harness` owns run lifecycle (coordinator, store, inbox, driver, outcome). Public subpaths: `./coordinator`, `./store`, `./inbox`, `./driver`, `./driver/memory`, `./driver/durable-object`, and `./outcome`. It does not replace `@yolk-sdk/agent/loop`.
-- OpenAI/Codex, Vercel AI Gateway, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, and Grok also expose best-effort subscription-allowance snapshots from private provider endpoints.
+- OpenAI/Codex, Vercel AI Gateway, OpenCode Go, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, Grok, and OpenCode Go also expose best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
 ## Physical Layout

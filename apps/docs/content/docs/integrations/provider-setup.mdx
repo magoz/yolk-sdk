@@ -1,12 +1,12 @@
 ---
 title: Use model providers
-description: Wire OpenAI-compatible, Vercel AI Gateway, Codex, Claude, or Grok provider layers into an agent loop.
+description: Wire OpenAI-compatible, Vercel AI Gateway, OpenCode Go, Codex, Claude, or Grok provider layers into an agent loop.
 ---
 
 Provider layers implement `LLMProvider`. Your app chooses the provider, model id, credentials, HTTP layer, and policy.
 
 Provider output-token limits are host-owned when the endpoint supports them. OpenAI-compatible chat,
-Vercel AI Gateway, Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does
+Vercel AI Gateway, OpenCode Go, Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does
 not infer model limits or apply hidden fallbacks.
 
 ## Install
@@ -57,6 +57,58 @@ reads `AI_GATEWAY_API_KEY`, falls back to
 `extraHeaders` for optional `http-referer` and `x-title` attribution. Required authorization and JSON
 headers cannot be overridden. A custom `chatCompletionsUrl` must be a trusted proxy because it
 receives the Bearer credential.
+
+## OpenCode Go
+
+Server-side configuration fragment; the host supplies the API key and model policy:
+
+```ts
+import { Layer, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeOpenCodeGoProviderLayer } from '@yolk-sdk/agent/providers/opencode/go-provider'
+
+const GoLayer = makeOpenCodeGoProviderLayer({
+  apiKey: Redacted.make(hostOpenCodeGoApiKey),
+  protocol: 'messages',
+  maxOutputTokens: hostModelConfig.maxOutputTokens
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+Choose `chat-completions`, `messages`, or `responses` to match the selected Go model's
+[advertised endpoint](https://opencode.ai/docs/go/#endpoints). Supply the unprefixed API model ID in
+the loop request. The factory validates a nonempty key and positive safe-integer limit when the
+layer builds. It does not read environment variables or perform OAuth. Hosts using environment
+configuration should load the key with `Config.Redacted` inside `Effect.gen`.
+
+`maxOutputTokens` becomes `max_tokens` for Chat Completions/Messages or `max_output_tokens` for
+Responses. Request `reasoningEffort` becomes `reasoning_effort` for chat, `output_config.effort` for
+Messages (omitting `minimal`), or Responses `reasoning.effort`. Responses also sends
+`summary: 'auto'` when effort is present; configure `reasoningSummary` to select another summary mode.
+Only offer efforts supported by your model. Chat emits and replays provider `reasoning_content`.
+
+Optional `extraHeaders` cannot replace required protocol headers, even with different casing.
+Override `baseUrl` only with a trusted proxy: it receives the API key. Messages and Responses require
+explicit stream completion; truncated responses do not count as success. Chat currently waits for a
+complete JSON response before emitting events. This adapter adds no model picker, catalog fetching,
+credential persistence, or automatic subscription-allowance polling.
+
+Read allowance on your host's schedule (server-side fragment):
+
+```ts
+import { Effect, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { fetchOpenCodeGoSubscriptionUsage } from '@yolk-sdk/agent/providers/opencode/usage'
+
+const usageEffect = fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeGoApiKey), {
+  requestTimeoutMs: 10_000
+}).pipe(Effect.provide(FetchHttpClient.layer))
+```
+
+The best-effort snapshot has `five-hour`, `seven-day`, and `monthly` used-percentage windows when
+available. The fetcher uses a fixed URL, rejects redirects, and returns shared
+`ProviderSubscriptionUsageError` variants without raw HTTP bodies or credential-bearing traces.
+Use provider reset timestamps and keep allowance failures separate from inference; do not derive
+subscription usage from token totals.
 
 ## OpenAI Codex
 
@@ -156,13 +208,14 @@ Then provide `AppAgentLayer` to `run` or `runRuntime`.
 
 ## Capability notes
 
-| Provider              | Media notes                                                             |
-| --------------------- | ----------------------------------------------------------------------- |
-| OpenAI-compatible     | text, image URLs/data URLs, inline text documents                       |
-| Vercel AI Gateway     | OpenAI-compatible text, tools, image URLs/data URLs, text documents     |
-| OpenAI Codex          | text, reasoning, tools, image URLs/data URLs, document data/files       |
-| Anthropic Claude Code | text, reasoning, tools, images, PDF URL/base64, inline text documents   |
-| xAI Grok subscription | text, reasoning, tools; can encode model-dependent image URL/data input |
+| Provider              | Media notes                                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| OpenAI-compatible     | text, image URLs/data URLs, inline text documents                                                          |
+| Vercel AI Gateway     | OpenAI-compatible text, tools, image URLs/data URLs, text documents                                        |
+| OpenCode Go           | Protocol/model-dependent: chat images and text documents; Messages images/PDFs; Responses images/documents |
+| OpenAI Codex          | text, reasoning, tools, image URLs/data URLs, document data/files                                          |
+| Anthropic Claude Code | text, reasoning, tools, images, PDF URL/base64, inline text documents                                      |
+| xAI Grok subscription | text, reasoning, tools; can encode model-dependent image URL/data input                                    |
 
 Codex preserves text, image, and document tool results as native function output content. Claude
 preserves text, images, inline text documents, and URL/base64 PDFs as nested tool-result content.
