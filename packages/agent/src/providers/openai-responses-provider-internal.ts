@@ -1,4 +1,14 @@
-import { Array as Arr, Effect, Layer, Match, Option, Predicate, Ref, Stream } from 'effect'
+import {
+  Array as Arr,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Predicate,
+  Redacted,
+  Ref,
+  Stream
+} from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -48,19 +58,31 @@ import { validateProviderTranscript } from './transcript.ts'
 
 type OpenAiResponsesReasoningSummary = 'auto' | 'concise' | 'detailed'
 
-export type OpenAiResponsesProviderConfig = {
-  readonly token: OAuthAccessToken
+type OpenAiResponsesAuthentication =
+  | {
+      readonly token: OAuthAccessToken
+      readonly authorizationHeaders: (
+        token: OAuthAccessToken,
+        model: string
+      ) => Readonly<Record<string, string>>
+      readonly expectedTokenProvider?: string
+      readonly apiKey?: never
+    }
+  | {
+      readonly apiKey: Redacted.Redacted<string>
+      readonly token?: never
+      readonly authorizationHeaders?: never
+      readonly expectedTokenProvider?: never
+    }
+
+export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
   readonly providerId: string
   readonly providerName: string
   readonly responsesUrl: string
-  readonly authorizationHeaders: (
-    token: OAuthAccessToken,
-    model: string
-  ) => Readonly<Record<string, string>>
   readonly alwaysIncludeReasoning: boolean
   readonly allowEofCompletion: boolean
+  readonly requireJsonCompletion?: boolean
   readonly unsupportedContentProviderName?: string
-  readonly expectedTokenProvider?: string
   readonly maxOutputTokens?: number
   readonly extraHeaders?: Readonly<Record<string, string>>
   readonly defaultReasoningEffort?: AgentReasoningEffort
@@ -605,6 +627,7 @@ type OpenAiResponsesProviderDescriptor = {
   readonly providerId: string
   readonly providerName: string
   readonly allowEofCompletion: boolean
+  readonly requireJsonCompletion?: boolean
 }
 
 type OpenAiResponsesLlmErrorFields = {
@@ -819,10 +842,21 @@ const toLlmEvents = (
   })
 
 const parseOpenAiResponsesJsonResponse = (
+  descriptor: OpenAiResponsesProviderDescriptor,
   raw: string
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const json = yield* decodeJsonString(raw, 'Could not parse OpenAI Responses response JSON')
+
+    if (descriptor.requireJsonCompletion && stringField(json, 'status') !== 'completed') {
+      return yield* Effect.fail(
+        providerSignalError(descriptor, {
+          message: 'The provider JSON response was not completed',
+          providerCode: 'incomplete_response',
+          fallbackKind: 'invalid_response'
+        })
+      )
+    }
 
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(json).pipe(
       Effect.mapError(
@@ -1276,7 +1310,7 @@ const finalizeBodyState = (
     const format = state.format === 'undecided' ? classifyResponsesBody(buffer) : state.format
 
     if (format === 'json') {
-      return yield* parseOpenAiResponsesJsonResponse(buffer)
+      return yield* parseOpenAiResponsesJsonResponse(descriptor, buffer)
     }
 
     const events: Array<LLMEvent> = []
@@ -1420,7 +1454,9 @@ const sendOpenAiResponsesRequest = (
       ...config.extraHeaders,
       accept: 'text/event-stream',
       'content-type': 'application/json',
-      ...config.authorizationHeaders(config.token, request.model)
+      ...(config.apiKey !== undefined
+        ? { authorization: `Bearer ${Redacted.value(config.apiKey)}` }
+        : config.authorizationHeaders(config.token, request.model))
     }
 
     const httpRequest = HttpClientRequest.post(config.responsesUrl).pipe(
@@ -1476,7 +1512,8 @@ export const makeOpenAiResponsesProviderLayer = (config: OpenAiResponsesProvider
       const descriptor: OpenAiResponsesProviderDescriptor = {
         providerId: config.providerId,
         providerName: config.providerName,
-        allowEofCompletion: config.allowEofCompletion
+        allowEofCompletion: config.allowEofCompletion,
+        requireJsonCompletion: config.requireJsonCompletion ?? false
       }
 
       return LLMProvider.of({

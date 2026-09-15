@@ -81,6 +81,7 @@ export class ProviderSubscriptionUsageConfigurationError extends Schema.TaggedEr
     reason: Schema.Literals([
       'invalid_request_timeout',
       'missing_account_id',
+      'missing_api_key',
       'missing_client_version',
       'missing_xai_user_id',
       'provider_mismatch'

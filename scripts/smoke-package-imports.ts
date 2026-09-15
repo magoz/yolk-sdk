@@ -33,6 +33,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './providers/openai/realtime',
       './providers/openai/speech',
       './providers/vercel/ai-gateway-provider',
+      './providers/opencode/go-provider',
+      './providers/opencode/usage',
       './providers/subscription-usage',
       './providers/xai',
       './providers/xai/grok',

@@ -13,13 +13,14 @@ For copy-paste provider layer setup, see [Use model providers](./provider-setup)
 | ---------------------- | ---------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | OpenAI-compatible chat | `makeOpenAiProviderLayer`          | API key            | Chat Completions-style endpoint; `OpenAiProviderLayer` can read its API key and output limit through Effect Config. |
 | Vercel AI Gateway      | `makeVercelAiGatewayProviderLayer` | API key or OIDC    | OpenAI-compatible Gateway endpoint with provider routing and model fallbacks.                                       |
+| OpenCode Go            | `makeOpenCodeGoProviderLayer`      | API key            | Host-selected Chat Completions, Messages, or Responses protocol.                                                    |
 | OpenAI Codex           | `makeOpenAiCodexProviderLayer`     | `OAuthAccessToken` | Responses API adapter with reasoning summaries and OAuth broker helpers.                                            |
 | Anthropic Claude Code  | `makeAnthropicClaudeProviderLayer` | `OAuthAccessToken` | Claude Code-compatible adapter with Claude OAuth broker helpers.                                                    |
 | xAI Grok subscription  | `makeXAiGrokProviderLayer`         | `OAuthAccessToken` | Responses adapter for Grok consumer subscriptions through the xAI CLI proxy.                                        |
 | Faux provider          | `FauxProvider.layer(...)`          | none               | Test-only deterministic provider from `@yolk-sdk/agent/loop/testing`.                                               |
 
 Provider output-token limits are host-owned when supported. OpenAI-compatible chat, Vercel AI
-Gateway, Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does not
+Gateway, OpenCode Go, Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does not
 maintain a model-limit catalog or apply hidden fallbacks.
 
 ## OpenAI-compatible chat
@@ -69,6 +70,29 @@ query Vercel's model catalog instead of hard-coding an SDK model union. `VercelA
 `chatCompletionsUrl` only with a trusted proxy because it receives the Bearer credential. Gateway
 `finish_reason` values `length` and `content_filter` fail as non-retryable `invalid_response` rather
 than reporting partial or filtered output as complete.
+
+## OpenCode Go
+
+Use `makeOpenCodeGoProviderLayer` from `@yolk-sdk/agent/providers/opencode/go-provider` with a
+redacted API key, explicit `protocol`, and host-owned `maxOutputTokens`. See
+[Go configuration](./provider-setup#opencode-go).
+
+| Protocol           | Endpoint suffix     | Authentication | Transport                                 |
+| ------------------ | ------------------- | -------------- | ----------------------------------------- |
+| `chat-completions` | `/chat/completions` | Bearer API key | Non-streamed JSON, normalized into events |
+| `messages`         | `/messages`         | `x-api-key`    | SSE or JSON response                      |
+| `responses`        | `/responses`        | Bearer API key | SSE or JSON response                      |
+
+All endpoints default to `https://opencode.ai/zen/go/v1`. Choose the protocol advertised for the
+selected model in [OpenCode's Go catalog](https://opencode.ai/docs/go/#endpoints); model availability
+can change. Pass the API model ID without the `opencode-go/` CLI prefix. Yolk neither fetches the
+catalog nor infers protocols or limits from model names.
+
+Messages uses native system instructions and tool names, not Claude Code OAuth fingerprints.
+Responses supports a host output limit and does not send Codex account or originator headers.
+Go reports safe failures under provider ID `opencode_go`. Credentials, model capabilities, supported
+reasoning efforts, allowance polling/persistence, and UI remain host-owned. Read allowance with
+`fetchOpenCodeGoSubscriptionUsage` from `@yolk-sdk/agent/providers/opencode/usage`.
 
 ## OpenAI Codex
 
@@ -168,7 +192,7 @@ OAuth helpers live in `@yolk-sdk/agent/providers/anthropic` and the exact `@yolk
 
 ## Read subscription allowance
 
-Claude, Codex, and Grok subscription connections can expose current allowance percentages and
+Claude, Codex, Grok, and OpenCode Go subscription connections can expose current allowance percentages and
 reset windows. Claude normalizes aggregate five-hour and seven-day windows; Codex normalizes primary
 and secondary rate-limit windows; Grok normalizes its aggregate shared credit allowance. Additional
 provider-specific buckets are ignored. The usage adapters use private provider endpoints, so treat
@@ -191,6 +215,14 @@ Use `fetchAnthropicClaudeSubscriptionUsage` for Claude. For Grok, call
 authenticated xAI `user_id`; the adapter does not reinterpret generic `OAuthAccessToken.accountId`.
 `clientVersion` must truthfully identify your host integration rather than impersonate an official
 Grok release. The adapter reports its programmatic request as `headless`.
+
+For Go, call `fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeGoApiKey), options)` from
+`@yolk-sdk/agent/providers/opencode/usage`. Unlike the OAuth adapters, it uses a Bearer API key at
+`https://opencode.ai/zen/go/v1/usage`. The API key must belong to the subscription's user and workspace;
+403 means the key is not entitled to Go usage. It returns `five-hour`, `seven-day`, and `monthly`
+windows, preserving the provider's absolute reset times. Monthly resets are subscription-anniversary
+based, not calendar-month boundaries. Missing/invalid percentages are omitted rather than filled
+with zero. No browser cookies or console scraping are needed.
 
 Shared snapshot and safe error schemas live in
 `@yolk-sdk/agent/providers/subscription-usage`. Hosts own polling, credential refresh, labels,

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it } from '@effect/vitest'

@@ -27,7 +27,7 @@ import {
   uncertainChildLaunchStep,
   childControlFailureStep
 } from './workflow-child-steps'
-import { Predicate } from 'effect'
+import * as Predicate from 'effect/Predicate'
 
 export { agentWorkflowHitlHookToken } from './workflow-contract'
 

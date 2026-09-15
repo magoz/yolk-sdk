@@ -36,7 +36,7 @@ Private Next.js dogfood/reference app for `@yolk-sdk/*` packages.
 - DB-backed app tests load `.env.test`; root `pnpm test:run` pushes the test schema first, and DB-dependent tests skip when `DATABASE_URL` is absent.
 - Effect app/services use `Config.*`; map config errors around the owning `Effect.gen` block.
 - Direct `process.env` is limited to app config, `lib/dotenv.ts`, Playwright setup/fixtures/spec skips, property-test helpers, DB scripts, and synchronous SDK callbacks such as `TelemetryLayer`.
-- `lib/dotenv.ts` is the only direct `dotenv.config()` owner and loads app-local env for scripts, Vitest, and Playwright.
+- `lib/dotenv.ts` is the only direct `dotenv.config()` owner and loads app-local env for scripts, Vitest, and Playwright. In test mode it prefers `DATABASE_URL_UNPOOLED` parsed from `.env.test` as the effective `DATABASE_URL`: schema resets invalidate enum OIDs retained by pooler-cached prepared statements. Never select an inherited unpooled URL from another environment; setups without a file-local direct URL retain their configured `DATABASE_URL`.
 
 ## App Notes
 

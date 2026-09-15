@@ -109,6 +109,7 @@ describeWithDb('createFileKnowledgeDocument', () => {
         expect(files[0]?.byteSize).toBe(bytes.byteLength)
         expect(chunks).toHaveLength(1)
         expect(chunks[0]?.content).toBe('Alpha file knowledge.')
+        expect(chunks[0]?.embedding).toEqual(embedding(0))
         expect(results.map(result => result.document.id)).toEqual([document.id])
         expect(context.document.id).toBe(document.id)
         expect(context.anchor.position).toBe(0)

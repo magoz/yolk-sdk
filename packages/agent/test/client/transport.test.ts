@@ -3,6 +3,7 @@ import {
   Headers,
   HttpClient,
   HttpClientResponse,
+  type HttpClientError,
   type HttpClientRequest
 } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -61,18 +62,23 @@ const makeHttpClientLayerFromResponses = (
 
   return Layer.succeed(
     HttpClient.HttpClient,
-    HttpClient.make(request =>
-      Effect.sync(() => {
-        requests.push({ request })
-        const response = responses[index]
-        index += 1
+    // Capture service-boundary requests without requiring a browser origin in Node.
+    HttpClient.makeWith(
+      (
+        request: Effect.Effect<HttpClientRequest.HttpClientRequest, HttpClientError.HttpClientError>
+      ) =>
+        Effect.map(request, request => {
+          requests.push({ request })
+          const response = responses[index]
+          index += 1
 
-        if (response === undefined) {
-          throw new Error(`No response configured for request ${index}`)
-        }
+          if (response === undefined) {
+            throw new Error(`No response configured for request ${index}`)
+          }
 
-        return HttpClientResponse.fromWeb(request, response)
-      })
+          return HttpClientResponse.fromWeb(request, response)
+        }),
+      Effect.succeed
     )
   )
 }
@@ -154,7 +160,11 @@ describe('collectAgentEvents', () => {
           httpClientLayer: makeHttpClientLayer(new Response('{"_tag":"Nope"}\n'), requests)
         })
       )
-    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
+    ).rejects.toMatchObject({
+      _tag: 'AgentTransportError',
+      message: expect.stringContaining('Invalid agent event:')
+    })
+    expect(requests.map(item => item.request.url)).toEqual(['/api/agent'])
   })
 
   it.each([
@@ -458,7 +468,10 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
+    ).rejects.toMatchObject({
+      _tag: 'AgentTransportError',
+      message: 'Invalid agent run stream start index'
+    })
 
     expect(requests).toEqual([])
   })
@@ -477,7 +490,10 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
+    ).rejects.toMatchObject({
+      _tag: 'AgentTransportError',
+      message: 'Invalid agent run stream start index'
+    })
 
     expect(requests).toEqual([])
   })
@@ -590,34 +606,43 @@ describe('collectAgentEvents', () => {
     const controller = new AbortController()
     const requests: Array<CapturedRequest> = []
 
-    const eventsPromise = collectEventStream(
-      streamAgentRunEventStreamUntilTerminal({
-        endpoint: '/api/agent/run_1',
-        continuationLimit: 2,
-        signal: controller.signal,
-        httpClientLayer: makeHttpClientLayerFromResponses(
-          [new Response(encodeEvents([AgentStart.make({})])), new Response('')],
-          requests
-        )
-      })
+    const eventsPromise = Effect.runPromiseExit(
+      Stream.runDrain(
+        streamAgentRunEventStreamUntilTerminal({
+          endpoint: '/api/agent/run_1',
+          continuationLimit: 2,
+          signal: controller.signal,
+          httpClientLayer: makeHttpClientLayerFromResponses(
+            [new Response(encodeEvents([AgentStart.make({})])), new Response('')],
+            requests
+          )
+        })
+      )
     )
 
-    await waitForRequestCount(requests, 2)
-    controller.abort('stop')
+    try {
+      await waitForRequestCount(requests, 2)
+      controller.abort('stop')
 
-    await expect(
-      Promise.race([
-        eventsPromise,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timed out waiting for abort')), 100)
-        )
+      expect(await settleTransport(eventsPromise)).toMatchObject({
+        _tag: 'Failure',
+        cause: {
+          reasons: [
+            {
+              _tag: 'Fail',
+              error: { _tag: 'AgentTransportError', message: 'Agent request aborted' }
+            }
+          ]
+        }
+      })
+      expect(requests.map(item => item.request.url)).toEqual([
+        '/api/agent/run_1',
+        '/api/agent/run_1?startIndex=1'
       ])
-    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
-
-    expect(requests.map(item => item.request.url)).toEqual([
-      '/api/agent/run_1',
-      '/api/agent/run_1?startIndex=1'
-    ])
+    } finally {
+      controller.abort('cleanup')
+      await settleTransport(eventsPromise)
+    }
   })
 
   it('rejects non-terminal start responses without a durable run id', async () => {
@@ -636,7 +661,11 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
+    ).rejects.toMatchObject({
+      _tag: 'AgentTransportError',
+      message: 'Agent run continuation failed: missing x-workflow-run-id'
+    })
+    expect(requests.map(item => item.request.url)).toEqual(['/api/agent'])
   })
 
   it('rejects when continuation limit is exhausted before terminal', async () => {
@@ -707,7 +736,11 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
+    ).rejects.toMatchObject({
+      _tag: 'AgentTransportError',
+      message: 'Agent run HITL response missing x-workflow-stream-tail-index'
+    })
+    expect(requests.map(item => item.request.url)).toEqual(['/api/agent/run_1'])
   })
 
   it('rejects invalid durable continuation options', async () => {
@@ -724,7 +757,10 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
+    ).rejects.toMatchObject({
+      _tag: 'AgentTransportError',
+      message: 'Invalid agent run continuation limit'
+    })
 
     expect(requests).toEqual([])
   })
