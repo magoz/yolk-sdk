@@ -34,6 +34,18 @@ This source upgrade targets `effect@4.0.0-rc.115`; it is not a claim that an alr
 - `Schema.SchemaError` is now a native `Error`. Synchronous schema makers throw a native error with a `SchemaIssue.Issue` cause; Effectful makers fail with the issue. Keep typed owner errors and inspect retained causes rather than matching old diagnostic text.
 - Tool schemas use Effect's canonical JSON representation. Prefer finite-number schemas for JSON inputs; definition references may acquire an `Encoded` suffix. Empty-struct tools still advertise a closed empty object. Custom JSON Schema output must still pass Yolk's portable-data boundary.
 
+### Next canary: renamed public service types
+
+Update type imports from these existing subpaths. The former names have no compatibility aliases;
+runtime behavior and wire formats are unchanged.
+
+| Subpath                    | Before            | After                |
+| -------------------------- | ----------------- | -------------------- |
+| `@yolk-sdk/agent/loop`     | `LoopConfigShape` | `LoopConfigSettings` |
+| `@yolk-sdk/harness/store`  | `RunStoreShape`   | `RunStoreApi`        |
+| `@yolk-sdk/harness/inbox`  | `InboxShape`      | `InboxApi`           |
+| `@yolk-sdk/harness/driver` | `DriverShape`     | `DriverApi`          |
+
 ### Next canary: optional harness and collector recovery
 
 `@yolk-sdk/harness` is a new optional run-lifecycle package (coordinator, store, inbox, drivers, outcomes). It is not the agent loop and does not add a Workflow driver. It is introduced after `0.1.0-canary.76` and unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available.

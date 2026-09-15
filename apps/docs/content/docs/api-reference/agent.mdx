@@ -526,8 +526,9 @@ headers take precedence.
 
 Claude lowering (`toAnthropicClaudeRequestBody` / `makeAnthropicClaudeProviderLayer`) requires
 `ToolDef.parameters` and `ToolCall.params` to decode as `Schema.Json`. Non-JSON fails non-retryable
-`LLMError` `provider_error`. Protocol tool fields stay `Schema.Unknown`. Lone-surrogate rewrite is
-re-decoded as JSON (failure, not skip). HTTP non-JSON errors still classify from status.
+`LLMError` `provider_error`. Protocol `ToolDef.parameters` admits a `ToolJsonSchema` representation
+at construction; tool-call params and results stay opaque. Lone-surrogate rewrite is re-decoded as
+JSON (failure, not skip). HTTP non-JSON errors still classify from status.
 
 ## Result conversion and typed realtime builders
 

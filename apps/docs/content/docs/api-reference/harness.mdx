@@ -11,13 +11,14 @@ Import feature APIs from explicit subpaths. The root package is intentionally em
 
 `@yolk-sdk/harness/coordinator`
 
-| Export            | Purpose                                                          |
-| ----------------- | ---------------------------------------------------------------- |
-| `Promotable`      | `'input' \| 'steer'`; input subsumes steer when coalescing wakes |
-| `CapturedRun`     | `Started` / `Joined` / `Stopping` waiter                         |
-| `StopReceipt`     | `Idle` / `Interrupted` / `LiveStopping` / `Settling`             |
-| `Coordinator`     | Process-local doorbell coordinator shape                         |
-| `makeCoordinator` | Build a process-local coordinator                                |
+| Export            | Purpose                                                                           |
+| ----------------- | --------------------------------------------------------------------------------- |
+| `Promotable`      | `'input' \| 'steer'`; input subsumes steer when coalescing wakes                  |
+| `CapturedRun`     | `Started` / `Joined` / `Stopping` waiter                                          |
+| `StopReceipt`     | `Idle` / `Interrupted` / `LiveStopping` / `Settling`                              |
+| `Coordinator`     | Process-local doorbell coordinator shape                                          |
+| `makeCoordinator` | Build a process-local coordinator                                                 |
+| `RunCoordinator`  | Owning coordinator service; `RunCoordinator.layer({ drain })` requires `RunStore` |
 
 ## Store
 
@@ -31,24 +32,32 @@ Import feature APIs from explicit subpaths. The root package is intentionally em
 | `makeInMemoryRunStoreLayer` | Process-local claim store                            |
 | `makeSnapshotRunStoreLayer` | Persist claims through host `load` / `save`          |
 
+`RunStore.inMemoryLayer()` owns process-local claims; `RunStore.snapshotLayer({ load, save })`
+owns snapshot-backed claims. Both build fresh layers without service dependencies. The existing
+`makeInMemoryRunStoreLayer` / `makeSnapshotRunStoreLayer` factories delegate to these owners.
+
 The snapshot stores claimed ids and resume counts. It is not transcript storage and does not persist Inbox items or HITL parks.
 
 ## Inbox
 
 `@yolk-sdk/harness/inbox`
 
-| Export                   | Purpose                                                           |
-| ------------------------ | ----------------------------------------------------------------- |
-| `Inbox`                  | Admission, park, and drain-token service                          |
-| `InboxItem`              | Queued input/HITL item (`id`, `runId`, `delivery`, `kind`)        |
-| `InboxKind`              | `'input' \| 'hitl'`                                               |
-| `ParkedResponse`         | `{ itemId, requestId }`                                           |
-| `ParkedState`            | Generation, request ids, responses, ready                         |
-| `HitlAdmission`          | `{ itemId, requestId, generation }`                               |
-| `HitlDecision`           | Accepted / Ready / Duplicate / Stale / UnknownRequest / NotParked |
-| `PauseDecision`          | `Parked` or `Stale`                                               |
-| `DrainBegin`             | `Skip` or `Run` with `drainToken` and ready responses             |
-| `makeInMemoryInboxLayer` | Process-lifetime Inbox                                            |
+| Export                   | Purpose                                                               |
+| ------------------------ | --------------------------------------------------------------------- |
+| `Inbox`                  | Admission, park, and drain-token service                              |
+| `InboxApi`               | Service methods for admission, queueing, HITL parks, and drain tokens |
+| `InboxItem`              | Queued input/HITL item (`id`, `runId`, `delivery`, `kind`)            |
+| `InboxKind`              | `'input' \| 'hitl'`                                                   |
+| `ParkedResponse`         | `{ itemId, requestId }`                                               |
+| `ParkedState`            | Generation, request ids, responses, ready                             |
+| `HitlAdmission`          | `{ itemId, requestId, generation }`                                   |
+| `HitlDecision`           | Accepted / Ready / Duplicate / Stale / UnknownRequest / NotParked     |
+| `PauseDecision`          | `Parked` or `Stale`                                                   |
+| `DrainBegin`             | `Skip` or `Run` with `drainToken` and ready responses                 |
+| `makeInMemoryInboxLayer` | Process-lifetime Inbox                                                |
+
+`Inbox.layer()` owns a fresh process-local queue, admission gate, and HITL generations with no
+service dependencies. `makeInMemoryInboxLayer` delegates to it.
 
 `takePromotable(runId, scope, drainToken)` requires the live `beginDrain` token. Missing, empty, inactive, stale, or wrong-run tokens return `undefined` and do not dequeue.
 
@@ -59,6 +68,7 @@ The snapshot stores claimed ids and resume counts. It is not transcript storage 
 | Export                     | Purpose                                          |
 | -------------------------- | ------------------------------------------------ |
 | `Driver`                   | Run, wake, interrupt, admit, pause, resume, stop |
+| `DriverApi`                | Driver service method contract                   |
 | `Drain`                    | Host execution; see signature below              |
 | `DrainContext`             | `{ drainToken, readyResponses }`                 |
 | `makeDriverLayer`          | Driver layer; default drain is `Effect.void`     |
@@ -69,6 +79,12 @@ The snapshot stores claimed ids and resume counts. It is not transcript storage 
 | `ResumeSuspendedResult`    | `{ resumed, exhausted }`                         |
 | `StopDecision`             | `Interrupted` / `ParkCleared` / `Idle`           |
 | `InterruptReason`          | `'user' \| 'shutdown'`                           |
+
+`Driver.layer({ maxResumeAttempts })` requires `RunStore`, `Inbox`, and `RunCoordinator`.
+`Driver.coordinatedLayer({ drain, maxResumeAttempts })` wires the coordinator and requires only
+`RunStore` and `Inbox`; `makeDriverLayer` delegates to it. Omitted budgets use the default; invalid
+numeric budgets fail layer initialization with `InvalidMaxResumeAttempts`. Share the same store
+and inbox instances across the composed layers, or use the memory/durable-object factories below.
 
 Fragment. Exported `Drain` type:
 

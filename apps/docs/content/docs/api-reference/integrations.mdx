@@ -26,6 +26,19 @@ JSON Schema meta-validation.
 | `@yolk-sdk/mcp/server`      | Official `McpServer`, `createMcpHandler`, resources, prompts, completions, MRTR, subscriptions, plus `makeMcpToolServer` and `runStdioMcpServer` |
 | `@yolk-sdk/mcp/server/node` | Official `serveStdio` and `StdioServerTransport`                                                                                                 |
 
+Both `@yolk-sdk/mcp/client` and `@yolk-sdk/mcp/protocol` export these Effect Schema owners:
+
+| Schema                    | Fields                                                  |
+| ------------------------- | ------------------------------------------------------- |
+| `InitializeClientInfo`    | `name`, `version`                                       |
+| `InitializeParams`        | `protocolVersion`, `capabilities`, `clientInfo`         |
+| `InitializedNotification` | `jsonrpc: '2.0'`, `method: 'notifications/initialized'` |
+| `ToolsCallParams`         | `name`, optional opaque `arguments`                     |
+
+Use their `.make` constructors for typed values and Effect Schema decoders for raw input.
+Compatibility helpers `makeJsonRpcRequest`, `makeInitializeParams`, and
+`makeInitializedNotification` remain available. Requests omit `params` when it is `undefined`.
+
 ## Knowledge
 
 | Subpath                             | Main exports                                                                                           |
