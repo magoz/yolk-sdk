@@ -81,6 +81,7 @@ export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
   readonly responsesUrl: string
   readonly alwaysIncludeReasoning: boolean
   readonly allowEofCompletion: boolean
+  readonly requireJsonCompletion?: boolean
   readonly unsupportedContentProviderName?: string
   readonly maxOutputTokens?: number
   readonly extraHeaders?: Readonly<Record<string, string>>
@@ -626,6 +627,7 @@ type OpenAiResponsesProviderDescriptor = {
   readonly providerId: string
   readonly providerName: string
   readonly allowEofCompletion: boolean
+  readonly requireJsonCompletion?: boolean
 }
 
 type OpenAiResponsesLlmErrorFields = {
@@ -840,10 +842,21 @@ const toLlmEvents = (
   })
 
 const parseOpenAiResponsesJsonResponse = (
+  descriptor: OpenAiResponsesProviderDescriptor,
   raw: string
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const json = yield* decodeJsonString(raw, 'Could not parse OpenAI Responses response JSON')
+
+    if (descriptor.requireJsonCompletion && stringField(json, 'status') !== 'completed') {
+      return yield* Effect.fail(
+        providerSignalError(descriptor, {
+          message: 'The provider JSON response was not completed',
+          providerCode: 'incomplete_response',
+          fallbackKind: 'invalid_response'
+        })
+      )
+    }
 
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(json).pipe(
       Effect.mapError(
@@ -1297,7 +1310,7 @@ const finalizeBodyState = (
     const format = state.format === 'undecided' ? classifyResponsesBody(buffer) : state.format
 
     if (format === 'json') {
-      return yield* parseOpenAiResponsesJsonResponse(buffer)
+      return yield* parseOpenAiResponsesJsonResponse(descriptor, buffer)
     }
 
     const events: Array<LLMEvent> = []
@@ -1499,7 +1512,8 @@ export const makeOpenAiResponsesProviderLayer = (config: OpenAiResponsesProvider
       const descriptor: OpenAiResponsesProviderDescriptor = {
         providerId: config.providerId,
         providerName: config.providerName,
-        allowEofCompletion: config.allowEofCompletion
+        allowEofCompletion: config.allowEofCompletion,
+        requireJsonCompletion: config.requireJsonCompletion ?? false
       }
 
       return LLMProvider.of({

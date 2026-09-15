@@ -55,12 +55,16 @@ const run = (
   response: Response,
   requests: Array<HttpClientRequest.HttpClientRequest>,
   request: LLMRequest = input,
-  overrides: Partial<OpenCodeGoProviderConfig> = {}
+  overrides: Partial<OpenCodeGoProviderConfig> = {},
+  observedTags: Array<string> = []
 ) =>
   Effect.gen(function* () {
     const provider = yield* LLMProvider
 
-    return yield* provider.stream(request).pipe(Stream.runCollect)
+    return yield* provider.stream(request).pipe(
+      Stream.tap(event => Effect.sync(() => observedTags.push(event._tag))),
+      Stream.runCollect
+    )
   }).pipe(
     Effect.provide(
       makeOpenCodeGoProviderLayer({
@@ -521,6 +525,83 @@ describe('OpenCode Go', () => {
       ])
     })
   )
+
+  for (const status of [
+    'incomplete',
+    'failed',
+    'cancelled',
+    'in_progress',
+    'queued',
+    null,
+    undefined
+  ]) {
+    it.effect(`responses: rejects JSON without completed status (${status})`, () =>
+      Effect.gen(function* () {
+        const observedTags: Array<string> = []
+
+        const error = yield* run(
+          'responses',
+          Response.json({
+            status,
+            incomplete_details: { reason: 'max_output_tokens' },
+            output_text: 'partial',
+            output: []
+          }),
+          [],
+          input,
+          {},
+          observedTags
+        ).pipe(Effect.flip)
+
+        expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
+        expect(observedTags).not.toContain('Done')
+      })
+    )
+  }
+
+  for (const stopReason of [null, '', '   ', undefined]) {
+    it.effect(`messages: rejects JSON without a stop reason (${stopReason})`, () =>
+      Effect.gen(function* () {
+        const observedTags: Array<string> = []
+
+        const error = yield* run(
+          'messages',
+          Response.json({
+            content: [{ type: 'text', text: 'partial' }],
+            stop_reason: stopReason
+          }),
+          [],
+          input,
+          {},
+          observedTags
+        ).pipe(Effect.flip)
+
+        expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
+        expect(observedTags).not.toContain('Done')
+      })
+    )
+  }
+
+  for (const protocol of ['messages', 'responses'] as const) {
+    it.effect(`${protocol}: accepts completed JSON text responses`, () =>
+      Effect.gen(function* () {
+        const events = yield* run(
+          protocol,
+          Response.json(
+            protocol === 'messages'
+              ? { content: [{ type: 'text', text: 'Complete' }], stop_reason: 'end_turn' }
+              : { status: 'completed', output_text: 'Complete', output: [] }
+          ),
+          []
+        )
+
+        expect(events).toMatchObject([
+          { _tag: 'TextDelta', text: 'Complete' },
+          { _tag: 'Done', stopReason: 'stop' }
+        ])
+      })
+    )
+  }
 
   it.effect('messages: rejects filtered output in JSON and SSE', () =>
     Effect.gen(function* () {

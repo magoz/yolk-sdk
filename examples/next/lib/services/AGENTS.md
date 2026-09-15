@@ -60,6 +60,7 @@ examples/next/lib/services/[service-name]/
 - Services are composed in `examples/next/lib/layers.ts`.
 - `Auth.layer` provides `Email.layer` internally for OTP delivery.
 - Auth uses its own Neon HTTP `AuthDb` for better-auth; do not dedupe with `Db.layer` unless adapter support changes.
+- `Db` refines the full Drizzle Effect-PG codec set with scalar enum/vector text casts. Effect PG returns unregistered OIDs as bytes; preserve Drizzle's existing normalizers and parameter/JSON/array codecs rather than replacing defaults with a partial codec map.
 - OAuth services stay standalone because agent routes/actions need them directly.
 - `AppKnowledgeSearchLayer` is composed at storage/knowledge search boundaries, not in `AppLayer`; it requires `OPENAI_API_KEY` only for ingestion/search.
 - Add standalone services to `AppLayer` only when app code needs them directly.

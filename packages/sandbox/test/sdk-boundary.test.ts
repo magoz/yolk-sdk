@@ -196,7 +196,7 @@ describe('live Vercel client request construction', () => {
 
     if (git === undefined) throw new Error('expected git source')
     expect(Object.keys(git)).toEqual(['type', 'url', 'username', 'password', 'depth', 'revision'])
-    expect(reads).toEqual(['source', 'source', 'depth', 'depth', 'revision', 'revision'])
+    expect(reads).toEqual(['source', 'depth', 'depth', 'revision', 'revision'])
 
     spy.mockClear()
     expect(

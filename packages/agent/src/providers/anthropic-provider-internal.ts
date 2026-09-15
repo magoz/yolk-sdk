@@ -1557,11 +1557,25 @@ const decodeAnthropicMessageResponse = (json: Schema.Json) =>
 
 const parseAnthropicJsonResponse = (
   raw: string,
-  decodeToolName: (name: string) => string
+  decodeToolName: (name: string) => string,
+  allowEofCompletion: boolean
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const json = yield* decodeJsonString(raw, 'Could not parse Anthropic Claude response JSON')
     const parsed = yield* decodeAnthropicMessageResponse(json)
+
+    if (
+      !allowEofCompletion &&
+      (parsed.stop_reason === null || parsed.stop_reason.trim().length === 0)
+    ) {
+      return yield* Effect.fail(
+        new LLMError({
+          cause: 'invalid_response',
+          message: 'Anthropic Messages JSON response did not include a stop reason',
+          retryable: false
+        })
+      )
+    }
 
     return yield* toLlmEvents(parsed, decodeToolName)
   })
@@ -1885,7 +1899,7 @@ const finalizeBodyState = (
     const format = state.format === 'undecided' ? classifyAnthropicBody(buffer) : state.format
 
     if (format === 'json') {
-      return yield* parseAnthropicJsonResponse(buffer, decodeToolName)
+      return yield* parseAnthropicJsonResponse(buffer, decodeToolName, allowEofCompletion)
     }
 
     const events: Array<LLMEvent> = []

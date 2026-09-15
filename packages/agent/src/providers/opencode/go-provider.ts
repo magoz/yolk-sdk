@@ -103,6 +103,7 @@ const makeOpenCodeGoProtocolLayer = (
             maxOutputTokens: config.maxOutputTokens,
             alwaysIncludeReasoning: false,
             allowEofCompletion: false,
+            requireJsonCompletion: true,
             extraHeaders,
             ...reasoningOptions
           })
