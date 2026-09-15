@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
   ConnectorBinaryHttpClient,
   CredentialResolver,
@@ -16,7 +17,9 @@ import {
 import { downloadNotionFile } from '@yolk-sdk/connectors/notion'
 
 const budget = { maxBytes: 16, maxMetadataBytes: 2000, maxErrorBodyBytes: 32 }
+
 const bytes = new Uint8Array([0, 128, 255])
+
 const integration = (connectorId: string) =>
   makeIntegration({
     connectorId,
@@ -24,16 +27,26 @@ const integration = (connectorId: string) =>
       makeCredentialBinding({ slotId: `${connectorId}.oauth`, credentialRef: 'ref' })
     ]
   })
+
 const response = (body = bytes, status = 200, headers = {}): ConnectorBinaryHttpResponse => ({
   bytes: body,
   status,
   headers,
   bodyComplete: true
 })
-const json = (value: unknown) => response(new TextEncoder().encode(JSON.stringify(value)))
+
+const isJson = Schema.is(Schema.Json)
+
+const json = (value: Schema.Json) => {
+  if (!isJson(value)) throw new TypeError('JSON fixture requires a finite JSON value')
+
+  return response(new TextEncoder().encode(JSON.stringify(value)))
+}
+
 const host = (responses: readonly ConnectorBinaryHttpResponse[]) => {
   const requests: ConnectorBinaryHttpRequest[] = []
   const scopes: (readonly string[] | undefined)[] = []
+
   return {
     requests,
     scopes,
@@ -41,9 +54,9 @@ const host = (responses: readonly ConnectorBinaryHttpResponse[]) => {
       Layer.succeed(CredentialResolver, {
         resolve: req => {
           scopes.push(req.slot.requiredScopes)
+
           return Effect.succeed(
             OAuthCredential.make({
-              _tag: 'OAuthCredential',
               provider: req.integration.connectorId,
               accessToken: 'secret',
               expiresAt: 4e12
@@ -55,12 +68,14 @@ const host = (responses: readonly ConnectorBinaryHttpResponse[]) => {
         request: req => {
           const r = responses[requests.length] ?? response(new Uint8Array(), 500)
           requests.push(req)
+
           return Effect.succeed(r)
         }
       })
     )
   }
 }
+
 const driveMetadata = {
   id: 'file',
   name: 'x',
@@ -70,6 +85,11 @@ const driveMetadata = {
 }
 
 describe('bounded document retrieval', () => {
+  it('rejects non-finite JSON fixture values before stringify', () => {
+    expect(() => json(Infinity)).toThrow('JSON fixture requires a finite JSON value')
+    expect(() => json({ n: Infinity })).toThrow('JSON fixture requires a finite JSON value')
+  })
+
   it.effect('Drive blob uses content consent, resource keys and shared-drive support', () =>
     Effect.gen(function* () {
       const h = host([
@@ -81,11 +101,13 @@ describe('bounded document retrieval', () => {
         }),
         response()
       ])
+
       const result = yield* downloadGoogleDriveFile(
         integration('google'),
         { fileId: 'file', resourceKey: 'key' },
         budget
       ).pipe(Effect.provide(h.layer))
+
       expect(result.bytes).toEqual(bytes)
       expect(h.requests[1]).toMatchObject({
         url: 'https://www.googleapis.com/drive/v3/files/file?alt=media&supportsAllDrives=true',
@@ -102,11 +124,13 @@ describe('bounded document retrieval', () => {
         json({ ...driveMetadata, mimeType: 'application/vnd.google-apps.document' }),
         response()
       ])
+
       const result = yield* exportGoogleDriveFile(
         integration('google'),
         { fileId: 'file', mimeType: 'application/pdf' },
         { ...budget, maxBytes: 20_000_000, contentAccess: 'readonly' }
       ).pipe(Effect.provide(h.layer))
+
       expect(result.source.exported).toBe(true)
       expect(h.requests[1]?.url).toContain('/export?mimeType=application%2Fpdf')
       expect(h.requests[1]?.maxBytes).toBe(10_000_000)
@@ -132,6 +156,7 @@ describe('bounded document retrieval', () => {
           ).toBe('Failure')
           expect(h.requests).toHaveLength(1)
         }
+
         const h = host([json(driveMetadata)])
         expect(
           (yield* exportGoogleDriveFile(
@@ -147,13 +172,17 @@ describe('bounded document retrieval', () => {
     Effect.gen(function* () {
       for (const mimeType of ['constructor', 'toString', '__proto__']) {
         const h = host([json({ ...driveMetadata, mimeType })])
+
         const result = yield* exportGoogleDriveFile(
           integration('google'),
           { fileId: 'file', mimeType: 'application/pdf' },
           budget
         ).pipe(Effect.provide(h.layer), Effect.result)
+
         expect(result._tag).toBe('Failure')
-        if (result._tag === 'Failure') expect(result.failure.code).toBe('not_downloadable')
+
+        if (Predicate.isTagged(result, 'Failure'))
+          expect(result.failure.code).toBe('not_downloadable')
         expect(h.requests).toHaveLength(1)
       }
     })
@@ -167,11 +196,13 @@ describe('bounded document retrieval', () => {
         response(new Uint8Array(17))
       ]) {
         const h = host([json(driveMetadata), r])
+
         const result = yield* downloadGoogleDriveFile(
           integration('google'),
           { fileId: 'file' },
           budget
         ).pipe(Effect.provide(h.layer), Effect.result)
+
         expect(result._tag).toBe('Failure')
         expect(JSON.stringify(result)).not.toContain('SECRET')
         expect(h.requests).toHaveLength(2)
@@ -206,13 +237,16 @@ describe('bounded document retrieval', () => {
     Effect.gen(function* () {
       const h = host([response()])
       const policy = { allowHostedUrl: (u: URL) => u.hostname === 'assets.example.com' }
+
       const file = {
         type: 'file' as const,
         file: { url: 'https://assets.example.com/x?signed=SECRET' }
       }
+
       const result = yield* downloadNotionFile(integration('notion'), file, budget, policy).pipe(
         Effect.provide(h.layer)
       )
+
       expect(result).toEqual({ bytes, byteLength: 3 })
       expect(h.requests[0]?.headers).toEqual({})
       expect(h.scopes).toHaveLength(0)
@@ -230,6 +264,7 @@ describe('bounded document retrieval', () => {
   it.effect('URL syntax and input validation reject pre-network', () =>
     Effect.gen(function* () {
       const h = host([])
+
       for (const url of [
         'https://127.0.0.1/x',
         'https://[::1]/',
@@ -251,6 +286,7 @@ describe('bounded document retrieval', () => {
           ).pipe(Effect.provide(h.layer), Effect.result))._tag
         ).toBe('Failure')
       }
+
       expect(
         (yield* downloadGoogleDriveFile(
           integration('google'),

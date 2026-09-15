@@ -44,4 +44,5 @@ export const AgentChatSessionEvent = Schema.Union([
   MessagesRegenerated,
   UserMessageEdited
 ])
+
 export type AgentChatSessionEvent = typeof AgentChatSessionEvent.Type

@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option } from 'effect'
+import { Array as Arr, Effect, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 
 export class TextPart extends Schema.TaggedClass<TextPart>()('Text', {
@@ -25,6 +25,7 @@ export const AttachmentSource = Schema.Union([
   UrlAttachmentSource,
   RefAttachmentSource
 ])
+
 export type AttachmentSource = typeof AttachmentSource.Type
 
 export class ImagePart extends Schema.TaggedClass<ImagePart>()('Image', {
@@ -51,9 +52,11 @@ export class AudioPart extends Schema.TaggedClass<AudioPart>()('Audio', {
 }) {}
 
 export const ContentPart = Schema.Union([TextPart, ImagePart, DocumentPart, AudioPart])
+
 export type ContentPart = typeof ContentPart.Type
 
 export const Content = Schema.Union([Schema.String, Schema.Array(ContentPart)])
+
 export type Content = typeof Content.Type
 
 export type AttachmentContentPart = ImagePart | DocumentPart | AudioPart
@@ -65,79 +68,73 @@ export type AttachmentSourceResolver<E = never, R = never> = (
 const resolveContentPartAttachmentSource = <E, R>(
   part: ContentPart,
   resolver: AttachmentSourceResolver<E, R>
-): Effect.Effect<ContentPart, E, R> => {
-  switch (part._tag) {
-    case 'Text':
-      return Effect.succeed(part)
-    case 'Image':
-      return resolver(part).pipe(
+): Effect.Effect<ContentPart, E, R> =>
+  Match.value(part).pipe(
+    Match.tag('Text', current => Effect.succeed(current)),
+    Match.tag('Image', current =>
+      resolver(current).pipe(
         Effect.map(source =>
           ImagePart.make({
             source,
-            mimeType: part.mimeType,
-            filename: part.filename,
-            title: part.title,
-            width: part.width,
-            height: part.height
+            mimeType: current.mimeType,
+            filename: current.filename,
+            title: current.title,
+            width: current.width,
+            height: current.height
           })
         )
       )
-    case 'Document':
-      return resolver(part).pipe(
+    ),
+    Match.tag('Document', current =>
+      resolver(current).pipe(
         Effect.map(source =>
           DocumentPart.make({
             source,
-            mimeType: part.mimeType,
-            filename: part.filename,
-            title: part.title
+            mimeType: current.mimeType,
+            filename: current.filename,
+            title: current.title
           })
         )
       )
-    case 'Audio':
-      return resolver(part).pipe(
+    ),
+    Match.tag('Audio', current =>
+      resolver(current).pipe(
         Effect.map(source =>
           AudioPart.make({
             source,
-            mimeType: part.mimeType,
-            filename: part.filename,
-            durationMs: part.durationMs
+            mimeType: current.mimeType,
+            filename: current.filename,
+            durationMs: current.durationMs
           })
         )
       )
-  }
-}
+    ),
+    Match.exhaustive
+  )
 
 export const resolveContentAttachmentSources = <E, R>(
   content: Content,
   resolver: AttachmentSourceResolver<E, R>
 ): Effect.Effect<Content, E, R> =>
-  typeof content === 'string'
+  Predicate.isString(content)
     ? Effect.succeed(content)
     : Effect.forEach(content, part => resolveContentPartAttachmentSource(part, resolver))
 
-export const contentPartText = (part: ContentPart) => {
-  switch (part._tag) {
-    case 'Text':
-      return part.text
-    case 'Image':
-    case 'Document':
-    case 'Audio':
-      return ''
-  }
-}
+export const contentPartText = (part: ContentPart) =>
+  Match.value(part).pipe(
+    Match.tag('Text', current => current.text),
+    Match.tag('Image', 'Document', 'Audio', () => ''),
+    Match.exhaustive
+  )
 
-export const contentPartPreview = (part: ContentPart) => {
-  switch (part._tag) {
-    case 'Text':
-      return part.text
-    case 'Image':
-      return 'Image'
-    case 'Document':
-      return `Document: ${part.title ?? part.filename}`
-    case 'Audio':
-      return 'Audio'
-  }
-}
+export const contentPartPreview = (part: ContentPart) =>
+  Match.value(part).pipe(
+    Match.tag('Text', current => current.text),
+    Match.tag('Image', () => 'Image'),
+    Match.tag('Document', current => `Document: ${current.title ?? current.filename}`),
+    Match.tag('Audio', () => 'Audio'),
+    Match.exhaustive
+  )
 
 const loneSurrogates = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
 
@@ -155,9 +152,11 @@ export const replaceLoneSurrogates = (text: string) => text.replace(loneSurrogat
  * hosts may also use it when persisting model-produced JSON.
  */
 export const replaceLoneSurrogatesDeep = (value: unknown): unknown => {
-  if (typeof value === 'string') return replaceLoneSurrogates(value)
+  if (Predicate.isString(value)) return replaceLoneSurrogates(value)
+
   if (Array.isArray(value)) return value.map(replaceLoneSurrogatesDeep)
-  if (typeof value === 'object' && value !== null) {
+
+  if (Predicate.isObjectOrArray(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [
         replaceLoneSurrogates(key),
@@ -170,32 +169,32 @@ export const replaceLoneSurrogatesDeep = (value: unknown): unknown => {
 }
 
 export const contentText = (content: Content) =>
-  typeof content === 'string' ? content : Arr.map(content, contentPartText).join('')
+  Predicate.isString(content) ? content : Arr.map(content, contentPartText).join('')
 
 export const contentPreview = (content: Content) =>
-  typeof content === 'string' ? content : Arr.map(content, contentPartPreview).join(', ')
+  Predicate.isString(content) ? content : Arr.map(content, contentPartPreview).join(', ')
 
 export const contentParts = (content: Content): ReadonlyArray<ContentPart> =>
-  typeof content === 'string' ? [TextPart.make({ text: content })] : content
+  Predicate.isString(content) ? [TextPart.make({ text: content })] : content
 
 export const isContentEmpty = (content: Content) =>
-  typeof content === 'string'
+  Predicate.isString(content)
     ? content.length === 0
     : content.length === 0 ||
-      Arr.every(content, part => part._tag === 'Text' && part.text.length === 0)
+      Arr.every(content, part => Predicate.isTagged(part, 'Text') && part.text.length === 0)
 
 export const appendTextToContent = (content: Content, text: string): Content => {
-  if (typeof content === 'string') {
+  if (Predicate.isString(content)) {
     return `${content}${text}`
   }
 
   return Option.match(Arr.last(content), {
     onNone: () => [TextPart.make({ text })],
     onSome: last =>
-      last._tag !== 'Text'
+      !Predicate.isTagged(last, 'Text')
         ? [...content, TextPart.make({ text })]
         : Arr.map(content, (part, index) =>
-            index === content.length - 1 && part._tag === 'Text'
+            index === content.length - 1 && Predicate.isTagged(part, 'Text')
               ? TextPart.make({ text: `${part.text}${text}` })
               : part
           )
@@ -211,42 +210,33 @@ export const refAttachmentSource = (id: string) => RefAttachmentSource.make({ id
 
 export const inlineBase64Source = inlineBase64AttachmentSource
 
-export const attachmentSourcePreview = (source: AttachmentSource) => {
-  switch (source._tag) {
-    case 'InlineBase64':
-      return 'inline'
-    case 'Url':
-      return source.url
-    case 'Ref':
-      return source.id
-  }
-}
+export const attachmentSourcePreview = (source: AttachmentSource) =>
+  Match.value(source).pipe(
+    Match.tag('InlineBase64', () => 'inline'),
+    Match.tag('Url', current => current.url),
+    Match.tag('Ref', current => current.id),
+    Match.exhaustive
+  )
 
-export const attachmentSourceDataUrl = (source: AttachmentSource, mimeType: string) => {
-  switch (source._tag) {
-    case 'InlineBase64':
-      return Option.some(`data:${mimeType};base64,${source.data}`)
-    case 'Url':
-    case 'Ref':
-      return Option.none<string>()
-  }
-}
+export const attachmentSourceDataUrl = (source: AttachmentSource, mimeType: string) =>
+  Match.value(source).pipe(
+    Match.tag('InlineBase64', current => Option.some(`data:${mimeType};base64,${current.data}`)),
+    Match.tag('Url', 'Ref', () => Option.none<string>()),
+    Match.exhaustive
+  )
 
-export const attachmentSourceUrl = (source: AttachmentSource, mimeType: string) => {
-  switch (source._tag) {
-    case 'InlineBase64':
-      return Option.some(`data:${mimeType};base64,${source.data}`)
-    case 'Url':
-      return Option.some(source.url)
-    case 'Ref':
-      return Option.none<string>()
-  }
-}
+export const attachmentSourceUrl = (source: AttachmentSource, mimeType: string) =>
+  Match.value(source).pipe(
+    Match.tag('InlineBase64', current => Option.some(`data:${mimeType};base64,${current.data}`)),
+    Match.tag('Url', current => Option.some(current.url)),
+    Match.tag('Ref', () => Option.none<string>()),
+    Match.exhaustive
+  )
 
 const normalizeMimeType = (mimeType: string) =>
   mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
 
-const textDocumentMimeTypeByExtension: Readonly<Record<string, string>> = {
+const textDocumentMimeTypeByExtension = {
   '.csv': 'text/csv',
   '.css': 'text/css',
   '.gql': 'application/graphql',
@@ -300,6 +290,7 @@ export const isTextDocumentMimeType = (mimeType: string) => {
 
 export const textDocumentMimeTypeFromFilename = (filename: string) => {
   const normalized = filename.trim().toLowerCase()
+
   const entry = Object.entries(textDocumentMimeTypeByExtension).find(([extension]) =>
     normalized.endsWith(extension)
   )
@@ -314,6 +305,7 @@ export const inferTextDocumentMimeType = (input: {
   const normalized = normalizeMimeType(input.mimeType)
 
   if (isTextDocumentMimeType(normalized)) return normalized
+
   if (!isUnknownDocumentMimeType(normalized)) return undefined
 
   return textDocumentMimeTypeFromFilename(input.filename)
@@ -337,6 +329,7 @@ export const documentPartFromText = (input: {
   readonly title?: string
 }) => {
   const normalized = normalizeMimeType(input.mimeType)
+
   const mimeType =
     inferTextDocumentMimeType({
       filename: input.filename,
@@ -363,25 +356,21 @@ const decodeBase64Utf8 = (data: string) => {
   return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
 }
 
-export const attachmentSourceText = (source: AttachmentSource) => {
-  switch (source._tag) {
-    case 'InlineBase64':
-      return Effect.try({
-        try: () => Option.some(decodeBase64Utf8(source.data)),
+export const attachmentSourceText = (source: AttachmentSource) =>
+  Match.value(source).pipe(
+    Match.tag('InlineBase64', current =>
+      Effect.try({
+        try: () => Option.some(decodeBase64Utf8(current.data)),
         catch: error => error
       })
-    case 'Url':
-    case 'Ref':
-      return Effect.succeed(Option.none<string>())
-  }
-}
+    ),
+    Match.tag('Url', 'Ref', () => Effect.succeed(Option.none<string>())),
+    Match.exhaustive
+  )
 
-export const attachmentSourceBase64 = (source: AttachmentSource) => {
-  switch (source._tag) {
-    case 'InlineBase64':
-      return Option.some(source.data)
-    case 'Url':
-    case 'Ref':
-      return Option.none<string>()
-  }
-}
+export const attachmentSourceBase64 = (source: AttachmentSource) =>
+  Match.value(source).pipe(
+    Match.tag('InlineBase64', current => Option.some(current.data)),
+    Match.tag('Url', 'Ref', () => Option.none<string>()),
+    Match.exhaustive
+  )

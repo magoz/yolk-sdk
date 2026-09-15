@@ -1,4 +1,4 @@
-import { Option } from 'effect'
+import { Match, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AssistantAgentMessage,
@@ -68,9 +68,9 @@ const segmentKey = (event: {
   readonly responseId: string | null
 }): string | null => event.itemId ?? event.responseId
 
-const decodeParamsOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeParamsOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
-const toolCallParams = (argumentsJson: string): unknown =>
+const toolCallParams = (argumentsJson: string): Schema.Json =>
   Option.getOrElse(decodeParamsOption(argumentsJson), () => argumentsJson)
 
 export const protocolToolCallFromVoice = (call: VoiceToolCall): ToolCall =>
@@ -143,6 +143,7 @@ const flushSegment = (
 ): VoiceProjectionResult => {
   const draft = state.assistantDrafts.find(entry => entry.key === key)
   const remainingDrafts = state.assistantDrafts.filter(entry => entry.key !== key)
+
   // Truncated/interrupted segments can arrive as finals with an empty
   // transcript; never lose text the user already heard streaming.
   const text =
@@ -208,71 +209,73 @@ const appendDraftDelta = (
 export const projectVoiceEvent = (
   state: VoiceProjectionState,
   event: VoiceEvent
-): VoiceProjectionResult => {
-  switch (event._tag) {
-    case 'UserTranscriptFinal':
-      return { state, messages: [UserMessage.make({ content: event.text })] }
-    case 'AssistantTranscriptDelta':
-      return isFinalized(state, segmentKey(event))
+): VoiceProjectionResult =>
+  Match.value(event).pipe(
+    Match.withReturnType<VoiceProjectionResult>(),
+    Match.tag('UserTranscriptFinal', current => ({
+      state,
+      messages: [UserMessage.make({ content: current.text })]
+    })),
+    Match.tag('AssistantTranscriptDelta', current =>
+      isFinalized(state, segmentKey(current))
         ? { state, messages: [] }
-        : appendDraftDelta(state, segmentKey(event), event.delta)
-    case 'AssistantTranscriptFinal':
-      return isFinalized(state, segmentKey(event))
+        : appendDraftDelta(state, segmentKey(current), current.delta)
+    ),
+    Match.tag('AssistantTranscriptFinal', current =>
+      isFinalized(state, segmentKey(current))
         ? { state, messages: [] }
-        : flushSegment(state, segmentKey(event), event.text)
-    case 'Interrupted':
-    case 'SessionClosed':
-      return flushAllDrafts(state)
-    case 'ToolCallsRequested':
-      return {
-        state: {
-          ...state,
-          turnToolCalls: [
-            ...state.turnToolCalls,
-            ...event.calls.map(call => protocolToolCallFromVoice(call))
-          ]
-        },
-        messages: []
-      }
-    case 'ToolCallCompleted':
-      return {
-        state: {
-          ...state,
-          turnToolResults: [
-            ...state.turnToolResults,
-            ToolResultMessage.make({ toolCallId: event.callId, content: event.output })
-          ]
-        },
-        messages: []
-      }
-    case 'ToolCallFailed':
-      return {
-        state: {
-          ...state,
-          turnToolResults: [
-            ...state.turnToolResults,
-            ToolResultMessage.make({
-              toolCallId: event.callId,
-              content: event.message,
-              isError: true
-            })
-          ]
-        },
-        messages: []
-      }
-    case 'SessionOpening':
-    case 'SessionOpened':
-    case 'AudioInputStarted':
-    case 'AudioInputStopped':
-    case 'UserTranscriptDelta':
-    case 'AssistantAudioStarted':
-    case 'AssistantAudioStopped':
-    case 'ToolCallExecuting':
-    case 'AwaitingInput':
-    case 'Error':
-      return { state, messages: [] }
-  }
-}
+        : flushSegment(state, segmentKey(current), current.text)
+    ),
+    Match.tag('Interrupted', 'SessionClosed', () => flushAllDrafts(state)),
+    Match.tag('ToolCallsRequested', current => ({
+      state: {
+        ...state,
+        turnToolCalls: [
+          ...state.turnToolCalls,
+          ...current.calls.map(call => protocolToolCallFromVoice(call))
+        ]
+      },
+      messages: []
+    })),
+    Match.tag('ToolCallCompleted', current => ({
+      state: {
+        ...state,
+        turnToolResults: [
+          ...state.turnToolResults,
+          ToolResultMessage.make({ toolCallId: current.callId, content: current.output })
+        ]
+      },
+      messages: []
+    })),
+    Match.tag('ToolCallFailed', current => ({
+      state: {
+        ...state,
+        turnToolResults: [
+          ...state.turnToolResults,
+          ToolResultMessage.make({
+            toolCallId: current.callId,
+            content: current.message,
+            isError: true
+          })
+        ]
+      },
+      messages: []
+    })),
+    Match.tag(
+      'SessionOpening',
+      'SessionOpened',
+      'AudioInputStarted',
+      'AudioInputStopped',
+      'UserTranscriptDelta',
+      'AssistantAudioStarted',
+      'AssistantAudioStopped',
+      'ToolCallExecuting',
+      'AwaitingInput',
+      'Error',
+      () => ({ state, messages: [] })
+    ),
+    Match.exhaustive
+  )
 
 // --- Reconnect seeding -------------------------------------------------------
 
@@ -319,22 +322,22 @@ export const voiceSeedTextsFromMessages = (
   messages: ReadonlyArray<AgentMessage>,
   options: VoiceSeedTextOptions = {}
 ): ReadonlyArray<VoiceSeedText> =>
-  messages.flatMap((message): ReadonlyArray<VoiceSeedText> => {
-    switch (message._tag) {
-      case 'User': {
-        const text = userSeedText(message, options)
+  messages.flatMap((message): ReadonlyArray<VoiceSeedText> =>
+    Match.value(message).pipe(
+      Match.tag('User', current => {
+        const text = userSeedText(current, options)
 
         return text.length === 0 ? [] : [{ role: 'user' as const, text }]
-      }
-      case 'Assistant': {
-        const text = contentPreview(assistantContent(message))
+      }),
+      Match.tag('Assistant', current => {
+        const text = contentPreview(assistantContent(current))
 
         return text.length === 0 ? [] : [{ role: 'assistant' as const, text }]
-      }
-      case 'ToolResult':
-        return []
-    }
-  })
+      }),
+      Match.tag('ToolResult', () => []),
+      Match.exhaustive
+    )
+  )
 
 // --- Durable event ids -------------------------------------------------------
 
@@ -356,11 +359,16 @@ export type VoiceEventSequencerState = {
 
 export const initialVoiceEventSequencerState: VoiceEventSequencerState = { nextSequence: 0 }
 
+type SequenceVoiceEventResult = {
+  readonly stored: StoredVoiceEvent
+  readonly state: VoiceEventSequencerState
+}
+
 export const sequenceVoiceEvent = (
   streamId: string,
   state: VoiceEventSequencerState,
   event: VoiceEvent
-): { readonly stored: StoredVoiceEvent; readonly state: VoiceEventSequencerState } => ({
+): SequenceVoiceEventResult => ({
   stored: StoredVoiceEvent.make({
     eventId: makeVoiceEventId(streamId, state.nextSequence),
     event

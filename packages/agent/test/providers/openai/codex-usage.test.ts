@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
 import type { HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -10,7 +10,9 @@ import {
 } from '../../../src/providers/openai/codex-usage.ts'
 
 const fetchedAt = '2026-08-11T08:00:00.000Z'
+
 const tokenExpiresAt = 1_800_000_000_000
+
 const token = OAuthAccessToken.make({
   provider: 'openai-codex',
   accessToken: 'codex-secret',
@@ -65,6 +67,7 @@ describe('OpenAI Codex subscription usage', () => {
 
   it.effect('uses the fixed endpoint and required account header', () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
     const client = HttpClient.make(request => {
       requests.push(request)
 
@@ -95,41 +98,48 @@ describe('OpenAI Codex subscription usage', () => {
 
   it.effect('fails before HTTP when the account id is missing or blank', () => {
     let called = false
+
     const client = HttpClient.make(request => {
       called = true
+
       return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({})))
     })
 
     return Effect.gen(function* () {
-      const results = yield* Effect.forEach([undefined, '   '], accountId =>
-        fetchOpenAiCodexSubscriptionUsage(
-          OAuthAccessToken.make({
-            provider: 'openai-codex',
-            accessToken: 'secret',
-            expiresAt: tokenExpiresAt,
-            ...(accountId === undefined ? {} : { accountId })
-          })
-        ).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.result)
-      )
+      const results = yield* Effect.forEach([undefined, '   '], accountId => {
+        const tokenInput = {
+          provider: 'openai-codex' as const,
+          accessToken: 'secret',
+          expiresAt: tokenExpiresAt
+        }
 
-      expect(results.map(result => Result.isFailure(result) && result.failure)).toEqual([
-        expect.objectContaining({
-          _tag: 'ProviderSubscriptionUsageConfigurationError',
-          reason: 'missing_account_id'
-        }),
-        expect.objectContaining({
-          _tag: 'ProviderSubscriptionUsageConfigurationError',
+        return fetchOpenAiCodexSubscriptionUsage(
+          OAuthAccessToken.make(accountId === undefined ? tokenInput : { ...tokenInput, accountId })
+        ).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.result)
+      })
+
+      expect(results).toHaveLength(2)
+
+      for (const result of results) {
+        expect(
+          Result.isFailure(result) &&
+            Predicate.isTagged(result.failure, 'ProviderSubscriptionUsageConfigurationError')
+        ).toBe(true)
+        expect(Result.isFailure(result) && result.failure).toMatchObject({
           reason: 'missing_account_id'
         })
-      ])
+      }
+
       expect(called).toBe(false)
     })
   })
 
   it.effect('rejects invalid request timeouts before HTTP', () => {
     let called = false
+
     const client = HttpClient.make(request => {
       called = true
+
       return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({})))
     })
 
@@ -138,8 +148,11 @@ describe('OpenAI Codex subscription usage', () => {
         requestTimeoutMs: 0
       }).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.result)
 
+      expect(
+        Result.isFailure(result) &&
+          Predicate.isTagged(result.failure, 'ProviderSubscriptionUsageConfigurationError')
+      ).toBe(true)
       expect(Result.isFailure(result) && result.failure).toMatchObject({
-        _tag: 'ProviderSubscriptionUsageConfigurationError',
         reason: 'invalid_request_timeout'
       })
       expect(called).toBe(false)
@@ -156,7 +169,9 @@ describe('OpenAI Codex subscription usage', () => {
         headers: { 'Content-Type': 'application/json' }
       })
     ]
+
     let call = 0
+
     const client = HttpClient.make(request =>
       Effect.succeed(HttpClientResponse.fromWeb(request, responses[call++] ?? new Response()))
     )
@@ -217,6 +232,40 @@ describe('OpenAI Codex subscription usage', () => {
         category: 'invalid_response',
         provider: 'openai-codex'
       })
+    })
+  )
+
+  it.effect('omits unused window optionals and preserves present JSON key order', () =>
+    Effect.gen(function* () {
+      const snapshot = yield* parseOpenAiCodexSubscriptionUsage(
+        {
+          rate_limit: {
+            primary_window: { used_percent: 10 },
+            secondary_window: {
+              used_percent: 20,
+              limit_window_seconds: 60,
+              reset_after_seconds: 5,
+              reset_at: 1_786_435_200
+            }
+          }
+        },
+        fetchedAt
+      )
+
+      const [primary, secondary] = Array.from(snapshot.windows)
+
+      expect(Object.keys(primary ?? {})).toEqual(['id', 'usedPercent'])
+      expect(JSON.stringify(primary)).toBe('{"id":"primary","usedPercent":10}')
+      expect(Object.keys(secondary ?? {})).toEqual([
+        'id',
+        'usedPercent',
+        'resetsAt',
+        'resetsAfterSeconds',
+        'windowDurationMinutes'
+      ])
+      expect(JSON.stringify(secondary)).toBe(
+        '{"id":"secondary","usedPercent":20,"resetsAt":"2026-08-11T08:00:00.000Z","resetsAfterSeconds":5,"windowDurationMinutes":1}'
+      )
     })
   )
 })

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { Effect } from 'effect'
+import { Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AgentWebSocketServerMessage,
@@ -22,12 +22,14 @@ type SocketAgentErrorResult = {
 }
 
 const cloudflareAgentUrl = process.env.CLOUDFLARE_AGENT_URL ?? ''
+
 const turnTimeoutMs = 30_000
 
 const webSocketUrl = (baseUrl: string, sessionId: string) => {
   const url = new URL(baseUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   url.pathname = `/connect/${encodeURIComponent(sessionId)}`
+
   return url.toString()
 }
 
@@ -36,7 +38,7 @@ const decodeServerMessage = Schema.decodeUnknownEffect(
 )
 
 const encodeUserInput = (input: string, expectedRevision: number) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
     UserInput.make({
       expectedRevision,
       message: UserMessage.make({ content: input })
@@ -76,36 +78,38 @@ const runSocketTurn = (url: string, input: string) =>
     }
 
     const handleServerMessage = (message: AgentWebSocketServerMessageType) => {
-      switch (message._tag) {
-        case 'SessionSnapshot':
-          snapshotRevision = message.revision
-          snapshotMessageCount = message.messages.length
+      Match.value(message).pipe(
+        Match.tag('SessionSnapshot', current => {
+          snapshotRevision = current.revision
+          snapshotMessageCount = current.messages.length
           Effect.runFork(
-            encodeUserInput(input, message.revision).pipe(
+            encodeUserInput(input, current.revision).pipe(
               Effect.tap(encoded => Effect.sync(() => socket.send(encoded))),
               Effect.catch(error =>
                 Effect.sync(() => finish(Effect.fail(socketError('Encode failed', error))))
               )
             )
           )
-          return
-        case 'LLMTextDelta':
-          text = `${text}${message.text}`
-          return
-        case 'AgentEnd':
+
+          return undefined
+        }),
+        Match.tag('LLMTextDelta', current => {
+          text = `${text}${current.text}`
+        }),
+        Match.tag('AgentEnd', () => {
           finish(Effect.succeed({ snapshotRevision, snapshotMessageCount, text }))
-          return
-        case 'AgentError':
-          finish(Effect.fail(socketError(message.message)))
-          return
-        default:
-          return
-      }
+        }),
+        Match.tag('AgentError', current => {
+          finish(Effect.fail(socketError(current.message)))
+        }),
+        Match.orElse(() => undefined)
+      )
     }
 
     const onMessage = (event: MessageEvent) => {
-      if (typeof event.data !== 'string') {
+      if (!Predicate.isString(event.data)) {
         finish(Effect.fail(socketError('Expected text websocket message')))
+
         return
       }
 
@@ -156,9 +160,9 @@ const runSocketTurnWithExpectedRevision = (url: string, input: string, expectedR
     }
 
     const handleServerMessage = (message: AgentWebSocketServerMessageType) => {
-      switch (message._tag) {
-        case 'SessionSnapshot':
-          snapshotRevision = message.revision
+      Match.value(message).pipe(
+        Match.tag('SessionSnapshot', current => {
+          snapshotRevision = current.revision
           Effect.runFork(
             encodeUserInput(input, expectedRevision).pipe(
               Effect.tap(encoded => Effect.sync(() => socket.send(encoded))),
@@ -167,27 +171,29 @@ const runSocketTurnWithExpectedRevision = (url: string, input: string, expectedR
               )
             )
           )
-          return
-        case 'AgentError':
+
+          return undefined
+        }),
+        Match.tag('AgentError', current => {
           finish(
             Effect.succeed({
               snapshotRevision,
-              code: message.code,
-              message: message.message
+              code: current.code,
+              message: current.message
             })
           )
-          return
-        case 'AgentEnd':
+        }),
+        Match.tag('AgentEnd', () => {
           finish(Effect.fail(socketError('Expected AgentError, received AgentEnd')))
-          return
-        default:
-          return
-      }
+        }),
+        Match.orElse(() => undefined)
+      )
     }
 
     const onMessage = (event: MessageEvent) => {
-      if (typeof event.data !== 'string') {
+      if (!Predicate.isString(event.data)) {
         finish(Effect.fail(socketError('Expected text websocket message')))
+
         return
       }
 
@@ -240,29 +246,29 @@ const runMalformedSocketTurn = (url: string, input: string) =>
     }
 
     const handleServerMessage = (message: AgentWebSocketServerMessageType) => {
-      switch (message._tag) {
-        case 'SessionSnapshot':
-          snapshotRevision = message.revision
-          snapshotMessageCount = message.messages.length
+      Match.value(message).pipe(
+        Match.tag('SessionSnapshot', current => {
+          snapshotRevision = current.revision
+          snapshotMessageCount = current.messages.length
           socket.send(input)
-          return
-        case 'LLMTextDelta':
-          text = `${text}${message.text}`
-          return
-        case 'AgentEnd':
+        }),
+        Match.tag('LLMTextDelta', current => {
+          text = `${text}${current.text}`
+        }),
+        Match.tag('AgentEnd', () => {
           finish(Effect.succeed({ snapshotRevision, snapshotMessageCount, text }))
-          return
-        case 'AgentError':
-          finish(Effect.fail(socketError(message.message)))
-          return
-        default:
-          return
-      }
+        }),
+        Match.tag('AgentError', current => {
+          finish(Effect.fail(socketError(current.message)))
+        }),
+        Match.orElse(() => undefined)
+      )
     }
 
     const onMessage = (event: MessageEvent) => {
-      if (typeof event.data !== 'string') {
+      if (!Predicate.isString(event.data)) {
         finish(Effect.fail(socketError('Expected text websocket message')))
+
         return
       }
 
@@ -320,8 +326,9 @@ const readSnapshot = (url: string) =>
     }
 
     const onMessage = (event: MessageEvent) => {
-      if (typeof event.data !== 'string') {
+      if (!Predicate.isString(event.data)) {
         finish(Effect.fail(socketError('Expected text websocket message')))
+
         return
       }
 
@@ -329,7 +336,7 @@ const readSnapshot = (url: string) =>
         decodeServerMessage(event.data).pipe(
           Effect.tap(message =>
             Effect.sync(() => {
-              if (message._tag === 'SessionSnapshot') {
+              if (Predicate.isTagged(message, 'SessionSnapshot')) {
                 finish(
                   Effect.succeed({
                     revision: message.revision,

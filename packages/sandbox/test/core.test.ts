@@ -53,7 +53,9 @@ describe('sandbox core', () => {
         username: 'git-user',
         password: 'git-password'
       })
+
       const retention = yield* Schema.decodeUnknownEffect(SandboxSnapshotRetention)({ count: 10 })
+
       const tooMany = yield* Schema.decodeUnknownEffect(SandboxSnapshotRetention)({
         count: 11
       }).pipe(Effect.result)
@@ -73,35 +75,35 @@ describe('sandbox core', () => {
       maxExpiresAtMs: 200
     })
 
-    expect(
-      sandboxStateDecision({
-        state: Option.some(state),
-        name: 'sandbox-a',
-        nowMs: 50,
-        lifecycle: defaultSandboxLifecycle
-      })._tag
-    ).toBe('UseExisting')
-    expect(
-      sandboxStateDecision({
-        state: Option.some(state),
-        name: 'sandbox-a',
-        nowMs: 150,
-        lifecycle: defaultSandboxLifecycle
-      })
-    ).toMatchObject({
-      _tag: 'Create',
+    const existing = sandboxStateDecision({
+      state: Option.some(state),
+      name: 'sandbox-a',
+      nowMs: 50,
+      lifecycle: defaultSandboxLifecycle
+    })
+
+    const idleExpired = sandboxStateDecision({
+      state: Option.some(state),
+      name: 'sandbox-a',
+      nowMs: 150,
+      lifecycle: defaultSandboxLifecycle
+    })
+
+    const maxExpired = sandboxStateDecision({
+      state: Option.some(state),
+      name: 'sandbox-a',
+      nowMs: 250,
+      lifecycle: defaultSandboxLifecycle
+    })
+
+    expect(existing._tag).toBe('UseExisting')
+    expect(idleExpired._tag).toBe('Create')
+    expect(idleExpired).toMatchObject({
       workspaceReset: true,
       reason: 'idle_expired'
     })
-    expect(
-      sandboxStateDecision({
-        state: Option.some(state),
-        name: 'sandbox-a',
-        nowMs: 250,
-        lifecycle: defaultSandboxLifecycle
-      })
-    ).toMatchObject({
-      _tag: 'Create',
+    expect(maxExpired._tag).toBe('Create')
+    expect(maxExpired).toMatchObject({
       workspaceReset: true,
       reason: 'max_expired'
     })
@@ -115,16 +117,18 @@ describe('sandbox core', () => {
       expiresAtMs: 100,
       maxExpiresAtMs: Number.MAX_SAFE_INTEGER
     })
+
     const lifecycle = PersistentSandboxLifecycle.make({ idleTtlMs: 100 })
 
-    expect(
-      sandboxStateDecision({
-        state: Option.some(state),
-        name: 'sandbox-a',
-        nowMs: 150,
-        lifecycle
-      })
-    ).toMatchObject({ _tag: 'UseExisting', state })
+    const decision = sandboxStateDecision({
+      state: Option.some(state),
+      name: 'sandbox-a',
+      nowMs: 150,
+      lifecycle
+    })
+
+    expect(decision._tag).toBe('UseExisting')
+    expect(decision).toMatchObject({ state })
   })
 
   it('touches disposable state without exceeding max lifetime', () => {
@@ -135,6 +139,7 @@ describe('sandbox core', () => {
       expiresAtMs: 100,
       maxExpiresAtMs: 250
     })
+
     const touched = touchSandboxState({ state, nowMs: 200, lifecycle: defaultSandboxLifecycle })
 
     expect(touched.lastUsedAtMs).toBe(200)

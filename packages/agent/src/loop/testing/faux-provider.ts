@@ -66,6 +66,7 @@ const takeResponse = (responses: Ref.Ref<ReadonlyArray<FauxResponse>>) =>
     }
 
     yield* Ref.set(responses, current.slice(1))
+
     return response
   })
 
@@ -84,6 +85,7 @@ export const FauxProvider = {
         return LLMProvider.of({
           stream: request => {
             input.requests.push(request)
+
             return Stream.fromEffect(takeResponse(responses)).pipe(
               Stream.flatMap(response => Stream.fromIterable(response.events))
             )

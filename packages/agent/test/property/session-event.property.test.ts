@@ -1,4 +1,5 @@
-import { Effect, Option, Schema } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Effect, Match, Option, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentError,
@@ -37,21 +38,21 @@ const sessionCommand = Schema.Struct({
   runId
 })
 
-const sessionCommandsArbitrary = Schema.toArbitrary(Schema.Array(sessionCommand))
+const sessionCommandsArbitrary = Arbitrary.schema(Schema.Array(sessionCommand))
 
 const revisionCase = Schema.Struct({
   initialEvents: Schema.Array(sessionCommand),
   staleRevision: Schema.Number
 })
 
-const revisionCaseArbitrary = Schema.toArbitrary(revisionCase)
+const revisionCaseArbitrary = Arbitrary.schema(revisionCase)
 
 const appendCommand = Schema.Struct({
   expectation: Schema.Literals(['current', 'stale', 'none']),
   event: sessionCommand
 })
 
-const appendCommandsArbitrary = Schema.toArbitrary(Schema.Array(appendCommand))
+const appendCommandsArbitrary = Arbitrary.schema(Schema.Array(appendCommand))
 
 const emptyLog = (): RuntimeSessionEventLog => ({
   sessionId: 'session_1',
@@ -186,12 +187,15 @@ describe('session event property tests', () => {
     ([input]) =>
       Effect.gen(function* () {
         const store = yield* SessionEventStore
+
         const initialLog = yield* store.append({
           sessionId: 'session_1',
           expectedRevision: 0,
           events: eventsForCommands(input.initialEvents)
         })
+
         const staleRevision = initialLog.revision + Math.abs(input.staleRevision) + 1
+
         const result = yield* store
           .append({
             sessionId: 'session_1',
@@ -199,12 +203,19 @@ describe('session event property tests', () => {
             events: [InputAppended.make({ message: UserMessage.make({ content: 'rejected' }) })]
           })
           .pipe(Effect.result)
+
         const after = yield* store.load('session_1')
 
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'SessionConflictError', sessionId: 'session_1' }
-        })
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'SessionConflictError')).toBe(true)
+
+          if (Predicate.isTagged(result.failure, 'SessionConflictError')) {
+            expect(result.failure.sessionId).toBe('session_1')
+          }
+        }
+
         expect(after).toEqual(initialLog)
       }).pipe(Effect.provide(makeInMemorySessionEventStoreLayer())),
     propertyOptions
@@ -219,32 +230,42 @@ describe('session event property tests', () => {
         let expectedLog = emptyLog()
 
         for (const [index, command] of commands.entries()) {
-          const expectedRevision =
-            command.expectation === 'none'
-              ? undefined
-              : command.expectation === 'current'
-                ? expectedLog.revision
-                : expectedLog.revision + 1
+          const expectedRevision = Match.value(command.expectation).pipe(
+            Match.when('none', () => undefined),
+            Match.when('current', () => expectedLog.revision),
+            Match.when('stale', () => expectedLog.revision + 1),
+            Match.exhaustive
+          )
+
           const events = [eventForCommand(command.event, index)]
+
+          const appendInput = {
+            sessionId: 'session_1',
+            events
+          }
+
           const result = yield* store
-            .append({
-              sessionId: 'session_1',
-              ...(expectedRevision === undefined ? {} : { expectedRevision }),
-              events
-            })
+            .append(
+              expectedRevision === undefined ? appendInput : { ...appendInput, expectedRevision }
+            )
             .pipe(Effect.result)
 
           if (command.expectation === 'stale') {
-            expect(result).toMatchObject({
-              _tag: 'Failure',
-              failure: { _tag: 'SessionConflictError', sessionId: 'session_1' }
-            })
+            expect(Result.isFailure(result)).toBe(true)
+
+            if (Result.isFailure(result)) {
+              expect(Predicate.isTagged(result.failure, 'SessionConflictError')).toBe(true)
+
+              if (Predicate.isTagged(result.failure, 'SessionConflictError')) {
+                expect(result.failure.sessionId).toBe('session_1')
+              }
+            }
           } else {
             expectedLog = appendRuntimeSessionEventsToLog(expectedLog, {
               sessionId: 'session_1',
               events
             })
-            expect(result).toMatchObject({ _tag: 'Success' })
+            expect(result._tag).toBe('Success')
           }
 
           const actual = yield* store.load('session_1')

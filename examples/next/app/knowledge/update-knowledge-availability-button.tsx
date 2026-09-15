@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { updateKnowledgeAvailabilityAction } from '@/lib/core/knowledge/update-knowledge-availability-action'
 import type { KnowledgeAvailability } from '@/lib/core/knowledge/availability'
+import { Predicate } from 'effect'
 
 const availabilities: ReadonlyArray<{
   readonly value: KnowledgeAvailability
@@ -46,15 +47,18 @@ export function UpdateKnowledgeAvailabilityButton({
         value={selectedAvailability}
         onChange={event => {
           const nextAvailability = availabilityFromValue(event.currentTarget.value)
+
           if (nextAvailability === undefined) {
             setMessage('Invalid availability')
+
             return
           }
+
           setSelectedAvailability(nextAvailability)
           startTransition(() => {
             void updateKnowledgeAvailabilityAction({ id, availability: nextAvailability }).then(
               result => {
-                if (result._tag === 'Error') {
+                if (Predicate.isTagged(result, 'Error')) {
                   setMessage(result.message)
                   setSelectedAvailability(availability)
                 } else {

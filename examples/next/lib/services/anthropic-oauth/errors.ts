@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
 
-export class AnthropicClaudeOAuthError extends Schema.TaggedErrorClass<AnthropicClaudeOAuthError>()(
+export class AnthropicClaudeOAuthError extends Schema.TaggedError<AnthropicClaudeOAuthError>()(
   'AnthropicClaudeOAuthError',
   {
     message: Schema.String,
@@ -9,14 +9,14 @@ export class AnthropicClaudeOAuthError extends Schema.TaggedErrorClass<Anthropic
   }
 ) {}
 
-export class AnthropicClaudeAuthNotFoundError extends Schema.TaggedErrorClass<AnthropicClaudeAuthNotFoundError>()(
+export class AnthropicClaudeAuthNotFoundError extends Schema.TaggedError<AnthropicClaudeAuthNotFoundError>()(
   'AnthropicClaudeAuthNotFoundError',
   {
     message: Schema.String
   }
 ) {}
 
-export class AnthropicClaudeAuthInvalidError extends Schema.TaggedErrorClass<AnthropicClaudeAuthInvalidError>()(
+export class AnthropicClaudeAuthInvalidError extends Schema.TaggedError<AnthropicClaudeAuthInvalidError>()(
   'AnthropicClaudeAuthInvalidError',
   {
     message: Schema.String,

@@ -29,7 +29,7 @@
 - Remote MCP requires `https:` by default; `http://localhost` is dev-policy gated.
 - Local stdio client core uses Effect platform process/stream APIs, not raw `node:child_process`; Node wrappers only provide `NodeServices.layer`.
 - Local stdio receives explicit env only, uses `extendEnv: false`, ignores stderr, validates `initialize`, and matches responses by JSON-RPC id.
-- Decode wire JSON in two steps: JSON string → unknown (`Schema.UnknownFromJsonString`) → protocol schema.
+- Decode wire JSON in two steps: JSON string → unknown (`Schema.fromJsonString(Schema.Unknown)`) → protocol schema.
 - Server `handleHttpRequest` maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
 - Server stdio runner uses Effect `Stdio`; hosts provide the platform layer.
 - Preserve discovered MCP `title`, input/output schemas, and annotations when adapting tools.

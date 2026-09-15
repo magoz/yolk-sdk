@@ -25,6 +25,7 @@ const getFixedPort = (envName: string, defaultValue: string) => {
 }
 
 const port = getFixedPort('E2E_PORT', '41773')
+
 const baseURL = `http://localhost:${port}`
 
 export default defineConfig({

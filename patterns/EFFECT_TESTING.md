@@ -89,7 +89,7 @@ it.effect('manages resources correctly', () =>
 
 ### Always Fork Effects That Sleep
 
-The TestClock only affects forked effects. If you call `Effect.sleep` directly without forking, it will block forever because the clock never advances.
+TestClock affects all effects using its service. Fork sleepers when the test body must advance the clock; otherwise that same body blocks before reaching `TestClock.adjust`.
 
 ```typescript
 // WRONG - blocks forever
@@ -104,7 +104,7 @@ it.effect('broken test', () =>
 it.effect('timeout test', () =>
   Effect.gen(function* () {
     const fiber = yield* Effect.forkChild(
-      Effect.sleep(Duration.seconds(30)).pipe(Effect.timeout(Duration.seconds(10)))
+      Effect.sleep(Duration.seconds(30)).pipe(Effect.timeoutOption(Duration.seconds(10)))
     )
 
     // Advance past timeout
@@ -158,7 +158,7 @@ it.effect('runs scheduled task', () =>
     const results: number[] = []
 
     const scheduled = Effect.sync(() => results.push(Date.now())).pipe(
-      Effect.repeat(Schedule.fixed(Duration.seconds(1)).pipe(Schedule.both(Schedule.recurs(3))))
+      Effect.repeat(Schedule.max([Schedule.fixed(Duration.seconds(1)), Schedule.recurs(3)]))
     )
 
     const fiber = yield* Effect.forkChild(scheduled)
@@ -234,53 +234,58 @@ layer(MyService.layer, { timeout: '30 seconds' })('live tests', it => {
 
 ## Property-Based Testing
 
-FastCheck is re-exported from `effect/FastCheck`. Use `Schema.toArbitrary()` to create arbitraries from Schema. @effect/vitest provides `it.prop` and `it.effect.prop` for property testing.
-
-> **v4 change:** `Arbitrary.make(schema)` → `Schema.toArbitrary(schema)`
+Effect rc.115 uses native arbitraries from `effect/unstable/arbitrary`. Use `Arbitrary.schema(schema)`; `@effect/vitest` accepts schemas or native arbitraries in `it.prop` and `it.effect.prop`. It requires Vitest 5. Assert inside callbacks rather than returning an unchecked boolean.
 
 ```typescript
 import { it, expect } from '@effect/vitest'
 import { Effect, Schema } from 'effect'
 
 // Synchronous property test - array syntax
-it.prop('addition is commutative', [Schema.Number, Schema.Number], ([a, b]) => a + b === b + a)
+it.prop('addition is commutative', [Schema.Int, Schema.Int], ([a, b]) => {
+  expect(a + b).toBe(b + a)
+})
 
 // Synchronous property test - object syntax
-it.prop(
-  'addition is commutative',
-  { a: Schema.Number, b: Schema.Number },
-  ({ a, b }) => a + b === b + a
-)
+it.prop('addition is commutative', { a: Schema.Int, b: Schema.Int }, ({ a, b }) => {
+  expect(a + b).toBe(b + a)
+})
 
 // Effectful property test
-it.effect.prop('async symmetry', [Schema.Number, Schema.Number], ([a, b]) =>
-  Effect.gen(function* () {
-    yield* Effect.void
-    return a + b === b + a
+it.effect.prop('async symmetry', [Schema.Int, Schema.Int], ([a, b]) =>
+  Effect.sync(() => {
+    expect(a + b).toBe(b + a)
   })
 )
 
-// With custom fastCheck options
-it.effect.prop('[custom runs]', [Schema.Number], ([n]) => Effect.succeed(n === n), {
-  fastCheck: { numRuns: 200 }
-})
+// Native arbitrary options
+it.effect.prop(
+  '[custom runs]',
+  [Schema.Int],
+  ([n]) =>
+    Effect.sync(() => {
+      expect(Number.isInteger(n)).toBe(true)
+    }),
+  {
+    arbitrary: { runs: 200 }
+  }
+)
 ```
 
 ### Creating Arbitraries from Schema
 
 ```typescript
 import { Schema } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
 
 // Define your domain schema
 export class User extends Schema.Class<User>('User')({
   id: Schema.String,
   name: Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty())),
-  age: Schema.Number.pipe(Schema.int(), Schema.between(0, 150)),
+  age: Schema.Int.check(Schema.isBetween(0, 150)),
   email: Schema.String.pipe(Schema.check(Schema.isPattern(/^[^@]+@[^@]+\.[^@]+$/)))
 }) {}
 
-// Create arbitrary from Schema (v4: Arbitrary.make → Schema.toArbitrary)
-const userArb = Schema.toArbitrary(User)
+const userArb = Arbitrary.schema(User)
 
 it.prop('user validation', [userArb], ([user]) => {
   // user is guaranteed to be a valid User
@@ -294,34 +299,20 @@ it.prop('user validation', [userArb], ([user]) => {
 
 ```typescript
 import { Schema } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
 
-// Money must always have positive amount and valid currency
+// Bounded integer minor units keep generated financial examples exact.
 export class Money extends Schema.Class<Money>('Money')({
-  amount: Schema.BigDecimal.pipe(Schema.positive()),
-  currency: Schema.Literal('USD', 'EUR', 'GBP')
-}) {
-  add(other: Money): Money {
-    if (this.currency !== other.currency) {
-      throw new Error('Currency mismatch')
-    }
-    return Money.make({
-      amount: BigDecimal.sum(this.amount, other.amount),
-      currency: this.currency
-    })
-  }
-}
+  amountMinor: Schema.Int.check(Schema.isBetween(0, 1_000_000)),
+  currency: Schema.Literals(['USD', 'EUR', 'GBP'])
+}) {}
 
-const moneyArb = Schema.toArbitrary(Money)
+const moneyArb = Arbitrary.schema(Money)
 
-it.prop('money addition is associative', [moneyArb, moneyArb, moneyArb], ([a, b, c]) => {
-  // Only test if currencies match
-  if (a.currency !== b.currency || b.currency !== c.currency) {
-    return true // Skip this case
-  }
-
-  const left = a.add(b).add(c)
-  const right = a.add(b.add(c))
-  return Equal.equals(left.amount, right.amount)
+it.prop('money preserves amount and currency through its wire codec', [moneyArb], ([money]) => {
+  const encoded = Schema.encodeSync(Money)(money)
+  const decoded = Schema.decodeUnknownSync(Money)(encoded)
+  expect(decoded).toEqual(money)
 })
 ```
 
@@ -329,7 +320,7 @@ it.prop('money addition is associative', [moneyArb, moneyArb, moneyArb], ([a, b,
 
 - Test laws/invariants, not random examples.
 - Keep arbitraries domain-shaped and small.
-- Prefer `Schema.toArbitrary()` for boundary/domain schemas.
+- Prefer `Arbitrary.schema()` for boundary/domain schemas.
 - Assert one or two invariants per property; split broad laws.
 - Use deterministic `now`, IDs, clocks, and layers.
 - Keep explicit example tests for named regressions and edge cases.
@@ -415,6 +406,8 @@ it.effect('sends welcome email on signup', () =>
 
 ## Database and IO Integration Tests
 
+The root Vitest config resolves `workflow` and `workflow/api` from the Next example for both app and SDK imports. pnpm peer contexts can create multiple physical copies; without one module identity, a mock can leave SDK calls using the real platform. Preserve this aliasing in isolated test configurations too.
+
 Use repo-owned test setup, not undocumented dependencies. Current DB pattern:
 
 - App tests load test env through the app-owned dotenv boundary.
@@ -464,6 +457,14 @@ it.effect('exits with expected error', () =>
   })
 )
 ```
+
+Vitest `toEqual` does **not** compare `Error` values by message alone. It checks prototype,
+`name`, `message`, `cause` (when the expected value supplies it), `AggregateError.errors`, then
+own enumerable fields. `toMatchObject` subset equality excludes `Error`s. Replacing a plain
+partial expectation with an `Error` constructor can change matcher semantics — require a
+positive match **and** wrong-tag / payload / missing / extra negatives; do not assume generic
+object equality. Non-Error domain constructors are a separate `toEqual` / `toMatchObject`
+contract.
 
 ### Testing Error Recovery
 

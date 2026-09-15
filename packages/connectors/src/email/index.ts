@@ -10,9 +10,10 @@ import {
   isBytes,
   validateTransfer
 } from '../transfer-internal.ts'
-import { Context, Effect } from 'effect'
+import { Context, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
+import { requiredStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
 import {
   CredentialSlot,
@@ -27,33 +28,45 @@ import { ActionResult } from '../result.ts'
 export const emailConnectorId = 'email'
 
 export const emailIncomingCredentialSlotId = 'email.incoming'
+
 export const emailSmtpCredentialSlotId = 'email.smtp'
 
 export const EmailIncomingCredentialSlot = CredentialSlot.make({
   id: emailIncomingCredentialSlotId,
   kind: 'username_password'
 })
+
 export const EmailSmtpCredentialSlot = CredentialSlot.make({
   id: emailSmtpCredentialSlotId,
   kind: 'username_password'
 })
 
 export const emailIncomingProtocolConfigKey = 'incomingProtocol'
+
 export const emailIncomingHostConfigKey = 'incomingHost'
+
 export const emailIncomingPortConfigKey = 'incomingPort'
+
 export const emailIncomingSecurityConfigKey = 'incomingSecurity'
+
 export const emailSmtpProtocolConfigKey = 'smtpProtocol'
+
 export const emailSmtpHostConfigKey = 'smtpHost'
+
 export const emailSmtpPortConfigKey = 'smtpPort'
+
 export const emailSmtpSecurityConfigKey = 'smtpSecurity'
 
 export const EmailIncomingProtocol = Schema.Literals(['imap', 'pop3'])
+
 export type EmailIncomingProtocol = typeof EmailIncomingProtocol.Type
 
 export const EmailSmtpProtocol = Schema.Literal('smtp')
+
 export type EmailSmtpProtocol = typeof EmailSmtpProtocol.Type
 
 export const EmailSecurity = Schema.Literals(['none', 'starttls', 'tls'])
+
 export type EmailSecurity = typeof EmailSecurity.Type
 
 export class EmailIncomingConnection extends Schema.Class<EmailIncomingConnection>(
@@ -103,6 +116,7 @@ export class EmailAttachmentMetadata extends Schema.Class<EmailAttachmentMetadat
 export const EmailAttachmentBase64 = Schema.String.check(
   Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
 )
+
 export type EmailAttachmentBase64 = typeof EmailAttachmentBase64.Type
 
 const EmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
@@ -150,6 +164,7 @@ const EmailPageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1
 export const EmailFolderName = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
   Schema.brand('EmailFolderName')
 )
+
 export type EmailFolderName = typeof EmailFolderName.Type
 
 export class EmailListMessagesInput extends Schema.Class<EmailListMessagesInput>(
@@ -266,6 +281,7 @@ export class EmailComposeMessage extends Schema.Class<EmailComposeMessage>('Emai
 export const EmailDraftId = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
   Schema.brand('EmailDraftId')
 )
+
 export type EmailDraftId = typeof EmailDraftId.Type
 
 export class EmailCreateDraftInput extends Schema.Class<EmailCreateDraftInput>(
@@ -386,28 +402,27 @@ export class EmailClient extends Context.Service<EmailClient, EmailClientApi>()(
   '@yolk-sdk/connectors/EmailClient'
 ) {}
 
-const configValue = (integration: ConnectorIntegration, key: string) =>
-  Object.getOwnPropertyDescriptor(integration.config, key)?.value
+const validationError = (integration: ConnectorIntegration, message: string) =>
+  new ConnectorError({
+    cause: 'validation_failed',
+    message,
+    connectorId: integration.connectorId
+  })
 
-const validationError = (
+const invalidHostOutput = (
   integration: ConnectorIntegration,
   message: string,
-  underlying?: unknown
+  error: Schema.SchemaError
 ) =>
   new ConnectorError({
     cause: 'validation_failed',
     message,
     connectorId: integration.connectorId,
-    underlying
+    underlying: error
   })
 
-const requiredHost = (integration: ConnectorIntegration, key: string) => {
-  const value = configValue(integration, key)
-  if (typeof value === 'string' && value.trim() !== '') {
-    return Effect.succeed(value.trim())
-  }
-  return Effect.fail(validationError(integration, `Missing integration config: ${key}`))
-}
+const requiredHost = (integration: ConnectorIntegration, key: string) =>
+  Effect.map(requiredStringConfig(integration, key), value => value.trim())
 
 const enumConfig = <Value extends string>(input: {
   readonly integration: ConnectorIntegration
@@ -415,17 +430,23 @@ const enumConfig = <Value extends string>(input: {
   readonly allowed: ReadonlyArray<Value>
   readonly fallback: Value
 }) => {
-  const value = configValue(input.integration, input.key)
+  const value: unknown = Object.getOwnPropertyDescriptor(input.integration.config, input.key)?.value
+
   if (value === undefined) return Effect.succeed(input.fallback)
-  const match =
-    typeof value === 'string' ? input.allowed.find(candidate => candidate === value) : undefined
+
+  const match = Predicate.isString(value)
+    ? input.allowed.find(candidate => candidate === value)
+    : undefined
+
   if (match !== undefined) return Effect.succeed(match)
+
   return Effect.fail(
-    validationError(
-      input.integration,
-      `Invalid integration config ${input.key}; expected ${input.allowed.join(' | ')}`,
-      value
-    )
+    new ConnectorError({
+      cause: 'validation_failed',
+      message: `Invalid integration config ${input.key}; expected ${input.allowed.join(' | ')}`,
+      connectorId: input.integration.connectorId,
+      underlying: value
+    })
   )
 }
 
@@ -434,24 +455,40 @@ const portConfig = (
   key: string,
   fallback: number
 ): Effect.Effect<number, ConnectorError> => {
-  const value = configValue(integration, key)
+  const value: unknown = Object.getOwnPropertyDescriptor(integration.config, key)?.value
+
   if (value === undefined) return Effect.succeed(fallback)
 
-  const parsed =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' && /^\d+$/.test(value)
-        ? Number(value)
-        : Number.NaN
+  const parsed = Predicate.isNumber(value)
+    ? value
+    : Predicate.isString(value) && /^\d+$/.test(value)
+      ? Number(value)
+      : Number.NaN
 
   if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535) {
     return Effect.succeed(parsed)
   }
 
   return Effect.fail(
-    validationError(integration, `Invalid integration config ${key}; expected port 1-65535`, value)
+    new ConnectorError({
+      cause: 'validation_failed',
+      message: `Invalid integration config ${key}; expected port 1-65535`,
+      connectorId: integration.connectorId,
+      underlying: value
+    })
   )
 }
+
+const incomingDefaultPort = {
+  imap: { tls: 993, starttls: 143, none: 143 },
+  pop3: { tls: 995, starttls: 110, none: 110 }
+} satisfies Record<EmailIncomingProtocol, Record<EmailSecurity, number>>
+
+const smtpDefaultPort = {
+  tls: 465,
+  starttls: 587,
+  none: 25
+} satisfies Record<EmailSecurity, number>
 
 const incomingConnection = (integration: ConnectorIntegration) =>
   Effect.gen(function* () {
@@ -461,16 +498,20 @@ const incomingConnection = (integration: ConnectorIntegration) =>
       allowed: ['imap', 'pop3'] as const,
       fallback: 'imap' as const
     })
+
     const host = yield* requiredHost(integration, emailIncomingHostConfigKey)
+
     const security = yield* enumConfig({
       integration,
       key: emailIncomingSecurityConfigKey,
       allowed: ['none', 'starttls', 'tls'] as const,
       fallback: 'tls' as const
     })
-    const defaultPort =
-      protocol === 'imap' ? (security === 'tls' ? 993 : 143) : security === 'tls' ? 995 : 110
+
+    const defaultPort = incomingDefaultPort[protocol][security]
+
     const port = yield* portConfig(integration, emailIncomingPortConfigKey, defaultPort)
+
     return EmailIncomingConnection.make({ protocol, host, port, security })
   })
 
@@ -482,15 +523,19 @@ const smtpConnection = (integration: ConnectorIntegration) =>
       allowed: ['smtp'] as const,
       fallback: 'smtp' as const
     })
+
     const host = yield* requiredHost(integration, emailSmtpHostConfigKey)
+
     const security = yield* enumConfig({
       integration,
       key: emailSmtpSecurityConfigKey,
       allowed: ['none', 'starttls', 'tls'] as const,
       fallback: 'starttls' as const
     })
-    const defaultPort = security === 'tls' ? 465 : security === 'starttls' ? 587 : 25
+
+    const defaultPort = smtpDefaultPort[security]
     const port = yield* portConfig(integration, emailSmtpPortConfigKey, defaultPort)
+
     return EmailSmtpConnection.make({ protocol, host, port, security })
   })
 
@@ -498,17 +543,21 @@ const usableCredential = (
   integration: ConnectorIntegration,
   credential: RuntimeCredential,
   slot: CredentialSlot
-): Effect.Effect<UsernamePasswordCredential, ConnectorError> => {
-  if (credential._tag === 'UsernamePasswordCredential') return Effect.succeed(credential)
-  return Effect.fail(
-    new ConnectorError({
-      cause: 'credential_invalid',
-      message: `Credential slot ${slot.id} requires username/password`,
-      connectorId: integration.connectorId,
-      slotId: slot.id
-    })
+): Effect.Effect<UsernamePasswordCredential, ConnectorError> =>
+  Match.value(credential).pipe(
+    Match.tag('UsernamePasswordCredential', current => Effect.succeed(current)),
+    Match.tag('ApiKeyCredential', 'BearerTokenCredential', 'OAuthCredential', () =>
+      Effect.fail(
+        new ConnectorError({
+          cause: 'credential_invalid',
+          message: `Credential slot ${slot.id} requires username/password`,
+          connectorId: integration.connectorId,
+          slotId: slot.id
+        })
+      )
+    ),
+    Match.exhaustive
   )
-}
 
 const requireRecipient = (integration: ConnectorIntegration, message: EmailComposeMessage) =>
   message.to.length > 0 || (message.cc?.length ?? 0) > 0 || (message.bcc?.length ?? 0) > 0
@@ -558,6 +607,7 @@ export const emailListMessagesAction = defineAction({
       const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
       const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
       const client = yield* EmailClient
+
       return yield* client.listMessages(
         EmailListMessagesRequest.make({
           connection,
@@ -583,6 +633,7 @@ export const emailGetMessageAction = defineAction({
       const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
       const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
       const client = yield* EmailClient
+
       return yield* client.getMessage(
         EmailGetMessageRequest.make({
           connection,
@@ -608,11 +659,13 @@ export const emailGetAttachmentAction = defineAction({
       const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
       const client = yield* EmailClient
       const getAttachment = client.getAttachment
+
       if (getAttachment === undefined) {
         return yield* Effect.fail(
           validationError(integration, 'EmailClient does not support attachment retrieval')
         )
       }
+
       const result = yield* getAttachment(
         EmailGetAttachmentRequest.make({
           connection,
@@ -622,14 +675,17 @@ export const emailGetAttachmentAction = defineAction({
           folder: input.folder
         })
       )
-      if (result._tag === 'Failure') {
+
+      if (Predicate.isTagged(result, 'Failure')) {
         return result
       }
+
       const output = yield* Schema.decodeUnknownEffect(EmailGetAttachmentOutput)(result.value).pipe(
         Effect.mapError(error =>
-          validationError(integration, 'EmailClient returned invalid attachment output', error)
+          invalidHostOutput(integration, 'EmailClient returned invalid attachment output', error)
         )
       )
+
       return ActionResult.success(output)
     })
 })
@@ -647,6 +703,7 @@ export const emailCreateDraftAction = defineAction({
       const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
       const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
       const client = yield* EmailClient
+
       return yield* client.createDraft(
         EmailCreateDraftRequest.make({
           connection,
@@ -671,6 +728,7 @@ export const emailSendMessageAction = defineAction({
       const resolved = yield* resolveCredential(integration, EmailSmtpCredentialSlot)
       const credential = yield* usableCredential(integration, resolved, EmailSmtpCredentialSlot)
       const client = yield* EmailClient
+
       return yield* client.sendMessage(
         EmailSendMessageRequest.make({ connection, credential, message: input.message })
       )
@@ -684,6 +742,7 @@ const emailMutationContext = (integration: ConnectorIntegration, operation: stri
     const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
     const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
     const client = yield* EmailClient
+
     return { connection, credential, client }
   })
 
@@ -700,11 +759,13 @@ export const emailSetReadAction = defineAction({
         integration,
         'Changing read state'
       )
+
       if (client.setRead === undefined) {
         return yield* Effect.fail(
           validationError(integration, 'EmailClient does not support setRead')
         )
       }
+
       const result = yield* client.setRead(
         EmailSetReadRequest.make({
           connection,
@@ -714,12 +775,15 @@ export const emailSetReadAction = defineAction({
           isRead: input.isRead
         })
       )
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       const output = yield* Schema.decodeUnknownEffect(EmailSetReadOutput)(result.value).pipe(
         Effect.mapError(error =>
-          validationError(integration, 'EmailClient returned invalid setRead output', error)
+          invalidHostOutput(integration, 'EmailClient returned invalid setRead output', error)
         )
       )
+
       return ActionResult.success(output)
     })
 })
@@ -734,11 +798,13 @@ export const emailTrashAction = defineAction({
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const { connection, credential, client } = yield* emailMutationContext(integration, 'Trash')
+
       if (client.trash === undefined) {
         return yield* Effect.fail(
           validationError(integration, 'EmailClient does not support trash')
         )
       }
+
       const result = yield* client.trash(
         EmailTrashRequest.make({
           connection,
@@ -748,12 +814,15 @@ export const emailTrashAction = defineAction({
           trashFolder: input.trashFolder
         })
       )
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       const output = yield* Schema.decodeUnknownEffect(EmailMoveMessageOutput)(result.value).pipe(
         Effect.mapError(error =>
-          validationError(integration, 'EmailClient returned invalid trash output', error)
+          invalidHostOutput(integration, 'EmailClient returned invalid trash output', error)
         )
       )
+
       return ActionResult.success(output)
     })
 })
@@ -768,11 +837,13 @@ export const emailUntrashAction = defineAction({
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const { connection, credential, client } = yield* emailMutationContext(integration, 'Untrash')
+
       if (client.untrash === undefined) {
         return yield* Effect.fail(
           validationError(integration, 'EmailClient does not support untrash')
         )
       }
+
       const result = yield* client.untrash(
         EmailUntrashRequest.make({
           connection,
@@ -782,12 +853,15 @@ export const emailUntrashAction = defineAction({
           destinationFolder: input.destinationFolder ?? EmailFolderName.make('INBOX')
         })
       )
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       const output = yield* Schema.decodeUnknownEffect(EmailMoveMessageOutput)(result.value).pipe(
         Effect.mapError(error =>
-          validationError(integration, 'EmailClient returned invalid untrash output', error)
+          invalidHostOutput(integration, 'EmailClient returned invalid untrash output', error)
         )
       )
+
       return ActionResult.success(output)
     })
 })
@@ -817,6 +891,7 @@ export const downloadEmailAttachment = (
 ) =>
   Effect.gen(function* () {
     const limits = yield* validateTransfer(integration, emailConnectorId, budget)
+
     const target = yield* decodeInput(
       Schema.Struct({
         messageId: SafeText,
@@ -825,26 +900,34 @@ export const downloadEmailAttachment = (
       }),
       input
     )
+
     const connection = yield* incomingConnection(integration).pipe(
       Effect.catch(() => failTransfer('invalid_input'))
     )
+
     yield* rejectPop3Folder(integration, connection, target.folder).pipe(
       Effect.catch(() => failTransfer('invalid_input'))
     )
+
     const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot).pipe(
       Effect.mapError(credentialFailure)
     )
+
     const credential = yield* usableCredential(
       integration,
       resolved,
       EmailIncomingCredentialSlot
     ).pipe(Effect.mapError(credentialFailure))
+
     const client = yield* EmailClient
+
     if (client.getAttachmentBytes === undefined) return yield* failTransfer('not_downloadable')
     const request = EmailGetAttachmentRequest.make({ connection, credential, ...target })
+
     const result = yield* client
       .getAttachmentBytes({ ...request, maxBytes: limits.maxBytes })
       .pipe(Effect.mapError(e => new ConnectorFileTransferError({ code: e.code })))
+
     const metadata = yield* Schema.decodeUnknownEffect(
       Schema.Struct({
         messageId: SafeText,
@@ -854,13 +937,16 @@ export const downloadEmailAttachment = (
         contentType: Schema.optional(SafeText)
       })
     )(result).pipe(Effect.catch(() => failTransfer('invalid_metadata')))
+
     if (!isBytes(result.bytes) || result.bytes.byteLength > limits.maxBytes)
       return yield* failTransfer('response_too_large')
+
     if (
       metadata.byteLength !== result.bytes.byteLength ||
       metadata.messageId !== target.messageId ||
       metadata.attachmentId !== target.attachmentId
     )
       return yield* failTransfer('invalid_metadata')
+
     return { ...metadata, ...fileBytes(result.bytes) }
   })

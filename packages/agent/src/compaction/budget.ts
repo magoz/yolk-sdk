@@ -20,10 +20,12 @@ export const makeContextBudget = (input: ContextBudgetInput): ContextBudget => {
     0,
     input.contextWindowTokens - input.reservedOutputTokens
   )
+
   const maxInputTokens =
     input.maxInputTokens === undefined || !Number.isFinite(input.maxInputTokens)
       ? contextUsableInputTokens
       : Math.max(0, input.maxInputTokens)
+
   const usableInputTokens = Math.min(contextUsableInputTokens, maxInputTokens)
 
   return {

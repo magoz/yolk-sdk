@@ -94,10 +94,12 @@ describe('knowledge tool', () => {
       readonly availability?: 'archived' | 'pinned' | 'searchable'
       readonly limit: number
     }> = []
+
     const toolModule = makeKnowledgeToolModule({
       list: input =>
         Effect.sync(() => {
           calls.push(input)
+
           return [documentSummary]
         }),
       search: () => Effect.succeed([])
@@ -108,6 +110,7 @@ describe('knowledge tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -133,18 +136,22 @@ describe('knowledge tool', () => {
       readonly minScore?: number
       readonly contextChunks: number
     }> = []
-    const toolModule = makeKnowledgeToolModule(input =>
-      Effect.sync(() => {
-        calls.push(input)
-        return [searchResult]
-      })
-    )
+
+    const toolModule = makeKnowledgeToolModule({
+      search: input =>
+        Effect.sync(() => {
+          calls.push(input)
+
+          return [searchResult]
+        })
+    })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -164,13 +171,14 @@ describe('knowledge tool', () => {
   })
 
   it.effect('returns model-visible errors for blank queries', () => {
-    const toolModule = makeKnowledgeToolModule(() => Effect.succeed([]))
+    const toolModule = makeKnowledgeToolModule({ search: () => Effect.succeed([]) })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({ id: 'call_1', name: 'search_knowledge', params: { queries: ['   '] } })
       )
@@ -185,18 +193,22 @@ describe('knowledge tool', () => {
 
   it.effect('runs multiple knowledge queries', () => {
     const calls: Array<string> = []
-    const toolModule = makeKnowledgeToolModule(input =>
-      Effect.sync(() => {
-        calls.push(input.query)
-        return []
-      })
-    )
+
+    const toolModule = makeKnowledgeToolModule({
+      search: input =>
+        Effect.sync(() => {
+          calls.push(input.query)
+
+          return []
+        })
+    })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
         modules: [toolModule],
         context: { surface: 'voice', route: '/agent', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -220,11 +232,13 @@ describe('knowledge tool', () => {
       readonly after: number
       readonly maxChars: number
     }> = []
+
     const toolModule = makeKnowledgeToolModule({
       search: () => Effect.succeed([]),
       getContext: input =>
         Effect.sync(() => {
           calls.push(input)
+
           return contextWindow
         })
     })
@@ -234,6 +248,7 @@ describe('knowledge tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -272,11 +287,13 @@ describe('knowledge tool', () => {
       readonly after: number
       readonly maxChars: number
     }> = []
+
     const toolModule = makeKnowledgeToolModule({
       search: () => Effect.succeed([]),
       getContext: input =>
         Effect.sync(() => {
           calls.push(input)
+
           return contextWindow
         })
     })
@@ -286,6 +303,7 @@ describe('knowledge tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -333,6 +351,7 @@ describe('knowledge tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',

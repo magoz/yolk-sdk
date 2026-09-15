@@ -2,6 +2,7 @@ import { Context, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ConnectorError } from './error.ts'
 import type { ConnectorIntegration } from './integration.ts'
+import { PortableMetadata } from './portable-metadata.ts'
 
 export const CredentialKind = Schema.Literals([
   'api_key',
@@ -9,6 +10,7 @@ export const CredentialKind = Schema.Literals([
   'oauth',
   'username_password'
 ])
+
 export type CredentialKind = typeof CredentialKind.Type
 
 export class CredentialSlot extends Schema.Class<CredentialSlot>('CredentialSlot')({
@@ -20,24 +22,22 @@ export class CredentialSlot extends Schema.Class<CredentialSlot>('CredentialSlot
 export class CredentialBinding extends Schema.Class<CredentialBinding>('CredentialBinding')({
   slotId: Schema.String,
   credentialRef: Schema.String,
-  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+  metadata: Schema.optionalKey(PortableMetadata)
 }) {}
 
-export class ApiKeyCredential extends Schema.Class<ApiKeyCredential>('ApiKeyCredential')({
-  _tag: Schema.Literal('ApiKeyCredential'),
+export class ApiKeyCredential extends Schema.TaggedClass<ApiKeyCredential>()('ApiKeyCredential', {
   key: Schema.String
 }) {}
 
-export class BearerTokenCredential extends Schema.Class<BearerTokenCredential>(
-  'BearerTokenCredential'
-)({
-  _tag: Schema.Literal('BearerTokenCredential'),
-  token: Schema.String,
-  expiresAt: Schema.optional(Schema.Number)
-}) {}
+export class BearerTokenCredential extends Schema.TaggedClass<BearerTokenCredential>()(
+  'BearerTokenCredential',
+  {
+    token: Schema.String,
+    expiresAt: Schema.optional(Schema.Number)
+  }
+) {}
 
-export class OAuthCredential extends Schema.Class<OAuthCredential>('OAuthCredential')({
-  _tag: Schema.Literal('OAuthCredential'),
+export class OAuthCredential extends Schema.TaggedClass<OAuthCredential>()('OAuthCredential', {
   provider: Schema.String,
   accessToken: Schema.String,
   expiresAt: Schema.Number,
@@ -48,13 +48,13 @@ export class OAuthCredential extends Schema.Class<OAuthCredential>('OAuthCredent
   scopes: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
-export class UsernamePasswordCredential extends Schema.Class<UsernamePasswordCredential>(
-  'UsernamePasswordCredential'
-)({
-  _tag: Schema.Literal('UsernamePasswordCredential'),
-  username: Schema.String,
-  password: Schema.String
-}) {}
+export class UsernamePasswordCredential extends Schema.TaggedClass<UsernamePasswordCredential>()(
+  'UsernamePasswordCredential',
+  {
+    username: Schema.String,
+    password: Schema.String
+  }
+) {}
 
 export const RuntimeCredential = Schema.Union([
   ApiKeyCredential,
@@ -62,6 +62,7 @@ export const RuntimeCredential = Schema.Union([
   OAuthCredential,
   UsernamePasswordCredential
 ])
+
 export type RuntimeCredential = typeof RuntimeCredential.Type
 
 export type CredentialResolveRequest = {
@@ -84,8 +85,14 @@ export class CredentialResolver extends Context.Service<
 export const makeCredentialBinding = (input: {
   readonly slotId: string
   readonly credentialRef: string
-  readonly metadata?: Readonly<Record<string, unknown>>
-}) => CredentialBinding.make(input)
+  readonly metadata?: PortableMetadata
+}) => {
+  const fields = { slotId: input.slotId, credentialRef: input.credentialRef }
+
+  if (input.metadata === undefined) return CredentialBinding.make(fields)
+
+  return CredentialBinding.make({ ...fields, metadata: input.metadata })
+}
 
 export const findCredentialBinding = (integration: ConnectorIntegration, slot: CredentialSlot) =>
   Option.fromNullishOr(integration.credentialBindings.find(binding => binding.slotId === slot.id))
@@ -106,5 +113,6 @@ export const resolveCredential = (integration: ConnectorIntegration, slot: Crede
     }
 
     const resolver = yield* CredentialResolver
+
     return yield* resolver.resolve({ integration, slot, binding: binding.value })
   })

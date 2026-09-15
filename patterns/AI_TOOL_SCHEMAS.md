@@ -2,6 +2,16 @@
 
 Provider-facing JSON Schema conventions for agent/tool definitions.
 
+## Representation admission
+
+`ToolDef.parameters` uses protocol `ToolJsonSchema`: boolean or plain JSON object, with finite
+JSON values, dense ordinary arrays, and enumerable own data keys. Decode/construction preserve
+identity; accessors are rejected unread, as are exotic prototypes, hidden/symbol keys and cycles.
+Null-prototype objects and DAG aliases are legal. This is not meta-schema validation and does not
+change opaque tool arguments/results or HITL contracts. Provider requirements below are stricter
+than this shared representation. MCP tools/list accepts the object arm only and maps decode failure
+to typed validation errors. Background envelopes preserve boolean schemas as their arguments schema.
+
 ## OpenAI-compatible function parameters
 
 - Tool parameter JSON Schema sent to OpenAI-compatible providers must have root `{ "type": "object" }`.

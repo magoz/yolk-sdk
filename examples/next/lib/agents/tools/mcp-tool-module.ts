@@ -28,9 +28,6 @@ const toToolError = (tool: string, message: string) =>
     cause: 'execution'
   })
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
 const emptyMcpResolvedTools: ReadonlyArray<McpResolvedTool> = []
 
 type McpHttpClientLayer = Layer.Layer<HttpClient.HttpClient>
@@ -52,6 +49,7 @@ const makeRegistration = (
   execute: ({ call }) =>
     Effect.gen(function* () {
       const configOption = findServerConfig(configs, resolved.serverName)
+
       if (Option.isNone(configOption)) {
         return yield* Effect.fail(
           toToolError(call.name, `MCP server is not configured: ${resolved.serverName}`)
@@ -77,17 +75,19 @@ export const makeMcpToolModule = (
 ): Effect.Effect<ToolModule<AgentToolContext>, never, never> =>
   Effect.gen(function* () {
     const configs = allConfigs
+
     const resolvedByServer = yield* Effect.forEach(configs, config =>
       listRemoteMcpServerTools(config, { securityPolicy: mcpSecurityPolicy }).pipe(
         Effect.provide(httpClientLayer),
         Effect.catch(error =>
           Effect.logWarning('MCP server unavailable', {
             server: config.name,
-            error: unknownToMessage(error)
+            error: error.message
           }).pipe(Effect.as(emptyMcpResolvedTools))
         )
       )
     )
+
     const tools = Arr.flatten(resolvedByServer).map(tool =>
       makeRegistration(configs, tool, httpClientLayer)
     )

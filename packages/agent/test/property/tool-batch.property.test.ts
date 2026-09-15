@@ -1,4 +1,5 @@
-import { Effect, Layer, Schema, Stream } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
 import { type AgentEvent, ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
@@ -17,7 +18,7 @@ const toolBatchCase = Schema.Struct({
   calls: Schema.Array(toolCallSpec)
 })
 
-const toolBatchCaseArbitrary = Schema.toArbitrary(toolBatchCase)
+const toolBatchCaseArbitrary = Arbitrary.schema(toolBatchCase)
 
 const toolCallFromSpec = (spec: typeof toolCallSpec.Type) =>
   ToolCall.make({ id: spec.id, name: spec.name, params: {} })
@@ -53,24 +54,30 @@ describe('tool batch property tests', () => {
     ([input]) =>
       Effect.gen(function* () {
         const calls = input.calls.filter(call => successNames.has(call.name)).map(toolCallFromSpec)
+
         const events = yield* runToolBatch({ calls }).pipe(
           Stream.runCollect,
           Effect.provide(executorLayer),
           Effect.provide(LoopConfig.defaultLayer)
         )
+
         const eventArray = Array.from(events)
+
         const startedIds = eventArray.flatMap(event =>
-          event._tag === 'ToolExecutionStarted' ? [event.call.id] : []
+          Predicate.isTagged(event, 'ToolExecutionStarted') ? [event.call.id] : []
         )
+
         const completed = eventArray.flatMap(event =>
-          event._tag === 'ToolExecutionCompleted' ? [event] : []
+          Predicate.isTagged(event, 'ToolExecutionCompleted') ? [event] : []
         )
 
         expect(startedIds).toEqual(calls.map(call => call.id))
         expect(completed.map(event => event.call.id)).toEqual(calls.map(call => call.id))
         expect(completed.map(event => event.result.toolCallId)).toEqual(calls.map(call => call.id))
         expect(completed.map(event => event.result.content)).toEqual(calls.map(call => call.name))
-        expect(eventArray.some(event => event._tag === 'ToolExecutionError')).toBe(false)
+        expect(eventArray.some(event => Predicate.isTagged(event, 'ToolExecutionError'))).toBe(
+          false
+        )
       }),
     propertyOptions
   )
@@ -88,6 +95,7 @@ describe('tool batch property tests', () => {
 
         const call = toolCallFromSpec(missing)
         const events: Array<AgentEvent> = []
+
         const result = yield* runToolBatch({ calls: [call] }).pipe(
           Stream.runForEach(event =>
             Effect.sync(() => {
@@ -99,7 +107,7 @@ describe('tool batch property tests', () => {
           Effect.result
         )
 
-        expect(result).toMatchObject({ _tag: 'Success' })
+        expect(result._tag).toBe('Success')
         expect(events.map(event => event._tag)).toEqual([
           'ToolExecutionStarted',
           'ToolExecutionError',

@@ -3,12 +3,14 @@ import { Effect } from 'effect'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
+import { encodePersistedMetadata } from './encode-persisted-metadata'
 
 const DEFAULT_STORAGE_COLLECTION_LABEL = 'storage'
 
 export const ensureUserKnowledgeCollection = (input: { readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [existing] = yield* db
       .select()
       .from(schema.knowledgeCollection)
@@ -23,12 +25,17 @@ export const ensureUserKnowledgeCollection = (input: { readonly userId: string }
       return existing
     }
 
+    const metadata = yield* encodePersistedMetadata({
+      value: { purpose: 'storage', userId: input.userId },
+      entity: 'knowledgeCollection'
+    })
+
     const [created] = yield* db
       .insert(schema.knowledgeCollection)
       .values({
         userId: input.userId,
         label: DEFAULT_STORAGE_COLLECTION_LABEL,
-        metadata: { purpose: 'storage', userId: input.userId }
+        metadata
       })
       .onConflictDoUpdate({
         target: [schema.knowledgeCollection.userId, schema.knowledgeCollection.label],

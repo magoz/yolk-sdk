@@ -21,8 +21,6 @@ describe('addWorkflowToolResultUsage', () => {
       })
     )
 
-    expect(usage).toEqual(
-      AgentUsage.make({ input: { total: 140 }, output: { total: 28 } })
-    )
+    expect(usage).toEqual(AgentUsage.make({ input: { total: 140 }, output: { total: 28 } }))
   })
 })

@@ -50,14 +50,39 @@ describe('makeWebRtcVoiceTransport', () => {
     })
   )
 
+  it.effect('ignores malformed data-channel payloads that are not strings', () =>
+    Effect.gen(function* () {
+      const world = makeFakeWorld()
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const transport = yield* makeWebRtcVoiceTransport(makeTransportOptions(world))
+
+          world.fireChannelMessageEvent({ data: { forged: true } })
+          world.fireChannelMessageEvent({ data: 1 })
+          world.fireChannelMessage('hello-from-provider')
+
+          const events = yield* transport.events.pipe(Stream.take(2), Stream.runCollect)
+
+          expect([...events].map(event => event._tag)).toEqual([
+            'SessionOpening',
+            'UserTranscriptFinal'
+          ])
+        })
+      )
+    })
+  )
+
   it.effect('releases microphone, peer connection, channel, and listeners on scope close', () =>
     Effect.gen(function* () {
       const world = makeFakeWorld()
       const scope = yield* Scope.make()
+
       const transport = yield* Scope.provide(
         makeWebRtcVoiceTransport(makeTransportOptions(world)),
         scope
       )
+
       const collected = yield* Effect.forkChild(Stream.runCollect(transport.events))
 
       yield* Scope.close(scope, Exit.void)
@@ -90,6 +115,7 @@ describe('makeWebRtcVoiceTransport', () => {
   it.effect('cleans up when negotiation fails', () =>
     Effect.gen(function* () {
       const world = makeFakeWorld()
+
       const error = yield* Effect.scoped(
         makeWebRtcVoiceTransport({
           ...makeTransportOptions(world),

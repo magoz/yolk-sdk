@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 import { PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
+import { encodePersistedMetadata } from './encode-persisted-metadata'
 import { indexKnowledgeDocument } from './index-knowledge-document'
 import { knowledgeSlugFromTitle } from './slug'
 
@@ -30,6 +31,12 @@ export const createTextKnowledgeDocument = (input: {
 
     const db = yield* Db
     const documentId = createId()
+
+    const metadata = yield* encodePersistedMetadata({
+      value: { source: 'manual_text' },
+      entity: 'userKnowledgeDocument'
+    })
+
     const [document] = yield* db
       .insert(schema.userKnowledgeDocument)
       .values({
@@ -43,7 +50,7 @@ export const createTextKnowledgeDocument = (input: {
         status: 'processing',
         availability: input.pinned ? 'pinned' : 'searchable',
         summary: content.length <= 500 ? content : `${content.slice(0, 500)}…`,
-        metadata: { source: 'manual_text' }
+        metadata
       })
       .returning()
 
@@ -60,6 +67,6 @@ export const createTextKnowledgeDocument = (input: {
       userId: input.userId,
       documentId: document.id,
       content,
-      metadata: { source: 'manual_text' }
+      metadata
     })
   }).pipe(Effect.withSpan('knowledge.createTextKnowledgeDocument'))

@@ -1,9 +1,11 @@
 import { Config, Effect, Layer, type Redacted } from 'effect'
+import type * as Schema from 'effect/Schema'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { LLMError } from '@yolk-sdk/agent/loop'
-import { makeOpenAiProviderLayer } from '../openai/provider.ts'
+import { makeOpenAiProviderLayer, type OpenAiRequestExtras } from '../openai/provider.ts'
 
 export const vercelAiGatewayProviderId = 'vercel_ai_gateway'
+
 export const vercelAiGatewayChatCompletionsUrl = 'https://ai-gateway.vercel.sh/v1/chat/completions'
 
 export type VercelAiGatewayProviderSort = 'cost' | 'ttft' | 'tps'
@@ -30,28 +32,72 @@ const vercelAiGatewayProviderIdentity = {
   name: 'Vercel AI Gateway'
 }
 
-const gatewayExtraBody = (config: VercelAiGatewayProviderConfig) => ({
-  ...(config.fallbackModels === undefined ? {} : { models: config.fallbackModels }),
-  ...(config.routing === undefined ? {} : { providerOptions: { gateway: config.routing } })
-})
+const gatewayExtraBody = (config: VercelAiGatewayProviderConfig): OpenAiRequestExtras => {
+  const extras: { [key: string]: Schema.Json } = {}
+
+  if (config.fallbackModels !== undefined) {
+    extras.models = [...config.fallbackModels]
+  }
+
+  if (config.routing !== undefined) {
+    const gateway: { [key: string]: Schema.Json } = {}
+
+    if (config.routing.order !== undefined) {
+      gateway.order = [...config.routing.order]
+    }
+
+    if (config.routing.only !== undefined) {
+      gateway.only = [...config.routing.only]
+    }
+
+    if (config.routing.sort !== undefined) {
+      gateway.sort = config.routing.sort
+    }
+
+    extras.providerOptions = { gateway }
+  }
+
+  return extras
+}
+
+type VercelAiGatewayOpenAiLayerFields = {
+  apiKey: VercelAiGatewayProviderConfig['apiKey']
+  maxCompletionTokens: number
+  completionTokenField: 'max_tokens'
+  reasoningEffortFormat: 'reasoning-object'
+  chatCompletionsUrl: string
+  providerIdentity: typeof vercelAiGatewayProviderIdentity
+  extraBody: OpenAiRequestExtras
+  extraHeaders?: VercelAiGatewayProviderConfig['extraHeaders']
+}
 
 export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProviderConfig) =>
-  makeOpenAiProviderLayer({
-    apiKey: config.apiKey,
-    maxCompletionTokens: config.maxCompletionTokens,
-    completionTokenField: 'max_tokens',
-    reasoningEffortFormat: 'reasoning-object',
-    chatCompletionsUrl: config.chatCompletionsUrl ?? vercelAiGatewayChatCompletionsUrl,
-    providerIdentity: vercelAiGatewayProviderIdentity,
-    extraBody: gatewayExtraBody(config),
-    ...(config.extraHeaders === undefined ? {} : { extraHeaders: config.extraHeaders })
-  })
+  makeOpenAiProviderLayer(
+    (() => {
+      const fields: VercelAiGatewayOpenAiLayerFields = {
+        apiKey: config.apiKey,
+        maxCompletionTokens: config.maxCompletionTokens,
+        completionTokenField: 'max_tokens',
+        reasoningEffortFormat: 'reasoning-object',
+        chatCompletionsUrl: config.chatCompletionsUrl ?? vercelAiGatewayChatCompletionsUrl,
+        providerIdentity: vercelAiGatewayProviderIdentity,
+        extraBody: gatewayExtraBody(config)
+      }
+
+      if (config.extraHeaders !== undefined) {
+        fields.extraHeaders = config.extraHeaders
+      }
+
+      return fields
+    })()
+  )
 
 const vercelAiGatewayEnvironmentConfig = Effect.gen(function* () {
-  const apiKey = yield* Config.redacted('AI_GATEWAY_API_KEY').pipe(
-    Config.orElse(() => Config.redacted('VERCEL_OIDC_TOKEN'))
+  const apiKey = yield* Config.Redacted('AI_GATEWAY_API_KEY').pipe(
+    Config.orElse(() => Config.Redacted('VERCEL_OIDC_TOKEN'))
   )
-  const maxCompletionTokens = yield* Config.int('AI_GATEWAY_MAX_COMPLETION_TOKENS')
+
+  const maxCompletionTokens = yield* Config.Int('AI_GATEWAY_MAX_COMPLETION_TOKENS')
 
   return { apiKey, maxCompletionTokens }
 }).pipe(

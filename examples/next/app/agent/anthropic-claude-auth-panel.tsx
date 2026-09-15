@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { deleteAnthropicClaudeTokenAction } from '@/lib/core/agent/delete-anthropic-claude-token-action'
 import { exchangeAnthropicClaudeOAuthCodeAction } from '@/lib/core/agent/exchange-anthropic-claude-oauth-code-action'
 import { startAnthropicClaudeOAuthAction } from '@/lib/core/agent/start-anthropic-claude-oauth-action'
+import { Predicate } from 'effect'
 
 type AnthropicClaudeAuthPanelProps = {
   readonly initialConnected: boolean
@@ -23,8 +24,9 @@ export function AnthropicClaudeAuthPanel({ initialConnected }: AnthropicClaudeAu
     startTransition(async () => {
       const result = await startAnthropicClaudeOAuthAction()
 
-      if (result._tag === 'Error') {
+      if (Predicate.isTagged(result, 'Error')) {
         toast.error(result.message)
+
         return
       }
 
@@ -40,8 +42,9 @@ export function AnthropicClaudeAuthPanel({ initialConnected }: AnthropicClaudeAu
     startTransition(async () => {
       const result = await exchangeAnthropicClaudeOAuthCodeAction({ authorizationCode })
 
-      if (result._tag === 'Error') {
+      if (Predicate.isTagged(result, 'Error')) {
         toast.error(result.message)
+
         return
       }
 
@@ -61,8 +64,9 @@ export function AnthropicClaudeAuthPanel({ initialConnected }: AnthropicClaudeAu
     startTransition(async () => {
       const result = await deleteAnthropicClaudeTokenAction()
 
-      if (result._tag === 'Error') {
+      if (Predicate.isTagged(result, 'Error')) {
         toast.error(result.message)
+
         return
       }
 

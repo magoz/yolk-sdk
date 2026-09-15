@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolCall, ToolResultMessage, type AgentMessage } from '@yolk-sdk/agent/protocol'
 import { projectVoiceEvent, StoredVoiceEvent, type VoiceProjectionState } from './projection.ts'
@@ -130,21 +131,26 @@ export const voiceToolEventId = (callId: string, phase: VoiceToolEventPhase) =>
 export const storedVoiceToolEvents = (
   event: VoiceToolCallsRequested | VoiceToolCallCompleted | VoiceToolCallFailed
 ): ReadonlyArray<StoredVoiceEvent> => {
-  switch (event._tag) {
-    case 'ToolCallsRequested':
-      return event.calls.map(call =>
+  return Match.value(event).pipe(
+    Match.tag('ToolCallsRequested', current =>
+      current.calls.map(call =>
         StoredVoiceEvent.make({
           eventId: voiceToolEventId(call.callId, 'requested'),
           event: VoiceToolCallsRequested.make({ calls: [call] })
         })
       )
-    case 'ToolCallCompleted':
-      return [
-        StoredVoiceEvent.make({ eventId: voiceToolEventId(event.callId, 'completed'), event })
-      ]
-    case 'ToolCallFailed':
-      return [StoredVoiceEvent.make({ eventId: voiceToolEventId(event.callId, 'failed'), event })]
-  }
+    ),
+    Match.tag('ToolCallCompleted', current => [
+      StoredVoiceEvent.make({
+        eventId: voiceToolEventId(current.callId, 'completed'),
+        event: current
+      })
+    ]),
+    Match.tag('ToolCallFailed', current => [
+      StoredVoiceEvent.make({ eventId: voiceToolEventId(current.callId, 'failed'), event: current })
+    ]),
+    Match.exhaustive
+  )
 }
 
 /** Matches the controller's model-visible denial message for consistent logs. */
@@ -167,30 +173,28 @@ export const storedToolEventsFromOutcome = (input: {
     event: VoiceToolCallsRequested.make({ calls: [input.call] })
   })
 
-  switch (input.outcome._tag) {
-    case 'Executed':
-      return [
-        requested,
-        StoredVoiceEvent.make({
-          eventId: voiceToolEventId(input.call.callId, 'completed'),
-          event: VoiceToolCallCompleted.make({
-            callId: input.call.callId,
-            output: input.outcome.output
-          })
+  return Match.value(input.outcome).pipe(
+    Match.tag('Executed', current => [
+      requested,
+      StoredVoiceEvent.make({
+        eventId: voiceToolEventId(input.call.callId, 'completed'),
+        event: VoiceToolCallCompleted.make({
+          callId: input.call.callId,
+          output: current.output
         })
-      ]
-    case 'Denied':
-      return [
-        requested,
-        StoredVoiceEvent.make({
-          eventId: voiceToolEventId(input.call.callId, 'failed'),
-          event: VoiceToolCallFailed.make({
-            callId: input.call.callId,
-            message: deniedMessage(input.outcome.reason)
-          })
+      })
+    ]),
+    Match.tag('Denied', current => [
+      requested,
+      StoredVoiceEvent.make({
+        eventId: voiceToolEventId(input.call.callId, 'failed'),
+        event: VoiceToolCallFailed.make({
+          callId: input.call.callId,
+          message: deniedMessage(current.reason)
         })
-      ]
-    case 'ApprovalRequired':
-      return [requested]
-  }
+      })
+    ]),
+    Match.tag('ApprovalRequired', () => [requested]),
+    Match.exhaustive
+  )
 }

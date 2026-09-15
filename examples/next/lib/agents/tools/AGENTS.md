@@ -6,7 +6,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 
 | Tool/module                                                               | Text | Voice | Cloudflare                             | Notes                                                                          |
 | ------------------------------------------------------------------------- | ---- | ----- | -------------------------------------- | ------------------------------------------------------------------------------ |
-| `question`                                                                | yes  | no    | yes                                    | top-level package HITL question tool; omitted from subagents                    |
+| `question`                                                                | yes  | no    | yes                                    | top-level package HITL question tool; omitted from subagents                   |
 | `web_fetch`                                                               | yes  | yes   | yes                                    | public URL fetch only                                                          |
 | `web_search`                                                              | yes  | yes   | yes                                    | Exa/Parallel MCP endpoints                                                     |
 | `skill`                                                                   | yes  | no    | bootstrap-injected; generated fallback | project skill command/runtime tool                                             |
@@ -28,6 +28,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Recoverable/model-correctable failures use `modelVisibleToolError` or `ToolResult.isError`; execution `ToolError`s become model-visible failed tool results, so keep messages safe and non-secret.
 - Tool modules receive context `{ surface, route, userId, sessionId?, subagent?, skillset? }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
+- `just_bash` timeout is a model-visible failure even when the virtual shell resolves with exit code 0; resolved aborted results include `timed_out: true`. Arbitrary non-Error host rejections are not stringified.
 - Storage tools are Next/Workflow/voice only; they use app knowledge search/DB adapters from route runtime wiring, not Cloudflare bootstrap.
 - Knowledge tools are Next/Workflow/voice only; use `list_knowledge_documents` to discover files/documents, then `search_knowledge`, then `get_knowledge_context` to expand/continue nearby chunks.
 - `manage_skills` is Next/Workflow-only; it uses app DB skill adapters from route runtime wiring, not Cloudflare bootstrap; UI refreshes slash commands after completed runs.

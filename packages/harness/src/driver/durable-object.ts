@@ -1,14 +1,8 @@
 import { Layer } from 'effect'
 import type { Effect } from 'effect'
-import {
-  makeDriverLayer,
-  type Drain,
-  type Driver,
-  type InvalidMaxResumeAttempts
-} from '../driver.ts'
-import { makeInMemoryInboxLayer } from '../inbox.ts'
-import type { Inbox } from '../inbox.ts'
-import { makeSnapshotRunStoreLayer, type DurableRunStoreSnapshot, type RunStore } from '../store.ts'
+import { Driver, type Drain, type InvalidMaxResumeAttempts } from '../driver.ts'
+import { Inbox } from '../inbox.ts'
+import { RunStore, type DurableRunStoreSnapshot } from '../store.ts'
 
 export type { DurableRunStoreSnapshot }
 
@@ -27,8 +21,8 @@ export function makeDurableObjectDriverLayer(
 export function makeDurableObjectDriverLayer(
   options: DurableObjectDriverBase & { readonly maxResumeAttempts?: number }
 ) {
-  return makeDriverLayer(options).pipe(
-    Layer.provideMerge(makeSnapshotRunStoreLayer(options)),
-    Layer.provideMerge(makeInMemoryInboxLayer())
+  return Driver.coordinatedLayer(options).pipe(
+    Layer.provideMerge(RunStore.snapshotLayer(options)),
+    Layer.provideMerge(Inbox.layer())
   )
 }

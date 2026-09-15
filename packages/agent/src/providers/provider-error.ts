@@ -197,23 +197,61 @@ export const providerFailureCause = (kind: ProviderFailureKind): ProviderLlmErro
   }
 }
 
+type ProviderErrorInfoFields = {
+  provider: ProviderErrorInfoInput['provider']
+  kind: ProviderErrorInfoInput['kind']
+  status?: ProviderErrorInfoInput['status']
+  providerCode?: ProviderErrorInfoInput['providerCode']
+  retryAfterMs?: ProviderErrorInfoInput['retryAfterMs']
+}
+
 export const providerErrorInfo = (input: ProviderErrorInfoInput) =>
-  ProviderErrorInfo.make({
-    provider: input.provider,
-    kind: input.kind,
-    ...(input.status === undefined ? {} : { status: input.status }),
-    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
-    ...(input.retryAfterMs === undefined ? {} : { retryAfterMs: input.retryAfterMs })
-  })
+  ProviderErrorInfo.make(
+    (() => {
+      const fields: ProviderErrorInfoFields = {
+        provider: input.provider,
+        kind: input.kind
+      }
+
+      if (input.status !== undefined) {
+        fields.status = input.status
+      }
+
+      if (input.providerCode !== undefined) {
+        fields.providerCode = input.providerCode
+      }
+
+      if (input.retryAfterMs !== undefined) {
+        fields.retryAfterMs = input.retryAfterMs
+      }
+
+      return fields
+    })()
+  )
 
 export const classifyProviderFailure = (input: ProviderFailureInput) => {
   const kind = providerFailureKind(input)
 
-  return providerErrorInfo({
-    provider: input.provider,
-    kind,
-    ...(input.status === undefined ? {} : { status: input.status }),
-    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
-    ...(input.headers === undefined ? {} : { retryAfterMs: retryAfterMsFromHeaders(input.headers) })
-  })
+  return providerErrorInfo(
+    (() => {
+      const fields: ProviderErrorInfoFields = {
+        provider: input.provider,
+        kind
+      }
+
+      if (input.status !== undefined) {
+        fields.status = input.status
+      }
+
+      if (input.providerCode !== undefined) {
+        fields.providerCode = input.providerCode
+      }
+
+      if (input.headers !== undefined) {
+        fields.retryAfterMs = retryAfterMsFromHeaders(input.headers)
+      }
+
+      return fields
+    })()
+  )
 }

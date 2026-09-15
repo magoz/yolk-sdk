@@ -1,4 +1,5 @@
-import { Effect, Layer, Option, Ref, Schema, Stream } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Effect, Layer, Match, Option, Predicate, Ref, Result, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk-sdk/agent/loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
@@ -9,11 +10,13 @@ import {
   latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
   runRuntime,
+  RuntimeRequest,
   RunAwaitingInput,
   RunCompleted,
   RunFailed,
   RunInterrupted,
   RunStarted,
+  SessionConflictError,
   SessionEventStore,
   type RuntimeConfig,
   type RuntimeSessionEvent,
@@ -54,6 +57,7 @@ const getRequest = (requests: ReadonlyArray<LLMRequest>, index: number) => {
 const makeStorage = (initial?: RuntimeSessionEventLog) =>
   Effect.gen(function* () {
     const ref = yield* Ref.make<RuntimeSessionEventLog | undefined>(initial)
+
     const storage: RuntimeEventLogStorage = {
       get: () => Ref.get(ref),
       put: log => Ref.set(ref, log)
@@ -89,7 +93,7 @@ const storageCommand = Schema.Struct({
   event: storageEventCommand
 })
 
-const storageCommandsArbitrary = Schema.toArbitrary(Schema.Array(storageCommand))
+const storageCommandsArbitrary = Arbitrary.schema(Schema.Array(storageCommand))
 
 const wsCommand = Schema.Struct({
   kind: Schema.Literals([
@@ -106,7 +110,7 @@ const wsCommand = Schema.Struct({
   ])
 })
 
-const wsCommandsArbitrary = Schema.toArbitrary(Schema.Array(wsCommand))
+const wsCommandsArbitrary = Arbitrary.schema(Schema.Array(wsCommand))
 
 const toolCall = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
 
@@ -203,19 +207,25 @@ const makeWsLayer = (storage: RuntimeEventLogStorage, requests: Array<LLMRequest
 
 const latestApprovalRequest = (log: RuntimeSessionEventLog) => {
   for (const stored of [...log.events].reverse()) {
-    const event = stored.event
+    const step = Match.value(stored.event).pipe(
+      Match.tag('RunAwaitingInput', current => ({
+        done: true as const,
+        request: current.requests.find(request =>
+          Predicate.isTagged(request, 'ToolApprovalRequest')
+        )
+      })),
+      Match.tag('RunCompleted', 'RunFailed', 'RunInterrupted', () => ({
+        done: true as const,
+        request: undefined
+      })),
+      Match.orElse(() => ({
+        done: false as const,
+        request: undefined
+      }))
+    )
 
-    switch (event._tag) {
-      case 'RunAwaitingInput':
-        return event.requests.find(request => request._tag === 'ToolApprovalRequest')
-      case 'RunCompleted':
-      case 'RunFailed':
-      case 'RunInterrupted':
-        return undefined
-      case 'HitlResponseAppended':
-      case 'InputAppended':
-      case 'RunStarted':
-        break
+    if (step.done) {
+      return step.request
     }
   }
 
@@ -270,18 +280,18 @@ const runWsUserInput = (input: {
     }
 
     const revision = expectedRevision(input.command.kind, before.revision)
+
     const result = yield* runRuntime(
-      {
-        _tag: 'AppendInput',
+      RuntimeRequest.AppendInput({
         sessionId: 'session_1',
         input: UserMessage.make({ content: `ws_user_${input.index}` }),
         runId: `ws_user_run_${input.index}`,
-        ...(revision === undefined ? {} : { expectedRevision: revision })
-      },
+        expectedRevision: revision
+      }),
       wsRuntimeConfig
     ).pipe(Stream.runCollect, Effect.result)
 
-    return { mutated: result._tag === 'Success' }
+    return { mutated: Predicate.isTagged(result, 'Success') }
   })
 
 const runWsHitlResponse = (input: {
@@ -299,18 +309,18 @@ const runWsHitlResponse = (input: {
     }
 
     const revision = expectedRevision(input.command.kind, before.revision)
+
     const result = yield* runRuntime(
-      {
-        _tag: 'AppendHitlResponse',
+      RuntimeRequest.AppendHitlResponse({
         sessionId: 'session_1',
         response: input.response,
         runId: `ws_hitl_run_${input.index}`,
-        ...(revision === undefined ? {} : { expectedRevision: revision })
-      },
+        expectedRevision: revision
+      }),
       wsRuntimeConfig
     ).pipe(Stream.runCollect, Effect.result)
 
-    return { mutated: result._tag === 'Success' }
+    return { mutated: Predicate.isTagged(result, 'Success') }
   })
 
 describe('Cloudflare session event storage', () => {
@@ -319,26 +329,30 @@ describe('Cloudflare session event storage', () => {
       const sessionId = 'session_1'
       const requests: Array<LLMRequest> = []
       const storage = yield* makeStorage()
+
       const layer = Layer.mergeAll(
         makeLoopLayer(requests),
         makeDurableObjectSessionEventStoreLayer(sessionId, storage)
       )
+
       const firstInput = UserMessage.make({ content: 'first' })
       const secondInput = UserMessage.make({ content: 'second' })
+
       const firstAssistant = AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'first reply' })]
       })
+
       const secondAssistant = AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'second reply' })]
       })
 
       yield* Effect.gen(function* () {
         yield* runRuntime(
-          { _tag: 'AppendInput', sessionId, input: firstInput, runId: 'run_1' },
+          RuntimeRequest.AppendInput({ sessionId, input: firstInput, runId: 'run_1' }),
           runtimeConfig
         ).pipe(Stream.runCollect)
         yield* runRuntime(
-          { _tag: 'AppendInput', sessionId, input: secondInput, runId: 'run_2' },
+          RuntimeRequest.AppendInput({ sessionId, input: secondInput, runId: 'run_2' }),
           runtimeConfig
         ).pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer))
@@ -369,10 +383,12 @@ describe('Cloudflare session event storage', () => {
     Effect.gen(function* () {
       const sessionId = 'session_1'
       const input = UserMessage.make({ content: 'interrupted' })
+
       const initialLog = appendRuntimeSessionEventsToLog(emptyRuntimeEventLog(sessionId), {
         sessionId,
         events: [InputAppended.make({ message: input }), RunStarted.make({ runId: 'run_1' })]
       })
+
       const storage = yield* makeStorage(initialLog)
 
       yield* interruptLatestIncompleteRun(sessionId, storage)
@@ -392,6 +408,7 @@ describe('Cloudflare session event storage', () => {
   it.effect('rejects stale HITL revision without mutating durable log', () =>
     Effect.gen(function* () {
       const sessionId = 'session_1'
+
       const before = appendRuntimeSessionEventsToLog(emptyRuntimeEventLog(sessionId), {
         sessionId,
         events: [
@@ -403,24 +420,29 @@ describe('Cloudflare session event storage', () => {
           })
         ]
       })
+
       const storage = yield* makeStorage(before)
       const requests: Array<LLMRequest> = []
+
       const result = yield* runRuntime(
-        {
-          _tag: 'AppendHitlResponse',
+        RuntimeRequest.AppendHitlResponse({
           sessionId,
           response: approvalResponse,
           runId: 'run_2',
           expectedRevision: before.revision + 1
-        },
+        }),
         wsRuntimeConfig
       ).pipe(Stream.runCollect, Effect.provide(makeWsLayer(storage, requests)), Effect.result)
+
       const after = yield* loadRuntimeEventLogOrEmpty(sessionId, storage)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'SessionConflictError', sessionId }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'SessionConflictError')).toBe(true)
+        expect(result.failure).toMatchObject({ sessionId })
+      }
+
       expect(after).toEqual(before)
     })
   )
@@ -442,34 +464,38 @@ describe('Cloudflare session event storage', () => {
             yield* interruptLatestIncompleteRun(sessionId, storage)
             expectedLog = interruptModelLog(sessionId, expectedLog)
           } else {
-            const expectedRevision =
-              command.kind === 'appendNone'
-                ? undefined
-                : command.kind === 'appendCurrent'
-                  ? expectedLog.revision
-                  : expectedLog.revision + 1
+            const expectedRevision = Match.value(command.kind).pipe(
+              Match.when('appendNone', () => undefined),
+              Match.when('appendCurrent', () => expectedLog.revision),
+              Match.orElse(() => expectedLog.revision + 1)
+            )
+
             const event = runtimeEventForCommand(command.event, index)
+
             const result = yield* Effect.gen(function* () {
               const store = yield* SessionEventStore
 
-              return yield* store.append({
-                sessionId,
-                ...(expectedRevision === undefined ? {} : { expectedRevision }),
-                events: [event]
-              })
+              const appendInput =
+                expectedRevision === undefined
+                  ? { sessionId, events: [event] }
+                  : { sessionId, expectedRevision, events: [event] }
+
+              return yield* store.append(appendInput)
             }).pipe(Effect.provide(storeLayer), Effect.result)
 
             if (command.kind === 'appendStale') {
-              expect(result).toMatchObject({
-                _tag: 'Failure',
-                failure: { _tag: 'SessionConflictError', sessionId }
-              })
+              expect(Result.isFailure(result)).toBe(true)
+
+              if (Result.isFailure(result)) {
+                expect(result.failure).toBeInstanceOf(SessionConflictError)
+                expect(result.failure.sessionId).toBe(sessionId)
+              }
             } else {
               expectedLog = appendRuntimeSessionEventsToLog(expectedLog, {
                 sessionId,
                 events: [event]
               })
-              expect(result).toMatchObject({ _tag: 'Success' })
+              expect(Result.isSuccess(result)).toBe(true)
             }
           }
 
@@ -508,6 +534,7 @@ describe('Cloudflare session event storage', () => {
                 )
                 break
               }
+
               case 'startActive': {
                 const store = yield* SessionEventStore
                 const activeRun = latestIncompleteRuntimeRun(before.events)
@@ -519,8 +546,10 @@ describe('Cloudflare session event storage', () => {
                     events: [RunStarted.make({ runId: `ws_active_run_${index}` })]
                   })
                 }
+
                 break
               }
+
               case 'userCurrent':
               case 'userNone':
               case 'userStale': {
@@ -530,20 +559,24 @@ describe('Cloudflare session event storage', () => {
                 if (!outcome.mutated) {
                   expect(after).toEqual(before)
                 }
+
                 break
               }
+
               case 'hitlCurrent':
               case 'hitlNone':
               case 'hitlStale':
               case 'hitlMismatch':
               case 'hitlDuplicate': {
                 const pending = latestApprovalRequest(before)
+
                 const response =
                   command.kind === 'hitlDuplicate'
                     ? (lastAcceptedHitlResponse ?? staleApprovalResponse())
                     : command.kind === 'hitlMismatch' || pending === undefined
                       ? staleApprovalResponse()
                       : responseForApprovalRequest(pending)
+
                 const outcome = yield* runWsHitlResponse({ storage, command, index, response })
                 const after = yield* loadRuntimeEventLogOrEmpty('session_1', storage)
 
@@ -552,6 +585,7 @@ describe('Cloudflare session event storage', () => {
                 } else {
                   expect(after).toEqual(before)
                 }
+
                 break
               }
             }
@@ -560,8 +594,9 @@ describe('Cloudflare session event storage', () => {
             expect(actual.revision).toBe(actual.events.length)
 
             const incomplete = latestIncompleteRuntimeRun(actual.events)
+
             if (Option.isSome(incomplete)) {
-              expect(actual.events.at(-1)?.event._tag).toBe('RunStarted')
+              expect(Predicate.isTagged(actual.events.at(-1)?.event, 'RunStarted')).toBe(true)
             }
           }
         }).pipe(Effect.provide(makeWsLayer(storage, requests)))

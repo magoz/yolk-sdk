@@ -1,18 +1,16 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import { and, eq, inArray } from 'drizzle-orm'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 import type { KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import {
-  AppKnowledgeSearchError,
-  AppKnowledgeCollectionNotFoundError,
-  isAppKnowledgeSearchError,
-  isAppKnowledgeCollectionNotFoundError
-} from './errors'
+import { AppKnowledgeSearchError, AppKnowledgeCollectionNotFoundError } from './errors'
 
 const DEFAULT_LIMIT = 10
+
 const DEFAULT_MIN_SCORE = 0.5
+
 const DEFAULT_CONTEXT_CHUNKS = 0
 
 export type SearchAppKnowledgeOptions = {
@@ -21,14 +19,12 @@ export type SearchAppKnowledgeOptions = {
   readonly contextChunks?: number
 }
 
-const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> => {
-  switch (scope._tag) {
-    case 'KnowledgeScope':
-      return [scope.id]
-    case 'KnowledgeScopes':
-      return scope.ids
-  }
-}
+const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> =>
+  Match.value(scope).pipe(
+    Match.tag('KnowledgeScope', current => [current.id]),
+    Match.tag('KnowledgeScopes', current => current.ids),
+    Match.exhaustive
+  )
 
 const ensureUserOwnsScope = (input: {
   readonly userId: string
@@ -42,6 +38,7 @@ const ensureUserOwnsScope = (input: {
     }
 
     const db = yield* Db
+
     const rows = yield* db
       .select({ id: schema.knowledgeCollection.id })
       .from(schema.knowledgeCollection)
@@ -65,17 +62,12 @@ const ensureUserOwnsScope = (input: {
     }
   })
 
-const mapSearchError = (error: unknown) => {
-  if (isAppKnowledgeSearchError(error) || isAppKnowledgeCollectionNotFoundError(error)) {
-    return error
-  }
-
-  return new AppKnowledgeSearchError({
+const sqlSearchError = (error: EffectDrizzleQueryError) =>
+  new AppKnowledgeSearchError({
     message: 'Could not search knowledge search',
     stage: 'store',
     cause: error
   })
-}
 
 export const searchAppKnowledge = (input: {
   readonly userId: string
@@ -107,5 +99,8 @@ export const searchAppKnowledge = (input: {
           new AppKnowledgeSearchError({ message: error.message, stage: error.stage, cause: error })
       )
     )
-  }).pipe(Effect.withSpan('knowledge_search.search'), Effect.mapError(mapSearchError))
+  }).pipe(
+    Effect.withSpan('knowledge_search.search'),
+    Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlSearchError(error)))
+  )
 }

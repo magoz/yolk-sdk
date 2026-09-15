@@ -54,6 +54,7 @@ export const createAgentCommand = (input: AgentCommandInput & { readonly userId:
   Effect.gen(function* () {
     const values = yield* validateAgentCommandInput(input)
     const db = yield* Db
+
     const [command] = yield* db
       .insert(schema.agentCommand)
       .values({ ...values, userId: input.userId })
@@ -72,6 +73,7 @@ export const upsertAgentCommand = (input: AgentCommandInput & { readonly userId:
   Effect.gen(function* () {
     const values = yield* validateAgentCommandInput(input)
     const db = yield* Db
+
     const [command] = yield* db
       .insert(schema.agentCommand)
       .values({ ...values, enabled: true, userId: input.userId })
@@ -99,6 +101,7 @@ export const updateAgentCommand = (input: AgentCommandUpdateInput & { readonly u
   Effect.gen(function* () {
     const values = yield* validateAgentCommandInput(input)
     const db = yield* Db
+
     const [command] = yield* db
       .update(schema.agentCommand)
       .set({ ...values, enabled: input.enabled })
@@ -127,6 +130,7 @@ export const setAgentCommandEnabled = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [command] = yield* db
       .update(schema.agentCommand)
       .set({ enabled: input.enabled })
@@ -151,6 +155,7 @@ export const setAgentCommandEnabled = (input: {
 export const deleteAgentCommand = (input: { readonly id: string; readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [command] = yield* db
       .delete(schema.agentCommand)
       .where(

@@ -6,6 +6,7 @@ import * as schema from '@/lib/services/db/schema'
 export const getUserKnowledge = (input: { readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     return yield* db
       .select({
         document: schema.userKnowledgeDocument,

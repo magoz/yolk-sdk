@@ -1,4 +1,16 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, Schema, Stream } from 'effect'
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schema,
+  Stream
+} from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   FauxExhaustedError,
@@ -19,8 +31,11 @@ import {
   latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
   runRuntime,
+  RuntimeRequest,
   RunStarted,
   SessionConflictError,
+  type AppendHitlResponseRuntimeRequest,
+  type AppendInputRuntimeRequest,
   type RuntimeConfig,
   type RuntimeSessionEventLog
 } from '@yolk-sdk/agent/runtime'
@@ -40,10 +55,10 @@ import {
   type AgentEvent,
   type HitlRequest
 } from '@yolk-sdk/agent/protocol'
-import { Driver, type DriverShape } from '@yolk-sdk/harness/driver'
+import { Driver, type DriverApi } from '@yolk-sdk/harness/driver'
 import { makeDurableObjectDriverLayer } from '@yolk-sdk/harness/driver/durable-object'
 import { RunStore, type DurableRunStoreSnapshot } from '@yolk-sdk/harness/store'
-import { makeLiveDrain } from '../src/drain-lifecycle.ts'
+import { makeLiveDrain, StartResult } from '../src/drain-lifecycle.ts'
 import {
   emptyRuntimeEventLog,
   interruptLatestIncompleteRun,
@@ -52,6 +67,7 @@ import {
 } from '../src/session-event-storage.ts'
 
 const sessionId = 'session_cloudflare_1'
+
 const orphanResumeCount = 2
 
 const runtimeConfig: RuntimeConfig = {
@@ -102,9 +118,11 @@ const eventTags = (log: RuntimeSessionEventLog) => log.events.map(stored => stor
 
 const requireStoredEvent = (log: RuntimeSessionEventLog, tag: string) => {
   const stored = log.events.find(item => item.event._tag === tag)
+
   if (stored === undefined) {
     throw new Error(`Expected ${tag} in runtime log, got [${eventTags(log).join(', ')}]`)
   }
+
   return stored
 }
 
@@ -114,10 +132,12 @@ const runIds = (
 ) => log.events.flatMap(stored => (stored.event._tag === tag ? [stored.event.runId] : []))
 
 const requireToolResult = (messages: ReadonlyArray<AgentMessage>) => {
-  const result = messages.find(message => message._tag === 'ToolResult')
+  const result = messages.find(message => Predicate.isTagged(message, 'ToolResult'))
+
   if (result === undefined) {
     throw new Error('Expected ToolResult in completed messages')
   }
+
   return result
 }
 
@@ -179,12 +199,15 @@ const makeScriptedProviderLayer = (
             yield* Ref.update(requests, current => [...current, request])
             const current = yield* Ref.get(scripts)
             const next = current[0]
+
             if (next === undefined) {
               return yield* Effect.fail(
                 new FauxExhaustedError({ message: 'No more scripted provider turns' })
               )
             }
+
             yield* Ref.set(scripts, current.slice(1))
+
             return next(request)
           })
         )
@@ -233,21 +256,13 @@ const hydrateSnapshot = (log: RuntimeSessionEventLog) =>
 
 const startOwnedAppend = (input: {
   readonly live: LiveDrain
-  readonly driver: DriverShape
+  readonly driver: DriverApi
   readonly eventStorage: {
     readonly get: () => Effect.Effect<RuntimeSessionEventLog | undefined>
     readonly put: (log: RuntimeSessionEventLog) => Effect.Effect<void>
   }
   readonly socketId: string
-  readonly runId: string
-  readonly request:
-    | { readonly _tag: 'AppendInput'; readonly sessionId: string; readonly input: UserMessage }
-    | {
-        readonly _tag: 'AppendHitlResponse'
-        readonly sessionId: string
-        readonly response: ReturnType<typeof ToolApprovalResponse.make>
-        readonly expectedRevision?: number
-      }
+  readonly request: AppendInputRuntimeRequest | AppendHitlResponseRuntimeRequest
   readonly config: RuntimeConfig
   readonly runtimeLayer: ReturnType<typeof makeRuntimeLayer>
   readonly observedEvents: Ref.Ref<ReadonlyArray<AgentEvent>>
@@ -255,13 +270,15 @@ const startOwnedAppend = (input: {
 }) =>
   Effect.gen(function* () {
     const prepareEpoch = yield* input.live.beginPrepare()
-    const work = runRuntime({ ...input.request, runId: input.runId }, input.config).pipe(
+
+    const work = runRuntime(input.request, input.config).pipe(
       Stream.tap(event => Ref.update(input.observedEvents, current => [...current, event])),
       Stream.runDrain,
       Effect.tapError(error => Ref.set(input.lastError, error)),
       Effect.catch(() => Effect.void),
       Effect.provide(input.runtimeLayer)
     )
+
     return yield* input.live.runOwned(prepareEpoch, input.socketId, work, input.driver, sessionId)
   })
 
@@ -273,13 +290,14 @@ const withFreshHarness = <A, E, R>(
     readonly drainStarts: Ref.Ref<number>
   },
   use: (services: {
-    readonly driver: DriverShape
+    readonly driver: DriverApi
     readonly store: RunStore['Service']
   }) => Effect.Effect<A, E, R>
 ) =>
   Effect.gen(function* () {
     const driver = yield* Driver
     const store = yield* RunStore
+
     return yield* use({ driver, store })
   }).pipe(
     Effect.provide(
@@ -294,21 +312,27 @@ const withFreshHarness = <A, E, R>(
 
 const waitingApprovalRequest = (log: RuntimeSessionEventLog): HitlRequest => {
   const stored = requireStoredEvent(log, 'RunAwaitingInput')
-  if (stored.event._tag !== 'RunAwaitingInput') {
+
+  if (!Predicate.isTagged(stored.event, 'RunAwaitingInput')) {
     throw new Error('Expected RunAwaitingInput event payload')
   }
+
   const request = stored.event.requests[0]
+
   if (request === undefined) {
     throw new Error('Expected a persisted HITL request')
   }
+
   return request
 }
 
 const failedError = (log: RuntimeSessionEventLog) => {
   const stored = requireStoredEvent(log, 'RunFailed')
-  if (stored.event._tag !== 'RunFailed') {
+
+  if (!Predicate.isTagged(stored.event, 'RunFailed')) {
     throw new Error('Expected RunFailed event payload')
   }
+
   return stored.event.error
 }
 
@@ -339,6 +363,7 @@ describe('Cloudflare drain-runtime composition', () => {
         const delayEnabled = yield* Ref.make(false)
         const queuedWorkStarted = yield* Ref.make(false)
         const queuedAttempted = yield* Deferred.make<void>()
+
         const scripts = yield* Ref.make<ReadonlyArray<ScriptedTurn>>([
           () =>
             Stream.fromIterable([LLMTextDelta.make({ text: 'partial' })]).pipe(
@@ -353,17 +378,20 @@ describe('Cloudflare drain-runtime composition', () => {
             ),
           () => Stream.fromIterable(Reply.text('successor done').events)
         ])
+
         const runtimeLayer = makeRuntimeLayer({
           eventStorage: stores.events,
           scripts,
           requests,
           executedTools
         })
+
         const harnessSave = delayedHarnessSave(stores.harness.save, {
           enabled: delayEnabled,
           entered: releaseEntered,
           hold: releaseHold
         }).save
+
         const firstInput = UserMessage.make({ content: 'live interrupt' })
         const successorInput = UserMessage.make({ content: 'fresh input' })
 
@@ -381,8 +409,11 @@ describe('Cloudflare drain-runtime composition', () => {
                 driver,
                 eventStorage: stores.events,
                 socketId: 'sock_live',
-                runId: 'run_live_1',
-                request: { _tag: 'AppendInput', sessionId, input: firstInput },
+                request: RuntimeRequest.AppendInput({
+                  sessionId,
+                  input: firstInput,
+                  runId: 'run_live_1'
+                }),
                 config: runtimeConfig,
                 runtimeLayer,
                 observedEvents,
@@ -404,11 +435,12 @@ describe('Cloudflare drain-runtime composition', () => {
               expect(yield* Ref.get(executedTools)).toEqual([])
               expect(
                 (yield* Ref.get(observedEvents)).some(
-                  event => event._tag === 'LLMTextDelta' && event.text === 'partial'
+                  event => Predicate.isTagged(event, 'LLMTextDelta') && event.text === 'partial'
                 )
               ).toBe(true)
 
               yield* Ref.set(delayEnabled, true)
+
               const reconnecting = yield* live
                 .reconnect(
                   driver,
@@ -416,7 +448,9 @@ describe('Cloudflare drain-runtime composition', () => {
                   interruptLatestIncompleteRun(sessionId, stores.events)
                 )
                 .pipe(Effect.forkChild)
+
               yield* Deferred.await(releaseEntered)
+
               const queued = yield* Deferred.succeed(queuedAttempted, undefined).pipe(
                 Effect.andThen(
                   live.runOwned(
@@ -429,6 +463,7 @@ describe('Cloudflare drain-runtime composition', () => {
                 ),
                 Effect.forkChild
               )
+
               yield* Deferred.await(queuedAttempted)
               yield* Effect.yieldNow
 
@@ -445,7 +480,7 @@ describe('Cloudflare drain-runtime composition', () => {
 
               yield* Deferred.succeed(releaseHold, undefined)
               yield* Fiber.join(reconnecting)
-              expect(yield* Fiber.join(queued)).toEqual({ _tag: 'Stale' })
+              expect(yield* Fiber.join(queued)).toEqual(StartResult.Stale())
               expect(yield* Ref.get(queuedWorkStarted)).toBe(false)
               const ownerExit = yield* Fiber.join(running).pipe(Effect.exit)
               expect(Exit.isFailure(ownerExit) && Cause.hasInterruptsOnly(ownerExit.cause)).toBe(
@@ -471,13 +506,17 @@ describe('Cloudflare drain-runtime composition', () => {
                 driver,
                 eventStorage: stores.events,
                 socketId: 'sock_successor',
-                runId: 'run_successor_1',
-                request: { _tag: 'AppendInput', sessionId, input: successorInput },
+                request: RuntimeRequest.AppendInput({
+                  sessionId,
+                  input: successorInput,
+                  runId: 'run_successor_1'
+                }),
                 config: runtimeConfig,
                 runtimeLayer,
                 observedEvents,
                 lastError
               })
+
               expect(successor._tag).toBe('Accepted')
               expect(yield* Ref.get(lastError)).toBeUndefined()
 
@@ -500,9 +539,11 @@ describe('Cloudflare drain-runtime composition', () => {
                 successorAssistant
               ])
               const successorRequest = (yield* Ref.get(requests))[1]
+
               if (successorRequest === undefined) {
                 throw new Error('Expected successor provider request')
               }
+
               expect(successorRequest.messages).toEqual([firstInput, successorInput])
               expect(yield* store.isClaimed(sessionId)).toBe(false)
               expect(yield* driver.isActive(sessionId)).toBe(false)
@@ -539,15 +580,18 @@ describe('Cloudflare drain-runtime composition', () => {
         const executedTools = yield* Ref.make<ReadonlyArray<ToolCall>>([])
         const observedEvents = yield* Ref.make<ReadonlyArray<AgentEvent>>([])
         const lastError = yield* Ref.make<unknown>(undefined)
+
         const scripts = yield* Ref.make<ReadonlyArray<ScriptedTurn>>([
           () => Stream.fromIterable(Reply.text('explicit resume').events)
         ])
+
         const runtimeLayer = makeRuntimeLayer({
           eventStorage: stores.events,
           scripts,
           requests,
           executedTools
         })
+
         const nextInput = UserMessage.make({ content: 'explicit next' })
 
         yield* withFreshHarness(
@@ -609,13 +653,17 @@ describe('Cloudflare drain-runtime composition', () => {
                 driver,
                 eventStorage: stores.events,
                 socketId: 'sock_explicit',
-                runId: 'run_explicit_1',
-                request: { _tag: 'AppendInput', sessionId, input: nextInput },
+                request: RuntimeRequest.AppendInput({
+                  sessionId,
+                  input: nextInput,
+                  runId: 'run_explicit_1'
+                }),
                 config: runtimeConfig,
                 runtimeLayer,
                 observedEvents,
                 lastError
               })
+
               expect(started._tag).toBe('Accepted')
               expect(yield* Ref.get(lastError)).toBeUndefined()
               const completed = yield* loadRuntimeEventLogOrEmpty(sessionId, stores.events)
@@ -637,9 +685,11 @@ describe('Cloudflare drain-runtime composition', () => {
                 explicitAssistant
               ])
               const explicitRequest = (yield* Ref.get(requests))[0]
+
               if (explicitRequest === undefined) {
                 throw new Error('Expected explicit provider request')
               }
+
               expect(explicitRequest.messages).toEqual([orphanedInput, nextInput])
               expect(yield* store.isClaimed(sessionId)).toBe(false)
               expect(yield* store.resumeCount(sessionId)).toBe(0)
@@ -660,16 +710,19 @@ describe('Cloudflare drain-runtime composition', () => {
         const executedTools = yield* Ref.make<ReadonlyArray<ToolCall>>([])
         const observedEvents = yield* Ref.make<ReadonlyArray<AgentEvent>>([])
         const lastError = yield* Ref.make<unknown>(undefined)
+
         const scripts = yield* Ref.make<ReadonlyArray<ScriptedTurn>>([
           () => Stream.fromIterable(Reply.toolCall(weatherCall).events),
           () => Stream.fromIterable(Reply.text('sunny').events)
         ])
+
         const runtimeLayer = makeRuntimeLayer({
           eventStorage: stores.events,
           scripts,
           requests,
           executedTools
         })
+
         const input = UserMessage.make({ content: 'weather?' })
 
         yield* Effect.gen(function* () {
@@ -689,13 +742,17 @@ describe('Cloudflare drain-runtime composition', () => {
                   driver,
                   eventStorage: stores.events,
                   socketId: 'sock_hitl_a',
-                  runId: 'run_hitl_1',
-                  request: { _tag: 'AppendInput', sessionId, input },
+                  request: RuntimeRequest.AppendInput({
+                    sessionId,
+                    input,
+                    runId: 'run_hitl_1'
+                  }),
                   config: weatherConfig,
                   runtimeLayer,
                   observedEvents,
                   lastError
                 })
+
                 expect(started._tag).toBe('Accepted')
                 const waiting = yield* loadRuntimeEventLogOrEmpty(sessionId, stores.events)
                 expect(eventTags(waiting)).toEqual([
@@ -750,18 +807,21 @@ describe('Cloudflare drain-runtime composition', () => {
               const approval = yield* Schema.decodeUnknownEffect(ToolApprovalRequest)(
                 waitingApprovalRequest(waiting)
               )
+
               const matching = ToolApprovalResponse.make({
                 requestId: approval.requestId,
                 toolCallId: approval.toolCallId,
                 decision: 'approved',
                 source: 'user'
               })
+
               const wrongToolCall = ToolApprovalResponse.make({
                 requestId: approval.requestId,
                 toolCallId: 'other',
                 decision: 'approved',
                 source: 'user'
               })
+
               const wrongRequest = ToolApprovalResponse.make({
                 requestId: 'approval:other',
                 toolCallId: approval.toolCallId,
@@ -778,23 +838,24 @@ describe('Cloudflare drain-runtime composition', () => {
                 Effect.gen(function* () {
                   const before = yield* loadRuntimeEventLogOrEmpty(sessionId, stores.events)
                   yield* Ref.set(lastError, undefined)
+
                   const started = yield* startOwnedAppend({
                     live,
                     driver,
                     eventStorage: stores.events,
                     socketId: input.socketId,
-                    runId: input.runId,
-                    request: {
-                      _tag: 'AppendHitlResponse',
+                    request: RuntimeRequest.AppendHitlResponse({
                       sessionId,
                       response: input.response,
+                      runId: input.runId,
                       expectedRevision: input.expectedRevision
-                    },
+                    }),
                     config: weatherConfig,
                     runtimeLayer,
                     observedEvents,
                     lastError
                   })
+
                   expect(started._tag).toBe('Accepted')
                   expect(yield* Ref.get(lastError)).toBeInstanceOf(SessionConflictError)
                   const after = yield* loadRuntimeEventLogOrEmpty(sessionId, stores.events)
@@ -825,23 +886,24 @@ describe('Cloudflare drain-runtime composition', () => {
               })
 
               yield* Ref.set(lastError, undefined)
+
               const resumed = yield* startOwnedAppend({
                 live,
                 driver,
                 eventStorage: stores.events,
                 socketId: 'sock_hitl_ok',
-                runId: 'run_hitl_2',
-                request: {
-                  _tag: 'AppendHitlResponse',
+                request: RuntimeRequest.AppendHitlResponse({
                   sessionId,
                   response: matching,
+                  runId: 'run_hitl_2',
                   expectedRevision: waiting.revision
-                },
+                }),
                 config: weatherConfig,
                 runtimeLayer,
                 observedEvents,
                 lastError
               })
+
               expect(resumed._tag).toBe('Accepted')
               expect(yield* Ref.get(lastError)).toBeUndefined()
               const completed = yield* loadRuntimeEventLogOrEmpty(sessionId, stores.events)
@@ -860,9 +922,11 @@ describe('Cloudflare drain-runtime composition', () => {
                 HitlResponseAppended.make({ response: matching })
               )
               const completedEvent = requireStoredEvent(completed, 'RunCompleted').event
-              if (completedEvent._tag !== 'RunCompleted') {
+
+              if (!Predicate.isTagged(completedEvent, 'RunCompleted')) {
                 throw new Error('Expected RunCompleted payload')
               }
+
               const toolResult = requireToolResult(completedEvent.messages)
               expect(toolResult._tag).toBe('ToolResult')
               expect(toolResult.toolCallId).toBe('call_1')
@@ -875,9 +939,11 @@ describe('Cloudflare drain-runtime composition', () => {
               ])
               expect(yield* Ref.get(executedTools)).toEqual([weatherCall])
               const resumedRequest = (yield* Ref.get(requests))[1]
+
               if (resumedRequest === undefined) {
                 throw new Error('Expected resumed provider request')
               }
+
               expect(resumedRequest.messages).toEqual([input, weatherAssistant, toolResult])
               expect((yield* Ref.get(requests)).length).toBe(2)
               expect(yield* store.isClaimed(sessionId)).toBe(false)
@@ -905,12 +971,14 @@ describe('Cloudflare drain-runtime composition', () => {
           const observedEvents = yield* Ref.make<ReadonlyArray<AgentEvent>>([])
           const lastError = yield* Ref.make<unknown>(undefined)
           const scripts = yield* Ref.make<ReadonlyArray<ScriptedTurn>>([input.script])
+
           const runtimeLayer = makeRuntimeLayer({
             eventStorage: stores.events,
             scripts,
             requests,
             executedTools
           })
+
           const userInput = UserMessage.make({ content: input.content })
 
           yield* withFreshHarness(
@@ -927,13 +995,17 @@ describe('Cloudflare drain-runtime composition', () => {
                   driver,
                   eventStorage: stores.events,
                   socketId: input.socketId,
-                  runId: input.runId,
-                  request: { _tag: 'AppendInput', sessionId, input: userInput },
+                  request: RuntimeRequest.AppendInput({
+                    sessionId,
+                    input: userInput,
+                    runId: input.runId
+                  }),
                   config: runtimeConfig,
                   runtimeLayer,
                   observedEvents,
                   lastError
                 })
+
                 expect(started._tag).toBe('Accepted')
                 const log = yield* loadRuntimeEventLogOrEmpty(sessionId, stores.events)
                 expect(eventTags(log)).toEqual(['InputAppended', 'RunStarted', 'RunFailed'])
@@ -946,9 +1018,11 @@ describe('Cloudflare drain-runtime composition', () => {
                 expect(error.message).toContain('Expected exactly one LLM done event, received 0')
                 expect(error.retryable).toBe(false)
                 const capturedError = yield* Ref.get(lastError)
+
                 if (!(capturedError instanceof LLMError)) {
                   throw new Error(`Expected captured LLMError, got ${String(capturedError)}`)
                 }
+
                 expect(capturedError._tag).toBe('LLMError')
                 expect(capturedError.cause).toBe('invalid_response')
                 expect(capturedError.retryable).toBe(false)
@@ -962,12 +1036,12 @@ describe('Cloudflare drain-runtime composition', () => {
                 expect((yield* Ref.get(requests)).length).toBe(1)
                 expect(
                   (yield* Ref.get(observedEvents)).some(
-                    event => event._tag === 'LLMTextDelta' && event.text === 'partial'
+                    event => Predicate.isTagged(event, 'LLMTextDelta') && event.text === 'partial'
                   )
                 ).toBe(input.expectPartial)
-                expect(
-                  (yield* Ref.get(observedEvents)).some(event => event._tag === 'AgentEnd')
-                ).toBe(false)
+                expect((yield* Ref.get(observedEvents)).some(Predicate.isTagged('AgentEnd'))).toBe(
+                  false
+                )
               })
           )
         })

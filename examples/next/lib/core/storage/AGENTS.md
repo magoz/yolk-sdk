@@ -11,6 +11,7 @@ App-owned `/storage` source ingestion and indexing helpers.
 ## Current scope
 
 - Text sources insert `storageObject` rows and ingest text documents into the user `storage` knowledge collection.
+- Storage object and collection jsonb metadata is encoded with `encodePersistedMetadata` before write. List/get still return opaque row `metadata: unknown` until a caller decodes it.
 - File upload is presigned R2 PUT: create upload URL, verify owner prefix/size on finalize, read bytes from R2, then delete transient upload bytes.
 - File finalize extracts text with `FileExtractor`, stores metadata, and ingests the extracted document into knowledge search.
 - Delete removes the authenticated user's `storageObject`; DB relations own document cleanup.

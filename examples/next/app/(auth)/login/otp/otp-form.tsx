@@ -33,6 +33,7 @@ export const OtpForm = ({ email }: Props) => {
       if (error) {
         setShowError(true)
         toast.error(`Login error: ${error.message}`)
+
         return
       }
 

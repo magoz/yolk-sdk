@@ -1,12 +1,12 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk-sdk/agent/loop'
+import type { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   EmptyToolParams,
   makeTool,
   modelVisibleToolError,
-  ModelVisibleToolError,
+  type ModelVisibleToolError,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
 import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/search'
@@ -15,14 +15,23 @@ import type { AgentToolContext } from './tool-context.ts'
 type StorageToolError = ToolError | ModelVisibleToolError
 
 const storageSearchToolName = 'search_storage'
+
 const storageListSourcesToolName = 'list_storage_sources'
+
 const storageGetSourceToolName = 'get_storage_source'
+
 const defaultLimit = 8
+
 const maxLimit = 20
+
 const defaultContextChunks = 1
+
 const maxContextChunks = 5
+
 const maxQueries = 5
+
 const defaultSourceMaxChars = 12_000
+
 const maxSourceMaxChars = 40_000
 
 const StorageSearchParams = Schema.Struct({
@@ -65,6 +74,7 @@ const StorageGetSourceParams = Schema.Struct({
 })
 
 type StorageSearchParams = typeof StorageSearchParams.Type
+
 type StorageGetSourceParams = typeof StorageGetSourceParams.Type
 
 export type StorageSourceSummary = {
@@ -131,15 +141,7 @@ const storageGetSourceToolDescription = [
 const isStorageToolEnabled = (context: AgentToolContext) =>
   Effect.succeed(context.surface === 'text' || context.surface === 'voice')
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
-const makeToolError = (message: string, cause: ToolError['cause'], tool = storageSearchToolName) =>
-  new ToolError({
-    tool,
-    message,
-    cause
-  })
+const schemaErrorMessage = (error: Schema.SchemaError) => error.message
 
 const makeModelVisibleError = (message: string, tool = storageSearchToolName) =>
   modelVisibleToolError({
@@ -181,9 +183,11 @@ const normalizeMinScore = (value: number | undefined) => {
 const normalizeStorageSearchParams = (params: StorageSearchParams) =>
   Effect.gen(function* () {
     const queries = params.queries.map(query => query.trim()).filter(query => query.length > 0)
+
     if (queries.length === 0) {
       return yield* Effect.fail(makeModelVisibleError('queries must not be empty'))
     }
+
     if (queries.length > maxQueries) {
       return yield* Effect.fail(
         makeModelVisibleError(`queries must include at most ${maxQueries} items`)
@@ -197,6 +201,7 @@ const normalizeStorageSearchParams = (params: StorageSearchParams) =>
       minimum: 1,
       name: 'limit'
     })
+
     const contextChunks = yield* normalizeInteger({
       value: params.contextChunks,
       defaultValue: defaultContextChunks,
@@ -204,6 +209,7 @@ const normalizeStorageSearchParams = (params: StorageSearchParams) =>
       minimum: 0,
       name: 'contextChunks'
     })
+
     const minScore = yield* normalizeMinScore(params.minScore)
 
     return { queries, limit, minScore, contextChunks }
@@ -212,6 +218,7 @@ const normalizeStorageSearchParams = (params: StorageSearchParams) =>
 const normalizeStorageGetSourceParams = (params: StorageGetSourceParams) =>
   Effect.gen(function* () {
     const id = params.id.trim()
+
     if (id.length === 0) {
       return yield* Effect.fail(
         makeModelVisibleError('id must not be empty', storageGetSourceToolName)
@@ -231,18 +238,18 @@ const normalizeStorageGetSourceParams = (params: StorageGetSourceParams) =>
 
 const sourceLabel = (result: KnowledgeSearchResult) => {
   const title = result.document.title
+
   if (title !== undefined && title.length > 0) {
     return title
   }
 
-  switch (result.document.source._tag) {
-    case 'File':
-      return result.document.source.name ?? result.document.source.ref
-    case 'Url':
-      return result.document.source.url
-    case 'Text':
-      return result.document.source.label ?? result.document.id
-  }
+  return Match.value(result.document.source).pipe(
+    Match.tagsExhaustive({
+      File: source => source.name ?? source.ref,
+      Url: source => source.url,
+      Text: source => source.label ?? result.document.id
+    })
+  )
 }
 
 const resultText = (result: KnowledgeSearchResult) =>
@@ -366,10 +373,12 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
     parameters: StorageSearchParams,
     access: 'read',
     isEnabled: isStorageToolEnabled,
-    invalidParamsMessage: error => `Invalid storage search arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid storage search arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalizedParams = yield* normalizeStorageSearchParams(params)
+
         const items = yield* Effect.forEach(
           normalizedParams.queries,
           query =>
@@ -388,15 +397,7 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
           content: formatSearchResults(items),
           structuredContent: structuredSearchResult(items)
         })
-      }).pipe(
-        Effect.mapError(error =>
-          error instanceof ToolError
-            ? error
-            : error instanceof ModelVisibleToolError
-              ? error
-              : makeToolError(`Storage search failed: ${unknownToMessage(error)}`, 'execution')
-        )
-      )
+      })
   })
 
 const listSourcesTool = (
@@ -416,15 +417,6 @@ const listSourcesTool = (
             content: formatSources(sources),
             structuredContent: { sources }
           })
-        ),
-        Effect.mapError(error =>
-          error instanceof ToolError
-            ? error
-            : makeToolError(
-                `Storage source listing failed: ${unknownToMessage(error)}`,
-                'execution',
-                storageListSourcesToolName
-              )
         )
       )
   })
@@ -439,10 +431,11 @@ const getSourceTool = (
     access: 'read',
     isEnabled: isStorageToolEnabled,
     invalidParamsMessage: error =>
-      `Invalid storage source read arguments: ${unknownToMessage(error)}`,
+      `Invalid storage source read arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalizedParams = yield* normalizeStorageGetSourceParams(params)
+
         const source = yield* getSource({
           userId: context.userId,
           id: normalizedParams.id,
@@ -454,25 +447,14 @@ const getSourceTool = (
           content: formatSourceDetail(source),
           structuredContent: { source }
         })
-      }).pipe(
-        Effect.mapError(error =>
-          error instanceof ToolError
-            ? error
-            : error instanceof ModelVisibleToolError
-              ? error
-              : makeToolError(
-                  `Storage source read failed: ${unknownToMessage(error)}`,
-                  'execution',
-                  storageGetSourceToolName
-                )
-        )
-      )
+      })
   })
 
 const storageTools = (
   handlers: StorageKnowledgeSearchToolHandlers
 ): ToolModule<AgentToolContext>['tools'] => {
   const requiredTools = [searchTool(handlers.search)]
+
   const sourceTools = [
     ...(handlers.listSources === undefined ? [] : [listSourcesTool(handlers.listSources)]),
     ...(handlers.getSource === undefined ? [] : [getSourceTool(handlers.getSource)])
@@ -482,13 +464,8 @@ const storageTools = (
 }
 
 export const makeStorageSearchToolModule = (
-  searchOrHandlers: StorageSearchHandler | StorageKnowledgeSearchToolHandlers
-): ToolModule<AgentToolContext> => {
-  const handlers =
-    typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
-
-  return {
-    id: 'storage-search',
-    tools: storageTools(handlers)
-  }
-}
+  handlers: StorageKnowledgeSearchToolHandlers
+): ToolModule<AgentToolContext> => ({
+  id: 'storage-search',
+  tools: storageTools(handlers)
+})

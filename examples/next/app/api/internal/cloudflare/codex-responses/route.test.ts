@@ -1,9 +1,10 @@
+import { Arbitrary } from 'effect/unstable/arbitrary'
 import { Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { propertyOptions } from '../../../../../../../test/property/options'
 import { forwardedHeaders, forwardHeaderNames } from './route-model'
 
-const headersArbitrary = Schema.toArbitrary(Schema.Record(Schema.String, Schema.String))
+const headersArbitrary = Arbitrary.schema(Schema.Record(Schema.String, Schema.String))
 
 describe('Cloudflare Codex responses proxy', () => {
   it('forwards only allowlisted Codex headers', () => {
@@ -34,6 +35,7 @@ describe('Cloudflare Codex responses proxy', () => {
       const forwardedNames = Object.keys(forwarded)
 
       expect(forwardedNames.every(name => forwardHeaderNames.includes(name))).toBe(true)
+
       for (const name of forwardHeaderNames) {
         if (headers[name] === undefined) {
           expect(forwarded[name]).toBeUndefined()

@@ -10,6 +10,7 @@ import {
   VoiceUserTranscriptFinal,
   type VoiceEvent
 } from '@yolk-sdk/agent/voice'
+import { Match } from 'effect'
 import type { OpenAiRealtimeServerEvent } from './events.ts'
 
 /**
@@ -21,41 +22,41 @@ import type { OpenAiRealtimeServerEvent } from './events.ts'
 export const openAiRealtimeServerEventToVoiceEvents = (
   event: OpenAiRealtimeServerEvent
 ): ReadonlyArray<VoiceEvent> => {
-  switch (event._tag) {
-    case 'InputAudioTranscriptionDelta':
-      return [VoiceUserTranscriptDelta.make({ itemId: event.itemId, delta: event.delta })]
-    case 'InputAudioTranscriptionCompleted':
-      return [VoiceUserTranscriptFinal.make({ itemId: event.itemId, text: event.transcript })]
-    case 'OutputAudioTranscriptDelta':
-      return [
-        VoiceAssistantTranscriptDelta.make({
-          itemId: event.itemId,
-          responseId: event.responseId,
-          delta: event.delta
-        })
-      ]
-    case 'OutputAudioTranscriptDone':
-      return [
-        VoiceAssistantTranscriptFinal.make({
-          itemId: event.itemId,
-          responseId: event.responseId,
-          text: event.transcript
-        })
-      ]
-    case 'SessionConfigured':
-      return [
-        VoiceSessionOpened.make({
-          model: event.model,
-          transcriptionModel: event.transcriptionModel,
-          transcriptionLanguage: event.transcriptionLanguage
-        })
-      ]
-    case 'ResponseDone':
-      return event.status === 'cancelled'
-        ? [VoiceInterrupted.make({ responseId: event.responseId })]
+  return Match.value(event).pipe(
+    Match.tag('InputAudioTranscriptionDelta', current => [
+      VoiceUserTranscriptDelta.make({ itemId: current.itemId, delta: current.delta })
+    ]),
+    Match.tag('InputAudioTranscriptionCompleted', current => [
+      VoiceUserTranscriptFinal.make({ itemId: current.itemId, text: current.transcript })
+    ]),
+    Match.tag('OutputAudioTranscriptDelta', current => [
+      VoiceAssistantTranscriptDelta.make({
+        itemId: current.itemId,
+        responseId: current.responseId,
+        delta: current.delta
+      })
+    ]),
+    Match.tag('OutputAudioTranscriptDone', current => [
+      VoiceAssistantTranscriptFinal.make({
+        itemId: current.itemId,
+        responseId: current.responseId,
+        text: current.transcript
+      })
+    ]),
+    Match.tag('SessionConfigured', current => [
+      VoiceSessionOpened.make({
+        model: current.model,
+        transcriptionModel: current.transcriptionModel,
+        transcriptionLanguage: current.transcriptionLanguage
+      })
+    ]),
+    Match.tag('ResponseDone', current =>
+      current.status === 'cancelled'
+        ? [VoiceInterrupted.make({ responseId: current.responseId })]
         : []
-    case 'FunctionCalls': {
-      const [first, ...rest] = event.calls.map(call =>
+    ),
+    Match.tag('FunctionCalls', current => {
+      const [first, ...rest] = current.calls.map(call =>
         VoiceToolCall.make({
           callId: call.callId,
           name: call.name,
@@ -64,10 +65,11 @@ export const openAiRealtimeServerEventToVoiceEvents = (
       )
 
       return first === undefined ? [] : [VoiceToolCallsRequested.make({ calls: [first, ...rest] })]
-    }
-    case 'Error':
-      return [VoiceErrorEvent.make({ code: 'provider_error', message: event.message })]
-    case 'Ignored':
-      return []
-  }
+    }),
+    Match.tag('Error', current => [
+      VoiceErrorEvent.make({ code: 'provider_error', message: current.message })
+    ]),
+    Match.tag('Ignored', () => []),
+    Match.exhaustive
+  )
 }

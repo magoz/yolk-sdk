@@ -1,4 +1,4 @@
-import { Effect, Exit, Layer, Stream } from 'effect'
+import { Effect, Exit, Layer, Match, Option, Predicate, Stream } from 'effect'
 import {
   Headers,
   HttpClient,
@@ -82,6 +82,7 @@ const makeHttpClientLayer = (response: Response, requests: Array<CapturedRequest
 
 const settleTransport = async <A>(promise: Promise<A>): Promise<A> => {
   let timer: ReturnType<typeof setTimeout> | undefined
+
   try {
     return await Promise.race([
       promise,
@@ -135,10 +136,7 @@ describe('collectAgentEvents', () => {
     const headers = readCapturedHeaders(requests)
     expect(requests[0]?.request.url).toBe('/api/agent')
     expect(requests[0]?.request.method).toBe('POST')
-    expect(Headers.get(headers, 'content-type')).toMatchObject({
-      _tag: 'Some',
-      value: 'application/json'
-    })
+    expect(Headers.get(headers, 'content-type')).toMatchObject(Option.some('application/json'))
     expect(readCapturedBody(requests)).toBe(
       JSON.stringify({ sessionId: 'session_1', messages, reasoningEffort: 'high' })
     )
@@ -156,7 +154,7 @@ describe('collectAgentEvents', () => {
           httpClientLayer: makeHttpClientLayer(new Response('{"_tag":"Nope"}\n'), requests)
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
   })
 
   it.each([
@@ -181,6 +179,7 @@ describe('collectAgentEvents', () => {
     async (_, streamRun) => {
       const requests: Array<CapturedRequest> = []
       let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined
+
       const response = new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
@@ -189,18 +188,20 @@ describe('collectAgentEvents', () => {
           }
         })
       )
+
       const events = Stream.toAsyncIterable(
         streamRun({
           endpoint: '/api/agent/run_1',
           httpClientLayer: makeHttpClientLayer(response, requests)
         })
       )[Symbol.asyncIterator]()
+
       expect((await events.next()).value?._tag).toBe('AgentStart')
       bodyController?.error(new TypeError('Response body terminated'))
 
-      await expect(settleTransport(events.next())).rejects.toMatchObject({
-        _tag: 'AgentTransportError'
-      })
+      await expect(settleTransport(events.next())).rejects.toSatisfy(error =>
+        Predicate.isTagged(error, 'AgentTransportError')
+      )
     }
   )
 
@@ -208,6 +209,7 @@ describe('collectAgentEvents', () => {
     'propagates a host callback defect from %s without hanging or wrapping it',
     async mode => {
       const defect = new Error('Host callback defect')
+
       const request = {
         endpoint: '/api/agent/run_1',
         httpClientLayer: makeHttpClientLayer(new Response(encodeEvents([AgentStart.make({})])), []),
@@ -215,22 +217,30 @@ describe('collectAgentEvents', () => {
           throw defect
         }
       }
-      const stream =
-        mode === 'start'
-          ? streamAgentEventStreamUntilTerminal({
-              ...request,
-              sessionId: 'session_1',
-              messages: [UserMessage.make({ content: 'hello' })]
-            })
-          : mode === 'hitl'
-            ? streamAgentRunHitlResponseEventStreamUntilTerminal({ ...request, hitlResponses: [] })
-            : streamAgentRunEventStreamUntilTerminal(request)
+
+      const stream = Match.value(mode).pipe(
+        Match.when('start', () =>
+          streamAgentEventStreamUntilTerminal({
+            ...request,
+            sessionId: 'session_1',
+            messages: [UserMessage.make({ content: 'hello' })]
+          })
+        ),
+        Match.when('hitl', () =>
+          streamAgentRunHitlResponseEventStreamUntilTerminal({ ...request, hitlResponses: [] })
+        ),
+        Match.when('run', () => streamAgentRunEventStreamUntilTerminal(request)),
+        Match.exhaustive
+      )
+
       const exit = await settleTransport(Effect.runPromiseExit(Stream.runDrain(stream)))
       expect(Exit.isFailure(exit)).toBe(true)
+
       if (Exit.isFailure(exit)) {
         expect(exit.cause.reasons).toHaveLength(1)
         const reason = exit.cause.reasons[0]
         expect(reason?._tag).toBe('Die')
+
         if (reason?._tag === 'Die') expect(reason.defect).toBe(defect)
       }
     }
@@ -240,6 +250,7 @@ describe('collectAgentEvents', () => {
     const responseEvents = [
       AgentError.make({ code: 'provider_error', message: 'Provider failed', retryable: true })
     ]
+
     const requests: Array<CapturedRequest> = []
 
     const events = await Effect.runPromise(
@@ -317,6 +328,7 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
     const runIds: Array<string> = []
     const seen: Array<string> = []
+
     const events = await collectEventStream(
       streamAgentEventStreamUntilTerminal({
         endpoint: '/api/agent',
@@ -350,6 +362,7 @@ describe('collectAgentEvents', () => {
 
   it('continues existing durable runs from the requested start index', async () => {
     const requests: Array<CapturedRequest> = []
+
     const events = await collectEventStream(
       streamAgentRunEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
@@ -445,7 +458,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests).toEqual([])
   })
@@ -464,7 +477,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests).toEqual([])
   })
@@ -476,7 +489,9 @@ describe('collectAgentEvents', () => {
       decision: 'approved',
       source: 'user'
     })
+
     const requests: Array<CapturedRequest> = []
+
     const events = await collectEventStream(
       streamAgentRunHitlResponseEventStream({
         endpoint: '/api/agent/run_1',
@@ -501,7 +516,9 @@ describe('collectAgentEvents', () => {
       decision: 'approved',
       source: 'user'
     })
+
     const requests: Array<CapturedRequest> = []
+
     const events = await collectEventStream(
       streamAgentRunHitlResponseEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
@@ -536,7 +553,9 @@ describe('collectAgentEvents', () => {
       decision: 'approved',
       source: 'user'
     })
+
     const requests: Array<CapturedRequest> = []
+
     const events = await collectEventStream(
       streamAgentRunHitlResponseEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
@@ -570,6 +589,7 @@ describe('collectAgentEvents', () => {
   it('aborts empty continuation waits before polling again', async () => {
     const controller = new AbortController()
     const requests: Array<CapturedRequest> = []
+
     const eventsPromise = collectEventStream(
       streamAgentRunEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
@@ -592,7 +612,7 @@ describe('collectAgentEvents', () => {
           setTimeout(() => reject(new Error('Timed out waiting for abort')), 100)
         )
       ])
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests.map(item => item.request.url)).toEqual([
       '/api/agent/run_1',
@@ -616,7 +636,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
   })
 
   it('rejects when continuation limit is exhausted before terminal', async () => {
@@ -636,7 +656,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests.map(item => item.request.url)).toEqual([
       '/api/agent/run_1',
@@ -658,7 +678,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests.map(item => item.request.url)).toEqual([
       '/api/agent/run_1',
@@ -673,6 +693,7 @@ describe('collectAgentEvents', () => {
       decision: 'approved',
       source: 'user'
     })
+
     const requests: Array<CapturedRequest> = []
 
     await expect(
@@ -686,7 +707,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
   })
 
   it('rejects invalid durable continuation options', async () => {
@@ -703,7 +724,7 @@ describe('collectAgentEvents', () => {
           )
         })
       )
-    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+    ).rejects.toSatisfy(error => Predicate.isTagged(error, 'AgentTransportError'))
 
     expect(requests).toEqual([])
   })
@@ -725,6 +746,7 @@ describe('collectAgentEvents', () => {
   it('cancels the response body when event consumption stops', async () => {
     let cancelled = false
     const requests: Array<CapturedRequest> = []
+
     const response = new Response(
       new ReadableStream<Uint8Array>({
         start: controller => {
@@ -735,6 +757,7 @@ describe('collectAgentEvents', () => {
         }
       })
     )
+
     const events = Stream.toAsyncIterable(
       streamAgentEventStream({
         sessionId: 'session_1',
@@ -742,11 +765,14 @@ describe('collectAgentEvents', () => {
         httpClientLayer: makeHttpClientLayer(response, requests)
       })
     )[Symbol.asyncIterator]()
+
     const firstEvent = await events.next()
 
-    expect(firstEvent).toMatchObject({ done: false, value: { _tag: 'AgentStart' } })
+    expect(firstEvent.done).toBe(false)
+    expect(Predicate.isTagged(firstEvent.value, 'AgentStart')).toBe(true)
 
     const returnEvents = events.return
+
     if (returnEvents === undefined) {
       throw new Error('Expected async iterator return')
     }
@@ -761,6 +787,7 @@ describe('collectAgentEvents', () => {
     let closed = false
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined
     const requests: Array<CapturedRequest> = []
+
     const awaitingInput = AgentAwaitingInput.make({
       requests: [
         ToolApprovalRequest.make({
@@ -773,6 +800,7 @@ describe('collectAgentEvents', () => {
       turns: 1,
       usage: zeroAgentUsage
     })
+
     const response = new Response(
       new ReadableStream<Uint8Array>({
         start: streamController => {
@@ -787,12 +815,14 @@ describe('collectAgentEvents', () => {
         }
       })
     )
+
     const closeResponseBody = () => {
       if (controller === undefined || closed) return
 
       closed = true
       controller.close()
     }
+
     const eventsPromise = Effect.runPromise(
       collectAgentEvents({
         sessionId: 'session_1',
@@ -830,6 +860,7 @@ describe('collectAgentEvents', () => {
 
     try {
       const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
+
       const eventsPromise = collectEventStream(
         streamCloudflareAgentEventStream({
           webSocketUrl: 'wss://worker.example/connect/session_1',
@@ -856,11 +887,7 @@ describe('collectAgentEvents', () => {
       const events = await eventsPromise
 
       expect(socket.sent).toEqual([
-        JSON.stringify({
-          message: { _tag: 'User', content: 'hello' },
-          expectedRevision: 7,
-          _tag: 'UserInput'
-        })
+        '{"_tag":"UserInput","message":{"_tag":"User","content":"hello"},"expectedRevision":7}'
       ])
       expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
       expect(socket.closeCalls).toEqual([{ code: 1000, reason: 'done' }])
@@ -917,7 +944,7 @@ class FakeWebSocket {
 
   private dispatch(event: Event) {
     for (const listener of this.listeners.get(event.type) ?? []) {
-      if (typeof listener === 'function') {
+      if (Predicate.isFunction(listener)) {
         listener(event)
       } else {
         listener.handleEvent(event)
@@ -946,9 +973,11 @@ const waitForRequestCount = async (requests: ReadonlyArray<CapturedRequest>, cou
 const waitForSocket = async () => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const socket = FakeWebSocket.instances[0]
+
     if (socket !== undefined) {
       return socket
     }
+
     await wait()
   }
 
@@ -957,6 +986,7 @@ const waitForSocket = async () => {
 
 const firstSocket = () => {
   const socket = FakeWebSocket.instances[0]
+
   if (socket === undefined) {
     throw new Error('Expected WebSocket instance')
   }
@@ -969,6 +999,7 @@ const waitForSent = async (socket: FakeWebSocket) => {
     if (socket.sent.length > 0) {
       return
     }
+
     await wait()
   }
 

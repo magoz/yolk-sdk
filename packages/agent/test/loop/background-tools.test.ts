@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Predicate, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -29,29 +29,35 @@ import {
 
 const call = (id = 'bg', mode = 'background', value = 'work') =>
   ToolCall.make({ id, name: 'work', params: { execution: mode, arguments: { value } } })
+
 const receipt = BackgroundToolAccepted.make({ version: 1, executionId: 'owner:bg' })
-const setFor = (host: BackgroundToolHost<unknown>, manual = false) =>
-  resolveTools(
+
+const setFor = (host: BackgroundToolHost<unknown>, manual = false) => {
+  const tool = {
+    name: 'work',
+    description: '',
+    access: 'write' as const,
+    background: true as const,
+    parameters: Schema.Struct({ value: Schema.String }),
+    execute: ({ call }: { readonly call: ToolCall }) =>
+      Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'inline' }))
+  }
+
+  return resolveTools(
     [
       {
         id: 'test',
         tools: [
-          makeTool({
-            name: 'work',
-            description: '',
-            access: 'write',
-            background: true,
-            ...(manual ? { approval: ToolApprovalPolicy.make({ mode: 'manual' }) } : {}),
-            parameters: Schema.Struct({ value: Schema.String }),
-            execute: ({ call }) =>
-              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'inline' }))
-          })
+          makeTool(
+            manual ? { ...tool, approval: ToolApprovalPolicy.make({ mode: 'manual' }) } : tool
+          )
         ]
       }
     ],
     {},
     { backgroundHost: host }
   )
+}
 
 const response = (requestId: string, decision: 'approved' | 'denied' = 'approved') =>
   ToolApprovalResponse.make({ requestId, toolCallId: 'bg', decision, source: 'user' })
@@ -62,31 +68,39 @@ describe('background loop admission', () => {
     () =>
       Effect.gen(function* () {
         let admissions = 0
+
         const host: BackgroundToolHost<unknown> = {
           accept: () => {
             admissions++
+
             return Effect.succeed(receipt)
           }
         }
+
         const gated = yield* setFor(host, true)
         const automatic = yield* setFor(host)
         const sibling = ToolCall.make({ ...call('sibling'), name: 'automatic' })
+
         const tools = [
           ...gated.tools,
           ...automatic.tools.map(def => ({ ...def, name: 'automatic' }))
         ]
+
         const first = yield* prepareToolBatch({ calls: [sibling, call()], tools, responses: [] })
         expect(first.callsToExecute).toHaveLength(1)
         expect(first.pendingRequests).toHaveLength(1)
+
         const events = yield* runToolBatch({ calls: [sibling, call()], tools }).pipe(
           Stream.runCollect,
           Effect.provide(Layer.merge(LoopConfig.defaultLayer, makeToolExecutorLayer(gated)))
         )
+
         expect(events.map(event => event._tag)).toContain('AgentAwaitingInput')
         expect(events.map(event => event._tag)).not.toContain('ToolExecutionStarted')
         expect(admissions).toBe(0)
         const pending = first.pendingRequests[0]
         expect(pending?.call.params).toEqual(call().params)
+
         const approved = yield* runToolBatch({
           calls: [call()],
           tools: gated.tools,
@@ -95,6 +109,7 @@ describe('background loop admission', () => {
           Stream.runCollect,
           Effect.provide(Layer.merge(LoopConfig.defaultLayer, makeToolExecutorLayer(gated)))
         )
+
         expect(approved.map(event => event._tag)).toEqual([
           'ToolApprovalGranted',
           'ToolExecutionStarted',
@@ -109,8 +124,10 @@ describe('background loop admission', () => {
     () =>
       Effect.gen(function* () {
         const set = yield* setFor({ accept: () => Effect.succeed(receipt) }, true)
+
         const prepare = (current: ToolCall, responses: readonly ToolApprovalResponse[] = []) =>
           prepareToolBatch({ calls: [current], tools: set.tools, responses })
+
         const pending = (yield* prepare(call())).pendingRequests[0]
         const approved = response(pending?.requestId ?? '')
         expect((yield* prepare(call(), [approved])).pendingRequests).toEqual([])
@@ -123,14 +140,17 @@ describe('background loop admission', () => {
             [approved]
           )).pendingRequests
         ).toEqual([])
+
         for (const changed of [call('bg', 'foreground'), call('bg', 'background', 'changed')]) {
           expect((yield* prepare(changed, [approved])).pendingRequests).toHaveLength(1)
         }
+
         // An omitted mode is not an approvable variant: it is rejected before any prompt.
         const omitted = yield* prepare(
           ToolCall.make({ ...call(), params: { arguments: { value: 'work' } } }),
           [approved]
         )
+
         expect(omitted.pendingRequests).toEqual([])
         expect(omitted.callsToExecute).toEqual([])
         expect(omitted.resultMessages[0]?.message).toMatchObject({ isError: true })
@@ -146,14 +166,18 @@ describe('background loop admission', () => {
     () =>
       Effect.gen(function* () {
         let admissions = 0
+
         const host: BackgroundToolHost<unknown> = {
           accept: () => {
             admissions++
+
             return Effect.succeed(receipt)
           }
         }
+
         const gated = yield* setFor(host, true)
         const automatic = yield* setFor(host)
+
         const malformed = [
           ToolCall.make({ id: 'bg', name: 'work', params: { arguments: { value: 'work' } } }),
           ToolCall.make({
@@ -168,6 +192,7 @@ describe('background loop admission', () => {
           }),
           ToolCall.make({ id: 'bg', name: 'work', params: { value: 'work' } })
         ]
+
         for (const set of [gated, automatic]) {
           for (const current of malformed) {
             const prepared = yield* prepareToolBatch({
@@ -175,6 +200,7 @@ describe('background loop admission', () => {
               tools: set.tools,
               responses: []
             })
+
             expect(prepared.pendingRequests).toEqual([])
             expect(prepared.callsToExecute).toEqual([])
             expect(prepared.resultMessages).toMatchObject([
@@ -185,6 +211,7 @@ describe('background loop admission', () => {
             ])
           }
         }
+
         const events = yield* runToolBatch({
           calls: [malformed[0] ?? call()],
           tools: automatic.tools
@@ -192,8 +219,10 @@ describe('background loop admission', () => {
           Stream.runCollect,
           Effect.provide(Layer.merge(LoopConfig.defaultLayer, makeToolExecutorLayer(automatic)))
         )
+
         expect(events.map(event => event._tag)).not.toContain('ToolExecutionStarted')
         expect(admissions).toBe(0)
+
         // Non-activated foreground registrations keep the legacy approval identity and raw params.
         const legacy = yield* resolveTools(
           [
@@ -214,11 +243,13 @@ describe('background loop admission', () => {
           ],
           {}
         )
+
         const legacyPending = yield* prepareToolBatch({
           calls: [ToolCall.make({ id: 'bg', name: 'work', params: { value: 'work' } })],
           tools: legacy.tools,
           responses: []
         })
+
         expect(legacyPending.pendingRequests[0]?.requestId).toBe('approval:bg')
       })
   )
@@ -229,6 +260,7 @@ describe('background loop admission', () => {
       Effect.gen(function* () {
         const set = yield* setFor({ accept: () => Effect.succeed(receipt) })
         const requests: LLMRequest[] = []
+
         const events = yield* run({
           model: 'fake',
           systemPrompt: '',
@@ -248,27 +280,37 @@ describe('background loop admission', () => {
             )
           )
         )
-        expect(events.filter(event => event._tag === 'ToolExecutionAccepted')).toHaveLength(1)
+
+        expect(
+          events.filter(event => Predicate.isTagged(event, 'ToolExecutionAccepted'))
+        ).toHaveLength(1)
         expect(
           events.filter(
-            event => event._tag === 'ToolExecutionCompleted' || event._tag === 'SubagentCompleted'
+            event =>
+              Predicate.isTagged(event, 'ToolExecutionCompleted') ||
+              Predicate.isTagged(event, 'SubagentCompleted')
           )
         ).toEqual([])
         expect(requests).toHaveLength(2)
         expect(
-          requests[1]?.messages.filter(message => message._tag === 'ToolResult')
+          requests[1]?.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
         ).toMatchObject([{ toolCallId: 'bg', acceptance: receipt }])
-        const end = events.find(event => event._tag === 'AgentEnd')
+        const end = events.find(event => Predicate.isTagged(event, 'AgentEnd'))
         expect(end?.usage).toEqual(zeroAgentUsage)
-        expect(end?.messages.filter(message => message._tag === 'ToolResult')).toHaveLength(1)
+        expect(
+          end?.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
+        ).toHaveLength(1)
         // Replayed acknowledgement settles the original call; it is never admitted again on resume.
         let readmissions = 0
+
         const replaySet = yield* setFor({
           accept: () => {
             readmissions++
+
             return Effect.succeed(receipt)
           }
         })
+
         yield* run({
           model: 'fake',
           systemPrompt: '',
@@ -299,6 +341,7 @@ describe('background loop admission', () => {
               )
             : Effect.succeed(receipt)
       })
+
       const events = yield* runToolBatch({
         calls: [call('accepted'), call('fail')],
         tools: set.tools
@@ -306,12 +349,13 @@ describe('background loop admission', () => {
         Stream.runCollect,
         Effect.provide(Layer.merge(LoopConfig.defaultLayer, makeToolExecutorLayer(set)))
       )
-      expect(events.filter(event => event._tag === 'ToolExecutionAccepted')).toMatchObject([
-        { result: { toolCallId: 'accepted', acceptance: receipt } }
-      ])
-      expect(events.filter(event => event._tag === 'ToolExecutionCompleted')).toMatchObject([
-        { result: { toolCallId: 'fail', isError: true } }
-      ])
+
+      expect(
+        events.filter(event => Predicate.isTagged(event, 'ToolExecutionAccepted'))
+      ).toMatchObject([{ result: { toolCallId: 'accepted', acceptance: receipt } }])
+      expect(
+        events.filter(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject([{ result: { toolCallId: 'fail', isError: true } }])
     })
   )
 })
@@ -323,11 +367,13 @@ it.effect(
       const set = yield* setFor({ accept: () => Effect.succeed(receipt) }, true)
       const value = 'long payload 🔐'.repeat(1000)
       const original = call('bg', 'background', value)
+
       const pending = yield* prepareToolBatch({
         calls: [original],
         tools: set.tools,
         responses: []
       })
+
       const id = pending.pendingRequests[0]?.requestId
       expect(id).toBe(
         `approval:bg:background-v1:${JSON.stringify({ arguments: { value }, execution: 'background', name: 'work' })}`

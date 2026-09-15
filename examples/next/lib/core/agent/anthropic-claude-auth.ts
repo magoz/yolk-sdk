@@ -23,6 +23,7 @@ type AnthropicClaudeAccount = {
 const selectAnthropicClaudeAccount = (userId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [account] = yield* db
       .select({
         id: schema.account.id,
@@ -73,6 +74,7 @@ const tokenFromAccount = (account: AnthropicClaudeAccount) =>
 export const hasAnthropicClaudeAuth = (userId: string) =>
   Effect.gen(function* () {
     const account = yield* selectAnthropicClaudeAccount(userId)
+
     return account !== undefined
   }).pipe(Effect.withSpan('agent.anthropicClaudeAuth.has'))
 
@@ -95,6 +97,7 @@ export const saveAnthropicClaudeToken = (input: {
         refreshToken: input.token.refresh,
         accessTokenExpiresAt: expiresAt
       })
+
       return
     }
 

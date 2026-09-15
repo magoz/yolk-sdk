@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { searchUserKnowledgeAction } from '@/lib/core/knowledge/search-user-knowledge-action'
 import type { KnowledgeSearchActionResult } from '@/lib/core/knowledge/search-user-knowledge-action-result'
+import { Predicate } from 'effect'
 
 type SearchResult = Extract<
   KnowledgeSearchActionResult,
@@ -33,14 +34,17 @@ export function SearchKnowledgeForm() {
         onSubmit={event => {
           event.preventDefault()
           const trimmed = query.trim()
+
           if (trimmed.length === 0) {
             setMessage('Enter a query')
+
             return
           }
 
           startTransition(async () => {
             const result = await searchUserKnowledgeAction({ query: trimmed, limit: 6 })
-            if (result._tag === 'Success') {
+
+            if (Predicate.isTagged(result, 'Success')) {
               setResults(result.results)
               setMessage(
                 result.results.length === 0 ? 'No matches' : `${result.results.length} matches`

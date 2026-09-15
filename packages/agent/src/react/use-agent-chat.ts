@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { Effect, Fiber, Option, Stream } from 'effect'
 import {
+  AgentTransportError,
   appendAgentMessage,
   streamAgentEventStream,
   type AgentTranscript,
@@ -20,11 +21,22 @@ import {
   type ToolApprovalResponse
 } from '@yolk-sdk/agent/protocol'
 import {
+  AgentChatAction,
+  AgentChatDeleteTurnResult as AgentChatDeleteTurnResultValue,
+  AgentChatEditUserMessageResult as AgentChatEditUserMessageResultValue,
+  AgentChatHitlResponseResult as AgentChatHitlResponseResultValue,
+  AgentChatRegenerateResult as AgentChatRegenerateResultValue,
+  AgentChatSubmitResult as AgentChatSubmitResultValue
+} from './chat-actions.ts'
+import {
   hasAgentChatReasoningSummary,
   initialAgentChatState,
   reduceAgentChatState
 } from './chat-core.ts'
 import {
+  DeleteChatTurnResult,
+  EditChatUserMessageResult,
+  RegenerateChatMessagesResult,
   deleteChatTurn,
   editChatUserMessage,
   regenerateChatMessagesFrom,
@@ -91,10 +103,18 @@ export type AgentChatHitlResponseResult =
     }
   | { readonly _tag: 'Ignored' }
 
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : 'Agent request failed'
+const admitAgentChatTransportCause = (error: unknown): AgentTransportError =>
+  error instanceof AgentTransportError
+    ? error
+    : new AgentTransportError({
+        message: error instanceof Error ? error.message : 'Agent request failed',
+        cause: error
+      })
 
-const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
+const errorMessage = (error: AgentTransportError) => error.message
+
+const isAbortError = (error: AgentTransportError) =>
+  error.cause instanceof Error && error.cause.name === 'AbortError'
 
 const defaultNowMs = () => globalThis.performance?.now() ?? 0
 
@@ -120,10 +140,12 @@ export function useAgentChat({
 }: UseAgentChatOptions) {
   const [state, dispatch] = useReducer(reduceAgentChatState, initialMessages ?? [], messages =>
     messages.reduce(
-      (current, message) => reduceAgentChatState(current, { _tag: 'HydrateMessage', message }),
+      (current, message) =>
+        reduceAgentChatState(current, AgentChatAction.HydrateMessage({ message })),
       initialAgentChatState
     )
   )
+
   const abortControllerRef = useRef<AbortController | null>(null)
   const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null)
   const isRunning = state.status === 'running'
@@ -132,7 +154,7 @@ export function useAgentChat({
   const applyEvent = useCallback(
     (event: AgentEvent) => {
       onEvent?.(event)
-      dispatch({ _tag: 'Event', event, nowMs: nowMs() })
+      dispatch(AgentChatAction.Event({ event, nowMs: nowMs() }))
     },
     [nowMs, onEvent]
   )
@@ -140,18 +162,18 @@ export function useAgentChat({
   const fail = useCallback(
     (message: string) => {
       onError?.(message)
-      dispatch({ _tag: 'Error', message })
+      dispatch(AgentChatAction.Error({ message }))
     },
     [onError]
   )
 
   const markAborted = useCallback(() => {
     onAbort?.()
-    dispatch({ _tag: 'Abort' })
+    dispatch(AgentChatAction.Abort())
   }, [onAbort])
 
   const appendMessage = useCallback((message: AgentMessage) => {
-    dispatch({ _tag: 'AppendMessage', message })
+    dispatch(AgentChatAction.AppendMessage({ message }))
   }, [])
 
   const makeTransportRequest = useCallback(
@@ -172,18 +194,20 @@ export function useAgentChat({
     (messages: AgentTranscript, hitlResponses?: ReadonlyArray<HitlResponse>) => {
       const controller = new AbortController()
       abortControllerRef.current = controller
+
       const clearController = Effect.sync(() => {
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null
           fiberRef.current = null
         }
       })
+
       const eventStream =
         transport === undefined
           ? streamAgentEventStream(makeTransportRequest(messages, controller.signal, hitlResponses))
           : Stream.fromAsyncIterable(
               transport(makeTransportRequest(messages, controller.signal, hitlResponses)),
-              error => error
+              admitAgentChatTransportCause
             )
 
       const fiber = Effect.runFork(
@@ -194,6 +218,7 @@ export function useAgentChat({
               Effect.sync(() => {
                 if (controller.signal.aborted || isAbortError(caught)) {
                   markAborted()
+
                   return
                 }
 
@@ -204,6 +229,7 @@ export function useAgentChat({
           Effect.ensuring(clearController)
         )
       )
+
       fiberRef.current = fiber
     },
     [applyEvent, fail, makeTransportRequest, markAborted, transport]
@@ -229,15 +255,19 @@ export function useAgentChat({
   const submitMessage = useCallback(
     (message: UserMessage): AgentChatSubmitResult => {
       if (!canSubmitContent(message.content)) {
-        return { _tag: 'Ignored' }
+        return AgentChatSubmitResultValue.Ignored()
       }
 
       const messages = appendAgentMessage(toAgentMessages(state.chatMessages), message)
 
-      dispatch({ _tag: 'Submit', message })
+      dispatch(AgentChatAction.Submit({ message }))
       runAgent(messages)
 
-      return { _tag: 'Submitted', content: message.content, message, messages }
+      return AgentChatSubmitResultValue.Submitted({
+        content: message.content,
+        message,
+        messages
+      })
     },
     [canSubmitContent, runAgent, state.chatMessages]
   )
@@ -247,7 +277,7 @@ export function useAgentChat({
       const content = value.trim()
 
       if (!canSubmitText(content)) {
-        return { _tag: 'Ignored' }
+        return AgentChatSubmitResultValue.Ignored()
       }
 
       return submitMessage(UserMessage.make({ content }))
@@ -258,22 +288,21 @@ export function useAgentChat({
   const deleteTurn = useCallback(
     (messageId: string): AgentChatDeleteTurnResult => {
       if (isRunning || isWaiting || abortControllerRef.current !== null) {
-        return { _tag: 'Ignored' }
+        return AgentChatDeleteTurnResultValue.Ignored()
       }
 
       const next = deleteChatTurn(state.chatMessages, messageId)
 
-      if (next._tag === 'NotFound') {
-        return { _tag: 'Ignored' }
+      if (DeleteChatTurnResult.$is('NotFound')(next)) {
+        return AgentChatDeleteTurnResultValue.Ignored()
       }
 
-      dispatch({ _tag: 'DeleteTurn', messageId })
+      dispatch(AgentChatAction.DeleteTurn({ messageId }))
 
-      return {
-        _tag: 'Deleted',
+      return AgentChatDeleteTurnResultValue.Deleted({
         turnStartMessageId: next.turnStartMessageId,
         deletedMessageIds: next.deletedMessageIds
-      }
+      })
     },
     [isRunning, isWaiting, state.chatMessages]
   )
@@ -281,25 +310,25 @@ export function useAgentChat({
   const regenerateFrom = useCallback(
     (messageId: string): AgentChatRegenerateResult => {
       if (isRunning || isWaiting || abortControllerRef.current !== null) {
-        return { _tag: 'Ignored' }
+        return AgentChatRegenerateResultValue.Ignored()
       }
 
       const next = regenerateChatMessagesFrom(state.chatMessages, messageId)
 
-      if (next._tag === 'NotFound') {
-        return { _tag: 'Ignored' }
+      if (RegenerateChatMessagesResult.$is('NotFound')(next)) {
+        return AgentChatRegenerateResultValue.Ignored()
       }
 
       const messages = toAgentMessages(next.messages)
       const transcript = transcriptFromChatMessages(messages)
 
       return Option.match(transcript, {
-        onNone: () => ({ _tag: 'Ignored' }),
+        onNone: () => AgentChatRegenerateResultValue.Ignored(),
         onSome: value => {
-          dispatch({ _tag: 'RegenerateFrom', messageId })
+          dispatch(AgentChatAction.RegenerateFrom({ messageId }))
           runAgent(value)
 
-          return { _tag: 'Regenerated', messageId, messages: value }
+          return AgentChatRegenerateResultValue.Regenerated({ messageId, messages: value })
         }
       })
     },
@@ -314,27 +343,30 @@ export function useAgentChat({
         isWaiting ||
         abortControllerRef.current !== null
       ) {
-        return { _tag: 'Ignored' }
+        return AgentChatEditUserMessageResultValue.Ignored()
       }
 
       const next = editChatUserMessage(state.chatMessages, messageId, content)
 
-      if (next._tag !== 'Edited') {
-        return { _tag: 'Ignored' }
+      if (EditChatUserMessageResult.$is('Edited')(next)) {
+        const messages = toAgentMessages(next.messages)
+        const transcript = transcriptFromChatMessages(messages)
+
+        return Option.match(transcript, {
+          onNone: () => AgentChatEditUserMessageResultValue.Ignored(),
+          onSome: value => {
+            dispatch(AgentChatAction.EditUserMessage({ messageId, content }))
+            runAgent(value)
+
+            return AgentChatEditUserMessageResultValue.Edited({
+              messageId: next.messageId,
+              messages: value
+            })
+          }
+        })
       }
 
-      const messages = toAgentMessages(next.messages)
-      const transcript = transcriptFromChatMessages(messages)
-
-      return Option.match(transcript, {
-        onNone: () => ({ _tag: 'Ignored' }),
-        onSome: value => {
-          dispatch({ _tag: 'EditUserMessage', messageId, content })
-          runAgent(value)
-
-          return { _tag: 'Edited', messageId: next.messageId, messages: value }
-        }
-      })
+      return AgentChatEditUserMessageResultValue.Ignored()
     },
     [isRunning, isWaiting, runAgent, state.chatMessages]
   )
@@ -342,18 +374,18 @@ export function useAgentChat({
   const submitHitlResponse = useCallback(
     (response: HitlResponse): AgentChatHitlResponseResult => {
       if (!canSubmitHitlResponse()) {
-        return { _tag: 'Ignored' }
+        return AgentChatHitlResponseResultValue.Ignored()
       }
 
       const transcript = transcriptFromChatMessages(toAgentMessages(state.chatMessages))
 
       return Option.match(transcript, {
-        onNone: () => ({ _tag: 'Ignored' }),
+        onNone: () => AgentChatHitlResponseResultValue.Ignored(),
         onSome: messages => {
-          dispatch({ _tag: 'SubmitHitlResponse', response })
+          dispatch(AgentChatAction.SubmitHitlResponse({ response }))
           runAgent(messages, [response])
 
-          return { _tag: 'Submitted', response, messages }
+          return AgentChatHitlResponseResultValue.Submitted({ response, messages })
         }
       })
     },
@@ -373,13 +405,17 @@ export function useAgentChat({
   const stop = useCallback(() => {
     const controller = abortControllerRef.current
     const fiber = fiberRef.current
+
     if (controller === null && fiber === null && !isRunning) {
       return
     }
+
     controller?.abort()
+
     if (fiber !== null) {
       Effect.runFork(Fiber.interrupt(fiber))
     }
+
     markAborted()
   }, [isRunning, markAborted])
 
@@ -387,6 +423,7 @@ export function useAgentChat({
     () => () => {
       abortControllerRef.current?.abort()
       const fiber = fiberRef.current
+
       if (fiber !== null) {
         Effect.runFork(Fiber.interrupt(fiber))
       }

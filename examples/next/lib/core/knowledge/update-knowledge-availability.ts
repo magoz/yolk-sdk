@@ -12,6 +12,7 @@ export const updateKnowledgeAvailability = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [document] = yield* db
       .update(schema.userKnowledgeDocument)
       .set({

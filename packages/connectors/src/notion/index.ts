@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Effect, Match, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
@@ -9,8 +9,11 @@ import { ActionResult, ProviderFailure } from '../result.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
 export const notionConnectorId = 'notion'
+
 export const notionApiTokenSlotId = 'notion.api_token'
+
 export const notionApiBaseUrl = 'https://api.notion.com/v1'
+
 export const notionVersion = '2025-09-03'
 
 export const NotionApiTokenSlot = CredentialSlot.make({
@@ -19,6 +22,7 @@ export const NotionApiTokenSlot = CredentialSlot.make({
 })
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
+
 const isJsonObject = Schema.is(JsonObject)
 
 export const notionAuthorizationHeaders = (token: string) => ({
@@ -29,10 +33,11 @@ export const notionAuthorizationHeaders = (token: string) => ({
 const isSuccessStatus = (status: number) => status >= 200 && status < 300
 
 const decodeJsonObject = (body: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(body).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(body).pipe(
     Effect.result,
     Effect.map(result => {
       if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+
       return result.success
     })
   )
@@ -41,10 +46,13 @@ const jsonMessageField = (body: string, keys: ReadonlyArray<string>) =>
   decodeJsonObject(body).pipe(
     Effect.map(parsed => {
       if (parsed === undefined) return undefined
+
       for (const key of keys) {
         const value = parsed[key]
-        if (typeof value === 'string' && value.trim() !== '') return value
+
+        if (Predicate.isString(value) && value.trim() !== '') return value
       }
+
       return undefined
     })
   )
@@ -77,15 +85,12 @@ const resolveNotionToken = (integration: ConnectorIntegration) =>
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, NotionApiTokenSlot)
 
-    switch (credential._tag) {
-      case 'ApiKeyCredential':
-        return credential.key
-      case 'BearerTokenCredential':
-        return credential.token
-      case 'OAuthCredential':
-        return credential.accessToken
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
+    return yield* Match.value(credential).pipe(
+      Match.tag('ApiKeyCredential', current => Effect.succeed(current.key)),
+      Match.tag('BearerTokenCredential', current => Effect.succeed(current.token)),
+      Match.tag('OAuthCredential', current => Effect.succeed(current.accessToken)),
+      Match.tag('UsernamePasswordCredential', () =>
+        Effect.fail(
           new ConnectorError({
             cause: 'credential_invalid',
             message: 'Notion connector does not accept username/password credentials',
@@ -93,7 +98,9 @@ const resolveNotionToken = (integration: ConnectorIntegration) =>
             slotId: NotionApiTokenSlot.id
           })
         )
-    }
+      ),
+      Match.exhaustive
+    )
   })
 
 export const NotionRichText = Schema.Struct({
@@ -317,11 +324,6 @@ const pageParent = (input: NotionCreatePageInput) => {
   return undefined
 }
 
-const unknownField = (value: unknown, key: string) => {
-  if (!isJsonObject(value)) return undefined
-  return value[key]
-}
-
 const pageProperties = (propertyName: string, title: string | undefined) => ({
   [propertyName]: {
     title: [
@@ -334,11 +336,25 @@ const pageProperties = (propertyName: string, title: string | undefined) => ({
   }
 })
 
-const hasDatabaseLikeParent = (input: NotionCreatePageInput) =>
-  input.parentDatabaseId !== undefined ||
-  input.parentDataSourceId !== undefined ||
-  unknownField(input.parent, 'database_id') !== undefined ||
-  unknownField(input.parent, 'data_source_id') !== undefined
+const hasDatabaseLikeParent = (input: NotionCreatePageInput) => {
+  if (input.parentDatabaseId !== undefined) {
+    return true
+  }
+
+  if (input.parentDataSourceId !== undefined) {
+    return true
+  }
+
+  const databaseParent = input.parent
+
+  if (isJsonObject(databaseParent) && databaseParent['database_id'] !== undefined) {
+    return true
+  }
+
+  const dataSourceParent = input.parent
+
+  return isJsonObject(dataSourceParent) && dataSourceParent['data_source_id'] !== undefined
+}
 
 const createPageProperties = (input: NotionCreatePageInput) =>
   Effect.gen(function* () {
@@ -367,6 +383,7 @@ const requireNotionDataSourceId = (
 ) =>
   Effect.gen(function* () {
     const dataSourceId = input.data_source_id ?? input.dataSourceId
+
     if (dataSourceId !== undefined) return dataSourceId
 
     return yield* Effect.fail(
@@ -382,6 +399,7 @@ const requireNotionDataSourceId = (
 const requireNotionRichText = (input: NotionCreateCommentInput) =>
   Effect.gen(function* () {
     const richText = input.rich_text ?? input.richText
+
     if (richText !== undefined) return richText
 
     return yield* Effect.fail(
@@ -429,6 +447,7 @@ const notionJsonAction = (
     }
 
     const output = yield* decodeJsonResponse(Schema.Unknown, response)
+
     return ActionResult.success(output)
   })
 
@@ -460,6 +479,7 @@ export const notionSearchAction = defineAction({
     Effect.gen(function* () {
       const token = yield* resolveNotionToken(integration)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -487,6 +507,7 @@ export const notionSearchAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(NotionSearchApiOutput, response)
+
       return ActionResult.success(
         NotionSearchOutput.make({
           results: output.results,
@@ -506,6 +527,7 @@ export const notionGetPageAction = defineAction({
     Effect.gen(function* () {
       const token = yield* resolveNotionToken(integration)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -524,6 +546,7 @@ export const notionGetPageAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(NotionPage, response)
+
       return ActionResult.success(output)
     })
 })
@@ -536,6 +559,7 @@ export const notionCreatePageAction = defineAction({
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const parent = pageParent(input)
+
       if (parent === undefined) {
         return yield* Effect.fail(
           new ConnectorError({
@@ -550,6 +574,7 @@ export const notionCreatePageAction = defineAction({
       const token = yield* resolveNotionToken(integration)
       const http = yield* ConnectorHttpClient
       const properties = yield* createPageProperties(input)
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -576,6 +601,7 @@ export const notionCreatePageAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(NotionPage, response)
+
       return ActionResult.success(output)
     })
 })
@@ -619,9 +645,12 @@ export const notionGetPageContentAction = defineAction({
           method: 'GET',
           path: `/blocks/${encodeURIComponent(input.blockId)}/children${(() => {
             const params = new URLSearchParams()
+
             if (input.pageSize !== undefined) params.set('page_size', String(input.pageSize))
+
             if (input.startCursor !== undefined) params.set('start_cursor', input.startCursor)
             const query = params.toString()
+
             return query === '' ? '' : `?${query}`
           })()}`
         }),
@@ -810,6 +839,7 @@ export const notionGetDataSourceAction = defineAction({
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const dataSourceId = yield* requireNotionDataSourceId(input, 'notion.get_data_source')
+
       return yield* notionJsonAction(
         integration,
         token =>
@@ -832,6 +862,7 @@ export const notionQueryDataSourceAction = defineAction({
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const dataSourceId = yield* requireNotionDataSourceId(input, 'notion.query_data_source')
+
       return yield* notionJsonAction(
         integration,
         token =>
@@ -884,6 +915,7 @@ export const notionUpdateDataSourceAction = defineAction({
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const dataSourceId = yield* requireNotionDataSourceId(input, 'notion.update_data_source')
+
       return yield* notionJsonAction(
         integration,
         token =>
@@ -909,9 +941,12 @@ export const notionGetPagePropertyAction = defineAction({
       integration,
       token => {
         const params = new URLSearchParams()
+
         if (input.pageSize !== undefined) params.set('page_size', String(input.pageSize))
+
         if (input.startCursor !== undefined) params.set('start_cursor', input.startCursor)
         const query = params.toString()
+
         return notionRequest({
           token,
           method: 'GET',
@@ -933,9 +968,12 @@ export const notionListUsersAction = defineAction({
       integration,
       token => {
         const params = new URLSearchParams()
+
         if (input.pageSize !== undefined) params.set('page_size', String(input.pageSize))
+
         if (input.startCursor !== undefined) params.set('start_cursor', input.startCursor)
         const query = params.toString()
+
         return notionRequest({
           token,
           method: 'GET',
@@ -984,6 +1022,7 @@ export const notionCreateCommentAction = defineAction({
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const richText = yield* requireNotionRichText(input)
+
       return yield* notionJsonAction(
         integration,
         token =>
@@ -1014,8 +1053,11 @@ export const notionListCommentsAction = defineAction({
       token => {
         const params = new URLSearchParams()
         params.set('block_id', input.blockId)
+
         if (input.pageSize !== undefined) params.set('page_size', String(input.pageSize))
+
         if (input.startCursor !== undefined) params.set('start_cursor', input.startCursor)
+
         return notionRequest({ token, method: 'GET', path: `/comments?${params.toString()}` })
       },
       'notion_list_comments_failed',
@@ -1054,5 +1096,7 @@ export const NotionConnector = defineConnector({
   description: 'Notion page and search connector actions.',
   actions: notionActions
 })
+
 export { downloadNotionFile } from './download.ts'
+
 export type { NotionDownloadFile, NotionFileDownloadPolicy } from './download.ts'

@@ -63,6 +63,8 @@ that exercise package-backed providers through app runtime wiring.
 - Used for ChatGPT Plus/Pro/Max subscription access.
 - Does **not** use `OPENAI_API_KEY`.
 - Requires per-user token from `examples/next/lib/core/agent/openai-codex-auth.ts`.
+- Account-ID extraction in `lib/services/openai-codex-oauth` uses sequential, own-property-only claim schemas: direct `chatgpt_account_id`, nested `https://api.openai.com/auth.chatgpt_account_id`, then the first organization with a string `id`. Empty strings remain valid; malformed organization entries are skipped. Unrelated claims are not validated as finite JSON.
+- Migration: inherited claim properties are intentionally ignored (older extraction read the prototype chain). Put claims in the token payload itself. ID-token → access-token → current-account fallback stays nullish-only, so an empty ID does not fall through. This is best-effort account routing, not JWT signature verification; no DB schema change is involved.
 - Cloudflare Codex calls use brokered access tokens from Next, then stream through the internal Next Codex response proxy by default.
 - Direct DO ↔ Codex WebSocket code is retained only for unproxied experiments.
 

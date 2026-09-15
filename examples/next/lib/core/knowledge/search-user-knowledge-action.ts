@@ -29,6 +29,7 @@ export const searchUserKnowledgeAction = async (input: {
         'knowledge.query_length': input.query.length,
         'knowledge.limit': input.limit ?? 6
       })
+
       const results = yield* searchUserKnowledge({
         userId: session.user.id,
         query: input.query,

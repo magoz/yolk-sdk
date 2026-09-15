@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
@@ -29,27 +29,39 @@ const resolvedToolNames = (modulesEffect: ReturnType<typeof makeTextToolModules>
 
 const requestMessage = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body
-  if (body._tag !== 'Uint8Array') {
+
+  if (!Predicate.isTagged(body, 'Uint8Array')) {
     return { id: null, method: 'unknown' }
   }
 
   const value: unknown = JSON.parse(new TextDecoder().decode(body.body))
-  if (typeof value !== 'object' || value === null) {
+
+  if (!isMcpJsonRpcEnvelope(value)) {
     return { id: null, method: 'unknown' }
   }
 
-  const id = Reflect.get(value, 'id')
-  const method = Reflect.get(value, 'method')
+  const id = value.id
+  const method = value.method
+
   return {
-    id: typeof id === 'string' || typeof id === 'number' ? id : null,
-    method: typeof method === 'string' ? method : 'unknown'
+    id: Predicate.isString(id) || Predicate.isNumber(id) ? id : null,
+    method: Predicate.isString(method) ? method : 'unknown'
   }
 }
+
+type McpJsonRpcEnvelope = {
+  readonly id?: string | number | null
+  readonly method?: string
+}
+
+const isMcpJsonRpcEnvelope = (value: unknown): value is McpJsonRpcEnvelope =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
 const fakeRemoteMcpLayer: Layer.Layer<HttpClient.HttpClient> = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make(request => {
     const message = requestMessage(request)
+
     const result =
       message.method === 'server/discover'
         ? {
@@ -107,6 +119,7 @@ describe('Cloudflare tool modules', () => {
       const nextTools = yield* resolvedToolNames(
         makeTextToolModules(mcpServers, fakeRemoteMcpLayer)
       )
+
       const cloudflareTools = yield* resolvedToolNames(
         makeCloudflareTextToolModules(mcpServers, fakeRemoteMcpLayer)
       )

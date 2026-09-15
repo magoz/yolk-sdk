@@ -1,10 +1,12 @@
+import { Match } from 'effect'
 import * as Schema from 'effect/Schema'
 import { AgentError, ProviderErrorInfo, type AgentErrorCode } from '@yolk-sdk/agent/protocol'
 
 export const LLMResponseIssue = Schema.Literal('missing_done')
+
 export type LLMResponseIssue = typeof LLMResponseIssue.Type
 
-export class LLMError extends Schema.TaggedErrorClass<LLMError>()('LLMError', {
+export class LLMError extends Schema.TaggedError<LLMError>()('LLMError', {
   cause: Schema.Literals([
     'validation_error',
     'provider_error',
@@ -19,14 +21,14 @@ export class LLMError extends Schema.TaggedErrorClass<LLMError>()('LLMError', {
   responseIssue: Schema.optional(LLMResponseIssue)
 }) {}
 
-export class FauxExhaustedError extends Schema.TaggedErrorClass<FauxExhaustedError>()(
+export class FauxExhaustedError extends Schema.TaggedError<FauxExhaustedError>()(
   'FauxExhaustedError',
   {
     message: Schema.String
   }
 ) {}
 
-export class ToolError extends Schema.TaggedErrorClass<ToolError>()('ToolError', {
+export class ToolError extends Schema.TaggedError<ToolError>()('ToolError', {
   tool: Schema.String,
   message: Schema.String,
   cause: Schema.Literals([
@@ -41,7 +43,7 @@ export class ToolError extends Schema.TaggedErrorClass<ToolError>()('ToolError',
   ])
 }) {}
 
-export class ContextTransformError extends Schema.TaggedErrorClass<ContextTransformError>()(
+export class ContextTransformError extends Schema.TaggedError<ContextTransformError>()(
   'ContextTransformError',
   {
     cause: Schema.Literals(['context_overflow', 'invalid_response']),
@@ -50,7 +52,7 @@ export class ContextTransformError extends Schema.TaggedErrorClass<ContextTransf
   }
 ) {}
 
-export class AbortError extends Schema.TaggedErrorClass<AbortError>()('AbortError', {
+export class AbortError extends Schema.TaggedError<AbortError>()('AbortError', {
   reason: Schema.Literals(['user', 'system', 'max_turns'])
 }) {}
 
@@ -75,38 +77,59 @@ const toolErrorCode = (error: ToolError): AgentErrorCode => {
   }
 }
 
-export const agentLoopErrorToAgentError = (error: AgentLoopError): AgentError => {
-  switch (error._tag) {
-    case 'LLMError':
-      return AgentError.make({
-        code: error.cause,
-        message: error.message,
-        retryable: error.retryable,
-        ...(error.provider === undefined ? {} : { provider: error.provider })
+export const agentLoopErrorToAgentError = (error: AgentLoopError): AgentError =>
+  Match.value(error).pipe(
+    Match.tag('LLMError', current => {
+      type AgentErrorFields = {
+        code: AgentErrorCode
+        message: string
+        retryable: boolean
+        provider?: AgentError['provider']
+      }
+
+      return AgentError.make(
+        (() => {
+          const fields: AgentErrorFields = {
+            code: current.cause,
+            message: current.message,
+            retryable: current.retryable
+          }
+
+          if (current.provider !== undefined) {
+            fields.provider = current.provider
+          }
+
+          return fields
+        })()
+      )
+    }),
+    Match.tag('ToolError', current =>
+      AgentError.make({
+        code: toolErrorCode(current),
+        message: current.message,
+        retryable: current.cause === 'timeout'
       })
-    case 'ToolError':
-      return AgentError.make({
-        code: toolErrorCode(error),
-        message: error.message,
-        retryable: error.cause === 'timeout'
+    ),
+    Match.tag('ContextTransformError', current =>
+      AgentError.make({
+        code: current.cause,
+        message: current.message,
+        retryable: current.retryable
       })
-    case 'ContextTransformError':
-      return AgentError.make({
-        code: error.cause,
-        message: error.message,
-        retryable: error.retryable
-      })
-    case 'AbortError':
-      return AgentError.make({
+    ),
+    Match.tag('AbortError', current =>
+      AgentError.make({
         code: 'aborted',
-        message: `Agent run aborted: ${error.reason}`,
-        retryable: error.reason === 'system'
+        message: `Agent run aborted: ${current.reason}`,
+        retryable: current.reason === 'system'
       })
-    case 'FauxExhaustedError':
-      return AgentError.make({
+    ),
+    Match.tag('FauxExhaustedError', current =>
+      AgentError.make({
         code: 'provider_error',
-        message: error.message,
+        message: current.message,
         retryable: false
       })
-  }
-}
+    ),
+    Match.exhaustive
+  )

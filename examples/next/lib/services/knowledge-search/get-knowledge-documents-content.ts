@@ -2,8 +2,8 @@ import { and, asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import { AppSearchIndexStoreError } from './errors'
-import type { AppKnowledgeDocumentWithContent } from './document-records'
+import { AppSearchIndexStoreError, isAppSearchIndexStoreError } from './errors'
+import { decodeAppKnowledgeDocumentRecord } from './document-records'
 
 type AccumulatedDocument = {
   readonly document: schema.KnowledgeDocument
@@ -17,6 +17,7 @@ export const getKnowledgeDocumentsContent = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const rows = yield* db
       .select({
         document: schema.knowledgeDocument,
@@ -44,10 +45,12 @@ export const getKnowledgeDocumentsContent = (input: {
 
     for (const row of rows) {
       const existing = documents.get(row.document.id)
+
       if (existing !== undefined) {
         if (row.chunkContent !== null) {
           existing.chunks.push(row.chunkContent)
         }
+
         continue
       }
 
@@ -58,18 +61,20 @@ export const getKnowledgeDocumentsContent = (input: {
       })
     }
 
-    return Array.from(documents.values()).map(item => ({
-      document: item.document,
-      storageRecord: item.storageRecord,
-      content: item.chunks.join('\n\n')
-    })) satisfies ReadonlyArray<AppKnowledgeDocumentWithContent>
+    return yield* Effect.forEach(Array.from(documents.values()), item =>
+      decodeAppKnowledgeDocumentRecord({
+        document: item.document,
+        storageRecord: item.storageRecord
+      }).pipe(Effect.map(record => ({ ...record, content: item.chunks.join('\n\n') })))
+    )
   }).pipe(
     Effect.withSpan('knowledge_search.documents.getContent'),
-    Effect.mapError(
-      error =>
-        new AppSearchIndexStoreError({
-          message: 'Could not get knowledge search document content',
-          cause: error
-        })
+    Effect.mapError(error =>
+      isAppSearchIndexStoreError(error)
+        ? error
+        : new AppSearchIndexStoreError({
+            message: 'Could not get knowledge search document content',
+            cause: error
+          })
     )
   )

@@ -15,7 +15,10 @@ import {
   loadRuntimeSkillset,
   skillsetManifestFromMergedSkillset
 } from '@/lib/agents/skillset/project-source'
-import { AgentPlayground, type AgentRuntimeInfo } from './playground'
+import type { SkillsetManifest } from '@yolk-sdk/agent/skillset'
+import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
+import { AgentPlayground } from './playground'
+import { AgentRuntimeInfo } from './agent-runtime-info'
 
 export type AgentRuntime = 'next' | 'cloudflare' | 'workflow'
 
@@ -23,7 +26,7 @@ type AgentRuntimePageProps = {
   readonly runtime: AgentRuntime
 }
 
-class CloudflareAgentUnavailableError extends Schema.TaggedErrorClass<CloudflareAgentUnavailableError>()(
+class CloudflareAgentUnavailableError extends Schema.TaggedError<CloudflareAgentUnavailableError>()(
   'CloudflareAgentUnavailableError',
   {
     message: Schema.String
@@ -79,8 +82,17 @@ function CloudflareUnavailableMessage({ message }: { readonly message: string })
   )
 }
 
-const encodeJson = (value: unknown) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
+type CloudflareBootstrapPayload = {
+  readonly userId: string
+  readonly tokenEndpoint: string
+  readonly codexResponsesEndpoint: string
+  readonly bridgeSecret: string
+  readonly mcpServers: ReadonlyArray<McpRemoteServerConfig>
+  readonly skillset: SkillsetManifest
+}
+
+const encodeJson = (value: CloudflareBootstrapPayload) =>
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value)
 
 const cloudflareWebSocketUrl = (url: string, sessionId: string) =>
   Effect.try({
@@ -88,6 +100,7 @@ const cloudflareWebSocketUrl = (url: string, sessionId: string) =>
       const parsed = new URL(url)
       parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
       parsed.pathname = `/connect/${encodeURIComponent(sessionId)}`
+
       return parsed.toString()
     },
     catch: error => error
@@ -110,19 +123,23 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
   Effect.gen(function* () {
     const workerUrl = yield* requireConfigOption(
       'CLOUDFLARE_AGENT_URL',
-      yield* Config.option(Config.string('CLOUDFLARE_AGENT_URL'))
+      yield* Config.option(Config.String('CLOUDFLARE_AGENT_URL'))
     )
+
     const appUrl = yield* requireConfigOption(
       'YOLK_APP_URL',
-      yield* Config.option(Config.string('YOLK_APP_URL'))
+      yield* Config.option(Config.String('YOLK_APP_URL'))
     )
+
     const bridgeSecret = yield* requireConfigOption(
       'YOLK_CLOUDFLARE_BRIDGE_SECRET',
-      yield* Config.option(Config.string('YOLK_CLOUDFLARE_BRIDGE_SECRET'))
+      yield* Config.option(Config.String('YOLK_CLOUDFLARE_BRIDGE_SECRET'))
     )
+
     const mcpServers = yield* loadProjectMcpServers()
     const skillset = yield* loadRuntimeSkillset({ userId: input.userId })
     const client = yield* HttpClient.HttpClient
+
     const body = yield* encodeJson({
       userId: input.userId,
       tokenEndpoint: `${appUrl}/api/internal/cloudflare/codex-token`,
@@ -131,6 +148,7 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
       mcpServers,
       skillset: skillsetManifestFromMergedSkillset(skillset)
     })
+
     const response = yield* client.execute(
       HttpClientRequest.post(`${workerUrl}/bootstrap/${encodeURIComponent(input.sessionId)}`).pipe(
         HttpClientRequest.setHeaders({
@@ -152,24 +170,22 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
     return yield* cloudflareWebSocketUrl(workerUrl, input.sessionId)
   })
 
-const nextRuntimeInfo: AgentRuntimeInfo = {
-  _tag: 'Next',
+const nextRuntimeInfo = AgentRuntimeInfo.Next({
   label: 'Next runtime',
   detail: 'Text runs in /api/agent. Voice uses Realtime routes.'
-}
-
-const cloudflareRuntimeInfo = (webSocketUrl: string): AgentRuntimeInfo => ({
-  _tag: 'Cloudflare',
-  label: 'Cloudflare runtime',
-  detail: 'Text runs in Worker/Durable Object. Voice uses Realtime routes.',
-  webSocketUrl
 })
 
-const workflowRuntimeInfo: AgentRuntimeInfo = {
-  _tag: 'Workflow',
+const cloudflareRuntimeInfo = (webSocketUrl: string) =>
+  AgentRuntimeInfo.Cloudflare({
+    label: 'Cloudflare runtime',
+    detail: 'Text runs in Worker/Durable Object. Voice uses Realtime routes.',
+    webSocketUrl
+  })
+
+const workflowRuntimeInfo = AgentRuntimeInfo.Workflow({
   label: 'Vercel Workflow runtime',
   detail: 'Text runs in a Vercel Workflow with durable stream replay.'
-}
+})
 
 async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
   await cookies()
@@ -180,6 +196,7 @@ async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
       const openAiCodexConnected = yield* hasOpenAiCodexAuth(session.user.id)
       const anthropicClaudeConnected = yield* hasAnthropicClaudeAuth(session.user.id)
       const sessionId = `agent-${runtime}-${session.user.id}`
+
       const runtimeDetails = yield* runtime === 'cloudflare'
         ? Effect.map(
             bootstrapCloudflareAgent({ sessionId, userId: session.user.id }),

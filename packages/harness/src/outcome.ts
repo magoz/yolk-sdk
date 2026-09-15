@@ -1,4 +1,9 @@
-import { Effect, Stream } from 'effect'
+import { Effect, Match, Predicate, Stream, type Data } from 'effect'
+import {
+  HitlMatch as hitlMatch,
+  OverflowCompactionResult as overflowCompactionResult,
+  StepOutcome as stepOutcome
+} from './outcome-constructors-internal.ts'
 import {
   addAgentUsage,
   zeroAgentUsage,
@@ -28,48 +33,61 @@ import {
 } from '@yolk-sdk/agent/compaction'
 
 export type OverflowCompactionResult =
-  | {
-      readonly _tag: 'Compacted'
-      readonly messages: ReadonlyArray<AgentMessage>
-    }
-  | {
-      readonly _tag: 'Skipped'
-    }
+  | { readonly _tag: 'Compacted'; readonly messages: ReadonlyArray<AgentMessage> }
+  | { readonly _tag: 'Skipped' }
 
-export type CompletedTurn = {
-  readonly _tag: 'Completed'
-  readonly needsContinuation: boolean
-} & ModelTurnResult
+export const OverflowCompactionResult = overflowCompactionResult
 
-export type ModelTurnOutcome =
-  | CompletedTurn
-  | { readonly _tag: 'Retry'; readonly error: AgentLoopError }
-  | ({ readonly _tag: 'Continue'; readonly error: AgentLoopError } & ModelTurnResult)
-  | { readonly _tag: 'RecoverFull'; readonly error: AgentLoopError }
-  | {
-      readonly _tag: 'Compacted'
-      readonly messages: ReadonlyArray<AgentMessage>
-      readonly overflowCompactionAttempt: number
-    }
+export type StepOutcome = Data.TaggedEnum<{
+  Completed: {
+    readonly needsContinuation: boolean
+    readonly assistantMessage: ModelTurnResult['assistantMessage']
+    readonly toolCalls: ModelTurnResult['toolCalls']
+    readonly usage: ModelTurnResult['usage']
+    readonly stopReason: ModelTurnResult['stopReason']
+  }
+  Retry: {
+    readonly error: AgentLoopError
+  }
+  Continue: {
+    readonly error: AgentLoopError
+    readonly assistantMessage: ModelTurnResult['assistantMessage']
+    readonly toolCalls: ModelTurnResult['toolCalls']
+    readonly usage: ModelTurnResult['usage']
+    readonly stopReason: ModelTurnResult['stopReason']
+  }
+  RecoverFull: {
+    readonly error: AgentLoopError
+  }
+  Compacted: {
+    readonly messages: ReadonlyArray<AgentMessage>
+    readonly overflowCompactionAttempt: number
+  }
+  AwaitingInput: {
+    readonly requests: ReadonlyArray<HitlRequest>
+    readonly usage: AgentUsage
+  }
+}>
 
-export type ToolBatchOutcome =
-  | CompletedTurn
-  | {
-      readonly _tag: 'AwaitingInput'
-      readonly requests: ReadonlyArray<HitlRequest>
-      readonly usage: AgentUsage
-    }
+export const StepOutcome = stepOutcome
 
-export type StepOutcome = ModelTurnOutcome | ToolBatchOutcome
+export type CompletedTurn = Extract<StepOutcome, { readonly _tag: 'Completed' }>
 
-const completedOutcome = (result: ModelTurnResult): CompletedTurn => ({
-  _tag: 'Completed',
-  needsContinuation: result.stopReason === 'tool_use',
-  assistantMessage: result.assistantMessage,
-  toolCalls: result.toolCalls,
-  usage: result.usage,
-  stopReason: result.stopReason
-})
+export type ModelTurnOutcome = Exclude<StepOutcome, { readonly _tag: 'AwaitingInput' }>
+
+export type ToolBatchOutcome = Extract<
+  StepOutcome,
+  { readonly _tag: 'Completed' | 'AwaitingInput' }
+>
+
+const completedOutcome = (result: ModelTurnResult): CompletedTurn =>
+  StepOutcome.Completed({
+    needsContinuation: result.stopReason === 'tool_use',
+    assistantMessage: result.assistantMessage,
+    toolCalls: result.toolCalls,
+    usage: result.usage,
+    stopReason: result.stopReason
+  })
 
 const modelTurnResult = (result: ModelTurnResult): ModelTurnResult => ({
   assistantMessage: result.assistantMessage,
@@ -86,10 +104,12 @@ const invalidOverflowCompactionAttemptError = () =>
   })
 
 const isAgentLoopError = (error: unknown): error is AgentLoopError => {
-  if (typeof error !== 'object' || error === null || !('_tag' in error)) {
+  if (!Predicate.isObjectOrArray(error) || !('_tag' in error)) {
     return false
   }
+
   const tag = error._tag
+
   return (
     tag === 'LLMError' ||
     tag === 'FauxExhaustedError' ||
@@ -100,16 +120,21 @@ const isAgentLoopError = (error: unknown): error is AgentLoopError => {
 }
 
 const isOverflow = (error: AgentLoopError) =>
-  (error._tag === 'LLMError' || error._tag === 'ContextTransformError') &&
-  error.cause === 'context_overflow'
+  Match.value(error).pipe(
+    Match.tag('LLMError', 'ContextTransformError', current => current.cause === 'context_overflow'),
+    Match.orElse(() => false)
+  )
 
 const isMissingDone = (error: AgentLoopError) =>
-  error._tag === 'LLMError' && error.responseIssue === 'missing_done'
+  Match.value(error).pipe(
+    Match.tag('LLMError', current => current.responseIssue === 'missing_done'),
+    Match.orElse(() => false)
+  )
 
 const isRetryableLlm = (
   error: AgentLoopError
 ): error is Extract<AgentLoopError, { _tag: 'LLMError' }> =>
-  error._tag === 'LLMError' && error.retryable
+  Predicate.isTagged(error, 'LLMError') && error.retryable
 
 const classifyModelTurnFailure = <E2, R2>(input: {
   readonly error: AgentLoopError
@@ -133,42 +158,49 @@ const classifyModelTurnFailure = <E2, R2>(input: {
       outputStarted: input.outputStarted
     }).pipe(
       Effect.flatMap(result =>
-        result._tag === 'Compacted'
-          ? Effect.succeed({
-              _tag: 'Compacted' as const,
-              messages: result.messages,
-              overflowCompactionAttempt: input.overflowCompactionAttempt + 1
-            })
-          : Effect.fail(input.error)
+        Match.value(result).pipe(
+          Match.tag('Compacted', current =>
+            Effect.succeed(
+              StepOutcome.Compacted({
+                messages: current.messages,
+                overflowCompactionAttempt: input.overflowCompactionAttempt + 1
+              })
+            )
+          ),
+          Match.orElse(() => Effect.fail(input.error))
+        )
       )
     )
   }
 
   if (isMissingDone(input.error) && !input.outputStarted) {
-    return Effect.succeed({ _tag: 'RecoverFull', error: input.error })
+    return Effect.succeed(StepOutcome.RecoverFull({ error: input.error }))
   }
 
   if (isMissingDone(input.error) && input.outputStarted) {
-    return Effect.succeed({
-      _tag: 'Continue',
-      error: input.error,
-      ...modelTurnResult(input.collected)
-    })
+    return Effect.succeed(
+      StepOutcome.Continue({
+        error: input.error,
+        ...modelTurnResult(input.collected)
+      })
+    )
   }
 
   if (isRetryableLlm(input.error) && !input.outputStarted) {
     if (input.error.cause === 'invalid_response') {
-      return Effect.succeed({ _tag: 'RecoverFull', error: input.error })
+      return Effect.succeed(StepOutcome.RecoverFull({ error: input.error }))
     }
-    return Effect.succeed({ _tag: 'Retry', error: input.error })
+
+    return Effect.succeed(StepOutcome.Retry({ error: input.error }))
   }
 
   if (isRetryableLlm(input.error) && input.outputStarted) {
-    return Effect.succeed({
-      _tag: 'Continue',
-      error: input.error,
-      ...modelTurnResult(input.collected)
-    })
+    return Effect.succeed(
+      StepOutcome.Continue({
+        error: input.error,
+        ...modelTurnResult(input.collected)
+      })
+    )
   }
 
   return Effect.fail(input.error)
@@ -191,6 +223,7 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
 > =>
   Effect.gen(function* () {
     const overflowCompactionAttempt = options?.overflowCompactionAttempt ?? 0
+
     if (!isOverflowCompactionAttemptCount(overflowCompactionAttempt)) {
       return yield* Effect.fail(invalidOverflowCompactionAttemptError())
     }
@@ -200,31 +233,38 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
       initialUsage: options?.initialUsage
     })
 
-    switch (outcome._tag) {
-      case 'Collected':
-        return completedOutcome(outcome.collection)
-      case 'SinkFailed':
-        return yield* Effect.fail(outcome.error)
-      case 'StreamFailed':
-        if (!isAgentLoopError(outcome.error)) {
-          return yield* Effect.fail(outcome.error)
+    return yield* Match.value(outcome).pipe(
+      Match.tag('Collected', current => Effect.succeed(completedOutcome(current.collection))),
+      Match.tag('SinkFailed', current => Effect.fail(current.error)),
+      Match.tag('StreamFailed', current => {
+        if (!isAgentLoopError(current.error)) {
+          return Effect.fail(current.error)
         }
-        return yield* classifyModelTurnFailure({
-          error: outcome.error,
+
+        return classifyModelTurnFailure({
+          error: current.error,
           collected: {
             assistantMessage:
-              outcome.collection.assistantMessage ?? outcome.collection.partialAssistantMessage,
-            toolCalls: outcome.collection.toolCalls,
-            usage: outcome.collection.usage,
-            stopReason: outcome.collection.stopReason
+              current.collection.assistantMessage ?? current.collection.partialAssistantMessage,
+            toolCalls: current.collection.toolCalls,
+            usage: current.collection.usage,
+            stopReason: current.collection.stopReason
           },
-          outputStarted: outcome.collection.outputStarted,
+          outputStarted: current.collection.outputStarted,
           messages: config.messages,
           overflowCompactionAttempt,
           compact: options?.compact
         })
-    }
+      }),
+      Match.exhaustive
+    )
   })
+
+type AttemptToolBatchFoldState = {
+  requests: ReadonlyArray<HitlRequest>
+  usage: AgentUsage
+  toolCalls: ModelTurnResult['toolCalls']
+}
 
 export const attemptToolBatch = <E2 = never, R2 = never>(
   config: ToolBatchConfig,
@@ -236,40 +276,38 @@ export const attemptToolBatch = <E2 = never, R2 = never>(
 
   return runToolBatch(config).pipe(
     Stream.runFoldEffect(
-      (): {
-        requests: ReadonlyArray<HitlRequest>
-        usage: AgentUsage
-        toolCalls: ModelTurnResult['toolCalls']
-      } => ({
+      (): AttemptToolBatchFoldState => ({
         requests: [],
         usage: config.usage ?? zeroAgentUsage,
         toolCalls: []
       }),
       (acc, event) => {
-        const next =
-          event._tag === 'AgentAwaitingInput'
-            ? { ...acc, requests: event.requests, usage: event.usage }
-            : event._tag === 'UsageUpdate'
-              ? { ...acc, usage: addAgentUsage(acc.usage, event.usage) }
-              : event._tag === 'ToolExecutionCompleted' || event._tag === 'ToolExecutionAccepted'
-                ? { ...acc, toolCalls: [...acc.toolCalls, event.call] }
-                : acc
+        const next = Predicate.isTagged(event, 'AgentAwaitingInput')
+          ? { ...acc, requests: event.requests, usage: event.usage }
+          : Predicate.isTagged(event, 'UsageUpdate')
+            ? { ...acc, usage: addAgentUsage(acc.usage, event.usage) }
+            : Predicate.isTagged(event, 'ToolExecutionCompleted') ||
+                Predicate.isTagged(event, 'ToolExecutionAccepted')
+              ? { ...acc, toolCalls: [...acc.toolCalls, event.call] }
+              : acc
+
         return onEvent === undefined ? Effect.succeed(next) : onEvent(event).pipe(Effect.as(next))
       }
     ),
     Effect.map((result): ToolBatchOutcome => {
       if (result.requests.length === 0) {
         const needsContinuation = result.toolCalls.length > 0
-        return {
-          _tag: 'Completed',
+
+        return StepOutcome.Completed({
           needsContinuation,
           assistantMessage: undefined,
           toolCalls: result.toolCalls,
           usage: result.usage,
           stopReason: needsContinuation ? 'tool_use' : 'stop'
-        }
+        })
       }
-      return { _tag: 'AwaitingInput', requests: result.requests, usage: result.usage }
+
+      return StepOutcome.AwaitingInput({ requests: result.requests, usage: result.usage })
     })
   )
 }
@@ -278,39 +316,48 @@ export type HitlMatch =
   | { readonly _tag: 'Match'; readonly requestId: string }
   | { readonly _tag: 'Mismatch' }
 
-const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) => {
-  switch (response._tag) {
-    case 'ToolApprovalResponse':
-      return (
-        request._tag === 'ToolApprovalRequest' &&
-        response.requestId === request.requestId &&
-        response.toolCallId === request.toolCallId
-      )
-    case 'QuestionResponse':
-      return (
-        request._tag === 'QuestionRequest' &&
-        response.requestId === request.requestId &&
-        response.toolCallId === request.toolCallId
-      )
-  }
-}
+export const HitlMatch = hitlMatch
+
+const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) =>
+  Match.value(response).pipe(
+    Match.tag(
+      'ToolApprovalResponse',
+      current =>
+        Predicate.isTagged(request, 'ToolApprovalRequest') &&
+        current.requestId === request.requestId &&
+        current.toolCallId === request.toolCallId
+    ),
+    Match.tag(
+      'QuestionResponse',
+      current =>
+        Predicate.isTagged(request, 'QuestionRequest') &&
+        current.requestId === request.requestId &&
+        current.toolCallId === request.toolCallId
+    ),
+    Match.exhaustive
+  )
 
 export const matchHitlResponse = (
   pending: ReadonlyArray<HitlRequest>,
   response: HitlResponse
 ): HitlMatch => {
   const matched = pending.find(request => hitlResponseMatchesRequest(response, request))
+
   return matched === undefined
-    ? { _tag: 'Mismatch' }
-    : { _tag: 'Match', requestId: matched.requestId }
+    ? HitlMatch.Mismatch()
+    : HitlMatch.Match({ requestId: matched.requestId })
 }
 
 export const resumeHitlIfMatched = <A, E, R>(input: {
   readonly pending: ReadonlyArray<HitlRequest>
   readonly response: HitlResponse
   readonly resume: (requestId: string) => Effect.Effect<A, E, R>
-}): Effect.Effect<A | { readonly _tag: 'Mismatch' }, E, R> => {
+}): Effect.Effect<A | Extract<HitlMatch, { readonly _tag: 'Mismatch' }>, E, R> => {
   const matched = matchHitlResponse(input.pending, input.response)
-  if (matched._tag === 'Mismatch') return Effect.succeed(matched)
-  return input.resume(matched.requestId)
+
+  return Match.value(matched).pipe(
+    Match.tag('Mismatch', current => Effect.succeed(current)),
+    Match.tag('Match', current => input.resume(current.requestId)),
+    Match.exhaustive
+  )
 }

@@ -5,6 +5,7 @@ import { describe, expect, it } from '@effect/vitest'
 import { FileExtractor } from './live-layer'
 
 const encode = (text: string) => new TextEncoder().encode(text)
+
 const zipText = (text: string) => Uint8Array.from(strToU8(text))
 
 const makeDocx = (text: string) =>
@@ -22,6 +23,7 @@ const makeDocx = (text: string) =>
 
 const makePdf = (text: string) => {
   const stream = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`
+
   const objects = [
     '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj',
     '2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj',
@@ -29,6 +31,7 @@ const makePdf = (text: string) => {
     `4 0 obj<</Length ${stream.length}>>stream\n${stream}\nendstream endobj`,
     '5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj'
   ]
+
   let body = '%PDF-1.4\n'
   const offsets: Array<number> = []
 
@@ -38,6 +41,7 @@ const makePdf = (text: string) => {
   }
 
   const startXref = body.length
+
   const rows = [
     '0000000000 65535 f ',
     ...offsets.map(offset => `${offset.toString().padStart(10, '0')} 00000 n `)
@@ -55,6 +59,7 @@ const extract = (input: {
 }) =>
   Effect.gen(function* () {
     const extractor = yield* FileExtractor
+
     return yield* extractor.extract(input)
   }).pipe(Effect.provide(FileExtractor.layer))
 
@@ -75,10 +80,12 @@ describe('FileExtractor', () => {
   it.effect('extracts xlsx sheets as csv sections', () =>
     Effect.gen(function* () {
       const workbook = XLSX.utils.book_new()
+
       const sheet = XLSX.utils.aoa_to_sheet([
         ['Name', 'Count'],
         ['Alpha', 2]
       ])
+
       XLSX.utils.book_append_sheet(workbook, sheet, 'Inventory')
       const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
 

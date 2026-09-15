@@ -1,5 +1,3 @@
-import { Array as Arr, pipe } from 'effect'
-
 export const forwardHeaderNames = [
   'accept',
   'authorization',
@@ -8,12 +6,20 @@ export const forwardHeaderNames = [
   'chatgpt-account-id'
 ] satisfies ReadonlyArray<string>
 
-export const forwardedHeaders = (headers: Readonly<Record<string, string | undefined>>) =>
-  pipe(
-    forwardHeaderNames,
-    Arr.reduce({}, (forwarded: Record<string, string>, name) => {
-      const value = headers[name]
+type ForwardHeaderName = (typeof forwardHeaderNames)[number]
 
-      return value === undefined ? forwarded : { ...forwarded, [name]: value }
-    })
-  )
+type ForwardedHeaders = Partial<Record<ForwardHeaderName, string>>
+
+export const forwardedHeaders = (headers: Readonly<Record<string, string | undefined>>) => {
+  const forwarded: ForwardedHeaders = {}
+
+  for (const name of forwardHeaderNames) {
+    const value = headers[name]
+
+    if (value !== undefined) {
+      forwarded[name] = value
+    }
+  }
+
+  return forwarded
+}

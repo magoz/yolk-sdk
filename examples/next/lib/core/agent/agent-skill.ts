@@ -1,5 +1,5 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { Data, Effect, Match } from 'effect'
 import { isValidSkillsetName } from '@yolk-sdk/agent/skillset'
 import { NotFoundError, PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
@@ -20,6 +20,8 @@ export type AgentSkillUpdateInput = AgentSkillInput & {
 export type AgentSkillCommandInput =
   | { readonly _tag: 'CreateCommand'; readonly command: AgentCommandInput }
   | { readonly _tag: 'SkipCommand' }
+
+export const AgentSkillCommandInput = Data.taggedEnum<AgentSkillCommandInput>()
 
 const validateText = (field: string, value: string) => {
   const trimmed = value.trim()
@@ -60,6 +62,7 @@ export const createAgentSkill = (input: AgentSkillInput & { readonly userId: str
   Effect.gen(function* () {
     const values = yield* validateSkillInput(input)
     const db = yield* Db
+
     const [skill] = yield* db
       .insert(schema.agentSkill)
       .values({ ...values, userId: input.userId })
@@ -82,10 +85,13 @@ export const createAgentSkillWithCommand = (
 ) =>
   Effect.gen(function* () {
     const values = yield* validateSkillInput(input)
-    const commandValues =
-      input.commandInput._tag === 'CreateCommand'
-        ? yield* validateAgentCommandInput(input.commandInput.command)
-        : undefined
+
+    const commandValues = yield* Match.value(input.commandInput).pipe(
+      Match.tag('CreateCommand', current => validateAgentCommandInput(current.command)),
+      Match.tag('SkipCommand', () => Effect.succeed(undefined)),
+      Match.exhaustive
+    )
+
     const db = yield* Db
 
     return yield* db.transaction(tx =>
@@ -135,6 +141,7 @@ export const updateAgentSkill = (input: AgentSkillUpdateInput & { readonly userI
   Effect.gen(function* () {
     const values = yield* validateSkillInput(input)
     const db = yield* Db
+
     const [skill] = yield* db
       .update(schema.agentSkill)
       .set({ ...values, enabled: input.enabled })
@@ -158,10 +165,13 @@ export const updateAgentSkillWithCommand = (
 ) =>
   Effect.gen(function* () {
     const values = yield* validateSkillInput(input)
-    const commandValues =
-      input.commandInput._tag === 'CreateCommand'
-        ? yield* validateAgentCommandInput(input.commandInput.command)
-        : undefined
+
+    const commandValues = yield* Match.value(input.commandInput).pipe(
+      Match.tag('CreateCommand', current => validateAgentCommandInput(current.command)),
+      Match.tag('SkipCommand', () => Effect.succeed(undefined)),
+      Match.exhaustive
+    )
+
     const db = yield* Db
 
     return yield* db.transaction(tx =>
@@ -221,6 +231,7 @@ export const setAgentSkillEnabled = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [skill] = yield* db
       .update(schema.agentSkill)
       .set({ enabled: input.enabled })
@@ -239,6 +250,7 @@ export const setAgentSkillEnabled = (input: {
 export const deleteAgentSkill = (input: { readonly id: string; readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [skill] = yield* db
       .delete(schema.agentSkill)
       .where(and(eq(schema.agentSkill.id, input.id), eq(schema.agentSkill.userId, input.userId)))

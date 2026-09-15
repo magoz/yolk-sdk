@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Effect, Match, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { resolveCredential } from '../credential.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -10,6 +10,7 @@ import { MicrosoftOAuthCredentialSlot } from './oauth.ts'
 export const microsoftGraphApiBaseUrl = 'https://graph.microsoft.com/v1.0'
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
+
 const isJsonObject = Schema.is(JsonObject)
 
 export const resolveMicrosoftAccessToken = (
@@ -19,29 +20,30 @@ export const resolveMicrosoftAccessToken = (
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, slot)
 
-    switch (credential._tag) {
-      case 'OAuthCredential':
-        return credential.accessToken
-      case 'BearerTokenCredential':
-        return credential.token
-      case 'ApiKeyCredential':
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
-          new ConnectorError({
-            cause: 'credential_invalid',
-            message: 'Microsoft connector requires an OAuth or bearer token credential',
-            connectorId: integration.connectorId,
-            slotId: slot.id
-          })
-        )
-    }
+    const invalidCredential = () =>
+      Effect.fail(
+        new ConnectorError({
+          cause: 'credential_invalid',
+          message: 'Microsoft connector requires an OAuth or bearer token credential',
+          connectorId: integration.connectorId,
+          slotId: slot.id
+        })
+      )
+
+    return yield* Match.value(credential).pipe(
+      Match.tag('OAuthCredential', current => Effect.succeed(current.accessToken)),
+      Match.tag('BearerTokenCredential', current => Effect.succeed(current.token)),
+      Match.tag('ApiKeyCredential', 'UsernamePasswordCredential', invalidCredential),
+      Match.exhaustive
+    )
   })
 
 const decodeJsonObject = (body: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(body).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(body).pipe(
     Effect.result,
     Effect.map(result => {
       if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+
       return result.success
     })
   )
@@ -51,9 +53,11 @@ const graphErrorDetail = (body: string) =>
     Effect.map(parsed => {
       if (parsed === undefined) return undefined
       const error = parsed.error
+
       if (!isJsonObject(error)) return undefined
       const message = error.message
-      return typeof message === 'string' && message.trim() !== '' ? message : undefined
+
+      return Predicate.isString(message) && message.trim() !== '' ? message : undefined
     })
   )
 
@@ -83,9 +87,18 @@ const providerCode = (fallback: string, status: number) => {
 
 const retryAfterMs = (headers: Readonly<Record<string, string>>) => {
   const retryAfter = headers['retry-after'] ?? headers['Retry-After']
+
   if (retryAfter === undefined) return undefined
   const seconds = Number(retryAfter)
+
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined
+}
+
+type MicrosoftProviderFailurePrefixFields = {
+  readonly code: string
+  readonly message: string
+  readonly status: number
+  retryAfterMs?: number
 }
 
 export const microsoftProviderFailure = (input: {
@@ -98,14 +111,26 @@ export const microsoftProviderFailure = (input: {
   graphErrorDetail(input.body).pipe(
     Effect.map(detail => {
       const retryAfter = retryAfterMs(input.headers)
+
       return ActionResult.failure(
-        new ProviderFailure({
-          code: providerCode(input.code, input.status),
-          message: detail === undefined ? input.message : `${input.message}: ${detail}`,
-          status: input.status,
-          ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
-          underlying: input.body
-        })
+        new ProviderFailure(
+          (() => {
+            const fields: MicrosoftProviderFailurePrefixFields = {
+              code: providerCode(input.code, input.status),
+              message: detail === undefined ? input.message : `${input.message}: ${detail}`,
+              status: input.status
+            }
+
+            if (retryAfter !== undefined) {
+              fields.retryAfterMs = retryAfter
+            }
+
+            return {
+              ...fields,
+              underlying: input.body
+            }
+          })()
+        )
       )
     })
   )

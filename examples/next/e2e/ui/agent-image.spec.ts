@@ -1,4 +1,13 @@
 import { Buffer } from 'node:buffer'
+import { Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
+import {
+  AgentEnd,
+  AgentStart,
+  UserMessage,
+  contentParts,
+  zeroAgentUsage
+} from '@yolk-sdk/agent/protocol'
 import { test, expect } from '../fixtures'
 
 const tinyPng = Buffer.from(
@@ -7,14 +16,24 @@ const tinyPng = Buffer.from(
 )
 
 const agentResponse = [
-  JSON.stringify({ _tag: 'AgentStart' }),
-  JSON.stringify({
-    _tag: 'AgentEnd',
-    messages: [],
-    turns: 1,
-    usage: { input: { total: 0 }, output: { total: 0 } }
-  })
+  JSON.stringify(AgentStart.make({})),
+  JSON.stringify(AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage }))
 ].join('\n')
+
+const capturedImageParts = (body: string) => {
+  const parsed: unknown = JSON.parse(body)
+
+  if (!Predicate.hasProperty(parsed, 'messages') || !Array.isArray(parsed.messages)) {
+    return []
+  }
+
+  return parsed.messages.flatMap(message =>
+    Option.match(Schema.decodeUnknownOption(UserMessage)(message), {
+      onNone: () => [],
+      onSome: user => contentParts(user.content).filter(part => Predicate.isTagged(part, 'Image'))
+    })
+  )
+}
 
 test('uploads image prompt and shows provider capabilities', async ({ authedPage }) => {
   let capturedBody = ''
@@ -46,6 +65,8 @@ test('uploads image prompt and shows provider capabilities', async ({ authedPage
 
   await expect(authedPage.getByRole('img', { name: 'Uploaded image' })).toBeVisible()
   await expect.poll(() => capturedBody).toContain('Describe this image')
-  expect(capturedBody).toContain('"_tag":"Image"')
-  expect(capturedBody).toContain('"mimeType":"image/png"')
+
+  const images = capturedImageParts(capturedBody)
+  expect(images).toHaveLength(1)
+  expect(images[0]?.mimeType).toBe('image/png')
 })

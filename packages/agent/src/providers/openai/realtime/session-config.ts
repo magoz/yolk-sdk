@@ -1,17 +1,20 @@
-import { Effect, Option, Result } from 'effect'
+import { Effect, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolDef } from '@yolk-sdk/agent/protocol'
 import { VoiceToolBridgeError, type VoiceSessionConfig } from '@yolk-sdk/agent/voice'
 import { backgroundVoiceUnsupportedMessage } from '../../../background-execution-internal.ts'
 
 export type OpenAiRealtimeVoice = 'marin' | 'cedar'
+
 export type OpenAiRealtimeReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
 export const OpenAiRealtimeTranscriptionModelSchema = Schema.Literals([
   'gpt-realtime-whisper',
   'gpt-4o-transcribe',
   'gpt-4o-mini-transcribe',
   'gpt-4o-mini-transcribe-2025-12-15'
 ])
+
 export type OpenAiRealtimeTranscriptionModel = typeof OpenAiRealtimeTranscriptionModelSchema.Type
 
 type PromptedOpenAiRealtimeTranscriptionModel = Exclude<
@@ -38,7 +41,7 @@ export type OpenAiRealtimeFunctionTool = {
   readonly type: 'function'
   readonly name: string
   readonly description: string
-  readonly parameters: unknown
+  readonly parameters: Schema.Json
 }
 
 export type OpenAiRealtimeSessionConfig = {
@@ -77,10 +80,14 @@ export type OpenAiRealtimeSessionConfigInput = {
 }
 
 export const openAiRealtimeModel = 'gpt-realtime-2'
+
 export const defaultOpenAiRealtimeVoice: OpenAiRealtimeVoice = 'marin'
+
 export const defaultOpenAiRealtimeReasoningEffort: OpenAiRealtimeReasoningEffort = 'low'
+
 export const defaultOpenAiRealtimeTranscriptionModel: OpenAiRealtimeTranscriptionModel =
   'gpt-realtime-whisper'
+
 export const openAiRealtimeTranscriptionPrompt = 'Transcribe English speech. Preserve exact words.'
 
 const makeOpenAiRealtimeInputTranscription = (
@@ -96,52 +103,68 @@ const makeOpenAiRealtimeInputTranscription = (
   }
 }
 
-type JsonSchemaRecord = Record<string, unknown>
+const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
+  value !== undefined && Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
-const isJsonSchemaRecord = (value: unknown): value is JsonSchemaRecord =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+const jsonObjectField = (value: Schema.JsonObject, key: string): Schema.Json | undefined =>
+  Object.hasOwn(value, key) ? value[key] : undefined
 
 type ObjectVariant = {
-  readonly properties: JsonSchemaRecord
+  readonly properties: Schema.JsonObject
   readonly required: ReadonlyArray<string>
 }
 
-const asObjectVariant = (value: unknown): ObjectVariant | undefined => {
-  if (!isJsonSchemaRecord(value) || value['type'] !== 'object') {
+const asObjectVariant = (value: Schema.Json): ObjectVariant | undefined => {
+  if (!isJsonObject(value) || jsonObjectField(value, 'type') !== 'object') {
     return undefined
   }
 
-  const properties = value['properties']
+  const properties = jsonObjectField(value, 'properties')
 
-  if (!isJsonSchemaRecord(properties)) {
+  if (!isJsonObject(properties)) {
     return undefined
   }
 
-  const required = Array.isArray(value['required'])
-    ? value['required'].filter((key): key is string => typeof key === 'string')
+  const requiredValue = jsonObjectField(value, 'required')
+
+  const required = Array.isArray(requiredValue)
+    ? requiredValue.filter((key): key is string => Predicate.isString(key))
     : []
 
   return { properties, required }
 }
 
-const stringEnumValues = (schema: unknown): ReadonlyArray<string> | undefined => {
-  if (!isJsonSchemaRecord(schema) || schema['type'] !== 'string') {
+const stringEnumValues = (schema: Schema.Json): ReadonlyArray<string> | undefined => {
+  if (!isJsonObject(schema) || jsonObjectField(schema, 'type') !== 'string') {
     return undefined
   }
 
-  const values = schema['enum']
+  const values = jsonObjectField(schema, 'enum')
 
-  if (!Array.isArray(values) || !values.every(value => typeof value === 'string')) {
+  if (!Array.isArray(values) || !values.every(value => Predicate.isString(value))) {
     return undefined
   }
 
   return values
 }
 
+type MergedRealtimeStringEnumProperty = {
+  readonly type: 'string'
+  readonly enum: ReadonlyArray<string>
+}
+
+const mergeRealtimeStringEnumProperty = (
+  existingValues: ReadonlyArray<string>,
+  incomingValues: ReadonlyArray<string>
+): MergedRealtimeStringEnumProperty => ({
+  type: 'string',
+  enum: [...new Set([...existingValues, ...incomingValues])]
+})
+
 // Same-named string enums union across variants so discriminator properties
 // (for example `operation`) keep every variant's value; otherwise the first
 // variant's schema wins.
-const mergeVariantProperty = (existing: unknown, incoming: unknown): unknown => {
+const mergeVariantProperty = (existing: Schema.Json, incoming: Schema.Json): Schema.Json => {
   const existingValues = stringEnumValues(existing)
   const incomingValues = stringEnumValues(incoming)
 
@@ -149,7 +172,29 @@ const mergeVariantProperty = (existing: unknown, incoming: unknown): unknown => 
     return existing
   }
 
-  return { type: 'string', enum: [...new Set([...existingValues, ...incomingValues])] }
+  return mergeRealtimeStringEnumProperty(existingValues, incomingValues)
+}
+
+const openAiRealtimeLoweredObjectParameters = (
+  properties: Schema.JsonObject,
+  required: ReadonlyArray<string>
+): Schema.JsonObject => {
+  type OpenAiRealtimeLoweredParametersFields = {
+    type: 'object'
+    properties: Schema.JsonObject
+    required?: ReadonlyArray<string>
+  }
+
+  const fields: OpenAiRealtimeLoweredParametersFields = {
+    type: 'object',
+    properties
+  }
+
+  if (required.length > 0) {
+    fields.required = required
+  }
+
+  return { ...fields, additionalProperties: false }
 }
 
 /**
@@ -159,13 +204,16 @@ const mergeVariantProperty = (existing: unknown, incoming: unknown): unknown => 
  * (same-named string enums union), and `required` keeps only keys required by
  * every variant. This widens what the model may produce; hosts still validate
  * real arguments against the original tool schema at execution time.
+ *
+ * Callers must admit `Schema.Json` before this helper; non-JSON documents fail
+ * at the advertisement boundary rather than being lowered here.
  */
-export const openAiRealtimeToolParameters = (parameters: unknown): unknown => {
-  if (!isJsonSchemaRecord(parameters)) {
+export const openAiRealtimeToolParameters = (parameters: Schema.Json): Schema.Json => {
+  if (!isJsonObject(parameters)) {
     return parameters
   }
 
-  const anyOf = parameters['anyOf']
+  const anyOf = jsonObjectField(parameters, 'anyOf')
 
   if (!Array.isArray(anyOf) || anyOf.length === 0) {
     return parameters
@@ -181,11 +229,12 @@ export const openAiRealtimeToolParameters = (parameters: unknown): unknown => {
     return parameters
   }
 
-  const properties: JsonSchemaRecord = {}
+  const properties = new Map<string, Schema.Json>()
 
   for (const variant of variants) {
     for (const [key, schema] of Object.entries(variant.properties)) {
-      properties[key] = key in properties ? mergeVariantProperty(properties[key], schema) : schema
+      const existing = properties.get(key)
+      properties.set(key, existing === undefined ? schema : mergeVariantProperty(existing, schema))
     }
   }
 
@@ -193,25 +242,32 @@ export const openAiRealtimeToolParameters = (parameters: unknown): unknown => {
     .map(variant => variant.required)
     .reduce((shared, keys) => shared.filter(key => keys.includes(key)))
 
-  return {
-    type: 'object',
-    properties,
-    ...(required.length > 0 ? { required } : {}),
-    additionalProperties: false
-  }
+  return openAiRealtimeLoweredObjectParameters(Object.fromEntries(properties), required)
 }
 
 const realtimeToolResult = (
   tool: ToolDef
-): Result.Result<OpenAiRealtimeFunctionTool, VoiceToolBridgeError> =>
-  tool.execution === 'background-v1'
-    ? Result.fail(new VoiceToolBridgeError({ message: backgroundVoiceUnsupportedMessage }))
-    : Result.succeed({
+): Result.Result<OpenAiRealtimeFunctionTool, VoiceToolBridgeError> => {
+  if (tool.execution === 'background-v1') {
+    return Result.fail(new VoiceToolBridgeError({ message: backgroundVoiceUnsupportedMessage }))
+  }
+
+  return Result.match(Schema.decodeUnknownResult(Schema.Json)(tool.parameters), {
+    onFailure: error =>
+      Result.fail(
+        new VoiceToolBridgeError({
+          message: `Invalid OpenAI Realtime tool parameters JSON: ${error.message}`
+        })
+      ),
+    onSuccess: parameters =>
+      Result.succeed({
         type: 'function',
         name: tool.name,
         description: tool.description,
-        parameters: openAiRealtimeToolParameters(tool.parameters)
+        parameters: openAiRealtimeToolParameters(parameters)
       })
+  })
+}
 
 /** Throws VoiceToolBridgeError for activated background definitions; prefer the Effect variant in Effect programs. */
 export const toOpenAiRealtimeTool = (tool: ToolDef): OpenAiRealtimeFunctionTool =>

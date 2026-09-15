@@ -1,6 +1,6 @@
 'use server'
 
-import { Effect } from 'effect'
+import { Effect, Match, Predicate } from 'effect'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
@@ -31,17 +31,21 @@ export const checkOpenAiCodexDeviceFlowAction = async (input: {
 
       const pollResult = yield* oauth.pollDeviceFlow(input)
 
-      switch (pollResult._tag) {
-        case 'Pending':
-          return { _tag: 'Pending' as const }
-        case 'Failed':
-          return pollResult
-        case 'Authorized': {
-          const token = yield* oauth.exchangeDeviceToken(pollResult.deviceToken)
-          yield* saveOpenAiCodexToken({ userId: session.user.id, token })
-          return { _tag: 'Success' as const }
-        }
-      }
+      return yield* Match.value(pollResult).pipe(
+        Match.tag('Pending', () => Effect.succeed({ _tag: 'Pending' as const })),
+        Match.tag('Failed', failed =>
+          Effect.succeed({ _tag: 'Failed' as const, message: failed.message })
+        ),
+        Match.tag('Authorized', authorized =>
+          Effect.gen(function* () {
+            const token = yield* oauth.exchangeDeviceToken(authorized.deviceToken)
+            yield* saveOpenAiCodexToken({ userId: session.user.id, token })
+
+            return { _tag: 'Success' as const }
+          })
+        ),
+        Match.exhaustive
+      )
     }).pipe(
       Effect.withSpan('action.agent.openAiCodex.checkDeviceFlow'),
       Effect.provide(AppLayer),
@@ -51,7 +55,9 @@ export const checkOpenAiCodexDeviceFlowAction = async (input: {
       ),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.tap(result =>
-        result._tag === 'Success' ? Effect.sync(() => revalidatePath('/agent')) : Effect.void
+        Predicate.isTagged(result, 'Success')
+          ? Effect.sync(() => revalidatePath('/agent'))
+          : Effect.void
       ),
       Effect.catch(() =>
         Effect.succeed({

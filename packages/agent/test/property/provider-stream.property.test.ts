@@ -1,4 +1,5 @@
-import { Effect, Layer, Schema, Stream } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Effect, Layer, Predicate, Result, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentInputUsage,
@@ -43,21 +44,21 @@ const validProviderCase = Schema.Struct({
   fragments: Schema.Array(providerFragment)
 })
 
-const validProviderCaseArbitrary = Schema.toArbitrary(validProviderCase)
+const validProviderCaseArbitrary = Arbitrary.schema(validProviderCase)
 
 const invalidProviderCase = Schema.Struct({
   fragments: Schema.Array(providerFragment),
   done: Schema.Literals(['none', 'duplicate', 'wrongReason'])
 })
 
-const invalidProviderCaseArbitrary = Schema.toArbitrary(invalidProviderCase)
+const invalidProviderCaseArbitrary = Arbitrary.schema(invalidProviderCase)
 
 const retryableFailureCase = Schema.Struct({
   failuresBeforeSuccess: Schema.Literals([0, 1, 2, 3, 4]),
   cause: Schema.Literals(['provider_error', 'rate_limit'])
 })
 
-const retryableFailureCaseArbitrary = Schema.toArbitrary(retryableFailureCase)
+const retryableFailureCaseArbitrary = Arbitrary.schema(retryableFailureCase)
 
 const nonRetryableFailureCase = Schema.Struct({
   cause: Schema.Literals(['provider_error', 'context_overflow']),
@@ -65,7 +66,7 @@ const nonRetryableFailureCase = Schema.Struct({
   emitsBeforeFailure: Schema.Boolean
 })
 
-const nonRetryableFailureCaseArbitrary = Schema.toArbitrary(nonRetryableFailureCase)
+const nonRetryableFailureCaseArbitrary = Arbitrary.schema(nonRetryableFailureCase)
 
 const weatherCall = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
 
@@ -108,13 +109,14 @@ const fragmentsToEvents = (fragments: ReadonlyArray<typeof providerFragment.Type
   fragments.slice(0, 24).map(eventForFragment)
 
 const hasHostToolCall = (events: ReadonlyArray<LLMEvent>) =>
-  events.some(event => event._tag === 'ToolCall')
+  events.some(event => Predicate.isTagged(event, 'ToolCall'))
 
 const expectedStopReason = (events: ReadonlyArray<LLMEvent>) =>
   hasHostToolCall(events) ? 'tool_use' : 'stop'
 
 const eventsWithDone = (input: typeof validProviderCase.Type) => {
   const events = fragmentsToEvents(input.fragments)
+
   return [...events, LLMDone.make({ stopReason: expectedStopReason(events) })]
 }
 
@@ -201,6 +203,7 @@ const makeNonRetryableLayer = (input: {
       LLMProvider.of({
         stream: request => {
           input.requests.push(request)
+
           const failure = Stream.fail(
             new LLMError({
               cause: input.cause,
@@ -269,16 +272,16 @@ describe('provider stream property tests', () => {
         expect(tags.indexOf('LLMStreamEnd')).toBeLessThan(tags.indexOf('AssistantMessage'))
         expect(tags.indexOf('AssistantMessage')).toBeLessThan(tags.indexOf('TurnEnd'))
         expect(countTag(events, 'LLMTextDelta')).toBe(
-          llmEvents.filter(event => event._tag === 'TextDelta').length
+          llmEvents.filter(event => Predicate.isTagged(event, 'TextDelta')).length
         )
         expect(countTag(events, 'LLMReasoningDelta')).toBe(
-          llmEvents.filter(event => event._tag === 'ReasoningDelta').length
+          llmEvents.filter(event => Predicate.isTagged(event, 'ReasoningDelta')).length
         )
         expect(countTag(events, 'UsageUpdate')).toBe(
-          llmEvents.filter(event => event._tag === 'Usage').length
+          llmEvents.filter(event => Predicate.isTagged(event, 'Usage')).length
         )
         expect(countTag(events, 'ToolInputEnd')).toBe(
-          llmEvents.filter(event => event._tag === 'ToolCall').length
+          llmEvents.filter(event => Predicate.isTagged(event, 'ToolCall')).length
         )
       })
     },
@@ -297,11 +300,17 @@ describe('provider stream property tests', () => {
         )
 
         expect(requests).toHaveLength(1)
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'LLMError', cause: 'invalid_response' }
-        })
-        if (result._tag === 'Failure') {
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+
+          if (Predicate.isTagged(result.failure, 'LLMError')) {
+            expect(result.failure.cause).toBe('invalid_response')
+          }
+        }
+
+        if (Result.isFailure(result)) {
           expect('responseIssue' in result.failure ? result.failure.responseIssue : undefined).toBe(
             input.done === 'none' ? 'missing_done' : undefined
           )
@@ -331,16 +340,22 @@ describe('provider stream property tests', () => {
         expect(requests).toHaveLength(shouldSucceed ? input.failuresBeforeSuccess + 1 : 3)
 
         if (shouldSucceed) {
-          expect(result).toMatchObject({ _tag: 'Success' })
-          if (result._tag === 'Success') {
+          expect(result._tag).toBe('Success')
+
+          if (Predicate.isTagged(result, 'Success')) {
             expect(countTag(result.success, 'AgentRetry')).toBe(expectedRetries)
             expect(countTag(result.success, 'TurnEnd')).toBe(1)
           }
         } else {
-          expect(result).toMatchObject({
-            _tag: 'Failure',
-            failure: { _tag: 'LLMError', cause: input.cause }
-          })
+          expect(Result.isFailure(result)).toBe(true)
+
+          if (Result.isFailure(result)) {
+            expect(Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+
+            if (Predicate.isTagged(result.failure, 'LLMError')) {
+              expect(result.failure.cause).toBe(input.cause)
+            }
+          }
         }
       })
     },
@@ -370,10 +385,15 @@ describe('provider stream property tests', () => {
           expect(requests).toHaveLength(1)
         }
 
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'LLMError', cause: input.cause }
-        })
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Predicate.isTagged(result.failure, 'LLMError')).toBe(true)
+
+          if (Predicate.isTagged(result.failure, 'LLMError')) {
+            expect(result.failure.cause).toBe(input.cause)
+          }
+        }
       })
     },
     propertyOptions

@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
@@ -8,8 +8,11 @@ import { ActionResult } from '../result.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
 export const afloatConnectorId = 'afloat'
+
 export const afloatApiKeySlotId = 'afloat.api_key'
+
 export const afloatMcpServerUrl = 'https://useafloat.com/mcp'
+
 export const afloatMcpProtocolVersion = '2026-07-28'
 
 export const AfloatApiKeyCredentialSlot = CredentialSlot.make({
@@ -21,7 +24,7 @@ const resolveAfloatApiKey = (integration: ConnectorIntegration) =>
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, AfloatApiKeyCredentialSlot)
 
-    if (credential._tag !== 'ApiKeyCredential') {
+    if (!Predicate.isTagged(credential, 'ApiKeyCredential')) {
       return yield* Effect.fail(
         new ConnectorError({
           cause: 'credential_invalid',
@@ -73,6 +76,7 @@ export const afloatMcpAuthAction = defineAction({
   execute: ({ integration }) =>
     Effect.gen(function* () {
       const apiKey = yield* resolveAfloatApiKey(integration)
+
       return ActionResult.success(makeAfloatMcpAuthData(apiKey))
     })
 })

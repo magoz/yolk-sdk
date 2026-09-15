@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -101,6 +101,7 @@ describe('LLMError', () => {
         message: 'truncated',
         retryable: false
       })
+
       expect(decoded.responseIssue).toBeUndefined()
 
       const encoded = yield* Schema.encodeUnknownEffect(LLMError)(
@@ -110,13 +111,14 @@ describe('LLMError', () => {
           retryable: false
         })
       )
+
       expect(encoded).toMatchObject({
         _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false
       })
       expect(
-        encoded !== null && typeof encoded === 'object' && 'responseIssue' in encoded
+        Predicate.isObjectOrArray(encoded) && 'responseIssue' in encoded
           ? encoded.responseIssue
           : undefined
       ).toBeUndefined()
@@ -131,10 +133,11 @@ describe('LLMError', () => {
         retryable: false,
         responseIssue: 'missing_done'
       })
+
       const encoded = yield* Schema.encodeUnknownEffect(LLMError)(error)
       const decoded = yield* Schema.decodeUnknownEffect(LLMError)(encoded)
+      expect(Predicate.isTagged(decoded, 'LLMError')).toBe(true)
       expect(decoded).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false,
         responseIssue: 'missing_done'
@@ -146,4 +149,20 @@ describe('LLMError', () => {
       expect('responseIssue' in agentLoopErrorToAgentError(decoded)).toBe(false)
     })
   )
+
+  it('omits provider on LLM wire errors when absent', () => {
+    const omitted = agentLoopErrorToAgentError(
+      new LLMError({
+        cause: 'provider_error',
+        message: 'down',
+        retryable: true
+      })
+    )
+
+    expect(Object.keys(omitted)).toEqual(['_tag', 'code', 'message', 'retryable'])
+    expect(JSON.stringify(omitted)).toBe(
+      '{"_tag":"AgentError","code":"provider_error","message":"down","retryable":true}'
+    )
+    expect(Object.hasOwn(omitted, 'provider')).toBe(false)
+  })
 })

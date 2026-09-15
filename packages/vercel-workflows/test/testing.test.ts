@@ -16,6 +16,7 @@ const collect = async <T>(stream: ReadableStream<T>, count: number): Promise<Arr
   try {
     while (chunks.length < count) {
       const result = await reader.read()
+
       if (result.done) break
       chunks.push(result.value)
     }
@@ -32,6 +33,7 @@ const drain = async <T>(stream: ReadableStream<T>): Promise<Array<T>> => {
 
   for (;;) {
     const result = await reader.read()
+
     if (result.done) return chunks
     chunks.push(result.value)
   }
@@ -53,6 +55,7 @@ describe('TestWorkflowWorld run lifecycle', () => {
   it('marks a rejecting workflow as failed and keeps the error', async () => {
     const world = new TestWorkflowWorld()
     const boom = new Error('boom')
+
     const { runId } = world.start(async () => {
       throw boom
     }, [])
@@ -65,6 +68,7 @@ describe('TestWorkflowWorld run lifecycle', () => {
   it('cancel rejects hooks, ends streams, and refuses terminal runs', async () => {
     const world = new TestWorkflowWorld()
     let hookError: unknown
+
     const { runId } = world.start(async () => {
       using hook = TestWorkflowWorld.createHook({ token: 'hook-1' })
 
@@ -100,9 +104,11 @@ describe('TestWorkflowWorld durable streams', () => {
   it('replays chunks from startIndex and follows live writes until close', async () => {
     const world = new TestWorkflowWorld()
     let release: () => void = () => {}
+
     const gate = new Promise<void>(resolve => {
       release = resolve
     })
+
     const { runId } = world.start(async () => {
       const writer = TestWorkflowWorld.getWritable<string>().getWriter()
       await writer.write('a')
@@ -140,6 +146,7 @@ describe('TestWorkflowWorld durable streams', () => {
   it('rejects writes after close with the platform 409 conflict shape', async () => {
     const world = new TestWorkflowWorld()
     let writeError: unknown
+
     const { runId } = world.start(async () => {
       const writable = TestWorkflowWorld.getWritable<string>()
       const writer = writable.getWriter()
@@ -147,6 +154,7 @@ describe('TestWorkflowWorld durable streams', () => {
       await writer.close()
 
       const late = TestWorkflowWorld.getWritable<string>().getWriter()
+
       try {
         await late.write('after-close')
       } catch (error) {
@@ -167,11 +175,13 @@ describe('TestWorkflowWorld durable streams', () => {
   it('rejects a second close with the same conflict shape', async () => {
     const world = new TestWorkflowWorld()
     let closeError: unknown
+
     const { runId } = world.start(async () => {
       const first = TestWorkflowWorld.getWritable<string>().getWriter()
       await first.close()
 
       const second = TestWorkflowWorld.getWritable<string>().getWriter()
+
       try {
         await second.close()
       } catch (error) {
@@ -190,9 +200,11 @@ describe('TestWorkflowWorld step executor', () => {
   it('honors fn.maxRetries and exposes 1-based attempt metadata', async () => {
     const world = new TestWorkflowWorld()
     const attempts: Array<number> = []
+
     const step = Object.assign(
       async () => {
         attempts.push(TestWorkflowWorld.getStepMetadata().attempt)
+
         if (attempts.length < 3) throw new Error('transient')
 
         return 'ok'
@@ -211,6 +223,7 @@ describe('TestWorkflowWorld step executor', () => {
   it('exhausts the retry budget and rethrows the final error', async () => {
     const world = new TestWorkflowWorld()
     const failure = new Error('permanent')
+
     const step = Object.assign(
       async (): Promise<never> => {
         throw failure
@@ -228,6 +241,7 @@ describe('TestWorkflowWorld step executor', () => {
 
   it('defaults to the platform retry budget when maxRetries is unset', async () => {
     const world = new TestWorkflowWorld()
+
     const step = async (): Promise<never> => {
       throw new Error('always')
     }
@@ -243,6 +257,7 @@ describe('TestWorkflowWorld step executor', () => {
   it('getStepMetadata outside a step context throws', async () => {
     const world = new TestWorkflowWorld()
     let metadataError: unknown
+
     const { runId } = world.start(async () => {
       try {
         TestWorkflowWorld.getStepMetadata()
@@ -260,6 +275,7 @@ describe('TestWorkflowWorld hooks', () => {
   it('resumes a registered hook exactly once', async () => {
     const world = new TestWorkflowWorld()
     let received: unknown
+
     const { runId } = world.start(async () => {
       using hook = TestWorkflowWorld.createHook<{ readonly answer: number }>({ token: 'hook-a' })
 
@@ -290,6 +306,7 @@ describe('testWorkflowModule ambient surface', () => {
   it('exposes workflow metadata inside a run', async () => {
     const world = new TestWorkflowWorld()
     let observedRunId: string | undefined
+
     const { runId } = world.start(async () => {
       observedRunId = testWorkflowModule.getWorkflowMetadata().workflowRunId
     }, [])

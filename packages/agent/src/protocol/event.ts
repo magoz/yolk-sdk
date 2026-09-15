@@ -1,4 +1,5 @@
 import * as Schema from 'effect/Schema'
+import { Match, Predicate } from 'effect'
 import { AssistantAgentMessage, AgentMessage, UserMessage } from './message.ts'
 import {
   HitlRequest,
@@ -21,6 +22,7 @@ const EventIdentity = {
 }
 
 export const SubagentStatus = Schema.Literals(['running', 'completed', 'error'])
+
 export type SubagentStatus = typeof SubagentStatus.Type
 
 export const AgentErrorCode = Schema.Literals([
@@ -39,6 +41,7 @@ export const AgentErrorCode = Schema.Literals([
   'conflict',
   'unknown'
 ])
+
 export type AgentErrorCode = typeof AgentErrorCode.Type
 
 export const ProviderFailureKind = Schema.Literals([
@@ -52,6 +55,7 @@ export const ProviderFailureKind = Schema.Literals([
   'invalid_response',
   'unknown'
 ])
+
 export type ProviderFailureKind = typeof ProviderFailureKind.Type
 
 export class ProviderErrorInfo extends Schema.Class<ProviderErrorInfo>('ProviderErrorInfo')({
@@ -305,56 +309,110 @@ export class SubagentCompleted extends Schema.TaggedClass<SubagentCompleted>()(
 
 export const makeSubagentRunId = (parentToolCallId: string) => `subagent:${parentToolCallId}`
 
+type QuestionAnswerCopyFields = {
+  questionId: QuestionAnswer['questionId']
+  optionIds?: QuestionAnswer['optionIds']
+  customAnswer?: QuestionAnswer['customAnswer']
+}
+
 const questionAnswerValue = (answer: QuestionAnswer) =>
-  QuestionAnswer.make({
-    questionId: answer.questionId,
-    ...(answer.optionIds === undefined ? {} : { optionIds: [...answer.optionIds] }),
-    ...(answer.customAnswer === undefined ? {} : { customAnswer: answer.customAnswer })
-  })
+  QuestionAnswer.make(
+    (() => {
+      const fields: QuestionAnswerCopyFields = {
+        questionId: answer.questionId
+      }
+
+      if (answer.optionIds !== undefined) {
+        fields.optionIds = [...answer.optionIds]
+      }
+
+      if (answer.customAnswer !== undefined) {
+        fields.customAnswer = answer.customAnswer
+      }
+
+      return fields
+    })()
+  )
+
+type QuestionResponseCopyFields = {
+  requestId: QuestionResponse['requestId']
+  toolCallId: QuestionResponse['toolCallId']
+  outcome: QuestionResponse['outcome']
+  source: QuestionResponse['source']
+  answers?: QuestionResponse['answers']
+  reason?: QuestionResponse['reason']
+}
 
 const questionResponseValue = (response: QuestionResponse) =>
-  QuestionResponse.make({
-    requestId: response.requestId,
-    toolCallId: response.toolCallId,
-    outcome: response.outcome,
-    source: response.source,
-    ...(response.answers === undefined
-      ? {}
-      : { answers: response.answers.map(answer => questionAnswerValue(answer)) }),
-    ...(response.reason === undefined ? {} : { reason: response.reason })
-  })
+  QuestionResponse.make(
+    (() => {
+      const fields: QuestionResponseCopyFields = {
+        requestId: response.requestId,
+        toolCallId: response.toolCallId,
+        outcome: response.outcome,
+        source: response.source
+      }
+
+      if (response.answers !== undefined) {
+        fields.answers = response.answers.map(answer => questionAnswerValue(answer))
+      }
+
+      if (response.reason !== undefined) {
+        fields.reason = response.reason
+      }
+
+      return fields
+    })()
+  )
+
+type ToolApprovalResponseCopyFields = {
+  requestId: ToolApprovalResponse['requestId']
+  toolCallId: ToolApprovalResponse['toolCallId']
+  decision: ToolApprovalResponse['decision']
+  source: ToolApprovalResponse['source']
+  reason?: ToolApprovalResponse['reason']
+}
 
 const toolApprovalResponseValue = (response: ToolApprovalResponse) =>
-  ToolApprovalResponse.make({
-    requestId: response.requestId,
-    toolCallId: response.toolCallId,
-    decision: response.decision,
-    source: response.source,
-    ...(response.reason === undefined ? {} : { reason: response.reason })
-  })
+  ToolApprovalResponse.make(
+    (() => {
+      const fields: ToolApprovalResponseCopyFields = {
+        requestId: response.requestId,
+        toolCallId: response.toolCallId,
+        decision: response.decision,
+        source: response.source
+      }
 
-export const hitlResponseEvent = (response: HitlResponse): AgentEvent => {
-  switch (response._tag) {
-    case 'QuestionResponse': {
-      const responseValue = questionResponseValue(response)
+      if (response.reason !== undefined) {
+        fields.reason = response.reason
+      }
 
-      return response.outcome === 'answered'
+      return fields
+    })()
+  )
+
+export const hitlResponseEvent = (response: HitlResponse): AgentEvent =>
+  Match.value(response).pipe(
+    Match.tag('QuestionResponse', current => {
+      const responseValue = questionResponseValue(current)
+
+      return current.outcome === 'answered'
         ? QuestionAnswered.make({ response: responseValue })
         : QuestionCancelled.make({ response: responseValue })
-    }
-    case 'ToolApprovalResponse': {
-      const responseValue = toolApprovalResponseValue(response)
+    }),
+    Match.tag('ToolApprovalResponse', current => {
+      const responseValue = toolApprovalResponseValue(current)
 
-      return response.decision === 'approved'
-        ? ToolApprovalGranted.make({ toolCallId: response.toolCallId, response: responseValue })
+      return current.decision === 'approved'
+        ? ToolApprovalGranted.make({ toolCallId: current.toolCallId, response: responseValue })
         : ToolApprovalDenied.make({
-            toolCallId: response.toolCallId,
-            reason: response.reason ?? 'Denied by user',
+            toolCallId: current.toolCallId,
+            reason: current.reason ?? 'Denied by user',
             response: responseValue
           })
-    }
-  }
-}
+    }),
+    Match.exhaustive
+  )
 
 export const AgentEvent = Schema.Union([
   AgentStart,
@@ -390,6 +448,7 @@ export const AgentEvent = Schema.Union([
   SubagentStarted,
   SubagentCompleted
 ])
+
 export type AgentEvent = typeof AgentEvent.Type
 
 export type TerminalAgentEvent = Extract<
@@ -398,4 +457,6 @@ export type TerminalAgentEvent = Extract<
 >
 
 export const isTerminalAgentEvent = (event: AgentEvent): event is TerminalAgentEvent =>
-  event._tag === 'AgentEnd' || event._tag === 'AgentError' || event._tag === 'AgentAwaitingInput'
+  Predicate.isTagged(event, 'AgentEnd') ||
+  Predicate.isTagged(event, 'AgentError') ||
+  Predicate.isTagged(event, 'AgentAwaitingInput')

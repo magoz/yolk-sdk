@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option } from 'effect'
+import { Array as Arr, Effect, Match, Option, Predicate, Result } from 'effect'
 import type { Context } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
@@ -66,23 +66,42 @@ const JsonRpcMessageSchema = Schema.Union([JsonRpcRequestSchema, JsonRpcNotifica
 
 type JsonRpcMessage = typeof JsonRpcMessageSchema.Type
 
-type DecodedLine =
-  | { readonly _tag: 'Message'; readonly message: JsonRpcMessage }
-  | { readonly _tag: 'Response'; readonly response: Option.Option<string> }
+const DecodedMessageLine = Schema.TaggedStruct('Message', {
+  message: Schema.Unknown
+})
 
-const decodedMessage = (message: JsonRpcMessage): DecodedLine => ({ _tag: 'Message', message })
+const DecodedResponseLine = Schema.TaggedStruct('Response', {
+  response: Schema.Unknown
+})
+
+type DecodedLine =
+  | {
+      readonly _tag: 'Message'
+      readonly message: JsonRpcMessage
+    }
+  | {
+      readonly _tag: 'Response'
+      readonly response: Option.Option<string>
+    }
+
+const decodedMessage = (message: JsonRpcMessage): DecodedLine => ({
+  ...DecodedMessageLine.make({ message }),
+  message
+})
 
 const decodedResponse = (response: Option.Option<string>): DecodedLine => ({
-  _tag: 'Response',
+  ...DecodedResponseLine.make({ response }),
   response
 })
 
-const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
+
 const decodeJsonRpcMessage = Schema.decodeUnknownEffect(JsonRpcMessageSchema)
+
 const decodeCallToolParams = Schema.decodeUnknownEffect(CallToolParamsSchema)
 
-const encodeJson = (value: unknown) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+const encodeJson = (value: JsonRpcResponse) =>
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
     Effect.mapError(
       error =>
         new McpServerError({
@@ -155,44 +174,47 @@ const protocolErrorResponse = (id: string | number | null, error: McpServerError
 
 const documentResourceUri = (filename: string) => `file:///${encodeURIComponent(filename)}`
 
-const mcpContentBlockFromPart = (part: ContentPart): SdkContentBlock => {
-  switch (part._tag) {
-    case 'Text':
-      return { type: 'text', text: part.text }
-    case 'Image':
-      return Option.match(attachmentSourceBase64(part.source), {
+const mcpContentBlockFromPart = (part: ContentPart): SdkContentBlock =>
+  Match.value(part).pipe(
+    Match.withReturnType<SdkContentBlock>(),
+    Match.tag('Text', current => ({ type: 'text', text: current.text })),
+    Match.tag('Image', current =>
+      Option.match(attachmentSourceBase64(current.source), {
         onNone: () => ({
           type: 'text',
-          text: `Image attachment: ${attachmentSourcePreview(part.source)}`
+          text: `Image attachment: ${attachmentSourcePreview(current.source)}`
         }),
-        onSome: data => ({ type: 'image', data, mimeType: part.mimeType })
+        onSome: data => ({ type: 'image', data, mimeType: current.mimeType })
       })
-    case 'Document':
-      return Option.match(attachmentSourceBase64(part.source), {
+    ),
+    Match.tag('Document', current =>
+      Option.match(attachmentSourceBase64(current.source), {
         onNone: () => ({
           type: 'text',
-          text: `Document attachment: ${attachmentSourcePreview(part.source)}`
+          text: `Document attachment: ${attachmentSourcePreview(current.source)}`
         }),
         onSome: data => ({
           type: 'resource',
           resource: {
-            uri: documentResourceUri(part.filename),
-            name: part.title ?? part.filename,
-            mimeType: part.mimeType,
+            uri: documentResourceUri(current.filename),
+            name: current.title ?? current.filename,
+            mimeType: current.mimeType,
             blob: data
           }
         })
       })
-    case 'Audio':
-      return Option.match(attachmentSourceBase64(part.source), {
+    ),
+    Match.tag('Audio', current =>
+      Option.match(attachmentSourceBase64(current.source), {
         onNone: () => ({
           type: 'text',
-          text: `Audio attachment: ${attachmentSourcePreview(part.source)}`
+          text: `Audio attachment: ${attachmentSourcePreview(current.source)}`
         }),
-        onSome: data => ({ type: 'audio', data, mimeType: part.mimeType })
+        onSome: data => ({ type: 'audio', data, mimeType: current.mimeType })
       })
-  }
-}
+    ),
+    Match.exhaustive
+  )
 
 const mcpResultFromToolResult = (result: ToolResult): SdkCallToolResult => {
   const content = Arr.map(contentParts(result.content), mcpContentBlockFromPart)
@@ -259,6 +281,7 @@ export const makeMcpToolServer = <R>(input: {
   readonly allowedOriginHostnames?: ReadonlyArray<string>
 }): McpToolServer<R> => {
   const findTool = (name: string) => Arr.findFirst(input.tools, tool => tool.def.name === name)
+
   const toolInputSchemas = input.tools.map(tool => ({
     tool,
     schema: Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))(
@@ -332,7 +355,9 @@ export const makeMcpToolServer = <R>(input: {
                 })
             )
           )
+
           const tool = findTool(params.name)
+
           if (Option.isNone(tool)) {
             return errorResponse(request.id, -32_602, `Unknown tool: ${params.name}`)
           }
@@ -353,16 +378,11 @@ export const makeMcpToolServer = <R>(input: {
 
           return successResponse(request.id, mcpResultFromExecutionResult(result))
         }
+
         default:
           return errorResponse(request.id, -32_601, `Method not found: ${request.method}`)
       }
-    }).pipe(
-      Effect.catch(error =>
-        error instanceof McpServerError
-          ? Effect.succeed(protocolErrorResponse(request.id, error))
-          : Effect.succeed(errorResponse(request.id, -32_000, unknownToMessage(error)))
-      )
-    )
+    }).pipe(Effect.catch(error => Effect.succeed(protocolErrorResponse(request.id, error))))
 
   const handleLine = (line: string) =>
     Effect.gen(function* () {
@@ -375,7 +395,7 @@ export const makeMcpToolServer = <R>(input: {
         )
       )
 
-      if (decoded._tag === 'Response') {
+      if (Predicate.isTagged(decoded, 'Response')) {
         return decoded.response
       }
 
@@ -387,12 +407,14 @@ export const makeMcpToolServer = <R>(input: {
 
       const response = yield* handleRequest(message)
       const encoded = yield* encodeJson(response)
+
       return Option.some(encoded)
     })
 
   const handleJson = (body: string) =>
     Effect.gen(function* () {
       const response = yield* handleLine(body)
+
       if (Option.isNone(response)) {
         return yield* encodeJson(errorResponse(null, -32_600, 'Notifications have no response'))
       }
@@ -403,10 +425,12 @@ export const makeMcpToolServer = <R>(input: {
   const handleHttpRequest = (request: Request) =>
     Effect.gen(function* () {
       const targetHostname = new URL(request.url).hostname
+
       const rejected = originValidationResponse(
         request,
         Array.from(input.allowedOriginHostnames ?? [targetHostname])
       )
+
       if (rejected !== undefined) {
         return rejected
       }
@@ -414,16 +438,23 @@ export const makeMcpToolServer = <R>(input: {
       if (!request.headers.has('mcp-protocol-version')) {
         if (request.method !== 'POST') {
           const body = yield* methodNotAllowedBody()
+
           return jsonResponse(body, { status: 405, headers: { allow: 'POST' } })
         }
 
-        const body = yield* Effect.promise(() => request.text()).pipe(
-          Effect.mapError(error => unknownToMessage(error)),
-          Effect.catch(error => badRequestBody(`Could not read request body: ${error}`))
+        const body = yield* Effect.tryPromise({
+          try: () => request.text(),
+          catch: error => `Could not read request body: ${unknownToMessage(error)}`
+        }).pipe(Effect.result)
+
+        if (Result.isFailure(body)) {
+          return jsonResponse(yield* badRequestBody(body.failure))
+        }
+
+        const responseBody = yield* handleJson(body.success).pipe(
+          Effect.catch(error => badRequestBody(error.message))
         )
-        const responseBody = yield* handleJson(body).pipe(
-          Effect.catch(error => badRequestBody(unknownToMessage(error)))
-        )
+
         return jsonResponse(responseBody)
       }
 

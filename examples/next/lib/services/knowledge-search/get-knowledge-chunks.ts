@@ -2,8 +2,8 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import { AppSearchIndexStoreError } from './errors'
-import type { AppKnowledgeChunkRecord } from './document-records'
+import { AppSearchIndexStoreError, isAppSearchIndexStoreError } from './errors'
+import { decodeAppKnowledgeChunkRecord } from './document-records'
 
 export const getKnowledgeChunks = (input: {
   readonly userId: string
@@ -15,6 +15,7 @@ export const getKnowledgeChunks = (input: {
     }
 
     const db = yield* Db
+
     const rows = yield* db
       .select({
         chunk: schema.knowledgeChunk,
@@ -38,14 +39,15 @@ export const getKnowledgeChunks = (input: {
       )
       .orderBy(asc(schema.knowledgeChunk.documentId), asc(schema.knowledgeChunk.position))
 
-    return rows satisfies ReadonlyArray<AppKnowledgeChunkRecord>
+    return yield* Effect.forEach(rows, decodeAppKnowledgeChunkRecord)
   }).pipe(
     Effect.withSpan('knowledge_search.chunks.get'),
-    Effect.mapError(
-      error =>
-        new AppSearchIndexStoreError({
-          message: 'Could not get knowledge search chunks',
-          cause: error
-        })
+    Effect.mapError(error =>
+      isAppSearchIndexStoreError(error)
+        ? error
+        : new AppSearchIndexStoreError({
+            message: 'Could not get knowledge search chunks',
+            cause: error
+          })
     )
   )

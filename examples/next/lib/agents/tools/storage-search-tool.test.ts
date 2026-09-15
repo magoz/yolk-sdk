@@ -2,6 +2,11 @@ import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { modelVisibleToolError } from '@yolk-sdk/agent/tools'
+import {
+  KnowledgeFileSource,
+  KnowledgeTextSource,
+  KnowledgeUrlSource
+} from '@yolk-sdk/knowledge/documents'
 import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/search'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeStorageSearchToolModule } from './storage-search-tool'
@@ -19,7 +24,7 @@ const searchResult: KnowledgeSearchResult = {
   document: {
     id: 'doc_1',
     scopeId: 'set_1',
-    source: { _tag: 'Text', label: 'Project note' },
+    source: KnowledgeTextSource.make({ label: 'Project note' }),
     status: 'ready',
     title: 'Project note'
   },
@@ -44,18 +49,22 @@ describe('storage knowledge search tool', () => {
       readonly minScore?: number
       readonly contextChunks: number
     }> = []
-    const toolModule = makeStorageSearchToolModule(input =>
-      Effect.sync(() => {
-        calls.push(input)
-        return [searchResult]
-      })
-    )
+
+    const toolModule = makeStorageSearchToolModule({
+      search: input =>
+        Effect.sync(() => {
+          calls.push(input)
+
+          return [searchResult]
+        })
+    })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -73,14 +82,73 @@ describe('storage knowledge search tool', () => {
     })
   })
 
-  it.effect('returns model-visible errors for blank queries', () => {
-    const toolModule = makeStorageSearchToolModule(() => Effect.succeed([]))
+  it.effect('labels file and url sources from reconstructed KnowledgeSource variants', () => {
+    const fileResult: KnowledgeSearchResult = {
+      ...searchResult,
+      document: {
+        ...searchResult.document,
+        id: 'doc_file',
+        title: undefined,
+        source: KnowledgeFileSource.make({
+          ref: 'uploads/user/notes.bin',
+          name: 'notes.bin'
+        })
+      }
+    }
+
+    const urlResult: KnowledgeSearchResult = {
+      ...searchResult,
+      document: {
+        ...searchResult.document,
+        id: 'doc_url',
+        title: undefined,
+        source: KnowledgeUrlSource.make({ url: 'https://example.test/doc' })
+      }
+    }
+
+    const unlabeledFile: KnowledgeSearchResult = {
+      ...searchResult,
+      document: {
+        ...searchResult.document,
+        id: 'doc_file_ref',
+        title: undefined,
+        source: KnowledgeFileSource.make({ ref: 'uploads/user/opaque-key' })
+      }
+    }
+
+    const toolModule = makeStorageSearchToolModule({
+      search: () => Effect.succeed([fileResult, urlResult, unlabeledFile])
+    })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'search_storage',
+          params: { queries: ['docs'] }
+        })
+      )
+
+      expect(result.content).toContain('Source: notes.bin')
+      expect(result.content).toContain('Source: https://example.test/doc')
+      expect(result.content).toContain('Source: uploads/user/opaque-key')
+    })
+  })
+
+  it.effect('returns model-visible errors for blank queries', () => {
+    const toolModule = makeStorageSearchToolModule({ search: () => Effect.succeed([]) })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -99,18 +167,22 @@ describe('storage knowledge search tool', () => {
 
   it.effect('runs multiple storage queries', () => {
     const calls: Array<string> = []
-    const toolModule = makeStorageSearchToolModule(input =>
-      Effect.sync(() => {
-        calls.push(input.query)
-        return [searchResult]
-      })
-    )
+
+    const toolModule = makeStorageSearchToolModule({
+      search: input =>
+        Effect.sync(() => {
+          calls.push(input.query)
+
+          return [searchResult]
+        })
+    })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -149,6 +221,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({ id: 'call_1', name: 'list_storage_sources', params: {} })
       )
@@ -185,6 +258,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -200,7 +274,7 @@ describe('storage knowledge search tool', () => {
   })
 
   it.effect('is available to subagents', () => {
-    const toolModule = makeStorageSearchToolModule(() => Effect.succeed([]))
+    const toolModule = makeStorageSearchToolModule({ search: () => Effect.succeed([]) })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
@@ -260,6 +334,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',

@@ -9,10 +9,12 @@ describe('makeDrainOccupancy', () => {
       const release = yield* Deferred.make<void>()
       const ran = yield* Ref.make(false)
       const firstToken = { id: 1 }
+
       const first = yield* occupancy.occupy(
         Deferred.await(release).pipe(Effect.andThen(Ref.set(ran, true))),
         firstToken
       )
+
       const second = yield* occupancy.occupy(Effect.void, { id: 2 })
 
       expect(first).toBe(true)

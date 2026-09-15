@@ -1,4 +1,18 @@
-import { Cause, Deferred, Effect, Fiber, Option, Queue, Ref, Stream, type Scope } from 'effect'
+import {
+  Cause,
+  Context,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Match,
+  Option,
+  Predicate,
+  Queue,
+  Ref,
+  Stream,
+  type Scope
+} from 'effect'
 import * as Schema from 'effect/Schema'
 import type {
   HitlResponse,
@@ -17,16 +31,16 @@ import {
   type VoiceToolCallOutcome,
   type VoiceToolCallsRequested
 } from './protocol.ts'
-import type { VoiceTransportApi } from './transport.ts'
+import { VoiceTransport, type VoiceTransportApi } from './transport.ts'
 
 /**
  * Client-side voice controller options. The controller never executes tools:
  * `executeToolCall` forwards each provider tool call to the host's
  * authenticated server endpoint and returns the server outcome. Approval
  * resume re-calls the same endpoint with the HITL `approval` response.
+ * The live transport is a yielded `VoiceTransport` requirement, not a value.
  */
 export type VoiceControllerOptions = {
-  readonly transport: VoiceTransportApi
   readonly codec: VoiceClientCodec
   readonly executeToolCall: (
     call: VoiceToolCall,
@@ -50,12 +64,21 @@ export type VoiceControllerApi = {
   readonly submitHitlResponse: (response: HitlResponse) => Effect.Effect<void>
 }
 
+export class VoiceController extends Context.Service<VoiceController, VoiceControllerApi>()(
+  '@yolk-sdk/agent/voice/VoiceController'
+) {
+  static layer = (
+    options: VoiceControllerOptions
+  ): Layer.Layer<VoiceController, never, VoiceTransport> =>
+    Layer.effect(this, makeVoiceController(options))
+}
+
 type PendingApproval = {
   readonly request: ToolApprovalRequest
   readonly deferred: Deferred.Deferred<ToolApprovalResponse>
 }
 
-const encodeErrorOutput = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeErrorOutput = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const errorOutputJson = (message: string) =>
   encodeErrorOutput({ error: message }).pipe(Effect.orElseSucceed(() => '{"error":"Tool failed"}'))
@@ -80,12 +103,14 @@ const sendAll = (
  *
  * The controller pumps transport events on a scoped background fiber so the
  * session end is observed even while a tool call awaits approval. Closing
- * the scope stops the pump and releases parked approvals.
+ * the scope stops the pump and releases parked approvals. Acquire with
+ * `VoiceTransport` in context (tests: `Effect.provideService`).
  */
 export const makeVoiceController = (
   options: VoiceControllerOptions
-): Effect.Effect<VoiceControllerApi, never, Scope.Scope> =>
+): Effect.Effect<VoiceControllerApi, never, Scope.Scope | VoiceTransport> =>
   Effect.gen(function* () {
+    const transport = yield* VoiceTransport
     const out = yield* Queue.unbounded<VoiceEvent, VoiceSessionError | Cause.Done>()
     const handledCallIds = yield* Ref.make<ReadonlySet<string>>(new Set())
     const pendingApprovals = yield* Ref.make<ReadonlyMap<string, PendingApproval>>(new Map())
@@ -104,7 +129,7 @@ export const makeVoiceController = (
       })
 
     const send = (payloads: Effect.Effect<ReadonlyArray<string>, VoiceSessionError>) =>
-      payloads.pipe(Effect.flatMap(encoded => sendAll(options.transport, encoded)))
+      payloads.pipe(Effect.flatMap(encoded => sendAll(transport, encoded)))
 
     const submitOutput = (callId: string, output: string) =>
       send(options.codec.encodeToolOutput(callId, output))
@@ -142,25 +167,26 @@ export const makeVoiceController = (
       call: VoiceToolCall,
       outcome: VoiceToolCallOutcome
     ): Effect.Effect<void, VoiceSessionError> => {
-      switch (outcome._tag) {
-        case 'Executed':
-          return emitCompleted(call, outcome.output)
-        case 'Denied':
-          return emitFailed(
+      return Match.value(outcome).pipe(
+        Match.tag('Executed', current => emitCompleted(call, current.output)),
+        Match.tag('Denied', current =>
+          emitFailed(
             call,
-            outcome.reason === undefined
+            current.reason === undefined
               ? 'Tool was denied.'
-              : `Tool was denied: ${outcome.reason}`,
-            outcome.output
+              : `Tool was denied: ${current.reason}`,
+            current.output
           )
-        case 'ApprovalRequired': {
+        ),
+        Match.tag('ApprovalRequired', () => {
           const message = `Tool ${call.name} still requires approval and was not executed.`
 
           return errorOutputJson(message).pipe(
             Effect.flatMap(output => emitFailed(call, message, output))
           )
-        }
-      }
+        }),
+        Match.exhaustive
+      )
     }
 
     const awaitApproval = (
@@ -190,7 +216,7 @@ export const makeVoiceController = (
       emit(VoiceToolCallExecuting.make({ callId: call.callId })).pipe(
         Effect.andThen(options.executeToolCall(call)),
         Effect.flatMap(outcome => {
-          if (outcome._tag !== 'ApprovalRequired') {
+          if (!Predicate.isTagged(outcome, 'ApprovalRequired')) {
             return settleOutcome(call, outcome)
           }
 
@@ -221,7 +247,7 @@ export const makeVoiceController = (
       }).pipe(Effect.catch(error => Queue.failCause(out, Cause.fail(error)).pipe(Effect.asVoid)))
 
     const dispatch = (event: VoiceEvent): Effect.Effect<void, never, Scope.Scope> => {
-      if (event._tag !== 'ToolCallsRequested') {
+      if (!Predicate.isTagged(event, 'ToolCallsRequested')) {
         return emit(event)
       }
 
@@ -239,6 +265,7 @@ export const makeVoiceController = (
 
         if (Option.isSome(failure)) {
           yield* Queue.failCause(out, failure.value)
+
           return
         }
 
@@ -246,7 +273,7 @@ export const makeVoiceController = (
       })
 
     yield* Effect.forkScoped(
-      Stream.runForEach(options.transport.events, dispatch).pipe(
+      Stream.runForEach(transport.events, dispatch).pipe(
         Effect.matchCauseEffect({
           onFailure: cause => finishPump(Option.some(cause)),
           onSuccess: () => finishPump(Option.none())
@@ -260,7 +287,7 @@ export const makeVoiceController = (
       )
 
     const submitHitlResponse = (response: HitlResponse): Effect.Effect<void> => {
-      if (response._tag !== 'ToolApprovalResponse') {
+      if (!Predicate.isTagged(response, 'ToolApprovalResponse')) {
         return Effect.void
       }
 

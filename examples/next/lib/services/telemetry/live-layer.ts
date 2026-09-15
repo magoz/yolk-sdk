@@ -1,10 +1,11 @@
-import { NodeSdk } from '@effect/opentelemetry'
+import * as NodeSdk from '@effect/opentelemetry/NodeSdk'
 import { BatchLogRecordProcessor, ConsoleLogRecordExporter } from '@opentelemetry/sdk-logs'
 
 // Note: Uses process.env because NodeSdk.layer() requires a synchronous callback
 // This is an acceptable exception for infrastructure-level code
 export const TelemetryLayer = NodeSdk.layer(() => {
   const serviceName = process.env.APP_NAME
+
   if (!serviceName) throw new Error('APP_NAME not found')
 
   const environment = process.env.NODE_ENV || 'development'

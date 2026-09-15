@@ -65,7 +65,11 @@ The smoke command reads `.alchemy/state/YolkAgentWorker/dev_magoz/Api.json` unle
 
 ## Alchemy compatibility
 
-This app pins `alchemy@2.0.0-beta.56` against catalog Effect `4.0.0-beta.80` (one Effect instance). Alchemy `2.0.0-beta.36` crashed at import time on `Effect.serviceOption(...).asEffect()`, which Effect 80 removed. `2.0.0-beta.38` dropped that obsolete protocol call but still treated `Schema.Defect` as a schema value (`Schema.optional(Schema.Defect)` / `Schema.DefectWithStack`), so `alchemy --help` and `alchemy/Cloudflare` failed on Effect 80 Schema AST encoding. 56 is the last Effect-80-compatible release (`peer effect >=4.0.0-beta.78`); it uses `Schema.Defect()` / `Schema.Defect({ includeStack: true })` and natively lazy-loads Vite, so the previous `patches/alchemy@*` Vite lazy-import is no longer needed. Do not blanket-strip remaining `.asEffect` sites: Alchemy's own `Resource`/`Platform`/`Binding` methods are still valid.
+This app pins `alchemy@2.0.0-beta.77` against catalog Effect `4.0.0-rc.115` (one Effect instance). Worker implementations are supplied directly to `Cloudflare.Worker`; the default runtime export is the Worker resource. Durable Objects use `Cloudflare.DurableObject` and `Cloudflare.WebSocket`. Storage adapters capture the genuine isolate `RuntimeContext` so app storage contracts remain environment-free.
+
+The published beta.77 dependency cohort still calls pre-rc.115 Config and CLI constructors. Reproducible pnpm patches cover Alchemy, its Cloudflare runtime, and the affected Distilled packages in both source and compiled exports; see [patch ownership and removal checks](../../patches/README.md). Keep these patches until an upstream release passes the runtime compatibility check without them. Peer ranges are not suppressed.
+
+The previous beta.56 / Effect beta.80 pair is no longer the compatibility target. Do not restore old `DurableObjectNamespace` or `ApiLive` wiring, add old Vite patches, or blanket-strip `.asEffect` calls: Alchemy-owned protocols are not Effect API aliases.
 
 `pnpm --filter @yolk-sdk/cloudflare-agent run compat` (also part of `pnpm cloudflare:check`) is a synchronous Node CLI smoke (`node --experimental-strip-types`, not tsx) so it loads Alchemy `lib/` the same way the CLI does. It checks the import graph, `alchemy --help`, and that app/root/Alchemy `require.resolve('effect')` realpaths are one instance. It does not deploy, start `alchemy dev`, or prove a running Worker or E2E.
 

@@ -98,17 +98,30 @@ const makeSharedWindow = (
   usedPercent: number,
   period: XAiGrokSubscriptionUsagePeriodMetadata | undefined
 ) =>
-  ProviderSubscriptionUsageWindow.make({
-    id: 'shared',
-    usedPercent,
-    ...(period === undefined
-      ? {}
-      : {
-          resetsAt: period.resetsAt,
-          resetsAfterSeconds: period.resetsAfterSeconds,
-          windowDurationMinutes: period.windowDurationMinutes
-        })
-  })
+  ProviderSubscriptionUsageWindow.make(
+    (() => {
+      type XAiGrokSharedWindowFields = {
+        id: 'shared'
+        usedPercent: number
+        resetsAt?: string
+        resetsAfterSeconds?: number
+        windowDurationMinutes?: number
+      }
+
+      const fields: XAiGrokSharedWindowFields = {
+        id: 'shared',
+        usedPercent
+      }
+
+      if (period !== undefined) {
+        fields.resetsAt = period.resetsAt
+        fields.resetsAfterSeconds = period.resetsAfterSeconds
+        fields.windowDurationMinutes = period.windowDurationMinutes
+      }
+
+      return fields
+    })()
+  )
 
 const invalidResponse = () =>
   ProviderSubscriptionUsageResponseError.make({
@@ -187,6 +200,7 @@ export const parseXAiGrokSubscriptionUsage = (
               }),
               canonicalFetchedAt
             )
+
             window = makeSharedWindow(usedPercent, legacyPeriod)
           }
         }
@@ -257,6 +271,7 @@ export const fetchXAiGrokSubscriptionUsage = (
     }
 
     const client = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.get(xAiGrokSubscriptionUsageUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
@@ -267,12 +282,14 @@ export const fetchXAiGrokSubscriptionUsage = (
         'x-grok-client-mode': 'headless'
       })
     )
+
     const json = yield* executeAndReadProviderSubscriptionUsageJson({
       provider: xAiGrokProviderId,
       client,
       request,
       timeoutMs: requestTimeoutMs
     })
+
     const responseFetchedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
 
     return yield* parseXAiGrokSubscriptionUsage(json, responseFetchedAt)

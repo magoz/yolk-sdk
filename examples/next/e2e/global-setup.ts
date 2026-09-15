@@ -23,7 +23,7 @@ const globalSetup = async () => {
     yield* ensureTestEnv('Global Setup')
 
     yield* Effect.log('Resetting database')
-    const databaseUrl = yield* Config.string('DATABASE_URL')
+    const databaseUrl = yield* Config.String('DATABASE_URL')
     const sql = neon(databaseUrl)
     const resetDb = drizzle({ client: sql, relations: schema.relations })
 
@@ -37,6 +37,7 @@ const globalSetup = async () => {
     const effectDb = yield* Db
 
     yield* Effect.log('Creating test user')
+
     const [user] = yield* effectDb
       .insert(schema.user)
       .values({
@@ -55,6 +56,7 @@ const globalSetup = async () => {
     const { token } = yield* createTestAuthSession(user.id)
 
     yield* Effect.log(`Setup complete — user: ${user.email}`)
+
     return token
   }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
 

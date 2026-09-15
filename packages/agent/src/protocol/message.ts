@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Data, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   Content,
@@ -12,9 +12,11 @@ import { BackgroundToolAccepted, ToolCall, ToolResult } from './tool.ts'
 export const MessageAuthor = Schema.Struct({
   displayName: Schema.optional(Schema.String)
 })
+
 export type MessageAuthor = typeof MessageAuthor.Type
 
 export const MessageAnnotations = Schema.Record(Schema.String, Schema.Json)
+
 export type MessageAnnotations = typeof MessageAnnotations.Type
 
 export type MessageEnvelope = {
@@ -73,6 +75,7 @@ export const AssistantPart = Schema.Union([
   ProviderToolCallPart,
   ProviderToolResultPart
 ])
+
 export type AssistantPart = typeof AssistantPart.Type
 
 export class AssistantAgentMessage extends Schema.TaggedClass<AssistantAgentMessage>()(
@@ -110,32 +113,32 @@ export const toolResultMessageFromResult = (
   })
 
 export const AgentMessage = Schema.Union([UserMessage, AssistantAgentMessage, ToolResultMessage])
+
 export type AgentMessage = typeof AgentMessage.Type
 
 const resolveAssistantPartAttachmentSources = <E, R>(
   part: AssistantPart,
   resolver: AttachmentSourceResolver<E, R>
-): Effect.Effect<AssistantPart, E, R> => {
-  switch (part._tag) {
-    case 'Text':
-      return resolveContentAttachmentSources(part.content, resolver).pipe(
-        Effect.map(content => AssistantTextPart.make({ ...part, content }))
+): Effect.Effect<AssistantPart, E, R> =>
+  Match.value(part).pipe(
+    Match.tag('Text', current =>
+      resolveContentAttachmentSources(current.content, resolver).pipe(
+        Effect.map(content => AssistantTextPart.make({ ...current, content }))
       )
-    case 'ProviderToolResult':
-      return resolveContentAttachmentSources(part.result.content, resolver).pipe(
+    ),
+    Match.tag('ProviderToolResult', current =>
+      resolveContentAttachmentSources(current.result.content, resolver).pipe(
         Effect.map(content =>
           ProviderToolResultPart.make({
-            ...part,
-            result: ToolResult.make({ ...part.result, content })
+            ...current,
+            result: ToolResult.make({ ...current.result, content })
           })
         )
       )
-    case 'Reasoning':
-    case 'HostToolCall':
-    case 'ProviderToolCall':
-      return Effect.succeed(part)
-  }
-}
+    ),
+    Match.tag('Reasoning', 'HostToolCall', 'ProviderToolCall', current => Effect.succeed(current)),
+    Match.exhaustive
+  )
 
 /**
  * Resolve every attachment in protocol content, including assistant text and
@@ -147,22 +150,25 @@ const resolveAssistantPartAttachmentSources = <E, R>(
 export const resolveMessageAttachmentSources = <E, R>(
   message: AgentMessage,
   resolver: AttachmentSourceResolver<E, R>
-): Effect.Effect<AgentMessage, E, R> => {
-  switch (message._tag) {
-    case 'User':
-      return resolveContentAttachmentSources(message.content, resolver).pipe(
-        Effect.map(content => UserMessage.make({ ...message, content }))
+): Effect.Effect<AgentMessage, E, R> =>
+  Match.value(message).pipe(
+    Match.tag('User', current =>
+      resolveContentAttachmentSources(current.content, resolver).pipe(
+        Effect.map(content => UserMessage.make({ ...current, content }))
       )
-    case 'ToolResult':
-      return resolveContentAttachmentSources(message.content, resolver).pipe(
-        Effect.map(content => ToolResultMessage.make({ ...message, content }))
+    ),
+    Match.tag('ToolResult', current =>
+      resolveContentAttachmentSources(current.content, resolver).pipe(
+        Effect.map(content => ToolResultMessage.make({ ...current, content }))
       )
-    case 'Assistant':
-      return Effect.forEach(message.parts, part =>
+    ),
+    Match.tag('Assistant', current =>
+      Effect.forEach(current.parts, part =>
         resolveAssistantPartAttachmentSources(part, resolver)
-      ).pipe(Effect.map(parts => AssistantAgentMessage.make({ ...message, parts })))
-  }
-}
+      ).pipe(Effect.map(parts => AssistantAgentMessage.make({ ...current, parts })))
+    ),
+    Match.exhaustive
+  )
 
 /** Resolve messages in order with the same Effect-native resolver; no deduplication or caching. */
 export const resolveMessagesAttachmentSources = <E, R>(
@@ -185,13 +191,18 @@ export type TranscriptInvariantValidation =
       readonly message: string
     }
 
+export const TranscriptInvariantValidation = Data.taggedEnum<TranscriptInvariantValidation>()
+
 export type RepairDanglingHostToolCallsOptions = {
   readonly content?: (call: ToolCall) => Content
   readonly structuredContent?: (call: ToolCall) => unknown
 }
 
 export const assistantContent = (message: AssistantAgentMessage): Content => {
-  const parts = message.parts.flatMap(part => (part._tag === 'Text' ? [part.content] : []))
+  const parts = message.parts.flatMap(part =>
+    Predicate.isTagged(part, 'Text') ? [part.content] : []
+  )
+
   const first = parts[0]
 
   if (parts.length === 0) {
@@ -206,10 +217,10 @@ export const assistantContent = (message: AssistantAgentMessage): Content => {
 }
 
 export const assistantReasoningText = (message: AssistantAgentMessage) =>
-  message.parts.flatMap(part => (part._tag === 'Reasoning' ? [part.text] : [])).join('')
+  message.parts.flatMap(part => (Predicate.isTagged(part, 'Reasoning') ? [part.text] : [])).join('')
 
 export const assistantHostToolCalls = (message: AssistantAgentMessage) =>
-  message.parts.flatMap(part => (part._tag === 'HostToolCall' ? [part.call] : []))
+  message.parts.flatMap(part => (Predicate.isTagged(part, 'HostToolCall') ? [part.call] : []))
 
 type PendingHostToolCall = {
   readonly call: ToolCall
@@ -217,18 +228,31 @@ type PendingHostToolCall = {
 }
 
 const pendingHostToolCalls = (message: AgentMessage, messageIndex: number) =>
-  message._tag === 'Assistant'
+  Predicate.isTagged(message, 'Assistant')
     ? assistantHostToolCalls(message).map(call => ({ call, assistantMessageIndex: messageIndex }))
     : []
 
 const danglingHostToolCall = (
   pending: PendingHostToolCall,
   beforeMessageIndex: number | undefined
-): DanglingHostToolCall => ({
-  call: pending.call,
-  assistantMessageIndex: pending.assistantMessageIndex,
-  ...(beforeMessageIndex === undefined ? {} : { beforeMessageIndex })
-})
+): DanglingHostToolCall => {
+  type DanglingHostToolCallFields = {
+    call: DanglingHostToolCall['call']
+    assistantMessageIndex: DanglingHostToolCall['assistantMessageIndex']
+    beforeMessageIndex?: DanglingHostToolCall['beforeMessageIndex']
+  }
+
+  const fields: DanglingHostToolCallFields = {
+    call: pending.call,
+    assistantMessageIndex: pending.assistantMessageIndex
+  }
+
+  if (beforeMessageIndex !== undefined) {
+    fields.beforeMessageIndex = beforeMessageIndex
+  }
+
+  return fields
+}
 
 const danglingHostToolCallSummary = (calls: ReadonlyArray<DanglingHostToolCall>) =>
   calls.map(({ call }) => `${call.name} (${call.id})`).join(', ')
@@ -242,12 +266,28 @@ const danglingHostToolResultMessage = (
 ) => {
   const structuredContent = options?.structuredContent?.(call)
 
-  return ToolResultMessage.make({
-    toolCallId: call.id,
-    content: options?.content?.(call) ?? danglingHostToolResultContent(call),
-    isError: true,
-    ...(structuredContent === undefined ? {} : { structuredContent })
-  })
+  type DanglingHostToolResultMessageFields = {
+    toolCallId: string
+    content: Content
+    isError: true
+    structuredContent?: ToolResultMessage['structuredContent']
+  }
+
+  return ToolResultMessage.make(
+    (() => {
+      const fields: DanglingHostToolResultMessageFields = {
+        toolCallId: call.id,
+        content: options?.content?.(call) ?? danglingHostToolResultContent(call),
+        isError: true
+      }
+
+      if (structuredContent !== undefined) {
+        fields.structuredContent = structuredContent
+      }
+
+      return fields
+    })()
+  )
 }
 
 export const danglingHostToolCalls = (
@@ -257,14 +297,14 @@ export const danglingHostToolCalls = (
   let pending: ReadonlyArray<PendingHostToolCall> = []
 
   for (const [messageIndex, message] of messages.entries()) {
-    if (message._tag !== 'ToolResult' && pending.length > 0) {
+    if (!Predicate.isTagged(message, 'ToolResult') && pending.length > 0) {
       dangling.push(...pending.map(call => danglingHostToolCall(call, messageIndex)))
       pending = []
     }
 
     pending = [...pending, ...pendingHostToolCalls(message, messageIndex)]
 
-    if (message._tag === 'ToolResult') {
+    if (Predicate.isTagged(message, 'ToolResult')) {
       pending = pending.filter(call => call.call.id !== message.toolCallId)
     }
   }
@@ -280,14 +320,13 @@ export const validateNoDanglingHostToolCalls = (
   const dangling = danglingHostToolCalls(messages)
 
   if (dangling.length === 0) {
-    return { _tag: 'Valid' }
+    return TranscriptInvariantValidation.Valid()
   }
 
-  return {
-    _tag: 'DanglingHostToolCalls',
+  return TranscriptInvariantValidation.DanglingHostToolCalls({
     calls: dangling,
     message: `Transcript has host tool calls without tool results: ${danglingHostToolCallSummary(dangling)}`
-  }
+  })
 }
 
 export const repairDanglingHostToolCalls = (
@@ -298,18 +337,18 @@ export const repairDanglingHostToolCalls = (
   let pending: ReadonlyArray<ToolCall> = []
 
   for (const message of messages) {
-    if (message._tag !== 'ToolResult' && pending.length > 0) {
+    if (!Predicate.isTagged(message, 'ToolResult') && pending.length > 0) {
       repaired.push(...pending.map(call => danglingHostToolResultMessage(call, options)))
       pending = []
     }
 
     repaired.push(message)
 
-    if (message._tag === 'Assistant') {
+    if (Predicate.isTagged(message, 'Assistant')) {
       pending = [...pending, ...assistantHostToolCalls(message)]
     }
 
-    if (message._tag === 'ToolResult') {
+    if (Predicate.isTagged(message, 'ToolResult')) {
       pending = pending.filter(call => call.id !== message.toolCallId)
     }
   }
@@ -333,6 +372,7 @@ export const messageContextText = (message: MessageEnvelope) => {
       ? []
       : [`- sent_at: ${formatCreatedAtMs(message.createdAtMs)}`])
   ]
+
   const annotationLines = Object.entries(message.annotations ?? {}).map(
     ([key, value]) => `- ${key}: ${formatAnnotationValue(value)}`
   )
@@ -352,7 +392,7 @@ export const prependMessageContextToContent = (content: Content, context: string
 
   const prefix = `${context}\n\nMessage:`
 
-  return typeof content === 'string'
+  return Predicate.isString(content)
     ? `${prefix}\n${content}`
     : [TextPart.make({ text: prefix }), ...content]
 }

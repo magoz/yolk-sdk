@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from 'vitest'
 
 const endpoint = new URL('https://example.com/mcp')
+
 const emptyObjectSchema = fromJsonSchema({ type: 'object', additionalProperties: false })
 
 const makeServer = () => {
@@ -75,6 +76,7 @@ const makeTransport = (handler: ReturnType<typeof createMcpHandler>) =>
 describe('official MCP SDK v2 integration', () => {
   it('serves the full modern core with MRTR over stateless HTTP', async () => {
     const handler = createMcpHandler(makeServer)
+
     const client = new Client(
       { name: 'sdk-v2-client', version: '1.0.0' },
       {

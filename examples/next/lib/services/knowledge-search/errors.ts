@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
 
-export class AppSearchIndexStoreError extends Schema.TaggedErrorClass<AppSearchIndexStoreError>()(
+export class AppSearchIndexStoreError extends Schema.TaggedError<AppSearchIndexStoreError>()(
   'AppSearchIndexStoreError',
   {
     message: Schema.String,
@@ -8,7 +8,7 @@ export class AppSearchIndexStoreError extends Schema.TaggedErrorClass<AppSearchI
   }
 ) {}
 
-export class AppKnowledgeDocumentNotFoundError extends Schema.TaggedErrorClass<AppKnowledgeDocumentNotFoundError>()(
+export class AppKnowledgeDocumentNotFoundError extends Schema.TaggedError<AppKnowledgeDocumentNotFoundError>()(
   'AppKnowledgeDocumentNotFoundError',
   {
     message: Schema.String,
@@ -16,7 +16,7 @@ export class AppKnowledgeDocumentNotFoundError extends Schema.TaggedErrorClass<A
   }
 ) {}
 
-export class AppKnowledgeCollectionNotFoundError extends Schema.TaggedErrorClass<AppKnowledgeCollectionNotFoundError>()(
+export class AppKnowledgeCollectionNotFoundError extends Schema.TaggedError<AppKnowledgeCollectionNotFoundError>()(
   'AppKnowledgeCollectionNotFoundError',
   {
     message: Schema.String,
@@ -24,7 +24,7 @@ export class AppKnowledgeCollectionNotFoundError extends Schema.TaggedErrorClass
   }
 ) {}
 
-export class AppKnowledgeSearchError extends Schema.TaggedErrorClass<AppKnowledgeSearchError>()(
+export class AppKnowledgeSearchError extends Schema.TaggedError<AppKnowledgeSearchError>()(
   'AppKnowledgeSearchError',
   {
     message: Schema.String,
@@ -33,7 +33,7 @@ export class AppKnowledgeSearchError extends Schema.TaggedErrorClass<AppKnowledg
   }
 ) {}
 
-export class AppKnowledgeExtractorError extends Schema.TaggedErrorClass<AppKnowledgeExtractorError>()(
+export class AppKnowledgeExtractorError extends Schema.TaggedError<AppKnowledgeExtractorError>()(
   'AppKnowledgeExtractorError',
   {
     message: Schema.String,
@@ -41,7 +41,7 @@ export class AppKnowledgeExtractorError extends Schema.TaggedErrorClass<AppKnowl
   }
 ) {}
 
-export class AppKnowledgeEmbedderError extends Schema.TaggedErrorClass<AppKnowledgeEmbedderError>()(
+export class AppKnowledgeEmbedderError extends Schema.TaggedError<AppKnowledgeEmbedderError>()(
   'AppKnowledgeEmbedderError',
   {
     message: Schema.String,
@@ -50,7 +50,7 @@ export class AppKnowledgeEmbedderError extends Schema.TaggedErrorClass<AppKnowle
   }
 ) {}
 
-export class AppKnowledgeSummarizerError extends Schema.TaggedErrorClass<AppKnowledgeSummarizerError>()(
+export class AppKnowledgeSummarizerError extends Schema.TaggedError<AppKnowledgeSummarizerError>()(
   'AppKnowledgeSummarizerError',
   {
     message: Schema.String,
@@ -60,7 +60,11 @@ export class AppKnowledgeSummarizerError extends Schema.TaggedErrorClass<AppKnow
 ) {}
 
 export const isAppSearchIndexStoreError = Schema.is(AppSearchIndexStoreError)
+
 export const isAppKnowledgeDocumentNotFoundError = Schema.is(AppKnowledgeDocumentNotFoundError)
+
 export const isAppKnowledgeCollectionNotFoundError = Schema.is(AppKnowledgeCollectionNotFoundError)
+
 export const isAppKnowledgeSearchError = Schema.is(AppKnowledgeSearchError)
+
 export const isAppKnowledgeSummarizerError = Schema.is(AppKnowledgeSummarizerError)

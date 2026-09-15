@@ -5,7 +5,7 @@
  * which defeats the purpose of using Schema for type-safe data validation.
  */
 
-/** @type {import('eslint').Rule.RuleModule} */
+/** @type {import('@oxlint/plugins').Rule} */
 export const noDisableValidation = {
   meta: {
     type: 'problem',

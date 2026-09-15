@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Ref } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { Driver } from '../src/driver.ts'
 import { makeDurableObjectDriverLayer } from '../src/driver/durable-object.ts'
@@ -36,6 +36,7 @@ describe('durable object driver', () => {
       const backing = yield* makeBacking()
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeDurableObjectDriverLayer({
         ...backing,
         drain: () =>
@@ -60,6 +61,7 @@ describe('durable object driver', () => {
       const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
       const firstStarted = yield* Deferred.make<void>()
       const firstRelease = yield* Deferred.make<void>()
+
       const backing = {
         load: Ref.get(snapshot),
         save: (next: DurableRunStoreSnapshot) =>
@@ -70,6 +72,7 @@ describe('durable object driver', () => {
               )
             : Ref.set(snapshot, next)
       }
+
       const layer = makeDurableObjectDriverLayer(backing)
 
       yield* Effect.gen(function* () {
@@ -90,6 +93,7 @@ describe('durable object driver', () => {
   it.effect('does not publish in-memory claims when save fails', () =>
     Effect.gen(function* () {
       const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
+
       const layer = makeDurableObjectDriverLayer({
         load: Ref.get(snapshot),
         save: () => Effect.die('save failed')
@@ -98,7 +102,7 @@ describe('durable object driver', () => {
       yield* Effect.gen(function* () {
         const store = yield* RunStore
         const exit = yield* store.claim('run_1').pipe(Effect.exit)
-        expect(exit._tag).toBe('Failure')
+        expect(Exit.isFailure(exit)).toBe(true)
         expect(yield* store.isClaimed('run_1')).toBe(false)
         expect(yield* Ref.get(snapshot)).toBeUndefined()
       }).pipe(Effect.provide(layer))
@@ -110,6 +114,7 @@ describe('durable object driver', () => {
       const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
       const started = yield* Deferred.make<void>()
       const cont = yield* Deferred.make<void>()
+
       const layer = makeDurableObjectDriverLayer({
         load: Ref.get(snapshot),
         save: next =>
@@ -141,6 +146,7 @@ describe('durable object driver', () => {
       const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
       const started = yield* Deferred.make<void>()
       const cont = yield* Deferred.make<void>()
+
       const layer = makeDurableObjectDriverLayer({
         load: Ref.get(snapshot),
         save: next =>
@@ -173,6 +179,7 @@ describe('durable object driver', () => {
       const backing = yield* makeBacking()
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeDurableObjectDriverLayer({
         ...backing,
         drain: () =>

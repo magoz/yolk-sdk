@@ -1,4 +1,5 @@
-import { Effect, Schema } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Effect, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
 import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
@@ -15,6 +16,7 @@ type TestContext = {
 }
 
 const toolName = Schema.Literals(['alpha', 'beta', 'gamma'])
+
 const moduleId = Schema.Literals(['module_1', 'module_2'])
 
 const toolSpec = Schema.Struct({
@@ -30,7 +32,7 @@ const registryCase = Schema.Struct({
   executeName: toolName
 })
 
-const registryCaseArbitrary = Schema.toArbitrary(registryCase)
+const registryCaseArbitrary = Arbitrary.schema(registryCase)
 
 const makeToolDef = (name: typeof toolName.Type) =>
   ToolDef.make({
@@ -39,13 +41,18 @@ const makeToolDef = (name: typeof toolName.Type) =>
     parameters: { type: 'object', properties: {}, additionalProperties: false }
   })
 
-const makeTool = (spec: typeof toolSpec.Type): ToolRegistration<TestContext> => ({
-  def: makeToolDef(spec.name),
-  access: spec.access,
-  ...(spec.gated ? { isEnabled: (context: TestContext) => Effect.succeed(context.enabled) } : {}),
-  execute: ({ call }) =>
-    Effect.succeed(ToolResult.make({ toolCallId: call.id, content: spec.name }))
-})
+const makeTool = (spec: typeof toolSpec.Type): ToolRegistration<TestContext> => {
+  const registration: ToolRegistration<TestContext> = {
+    def: makeToolDef(spec.name),
+    access: spec.access,
+    execute: ({ call }) =>
+      Effect.succeed(ToolResult.make({ toolCallId: call.id, content: spec.name }))
+  }
+
+  return spec.gated
+    ? { ...registration, isEnabled: (context: TestContext) => Effect.succeed(context.enabled) }
+    : registration
+}
 
 const modulesFromSpecs = (
   specs: ReadonlyArray<typeof toolSpec.Type>
@@ -76,6 +83,7 @@ const duplicateName = (specs: ReadonlyArray<typeof toolSpec.Type>) => {
     if (names.has(spec.name)) {
       return spec.name
     }
+
     names.add(spec.name)
   }
 
@@ -90,21 +98,28 @@ describe('tool registry property tests', () => {
       Effect.gen(function* () {
         const activeSpecs = resolvedEnabledSpecs(input)
         const duplicate = duplicateName(activeSpecs)
+
         const result = yield* resolveTools(modulesFromSpecs(input.tools), {
           enabled: input.enabled
         }).pipe(Effect.result)
 
         if (duplicate !== undefined) {
-          expect(result).toMatchObject({
-            _tag: 'Failure',
-            failure: { _tag: 'ToolRegistryError', cause: 'duplicate_tool' }
-          })
+          expect(Result.isFailure(result)).toBe(true)
+
+          if (Result.isFailure(result)) {
+            expect(Predicate.isTagged(result.failure, 'ToolRegistryError')).toBe(true)
+
+            if (Predicate.isTagged(result.failure, 'ToolRegistryError')) {
+              expect(result.failure.cause).toBe('duplicate_tool')
+            }
+          }
+
           return
         }
 
-        expect(result).toMatchObject({ _tag: 'Success' })
+        expect(result._tag).toBe('Success')
 
-        if (result._tag !== 'Success') {
+        if (!Predicate.isTagged(result, 'Success')) {
           return
         }
 
@@ -114,6 +129,7 @@ describe('tool registry property tests', () => {
         if (toolSet === undefined) {
           return
         }
+
         const expectedMetadata = activeSpecs.map(spec => ({
           moduleId: spec.moduleId,
           name: spec.name,
@@ -126,6 +142,7 @@ describe('tool registry property tests', () => {
         const executeResult = yield* Effect.provide(
           Effect.gen(function* () {
             const executor = yield* ToolExecutor
+
             return yield* executor.execute({ id: 'call_1', name: input.executeName, params: {} })
           }),
           makeToolExecutorLayer(toolSet)
@@ -134,15 +151,23 @@ describe('tool registry property tests', () => {
         const executable = activeSpecs.some(spec => spec.name === input.executeName)
 
         if (executable) {
-          expect(executeResult).toMatchObject({
-            _tag: 'Success',
+          const expectedExecuteResultFields = {
             success: { toolCallId: 'call_1', content: input.executeName }
-          })
+          }
+
+          expect(executeResult._tag).toBe('Success')
+          expect(executeResult).toMatchObject(expectedExecuteResultFields)
         } else {
-          expect(executeResult).toMatchObject({
-            _tag: 'Failure',
-            failure: { _tag: 'ToolError', cause: 'not_found', tool: input.executeName }
-          })
+          expect(Result.isFailure(executeResult)).toBe(true)
+
+          if (Result.isFailure(executeResult)) {
+            expect(Predicate.isTagged(executeResult.failure, 'ToolError')).toBe(true)
+
+            if (Predicate.isTagged(executeResult.failure, 'ToolError')) {
+              expect(executeResult.failure.cause).toBe('not_found')
+              expect(executeResult.failure.tool).toBe(input.executeName)
+            }
+          }
         }
       }),
     propertyOptions

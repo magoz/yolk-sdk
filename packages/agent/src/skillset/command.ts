@@ -9,6 +9,7 @@ export const CommandArgument = Schema.Struct({
   required: Schema.Boolean,
   description: Schema.optional(Schema.String)
 })
+
 export type CommandArgument = typeof CommandArgument.Type
 
 export const CommandAccess = Schema.Union([
@@ -16,6 +17,7 @@ export const CommandAccess = Schema.Union([
   Schema.Literal('write'),
   Schema.Literal('destructive')
 ])
+
 export type CommandAccess = typeof CommandAccess.Type
 
 export const CommandInfo = Schema.Struct({
@@ -29,6 +31,7 @@ export const CommandInfo = Schema.Struct({
   location: Schema.optional(Schema.String),
   source: Schema.optional(Schema.String)
 })
+
 export type CommandInfo = typeof CommandInfo.Type
 
 export type ParseCommandInput = {
@@ -110,6 +113,7 @@ export const commandHints = (template: string) => {
     template.matchAll(numberedPlaceholderPattern),
     match => `$${match[1]}`
   )
+
   const unique = [...new Set(numbered)].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
 
   return template.includes('$ARGUMENTS') ? [...unique, '$ARGUMENTS'] : unique
@@ -124,17 +128,39 @@ export const parseCommandMarkdown = (input: ParseCommandInput) =>
     const fileRefs = yield* parseBooleanField('fileRefs', document.data.fileRefs)
     const commandArguments = parseCommandArgumentsField(document.data.arguments)
 
-    return {
+    type ParsedCommandFields = {
+      name: string
+      description: string | undefined
+      template: string
+      hints: ReturnType<typeof commandHints>
+      arguments?: ReadonlyArray<CommandArgument>
+      access?: CommandAccess
+      fileRefs?: boolean
+    }
+
+    const fields: ParsedCommandFields = {
       name,
       description: description === undefined || description.length === 0 ? undefined : description,
       template: document.content,
-      hints: commandHints(document.content),
-      ...(commandArguments.length === 0 ? {} : { arguments: commandArguments }),
-      ...(access === undefined ? {} : { access }),
-      ...(fileRefs === undefined ? {} : { fileRefs }),
+      hints: commandHints(document.content)
+    }
+
+    if (commandArguments.length !== 0) {
+      fields.arguments = commandArguments
+    }
+
+    if (access !== undefined) {
+      fields.access = access
+    }
+
+    if (fileRefs !== undefined) {
+      fields.fileRefs = fileRefs
+    }
+
+    return Object.assign(fields, {
       location: input.location,
       source: input.source
-    }
+    })
   })
 
 export const parseCommandArguments = (input: string) => {
@@ -158,6 +184,7 @@ export const parseCommandArguments = (input: string) => {
         result.push(current)
         current = ''
       }
+
       continue
     }
 
@@ -173,10 +200,13 @@ export const parseCommandArguments = (input: string) => {
 
 export const renderCommand = (command: CommandInfo, argumentsText: string) => {
   const args = parseCommandArguments(argumentsText)
+
   const placeholders = Array.from(command.template.matchAll(numberedPlaceholderPattern), match =>
     Number(match[1])
   )
+
   const lastPlaceholder = placeholders.reduce((max, value) => Math.max(max, value), 0)
+
   const withNumbered = command.template.replace(numberedPlaceholderPattern, (_, index: string) => {
     const position = Number(index)
     const argIndex = position - 1
@@ -187,6 +217,7 @@ export const renderCommand = (command: CommandInfo, argumentsText: string) => {
 
     return position === lastPlaceholder ? args.slice(argIndex).join(' ') : (args[argIndex] ?? '')
   })
+
   const usesArguments = command.template.includes('$ARGUMENTS')
   const rendered = withNumbered.replaceAll('$ARGUMENTS', argumentsText)
 

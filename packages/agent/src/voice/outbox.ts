@@ -1,4 +1,4 @@
-import { Duration, Effect, Queue, Ref, type Scope } from 'effect'
+import { Context, Duration, Effect, Layer, Match, Predicate, Queue, Ref, type Scope } from 'effect'
 import {
   initialVoiceEventSequencerState,
   sequenceVoiceEvent,
@@ -31,7 +31,15 @@ export type VoiceEventOutboxApi = {
   readonly flushNow: Effect.Effect<void>
 }
 
+export class VoiceEventOutbox extends Context.Service<VoiceEventOutbox, VoiceEventOutboxApi>()(
+  '@yolk-sdk/agent/voice/VoiceEventOutbox'
+) {
+  static layer = (options: VoiceEventOutboxOptions): Layer.Layer<VoiceEventOutbox> =>
+    Layer.effect(this, makeVoiceEventOutbox(options))
+}
+
 const defaultFlushIntervalMs = 500
+
 const defaultMaxBatchSize = 100
 
 /**
@@ -39,21 +47,21 @@ const defaultMaxBatchSize = 100
  * for the next interval so finals/tool activity land server-side with
  * minimal loss window.
  */
-const isBoundaryEvent = (event: VoiceEvent) => {
-  switch (event._tag) {
-    case 'UserTranscriptFinal':
-    case 'AssistantTranscriptFinal':
-    case 'Interrupted':
-    case 'SessionClosed':
-    case 'ToolCallsRequested':
-    case 'ToolCallCompleted':
-    case 'ToolCallFailed':
-    case 'Error':
-      return true
-    default:
-      return false
-  }
-}
+const isBoundaryEvent = (event: VoiceEvent) =>
+  Match.value(event).pipe(
+    Match.tag(
+      'UserTranscriptFinal',
+      'AssistantTranscriptFinal',
+      'Interrupted',
+      'SessionClosed',
+      'ToolCallsRequested',
+      'ToolCallCompleted',
+      'ToolCallFailed',
+      'Error',
+      () => true
+    ),
+    Match.orElse(() => false)
+  )
 
 const isToolLifecycleEvent = (
   event: VoiceEvent
@@ -61,9 +69,9 @@ const isToolLifecycleEvent = (
   VoiceEvent,
   { _tag: 'ToolCallsRequested' | 'ToolCallCompleted' | 'ToolCallFailed' }
 > =>
-  event._tag === 'ToolCallsRequested' ||
-  event._tag === 'ToolCallCompleted' ||
-  event._tag === 'ToolCallFailed'
+  Predicate.isTagged(event, 'ToolCallsRequested') ||
+  Predicate.isTagged(event, 'ToolCallCompleted') ||
+  Predicate.isTagged(event, 'ToolCallFailed')
 
 type OutboxBuffer = {
   readonly pending: ReadonlyArray<StoredVoiceEvent>
@@ -89,6 +97,7 @@ export const makeVoiceEventOutbox = (
       pending: [],
       sequencer: initialVoiceEventSequencerState
     })
+
     const wake = yield* Queue.unbounded<void>()
     const maxBatchSize = options.maxBatchSize ?? defaultMaxBatchSize
     const flushInterval = Duration.millis(options.flushIntervalMs ?? defaultFlushIntervalMs)
@@ -122,9 +131,11 @@ export const makeVoiceEventOutbox = (
           const stored = isToolLifecycleEvent(event)
             ? storedVoiceToolEvents(event)
             : [sequenceVoiceEvent(options.streamId, current.sequencer, event).stored]
+
           const sequencer = isToolLifecycleEvent(event)
             ? current.sequencer
             : { nextSequence: current.sequencer.nextSequence + 1 }
+
           const pending = [...current.pending, ...stored]
 
           return [pending.length, { pending, sequencer } satisfies OutboxBuffer]

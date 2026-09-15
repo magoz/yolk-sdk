@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Effect, Option } from 'effect'
+import { Data, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -30,6 +30,8 @@ type SpeechAudio = {
   readonly contentType: string
 }
 
+class HoldToSpeakError extends Error {}
+
 type SpeechRequestOutcome =
   | {
       readonly _tag: 'Success'
@@ -37,8 +39,10 @@ type SpeechRequestOutcome =
     }
   | {
       readonly _tag: 'Failure'
-      readonly error: unknown
+      readonly error: HoldToSpeakError
     }
+
+const SpeechRequestOutcome = Data.taggedEnum<SpeechRequestOutcome>()
 
 type PlaybackCancel = {
   cancel: () => void
@@ -46,7 +50,16 @@ type PlaybackCancel = {
 
 const minRecordingMs = 300
 
-class HoldToSpeakError extends Error {}
+const holdToSpeakFromRejection = (error: unknown, prefix?: string): HoldToSpeakError => {
+  if (error instanceof HoldToSpeakError && prefix === undefined) {
+    return error
+  }
+
+  const detail = error instanceof Error ? error.message : String(error)
+  const message = prefix === undefined ? detail : `${prefix}: ${detail}`
+
+  return new HoldToSpeakError(message, { cause: error })
+}
 
 const toRequestError = (message: string) => (error: HttpClientError.HttpClientError) =>
   new HoldToSpeakError(`${message}: ${error.message}`)
@@ -85,14 +98,18 @@ const decodeTranscription = Schema.decodeUnknownEffect(VoiceTranscriptionResult)
 const transcribeAudio = (audio: Uint8Array, mimeType: string) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.post('/api/agent/voice/transcribe').pipe(
       HttpClientRequest.setHeaders({ accept: 'application/json', 'content-type': mimeType }),
       HttpClientRequest.bodyUint8Array(audio, mimeType)
     )
+
     const response = yield* client
       .execute(request)
       .pipe(Effect.mapError(toRequestError('Transcription request failed')))
+
     const okResponse = yield* ensureOkResponse(response)
+
     const payload = yield* okResponse.json.pipe(
       Effect.mapError(toRequestError('Could not parse transcription response'))
     )
@@ -102,39 +119,41 @@ const transcribeAudio = (audio: Uint8Array, mimeType: string) =>
     )
   }).pipe(Effect.provide(FetchHttpClient.layer))
 
-const encodeSpeakBody = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeSpeakBody = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const requestSpeech = (text: string): Effect.Effect<SpeechAudio, HoldToSpeakError> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+
     const body = yield* encodeSpeakBody({ text }).pipe(
       Effect.mapError(() => new HoldToSpeakError('Could not encode speech request'))
     )
+
     const request = HttpClientRequest.post('/api/agent/voice/speak').pipe(
       HttpClientRequest.setHeaders({ accept: 'audio/*', 'content-type': 'application/json' }),
       HttpClientRequest.bodyText(body, 'application/json')
     )
+
     const response = yield* client
       .execute(request)
       .pipe(Effect.mapError(toRequestError('Speech request failed')))
+
     const okResponse = yield* ensureOkResponse(response)
+
     const audio = yield* okResponse.arrayBuffer.pipe(
       Effect.mapError(toRequestError('Could not read speech audio'))
     )
+
     const contentType = okResponse.headers['content-type'] ?? 'audio/mpeg'
 
     return { audio, contentType }
   }).pipe(Effect.provide(FetchHttpClient.layer))
 
-const speechRequestSuccess = (speech: SpeechAudio): SpeechRequestOutcome => ({
-  _tag: 'Success',
-  speech
-})
+const speechRequestSuccess = (speech: SpeechAudio): SpeechRequestOutcome =>
+  SpeechRequestOutcome.Success({ speech })
 
-const speechRequestFailure = (error: unknown): SpeechRequestOutcome => ({
-  _tag: 'Failure',
-  error
-})
+const speechRequestFailure = (error: unknown): SpeechRequestOutcome =>
+  SpeechRequestOutcome.Failure({ error: holdToSpeakFromRejection(error) })
 
 const requestSpeechOutcome = (text: string): Promise<SpeechRequestOutcome> =>
   Effect.runPromise(requestSpeech(text)).then(speechRequestSuccess, speechRequestFailure)
@@ -148,9 +167,6 @@ const pickRecorderMimeType = () => {
 
   return candidates.find(candidate => MediaRecorder.isTypeSupported(candidate))
 }
-
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
 
 type ActiveRecording = {
   readonly recorder: MediaRecorder
@@ -230,6 +246,7 @@ export const useHoldToSpeak = ({
 
         if (element === null || speechRunIdRef.current !== runId) {
           resolve()
+
           return
         }
 
@@ -238,6 +255,7 @@ export const useHoldToSpeak = ({
         const url = URL.createObjectURL(new Blob([speech.audio], { type: speech.contentType }))
         let settled = false
         const playback: PlaybackCancel = { cancel: () => undefined }
+
         const settle = (error: Error | null) => {
           if (settled) {
             return
@@ -259,6 +277,7 @@ export const useHoldToSpeak = ({
 
           if (error === null) {
             resolve()
+
             return
           }
 
@@ -273,7 +292,7 @@ export const useHoldToSpeak = ({
         element.onerror = () => settle(new HoldToSpeakError('Audio playback failed'))
 
         void element.play().catch((error: unknown) => {
-          settle(new HoldToSpeakError(`Audio playback failed: ${unknownToMessage(error)}`))
+          settle(holdToSpeakFromRejection(error, 'Audio playback failed'))
         })
       }),
     [stopCurrentAudio]
@@ -317,7 +336,7 @@ export const useHoldToSpeak = ({
 
           const outcome = await speechPromise
 
-          if (outcome._tag === 'Failure') {
+          if (Predicate.isTagged(outcome, 'Failure')) {
             throw outcome.error
           }
 
@@ -329,7 +348,7 @@ export const useHoldToSpeak = ({
         }
       } catch (error) {
         if (speechRunIdRef.current === runId && speechPumpRunIdRef.current === runId) {
-          callbacksRef.current.onError(unknownToMessage(error))
+          callbacksRef.current.onError(error instanceof Error ? error.message : String(error))
         }
       } finally {
         if (speechPumpRunIdRef.current === runId) {
@@ -380,6 +399,7 @@ export const useHoldToSpeak = ({
       navigator.mediaDevices === undefined
     ) {
       callbacksRef.current.onError('This browser cannot record audio.')
+
       return
     }
 
@@ -402,10 +422,12 @@ export const useHoldToSpeak = ({
           }
 
           setStatus('idle')
+
           return
         }
 
         const recorder = new MediaRecorder(stream, { mimeType })
+
         const recording: ActiveRecording = {
           recorder,
           stream,
@@ -425,7 +447,9 @@ export const useHoldToSpeak = ({
       .catch((error: unknown) => {
         pendingStartRef.current = null
         setStatus('idle')
-        callbacksRef.current.onError(`Microphone access failed: ${unknownToMessage(error)}`)
+        callbacksRef.current.onError(
+          holdToSpeakFromRejection(error, 'Microphone access failed').message
+        )
       })
   }, [resetSpeech, status])
 
@@ -434,6 +458,7 @@ export const useHoldToSpeak = ({
 
     if (pending !== null) {
       pending.cancelled = true
+
       return
     }
 
@@ -451,6 +476,7 @@ export const useHoldToSpeak = ({
 
       if (heldForMs < minRecordingMs || recording.chunks.length === 0) {
         setStatus('idle')
+
         return
       }
 
@@ -465,7 +491,7 @@ export const useHoldToSpeak = ({
               onFailure: error =>
                 Effect.sync(() => {
                   setStatus('idle')
-                  callbacksRef.current.onError(unknownToMessage(error))
+                  callbacksRef.current.onError(error.message)
                 }),
               onSuccess: result =>
                 Effect.sync(() => {

@@ -1,9 +1,13 @@
 import * as Schema from 'effect/Schema'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
 const NonNegativeInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+
 const PositiveInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
+
 const PositiveNumber = Schema.Number.pipe(Schema.check(Schema.isGreaterThan(0)))
+
 const SnapshotRetentionCount = PositiveInteger.pipe(Schema.check(Schema.isLessThanOrEqualTo(10)))
 
 export class SandboxCommandInput extends Schema.Class<SandboxCommandInput>('SandboxCommandInput')({
@@ -28,6 +32,7 @@ export class VercelSandboxState extends Schema.TaggedClass<VercelSandboxState>()
 }) {}
 
 export const SandboxState = Schema.Union([VercelSandboxState])
+
 export type SandboxState = typeof SandboxState.Type
 
 export class SandboxCommandResult extends Schema.Class<SandboxCommandResult>(
@@ -73,6 +78,7 @@ export const SandboxLifecycle = Schema.Union([
   DisposableSandboxLifecycle,
   PersistentSandboxLifecycle
 ])
+
 export type SandboxLifecycle = typeof SandboxLifecycle.Type
 
 export class EmptySandboxInitialSource extends Schema.TaggedClass<EmptySandboxInitialSource>()(
@@ -112,6 +118,7 @@ export const SandboxInitialSource = Schema.Union([
   GitSandboxInitialSource,
   TarballSandboxInitialSource
 ])
+
 export type SandboxInitialSource = typeof SandboxInitialSource.Type
 
 export class SandboxResources extends Schema.Class<SandboxResources>('SandboxResources')({

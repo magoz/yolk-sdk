@@ -6,19 +6,20 @@ import {
   type SkillsetManifest as SkillsetManifestType
 } from '@yolk-sdk/agent/skillset'
 
-class ConfigSkillsetError extends Schema.TaggedErrorClass<ConfigSkillsetError>()(
-  'ConfigSkillsetError',
-  {
-    message: Schema.String
-  }
-) {}
+class ConfigSkillsetError extends Schema.TaggedError<ConfigSkillsetError>()('ConfigSkillsetError', {
+  message: Schema.String
+}) {}
 
 const configSourceId = 'config'
 
 const decodeSkillsetManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(SkillsetManifest))
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const schemaErrorToMessage = (error: Schema.SchemaError) => String(error)
+
+const configErrorToMessage = (error: Config.ConfigError) => String(error)
+
+const configLoadFailureMessage = (error: Config.ConfigError | ConfigSkillsetError) =>
+  error instanceof ConfigSkillsetError ? error.message : configErrorToMessage(error)
 
 const withConfigSource = (manifest: SkillsetManifestType): SkillsetManifestType => ({
   version: 1,
@@ -37,7 +38,7 @@ export const loadConfigSkillsetManifest = (): Effect.Effect<
   ConfigSkillsetError
 > =>
   Effect.gen(function* () {
-    const raw = yield* Config.option(Config.string('YOLK_SKILLSET'))
+    const raw = yield* Config.option(Config.String('YOLK_SKILLSET'))
 
     if (Option.isNone(raw)) {
       return emptySkillsetManifest
@@ -47,14 +48,16 @@ export const loadConfigSkillsetManifest = (): Effect.Effect<
       Effect.map(withConfigSource),
       Effect.mapError(
         error =>
-          new ConfigSkillsetError({ message: `Invalid YOLK_SKILLSET: ${unknownToMessage(error)}` })
+          new ConfigSkillsetError({
+            message: `Invalid YOLK_SKILLSET: ${schemaErrorToMessage(error)}`
+          })
       )
     )
   }).pipe(
-    Effect.catch(error =>
+    Effect.catch((error: Config.ConfigError | ConfigSkillsetError) =>
       Effect.fail(
         new ConfigSkillsetError({
-          message: `Could not load skillset config: ${unknownToMessage(error)}`
+          message: `Could not load skillset config: ${configLoadFailureMessage(error)}`
         })
       )
     )

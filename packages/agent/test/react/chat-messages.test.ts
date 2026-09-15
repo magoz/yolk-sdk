@@ -22,22 +22,30 @@ import {
   ToolInputDelta,
   ToolInputStart,
   ToolInputEnd,
+  BackgroundToolAccepted,
   ToolResult,
   ToolResultMessage,
   UserMessage,
   inlineBase64Source,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
+import { AgentToolRun } from '../../src/client/state.ts'
 import {
+  AgentChatPart,
   appendProtocolMessage,
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
+  ChatToolState,
   deleteChatTurn,
+  DeleteChatTurnResult,
   editChatUserMessage,
+  EditChatUserMessageResult,
   regenerateChatMessagesFrom,
+  RegenerateChatMessagesResult,
   toAgentMessages,
   type AgentChatMessage
 } from '../../src/react/chat-messages.ts'
+import { Predicate } from 'effect'
 
 describe('agent chat messages', () => {
   it('preserves multipart user content for protocol replay', () => {
@@ -48,8 +56,7 @@ describe('agent chat messages', () => {
         sequence: 0,
         role: 'user',
         parts: [
-          {
-            _tag: 'Text',
+          AgentChatPart.Text({
             id: 'message-0-user-content',
             content: [
               TextPart.make({ text: 'describe this' }),
@@ -61,14 +68,13 @@ describe('agent chat messages', () => {
               })
             ],
             state: 'done'
-          }
+          })
         ]
       }
     ]
 
     expect(toAgentMessages(chatMessages)).toEqual([
-      {
-        _tag: 'User',
+      UserMessage.make({
         content: [
           TextPart.make({ text: 'describe this' }),
           ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
@@ -78,7 +84,7 @@ describe('agent chat messages', () => {
             filename: 'brief.pdf'
           })
         ]
-      }
+      })
     ])
   })
 
@@ -88,6 +94,7 @@ describe('agent chat messages', () => {
       name: 'web_fetch',
       params: { url: 'https://e.com' }
     })
+
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'hi' }),
@@ -123,12 +130,14 @@ describe('agent chat messages', () => {
       name: 'web_fetch',
       params: { url: 'https://e.com' }
     })
+
     const result = ToolResult.make({
       toolCallId: call.id,
       content: 'Example Domain',
       isError: true,
       structuredContent: { title: 'Example Domain' }
     })
+
     const messages = buildAgentChatMessages({
       messages: [
         AssistantAgentMessage.make({
@@ -144,27 +153,18 @@ describe('agent chat messages', () => {
       userDraft: '',
       assistantDraft: '',
       reasoningDraft: '',
-      toolRuns: [
-        {
-          _tag: 'Completed',
-          call,
-          result,
-          startedAtMs: 10,
-          endedAtMs: 25
-        }
-      ],
+      toolRuns: [AgentToolRun.Completed({ call, result, startedAtMs: 10, endedAtMs: 25 })],
       error: null
     })
 
     expect(messages).toHaveLength(1)
     expect(messages[0]?.parts).toEqual([
-      { _tag: 'Text', id: 'message-0-assistant-text-0', content: '', state: 'done' },
-      {
-        _tag: 'ToolCall',
+      AgentChatPart.Text({ id: 'message-0-assistant-text-0', content: '', state: 'done' }),
+      AgentChatPart.ToolCall({
         id: 'message-0-tool-call-call_1',
         call,
-        state: { _tag: 'Completed', result, startedAtMs: 10, endedAtMs: 25 }
-      }
+        state: ChatToolState.Completed({ result, startedAtMs: 10, endedAtMs: 25 })
+      })
     ])
   })
 
@@ -174,12 +174,15 @@ describe('agent chat messages', () => {
       name: 'web_fetch',
       params: { url: 'https://e.com' }
     })
+
     const streamingCall = ToolCall.make({ id: call.id, name: call.name, params: {} })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+
     const inputStarted = applyAgentEventToChatMessages(
       [],
       ToolInputStart.make({ id: call.id, name: call.name })
     )
+
     const inputUpdated = applyAgentEventToChatMessages(
       inputStarted,
       ToolInputDelta.make({ id: call.id, delta: '{"url":"https://e.com"}' })
@@ -192,12 +195,11 @@ describe('agent chat messages', () => {
         sequence: 0,
         role: 'assistant',
         parts: [
-          {
-            _tag: 'ToolCall',
+          AgentChatPart.ToolCall({
             id: `tool-call-${call.id}`,
             call: streamingCall,
-            state: { _tag: 'InputStreaming', input: '{"url":"https://e.com"}' }
-          }
+            state: ChatToolState.InputStreaming({ input: '{"url":"https://e.com"}' })
+          })
         ]
       }
     ])
@@ -207,23 +209,26 @@ describe('agent chat messages', () => {
       ProviderToolResult.make({ call, result })
     )
 
-    expect(providerCompleted[0]?.parts[0]).toEqual({
-      _tag: 'ToolCall',
-      id: `tool-call-${call.id}`,
-      call,
-      state: { _tag: 'ProviderCompleted', result }
-    })
+    expect(providerCompleted[0]?.parts[0]).toEqual(
+      AgentChatPart.ToolCall({
+        id: `tool-call-${call.id}`,
+        call,
+        state: ChatToolState.ProviderCompleted({ result })
+      })
+    )
   })
 
   it('groups same-turn sibling tool calls while a tool batch is open', () => {
     const firstCall = ToolCall.make({ id: 'call_1', name: 'sleep', params: { seconds: 1 } })
     const secondCall = ToolCall.make({ id: 'call_2', name: 'sleep', params: { seconds: 1 } })
     const firstReady = applyAgentEventToChatMessages([], ToolInputEnd.make({ call: firstCall }))
+
     const firstRunning = applyAgentEventToChatMessages(
       firstReady,
       ToolExecutionStarted.make({ call: firstCall }),
       { nowMs: 1000 }
     )
+
     const secondReady = applyAgentEventToChatMessages(
       firstRunning,
       ToolInputEnd.make({ call: secondCall })
@@ -236,18 +241,16 @@ describe('agent chat messages', () => {
         sequence: 0,
         role: 'assistant',
         parts: [
-          {
-            _tag: 'ToolCall',
+          AgentChatPart.ToolCall({
             id: 'tool-call-call_1',
             call: firstCall,
-            state: { _tag: 'Running', startedAtMs: 1000 }
-          },
-          {
-            _tag: 'ToolCall',
+            state: ChatToolState.Running({ startedAtMs: 1000 })
+          }),
+          AgentChatPart.ToolCall({
             id: 'tool-call-call_2',
             call: secondCall,
-            state: { _tag: 'Called' }
-          }
+            state: ChatToolState.Called()
+          })
         ]
       }
     ])
@@ -258,14 +261,17 @@ describe('agent chat messages', () => {
     const secondCall = ToolCall.make({ id: 'call_2', name: 'sleep', params: { seconds: 1 } })
     const result = ToolResult.make({ toolCallId: firstCall.id, content: 'done' })
     const firstReady = applyAgentEventToChatMessages([], ToolInputEnd.make({ call: firstCall }))
+
     const firstRunning = applyAgentEventToChatMessages(
       firstReady,
       ToolExecutionStarted.make({ call: firstCall, createdAtMs: 1000 })
     )
+
     const firstCompleted = applyAgentEventToChatMessages(
       firstRunning,
       ToolExecutionCompleted.make({ call: firstCall, result, createdAtMs: 1500 })
     )
+
     const secondReady = applyAgentEventToChatMessages(
       firstCompleted,
       ToolInputEnd.make({ call: secondCall })
@@ -275,22 +281,25 @@ describe('agent chat messages', () => {
       ['ToolCall'],
       ['ToolCall']
     ])
-    expect(secondReady[0]?.parts[0]).toEqual({
-      _tag: 'ToolCall',
-      id: 'tool-call-call_1',
-      call: firstCall,
-      state: { _tag: 'Completed', result, startedAtMs: 1000, endedAtMs: 1500 }
-    })
-    expect(secondReady[1]?.parts[0]).toEqual({
-      _tag: 'ToolCall',
-      id: 'tool-call-call_2',
-      call: secondCall,
-      state: { _tag: 'Called' }
-    })
+    expect(secondReady[0]?.parts[0]).toEqual(
+      AgentChatPart.ToolCall({
+        id: 'tool-call-call_1',
+        call: firstCall,
+        state: ChatToolState.Completed({ result, startedAtMs: 1000, endedAtMs: 1500 })
+      })
+    )
+    expect(secondReady[1]?.parts[0]).toEqual(
+      AgentChatPart.ToolCall({
+        id: 'tool-call-call_2',
+        call: secondCall,
+        state: ChatToolState.Called()
+      })
+    )
   })
 
   it('renders pending and answered question tool states', () => {
     const call = ToolCall.make({ id: 'call_question', name: 'question', params: {} })
+
     const request = QuestionRequest.make({
       requestId: 'question:call_question',
       toolCallId: call.id,
@@ -303,6 +312,7 @@ describe('agent chat messages', () => {
         })
       ]
     })
+
     const response = QuestionResponse.make({
       requestId: request.requestId,
       toolCallId: call.id,
@@ -310,21 +320,24 @@ describe('agent chat messages', () => {
       source: 'user',
       answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
     })
+
     const requested = applyAgentEventToChatMessages([], QuestionRequested.make({ request }))
     const answered = applyAgentEventToChatMessages(requested, QuestionAnswered.make({ response }))
 
-    expect(requested[0]?.parts[0]).toEqual({
-      _tag: 'ToolCall',
-      id: `tool-call-${call.id}`,
-      call,
-      state: { _tag: 'QuestionRequested', request }
-    })
-    expect(answered[0]?.parts[0]).toEqual({
-      _tag: 'ToolCall',
-      id: `tool-call-${call.id}`,
-      call,
-      state: { _tag: 'QuestionAnswered', response, request }
-    })
+    expect(requested[0]?.parts[0]).toEqual(
+      AgentChatPart.ToolCall({
+        id: `tool-call-${call.id}`,
+        call,
+        state: ChatToolState.QuestionRequested({ request })
+      })
+    )
+    expect(answered[0]?.parts[0]).toEqual(
+      AgentChatPart.ToolCall({
+        id: `tool-call-${call.id}`,
+        call,
+        state: ChatToolState.QuestionAnswered({ response, request })
+      })
+    )
     const resultMessage = toAgentMessages(answered).at(-1)
 
     if (resultMessage?._tag !== 'ToolResult') {
@@ -346,34 +359,39 @@ describe('agent chat messages', () => {
 
   it('preserves question request after repeated answer events', () => {
     const call = ToolCall.make({ id: 'call_question', name: 'question', params: {} })
+
     const request = QuestionRequest.make({
       requestId: 'question:call_question',
       toolCallId: call.id,
       call,
       questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
     })
+
     const response = QuestionResponse.make({
       requestId: request.requestId,
       toolCallId: call.id,
       outcome: 'answered',
       source: 'user'
     })
+
     const requested = applyAgentEventToChatMessages([], QuestionRequested.make({ request }))
     const answered = applyAgentEventToChatMessages(requested, QuestionAnswered.make({ response }))
     const repeated = applyAgentEventToChatMessages(answered, QuestionAnswered.make({ response }))
 
-    expect(repeated[0]?.parts[0]).toEqual({
-      _tag: 'ToolCall',
-      id: `tool-call-${call.id}`,
-      call,
-      state: { _tag: 'QuestionAnswered', response, request }
-    })
+    expect(repeated[0]?.parts[0]).toEqual(
+      AgentChatPart.ToolCall({
+        id: `tool-call-${call.id}`,
+        call,
+        state: ChatToolState.QuestionAnswered({ response, request })
+      })
+    )
   })
 
   it('finalizes assistant messages when awaiting input', () => {
     const assistant = AssistantAgentMessage.make({
       parts: [AssistantTextPart.make({ content: 'ok' })]
     })
+
     const messages = applyAgentEventToChatMessages(
       [],
       AgentAwaitingInput.make({
@@ -392,7 +410,7 @@ describe('agent chat messages', () => {
     )
 
     expect(messages[0]?.parts).toEqual([
-      { _tag: 'Text', id: 'message-0-assistant-text-0', content: 'ok', state: 'done' }
+      AgentChatPart.Text({ id: 'message-0-assistant-text-0', content: 'ok', state: 'done' })
     ])
   })
 
@@ -413,12 +431,13 @@ describe('agent chat messages', () => {
 
     const deleted = deleteChatTurn(messages, 'message-1-assistant')
 
-    expect(deleted).toEqual({
-      _tag: 'Deleted',
-      turnStartMessageId: 'message-0-user',
-      deletedMessageIds: ['message-0-user', 'message-1-assistant'],
-      messages: messages.slice(2)
-    })
+    expect(deleted).toEqual(
+      DeleteChatTurnResult.Deleted({
+        turnStartMessageId: 'message-0-user',
+        deletedMessageIds: ['message-0-user', 'message-1-assistant'],
+        messages: messages.slice(2)
+      })
+    )
   })
 
   it('truncates transcript for regeneration by target role', () => {
@@ -436,14 +455,16 @@ describe('agent chat messages', () => {
       error: null
     })
 
-    expect(regenerateChatMessagesFrom(messages, 'message-2-user')).toEqual({
-      _tag: 'Regenerated',
-      messages: messages.slice(0, 3)
-    })
-    expect(regenerateChatMessagesFrom(messages, 'message-3-assistant')).toEqual({
-      _tag: 'Regenerated',
-      messages: messages.slice(0, 3)
-    })
+    expect(regenerateChatMessagesFrom(messages, 'message-2-user')).toEqual(
+      RegenerateChatMessagesResult.Regenerated({
+        messages: messages.slice(0, 3)
+      })
+    )
+    expect(regenerateChatMessagesFrom(messages, 'message-3-assistant')).toEqual(
+      RegenerateChatMessagesResult.Regenerated({
+        messages: messages.slice(0, 3)
+      })
+    )
   })
 
   it('edits a user message and truncates following messages', () => {
@@ -461,24 +482,31 @@ describe('agent chat messages', () => {
       error: null
     })
 
-    expect(editChatUserMessage(messages, 'message-2-user', 'updated')).toEqual({
-      _tag: 'Edited',
-      messageId: 'message-2-user',
-      messages: [
-        messages[0],
-        messages[1],
-        {
-          id: 'message-2-user',
-          turnId: 'turn-2',
-          sequence: 2,
-          role: 'user',
-          parts: [{ _tag: 'Text', id: 'message-2-user-text', content: 'updated', state: 'done' }]
-        }
-      ]
-    })
-    expect(editChatUserMessage(messages, 'message-3-assistant', 'updated')).toEqual({
-      _tag: 'NotUserMessage'
-    })
+    expect(editChatUserMessage(messages, 'message-2-user', 'updated')).toEqual(
+      EditChatUserMessageResult.Edited({
+        messageId: 'message-2-user',
+        messages: [
+          messages[0],
+          messages[1],
+          {
+            id: 'message-2-user',
+            turnId: 'turn-2',
+            sequence: 2,
+            role: 'user',
+            parts: [
+              AgentChatPart.Text({
+                id: 'message-2-user-text',
+                content: 'updated',
+                state: 'done'
+              })
+            ]
+          }
+        ]
+      })
+    )
+    expect(editChatUserMessage(messages, 'message-3-assistant', 'updated')).toEqual(
+      EditChatUserMessageResult.NotUserMessage()
+    )
   })
 
   it('appends with monotonic message ids after deletion', () => {
@@ -494,9 +522,10 @@ describe('agent chat messages', () => {
       toolRuns: [],
       error: null
     })
+
     const deleted = deleteChatTurn(messages, 'message-0-user')
 
-    if (deleted._tag !== 'Deleted') {
+    if (!Predicate.isTagged(deleted, 'Deleted')) {
       throw new Error('Expected deleted turn')
     }
 
@@ -508,9 +537,155 @@ describe('agent chat messages', () => {
           turnId: 'turn-3',
           sequence: 3,
           role: 'user',
-          parts: [{ _tag: 'Text', id: 'message-3-user-text', content: 'three', state: 'done' }]
+          parts: [
+            AgentChatPart.Text({ id: 'message-3-user-text', content: 'three', state: 'done' })
+          ]
         }
       ]
+    )
+  })
+
+  it('omits envelope and tool-result optionals while preserving JSON key order when present', () => {
+    const omittedUser = appendProtocolMessage([], UserMessage.make({ content: 'hi' }))[0]
+
+    if (omittedUser === undefined) {
+      expect.fail('Expected omitted-envelope user chat message')
+    }
+
+    const presentUser = appendProtocolMessage(
+      [],
+      UserMessage.make({
+        content: 'hi',
+        createdAtMs: 9,
+        author: { displayName: 'Ada' },
+        annotations: { topic: 'invoice' }
+      })
+    )[0]
+
+    if (presentUser === undefined) {
+      expect.fail('Expected present-envelope user chat message')
+    }
+
+    expect(Object.keys(omittedUser)).toEqual(['id', 'turnId', 'sequence', 'role', 'parts'])
+    expect(Object.hasOwn(omittedUser, 'createdAtMs')).toBe(false)
+    expect(Object.keys(presentUser)).toEqual([
+      'id',
+      'turnId',
+      'sequence',
+      'role',
+      'createdAtMs',
+      'author',
+      'annotations',
+      'parts'
+    ])
+    expect(
+      JSON.stringify({
+        createdAtMs: presentUser.createdAtMs,
+        author: presentUser.author,
+        annotations: presentUser.annotations
+      })
+    ).toBe('{"createdAtMs":9,"author":{"displayName":"Ada"},"annotations":{"topic":"invoice"}}')
+
+    const call = ToolCall.make({ id: 'call_omit', name: 'web_fetch', params: {} })
+
+    const omittedResult = buildAgentChatMessages({
+      messages: [
+        AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] }),
+        ToolResultMessage.make({ toolCallId: call.id, content: 'ok' })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    const presentResult = buildAgentChatMessages({
+      messages: [
+        AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] }),
+        ToolResultMessage.make({
+          toolCallId: call.id,
+          content: 'ok',
+          isError: true,
+          structuredContent: { code: 'x' }
+        })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    const acceptedResult = buildAgentChatMessages({
+      messages: [
+        AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] }),
+        ToolResultMessage.make({
+          toolCallId: call.id,
+          content: 'ok',
+          acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:work' })
+        })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    const omittedMessage = omittedResult[0]
+    const presentMessage = presentResult[0]
+    const acceptedMessage = acceptedResult[0]
+
+    if (
+      omittedMessage === undefined ||
+      presentMessage === undefined ||
+      acceptedMessage === undefined
+    ) {
+      expect.fail('Expected assistant chat messages for tool-result projection')
+    }
+
+    const omittedTool = omittedMessage.parts.find(part => Predicate.isTagged(part, 'ToolCall'))
+    const presentTool = presentMessage.parts.find(part => Predicate.isTagged(part, 'ToolCall'))
+    const acceptedTool = acceptedMessage.parts.find(part => Predicate.isTagged(part, 'ToolCall'))
+
+    if (
+      omittedTool === undefined ||
+      presentTool === undefined ||
+      acceptedTool === undefined ||
+      !Predicate.isTagged(omittedTool, 'ToolCall') ||
+      !Predicate.isTagged(presentTool, 'ToolCall') ||
+      !Predicate.isTagged(acceptedTool, 'ToolCall')
+    ) {
+      expect.fail('Expected tool parts')
+    }
+
+    if (
+      !Predicate.isTagged(omittedTool.state, 'Completed') ||
+      !Predicate.isTagged(presentTool.state, 'Completed')
+    ) {
+      expect.fail('Expected completed tool state')
+    }
+
+    if (!Predicate.isTagged(acceptedTool.state, 'Accepted')) {
+      expect.fail('Expected accepted tool state')
+    }
+
+    expect(Object.keys(omittedTool.state.result)).toEqual(['toolCallId', 'content'])
+    expect(Object.hasOwn(omittedTool.state.result, 'isError')).toBe(false)
+    expect(Object.hasOwn(omittedTool.state.result, 'acceptance')).toBe(false)
+    expect(JSON.stringify(omittedTool.state.result)).toBe(
+      '{"toolCallId":"call_omit","content":"ok"}'
+    )
+    expect(Object.keys(presentTool.state.result)).toEqual([
+      'toolCallId',
+      'content',
+      'isError',
+      'structuredContent'
+    ])
+    expect(Object.keys(acceptedTool.state.result)).toEqual(['toolCallId', 'content', 'acceptance'])
+    expect(acceptedTool.state.result.acceptance).toEqual(
+      BackgroundToolAccepted.make({ version: 1, executionId: 'owner:work' })
     )
   })
 })

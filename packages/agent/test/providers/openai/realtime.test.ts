@@ -1,14 +1,31 @@
+import { Effect, Predicate, Result } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef } from '@yolk-sdk/agent/protocol'
-import { VoiceInputTranscription, VoiceSessionConfig } from '@yolk-sdk/agent/voice'
+import {
+  VoiceAssistantTranscriptFinal,
+  VoiceErrorEvent,
+  VoiceInputTranscription,
+  VoiceInterrupted,
+  VoiceSessionConfig,
+  VoiceSessionOpened,
+  VoiceToolBridgeError,
+  VoiceToolCall,
+  VoiceToolCallsRequested,
+  VoiceUserTranscriptDelta
+} from '@yolk-sdk/agent/voice'
 import {
   decodeOpenAiRealtimeServerEvent,
   makeOpenAiRealtimeFunctionCallOutputEvent,
   makeOpenAiRealtimeSessionConfig,
+  OpenAiRealtimeError,
+  OpenAiRealtimeIgnored,
   openAiRealtimeSessionConfigFromVoice,
   openAiRealtimeToolParameters,
   openAiRealtimeServerEventToVoiceEvents,
-  openAiRealtimeTranscriptionPrompt
+  openAiRealtimeTranscriptionPrompt,
+  toOpenAiRealtimeTool,
+  toOpenAiRealtimeToolEffect
 } from '../../../src/providers/openai/realtime/index.ts'
 
 describe('decodeOpenAiRealtimeServerEvent', () => {
@@ -21,11 +38,8 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       })
     )
 
-    expect(event).toMatchObject({
-      _tag: 'InputAudioTranscriptionCompleted',
-      itemId: 'item_1',
-      transcript: 'Can you hear me?'
-    })
+    expect(event._tag).toBe('InputAudioTranscriptionCompleted')
+    expect(event).toMatchObject({ itemId: 'item_1', transcript: 'Can you hear me?' })
   })
 
   it('keeps output transcript metadata', () => {
@@ -38,8 +52,8 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       })
     )
 
+    expect(event._tag).toBe('OutputAudioTranscriptDone')
     expect(event).toMatchObject({
-      _tag: 'OutputAudioTranscriptDone',
       itemId: 'item_2',
       responseId: 'resp_1',
       transcript: 'Yes, I can hear you.'
@@ -64,8 +78,8 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       })
     )
 
+    expect(event._tag).toBe('SessionConfigured')
     expect(event).toMatchObject({
-      _tag: 'SessionConfigured',
       eventType: 'session.updated',
       model: 'gpt-realtime-2',
       transcriptionModel: 'gpt-4o-transcribe',
@@ -88,8 +102,8 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       })
     )
 
+    expect(event._tag).toBe('FunctionCalls')
     expect(event).toMatchObject({
-      _tag: 'FunctionCalls',
       calls: [{ callId: 'call_1', name: 'web_search', argumentsJson: '{"q":1}' }]
     })
   })
@@ -99,13 +113,13 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       decodeOpenAiRealtimeServerEvent(
         JSON.stringify({ type: 'error', error: { message: 'session expired' } })
       )
-    ).toMatchObject({ _tag: 'Error', message: 'session expired' })
-    expect(decodeOpenAiRealtimeServerEvent('not json')).toMatchObject({ _tag: 'Ignored' })
+    ).toMatchObject(OpenAiRealtimeError.make({ message: 'session expired' }))
+    expect(decodeOpenAiRealtimeServerEvent('not json')).toMatchObject(
+      OpenAiRealtimeIgnored.make({})
+    )
     expect(
       decodeOpenAiRealtimeServerEvent(JSON.stringify({ type: 'rate_limits.updated' }))
-    ).toMatchObject({
-      _tag: 'Ignored'
-    })
+    ).toMatchObject(OpenAiRealtimeIgnored.make({}))
   })
 })
 
@@ -122,7 +136,7 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
           delta: 'Hel'
         })
       )
-    ).toEqual([{ _tag: 'UserTranscriptDelta', itemId: 'item_1', delta: 'Hel' }])
+    ).toEqual([VoiceUserTranscriptDelta.make({ itemId: 'item_1', delta: 'Hel' })])
 
     expect(
       decodeToVoice(
@@ -134,12 +148,11 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         })
       )
     ).toEqual([
-      {
-        _tag: 'AssistantTranscriptFinal',
+      VoiceAssistantTranscriptFinal.make({
         itemId: 'item_2',
         responseId: 'resp_1',
         text: 'Hi there.'
-      }
+      })
     ])
   })
 
@@ -157,13 +170,12 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         })
       )
     ).toEqual([
-      {
-        _tag: 'ToolCallsRequested',
+      VoiceToolCallsRequested.make({
         calls: [
-          { callId: 'call_1', name: 'a', argumentsJson: '{}' },
-          { callId: 'call_2', name: 'b', argumentsJson: '{}' }
+          VoiceToolCall.make({ callId: 'call_1', name: 'a', argumentsJson: '{}' }),
+          VoiceToolCall.make({ callId: 'call_2', name: 'b', argumentsJson: '{}' })
         ]
-      }
+      })
     ])
   })
 
@@ -173,12 +185,11 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         JSON.stringify({ type: 'session.created', session: { model: 'gpt-realtime-2' } })
       )
     ).toEqual([
-      {
-        _tag: 'SessionOpened',
+      VoiceSessionOpened.make({
         model: 'gpt-realtime-2',
         transcriptionModel: null,
         transcriptionLanguage: null
-      }
+      })
     ])
 
     expect(
@@ -192,12 +203,11 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         })
       )
     ).toEqual([
-      {
-        _tag: 'SessionOpened',
+      VoiceSessionOpened.make({
         model: 'gpt-realtime-2',
         transcriptionModel: 'gpt-4o-transcribe',
         transcriptionLanguage: 'en'
-      }
+      })
     ])
 
     expect(
@@ -207,7 +217,7 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
           response: { id: 'resp_1', status: 'cancelled', output: [] }
         })
       )
-    ).toEqual([{ _tag: 'Interrupted', responseId: 'resp_1' }])
+    ).toEqual([VoiceInterrupted.make({ responseId: 'resp_1' })])
 
     expect(
       decodeToVoice(
@@ -221,7 +231,7 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
 
   it('maps provider errors to voice error events', () => {
     expect(decodeToVoice(JSON.stringify({ type: 'error', error: { message: 'boom' } }))).toEqual([
-      { _tag: 'Error', code: 'provider_error', message: 'boom' }
+      VoiceErrorEvent.make({ code: 'provider_error', message: 'boom' })
     ])
   })
 })
@@ -299,7 +309,7 @@ describe('makeOpenAiRealtimeSessionConfig', () => {
 describe('openAiRealtimeToolParameters', () => {
   // OpenAI Realtime 504s on union-root tool parameters; see the helper's doc.
   it('lowers a union of object variants into one object schema', () => {
-    const parameters = {
+    const parameters: Schema.Json = {
       anyOf: [
         {
           type: 'object',
@@ -347,7 +357,7 @@ describe('openAiRealtimeToolParameters', () => {
   })
 
   it('keeps unions with non-object variants unchanged', () => {
-    const parameters = {
+    const parameters: Schema.Json = {
       anyOf: [{ type: 'object', properties: { a: { type: 'string' } } }, { type: 'string' }]
     }
 
@@ -355,7 +365,7 @@ describe('openAiRealtimeToolParameters', () => {
   })
 
   it('omits required when no key is shared by every variant', () => {
-    const parameters = {
+    const parameters: Schema.Json = {
       anyOf: [
         { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
         { type: 'object', properties: { b: { type: 'string' } }, required: ['b'] }
@@ -367,6 +377,59 @@ describe('openAiRealtimeToolParameters', () => {
       properties: { a: { type: 'string' }, b: { type: 'string' } },
       additionalProperties: false
     })
+  })
+
+  it('keeps own __proto__ and constructor fields from raw realtime union wire', () => {
+    const wire =
+      '{"anyOf":[' +
+      '{"type":"object","properties":{' +
+      '"__proto__":{"type":"string","enum":["a"]},' +
+      '"constructor":{"type":"string","enum":["left"]}},' +
+      '"required":["__proto__","constructor"]},' +
+      '{"type":"object","properties":{' +
+      '"__proto__":{"type":"string","enum":["b"]},' +
+      '"constructor":{"type":"string","enum":["right"]}},' +
+      '"required":["__proto__","constructor"]}]}'
+
+    const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Json))(wire)
+
+    expect(Result.isSuccess(decoded)).toBe(true)
+
+    if (!Result.isSuccess(decoded)) {
+      return
+    }
+
+    const lowered = openAiRealtimeToolParameters(decoded.success)
+
+    expect(Predicate.isObjectOrArray(lowered) && !Array.isArray(lowered)).toBe(true)
+
+    if (!Predicate.isObjectOrArray(lowered) || Array.isArray(lowered)) {
+      return
+    }
+
+    const properties = Object.hasOwn(lowered, 'properties') ? lowered['properties'] : undefined
+
+    expect(Predicate.isObjectOrArray(properties) && !Array.isArray(properties)).toBe(true)
+
+    if (!Predicate.isObjectOrArray(properties) || Array.isArray(properties)) {
+      return
+    }
+
+    expect(Object.hasOwn(properties, '__proto__')).toBe(true)
+    expect(Object.hasOwn(properties, 'constructor')).toBe(true)
+    expect(Object.getPrototypeOf(properties)).toBe(Object.prototype)
+    expect(properties['__proto__']).toEqual({ type: 'string', enum: ['a', 'b'] })
+    expect(properties['constructor']).toEqual({
+      type: 'string',
+      enum: ['left', 'right']
+    })
+    expect(lowered['required']).toEqual(['__proto__', 'constructor'])
+    expect(lowered['additionalProperties']).toBe(false)
+    expect(JSON.stringify(lowered)).toBe(
+      '{"type":"object","properties":{"__proto__":{"type":"string","enum":["a","b"]},' +
+        '"constructor":{"type":"string","enum":["left","right"]}},' +
+        '"required":["__proto__","constructor"],"additionalProperties":false}'
+    )
   })
 
   it('applies the lowering to session config tools', () => {
@@ -383,6 +446,7 @@ describe('openAiRealtimeToolParameters', () => {
         ]
       }
     })
+
     const config = makeOpenAiRealtimeSessionConfig({
       instructions: 'Be brief.',
       tools: [unionTool]
@@ -395,6 +459,42 @@ describe('openAiRealtimeToolParameters', () => {
       additionalProperties: false
     })
   })
+
+  it('rejects forged non-JSON tool parameter documents as VoiceToolBridgeError before transport', () => {
+    const parameters = { type: 'object' }
+
+    const tool = ToolDef.make({
+      name: 'search',
+      description: 'Search docs',
+      parameters
+    })
+
+    Object.assign(parameters, { extra: () => undefined })
+
+    expect(() => toOpenAiRealtimeTool(tool)).toThrow(VoiceToolBridgeError)
+    expect(() => toOpenAiRealtimeTool(tool)).toThrow(/Invalid OpenAI Realtime tool parameters JSON/)
+  })
+
+  it.effect(
+    'rejects forged non-JSON tool parameter documents in the Effect advertisement path',
+    () =>
+      Effect.gen(function* () {
+        const parameters = { type: 'object' }
+
+        const tool = ToolDef.make({
+          name: 'search',
+          description: 'Search docs',
+          parameters
+        })
+
+        Object.assign(parameters, { extra: () => undefined })
+
+        const error = yield* toOpenAiRealtimeToolEffect(tool).pipe(Effect.flip)
+
+        expect(error._tag).toBe('VoiceToolBridgeError')
+        expect(error.message).toContain('Invalid OpenAI Realtime tool parameters JSON')
+      })
+  )
 })
 
 describe('openAiRealtimeSessionConfigFromVoice', () => {

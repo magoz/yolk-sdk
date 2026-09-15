@@ -8,7 +8,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/harness@canary effect@4.0.0-rc.115
 ```
 
 ## Subpaths
@@ -24,6 +24,34 @@ pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
 | `@yolk-sdk/harness/driver/durable-object` | Durable Object storage-backed claims + driver                                                           |
 | `@yolk-sdk/harness/outcome`               | Classify one model/tool attempt: Completed / Retry / Continue / RecoverFull / Compacted / AwaitingInput |
 
+## Tagged constructors
+
+Inbox, driver, and outcome ADTs are `Data.taggedEnum` **values** on the existing subpaths. They are
+plain objects with `_tag` last, not `Equal`/`Hash` Data classes.
+
+```ts
+import {
+  DrainBegin,
+  HitlDecision,
+  PauseDecision,
+  RecoveryAdmission,
+  RecoveryAttempt
+} from '@yolk-sdk/harness/inbox'
+import { StopDecision } from '@yolk-sdk/harness/driver'
+import { HitlMatch, OverflowCompactionResult, StepOutcome } from '@yolk-sdk/harness/outcome'
+```
+
+| Subpath   | Value constructors                                                                    |
+| --------- | ------------------------------------------------------------------------------------- |
+| `inbox`   | `HitlDecision`, `PauseDecision`, `RecoveryAttempt`, `RecoveryAdmission`, `DrainBegin` |
+| `driver`  | `StopDecision` (`Idle` / `Interrupted` / `ParkCleared`)                               |
+| `outcome` | `OverflowCompactionResult`, `StepOutcome`, `HitlMatch`                                |
+
+`StopDecision` is the same internal tagged enum, re-exported as `export type` + `export const` from
+`./driver`. Driver recovery uses Inbox `RecoveryAttempt` (`Skip` / `Exhausted` / `Resume`). Prefer
+`Match.tag` / `Predicate.isTagged` over `_tag ===`. `HitlMatch.Match({ requestId })` /
+`HitlMatch.Mismatch()` replace handwritten `{ _tag: 'Match' | 'Mismatch' }` objects.
+
 ## Example
 
 Omitting `drain` uses a no-op (`Effect.void`): `driver.run` only claims and releases ownership. Attach host work with a custom drain. `Inbox.takePromotable` requires that drain's live `drainToken`.
@@ -33,7 +61,7 @@ Omitting `drain` uses a no-op (`Effect.void`): `driver.run` only claims and rele
 Setup:
 
 ```bash
-pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/harness@canary effect@4.0.0-rc.115
 pnpm add -D tsx
 ```
 
@@ -114,6 +142,40 @@ Startup is explicit: build the shared Driver/Inbox/Store, restore host-owned wai
 - A successful drain that leased a Ready generation acknowledges and clears those refs. Failure or interruption keeps them (at-least-once). Host side effects must be idempotent.
 - Human pause releases the busy claim. User `stop` is terminal at the captured owner's settlement (including shutdown then user-stop). Shutdown interrupt keeps the claim. The Durable Object snapshot claim store does not make Inbox durable.
 - After process restart, hosts enumerate their own persisted waiting checkpoints and rebuild a fresh park with the current drain token. Do not import old Inbox parks, drain tokens, or generation strings. Correlate later responses to the new park and host identity policy. Persisted partial responses may be re-admitted only after protocol/host validation against that fresh park.
+
+## Type imports (breaking)
+
+Runtime/wire is unchanged. These public type exports were renamed; there are no `Shape` aliases.
+
+```ts
+import type { RunStoreApi } from '@yolk-sdk/harness/store'
+import type { InboxApi } from '@yolk-sdk/harness/inbox'
+import type { DriverApi } from '@yolk-sdk/harness/driver'
+```
+
+| Old type import                                | New type import |
+| ---------------------------------------------- | --------------- |
+| `RunStoreShape` from `@yolk-sdk/harness/store` | `RunStoreApi`   |
+| `InboxShape` from `@yolk-sdk/harness/inbox`    | `InboxApi`      |
+| `DriverShape` from `@yolk-sdk/harness/driver`  | `DriverApi`     |
+
+## Owner layers
+
+Each service is acquired through its owning static layer factory, which holds the real
+construction logic. The historical `make*` factories keep their signatures and behavior
+and delegate to these canonical owners:
+
+| Canonical owner layer                                                                                                                 | Backward-compatible factory                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `RunStore.inMemoryLayer()` / `snapshotLayer()`                                                                                        | `makeInMemoryRunStoreLayer` / `makeSnapshotRunStoreLayer`                                       |
+| `Inbox.layer()`                                                                                                                       | `makeInMemoryInboxLayer`                                                                        |
+| `RunCoordinator.layer()` (claims via `RunStore`)                                                                                      | `makeCoordinator` stays as the scoped doorbell factory                                          |
+| `Driver.layer()` (requires `RunStore` + `Inbox` + `RunCoordinator`) + `Driver.coordinatedLayer()` (default coordinator, lazy options) | `makeDriverLayer` delegates to `coordinatedLayer`, keeping the `RunStore` + `Inbox` requirement |
+
+Every factory call builds fresh layers, so composed harnesses never share `Ref` state.
+Within one composed harness, the driver and the merged output share a single store
+instance. `InterruptReason` is owned by `@yolk-sdk/harness/coordinator` and re-exported
+from `@yolk-sdk/harness/driver`.
 
 ## Step outcomes
 

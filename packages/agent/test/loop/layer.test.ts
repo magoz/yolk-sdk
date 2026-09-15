@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Predicate, Result, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
@@ -45,6 +45,7 @@ describe('makeAgentLoopLayer', () => {
       const config = yield* LoopConfig
       const executor = yield* ToolExecutor
       const transformed = yield* transformer.transform([UserMessage.make({ content: 'hello' })])
+
       const result = yield* executor
         .execute(ToolCall.make({ id: 'call_1', name: 'weather', params: {} }))
         .pipe(Effect.result)
@@ -55,13 +56,10 @@ describe('makeAgentLoopLayer', () => {
       expect(config.maxRetries).toBe(2)
       expect(config.retryBaseDelayMs).toBe(2000)
       expect(config.toolConcurrency).toBe(4)
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'ToolError',
-          tool: 'weather',
-          cause: 'execution'
-        }
+      expect(Result.isFailure(result) && Predicate.isTagged(result.failure, 'ToolError')).toBe(true)
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        tool: 'weather',
+        cause: 'execution'
       })
     }).pipe(
       Effect.provide(
@@ -77,6 +75,7 @@ describe('decorateLLMProvider', () => {
   it.effect('wraps the provider stream', () =>
     Effect.gen(function* () {
       let streams = 0
+
       const eventsChunk = yield* runModelTurn({
         messages: [UserMessage.make({ content: 'hello' })],
         systemPrompt: 'Be brief.',
@@ -91,6 +90,7 @@ describe('decorateLLMProvider', () => {
               LLMProvider.of({
                 stream: request => {
                   streams += 1
+
                   return provider.stream(request)
                 }
               })
@@ -114,6 +114,7 @@ describe('decorateLLMProvider', () => {
 
   it.effect('accepts an Effect-returning decorator', () => {
     let streams = 0
+
     return Effect.gen(function* () {
       const provider = yield* LLMProvider
       yield* provider
@@ -133,6 +134,7 @@ describe('decorateLLMProvider', () => {
             LLMProvider.of({
               stream: request => {
                 streams += 1
+
                 return provider.stream(request)
               }
             })

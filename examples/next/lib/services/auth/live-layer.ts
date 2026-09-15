@@ -15,7 +15,8 @@ class AuthDb extends Context.Service<AuthDb, ReturnType<typeof drizzle>>()('@app
 const AuthDbLive = Layer.effect(
   AuthDb,
   Effect.gen(function* () {
-    const url = yield* Config.string('DATABASE_URL')
+    const url = yield* Config.String('DATABASE_URL')
+
     return drizzle({ connection: url, relations: schema.relations })
   })
 )
@@ -35,8 +36,8 @@ const AuthConfigLive = Layer.effect(
   AuthConfig,
   Effect.gen(function* () {
     const origins = yield* getAuthOriginConfig()
-    const appName = yield* Config.string('APP_NAME')
-    const emailSender = yield* Config.string('EMAIL_SENDER')
+    const appName = yield* Config.String('APP_NAME')
+    const emailSender = yield* Config.String('EMAIL_SENDER')
 
     return { ...origins, appName, emailSender }
   }).pipe(Effect.mapError(() => new AuthConfigError({ message: 'Auth config missing' })))

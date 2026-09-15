@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
+import { Predicate } from 'effect'
 import {
   ConnectorBinaryWriteHttpClient,
   ConnectorFileTransferError,
@@ -50,7 +51,7 @@ import {
   updateR2Object
 } from '../packages/connectors/src/r2-storage/index.ts'
 
-type PackageExportShape = {
+type PackageExportContract = {
   readonly packageDir: string
   readonly packageName: string
   readonly expectedExports: ReadonlyArray<string>
@@ -59,7 +60,7 @@ type PackageExportShape = {
 
 const workspaceRoot = process.cwd()
 
-const packageExportShapes: ReadonlyArray<PackageExportShape> = [
+const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/agent',
     packageName: '@yolk-sdk/agent',
@@ -187,34 +188,45 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   }
 ]
 
-const field = (value: unknown, key: string): unknown => {
-  if (typeof value !== 'object' || value === null) {
-    return undefined
+type PackageManifest = {
+  readonly name: string | undefined
+  readonly type: string | undefined
+  readonly sideEffects: boolean | undefined
+  readonly exportKeys: ReadonlyArray<string>
+}
+
+const emptyPackageManifest: PackageManifest = {
+  name: undefined,
+  type: undefined,
+  sideEffects: undefined,
+  exportKeys: []
+}
+
+const readPackageManifest = (path: string): PackageManifest => {
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+
+  if (!Predicate.isObjectOrArray(parsed) || parsed === null) {
+    return emptyPackageManifest
   }
 
-  return Object.entries(value).find(([entryKey]) => entryKey === key)?.[1]
-}
+  const fieldValue = (key: string) =>
+    Object.entries(parsed).find(([entryKey]) => entryKey === key)?.[1]
 
-const stringField = (value: unknown, key: string): string | undefined => {
-  const result = field(value, key)
-  return typeof result === 'string' ? result : undefined
-}
+  const name = fieldValue('name')
+  const type = fieldValue('type')
+  const sideEffects = fieldValue('sideEffects')
+  const exportsField = fieldValue('exports')
 
-const booleanField = (value: unknown, key: string): boolean | undefined => {
-  const result = field(value, key)
-  return typeof result === 'boolean' ? result : undefined
-}
-
-const objectKeysField = (value: unknown, key: string): ReadonlyArray<string> => {
-  const result = field(value, key)
-  if (typeof result !== 'object' || result === null) {
-    return []
+  return {
+    name: Predicate.isString(name) ? name : undefined,
+    type: Predicate.isString(type) ? type : undefined,
+    sideEffects: Predicate.isBoolean(sideEffects) ? sideEffects : undefined,
+    exportKeys:
+      Predicate.isObjectOrArray(exportsField) && exportsField !== null
+        ? Object.keys(exportsField)
+        : []
   }
-
-  return Object.keys(result)
 }
-
-const readJson = (path: string): unknown => JSON.parse(readFileSync(path, 'utf8'))
 
 const normalizedRootSource = (source: string) =>
   source
@@ -228,38 +240,52 @@ const sorted = (values: ReadonlyArray<string>) =>
 const sameMembers = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
   sorted(left).join('\n') === sorted(right).join('\n')
 
-const failures = packageExportShapes.flatMap(shape => {
-  const packageJsonPath = join(workspaceRoot, shape.packageDir, 'package.json')
-  const packageJson = readJson(packageJsonPath)
-  const exportKeys = objectKeysField(packageJson, 'exports')
-  const rootSource = readFileSync(join(workspaceRoot, shape.packageDir, 'src/index.ts'), 'utf8')
+const failures = packageExportContracts.flatMap(packageExport => {
+  const packageJsonPath = join(workspaceRoot, packageExport.packageDir, 'package.json')
+  const packageJson = readPackageManifest(packageJsonPath)
+  const exportKeys = packageJson.exportKeys
+
+  const rootSource = readFileSync(
+    join(workspaceRoot, packageExport.packageDir, 'src/index.ts'),
+    'utf8'
+  )
+
   const rootStatements = normalizedRootSource(rootSource)
   const packageFailures: Array<string> = []
 
-  if (stringField(packageJson, 'name') !== shape.packageName) {
-    packageFailures.push(`${shape.packageDir}/package.json name must be ${shape.packageName}`)
-  }
-
-  if (stringField(packageJson, 'type') !== 'module') {
-    packageFailures.push(`${shape.packageDir}/package.json must use type=module`)
-  }
-
-  if (booleanField(packageJson, 'sideEffects') !== false) {
-    packageFailures.push(`${shape.packageDir}/package.json must declare sideEffects=false`)
-  }
-
-  if (!sameMembers(exportKeys, shape.expectedExports)) {
+  if (packageJson.name !== packageExport.packageName) {
     packageFailures.push(
-      `${shape.packageDir}/package.json exports mismatch: expected ${sorted(shape.expectedExports).join(', ')}, got ${sorted(exportKeys).join(', ')}`
+      `${packageExport.packageDir}/package.json name must be ${packageExport.packageName}`
+    )
+  }
+
+  if (packageJson.type !== 'module') {
+    packageFailures.push(`${packageExport.packageDir}/package.json must use type=module`)
+  }
+
+  if (packageJson.sideEffects !== false) {
+    packageFailures.push(`${packageExport.packageDir}/package.json must declare sideEffects=false`)
+  }
+
+  if (!sameMembers(exportKeys, packageExport.expectedExports)) {
+    packageFailures.push(
+      `${packageExport.packageDir}/package.json exports mismatch: expected ${sorted(packageExport.expectedExports).join(', ')}, got ${sorted(exportKeys).join(', ')}`
     )
   }
 
   if (exportKeys.some(exportKey => exportKey.includes('*'))) {
-    packageFailures.push(`${shape.packageDir}/package.json exports must be explicit, no wildcards`)
+    packageFailures.push(
+      `${packageExport.packageDir}/package.json exports must be explicit, no wildcards`
+    )
   }
 
-  if (shape.tinyRoot && (rootStatements.length !== 1 || rootStatements[0] !== 'export {}')) {
-    packageFailures.push(`${shape.packageDir}/src/index.ts root must stay tiny: only export {}`)
+  if (
+    packageExport.tinyRoot &&
+    (rootStatements.length !== 1 || rootStatements[0] !== 'export {}')
+  ) {
+    packageFailures.push(
+      `${packageExport.packageDir}/src/index.ts root must stay tiny: only export {}`
+    )
   }
 
   return packageFailures
@@ -268,15 +294,15 @@ const failures = packageExportShapes.flatMap(shape => {
 // These additive APIs intentionally reuse the existing root, microsoft, and dropbox exports in
 // both exports and publishConfig.exports; no new package subpath is needed.
 if (
-  typeof ConnectorBinaryHttpClient !== 'function' ||
-  typeof ConnectorBinaryHttpError !== 'function' ||
-  typeof downloadOneDriveItem !== 'function' ||
-  typeof OneDriveDownloadError !== 'function' ||
-  typeof OneDriveDownloadSource !== 'function' ||
+  !Predicate.isFunction(ConnectorBinaryHttpClient) ||
+  !Predicate.isFunction(ConnectorBinaryHttpError) ||
+  !Predicate.isFunction(downloadOneDriveItem) ||
+  !Predicate.isFunction(OneDriveDownloadError) ||
+  !Predicate.isFunction(OneDriveDownloadSource) ||
   OneDriveDownloadErrorCode === undefined ||
-  typeof downloadDropboxFile !== 'function' ||
-  typeof DropboxDownloadError !== 'function' ||
-  typeof DropboxDownloadSource !== 'function' ||
+  !Predicate.isFunction(downloadDropboxFile) ||
+  !Predicate.isFunction(DropboxDownloadError) ||
+  !Predicate.isFunction(DropboxDownloadSource) ||
   DropboxDownloadErrorCode === undefined
 ) {
   failures.push('Connector host-only binary download runtime exports are missing')
@@ -305,7 +331,7 @@ if (
     getR2Object,
     createR2Object,
     updateR2Object
-  ].some(value => typeof value !== 'function') ||
+  ].some(value => !Predicate.isFunction(value)) ||
   GoogleDriveReadonlyOAuthCredentialSlot.id !== 'google.oauth' ||
   fortnoxListSupplierInvoiceFilesAction.access !== 'read' ||
   todoistListCommentsAction.access !== 'read'
@@ -315,8 +341,10 @@ if (
 
 if (failures.length > 0) {
   console.error('Package export/tree-shake smoke failures:')
+
   for (const failure of failures) {
     console.error(`- ${failure}`)
   }
+
   process.exitCode = 1
 }

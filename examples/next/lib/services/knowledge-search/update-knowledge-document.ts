@@ -1,19 +1,22 @@
 import { eq, sql } from 'drizzle-orm'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import { Effect } from 'effect'
+import type * as Schema from 'effect/Schema'
+import type { KnowledgeMetadata } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
-import * as schema from '@/lib/services/db/schema'
 import {
-  AppKnowledgeDocumentNotFoundError,
-  AppSearchIndexStoreError,
-  isAppKnowledgeDocumentNotFoundError,
-  isAppSearchIndexStoreError
-} from './errors'
+  encodePersistedJsonObject,
+  persistedJsonObjectErrorMessage,
+  type PersistedJsonObject
+} from '@/lib/services/db/persisted-json-object'
+import * as schema from '@/lib/services/db/schema'
+import { AppKnowledgeDocumentNotFoundError, AppSearchIndexStoreError } from './errors'
 import { getKnowledgeDocument } from './get-knowledge-document'
 
 export type UpdateKnowledgeDocumentFields = {
   readonly title?: string | null
   readonly summary?: string | null
-  readonly metadata?: Record<string, unknown>
+  readonly metadata?: KnowledgeMetadata
 }
 
 export type UpdateKnowledgeDocumentInput = {
@@ -22,32 +25,57 @@ export type UpdateKnowledgeDocumentInput = {
   readonly fields: UpdateKnowledgeDocumentFields
 }
 
-const mapUpdateError = (error: unknown) => {
-  if (isAppKnowledgeDocumentNotFoundError(error) || isAppSearchIndexStoreError(error)) {
-    return error
-  }
-
-  return new AppSearchIndexStoreError({
+const sqlStoreError = (error: EffectDrizzleQueryError) =>
+  new AppSearchIndexStoreError({
     message: 'Could not update knowledge search document',
     cause: error
   })
+
+type KnowledgeDocumentPatch = {
+  updatedAt: ReturnType<typeof sql>
+  title?: string | null
+  summary?: string | null
+  metadata?: PersistedJsonObject
 }
 
-const documentPatch = (fields: UpdateKnowledgeDocumentFields) => ({
-  updatedAt: sql`CURRENT_TIMESTAMP`,
-  ...(fields.title !== undefined ? { title: fields.title } : {}),
-  ...(fields.summary !== undefined ? { summary: fields.summary } : {}),
-  ...(fields.metadata !== undefined ? { metadata: fields.metadata } : {})
-})
+const metadataStoreError = (error: Schema.SchemaError) =>
+  new AppSearchIndexStoreError({
+    message: persistedJsonObjectErrorMessage(error),
+    cause: error
+  })
+
+const documentPatch = (fields: UpdateKnowledgeDocumentFields) =>
+  Effect.gen(function* () {
+    const patch: KnowledgeDocumentPatch = {
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    }
+
+    if (fields.title !== undefined) {
+      patch.title = fields.title
+    }
+
+    if (fields.summary !== undefined) {
+      patch.summary = fields.summary
+    }
+
+    if (fields.metadata !== undefined) {
+      patch.metadata = yield* encodePersistedJsonObject(fields.metadata).pipe(
+        Effect.mapError(metadataStoreError)
+      )
+    }
+
+    return patch
+  })
 
 export const updateKnowledgeDocument = (input: UpdateKnowledgeDocumentInput) =>
   Effect.gen(function* () {
     yield* getKnowledgeDocument({ userId: input.userId, documentId: input.documentId })
 
     const db = yield* Db
+
     const [document] = yield* db
       .update(schema.knowledgeDocument)
-      .set(documentPatch(input.fields))
+      .set(yield* documentPatch(input.fields))
       .where(eq(schema.knowledgeDocument.id, input.documentId))
       .returning({ id: schema.knowledgeDocument.id })
 
@@ -61,4 +89,7 @@ export const updateKnowledgeDocument = (input: UpdateKnowledgeDocumentInput) =>
     }
 
     return yield* getKnowledgeDocument({ userId: input.userId, documentId: document.id })
-  }).pipe(Effect.withSpan('knowledge_search.document.update'), Effect.mapError(mapUpdateError))
+  }).pipe(
+    Effect.withSpan('knowledge_search.document.update'),
+    Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
+  )

@@ -1,8 +1,8 @@
-import { Deferred, Effect } from 'effect'
+import { Deferred, Effect, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { admit, Driver } from '../src/driver.ts'
 import { makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
-import { Inbox } from '../src/inbox.ts'
+import { DrainBegin, HitlDecision, Inbox, PauseDecision } from '../src/inbox.ts'
 import { RunStore } from '../src/store.ts'
 
 describe('in-memory harness', () => {
@@ -22,6 +22,7 @@ describe('in-memory harness', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
@@ -48,6 +49,7 @@ describe('in-memory harness', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
@@ -87,6 +89,7 @@ describe('in-memory harness', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
@@ -137,8 +140,9 @@ describe('in-memory harness', () => {
       })
       expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
       const begun = yield* inbox.beginDrain('run_1', 'input')
-      expect(begun._tag).toBe('Run')
-      if (begun._tag !== 'Run') return
+      expect(Predicate.isTagged(begun, 'Run')).toBe(true)
+
+      if (!Predicate.isTagged(begun, 'Run')) return
 
       const first = yield* inbox.takePromotable('run_1', 'steer', begun.drainToken)
       const second = yield* inbox.takePromotable('run_1', 'input', begun.drainToken)
@@ -162,8 +166,9 @@ describe('in-memory harness', () => {
 
       expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
       const begun = yield* inbox.beginDrain('run_1', 'input')
-      expect(begun._tag).toBe('Run')
-      if (begun._tag !== 'Run') return
+      expect(Predicate.isTagged(begun, 'Run')).toBe(true)
+
+      if (!Predicate.isTagged(begun, 'Run')) return
 
       expect(yield* inbox.takePromotable('run_1', 'input', '')).toBeUndefined()
       expect(yield* inbox.takePromotable('run_1', 'input', 'nope')).toBeUndefined()
@@ -177,8 +182,9 @@ describe('in-memory harness', () => {
       })
       expect(yield* inbox.wakeIfUnblocked('run_2', 'input', Effect.void)).toBe(true)
       const other = yield* inbox.beginDrain('run_2', 'input')
-      expect(other._tag).toBe('Run')
-      if (other._tag !== 'Run') return
+      expect(Predicate.isTagged(other, 'Run')).toBe(true)
+
+      if (!Predicate.isTagged(other, 'Run')) return
       expect(yield* inbox.takePromotable('run_2', 'input', begun.drainToken)).toBeUndefined()
       expect(yield* inbox.takePromotable('run_1', 'input', other.drainToken)).toBeUndefined()
       expect((yield* inbox.pending('run_2')).map(item => item.id)).toEqual(['other_1'])
@@ -198,14 +204,72 @@ describe('in-memory harness', () => {
 
       expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
       const again = yield* inbox.beginDrain('run_1', 'input')
-      expect(again._tag).toBe('Run')
-      if (again._tag !== 'Run') return
+      expect(Predicate.isTagged(again, 'Run')).toBe(true)
+
+      if (!Predicate.isTagged(again, 'Run')) return
       expect(again.drainToken).not.toBe(begun.drainToken)
       expect(yield* inbox.takePromotable('run_1', 'input', begun.drainToken)).toBeUndefined()
       expect((yield* inbox.pending('run_1')).map(item => item.id)).toEqual(['item_2'])
       const next = yield* inbox.takePromotable('run_1', 'input', again.drainToken)
       expect(next?.id).toBe('item_2')
       expect(yield* inbox.pending('run_1')).toEqual([])
+    }).pipe(Effect.provide(makeInMemoryHarnessLayer()))
+  )
+
+  it.effect('inbox park, drain and HITL receipts use canonical constructors', () =>
+    Effect.gen(function* () {
+      const inbox = yield* Inbox
+      expect(yield* inbox.beginDrain('run_1', 'input')).toEqual(DrainBegin.Skip())
+      expect(yield* inbox.park('run_1', ['req_1'], 'd1')).toEqual(PauseDecision.Stale())
+      expect(
+        yield* inbox.acceptHitl(
+          'run_1',
+          { itemId: 'item_1', requestId: 'req_1', generation: '1' },
+          Effect.void
+        )
+      ).toEqual(HitlDecision.NotParked())
+
+      expect(yield* inbox.wakeIfUnblocked('run_1', 'input', Effect.void)).toBe(true)
+      const begun = yield* inbox.beginDrain('run_1', 'input')
+      expect(Predicate.isTagged(begun, 'Run')).toBe(true)
+
+      if (!Predicate.isTagged(begun, 'Run')) return
+      expect(begun).toEqual(DrainBegin.Run({ drainToken: begun.drainToken, readyResponses: [] }))
+
+      const parked = yield* inbox.park('run_1', ['req_1'], begun.drainToken)
+      expect(Predicate.isTagged(parked, 'Parked')).toBe(true)
+
+      if (!Predicate.isTagged(parked, 'Parked')) return
+      expect(parked).toEqual(PauseDecision.Parked({ generation: parked.generation }))
+
+      expect(
+        yield* inbox.acceptHitl(
+          'run_1',
+          { itemId: 'item_1', requestId: 'req_1', generation: 'stale' },
+          Effect.void
+        )
+      ).toEqual(HitlDecision.Stale())
+      expect(
+        yield* inbox.acceptHitl(
+          'run_1',
+          { itemId: 'item_1', requestId: 'missing', generation: parked.generation },
+          Effect.void
+        )
+      ).toEqual(HitlDecision.UnknownRequest())
+      expect(
+        yield* inbox.acceptHitl(
+          'run_1',
+          { itemId: 'item_1', requestId: 'req_1', generation: parked.generation },
+          Effect.void
+        )
+      ).toEqual(HitlDecision.Ready())
+      expect(
+        yield* inbox.acceptHitl(
+          'run_1',
+          { itemId: 'item_2', requestId: 'req_1', generation: parked.generation },
+          Effect.void
+        )
+      ).toEqual(HitlDecision.Duplicate())
     }).pipe(Effect.provide(makeInMemoryHarnessLayer()))
   )
 })

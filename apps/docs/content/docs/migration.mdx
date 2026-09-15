@@ -25,6 +25,15 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: Effect rc.115
+
+This source upgrade targets `effect@4.0.0-rc.115`; it is not a claim that an already-published canary uses that version. Upgrade matching Yolk packages and Effect together when the corresponding canary is available.
+
+- Use `Schema.TaggedError`, `Schema.fromJsonString(Schema.Unknown)` and capitalized `Config.String` / `Config.Int` / `Config.Redacted` APIs.
+- Schema construction now follows schema field order, including `_tag` first. JSON field values and optional presence are unchanged, but raw serialized bytes can differ. Do not depend on beta.80's property insertion order.
+- `Schema.SchemaError` is now a native `Error`. Synchronous schema makers throw a native error with a `SchemaIssue.Issue` cause; Effectful makers fail with the issue. Keep typed owner errors and inspect retained causes rather than matching old diagnostic text.
+- Tool schemas use Effect's canonical JSON representation. Prefer finite-number schemas for JSON inputs; definition references may acquire an `Encoded` suffix. Empty-struct tools still advertise a closed empty object. Custom JSON Schema output must still pass Yolk's portable-data boundary.
+
 ### Next canary: optional harness and collector recovery
 
 `@yolk-sdk/harness` is a new optional run-lifecycle package (coordinator, store, inbox, drivers, outcomes). It is not the agent loop and does not add a Workflow driver. It is introduced after `0.1.0-canary.76` and unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available.
@@ -36,6 +45,146 @@ Kernel streams that end with zero `Done` events fail as `LLMError` `invalid_resp
 Overflow compact now refuses to run after published output (`overflowCompactionMayRun`). Durable persist-then-retry stays host-owned.
 
 `attemptModelTurn` classifies one `runModelTurn` after that stream's inner retries. It does not add an outer retry loop. A finalized collector failure (`collectModelTurn` / `collectModelTurnAttempt`) is not host-chosen recovery; see [Troubleshooting](./troubleshooting#collector-failed-versus-host-chosen-recovery) and [Harness composition](./vercel-workflows/harness-composition).
+
+### Next canary: owned JSON data and voice session resources
+
+`ToolDef.parameters` now requires `ToolJsonSchema`: boolean or plain JSON-object representation.
+Constructors/raw decode reject nonfinite values, cycles, exotics and accessor fields; accessors are
+not executed. Dense ordinary arrays, null-prototype objects and DAG aliases are legal. Admitted
+identity is retained, not frozen. Use `decodeToolJsonSchema` / `decodeToolJsonSchemaObject` for raw
+inputs (`Option`); JSON Schema semantic/provider validation is separate. Tool arguments/results and
+HITL stay opaque. Background envelopes preserve boolean argument schemas. MCP discovery requires
+the object arm and retains typed validation errors and the omitted-schema default.
+
+`OpenAiProviderConfig.extraBody` now takes JSON-object input (`OpenAiRequestExtras`). Build inert
+JSON data, not getter-backed configuration. Lowering snapshots surviving enumerable own fields,
+discarding canonical request keys unread. Surviving accessors/exotics/invalid JSON fail with fixed
+`Invalid … extraBody JSON: expected a JSON object` before HTTP. The snapshot preserves JSON values,
+own `__proto__`/`constructor` and DAG aliases; it does not retain input identity. Root symbols/hidden
+fields are omitted; nested symbols/hidden fields and extra array properties fail. Final request
+serialization remains independently checked. Proxy reflection traps are not guaranteed inert.
+
+Connector integration/binding `metadata` now uses `PortableMetadata`. Convert Dates, Maps, custom
+instances and other rich values to explicit JSON first. Decode/make return non-frozen snapshots with
+null-prototype objects and dense arrays; aliases share copied nodes, cycles/accessors/exotics fail.
+Absent metadata stays absent. Config, credential secrets, error `underlying` and host DB schemas are
+unchanged; this is not a database migration.
+
+`makeVoiceController` now requires `VoiceTransport` instead of `options.transport`. Wrap existing
+transport values with `Effect.provideService`, or use `VoiceSession.layer` with a transport layer,
+codec/tool endpoint and optional `eventLog`. Browser/WebSocket transport layer constructors are
+exported from their existing subpaths. Configured logging runs without an external event consumer;
+no `eventLog` means no ambient outbox capture. Keep provided layers alive through the full session
+usage, or use `Layer.buildWithScope` for an explicit lifetime. `Layer.succeed` injects externally
+owned values; it does not allocate/finalize resources. These are breaking 0.x changes (minor).
+
+### Next canary: makeTool SchemaError and workflow CommitError callbacks
+
+`makeTool({ invalidParamsMessage })` on `@yolk-sdk/agent/tools` is now
+`(error: Schema.SchemaError) => string` (was `(error: unknown) => string`). Only
+`Schema.decodeUnknownEffect` on `parameters` invokes it (validate and execute). The decode error
+is passed through unwrapped. Default remains `Invalid ${name} arguments: ${String(error)}`,
+including the `SchemaError(...)` wrapper. In Effect rc.115, `SchemaError` extends native `Error`,
+but the wrapper remains part of this tool-message contract; do not switch the default to `.message`. Existing `(error: unknown) => string` callbacks remain assignable. No new
+export subpath; `MakeToolOptions` is still not barreled from `@yolk-sdk/agent/tools`.
+
+`commitThenWriteTerminalEvent({ writeCommitError })` on `@yolk-sdk/vercel-workflows` is now
+`(error: CommitError) => …`, where `CommitError` is the existing generic on `commit`. The producer
+is `Effect.matchEffect` `onFailure` of `commit`; typed failures—not defects or interruptions—are
+passed to the callback. Result tags still carry `commitError` and `error` as `unknown`; those fields are not
+tightened. Existing `(error: unknown) => …` callbacks remain assignable. No generic expansion or
+export-map change.
+
+### Next canary: voice void addTrack, finite voice argument JSON, MCP protocol owners
+
+`WebRtcPeerConnectionLike.addTrack` on `@yolk-sdk/agent/voice/browser` is now a void command (was
+unused `unknown`). Hosts and fakes must not read a sender. Real `RTCPeerConnection.addTrack`
+remains assignable. No export-map change.
+
+Voice raw-argument JSON on `@yolk-sdk/agent/voice`: `protocolToolCallFromVoice` and
+`decideVoiceToolCall` admit finite JSON. Actual `null` / `false` / `0` still admit as those values.
+Raw text `1e999` uses the existing malformed fallbacks instead of publishing `Infinity`:
+projection params are the raw string `'1e999'`; approval display params are
+`{ argumentsJson: '1e999' }`. Nested overflow such as `{"n":1e999}` takes the same fallbacks. Do
+not demonstrate with `JSON.stringify(Infinity)` (that is `null`). `protocolToolCallFromVoice` still
+returns `ToolCall`. Execution schema validation, approval identifiers, and gates are unchanged.
+
+`@yolk-sdk/mcp/client` and `@yolk-sdk/mcp/protocol` add Schema owners `InitializeClientInfo`,
+`InitializeParams`, `InitializedNotification`, and `ToolsCallParams` (same `protocol.ts`; no new
+export subpath). Prefer Schema owners for new construction. Compatibility `makeJsonRpcRequest`,
+`makeInitializeParams`, and `makeInitializedNotification` remain and build through those schemas.
+`makeJsonRpcRequest` still omits `params` when `undefined`; when params are present, getter access
+order stays `id`, `method`, `params`, `params`.
+
+### Next canary: OpenAI JSON admission, Realtime parameters, and Gmail finite JSON
+
+OpenAI Chat Completions and Responses lowering now requires `ToolDef.parameters` and tool-call
+`params` to decode as `Schema.Json`. Non-JSON values fail as non-retryable `LLMError`
+`provider_error` before transport. `ToolDef.parameters` now has the admission contract above;
+`ToolCall.params` remains `Schema.Unknown`. Public
+Codex wrapper `OpenAiCodexTool.parameters` is still `unknown`. Optional body fields are omitted
+unless present. After lone-surrogate rewrite, request bodies are decoded as JSON again and fail
+rather than skipping. Inbound HTTP JSON admits `Schema.Json` (`invalid_response` on failure).
+Responses SSE JSON admits `Schema.Json`: non-object JSON events are ignored; malformed non-JSON
+event text fails. First `response.completed` remains terminal. HTTP error bodies stay raw text.
+
+The former extraBody spread/getter contract is superseded by the portable snapshot migration above.
+Canonical fields are discarded unread and surviving accessors are rejected without execution.
+Composed-body admission after lone-surrogate rewriting remains the final serialization defense.
+
+Public Realtime `OpenAiRealtimeFunctionTool.parameters` and `openAiRealtimeToolParameters` now take
+`Schema.Json`. Non-JSON advertisement fails `VoiceToolBridgeError`: sync helpers throw; Effect
+helpers fail in the typed channel. Mapper defects stay defects. Union-root lowering uses a `Map` so
+own `__proto__` / `constructor` merge instead of prototype assignment.
+
+Gmail `get_thread` / `list_attachments` MIME `payload` admits `Schema.Json` after JSON parse.
+Best-effort optional size omission (`-1`, `1.5`, `null`, `"12"`, missing) and sibling preservation
+are unchanged. Finite JSON is a deliberate whole-payload reject: raw HTTP `1e999` → `Infinity` →
+`ConnectorError` `validation_failed` (`Invalid response shape`). Public action classes,
+`GmailUnknownOutput`, and `gmail.get_attachment` are unchanged. Independent raw wire/key goldens were
+not migrated.
+
+### Next canary: Claude JSON tool payloads and React constructor usage
+
+Claude lowering now requires `ToolDef.parameters` and `ToolCall.params` to decode as `Schema.Json`.
+Non-JSON values fail as non-retryable `LLMError` with `cause: 'provider_error'`. `ToolDef.parameters`
+now has the admission contract above; `ToolCall.params` remains opaque. After lone-surrogate
+rewrite, the Claude request body is decoded as JSON again and fails rather than skipping.
+HTTP error bodies that are not JSON still classify from status.
+
+`useAgentChat` now dispatches the existing `AgentChatAction` constructors and returns the existing
+hook-result constructors (`AgentChatSubmitResult`, `AgentChatDeleteTurnResult`, and siblings).
+Those values are `Data.taggedEnum` plain objects with `_tag` last, not Equal/Hash classes. Prefer
+constructors and `$is`; omit absent optionals. Duration descriptors still use
+`Schema.TaggedStruct.make`. No new React export paths.
+
+MCP production client/protocol/index are unchanged in this batch. App-owned knowledge-search File
+identity, Cloudflare occupancy, and example UI wiring are not `@yolk-sdk/*` APIs.
+
+### Next canary: canonical tagged constructors
+
+Several public ADTs that were type-only, or that callers built as handwritten `{ _tag }` objects,
+now have constructors on existing subpaths. No new export paths.
+
+`Data.taggedEnum` builds **plain objects** `{ ...fields, _tag }` (`_tag` last). They are not
+`Equal`/`Hash` Data classes. `Schema.Class` / `Data.TaggedClass` remain class instances.
+`Schema.TaggedStruct.make` constructs validated plain values. Prefer constructors; omit absent optionals.
+Existing `_tag` reads still work.
+
+| Package / subpath               | Before                                                              | After                                                                                                                                                                    |
+| ------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@yolk-sdk/agent/protocol`      | `PlainHitlResponse` type-only; helpers wrote `_tag` (often first)   | Value `PlainHitlResponse.QuestionResponse` / `.ToolApprovalResponse`; helpers omit absent optionals                                                                      |
+| `@yolk-sdk/agent/runtime`       | `export type { RuntimeRequest }` only                               | `export { runRuntime, RuntimeRequest }` (value carries the type)                                                                                                         |
+| `@yolk-sdk/agent/react`         | Chat ADTs type-only                                                 | Values `AgentChatPart`, `ChatToolState`, `AgentChatItem`, `ToolRunState`, message mutators, `AgentChatAction`, hook results; `ToolDurationKnown` / `ToolDurationUnknown` |
+| `@yolk-sdk/harness/outcome`     | `StepOutcome` / `HitlMatch` / overflow result type-only or internal | Public `StepOutcome`, `HitlMatch`, `OverflowCompactionResult`                                                                                                            |
+| `@yolk-sdk/harness/inbox`       | Private decision constructors                                       | Public `HitlDecision`, `PauseDecision`, `RecoveryAttempt`, `RecoveryAdmission`, `DrainBegin`                                                                             |
+| `@yolk-sdk/harness/driver`      | `export type StopDecision` only                                     | Type + `export const StopDecision`; recovery uses Inbox `RecoveryAttempt`                                                                                                |
+| `@yolk-sdk/knowledge/documents` | Inline `{ _tag: 'File' }` / `{ _tag: 'KnowledgeScope' }` objects    | `KnowledgeFileSource` / `Url` / `Text` and `KnowledgeSearchScope` / `KnowledgeSearchScopes` `.make`                                                                      |
+| `@yolk-sdk/vercel-workflows`    | Type-only `WorkflowStepResult` / `VercelAgentWorkflowRunResult`     | Matching value companions; `settleWorkflowStep` returns `Success` / `Failure` constructors                                                                               |
+
+JSON key order for `Data.taggedEnum` values puts `_tag` last. Do not treat that as `Equal`/`Hash`.
+The knowledge **value** `KnowledgeSearchScope` is the single-id constructor; the **type** remains the union.
+A missing source URL is not a storage object id; do not invent locators to satisfy `.make`.
 
 ### Next canary: host-only connector file retrieval and writes
 

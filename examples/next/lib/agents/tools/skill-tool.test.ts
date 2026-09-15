@@ -25,6 +25,7 @@ describe('skill tool', () => {
         userId: 'user_1',
         skillset
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({ id: 'call_1', name: 'skill', params: { name: 'review-code' } })
       )
@@ -56,6 +57,7 @@ describe('skill tool', () => {
         userId: 'user_1',
         skillset
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({ id: 'call_1', name: 'skill', params: { name: 'missing' } })
       )

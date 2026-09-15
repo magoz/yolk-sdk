@@ -2,44 +2,79 @@ import { createServer, type ServerResponse } from 'node:http'
 import type { Page } from '@playwright/test'
 import { createId } from '@paralleldrive/cuid2'
 import { eq } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
+import {
+  AgentEnd,
+  AgentStart,
+  AssistantAgentMessage,
+  AssistantMessageEvent,
+  HostToolCallPart,
+  LLMStreamEnd,
+  LLMStreamStart,
+  SubagentStarted,
+  ToolCall,
+  ToolExecutionCompleted,
+  ToolExecutionStarted,
+  ToolInputEnd,
+  TurnEnd,
+  TurnStart,
+  makeSubagentRunId,
+  zeroAgentUsage,
+  type AgentEvent
+} from '@yolk-sdk/agent/protocol'
+import { makeSubagentToolResult, subagentToolName } from '@yolk-sdk/agent/tools'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { test, expect } from '../fixtures'
 import { TestDbLayer } from '../utils/test-db'
 
-const slowCall = {
+const slowParams = {
+  description: 'slow task',
+  prompt: 'slow',
+  subagent_type: 'general'
+}
+
+const fastParams = {
+  description: 'fast task',
+  prompt: 'fast',
+  subagent_type: 'general'
+}
+
+const slowCall = ToolCall.make({
   id: 'call_slow_subagent',
-  name: 'subagent',
-  params: { description: 'slow task', prompt: 'slow', subagent_type: 'general' }
-}
-
-const fastCall = {
-  id: 'call_fast_subagent',
-  name: 'subagent',
-  params: { description: 'fast task', prompt: 'fast', subagent_type: 'general' }
-}
-
-const result = (call: typeof slowCall, startedAtMs: number, endedAtMs: number) => ({
-  toolCallId: call.id,
-  content: `<subagent_result>done ${call.id}</subagent_result>`,
-  structuredContent: {
-    subagent_run_id: `subagent:${call.id}`,
-    subagent_type: 'general',
-    description: call.params.description,
-    started_at_ms: startedAtMs,
-    ended_at_ms: endedAtMs,
-    duration_ms: endedAtMs - startedAtMs,
-    status: 'completed',
-    model: 'e2e-model'
-  }
+  name: subagentToolName,
+  params: slowParams
 })
 
-const writeEvent = (response: ServerResponse, event: unknown) => {
+const fastCall = ToolCall.make({
+  id: 'call_fast_subagent',
+  name: subagentToolName,
+  params: fastParams
+})
+
+const result = (
+  call: ToolCall,
+  params: typeof slowParams,
+  startedAtMs: number,
+  endedAtMs: number
+) =>
+  makeSubagentToolResult({
+    callId: call.id,
+    output: `done ${call.id}`,
+    subagentType: params.subagent_type,
+    description: params.description,
+    subagentRunId: makeSubagentRunId(call.id),
+    startedAtMs,
+    endedAtMs,
+    model: 'e2e-model'
+  })
+
+const writeEvent = (response: ServerResponse, event: AgentEvent) => {
   response.write(`${JSON.stringify(event)}\n`)
 }
 
 const loginEmail = 'e2e-test@example.com'
+
 const loginOtp = '123456'
 
 const seedLoginOtp = () =>
@@ -68,73 +103,86 @@ const login = async (page: Page) => {
 
 const startWorkflowStreamServer = async () => {
   let releaseCompletions: (() => void) | undefined
+
   const completionsReleased = new Promise<void>(resolve => {
     releaseCompletions = resolve
   })
+
   const server = createServer((_request, response) => {
     const startedAtMs = Date.now()
     response.writeHead(200, {
       'content-type': 'application/x-ndjson; charset=utf-8',
       'x-workflow-run-id': 'e2e-subagent-parallel-run'
     })
-    writeEvent(response, { _tag: 'AgentStart' })
-    writeEvent(response, { _tag: 'TurnStart', turn: 1 })
-    writeEvent(response, { _tag: 'LLMStreamStart', turn: 1 })
-    writeEvent(response, { _tag: 'ToolInputEnd', call: slowCall })
-    writeEvent(response, { _tag: 'ToolInputEnd', call: fastCall })
-    writeEvent(response, { _tag: 'LLMStreamEnd', turn: 1 })
-    writeEvent(response, {
-      _tag: 'AssistantMessage',
-      message: {
-        _tag: 'Assistant',
-        parts: [
-          { _tag: 'HostToolCall', call: slowCall },
-          { _tag: 'HostToolCall', call: fastCall }
-        ]
-      }
-    })
-    writeEvent(response, { _tag: 'ToolExecutionStarted', call: slowCall, createdAtMs: startedAtMs })
-    writeEvent(response, {
-      _tag: 'SubagentStarted',
-      parentToolCallId: slowCall.id,
-      subagentRunId: `subagent:${slowCall.id}`,
-      subagentType: 'general',
-      description: slowCall.params.description,
-      model: 'e2e-model',
-      createdAtMs: startedAtMs
-    })
-    writeEvent(response, { _tag: 'ToolExecutionStarted', call: fastCall, createdAtMs: startedAtMs })
-    writeEvent(response, {
-      _tag: 'SubagentStarted',
-      parentToolCallId: fastCall.id,
-      subagentRunId: `subagent:${fastCall.id}`,
-      subagentType: 'general',
-      description: fastCall.params.description,
-      model: 'e2e-model',
-      createdAtMs: startedAtMs
-    })
+    writeEvent(response, AgentStart.make({}))
+    writeEvent(response, TurnStart.make({ turn: 1 }))
+    writeEvent(response, LLMStreamStart.make({ turn: 1 }))
+    writeEvent(response, ToolInputEnd.make({ call: slowCall }))
+    writeEvent(response, ToolInputEnd.make({ call: fastCall }))
+    writeEvent(response, LLMStreamEnd.make({ turn: 1 }))
+    writeEvent(
+      response,
+      AssistantMessageEvent.make({
+        message: AssistantAgentMessage.make({
+          parts: [
+            HostToolCallPart.make({ call: slowCall }),
+            HostToolCallPart.make({ call: fastCall })
+          ]
+        })
+      })
+    )
+    writeEvent(response, ToolExecutionStarted.make({ call: slowCall, createdAtMs: startedAtMs }))
+    writeEvent(
+      response,
+      SubagentStarted.make({
+        parentToolCallId: slowCall.id,
+        subagentRunId: makeSubagentRunId(slowCall.id),
+        subagentType: 'general',
+        description: slowParams.description,
+        model: 'e2e-model',
+        createdAtMs: startedAtMs
+      })
+    )
+    writeEvent(response, ToolExecutionStarted.make({ call: fastCall, createdAtMs: startedAtMs }))
+    writeEvent(
+      response,
+      SubagentStarted.make({
+        parentToolCallId: fastCall.id,
+        subagentRunId: makeSubagentRunId(fastCall.id),
+        subagentType: 'general',
+        description: fastParams.description,
+        model: 'e2e-model',
+        createdAtMs: startedAtMs
+      })
+    )
 
     completionsReleased.then(() => {
       const endedAtMs = Date.now()
-      writeEvent(response, {
-        _tag: 'ToolExecutionCompleted',
-        call: slowCall,
-        result: result(slowCall, startedAtMs, endedAtMs),
-        createdAtMs: endedAtMs
-      })
-      writeEvent(response, {
-        _tag: 'ToolExecutionCompleted',
-        call: fastCall,
-        result: result(fastCall, startedAtMs, endedAtMs),
-        createdAtMs: endedAtMs
-      })
-      writeEvent(response, { _tag: 'TurnEnd', turn: 1, reason: 'tool_use' })
-      writeEvent(response, {
-        _tag: 'AgentEnd',
-        messages: [],
-        turns: 1,
-        usage: { input: { total: 0 }, output: { total: 0 } }
-      })
+      writeEvent(
+        response,
+        ToolExecutionCompleted.make({
+          call: slowCall,
+          result: result(slowCall, slowParams, startedAtMs, endedAtMs),
+          createdAtMs: endedAtMs
+        })
+      )
+      writeEvent(
+        response,
+        ToolExecutionCompleted.make({
+          call: fastCall,
+          result: result(fastCall, fastParams, startedAtMs, endedAtMs),
+          createdAtMs: endedAtMs
+        })
+      )
+      writeEvent(response, TurnEnd.make({ turn: 1, reason: 'tool_use' }))
+      writeEvent(
+        response,
+        AgentEnd.make({
+          messages: [],
+          turns: 1,
+          usage: zeroAgentUsage
+        })
+      )
       response.end()
     })
   })
@@ -144,7 +192,7 @@ const startWorkflowStreamServer = async () => {
   })
   const address = server.address()
 
-  if (address === null || typeof address === 'string') {
+  if (address === null || Predicate.isString(address)) {
     throw new Error('Expected local stream server port')
   }
 
@@ -181,12 +229,12 @@ test('shows same-turn workflow subagents running concurrently', async ({ page })
 
     streamServer.releaseCompletions()
 
-    await expect(
-      page.getByRole('button', { name: /Subagent: slow task.*\d+ms/ })
-    ).toBeVisible({ timeout: 15_000 })
-    await expect(
-      page.getByRole('button', { name: /Subagent: fast task.*\d+ms/ })
-    ).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: /Subagent: slow task.*\d+ms/ })).toBeVisible({
+      timeout: 15_000
+    })
+    await expect(page.getByRole('button', { name: /Subagent: fast task.*\d+ms/ })).toBeVisible({
+      timeout: 15_000
+    })
   } finally {
     await streamServer.close()
   }

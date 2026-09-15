@@ -97,7 +97,7 @@ export class PersistenceError extends Data.TaggedError('PersistenceError')<{
 }> {}
 ```
 
-Use `Schema.TaggedErrorClass` instead when you need `Schema.is()` guards or serialization.
+Use `Schema.TaggedError` instead when you need `Schema.is()` guards or serialization.
 
 ## Type extraction
 

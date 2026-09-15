@@ -25,7 +25,9 @@ KnowledgeDocument
   updatedAt
 ```
 
-`KnowledgeSource` separately models `File`, `Url`, or `Text` ingestion origins.
+`KnowledgeSource` separately models `File`, `Url`, or `Text` ingestion origins. Construct them with
+`KnowledgeFileSource.make`, `KnowledgeUrlSource.make`, and `KnowledgeTextSource.make` from
+`@yolk-sdk/knowledge/documents`.
 `IndexedKnowledgeDocument` carries that source plus indexing status and optional
 title/summary/error/hash/count metadata. It is distinct from the content-oriented
 `KnowledgeDocument` above.
@@ -45,7 +47,7 @@ The helpers do not enforce this policy automatically. Pass only selected documen
 Install:
 
 ```bash
-pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 ## Use pinned knowledge as context
@@ -93,11 +95,12 @@ replacement, rollback policy, and ready/error filtering. Failures retain their s
 
 ```ts
 import { Effect } from 'effect'
+import { KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
 import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 
 const results = await Effect.runPromise(
   searchKnowledge({
-    scope: { _tag: 'KnowledgeScope', id: 'workspace-docs' },
+    scope: KnowledgeSearchScope.make({ id: 'workspace-docs' }),
     query: 'How do agent tools work?',
     limit: 5,
     mode: 'hybrid',
@@ -105,6 +108,9 @@ const results = await Effect.runPromise(
   }).pipe(Effect.provide(HostKnowledgeSearchLayer))
 )
 ```
+
+The value `KnowledgeSearchScope` is the single-id constructor (tag `KnowledgeScope`).
+`KnowledgeSearchScopes.make({ ids })` covers multiple ids. The type `KnowledgeSearchScope` is the union.
 
 The package defines the search contract. Your app implements the store and embedding provider.
 

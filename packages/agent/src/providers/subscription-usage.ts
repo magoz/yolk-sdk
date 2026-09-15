@@ -1,7 +1,9 @@
 import * as Schema from 'effect/Schema'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
 const PositiveNumber = Schema.Number.pipe(Schema.check(Schema.isGreaterThan(0)))
+
 const isCanonicalInstant = (value: string) => {
   const date = new Date(value)
 
@@ -39,7 +41,7 @@ export class ProviderSubscriptionUsageSnapshot extends Schema.Class<ProviderSubs
   windows: Schema.Chunk(ProviderSubscriptionUsageWindow)
 }) {}
 
-export class ProviderSubscriptionUsageRequestError extends Schema.TaggedErrorClass<ProviderSubscriptionUsageRequestError>()(
+export class ProviderSubscriptionUsageRequestError extends Schema.TaggedError<ProviderSubscriptionUsageRequestError>()(
   'ProviderSubscriptionUsageRequestError',
   {
     provider: Schema.String,
@@ -47,7 +49,7 @@ export class ProviderSubscriptionUsageRequestError extends Schema.TaggedErrorCla
   }
 ) {}
 
-export class ProviderSubscriptionUsageResponseError extends Schema.TaggedErrorClass<ProviderSubscriptionUsageResponseError>()(
+export class ProviderSubscriptionUsageResponseError extends Schema.TaggedError<ProviderSubscriptionUsageResponseError>()(
   'ProviderSubscriptionUsageResponseError',
   {
     provider: Schema.String,
@@ -56,7 +58,7 @@ export class ProviderSubscriptionUsageResponseError extends Schema.TaggedErrorCl
   }
 ) {}
 
-export class ProviderSubscriptionUsageAuthError extends Schema.TaggedErrorClass<ProviderSubscriptionUsageAuthError>()(
+export class ProviderSubscriptionUsageAuthError extends Schema.TaggedError<ProviderSubscriptionUsageAuthError>()(
   'ProviderSubscriptionUsageAuthError',
   {
     provider: Schema.String,
@@ -64,7 +66,7 @@ export class ProviderSubscriptionUsageAuthError extends Schema.TaggedErrorClass<
   }
 ) {}
 
-export class ProviderSubscriptionUsageRateLimitError extends Schema.TaggedErrorClass<ProviderSubscriptionUsageRateLimitError>()(
+export class ProviderSubscriptionUsageRateLimitError extends Schema.TaggedError<ProviderSubscriptionUsageRateLimitError>()(
   'ProviderSubscriptionUsageRateLimitError',
   {
     provider: Schema.String,
@@ -72,7 +74,7 @@ export class ProviderSubscriptionUsageRateLimitError extends Schema.TaggedErrorC
   }
 ) {}
 
-export class ProviderSubscriptionUsageConfigurationError extends Schema.TaggedErrorClass<ProviderSubscriptionUsageConfigurationError>()(
+export class ProviderSubscriptionUsageConfigurationError extends Schema.TaggedError<ProviderSubscriptionUsageConfigurationError>()(
   'ProviderSubscriptionUsageConfigurationError',
   {
     provider: Schema.String,

@@ -4,6 +4,7 @@ import {
   workflowResumeResponse,
   workflowResumeStartIndexFromUrl,
   workflowResumeStartIndexAfterTail,
+  WorkflowResumeStartIndexParseResult,
   type WorkflowCancelableRun,
   type WorkflowRunResolver
 } from './route-model'
@@ -48,6 +49,7 @@ describe('Workflow run route model', () => {
 
   it('resumes HITL streams after the previous tail index', async () => {
     const readableOptions: Array<WorkflowReadableOptions | undefined> = []
+
     const getRun: WorkflowRunResolver = runId =>
       makeRun({
         runId,
@@ -55,6 +57,7 @@ describe('Workflow run route model', () => {
         onCancel: () => undefined,
         onReadable: options => readableOptions.push(options)
       })
+
     const response = workflowResumeResponse('wrun_123', getRun, {
       startIndex: workflowResumeStartIndexAfterTail(3),
       tailIndex: 3
@@ -71,33 +74,27 @@ describe('Workflow run route model', () => {
   })
 
   it('parses only nonnegative safe start indexes', () => {
-    expect(workflowResumeStartIndexFromUrl('https://example.test/run')).toEqual({
-      _tag: 'ValidStartIndex'
-    })
-    expect(workflowResumeStartIndexFromUrl('/run?startIndex=0')).toEqual({
-      _tag: 'ValidStartIndex',
-      startIndex: 0
-    })
-    expect(workflowResumeStartIndexFromUrl('/run?startIndex=42')).toEqual({
-      _tag: 'ValidStartIndex',
-      startIndex: 42
-    })
-    expect(workflowResumeStartIndexFromUrl('/run?startIndex=-1')).toEqual({
-      _tag: 'InvalidStartIndex',
-      raw: '-1'
-    })
-    expect(workflowResumeStartIndexFromUrl('/run?startIndex=1x')).toEqual({
-      _tag: 'InvalidStartIndex',
-      raw: '1x'
-    })
-    expect(workflowResumeStartIndexFromUrl('/run?startIndex=1.5')).toEqual({
-      _tag: 'InvalidStartIndex',
-      raw: '1.5'
-    })
-    expect(workflowResumeStartIndexFromUrl('/run?startIndex=9007199254740992')).toEqual({
-      _tag: 'InvalidStartIndex',
-      raw: '9007199254740992'
-    })
+    expect(workflowResumeStartIndexFromUrl('https://example.test/run')).toEqual(
+      WorkflowResumeStartIndexParseResult.ValidStartIndex({})
+    )
+    expect(workflowResumeStartIndexFromUrl('/run?startIndex=0')).toEqual(
+      WorkflowResumeStartIndexParseResult.ValidStartIndex({ startIndex: 0 })
+    )
+    expect(workflowResumeStartIndexFromUrl('/run?startIndex=42')).toEqual(
+      WorkflowResumeStartIndexParseResult.ValidStartIndex({ startIndex: 42 })
+    )
+    expect(workflowResumeStartIndexFromUrl('/run?startIndex=-1')).toEqual(
+      WorkflowResumeStartIndexParseResult.InvalidStartIndex({ raw: '-1' })
+    )
+    expect(workflowResumeStartIndexFromUrl('/run?startIndex=1x')).toEqual(
+      WorkflowResumeStartIndexParseResult.InvalidStartIndex({ raw: '1x' })
+    )
+    expect(workflowResumeStartIndexFromUrl('/run?startIndex=1.5')).toEqual(
+      WorkflowResumeStartIndexParseResult.InvalidStartIndex({ raw: '1.5' })
+    )
+    expect(workflowResumeStartIndexFromUrl('/run?startIndex=9007199254740992')).toEqual(
+      WorkflowResumeStartIndexParseResult.InvalidStartIndex({ raw: '9007199254740992' })
+    )
   })
 
   it('returns cancel success JSON', async () => {

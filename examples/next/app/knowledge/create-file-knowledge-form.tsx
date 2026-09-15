@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { completeFileKnowledgeUploadAction } from '@/lib/core/knowledge/complete-file-knowledge-upload-action'
 import { createFileKnowledgeUploadUrlAction } from '@/lib/core/knowledge/create-file-knowledge-upload-url-action'
+import { Predicate } from 'effect'
 
 const acceptedFileTypes =
   '.txt,.md,.markdown,.csv,.json,.pdf,.docx,.xlsx,.pptx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation'
@@ -31,16 +32,18 @@ const uploadFile = async (file: File, pinned: boolean) => {
     byteSize: file.size
   })
 
-  if (signed._tag === 'Error') {
+  if (Predicate.isTagged(signed, 'Error')) {
     return signed
   }
 
   const headers = new Headers()
+
   if (file.type.length > 0) {
     headers.set('content-type', file.type)
   }
 
   const uploaded = await fetch(signed.upload.uploadUrl, { method: 'PUT', headers, body: file })
+
   if (!uploaded.ok) {
     return { _tag: 'Error' as const, message: 'Could not upload file' }
   }
@@ -66,6 +69,7 @@ export function CreateFileKnowledgeForm() {
     const incoming = Array.from(files)
     setSelectedFiles(current => {
       const existing = new Set(current.map(fileKey))
+
       return [...current, ...incoming.filter(file => !existing.has(fileKey(file)))]
     })
   }
@@ -76,17 +80,21 @@ export function CreateFileKnowledgeForm() {
       onSubmit={event => {
         event.preventDefault()
         const files = selectedFiles
+
         if (files.length === 0) {
           setMessage('Choose files')
+
           return
         }
 
         startTransition(async () => {
           const results = await Promise.all(files.map(file => uploadFile(file, pinned)))
-          const failures = results.filter(result => result._tag === 'Error')
+          const failures = results.filter(result => Predicate.isTagged(result, 'Error'))
+
           if (failures.length === 0) {
             setSelectedFiles([])
             setMessage(files.length === 1 ? 'Saved file knowledge' : `Saved ${files.length} files`)
+
             if (inputRef.current !== null) {
               inputRef.current.value = ''
             }

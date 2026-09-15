@@ -17,7 +17,7 @@ const SYNC_METHODS = [
   'asserts'
 ]
 
-/** @type {import('eslint').Rule.RuleModule} */
+/** @type {import('@oxlint/plugins').Rule} */
 export const noSchemaDecodeSync = {
   meta: {
     type: 'problem',
@@ -43,6 +43,7 @@ export const noSchemaDecodeSync = {
         ) {
           const name = node.property.name
           let alternative = name.replace('Sync', 'Effect')
+
           if (name === 'asserts') {
             alternative = 'is (for type guards) or decodeUnknownEffect (for validation)'
           }

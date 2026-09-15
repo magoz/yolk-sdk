@@ -54,6 +54,11 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 
 ### Offline validation
 
-Fake registry/control tests run without DB and share the pure production transition. `workflow-host.test.ts` executes actual host entrypoints, serializers and the agent loop with fake provider/store/platform boundaries, including cross-run lookup, launch failure, foreground event order, HITL and Stop. Package
+Fake registry/control tests run without DB and share the pure production transition. Child control
+Effects accept `ChildWorkflowIdentity`, `AgentTextRuntimeFactory`, and `AgentWorkflowStore` layers;
+control-only tests supply a runtime factory that fails if called. Live runtime factories capture the
+caller-provided service context and preserve the builder's typed failures; the enclosing step owns
+that context's lifetime. Directive wrappers and workflow-host tests continue exercising the concrete
+production entrypoints. `workflow-host.test.ts` executes actual host entrypoints, serializers and the agent loop with fake provider/store/platform boundaries, including cross-run lookup, launch failure, foreground event order, HITL and Stop. Package
 `@workflow/vitest` tests cover real isolated run/step behavior. Do not use root `test:run` here:
 it pushes the DB schema. Run `pnpm --filter @yolk-example/next build` to validate the actual Workflow bundle graph (typecheck and fake-platform tests cannot catch Node-only dependency leakage). The build may need the Google Inter font cache/network. A successful build is not DB-locking, credential reconstruction or hosted cancellation validation.

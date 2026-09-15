@@ -1,6 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode
+} from 'react'
 import Image from 'next/image'
 import { Streamdown } from 'streamdown'
 import {
@@ -15,6 +23,8 @@ import {
   Trash2Icon,
   WrenchIcon
 } from 'lucide-react'
+import { Match, Option, Predicate } from 'effect'
+import { subagentMetadata } from './subagent-metadata'
 import {
   QuestionAnswer,
   QuestionResponse,
@@ -31,37 +41,45 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { contentPreview, unknownPreview } from './agent-format'
+import { contentPreview, isJsonPreviewValue, jsonPreview } from './agent-format'
 import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-edit-model'
-import type { AgentChatItem, ToolDuration, ToolRunState } from '@yolk-sdk/agent/react'
+import {
+  ToolDurationKnown,
+  type AgentChatItem,
+  type ToolDuration,
+  type ToolRunState
+} from '@yolk-sdk/agent/react'
 
 const chatRowClass = 'mx-auto w-full max-w-3xl'
 
 function UtilityIcon({ role }: { readonly role: 'assistant' | 'reasoning' | 'tool' | 'error' }) {
-  const Icon =
-    role === 'reasoning'
-      ? BrainIcon
-      : role === 'tool'
-        ? WrenchIcon
-        : role === 'error'
-          ? CircleAlertIcon
-          : BotIcon
-
   return (
     <div
       className={cn(
         'mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border shadow-xs',
-        role === 'reasoning'
-          ? 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-200'
-          : role === 'tool'
-            ? 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-            : role === 'error'
-              ? 'border-destructive/20 bg-destructive/10 text-destructive'
-              : 'border-foreground/10 bg-background text-muted-foreground'
+        Match.value(role).pipe(
+          Match.when(
+            'reasoning',
+            () => 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-200'
+          ),
+          Match.when(
+            'tool',
+            () => 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+          ),
+          Match.when('error', () => 'border-destructive/20 bg-destructive/10 text-destructive'),
+          Match.when('assistant', () => 'border-foreground/10 bg-background text-muted-foreground'),
+          Match.exhaustive
+        )
       )}
       aria-hidden
     >
-      <Icon className="size-3.5" />
+      {Match.value(role).pipe(
+        Match.when('reasoning', () => <BrainIcon className="size-3.5" />),
+        Match.when('tool', () => <WrenchIcon className="size-3.5" />),
+        Match.when('error', () => <CircleAlertIcon className="size-3.5" />),
+        Match.when('assistant', () => <BotIcon className="size-3.5" />),
+        Match.exhaustive
+      )}
     </div>
   )
 }
@@ -84,11 +102,18 @@ function UtilityCard({
         <div
           className={cn(
             'min-w-0 flex-1 rounded-2xl border px-3.5 py-3 shadow-xs',
-            role === 'reasoning'
-              ? 'border-sky-500/20 bg-sky-500/5 text-sky-950 dark:text-sky-100'
-              : role === 'tool'
-                ? 'border-amber-500/20 bg-amber-500/5 text-amber-900 dark:text-amber-200'
-                : 'border-destructive/20 bg-destructive/5 text-destructive'
+            Match.value(role).pipe(
+              Match.when(
+                'reasoning',
+                () => 'border-sky-500/20 bg-sky-500/5 text-sky-950 dark:text-sky-100'
+              ),
+              Match.when(
+                'tool',
+                () => 'border-amber-500/20 bg-amber-500/5 text-amber-900 dark:text-amber-200'
+              ),
+              Match.when('error', () => 'border-destructive/20 bg-destructive/5 text-destructive'),
+              Match.exhaustive
+            )
           )}
         >
           <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -102,66 +127,53 @@ function UtilityCard({
   )
 }
 
-const formatToolDuration = (duration: ToolDuration) => {
-  if (duration._tag === 'Unknown') {
-    return 'done'
-  }
+const formatToolDuration = (duration: ToolDuration) =>
+  Match.value(duration).pipe(
+    Match.tag('Unknown', () => 'done'),
+    Match.tag('Known', current =>
+      current.milliseconds < 1000
+        ? `${current.milliseconds}ms`
+        : `${(current.milliseconds / 1000).toFixed(1)}s`
+    ),
+    Match.exhaustive
+  )
 
-  if (duration.milliseconds < 1000) {
-    return `${duration.milliseconds}ms`
-  }
+const toolStateLabel = (state: ToolRunState) =>
+  Match.value(state).pipe(
+    Match.tagsExhaustive({
+      InputStreaming: () => 'input',
+      ApprovalRequested: () => 'approval',
+      Denied: () => 'denied',
+      QuestionRequested: () => 'question',
+      QuestionAnswered: () => 'answered',
+      QuestionCancelled: () => 'cancelled',
+      Running: () => 'running',
+      Called: () => 'called',
+      Accepted: () => 'accepted (background)',
+      Completed: current =>
+        current.result.isError === true ? 'error' : formatToolDuration(current.duration),
+      Errored: () => 'error',
+      ProviderCompleted: current => (current.result.isError === true ? 'error' : 'done')
+    })
+  )
 
-  return `${(duration.milliseconds / 1000).toFixed(1)}s`
-}
-
-const toolStateLabel = (state: ToolRunState) => {
-  switch (state._tag) {
-    case 'InputStreaming':
-      return 'input'
-    case 'ApprovalRequested':
-      return 'approval'
-    case 'Denied':
-      return 'denied'
-    case 'QuestionRequested':
-      return 'question'
-    case 'QuestionAnswered':
-      return 'answered'
-    case 'QuestionCancelled':
-      return 'cancelled'
-    case 'Running':
-      return 'running'
-    case 'Called':
-      return 'called'
-    case 'Accepted':
-      return 'accepted (background)'
-    case 'Completed':
-      return state.result.isError === true ? 'error' : formatToolDuration(state.duration)
-    case 'Errored':
-      return 'error'
-    case 'ProviderCompleted':
-      return state.result.isError === true ? 'error' : 'done'
-  }
-}
-
-const toolStateHasError = (state: ToolRunState) => {
-  switch (state._tag) {
-    case 'Accepted':
-    case 'Completed':
-    case 'ProviderCompleted':
-      return state.result.isError === true
-    case 'Denied':
-    case 'Errored':
-    case 'QuestionCancelled':
-      return true
-    case 'ApprovalRequested':
-    case 'Called':
-    case 'InputStreaming':
-    case 'QuestionAnswered':
-    case 'QuestionRequested':
-    case 'Running':
-      return false
-  }
-}
+const toolStateHasError = (state: ToolRunState) =>
+  Match.value(state).pipe(
+    Match.tagsExhaustive({
+      Accepted: current => current.result.isError === true,
+      Completed: current => current.result.isError === true,
+      ProviderCompleted: current => current.result.isError === true,
+      Denied: () => true,
+      Errored: () => true,
+      QuestionCancelled: () => true,
+      ApprovalRequested: () => false,
+      Called: () => false,
+      InputStreaming: () => false,
+      QuestionAnswered: () => false,
+      QuestionRequested: () => false,
+      Running: () => false
+    })
+  )
 
 const optionLabel = (question: QuestionPrompt, optionId: string) =>
   question.options?.find(option => option.id === optionId)?.label ?? optionId
@@ -172,10 +184,12 @@ const questionForAnswer = (questions: ReadonlyArray<QuestionPrompt>, answer: Que
 const questionAnswerLine = (answer: QuestionAnswer, questions: ReadonlyArray<QuestionPrompt>) => {
   const question = questionForAnswer(questions, answer)
   const prompt = question?.prompt ?? answer.questionId
+
   const selected =
     answer.optionIds?.map(optionId =>
       question === undefined ? optionId : optionLabel(question, optionId)
     ) ?? []
+
   const custom = answer.customAnswer?.trim()
   const values = custom === undefined || custom.length === 0 ? selected : [...selected, custom]
 
@@ -195,28 +209,24 @@ const questionAnswerPreview = (
   return answers.map(answer => questionAnswerLine(answer, questions)).join('\n')
 }
 
-const toolStateContent = (state: ToolRunState) => {
-  switch (state._tag) {
-    case 'Accepted':
-    case 'Completed':
-    case 'ProviderCompleted':
-      return contentPreview(state.result.content)
-    case 'Denied':
-      return state.reason
-    case 'QuestionAnswered':
-      return questionAnswerPreview(state.response, state.request?.questions ?? [])
-    case 'QuestionCancelled':
-      return state.response.reason ?? 'cancelled'
-    case 'Errored':
-      return state.message
-    case 'ApprovalRequested':
-    case 'Called':
-    case 'InputStreaming':
-    case 'QuestionRequested':
-    case 'Running':
-      return undefined
-  }
-}
+const toolStateContent = (state: ToolRunState) =>
+  Match.value(state).pipe(
+    Match.tagsExhaustive({
+      Accepted: current => contentPreview(current.result.content),
+      Completed: current => contentPreview(current.result.content),
+      ProviderCompleted: current => contentPreview(current.result.content),
+      Denied: current => current.reason,
+      QuestionAnswered: current =>
+        questionAnswerPreview(current.response, current.request?.questions ?? []),
+      QuestionCancelled: current => current.response.reason ?? 'cancelled',
+      Errored: current => current.message,
+      ApprovalRequested: () => undefined,
+      Called: () => undefined,
+      InputStreaming: () => undefined,
+      QuestionRequested: () => undefined,
+      Running: () => undefined
+    })
+  )
 
 const toolResultLabel = (isError: boolean) => (isError ? 'tool error' : 'tool result')
 
@@ -224,64 +234,23 @@ const toolResultRole = (isError: boolean) => (isError ? 'error' : 'tool')
 
 const toolResultBadgeVariant = (isError: boolean) => (isError ? 'destructive' : 'outline')
 
-const objectField = (input: unknown, key: string) =>
-  input !== null && typeof input === 'object'
-    ? Object.getOwnPropertyDescriptor(input, key)?.value
-    : undefined
-
-const stringField = (input: unknown, key: string) => {
-  const value = objectField(input, key)
-
-  return typeof value === 'string' && value.length > 0 ? value : undefined
-}
-
-const numberField = (input: unknown, key: string) => {
-  const value = objectField(input, key)
-
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-const resultStructuredContent = (state: ToolRunState) => {
-  switch (state._tag) {
-    case 'Accepted':
-    case 'Completed':
-    case 'ProviderCompleted':
-      return state.result.structuredContent
-    case 'ApprovalRequested':
-    case 'Called':
-    case 'Denied':
-    case 'Errored':
-    case 'InputStreaming':
-    case 'QuestionAnswered':
-    case 'QuestionCancelled':
-    case 'QuestionRequested':
-    case 'Running':
-      return undefined
-  }
-}
-
-const subagentMetadata = (call: ToolCall, state: ToolRunState) => {
-  if (call.name !== 'subagent') {
-    return undefined
-  }
-
-  const structured = resultStructuredContent(state)
-  const description =
-    stringField(structured, 'description') ?? stringField(call.params, 'description')
-  const subagentType =
-    stringField(structured, 'subagent_type') ?? stringField(call.params, 'subagent_type')
-
-  return {
-    description,
-    subagentType,
-    subagentRunId: stringField(structured, 'subagent_run_id'),
-    startedAtMs: numberField(structured, 'started_at_ms'),
-    endedAtMs: numberField(structured, 'ended_at_ms'),
-    durationMs: numberField(structured, 'duration_ms'),
-    status: stringField(structured, 'status'),
-    model: stringField(structured, 'model')
-  }
-}
+const resultStructuredContent = (state: ToolRunState) =>
+  Match.value(state).pipe(
+    Match.tagsExhaustive({
+      Accepted: current => current.result.structuredContent,
+      Completed: current => current.result.structuredContent,
+      ProviderCompleted: current => current.result.structuredContent,
+      ApprovalRequested: () => undefined,
+      Called: () => undefined,
+      Denied: () => undefined,
+      Errored: () => undefined,
+      InputStreaming: () => undefined,
+      QuestionAnswered: () => undefined,
+      QuestionCancelled: () => undefined,
+      QuestionRequested: () => undefined,
+      Running: () => undefined
+    })
+  )
 
 const timestampLabel = (milliseconds: number) => new Date(milliseconds).toLocaleTimeString()
 
@@ -353,6 +322,7 @@ function ApprovalControls({
   readonly onResponse: (response: ToolApprovalResponse) => void
 }) {
   const requestId = approvalRequestId(call, state)
+
   const handleApprove = useCallback(() => {
     onResponse(
       ToolApprovalResponse.make({
@@ -363,6 +333,7 @@ function ApprovalControls({
       })
     )
   }, [call.id, onResponse, requestId])
+
   const handleDeny = useCallback(() => {
     onResponse(
       ToolApprovalResponse.make({
@@ -421,6 +392,7 @@ function QuestionControls({
   const request = state.request
   const [drafts, setDrafts] = useState(() => initialQuestionDrafts(request.questions))
   const canSubmit = canSubmitQuestionDrafts(request.questions, drafts)
+
   const updateOption = useCallback((question: QuestionPrompt, optionId: string) => {
     setDrafts(current =>
       current.map(draft => {
@@ -439,6 +411,7 @@ function QuestionControls({
       })
     )
   }, [])
+
   const updateCustomAnswer = useCallback((questionId: string, value: string) => {
     setDrafts(current =>
       current.map(draft =>
@@ -446,6 +419,7 @@ function QuestionControls({
       )
     )
   }, [])
+
   const handleSubmit = useCallback(() => {
     if (!canSubmit) {
       return
@@ -461,6 +435,7 @@ function QuestionControls({
       })
     )
   }, [canSubmit, drafts, onResponse, request.requestId, request.toolCallId])
+
   const handleCancel = useCallback(() => {
     onResponse(
       QuestionResponse.make({
@@ -565,13 +540,16 @@ function ToolRunCard({
   readonly onQuestionResponse: (response: QuestionResponse) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const isRunning = state._tag === 'Running'
+  const isRunning = Predicate.isTagged(state, 'Running')
   const isError = toolStateHasError(state)
   const output = toolStateContent(state)
-  const subagent = subagentMetadata(call, state)
+  const subagent = subagentMetadata(call, resultStructuredContent(state))
+
   const title =
     subagent?.description === undefined ? call.name : `Subagent: ${subagent.description}`
+
   const detailsId = `${id}-details`
+
   const handleToggle = useCallback(() => {
     setExpanded(current => !current)
   }, [])
@@ -644,7 +622,9 @@ function ToolRunCard({
                   {subagent.durationMs === undefined ? null : (
                     <span>
                       duration{' '}
-                      {formatToolDuration({ _tag: 'Known', milliseconds: subagent.durationMs })}
+                      {formatToolDuration(
+                        ToolDurationKnown.make({ milliseconds: subagent.durationMs })
+                      )}
                     </span>
                   )}
                 </div>
@@ -653,7 +633,7 @@ function ToolRunCard({
                 Input
               </div>
               <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground">
-                {unknownPreview(call.params)}
+                {isJsonPreviewValue(call.params) ? jsonPreview(call.params) : 'unparsed'}
               </div>
               {output === undefined ? null : (
                 <>
@@ -667,21 +647,24 @@ function ToolRunCard({
               )}
             </div>
           ) : null}
-          {state._tag === 'ApprovalRequested' ? (
-            <ApprovalControls
-              call={call}
-              state={state}
-              disabled={hitlDisabled}
-              onResponse={onToolApprovalResponse}
-            />
-          ) : null}
-          {state._tag === 'QuestionRequested' ? (
-            <QuestionControls
-              state={state}
-              disabled={hitlDisabled}
-              onResponse={onQuestionResponse}
-            />
-          ) : null}
+          {Match.value(state).pipe(
+            Match.tag('ApprovalRequested', requested => (
+              <ApprovalControls
+                call={call}
+                state={requested}
+                disabled={hitlDisabled}
+                onResponse={onToolApprovalResponse}
+              />
+            )),
+            Match.tag('QuestionRequested', requested => (
+              <QuestionControls
+                state={requested}
+                disabled={hitlDisabled}
+                onResponse={onQuestionResponse}
+              />
+            )),
+            Match.orElse(() => null)
+          )}
         </div>
       </div>
     </div>
@@ -739,24 +722,33 @@ function MessageCard({
   const editTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(currentText)
-  const hasVisibleContent = parts.some(part => part._tag !== 'Text' || part.text.length > 0)
-  const canEdit = role === 'user' && parts.every(part => part._tag === 'Text')
+
+  const hasVisibleContent = parts.some(
+    part => !Predicate.isTagged(part, 'Text') || part.text.length > 0
+  )
+
+  const canEdit = role === 'user' && parts.every(part => Predicate.isTagged(part, 'Text'))
+
   const canSaveEdit = canSaveEditedMessage({
     currentText,
     draftText: editedContent,
     disabled: actionsDisabled
   })
+
   const handleDelete = useCallback(() => {
     onDeleteTurn(messageId)
   }, [messageId, onDeleteTurn])
+
   const handleEditStart = useCallback(() => {
     setEditedContent(currentText)
     setIsEditing(true)
   }, [currentText, setEditedContent, setIsEditing])
+
   const handleEditCancel = useCallback(() => {
     setIsEditing(false)
     setEditedContent(currentText)
   }, [currentText, setEditedContent, setIsEditing])
+
   const handleEditSubmit = useCallback(() => {
     if (!canSaveEdit) {
       return
@@ -765,6 +757,7 @@ function MessageCard({
     onEditUserMessage(messageId, editDraftText(editedContent))
     setIsEditing(false)
   }, [canSaveEdit, editedContent, messageId, onEditUserMessage, setIsEditing])
+
   const handleEditKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       const action = editKeyAction(event)
@@ -777,6 +770,7 @@ function MessageCard({
 
       if (action === 'cancel') {
         handleEditCancel()
+
         return
       }
 
@@ -784,6 +778,7 @@ function MessageCard({
     },
     [handleEditCancel, handleEditSubmit]
   )
+
   const handleRegenerate = useCallback(() => {
     onRegenerateFrom(messageId)
   }, [messageId, onRegenerateFrom])
@@ -962,47 +957,49 @@ function MessageContentParts({
 }) {
   return (
     <div className="space-y-2">
-      {parts.map((part, index) => {
-        switch (part._tag) {
-          case 'Text':
-            return part.text.length > 0 ? (
-              <MarkdownText key={`text-${index}`} text={part.text} />
+      {parts.map((part, index) =>
+        Match.value(part).pipe(
+          Match.withReturnType<ReactNode>(),
+          Match.tag('Text', current =>
+            current.text.length > 0 ? (
+              <MarkdownText key={`text-${index}`} text={current.text} />
             ) : null
-          case 'Image':
-            const imageUrl = attachmentSourceDataUrl(part.source, part.mimeType)
-            if (imageUrl._tag === 'None') {
-              return (
+          ),
+          Match.tag('Image', current =>
+            Option.match(attachmentSourceDataUrl(current.source, current.mimeType), {
+              onNone: () => (
                 <div
                   key={`image-${index}`}
                   className="rounded-xl border border-foreground/10 bg-background/20 px-3 py-2 text-xs"
                 >
                   Image attachment
                 </div>
+              ),
+              onSome: imageUrl => (
+                <Image
+                  key={`image-${index}`}
+                  src={imageUrl}
+                  alt={role === 'user' ? 'Uploaded image' : 'Generated image'}
+                  width={640}
+                  height={360}
+                  unoptimized
+                  className="max-h-80 rounded-xl border border-foreground/10 object-contain shadow-xs"
+                />
               )
-            }
-
-            return (
-              <Image
-                key={`image-${index}`}
-                src={imageUrl.value}
-                alt={role === 'user' ? 'Uploaded image' : 'Generated image'}
-                width={640}
-                height={360}
-                unoptimized
-                className="max-h-80 rounded-xl border border-foreground/10 object-contain shadow-xs"
-              />
-            )
-          case 'Audio':
-            return (
-              <div
-                key={`audio-${index}`}
-                className="rounded-xl border border-foreground/10 bg-background/20 px-3 py-2 text-xs"
-              >
-                Audio attachment
-              </div>
-            )
-        }
-      })}
+            })
+          ),
+          Match.tag('Audio', () => (
+            <div
+              key={`audio-${index}`}
+              className="rounded-xl border border-foreground/10 bg-background/20 px-3 py-2 text-xs"
+            >
+              Audio attachment
+            </div>
+          )),
+          Match.tag('Document', () => null),
+          Match.exhaustive
+        )
+      )}
     </div>
   )
 }
@@ -1084,65 +1081,62 @@ function AgentChatItemView({
   readonly onToolApprovalResponse: (response: ToolApprovalResponse) => void
   readonly onQuestionResponse: (response: QuestionResponse) => void
 }) {
-  switch (item._tag) {
-    case 'UserMessage':
-      return (
+  return Match.value(item).pipe(
+    Match.withReturnType<ReactNode>(),
+    Match.tagsExhaustive({
+      UserMessage: current => (
         <MessageCard
-          content={item.content}
+          content={current.content}
           role="user"
-          messageId={item.messageId}
+          messageId={current.messageId}
           actionsDisabled={actionsDisabled}
           onDeleteTurn={onDeleteTurn}
           onEditUserMessage={onEditUserMessage}
           onRegenerateFrom={onRegenerateFrom}
         />
-      )
-    case 'AssistantMessage':
-      return (
+      ),
+      AssistantMessage: current => (
         <MessageCard
-          content={item.content}
+          content={current.content}
           role="assistant"
-          messageId={item.messageId}
+          messageId={current.messageId}
           actionsDisabled={actionsDisabled}
           onDeleteTurn={onDeleteTurn}
           onEditUserMessage={onEditUserMessage}
           onRegenerateFrom={onRegenerateFrom}
         />
-      )
-    case 'Reasoning':
-      return showReasoning ? <ReasoningCard text={item.text} /> : null
-    case 'ToolRun':
-      return showInlineTools ? (
-        <ToolRunCard
-          id={item.id}
-          call={item.call}
-          state={item.state}
-          hitlDisabled={hitlDisabled}
-          onToolApprovalResponse={onToolApprovalResponse}
-          onQuestionResponse={onQuestionResponse}
-        />
-      ) : null
-    case 'ToolResult':
-      return showInlineTools ? (
-        <ToolResultCard
-          name={item.name}
-          content={contentPreview(item.content)}
-          isError={item.isError === true}
-        />
-      ) : null
-    case 'UserDraft':
-      return <DraftCard text={item.text} role="user" />
-    case 'AssistantDraft':
-      return <DraftCard text={item.text} role="assistant" />
-    case 'AssistantStatus':
-      return <AssistantStatusCard label={item.label} />
-    case 'Error':
-      return (
+      ),
+      Reasoning: current => (showReasoning ? <ReasoningCard text={current.text} /> : null),
+      ToolRun: current =>
+        showInlineTools ? (
+          <ToolRunCard
+            id={current.id}
+            call={current.call}
+            state={current.state}
+            hitlDisabled={hitlDisabled}
+            onToolApprovalResponse={onToolApprovalResponse}
+            onQuestionResponse={onQuestionResponse}
+          />
+        ) : null,
+      ToolResult: current =>
+        showInlineTools ? (
+          <ToolResultCard
+            name={current.name}
+            content={contentPreview(current.content)}
+            isError={current.isError === true}
+          />
+        ) : null,
+      UserDraft: current => <DraftCard text={current.text} role="user" />,
+      AssistantDraft: current => <DraftCard text={current.text} role="assistant" />,
+      AssistantStatus: current => <AssistantStatusCard label={current.label} />,
+      Error: current => (
         <UtilityCard role="error" title="Request failed" badge="error">
-          {item.message}
+          {current.message}
         </UtilityCard>
-      )
-  }
+      ),
+      Retry: () => null
+    })
+  )
 }
 
 type AgentConversationProps = {

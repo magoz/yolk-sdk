@@ -24,6 +24,7 @@ describe('question tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: questionToolName,
@@ -57,6 +58,7 @@ describe('question tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: questionToolName,

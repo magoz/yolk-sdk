@@ -1,4 +1,4 @@
-import { Effect, Layer, Ref, Stream } from 'effect'
+import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import {
   decorateLLMProvider,
@@ -126,20 +126,36 @@ const isCodexContextWindowError = (error: LLMError) => {
   )
 }
 
+type CodexLlmErrorFields = {
+  cause: LLMError['cause']
+  message: string
+  retryable: boolean
+  provider?: LLMError['provider']
+}
+
 const normalizeCodexContextWindowError = (error: LLMError) =>
   error.cause === 'context_overflow'
     ? error
-    : new LLMError({
-        cause: 'context_overflow',
-        message: error.message,
-        retryable: false,
-        ...(error.provider === undefined ? {} : { provider: error.provider })
-      })
+    : new LLMError(
+        (() => {
+          const fields: CodexLlmErrorFields = {
+            cause: 'context_overflow',
+            message: error.message,
+            retryable: false
+          }
+
+          if (error.provider !== undefined) {
+            fields.provider = error.provider
+          }
+
+          return fields
+        })()
+      )
 
 const noteCodexToolCall =
   (hasToolCallRef: Ref.Ref<boolean>) =>
   (event: LLMEvent): Effect.Effect<LLMEvent> => {
-    if (event._tag !== 'ToolCall') return Effect.succeed(event)
+    if (!Predicate.isTagged(event, 'ToolCall')) return Effect.succeed(event)
 
     return Ref.set(hasToolCallRef, true).pipe(Effect.as(event))
   }

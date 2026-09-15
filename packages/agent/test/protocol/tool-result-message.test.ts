@@ -1,7 +1,14 @@
+import { Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AssistantAgentMessage,
   BackgroundToolAccepted,
+  HostToolCallPart,
+  ToolCall,
   ToolResult,
+  ToolResultMessage,
+  UserMessage,
+  repairDanglingHostToolCalls,
   toolResultMessageFromResult
 } from '@yolk-sdk/agent/protocol'
 
@@ -14,13 +21,16 @@ describe('toolResultMessageFromResult', () => {
       structuredContent: { status: 'accepted' },
       acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:work' })
     })
+
     const envelope = {
       createdAtMs: 42,
       author: { displayName: 'Host' },
       annotations: { source: 'test' }
     }
+
     const message = toolResultMessageFromResult(result, envelope)
-    expect(message).toMatchObject({ _tag: 'ToolResult', ...result, ...envelope })
+    expect(Predicate.isTagged(message, 'ToolResult')).toBe(true)
+    expect(message).toMatchObject({ ...result, ...envelope })
     expect(message.content).toBe(result.content)
     expect(message.structuredContent).toBe(result.structuredContent)
     expect(message.acceptance).toBe(result.acceptance)
@@ -29,6 +39,42 @@ describe('toolResultMessageFromResult', () => {
     expect(toolResultMessageFromResult(result).annotations).toBeUndefined()
     expect(
       toolResultMessageFromResult(ToolResult.make({ toolCallId: 'plain', content: 'done' }))
-    ).toMatchObject({ _tag: 'ToolResult', toolCallId: 'plain', content: 'done' })
+    ).toMatchObject(ToolResultMessage.make({ toolCallId: 'plain', content: 'done' }))
+  })
+
+  it('omits repaired structuredContent unless the host supplies it', () => {
+    const messages = [
+      AssistantAgentMessage.make({
+        parts: [
+          HostToolCallPart.make({
+            call: ToolCall.make({ id: 'call_1', name: 'lookup', params: {} })
+          })
+        ]
+      }),
+      UserMessage.make({ content: 'next' })
+    ]
+
+    const omitted = repairDanglingHostToolCalls(messages)[1]
+
+    expect(omitted).toBeInstanceOf(ToolResultMessage)
+    expect(Object.keys(omitted ?? {})).toEqual(['_tag', 'toolCallId', 'content', 'isError'])
+    expect(JSON.stringify(omitted)).toBe(
+      '{"_tag":"ToolResult","toolCallId":"call_1","content":"Tool lookup did not return a result before the transcript continued.","isError":true}'
+    )
+
+    const present = repairDanglingHostToolCalls(messages, {
+      structuredContent: () => ({ repaired: true })
+    })[1]
+
+    expect(Object.keys(present ?? {})).toEqual([
+      '_tag',
+      'toolCallId',
+      'content',
+      'isError',
+      'structuredContent'
+    ])
+    expect(JSON.stringify(present)).toBe(
+      '{"_tag":"ToolResult","toolCallId":"call_1","content":"Tool lookup did not return a result before the transcript continued.","isError":true,"structuredContent":{"repaired":true}}'
+    )
   })
 })

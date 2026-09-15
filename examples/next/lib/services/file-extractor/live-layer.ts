@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Option, Predicate } from 'effect'
 import mammoth from 'mammoth'
 import { extractText, getDocumentProxy, getMeta } from 'unpdf'
 import * as XLSX from 'xlsx'
@@ -35,11 +35,13 @@ type FileInput = {
 const extensionFor = (filename: string) => {
   const lower = filename.toLowerCase()
   const dotIndex = lower.lastIndexOf('.')
+
   return dotIndex === -1 ? '' : lower.slice(dotIndex + 1)
 }
 
 const formatFor = (input: { readonly filename: string; readonly mediaType: string }) => {
   const extension = extensionFor(input.filename)
+
   switch (extension) {
     case 'txt':
       return 'text'
@@ -85,14 +87,13 @@ const formatFor = (input: { readonly filename: string; readonly mediaType: strin
 const toArrayBuffer = (bytes: Uint8Array) => {
   const copy = new Uint8Array(bytes.byteLength)
   copy.set(bytes)
+
   return copy.buffer
 }
 
-const titleFromUnknown = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined
-
 const makeExtractedFile = (content: string, metadata: ExtractedFile['metadata']) => {
   const sanitized = sanitizeExtractedText(content)
+
   if (sanitized.length === 0) {
     return Effect.fail(
       new FileExtractionError({
@@ -113,21 +114,31 @@ const extractPdf = (input: FileInput, format: ExtractedFileFormat) =>
       try: () => getDocumentProxy(input.bytes),
       catch: cause => new FileExtractionError({ message: 'Could not read PDF', format, cause })
     })
+
     const extracted = yield* Effect.tryPromise({
       try: () => extractText(document, { mergePages: true }),
       catch: cause =>
         new FileExtractionError({ message: 'Could not extract PDF text', format, cause })
     })
+
     const meta = yield* Effect.tryPromise({
       try: () => getMeta(document),
       catch: cause =>
         new FileExtractionError({ message: 'Could not read PDF metadata', format, cause })
     }).pipe(Effect.option)
+
     yield* Effect.promise(() => document.destroy())
 
     return yield* makeExtractedFile(extracted.text, {
       format,
-      title: titleFromUnknown(meta._tag === 'Some' ? meta.value.info.Title : undefined),
+      title: Option.match(meta, {
+        onNone: () => undefined,
+        onSome: current => {
+          const title = current.info.Title
+
+          return Predicate.isString(title) && title.length > 0 ? title : undefined
+        }
+      }),
       pageCount: extracted.totalPages
     })
   })
@@ -149,11 +160,14 @@ const extractXlsx = (input: FileInput, format: ExtractedFileFormat) =>
       try: () => XLSX.read(input.bytes, { type: 'array' }),
       catch: cause => new FileExtractionError({ message: 'Could not read XLSX', format, cause })
     })
+
     const sheets = workbook.SheetNames.flatMap(sheetName => {
       const sheet = workbook.Sheets[sheetName]
+
       if (sheet === undefined) {
         return []
       }
+
       return [`# ${sheetName}\n${XLSX.utils.sheet_to_csv(sheet).trim()}`]
     })
 
@@ -180,6 +194,7 @@ export class FileExtractor extends Context.Service<FileExtractor>()('@app/FileEx
     extract: (input: FileInput) =>
       Effect.gen(function* () {
         const format = formatFor(input)
+
         if (format === undefined) {
           return yield* Effect.fail(
             new UnsupportedFileFormatError({ filename: input.filename, mediaType: input.mediaType })

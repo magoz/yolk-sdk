@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { deleteStorageObjectAction } from '@/lib/core/storage/delete-storage-object-action'
+import { Predicate } from 'effect'
 
 export function DeleteStorageSourceButton({
   id,
@@ -31,6 +32,7 @@ export function DeleteStorageSourceButton({
           const confirmed = window.confirm(
             `Delete “${label}”? This removes it from storage search.`
           )
+
           if (!confirmed) {
             return
           }
@@ -38,7 +40,7 @@ export function DeleteStorageSourceButton({
           setMessage(undefined)
           startTransition(() => {
             void deleteStorageObjectAction({ id }).then(result => {
-              if (result._tag === 'Error') {
+              if (Predicate.isTagged(result, 'Error')) {
                 setMessage(result.message)
               }
             })

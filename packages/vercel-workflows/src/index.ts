@@ -8,8 +8,11 @@ export {
   runVercelAgentWorkflow,
   sequenceDurableAgentEvent,
   settleWorkflowStep,
+  VercelAgentWorkflowRunResult,
+  WorkflowStepResult,
   writeDurableAgentEvent
 } from './workflow.ts'
+
 export type {
   CommitThenWriteTerminalEventInput,
   CommitThenWriteTerminalEventResult,
@@ -24,11 +27,10 @@ export type {
   VercelAgentWorkflowLoopConfig,
   VercelAgentWorkflowModelStepInput,
   VercelAgentWorkflowModelStepResult,
-  VercelAgentWorkflowRunResult,
   VercelAgentWorkflowStepRetryPolicy,
   VercelAgentWorkflowToolBatchStepInput,
   VercelAgentWorkflowToolBatchStepResult,
-  WorkflowStepResult,
   WriteDurableAgentEventInput
 } from './workflow.ts'
+
 export { awaitWorkflowChild, orchestrateWorkflowToolBatch } from './workflow-children.ts'

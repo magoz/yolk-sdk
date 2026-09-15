@@ -17,12 +17,15 @@ import {
 import { createId } from '@paralleldrive/cuid2'
 
 export const storageSourceType = pgEnum('StorageSourceType', ['file', 'url', 'text'])
+
 export const knowledgeDocumentStatus = pgEnum('KnowledgeDocumentStatus', [
   'processing',
   'ready',
   'error'
 ])
+
 export const knowledgeChunkingStrategy = pgEnum('KnowledgeChunkingStrategy', ['sentence-token'])
+
 export const knowledgeAvailability = pgEnum('KnowledgeAvailability', [
   'pinned',
   'searchable',
@@ -55,7 +58,9 @@ export const user = pgTable('user', {
     .defaultNow()
     .$onUpdate(() => new Date())
 })
+
 export type User = typeof user.$inferSelect
+
 export type InsertUser = typeof user.$inferInsert
 
 export const session = pgTable('session', {
@@ -146,7 +151,9 @@ export const agentSkill = pgTable(
     check('agentSkill_content_nonempty_check', sql`length(${table.content}) > 0`)
   ]
 )
+
 export type AgentSkill = typeof agentSkill.$inferSelect
+
 export type InsertAgentSkill = typeof agentSkill.$inferInsert
 
 export const agentCommand = pgTable(
@@ -183,7 +190,9 @@ export const agentCommand = pgTable(
     check('agentCommand_template_nonempty_check', sql`length(${table.template}) > 0`)
   ]
 )
+
 export type AgentCommand = typeof agentCommand.$inferSelect
+
 export type InsertAgentCommand = typeof agentCommand.$inferInsert
 
 export const agentConnector = pgTable(
@@ -224,7 +233,9 @@ export const agentConnector = pgTable(
     )
   ]
 )
+
 export type AgentConnector = typeof agentConnector.$inferSelect
+
 export type InsertAgentConnector = typeof agentConnector.$inferInsert
 
 ////////////////////////////////////////////////////////////////////////
@@ -249,7 +260,7 @@ export const storageObject = pgTable(
     byteSize: integer('byteSize'),
     contentHash: text('contentHash'),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
@@ -267,7 +278,9 @@ export const storageObject = pgTable(
     check('storageObject_byteSize_check', sql`${table.byteSize} IS NULL OR ${table.byteSize} >= 0`)
   ]
 )
+
 export type StorageObject = typeof storageObject.$inferSelect
+
 export type InsertStorageObject = typeof storageObject.$inferInsert
 
 export const knowledgeCollection = pgTable(
@@ -287,7 +300,7 @@ export const knowledgeCollection = pgTable(
       .default('sentence-token'),
     chunkMaxTokens: integer('chunkMaxTokens').notNull().default(512),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
@@ -306,7 +319,9 @@ export const knowledgeCollection = pgTable(
     check('knowledgeCollection_chunkMaxTokens_check', sql`${table.chunkMaxTokens} > 0`)
   ]
 )
+
 export type KnowledgeCollection = typeof knowledgeCollection.$inferSelect
+
 export type InsertKnowledgeCollection = typeof knowledgeCollection.$inferInsert
 
 export const knowledgeDocument = pgTable(
@@ -330,7 +345,7 @@ export const knowledgeDocument = pgTable(
     tokenCount: integer('tokenCount').notNull().default(0),
     chunkCount: integer('chunkCount').notNull().default(0),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     processedAt: timestamp('processedAt'),
@@ -355,7 +370,9 @@ export const knowledgeDocument = pgTable(
     check('knowledgeDocument_chunkCount_check', sql`${table.chunkCount} >= 0`)
   ]
 )
+
 export type KnowledgeDocument = typeof knowledgeDocument.$inferSelect
+
 export type InsertKnowledgeDocument = typeof knowledgeDocument.$inferInsert
 
 export const knowledgeChunk = pgTable(
@@ -371,7 +388,7 @@ export const knowledgeChunk = pgTable(
     position: integer('position').notNull(),
     tokenCount: integer('tokenCount').notNull().default(0),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow()
@@ -393,7 +410,9 @@ export const knowledgeChunk = pgTable(
     check('knowledgeChunk_tokenCount_check', sql`${table.tokenCount} >= 0`)
   ]
 )
+
 export type KnowledgeChunk = typeof knowledgeChunk.$inferSelect
+
 export type InsertKnowledgeChunk = typeof knowledgeChunk.$inferInsert
 
 ////////////////////////////////////////////////////////////////////////
@@ -420,7 +439,7 @@ export const userKnowledgeDocument = pgTable(
     errorMessage: text('errorMessage'),
     reviewedAt: timestamp('reviewedAt'),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
@@ -452,7 +471,9 @@ export const userKnowledgeDocument = pgTable(
     check('userKnowledgeDocument_content_nonempty_check', sql`length(${table.content}) > 0`)
   ]
 )
+
 export type UserKnowledgeDocument = typeof userKnowledgeDocument.$inferSelect
+
 export type InsertUserKnowledgeDocument = typeof userKnowledgeDocument.$inferInsert
 
 export const userKnowledgeFile = pgTable(
@@ -469,7 +490,7 @@ export const userKnowledgeFile = pgTable(
     byteSize: integer('byteSize'),
     checksum: text('checksum'),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow()
@@ -487,7 +508,9 @@ export const userKnowledgeFile = pgTable(
     )
   ]
 )
+
 export type UserKnowledgeFile = typeof userKnowledgeFile.$inferSelect
+
 export type InsertUserKnowledgeFile = typeof userKnowledgeFile.$inferInsert
 
 export const userKnowledgeChunk = pgTable(
@@ -505,7 +528,7 @@ export const userKnowledgeChunk = pgTable(
     position: integer('position').notNull(),
     tokenCount: integer('tokenCount').notNull().default(0),
     metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
+      .$type<unknown>()
       .default(sql`'{}'::jsonb`)
       .notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow()
@@ -527,7 +550,9 @@ export const userKnowledgeChunk = pgTable(
     check('userKnowledgeChunk_tokenCount_check', sql`${table.tokenCount} >= 0`)
   ]
 )
+
 export type UserKnowledgeChunk = typeof userKnowledgeChunk.$inferSelect
+
 export type InsertUserKnowledgeChunk = typeof userKnowledgeChunk.$inferInsert
 
 export const relations = defineRelations(

@@ -1,4 +1,5 @@
-import { Schema } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Match, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentEnd,
@@ -35,10 +36,12 @@ import {
   submitAgentUserMessage,
   toolRunsFromHitlRequests
 } from '../../src/client'
+import { AgentToolRun } from '../../src/client/state.ts'
 import { propertyOptions } from './property-options'
 
 const terminalKind = Schema.Literals(['approvalDenied', 'questionAnswered', 'questionCancelled'])
-const terminalKindArbitrary = Schema.toArbitrary(terminalKind)
+
+const terminalKindArbitrary = Arbitrary.schema(terminalKind)
 
 const clientEventKind = Schema.Literals([
   'text',
@@ -58,7 +61,7 @@ const clientEventCase = Schema.Struct({
   kinds: Schema.Array(clientEventKind)
 })
 
-const clientEventCaseArbitrary = Schema.toArbitrary(clientEventCase)
+const clientEventCaseArbitrary = Arbitrary.schema(clientEventCase)
 
 const clientEventTarget = Schema.Literals(['one', 'two'])
 
@@ -71,7 +74,7 @@ const multiClientEventCase = Schema.Struct({
   commands: Schema.Array(multiClientEventCommand)
 })
 
-const multiClientEventCaseArbitrary = Schema.toArbitrary(multiClientEventCase)
+const multiClientEventCaseArbitrary = Arbitrary.schema(multiClientEventCase)
 
 const call = ToolCall.make({ id: 'call_1', name: 'question', params: {} })
 
@@ -117,6 +120,7 @@ const terminalEvent = (kind: typeof terminalKind.Type) => {
 }
 
 const toolResult = ToolResult.make({ toolCallId: call.id, content: 'ok' })
+
 const assistantMessage = AssistantAgentMessage.make({
   parts: [AssistantTextPart.make({ content: 'done' })]
 })
@@ -172,26 +176,25 @@ const eventSequence = (kinds: ReadonlyArray<typeof clientEventKind.Type>) => [
 ]
 
 const toolRunIds = (runs: ReturnType<typeof reduceAgentEvents>['toolRuns']) =>
-  runs.map(run => {
-    switch (run._tag) {
-      case 'InputStreaming':
-        return run.id
-      case 'Denied':
-        return run.toolCallId
-      case 'QuestionRequested':
-        return run.request.toolCallId
-      case 'QuestionAnswered':
-      case 'QuestionCancelled':
-        return run.response.toolCallId
-      case 'InputReady':
-      case 'ApprovalRequested':
-      case 'Executing':
-      case 'Completed':
-      case 'Errored':
-      case 'ProviderCompleted':
-        return run.call.id
-    }
-  })
+  runs.map(run =>
+    Match.value(run).pipe(
+      Match.tag('InputStreaming', current => current.id),
+      Match.tag('Denied', current => current.toolCallId),
+      Match.tag('QuestionRequested', current => current.request.toolCallId),
+      Match.tag('QuestionAnswered', 'QuestionCancelled', current => current.response.toolCallId),
+      Match.tag(
+        'InputReady',
+        'ApprovalRequested',
+        'Executing',
+        'Completed',
+        'Errored',
+        'ProviderCompleted',
+        current => current.call.id
+      ),
+      Match.tag('Accepted', () => undefined),
+      Match.exhaustive
+    )
+  )
 
 const callForTarget = (target: typeof clientEventTarget.Type) =>
   target === 'one'
@@ -304,8 +307,8 @@ const isTerminalToolRun = (run: ReturnType<typeof reduceAgentEvents>['toolRuns']
 describe('client HITL property tests', () => {
   it('hydrates active tool runs from HITL requests', () => {
     expect(toolRunsFromHitlRequests([approvalRequest, questionRequest])).toEqual([
-      { _tag: 'ApprovalRequested', call, request: approvalRequest },
-      { _tag: 'QuestionRequested', request: questionRequest }
+      AgentToolRun.ApprovalRequested({ call, request: approvalRequest }),
+      AgentToolRun.QuestionRequested({ request: questionRequest })
     ])
   })
 
@@ -323,11 +326,12 @@ describe('client HITL property tests', () => {
 
       expect(state.toolRuns).toHaveLength(1)
       expect(state.toolRuns[0]?._tag).toBe(
-        kind === 'approvalDenied'
-          ? 'Denied'
-          : kind === 'questionAnswered'
-            ? 'QuestionAnswered'
-            : 'QuestionCancelled'
+        Match.value(kind).pipe(
+          Match.when('approvalDenied', () => 'Denied'),
+          Match.when('questionAnswered', () => 'QuestionAnswered'),
+          Match.when('questionCancelled', () => 'QuestionCancelled'),
+          Match.exhaustive
+        )
       )
     },
     propertyOptions
@@ -360,6 +364,7 @@ describe('client HITL property tests', () => {
         AgentStart.make({ eventId: 'multi_event_start' }),
         ...input.commands.slice(0, 64).map(multiClientEvent)
       ]
+
       const state = reduceAgentEvents([...events, ...events])
       const ids = toolRunIds(state.toolRuns)
       const activeRuns = state.toolRuns.filter(isActiveToolRun)
@@ -381,7 +386,8 @@ describe('client HITL property tests', () => {
         AgentStart.make({ eventId: 'reset_event_start' }),
         ...input.commands.slice(0, 64).map(multiClientEvent)
       ])
-      const completedBefore = state.toolRuns.filter(run => run._tag === 'Completed')
+
+      const completedBefore = state.toolRuns.filter(run => Predicate.isTagged(run, 'Completed'))
       const submitted = submitAgentUserMessage(state, UserMessage.make({ content: 'next' }))
       const errored = markAgentError(state, 'failed')
       const aborted = markAgentAborted(state)

@@ -23,13 +23,29 @@ import {
 } from './schemas'
 
 export const ANTHROPIC_CLAUDE_CLIENT_ID = anthropicClaudeClientId
+
 export const ANTHROPIC_CLAUDE_TOKEN_ENDPOINT = anthropicClaudeTokenEndpoint
+
 export const ANTHROPIC_CLAUDE_REDIRECT_URI = anthropicClaudeRedirectUri
+
 export const ANTHROPIC_CLAUDE_OAUTH_USER_AGENT = anthropicClaudeOAuthUserAgent
+
 export const ANTHROPIC_CLAUDE_REFRESH_BUFFER_MS = anthropicClaudeRefreshBufferMs
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+type AnthropicClaudeTokenRequest =
+  | {
+      readonly grant_type: 'authorization_code'
+      readonly client_id: string
+      readonly code: string
+      readonly state: string
+      readonly redirect_uri: string
+      readonly code_verifier: string
+    }
+  | {
+      readonly grant_type: 'refresh_token'
+      readonly refresh_token: string
+      readonly client_id: string
+    }
 
 const isOkStatus = (status: number) => status >= 200 && status < 300
 
@@ -56,6 +72,7 @@ const failAnthropicResponse = (
 ) =>
   Effect.gen(function* () {
     const text = yield* readErrorBody(response, operation)
+
     return yield* Effect.fail(
       new AnthropicClaudeOAuthError({
         message: `Anthropic Claude ${operation} failed: ${response.status} ${text}`,
@@ -75,14 +92,22 @@ const parseResponseJson = (response: HttpClientResponse.HttpClientResponse, oper
     )
   )
 
-const decodeJson = <S extends Schema.Top>(schema: S, value: unknown, operation: string) =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
-    Effect.mapError(
-      error =>
-        new AnthropicClaudeOAuthError({
-          message: `Invalid Anthropic Claude ${operation} response: ${unknownToMessage(error)}`,
-          cause: error
-        })
+const decodeResponseJson = <S extends Schema.Top>(
+  schema: S,
+  response: HttpClientResponse.HttpClientResponse,
+  operation: string
+) =>
+  parseResponseJson(response, operation).pipe(
+    Effect.flatMap(json =>
+      Schema.decodeUnknownEffect(schema)(json).pipe(
+        Effect.mapError(
+          error =>
+            new AnthropicClaudeOAuthError({
+              message: `Invalid Anthropic Claude ${operation} response: ${error.message}`,
+              cause: error
+            })
+        )
+      )
     )
   )
 
@@ -106,7 +131,12 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
       const execute = (request: HttpClientRequest.HttpClientRequest, operation: string) =>
         client.execute(request).pipe(Effect.mapError(toRequestError(operation)))
 
-      const postJson = (url: string, body: unknown, operation: string) =>
+      const postJson = <S extends Schema.Top>(
+        url: string,
+        body: AnthropicClaudeTokenRequest,
+        schema: S,
+        operation: string
+      ) =>
         Effect.gen(function* () {
           const request = yield* HttpClientRequest.post(url).pipe(
             HttpClientRequest.setHeaders({
@@ -118,18 +148,19 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
             Effect.mapError(
               error =>
                 new AnthropicClaudeOAuthError({
-                  message: `Could not serialize Anthropic Claude ${operation} request: ${unknownToMessage(error)}`,
+                  message: `Could not serialize Anthropic Claude ${operation} request: ${error.message}`,
                   cause: error
                 })
             )
           )
+
           const response = yield* execute(request, operation)
 
           if (!isOkStatus(response.status)) {
             return yield* failAnthropicResponse(response, operation)
           }
 
-          return yield* parseResponseJson(response, operation)
+          return yield* decodeResponseJson(schema, response, operation)
         })
 
       const exchangeAuthorizationCode = (input: {
@@ -153,7 +184,7 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
             })
           }
 
-          const json = yield* postJson(
+          const tokens = yield* postJson(
             ANTHROPIC_CLAUDE_TOKEN_ENDPOINT,
             {
               grant_type: 'authorization_code',
@@ -163,11 +194,7 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
               redirect_uri: ANTHROPIC_CLAUDE_REDIRECT_URI,
               code_verifier: input.codeVerifier
             },
-            'token exchange'
-          )
-          const tokens = yield* decodeJson(
             AnthropicClaudeTokenResponseSchema,
-            json,
             'token exchange'
           )
 
@@ -184,20 +211,17 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
 
       const refreshToken = (refreshTokenValue: string) =>
         Effect.gen(function* () {
-          const json = yield* postJson(
+          const tokens = yield* postJson(
             ANTHROPIC_CLAUDE_TOKEN_ENDPOINT,
             {
               grant_type: 'refresh_token',
               refresh_token: refreshTokenValue,
               client_id: ANTHROPIC_CLAUDE_CLIENT_ID
             },
-            'token refresh'
-          )
-          const tokens = yield* decodeJson(
             AnthropicClaudeTokenResponseSchema,
-            json,
             'token refresh'
           )
+
           const nowMs = yield* Clock.currentTimeMillis
 
           return toOAuthToken(tokens, refreshTokenValue, nowMs)
@@ -209,6 +233,7 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
       ) =>
         Effect.gen(function* () {
           const nowMs = yield* Clock.currentTimeMillis
+
           return !token.access || token.expires < nowMs + minTtlMs
         })
 

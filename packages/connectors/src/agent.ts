@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Match, Predicate } from 'effect'
 import type { Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
@@ -32,7 +32,7 @@ const resolveIntegration = <Context>(
   resolver: ConnectorIntegrationResolver<Context>,
   context: Context
 ) => {
-  if (typeof resolver === 'function') {
+  if (Predicate.isFunction(resolver)) {
     return resolver(context)
   }
 
@@ -44,25 +44,17 @@ const resolveAccess = (
   actionId: string,
   actionAccess: ConnectorActionAccess | undefined
 ): ToolAccess => {
-  if (typeof resolver === 'function') {
+  if (Predicate.isFunction(resolver)) {
     return resolver(actionId)
   }
 
   return resolver ?? actionAccess ?? 'read'
 }
 
-const unknownToMessage = (error: unknown) => {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}
-
 const failureContent = (failure: ProviderFailure) => `${failure.code}: ${failure.message}`
 
 const successContent = (value: unknown) => {
-  if (typeof value === 'string') {
+  if (Predicate.isString(value)) {
     return value
   }
 
@@ -85,7 +77,8 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
     description: action?.description ?? `Invoke connector action ${actionId}.`,
     parameters: action?.inputSchema ?? Schema.Unknown,
     access: resolveAccess(options.access, actionId, action?.access),
-    invalidParamsMessage: error => `Invalid ${name} arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid ${name} arguments: ${error instanceof Error ? error.message : String(error)}`,
     execute: ({ call, context, params }) =>
       resolveIntegration(options.integration, context).pipe(
         Effect.flatMap(integration =>
@@ -97,28 +90,31 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
             })
             .pipe(Effect.provide(options.layer))
         ),
-        Effect.map(result => {
-          switch (result._tag) {
-            case 'Success':
-              return ToolResult.make({
+        Effect.map(result =>
+          Match.value(result).pipe(
+            Match.tag('Success', current =>
+              ToolResult.make({
                 toolCallId: call.id,
-                content: successContent(result.value),
-                structuredContent: result.value
+                content: successContent(current.value),
+                structuredContent: current.value
               })
-            case 'Failure':
-              return ToolResult.make({
+            ),
+            Match.tag('Failure', current =>
+              ToolResult.make({
                 toolCallId: call.id,
-                content: failureContent(result.error),
+                content: failureContent(current.error),
                 isError: true,
-                structuredContent: result.error
+                structuredContent: current.error
               })
-          }
-        }),
+            ),
+            Match.exhaustive
+          )
+        ),
         Effect.mapError(
           error =>
             new ToolError({
               tool: name,
-              message: unknownToMessage(error),
+              message: error instanceof Error ? error.message : String(error),
               cause: 'execution'
             })
         )

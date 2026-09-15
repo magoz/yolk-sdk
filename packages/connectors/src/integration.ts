@@ -1,7 +1,9 @@
 import * as Schema from 'effect/Schema'
 import { CredentialBinding } from './credential.ts'
+import { PortableMetadata } from './portable-metadata.ts'
 
 export const IntegrationConfig = Schema.Record(Schema.String, Schema.Unknown)
+
 export type IntegrationConfig = typeof IntegrationConfig.Type
 
 export class ConnectorIntegration extends Schema.Class<ConnectorIntegration>(
@@ -11,7 +13,7 @@ export class ConnectorIntegration extends Schema.Class<ConnectorIntegration>(
   connectorId: Schema.String,
   config: IntegrationConfig,
   credentialBindings: Schema.Array(CredentialBinding),
-  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+  metadata: Schema.optionalKey(PortableMetadata)
 }) {}
 
 export const makeIntegration = (input: {
@@ -19,12 +21,16 @@ export const makeIntegration = (input: {
   readonly connectorId: string
   readonly config?: IntegrationConfig
   readonly credentialBindings?: ReadonlyArray<CredentialBinding>
-  readonly metadata?: Readonly<Record<string, unknown>>
-}) =>
-  ConnectorIntegration.make({
+  readonly metadata?: PortableMetadata
+}) => {
+  const fields = {
     id: input.id,
     connectorId: input.connectorId,
     config: input.config ?? {},
-    credentialBindings: input.credentialBindings ?? [],
-    metadata: input.metadata
-  })
+    credentialBindings: input.credentialBindings ?? []
+  }
+
+  if (input.metadata === undefined) return ConnectorIntegration.make(fields)
+
+  return ConnectorIntegration.make({ ...fields, metadata: input.metadata })
+}

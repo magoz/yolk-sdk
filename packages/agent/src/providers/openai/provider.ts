@@ -1,4 +1,4 @@
-import { Config, Context, Effect, Layer, Option, Redacted, Stream } from 'effect'
+import { Config, Context, Effect, Layer, Match, Option, Predicate, Redacted, Stream } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -49,14 +49,164 @@ type OpenAiProviderIdentity = {
   readonly name: string
 }
 
+/** Chat Completions extras input; lowering admits a portable JSON-object snapshot. */
+export type OpenAiRequestExtras = {
+  readonly [key: string]: Schema.Json
+}
+
+const isPlainObject = (value: object) => {
+  const proto = Object.getPrototypeOf(value)
+
+  return proto === Object.prototype || proto === null
+}
+
+const isDataPropertyDescriptor = (descriptor: PropertyDescriptor) =>
+  descriptor.enumerable === true && Object.hasOwn(descriptor, 'value')
+
+const snapshotFailed = Option.none<Schema.Json>()
+
+const snapshotPortableJson = (
+  value: unknown,
+  stack: Set<object>,
+  memo: Map<object, Schema.Json>
+): Option.Option<Schema.Json> => {
+  if (value === null || Predicate.isString(value) || Predicate.isBoolean(value)) {
+    return Option.some(value)
+  }
+
+  if (Predicate.isNumber(value)) {
+    return Number.isFinite(value) ? Option.some(value) : snapshotFailed
+  }
+
+  if (!Predicate.isObjectOrArray(value)) {
+    return snapshotFailed
+  }
+
+  if (stack.has(value)) {
+    return snapshotFailed
+  }
+
+  const memoized = memo.get(value)
+
+  if (memoized !== undefined) {
+    return Option.some(memoized)
+  }
+
+  stack.add(value)
+
+  if (Array.isArray(value)) {
+    if (
+      Object.getPrototypeOf(value) !== Array.prototype ||
+      Object.getOwnPropertySymbols(value).length !== 0 ||
+      Object.getOwnPropertyNames(value).length !== value.length + 1
+    ) {
+      stack.delete(value)
+
+      return snapshotFailed
+    }
+
+    const items: Array<Schema.Json> = []
+
+    for (let index = 0; index < value.length; index++) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, index)
+
+      if (descriptor === undefined || !isDataPropertyDescriptor(descriptor)) {
+        stack.delete(value)
+
+        return snapshotFailed
+      }
+
+      const item = snapshotPortableJson(descriptor.value, stack, memo)
+
+      if (Option.isNone(item)) {
+        stack.delete(value)
+
+        return snapshotFailed
+      }
+
+      items.push(item.value)
+    }
+
+    stack.delete(value)
+    memo.set(value, items)
+
+    return Option.some(items)
+  }
+
+  if (!isPlainObject(value)) {
+    stack.delete(value)
+
+    return snapshotFailed
+  }
+
+  const keys = Object.keys(value)
+
+  if (
+    Object.getOwnPropertySymbols(value).length !== 0 ||
+    Object.getOwnPropertyNames(value).length !== keys.length
+  ) {
+    stack.delete(value)
+
+    return snapshotFailed
+  }
+
+  const snapshot: { [key: string]: Schema.Json } = {}
+
+  Object.setPrototypeOf(snapshot, null)
+
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+
+    if (descriptor === undefined || !isDataPropertyDescriptor(descriptor)) {
+      stack.delete(value)
+
+      return snapshotFailed
+    }
+
+    const field = snapshotPortableJson(descriptor.value, stack, memo)
+
+    if (Option.isNone(field)) {
+      stack.delete(value)
+
+      return snapshotFailed
+    }
+
+    Object.defineProperty(snapshot, key, {
+      value: field.value,
+      enumerable: true,
+      writable: true,
+      configurable: true
+    })
+  }
+
+  stack.delete(value)
+  memo.set(value, snapshot)
+
+  return Option.some(snapshot)
+}
+
+const openAiCanonicalRequestKeys = new Set([
+  'model',
+  'messages',
+  'stream',
+  'tools',
+  'parallel_tool_calls',
+  'max_completion_tokens',
+  'max_tokens'
+])
+
 export type OpenAiProviderConfig = {
   readonly chatCompletionsUrl?: string
   readonly maxCompletionTokens: number
   /** Selects the compatible endpoint's output-limit parameter. Defaults to `max_completion_tokens`. */
   readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
   readonly extraHeaders?: Readonly<Record<string, string>>
-  /** Adds endpoint extensions; enabled reasoning and canonical model/messages/limit/stream fields win. */
-  readonly extraBody?: Readonly<Record<string, unknown>>
+  /**
+   * Admitted portable JSON-object extras. Runtime still snapshots and validates
+   * untyped input. Canonical model/messages/limit/stream/tools keys are omitted
+   * without reading values.
+   */
+  readonly extraBody?: OpenAiRequestExtras
   /** Opts into a compatible endpoint's `{ reasoning: { effort } }` request extension. */
   readonly reasoningEffortFormat?: 'reasoning-object'
   /** Customizes safe error metadata for a branded OpenAI-compatible endpoint. */
@@ -102,7 +252,7 @@ type OpenAiTool = {
   readonly function: {
     readonly name: string
     readonly description: string
-    readonly parameters: unknown
+    readonly parameters: Schema.Json
   }
 }
 
@@ -122,9 +272,17 @@ type OpenAiRequestBody = {
 type OpenAiRequestBodyConfig = {
   readonly maxCompletionTokens: number
   readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
-  readonly extraBody?: Readonly<Record<string, unknown>>
+  readonly extraBody?: unknown
   readonly reasoningEffortFormat?: 'reasoning-object'
   readonly providerName?: string
+}
+
+type OpenAiRequestBodyConfigFields = {
+  maxCompletionTokens: number
+  providerName: string
+  completionTokenField?: OpenAiRequestBodyConfig['completionTokenField']
+  extraBody?: OpenAiRequestBodyConfig['extraBody']
+  reasoningEffortFormat?: OpenAiRequestBodyConfig['reasoningEffortFormat']
 }
 
 const defaultOpenAiProviderIdentity: OpenAiProviderIdentity = {
@@ -190,8 +348,9 @@ class OpenAiConfig extends Context.Service<OpenAiConfig, OpenAiProviderConfig>()
 const OpenAiConfigLayer = Layer.effect(
   OpenAiConfig,
   Effect.gen(function* () {
-    const apiKey = yield* Config.redacted('OPENAI_API_KEY')
-    const maxCompletionTokens = yield* Config.int('OPENAI_MAX_COMPLETION_TOKENS')
+    const apiKey = yield* Config.Redacted('OPENAI_API_KEY')
+    const maxCompletionTokens = yield* Config.Int('OPENAI_MAX_COMPLETION_TOKENS')
+
     return { apiKey, maxCompletionTokens }
   }).pipe(
     Effect.mapError(
@@ -205,31 +364,83 @@ const OpenAiConfigLayer = Layer.effect(
   )
 )
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const JsonFromJsonString = Schema.fromJsonString(Schema.Json)
 
-const encodeJsonString = (value: unknown, message: string) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
-    Effect.mapError(
-      error =>
-        new LLMError({
-          cause: 'provider_error',
-          message: `${message}: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    )
+const schemaErrorMessage = (error: Schema.SchemaError) => error.message
+
+const schemaErrorToLlmError =
+  (cause: LLMError['cause'], message: string) => (error: Schema.SchemaError) =>
+    new LLMError({
+      cause,
+      message: `${message}: ${schemaErrorMessage(error)}`,
+      retryable: false
+    })
+
+const encodeJsonString = (value: Schema.Json, message: string) =>
+  Schema.encodeEffect(JsonFromJsonString)(value).pipe(
+    Effect.mapError(schemaErrorToLlmError('provider_error', message))
   )
 
+const invalidExtraBodyError = (providerName: string) =>
+  new LLMError({
+    cause: 'provider_error',
+    message: `Invalid ${providerName} extraBody JSON: expected a JSON object`,
+    retryable: false
+  })
+
+const isOpenAiCanonicalRequestKey = (key: string, config: OpenAiRequestBodyConfig) =>
+  openAiCanonicalRequestKeys.has(key) ||
+  (config.reasoningEffortFormat === 'reasoning-object' && key === 'reasoning')
+
+const snapshotOpenAiRequestExtras = (
+  extraBody: unknown,
+  config: OpenAiRequestBodyConfig,
+  providerName: string
+): Effect.Effect<OpenAiRequestExtras, LLMError> => {
+  if (
+    !Predicate.isObjectOrArray(extraBody) ||
+    Array.isArray(extraBody) ||
+    !isPlainObject(extraBody)
+  ) {
+    return Effect.fail(invalidExtraBodyError(providerName))
+  }
+
+  const surviving: { [key: string]: Schema.Json } = {}
+
+  Object.setPrototypeOf(surviving, null)
+
+  const stack = new Set<object>()
+  const memo = new Map<object, Schema.Json>()
+
+  for (const key of Object.keys(extraBody)) {
+    if (isOpenAiCanonicalRequestKey(key, config)) continue
+
+    const descriptor = Object.getOwnPropertyDescriptor(extraBody, key)
+
+    if (descriptor === undefined || !isDataPropertyDescriptor(descriptor)) {
+      return Effect.fail(invalidExtraBodyError(providerName))
+    }
+
+    const field = snapshotPortableJson(descriptor.value, stack, memo)
+
+    if (Option.isNone(field)) {
+      return Effect.fail(invalidExtraBodyError(providerName))
+    }
+
+    Object.defineProperty(surviving, key, {
+      value: field.value,
+      enumerable: true,
+      writable: true,
+      configurable: true
+    })
+  }
+
+  return Effect.succeed(surviving)
+}
+
 const decodeJsonString = (raw: string, message: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
-    Effect.mapError(
-      error =>
-        new LLMError({
-          cause: 'invalid_response',
-          message: `${message}: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    )
+  Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
+    Effect.mapError(schemaErrorToLlmError('invalid_response', message))
   )
 
 const unsupportedContentError = (contentType: string, providerName: string) =>
@@ -264,29 +475,36 @@ const textDocumentToOpenAiPart = (
 const contentPartToUserPart = (
   part: ContentPart,
   providerName: string
-): Effect.Effect<OpenAiTextContentPart | OpenAiImageContentPart, LLMError> => {
-  switch (part._tag) {
-    case 'Text':
-      return Effect.succeed({ type: 'text', text: part.text })
-    case 'Image':
-      return Option.match(attachmentSourceUrl(part.source, part.mimeType), {
-        onNone: () => Effect.fail(unsupportedContentError('Unresolved image source', providerName)),
-        onSome: url => Effect.succeed({ type: 'image_url', image_url: { url } })
-      })
-    case 'Document':
-      return isTextDocumentMimeType(part.mimeType)
-        ? textDocumentToOpenAiPart(part, providerName)
+): Effect.Effect<OpenAiTextContentPart | OpenAiImageContentPart, LLMError> =>
+  Match.value(part).pipe(
+    Match.tag(
+      'Text',
+      (current): Effect.Effect<OpenAiTextContentPart | OpenAiImageContentPart, LLMError> =>
+        Effect.succeed({ type: 'text', text: current.text })
+    ),
+    Match.tag(
+      'Image',
+      (current): Effect.Effect<OpenAiTextContentPart | OpenAiImageContentPart, LLMError> =>
+        Option.match(attachmentSourceUrl(current.source, current.mimeType), {
+          onNone: () =>
+            Effect.fail(unsupportedContentError('Unresolved image source', providerName)),
+          onSome: url => Effect.succeed({ type: 'image_url', image_url: { url } })
+        })
+    ),
+    Match.tag('Document', current =>
+      isTextDocumentMimeType(current.mimeType)
+        ? textDocumentToOpenAiPart(current, providerName)
         : Effect.fail(unsupportedContentError('Document', providerName))
-    case 'Audio':
-      return Effect.fail(unsupportedContentError('Audio', providerName))
-  }
-}
+    ),
+    Match.tag('Audio', () => Effect.fail(unsupportedContentError('Audio', providerName))),
+    Match.exhaustive
+  )
 
 const contentToUserContent = (
   content: Content,
   providerName: string
 ): Effect.Effect<OpenAiUserContent, LLMError> =>
-  typeof content === 'string'
+  Predicate.isString(content)
     ? Effect.succeed(content)
     : Effect.forEach(content, part => contentPartToUserPart(part, providerName))
 
@@ -294,32 +512,37 @@ const contentPartToText = (
   part: ContentPart,
   owner: string,
   providerName: string
-): Effect.Effect<string, LLMError> => {
-  switch (part._tag) {
-    case 'Text':
-      return Effect.succeed(part.text)
-    case 'Image':
-      return Effect.fail(unsupportedContentError(`${owner} image`, providerName))
-    case 'Document':
-      return Effect.fail(unsupportedContentError(`${owner} document`, providerName))
-    case 'Audio':
-      return Effect.fail(unsupportedContentError(`${owner} audio`, providerName))
-  }
-}
+): Effect.Effect<string, LLMError> =>
+  Match.value(part).pipe(
+    Match.tag('Text', current => Effect.succeed(current.text)),
+    Match.tag('Image', () => Effect.fail(unsupportedContentError(`${owner} image`, providerName))),
+    Match.tag('Document', () =>
+      Effect.fail(unsupportedContentError(`${owner} document`, providerName))
+    ),
+    Match.tag('Audio', () => Effect.fail(unsupportedContentError(`${owner} audio`, providerName))),
+    Match.exhaustive
+  )
 
 const contentToText = (
   content: Content,
   owner: string,
   providerName: string
 ): Effect.Effect<string, LLMError> =>
-  typeof content === 'string'
+  Predicate.isString(content)
     ? Effect.succeed(content)
     : Effect.forEach(content, part => contentPartToText(part, owner, providerName)).pipe(
         Effect.map(textParts => textParts.join('\n'))
       )
 
-const serializeToolArguments = (params: unknown, providerName: string) =>
-  encodeJsonString(params, `Could not serialize ${providerName} tool arguments`)
+const serializeToolArguments = (call: ToolCall, providerName: string) =>
+  Schema.decodeUnknownEffect(Schema.Json)(call.params).pipe(
+    Effect.mapError(
+      schemaErrorToLlmError('provider_error', `Could not serialize ${providerName} tool arguments`)
+    ),
+    Effect.flatMap(json =>
+      encodeJsonString(json, `Could not serialize ${providerName} tool arguments`)
+    )
+  )
 
 const toolCallToOpenAiToolCall = (
   call: ToolCall,
@@ -331,7 +554,7 @@ const toolCallToOpenAiToolCall = (
       type: 'function',
       function: {
         name: call.name,
-        arguments: yield* serializeToolArguments(call.params, providerName)
+        arguments: yield* serializeToolArguments(call, providerName)
       }
     }
   })
@@ -340,59 +563,71 @@ const toOpenAiMessage = (
   message: AgentMessage,
   providerName: string
 ): Effect.Effect<OpenAiMessage, LLMError> =>
-  Effect.gen(function* () {
-    switch (message._tag) {
-      case 'User':
-        return {
-          role: 'user',
-          content: yield* contentToUserContent(
-            prependMessageContextToContent(message.content, messageContextText(message)),
-            providerName
+  Match.value(message).pipe(
+    Match.withReturnType<Effect.Effect<OpenAiMessage, LLMError>>(),
+    Match.tag('User', current =>
+      contentToUserContent(
+        prependMessageContextToContent(current.content, messageContextText(current)),
+        providerName
+      ).pipe(Effect.map(content => ({ role: 'user' as const, content })))
+    ),
+    Match.tag('Assistant', current => {
+      const content = prependMessageContextToContent(
+        assistantContent(current),
+        messageContextText(current)
+      )
+
+      return Effect.forEach(assistantHostToolCalls(current), call =>
+        toolCallToOpenAiToolCall(call, providerName)
+      ).pipe(
+        Effect.flatMap(toolCalls =>
+          contentToText(content, 'Assistant', providerName).pipe(
+            Effect.map(text =>
+              toolCalls.length > 0
+                ? {
+                    role: 'assistant' as const,
+                    content: text,
+                    tool_calls: toolCalls
+                  }
+                : {
+                    role: 'assistant' as const,
+                    content: text
+                  }
+            )
           )
-        }
-      case 'Assistant': {
-        const content = prependMessageContextToContent(
-          assistantContent(message),
-          messageContextText(message)
         )
-        const toolCalls = yield* Effect.forEach(assistantHostToolCalls(message), call =>
-          toolCallToOpenAiToolCall(call, providerName)
-        )
+      )
+    }),
+    Match.tag('ToolResult', current =>
+      contentToText(
+        prependMessageContextToContent(current.content, messageContextText(current)),
+        'Tool result',
+        providerName
+      ).pipe(
+        Effect.map(content => ({
+          role: 'tool' as const,
+          tool_call_id: current.toolCallId,
+          content
+        }))
+      )
+    ),
+    Match.exhaustive
+  )
 
-        if (toolCalls.length > 0) {
-          return {
-            role: 'assistant',
-            content: yield* contentToText(content, 'Assistant', providerName),
-            tool_calls: toolCalls
-          }
-        }
-
-        return {
-          role: 'assistant',
-          content: yield* contentToText(content, 'Assistant', providerName)
-        }
+const toOpenAiTool = (tool: ToolDef, providerName: string): Effect.Effect<OpenAiTool, LLMError> =>
+  Schema.decodeUnknownEffect(Schema.Json)(tool.parameters).pipe(
+    Effect.mapError(
+      schemaErrorToLlmError('provider_error', `Invalid ${providerName} tool parameters JSON`)
+    ),
+    Effect.map((parameters): OpenAiTool => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters
       }
-      case 'ToolResult':
-        return {
-          role: 'tool',
-          tool_call_id: message.toolCallId,
-          content: yield* contentToText(
-            prependMessageContextToContent(message.content, messageContextText(message)),
-            'Tool result',
-            providerName
-          )
-        }
-    }
-  })
-
-const toOpenAiTool = (tool: ToolDef): OpenAiTool => ({
-  type: 'function',
-  function: {
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters
-  }
-})
+    }))
+  )
 
 export const toOpenAiRequestBody = (
   request: LLMRequest,
@@ -413,21 +648,30 @@ export const toOpenAiRequestBody = (
 
     yield* validateProviderTranscript(request.messages)
     const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
+
     const requestMessages = yield* Effect.forEach(request.messages, message =>
       toOpenAiMessage(message, providerName)
     )
+
     const messages = [systemMessage, ...requestMessages]
 
     const completionTokenLimit =
       config.completionTokenField === 'max_tokens'
         ? { max_tokens: config.maxCompletionTokens }
         : { max_completion_tokens: config.maxCompletionTokens }
+
     const reasoning =
       config.reasoningEffortFormat === 'reasoning-object' && request.reasoningEffort !== undefined
         ? { reasoning: { effort: request.reasoningEffort } }
         : {}
-    const body: OpenAiRequestBody = {
-      ...config.extraBody,
+
+    const extraBody =
+      config.extraBody === undefined
+        ? {}
+        : yield* snapshotOpenAiRequestExtras(config.extraBody, config, providerName)
+
+    const bodyWithoutTools: OpenAiRequestBody = {
+      ...extraBody,
       ...reasoning,
       model: request.model,
       messages,
@@ -435,15 +679,16 @@ export const toOpenAiRequestBody = (
       stream: false
     }
 
-    if (request.tools.length === 0) {
-      return body
-    }
+    const body: OpenAiRequestBody =
+      request.tools.length === 0
+        ? bodyWithoutTools
+        : {
+            ...bodyWithoutTools,
+            tools: yield* Effect.forEach(request.tools, tool => toOpenAiTool(tool, providerName)),
+            parallel_tool_calls: true
+          }
 
-    return {
-      ...body,
-      tools: request.tools.map(toOpenAiTool),
-      parallel_tool_calls: true
-    }
+    return body
   })
 
 const parseToolArguments = (raw: string, providerName: string) =>
@@ -471,6 +716,7 @@ const toLlmEvents = (
 
     const content = choice.message.content ?? ''
     const textEvents = content.length > 0 ? [LLMTextDelta.make({ text: content })] : []
+
     const toolCallEvents = yield* Effect.forEach(choice.message.tool_calls ?? [], call =>
       parseToolArguments(call.function.arguments, providerIdentity.name).pipe(
         Effect.map(params =>
@@ -522,17 +768,25 @@ const toHttpClientLlmError =
 const parseOpenAiResponseJson = (
   response: HttpClientResponse.HttpClientResponse,
   providerName: string
-): Effect.Effect<unknown, LLMError> =>
-  response.json.pipe(
-    Effect.mapError(
-      error =>
-        new LLMError({
-          cause: 'invalid_response',
-          message: `Could not parse ${providerName} response JSON: ${error.message}`,
-          retryable: false
-        })
+): Effect.Effect<Schema.Json, LLMError> =>
+  Effect.gen(function* () {
+    const raw = yield* response.json.pipe(
+      Effect.mapError(
+        error =>
+          new LLMError({
+            cause: 'invalid_response',
+            message: `Could not parse ${providerName} response JSON: ${error.message}`,
+            retryable: false
+          })
+      )
     )
-  )
+
+    return yield* Schema.decodeUnknownEffect(Schema.Json)(raw).pipe(
+      Effect.mapError(
+        schemaErrorToLlmError('invalid_response', `Could not parse ${providerName} response JSON`)
+      )
+    )
+  })
 
 const sendOpenAiRequest = (
   config: OpenAiProviderConfig,
@@ -541,22 +795,45 @@ const sendOpenAiRequest = (
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
-    const body = yield* toOpenAiRequestBody(request, {
-      maxCompletionTokens: config.maxCompletionTokens,
-      providerName: providerIdentity.name,
-      ...(config.completionTokenField === undefined
-        ? {}
-        : { completionTokenField: config.completionTokenField }),
-      ...(config.extraBody === undefined ? {} : { extraBody: config.extraBody }),
-      ...(config.reasoningEffortFormat === undefined
-        ? {}
-        : { reasoningEffortFormat: config.reasoningEffortFormat })
-    })
+
+    const body = yield* toOpenAiRequestBody(
+      request,
+      (() => {
+        const fields: OpenAiRequestBodyConfigFields = {
+          maxCompletionTokens: config.maxCompletionTokens,
+          providerName: providerIdentity.name
+        }
+
+        if (config.completionTokenField !== undefined) {
+          fields.completionTokenField = config.completionTokenField
+        }
+
+        if (config.extraBody !== undefined) {
+          fields.extraBody = config.extraBody
+        }
+
+        if (config.reasoningEffortFormat !== undefined) {
+          fields.reasoningEffortFormat = config.reasoningEffortFormat
+        }
+
+        return fields
+      })()
+    )
+
     // Replayed transcripts can carry lone surrogates; harden the lowered
     // body so one bad historical string cannot poison every model call.
-    const serializedBody = yield* encodeJsonString(
-      replaceLoneSurrogatesDeep(body),
-      `Could not serialize ${providerIdentity.name} request`
+    const serializedBody = yield* Schema.decodeUnknownEffect(Schema.Json)(
+      replaceLoneSurrogatesDeep(body)
+    ).pipe(
+      Effect.mapError(
+        schemaErrorToLlmError(
+          'provider_error',
+          `Could not serialize ${providerIdentity.name} request`
+        )
+      ),
+      Effect.flatMap(json =>
+        encodeJsonString(json, `Could not serialize ${providerIdentity.name} request`)
+      )
     )
 
     const httpRequest = HttpClientRequest.post(
@@ -570,6 +847,7 @@ const sendOpenAiRequest = (
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )
+
     const response = yield* client
       .execute(httpRequest)
       .pipe(Effect.mapError(toHttpClientLlmError(providerIdentity, true)))
@@ -604,16 +882,13 @@ const sendOpenAiRequest = (
     }
 
     const json = yield* parseOpenAiResponseJson(response, providerIdentity.name)
+
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiChatCompletionResponse)(json).pipe(
       Effect.mapError(
-        error =>
-          new LLMError({
-            cause: 'invalid_response',
-            message: `Invalid ${providerIdentity.name} response: ${unknownToMessage(error)}`,
-            retryable: false
-          })
+        schemaErrorToLlmError('invalid_response', `Invalid ${providerIdentity.name} response`)
       )
     )
+
     const choice = parsed.choices[0]
 
     if (choice === undefined) {

@@ -1,19 +1,21 @@
 import { S3Service } from '@effect-aws/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { Config, Context, DateTime, Effect, Layer, Option, Redacted } from 'effect'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
+import { Config, Context, DateTime, Effect, Layer, Option, Predicate, Redacted } from 'effect'
+import type * as Schema from 'effect/Schema'
 import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'
 import { KnowledgeStore } from '@yolk-sdk/knowledge/store'
 import { KnowledgeFileError, KnowledgeStoreError } from '@yolk-sdk/knowledge/errors'
-import type {
-  KnowledgeDocument,
-  KnowledgeFile,
-  KnowledgeScope,
-  UpdateKnowledgeDocumentInput
-} from '@yolk-sdk/knowledge/documents'
+import type { KnowledgeScope, UpdateKnowledgeDocumentInput } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
+import {
+  encodePersistedJsonObject,
+  persistedJsonObjectErrorMessage
+} from '@/lib/services/db/persisted-json-object'
 import * as dbSchema from '@/lib/services/db/schema'
+import { knowledgeDocumentFromRow, knowledgeFileFromRow } from './document-rows'
 
-type R2KnowledgeFileStoreConfigShape = {
+type R2KnowledgeFileStoreConfigValues = {
   readonly endpoint: string
   readonly bucketName: string
   readonly accessKeyId: Redacted.Redacted<string>
@@ -42,7 +44,7 @@ export type R2PresignedUpload = {
 
 class R2KnowledgeFileStoreConfig extends Context.Service<
   R2KnowledgeFileStoreConfig,
-  R2KnowledgeFileStoreConfigShape
+  R2KnowledgeFileStoreConfigValues
 >()('@app/R2KnowledgeFileStoreConfig') {}
 
 export class R2KnowledgeUploadStore extends Context.Service<
@@ -60,11 +62,11 @@ const optionString = (option: Option.Option<string>) =>
 const R2KnowledgeFileStoreConfigLayer = Layer.effect(
   R2KnowledgeFileStoreConfig,
   Effect.gen(function* () {
-    const endpoint = yield* Config.string('R2_ENDPOINT')
-    const bucketName = yield* Config.string('R2_BUCKET_NAME')
-    const accessKeyId = yield* Config.redacted('R2_ACCESS_KEY_ID')
-    const secretAccessKey = yield* Config.redacted('R2_SECRET_ACCESS_KEY')
-    const region = optionString(yield* Config.option(Config.string('R2_REGION'))) ?? 'auto'
+    const endpoint = yield* Config.String('R2_ENDPOINT')
+    const bucketName = yield* Config.String('R2_BUCKET_NAME')
+    const accessKeyId = yield* Config.Redacted('R2_ACCESS_KEY_ID')
+    const secretAccessKey = yield* Config.Redacted('R2_SECRET_ACCESS_KEY')
+    const region = optionString(yield* Config.option(Config.String('R2_REGION'))) ?? 'auto'
 
     return { endpoint, bucketName, accessKeyId, secretAccessKey, region }
   }).pipe(
@@ -96,35 +98,36 @@ const R2S3ClientLayer = Layer.unwrap(
 
 const scopeUserId = (scope: KnowledgeScope) => scope.id
 
-const toDateTime = (date: Date) => DateTime.fromDateUnsafe(date)
-
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
-const propertyValue = (input: unknown, key: string) => {
-  if (typeof input !== 'object' || input === null) {
+const propertyValue = (input: unknown, key: string): unknown => {
+  if (!Predicate.isObjectOrArray(input) || input === null) {
     return undefined
   }
 
-  return Object.getOwnPropertyDescriptor(input, key)?.value
+  const value: unknown = Object.getOwnPropertyDescriptor(input, key)?.value
+
+  return value
 }
 
 const stringProperty = (input: unknown, key: string) => {
   const value = propertyValue(input, key)
-  return typeof value === 'string' && value.length > 0 ? value : undefined
+
+  return Predicate.isString(value) && value.length > 0 ? value : undefined
 }
 
 const numberProperty = (input: unknown, key: string) => {
   const value = propertyValue(input, key)
-  return typeof value === 'number' ? value : undefined
+
+  return Predicate.isNumber(value) ? value : undefined
 }
 
 const externalErrorMessage = (error: unknown) => {
   const name =
     error instanceof Error && error.name.length > 0 ? error.name : stringProperty(error, 'name')
+
   const message = error instanceof Error ? error.message : stringProperty(error, 'message')
   const metadata = propertyValue(error, '$metadata')
   const status = numberProperty(metadata, 'httpStatusCode')
+
   const details = [name, status === undefined ? undefined : `HTTP ${status}`, message]
     .filter(detail => detail !== undefined && detail.length > 0)
     .join(' · ')
@@ -134,6 +137,7 @@ const externalErrorMessage = (error: unknown) => {
 
 const fileIntegrationError = (message: string, cause: unknown) => {
   const details = externalErrorMessage(cause)
+
   return new KnowledgeFileError({
     message: details === undefined ? message : `${message}: ${details}`,
     cause
@@ -141,10 +145,10 @@ const fileIntegrationError = (message: string, cause: unknown) => {
 }
 
 const storeError = (message: string, cause?: unknown) => new KnowledgeStoreError({ message, cause })
+
 const fileError = (message: string, cause?: unknown) => new KnowledgeFileError({ message, cause })
 
-const mapStoreError = (error: unknown) =>
-  error instanceof KnowledgeStoreError ? error : storeError(unknownToMessage(error), error)
+const sqlStoreError = (error: EffectDrizzleQueryError) => storeError(error.message, error)
 
 export const knowledgeFileStorageKey = (input: {
   readonly documentId: string
@@ -167,62 +171,41 @@ export const knowledgeFileStorageKey = (input: {
   }
 }
 
-const rowToDocument = (input: {
-  readonly document: typeof dbSchema.userKnowledgeDocument.$inferSelect
-}): KnowledgeDocument => ({
-  id: input.document.id,
-  slug: input.document.slug,
-  title: input.document.title,
-  purpose: input.document.purpose,
-  origin: input.document.origin,
-  content: input.document.content,
-  status: input.document.status,
-  availability: input.document.availability,
-  summary: input.document.summary ?? undefined,
-  errorMessage: input.document.errorMessage ?? undefined,
-  reviewedAt:
-    input.document.reviewedAt === null ? undefined : toDateTime(input.document.reviewedAt),
-  metadata: input.document.metadata,
-  createdAt: toDateTime(input.document.createdAt),
-  updatedAt: toDateTime(input.document.updatedAt)
-})
-
-const rowToFile = (row: typeof dbSchema.userKnowledgeFile.$inferSelect): KnowledgeFile => ({
-  id: row.id,
-  documentId: row.documentId,
-  storageKey: row.storageKey,
-  mediaType: row.mediaType ?? undefined,
-  byteSize: row.byteSize ?? undefined,
-  checksum: row.checksum ?? undefined,
-  metadata: row.metadata,
-  createdAt: toDateTime(row.createdAt)
-})
+const metadataStoreError = (error: Schema.SchemaError) =>
+  storeError(persistedJsonObjectErrorMessage(error), error)
 
 const updateSet = (input: {
   readonly existing: typeof dbSchema.userKnowledgeDocument.$inferSelect
   readonly update: UpdateKnowledgeDocumentInput
-}) => ({
-  slug: input.update.slug ?? input.existing.slug,
-  title: input.update.title ?? input.existing.title,
-  purpose: input.update.purpose ?? input.existing.purpose,
-  origin: input.update.origin ?? input.existing.origin,
-  content: input.update.content ?? input.existing.content,
-  status: input.update.status ?? input.existing.status,
-  availability: input.update.availability ?? input.existing.availability,
-  summary: input.update.summary ?? input.existing.summary,
-  errorMessage: input.update.errorMessage ?? input.existing.errorMessage,
-  reviewedAt:
-    input.update.reviewedAt === undefined
-      ? input.existing.reviewedAt
-      : DateTime.toDateUtc(input.update.reviewedAt),
-  metadata: input.update.metadata ?? input.existing.metadata,
-  updatedAt: sql`CURRENT_TIMESTAMP`
-})
+}) =>
+  encodePersistedJsonObject(
+    input.update.metadata === undefined ? input.existing.metadata : input.update.metadata
+  ).pipe(
+    Effect.map(metadata => ({
+      slug: input.update.slug ?? input.existing.slug,
+      title: input.update.title ?? input.existing.title,
+      purpose: input.update.purpose ?? input.existing.purpose,
+      origin: input.update.origin ?? input.existing.origin,
+      content: input.update.content ?? input.existing.content,
+      status: input.update.status ?? input.existing.status,
+      availability: input.update.availability ?? input.existing.availability,
+      summary: input.update.summary ?? input.existing.summary,
+      errorMessage: input.update.errorMessage ?? input.existing.errorMessage,
+      reviewedAt:
+        input.update.reviewedAt === undefined
+          ? input.existing.reviewedAt
+          : DateTime.toDateUtc(input.update.reviewedAt),
+      metadata,
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    })),
+    Effect.mapError(metadataStoreError)
+  )
 
 export const DrizzleKnowledgeStoreLayer = Layer.effect(
   KnowledgeStore,
   Effect.gen(function* () {
     const db = yield* Db
+
     const getScopedDocument = (input: { readonly scope: KnowledgeScope; readonly id: string }) =>
       Effect.gen(function* () {
         const [row] = yield* db
@@ -245,6 +228,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
     return {
       createDocument: input =>
         Effect.gen(function* () {
+          const metadata = yield* encodePersistedJsonObject(
+            input.metadata === undefined ? {} : input.metadata
+          ).pipe(Effect.mapError(metadataStoreError))
+
           const [created] = yield* db
             .insert(dbSchema.userKnowledgeDocument)
             .values({
@@ -257,7 +244,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
               status: 'ready',
               availability: input.availability,
               summary: input.summary,
-              metadata: input.metadata ?? {}
+              metadata
             })
             .returning()
 
@@ -265,18 +252,20 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             return yield* Effect.fail(storeError('Could not create knowledge document'))
           }
 
-          return rowToDocument({ document: created })
+          return yield* knowledgeDocumentFromRow({ document: created })
         }).pipe(
           Effect.withSpan('KnowledgeStore.createDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       updateDocument: input =>
         Effect.gen(function* () {
           const existing = yield* getScopedDocument({ scope: input.scope, id: input.id })
+          const fields = yield* updateSet({ existing, update: input })
+
           const [updated] = yield* db
             .update(dbSchema.userKnowledgeDocument)
-            .set(updateSet({ existing, update: input }))
+            .set(fields)
             .where(
               and(
                 eq(dbSchema.userKnowledgeDocument.id, input.id),
@@ -289,17 +278,17 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             return yield* Effect.fail(storeError('Could not update knowledge document'))
           }
 
-          return rowToDocument({ document: updated })
+          return yield* knowledgeDocumentFromRow({ document: updated })
         }).pipe(
           Effect.withSpan('KnowledgeStore.updateDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       getDocument: input =>
         getScopedDocument(input).pipe(
-          Effect.map(document => rowToDocument({ document })),
+          Effect.flatMap(document => knowledgeDocumentFromRow({ document })),
           Effect.withSpan('KnowledgeStore.getDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       getDocumentBySlug: input =>
@@ -318,10 +307,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             return yield* Effect.fail(storeError('Knowledge document not found'))
           }
 
-          return rowToDocument({ document: row })
+          return yield* knowledgeDocumentFromRow({ document: row })
         }).pipe(
           Effect.withSpan('KnowledgeStore.getDocumentBySlug'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       listDocuments: input =>
@@ -340,10 +329,14 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             .orderBy(desc(dbSchema.userKnowledgeDocument.createdAt))
             .limit(input.limit)
 
-          return { documents: rows.map(document => rowToDocument({ document })) }
+          return {
+            documents: yield* Effect.forEach(rows, document =>
+              knowledgeDocumentFromRow({ document })
+            )
+          }
         }).pipe(
           Effect.withSpan('KnowledgeStore.listDocuments'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       listPinned: input =>
@@ -360,10 +353,14 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             .orderBy(desc(dbSchema.userKnowledgeDocument.updatedAt))
             .limit(input.limit)
 
-          return { documents: rows.map(document => rowToDocument({ document })) }
+          return {
+            documents: yield* Effect.forEach(rows, document =>
+              knowledgeDocumentFromRow({ document })
+            )
+          }
         }).pipe(
           Effect.withSpan('KnowledgeStore.listPinned'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       deleteDocument: input =>
@@ -378,21 +375,22 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             )
         }).pipe(
           Effect.withSpan('KnowledgeStore.deleteDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       listFiles: input =>
         Effect.gen(function* () {
           yield* getScopedDocument(input)
+
           const rows = yield* db
             .select()
             .from(dbSchema.userKnowledgeFile)
             .where(eq(dbSchema.userKnowledgeFile.documentId, input.id))
 
-          return rows.map(rowToFile)
+          return yield* Effect.forEach(rows, knowledgeFileFromRow)
         }).pipe(
           Effect.withSpan('KnowledgeStore.listFiles'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         )
     }
   })
@@ -427,7 +425,9 @@ export const R2KnowledgeFileBlobStoreLayer = Layer.effect(
             Bucket: config.bucketName,
             Key: input.storageKey
           })
+
           const body = response.Body
+
           if (body === undefined) {
             return yield* Effect.fail(fileError('R2 object body missing'))
           }

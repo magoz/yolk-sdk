@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Option, Predicate } from 'effect'
 import {
   Headers,
   HttpClient,
@@ -26,9 +26,8 @@ const makeHttpClientLayer = (response: Response, requests: Array<CapturedRequest
 
 const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
   const body = requests[0]?.request.body
-  expect(body?._tag).toBe('Uint8Array')
 
-  if (body?._tag !== 'Uint8Array') {
+  if (!Predicate.isTagged(body, 'Uint8Array')) {
     expect.fail('Expected command request body to be text')
   }
 
@@ -39,6 +38,7 @@ describe('command client', () => {
   it.effect('loads command summaries', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const commands = yield* loadAgentCommands({
         httpClientLayer: makeHttpClientLayer(
           new Response(
@@ -77,6 +77,7 @@ describe('command client', () => {
   it.effect('renders a command prompt', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const content = yield* renderAgentCommand('review', 'app/agent', {
         httpClientLayer: makeHttpClientLayer(
           new Response(JSON.stringify({ content: 'Review app/agent' })),
@@ -87,12 +88,10 @@ describe('command client', () => {
       const headers = requests[0]?.request.headers
       expect(requests[0]?.request.url).toBe('/api/agent/commands')
       expect(requests[0]?.request.method).toBe('POST')
-      expect(
-        headers === undefined ? undefined : Headers.get(headers, 'content-type')
-      ).toMatchObject({
-        _tag: 'Some',
-        value: 'application/json'
-      })
+      const contentType = headers === undefined ? undefined : Headers.get(headers, 'content-type')
+
+      expect(contentType !== undefined && Option.isSome(contentType)).toBe(true)
+      expect(contentType).toMatchObject({ value: 'application/json' })
       expect(readCapturedBody(requests)).toBe(
         JSON.stringify({ command: 'review', arguments: 'app/agent' })
       )

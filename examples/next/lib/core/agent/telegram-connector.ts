@@ -15,6 +15,8 @@ export type TelegramConnectorStatus =
   | { readonly _tag: 'Connected'; readonly chatId: string }
   | { readonly _tag: 'Disconnected' }
 
+export const TelegramConnectorStatus = Data.taggedEnum<TelegramConnectorStatus>()
+
 export class TelegramConnectorValidationError extends Data.TaggedError(
   'TelegramConnectorValidationError'
 )<{
@@ -42,6 +44,7 @@ const validateTelegramConnectorConfig = (input: TelegramConnectorConfig) =>
 const selectTelegramConnector = (userId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [connector] = yield* db
       .select({
         id: schema.agentConnector.id,
@@ -80,8 +83,8 @@ export const getTelegramConnectorStatus = (userId: string) =>
     const config = yield* getTelegramConnectorConfig(userId)
 
     return config === undefined
-      ? { _tag: 'Disconnected' as const }
-      : { _tag: 'Connected' as const, chatId: config.chatId }
+      ? TelegramConnectorStatus.Disconnected()
+      : TelegramConnectorStatus.Connected({ chatId: config.chatId })
   }).pipe(Effect.withSpan('agent.telegramConnector.status'))
 
 export const saveTelegramConnectorConfig = (
@@ -100,6 +103,7 @@ export const saveTelegramConnectorConfig = (
         chatId: config.chatId,
         credentialSecret: config.botToken
       })
+
       return
     }
 

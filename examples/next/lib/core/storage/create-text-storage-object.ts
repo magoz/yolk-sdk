@@ -1,8 +1,10 @@
 import { Effect } from 'effect'
+import { KnowledgeTextSource } from '@yolk-sdk/knowledge/documents'
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 import { PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
+import { encodePersistedMetadata } from './encode-persisted-metadata'
 import { ensureUserKnowledgeCollection } from './ensure-user-knowledge-collection'
 
 export const createTextStorageObject = (input: {
@@ -22,6 +24,12 @@ export const createTextStorageObject = (input: {
 
     const db = yield* Db
     const collection = yield* ensureUserKnowledgeCollection({ userId: input.userId })
+
+    const metadata = yield* encodePersistedMetadata({
+      value: { title: trimmedTitle },
+      entity: 'storageObject'
+    })
+
     const [object] = yield* db
       .insert(schema.storageObject)
       .values({
@@ -31,7 +39,7 @@ export const createTextStorageObject = (input: {
         filename: trimmedTitle.length > 0 ? trimmedTitle : 'Untitled note',
         mediaType: 'text/plain',
         byteSize: new TextEncoder().encode(trimmedContent).byteLength,
-        metadata: { title: trimmedTitle }
+        metadata
       })
       .returning()
 
@@ -49,7 +57,9 @@ export const createTextStorageObject = (input: {
       documentId: object.id,
       maxTokens: collection.chunkMaxTokens,
       source: {
-        source: { _tag: 'Text', label: object.filename ?? undefined },
+        source: KnowledgeTextSource.make({
+          label: object.filename ?? undefined
+        }),
         content: trimmedContent,
         mediaType: 'text/plain',
         metadata: { storageObjectId: object.id, title: object.filename ?? undefined }

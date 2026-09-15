@@ -1,7 +1,6 @@
-import { getWorkflowMetadata } from 'workflow'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { readWorkflowChild, type WorkflowChildRead } from '@/lib/services/agent-workflow/read-child'
-import { Effect } from 'effect'
+import { Data, Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolExecutor, ToolError } from '@yolk-sdk/agent/loop'
 import {
@@ -29,7 +28,8 @@ import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
 import { AgentWorkflowStore } from '@/lib/services/agent-workflow/live-layer'
 import { WorkflowChildRecord, WorkflowRegistryError } from '@/lib/services/agent-workflow/registry'
-import { makeAgentTextRuntime } from './text-response'
+import { AgentTextRuntimeFactory, ChildWorkflowIdentity } from './child-runtime-host'
+import { AgentTextRuntimeFactoryLive, ChildWorkflowIdentityLive } from './child-runtime-live'
 
 export class WorkflowAgentContext extends Schema.Class<WorkflowAgentContext>(
   'WorkflowAgentContext'
@@ -39,6 +39,12 @@ export class WorkflowAgentContext extends Schema.Class<WorkflowAgentContext>(
   callId: Schema.optionalKey(Schema.String),
   childType: Schema.optionalKey(Schema.String)
 }) {}
+
+export class WorkflowChildPreparationError extends Data.TaggedClass(
+  'WorkflowChildPreparationError'
+)<{
+  readonly message: string
+}> {}
 
 const LookupParams = Schema.Struct({
   tool_call_id: Schema.String,
@@ -51,6 +57,7 @@ const LookupParams = Schema.Struct({
     )
   )
 })
+
 const lookupModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
   {
     id: 'workflow-subagent-control',
@@ -86,24 +93,36 @@ const unavailableSubagent = ({ call }: { readonly call: ToolCall }) =>
   )
 
 export const workflowRuntime = (request: AgentRouteRequest, context: WorkflowAgentContext) =>
-  makeAgentTextRuntime(request, context.userId, '/agent/workflow', {
-    ...(context.childType === undefined
-      ? { executeSubagent: unavailableSubagent, modules: lookupModules }
-      : { childType: context.childType })
-  })
+  Effect.gen(function* () {
+    const factory = yield* AgentTextRuntimeFactory
+
+    return yield* factory.make(
+      request,
+      context.userId,
+      '/agent/workflow',
+      context.childType === undefined
+        ? { executeSubagent: unavailableSubagent, modules: lookupModules }
+        : { childType: context.childType }
+    )
+  }).pipe(Effect.provide(AgentTextRuntimeFactoryLive))
 
 export const assertChildAdmission = (context: WorkflowAgentContext, physicalRunId: string) =>
   Effect.gen(function* () {
     const store = yield* AgentWorkflowStore
+
     if (context.parentRunId === undefined || context.callId === undefined) {
       const registry = yield* store.read(physicalRunId, context.userId)
+
       if (registry.stopped)
         return yield* Effect.fail(
           new WorkflowRegistryError({ message: 'Parent execution is stopped' })
         )
+
       return
     }
+
     const registry = yield* store.read(context.parentRunId, context.userId)
+
     if (
       registry.stopped ||
       !registry.children.some(
@@ -114,16 +133,16 @@ export const assertChildAdmission = (context: WorkflowAgentContext, physicalRunI
     }
   })
 
-const runStore = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.provide(AgentWorkflowStore.layer))
+const runChildControl = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.provide(AgentWorkflowStore.layer), Effect.provide(ChildWorkflowIdentityLive))
 
 export async function registerWorkflowStep(userId: string) {
-  const runId = getWorkflowMetadata().workflowRunId
   await Effect.runPromise(
     Effect.gen(function* () {
+      const identity = yield* ChildWorkflowIdentity
       const store = yield* AgentWorkflowStore
-      yield* store.register(runId, userId)
-    }).pipe(runStore)
+      yield* store.register(identity.workflowRunId(), userId)
+    }).pipe(runChildControl)
   )
 }
 
@@ -172,246 +191,296 @@ const controlFailureResult = (
     }
   })
 
+export const planWorkflowCall = (input: {
+  readonly context: unknown
+  readonly request: unknown
+  readonly call: unknown
+}) =>
+  Effect.gen(function* () {
+    const identity = yield* ChildWorkflowIdentity
+    const parentRunId = identity.workflowRunId()
+    const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
+    const call = yield* Schema.decodeUnknownEffect(ToolCall)(input.call)
+
+    if (call.name === 'subagent_status' || call.name === 'subagent_wait') {
+      const params = yield* Schema.decodeUnknownEffect(LookupParams)(call.params).pipe(
+        Effect.result
+      )
+
+      if (Predicate.isTagged(params, 'Failure'))
+        return {
+          type: 'result',
+          result: yield* Schema.encodeEffect(ToolResult)(
+            failureResult(call.id, 'Invalid child handle')
+          )
+        } as const
+
+      return {
+        type: 'lookup',
+        child: {
+          parentRunId: params.success.parent_run_id ?? parentRunId,
+          userId: context.userId,
+          callId: params.success.tool_call_id
+        },
+        wait: call.name === 'subagent_wait'
+      } as const
+    }
+
+    if (call.name !== 'subagent') return { type: 'normal' } as const
+    let reservationAttempted = false
+
+    return yield* Effect.gen(function* () {
+      const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(input.request)
+      let params: SubagentToolParams | undefined
+
+      const factory = yield* AgentTextRuntimeFactory
+
+      const runtime = yield* factory.make(request, context.userId, '/agent/workflow', {
+        executeSubagent: input =>
+          Effect.sync(() => {
+            params = input.params
+
+            return ToolResult.make({ toolCallId: input.call.id, content: '' })
+          })
+      })
+
+      const validated = yield* Effect.gen(function* () {
+        const executor = yield* ToolExecutor
+
+        return yield* executor.execute(call)
+      }).pipe(
+        Effect.provide(runtime.layer),
+        Effect.catchTag('ToolError', error => Effect.succeed(failureResult(call.id, error.message)))
+      )
+
+      if (params === undefined)
+        return {
+          type: 'result',
+          result: yield* Schema.encodeEffect(ToolResult)(validated)
+        } as const
+
+      const childRequest = AgentRouteRequest.make({
+        sessionId: `${request.sessionId}:subagent:${call.id}`,
+        messages: [UserMessage.make({ content: params.prompt })],
+        model: params.model ?? runtime.config.model,
+        reasoningEffort:
+          params.reasoning_effort ?? request.reasoningEffort ?? runtime.config.reasoningEffort
+      })
+
+      const store = yield* AgentWorkflowStore
+
+      const reservation = WorkflowChildRecord.make({
+        callId: call.id,
+        request: yield* Schema.encodeEffect(AgentRouteRequest)(childRequest),
+        subagentType: params.subagent_type,
+        description: params.description,
+        startedAtMs: Date.now(),
+        workflowRunId: null,
+        result: null
+      })
+
+      reservationAttempted = true
+
+      const registry = yield* store.change(parentRunId, context.userId, {
+        type: 'reserve',
+        child: reservation
+      })
+
+      const child = registry.children.find(child => child.callId === call.id)
+
+      if (registry.stopped || child === undefined)
+        return {
+          type: 'result',
+          result: yield* Schema.encodeEffect(ToolResult)(
+            failureResult(call.id, 'Child launch stopped or run child limit reached')
+          )
+        } as const
+      const reservedRequest = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(child.request)
+
+      return {
+        type: 'launch',
+        child: { parentRunId, userId: context.userId, callId: call.id },
+        background: params.background === true,
+        model: reservedRequest.model ?? runtime.config.model,
+        workflowRunId: child.workflowRunId
+      } as const
+    }).pipe(
+      Effect.catch(error =>
+        Effect.gen(function* () {
+          const expectedAuthFailure = [
+            'WorkflowRunForbidden',
+            'OpenAiCodexAuthNotFoundError',
+            'OpenAiCodexAuthInvalidError',
+            'AnthropicClaudeAuthNotFoundError',
+            'AnthropicClaudeAuthInvalidError'
+          ].includes(error._tag)
+
+          if (!expectedAuthFailure) {
+            // Error messages/causes can contain SQL parameters, prompts or credentials.
+            yield* reportError(
+              new WorkflowChildPreparationError({
+                message: 'Child launch preparation failed'
+              }),
+              {
+                operation: 'agent.workflow.child.prepare',
+                runId: parentRunId,
+                toolCallId: call.id,
+                cause_type: error._tag
+              }
+            )
+          }
+
+          const uncertain = reservationAttempted && !expectedAuthFailure
+
+          if (uncertain) {
+            // A commit response can be lost; an immutable duplicate reservation may
+            // already have launched. Never free/reuse it or persist a terminal failure.
+            const store = yield* AgentWorkflowStore
+            yield* store
+              .change(parentRunId, context.userId, {
+                type: 'launch-uncertain',
+                callId: call.id
+              })
+              .pipe(
+                Effect.catch(recoveryError =>
+                  reportError(
+                    new WorkflowChildPreparationError({
+                      message: 'Child reservation recovery unavailable'
+                    }),
+                    {
+                      operation: 'agent.workflow.child.prepare.recover',
+                      runId: parentRunId,
+                      toolCallId: call.id,
+                      cause_type: recoveryError._tag
+                    }
+                  )
+                )
+              )
+          }
+
+          const result = yield* Schema.encodeEffect(ToolResult)(
+            uncertain
+              ? controlFailureResult(
+                  call.id,
+                  parentRunId,
+                  call.id,
+                  'Child launch preparation failed'
+                )
+              : failureResult(call.id, 'Child launch preparation failed')
+          )
+
+          return { type: 'result', result } as const
+        })
+      )
+    )
+  })
+
 export async function planWorkflowCallStep(input: {
   readonly context: unknown
   readonly request: unknown
   readonly call: unknown
 }): Promise<WorkflowCallPlan> {
-  const parentRunId = getWorkflowMetadata().workflowRunId
   return await Effect.runPromise(
-    Effect.gen(function* () {
-      const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
-      const call = yield* Schema.decodeUnknownEffect(ToolCall)(input.call)
-      if (call.name === 'subagent_status' || call.name === 'subagent_wait') {
-        const params = yield* Schema.decodeUnknownEffect(LookupParams)(call.params).pipe(
-          Effect.result
-        )
-        if (params._tag === 'Failure')
-          return {
-            type: 'result',
-            result: yield* Schema.encodeEffect(ToolResult)(
-              failureResult(call.id, 'Invalid child handle')
-            )
-          } as const
-        return {
-          type: 'lookup',
-          child: {
-            parentRunId: params.success.parent_run_id ?? parentRunId,
-            userId: context.userId,
-            callId: params.success.tool_call_id
-          },
-          wait: call.name === 'subagent_wait'
-        } as const
-      }
-      if (call.name !== 'subagent') return { type: 'normal' } as const
-      let reservationAttempted = false
-      return yield* Effect.gen(function* () {
-        const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(input.request)
-        let params: SubagentToolParams | undefined
-        const runtime = yield* makeAgentTextRuntime(request, context.userId, '/agent/workflow', {
-          executeSubagent: input =>
-            Effect.sync(() => {
-              params = input.params
-              return ToolResult.make({ toolCallId: input.call.id, content: '' })
-            })
-        })
-        const validated = yield* Effect.gen(function* () {
-          const executor = yield* ToolExecutor
-          return yield* executor.execute(call)
-        }).pipe(
-          Effect.provide(runtime.layer),
-          Effect.catchTag('ToolError', error =>
-            Effect.succeed(failureResult(call.id, error.message))
-          )
-        )
-        if (params === undefined)
-          return {
-            type: 'result',
-            result: yield* Schema.encodeEffect(ToolResult)(validated)
-          } as const
-        const childRequest = AgentRouteRequest.make({
-          sessionId: `${request.sessionId}:subagent:${call.id}`,
-          messages: [UserMessage.make({ content: params.prompt })],
-          model: params.model ?? runtime.config.model,
-          reasoningEffort:
-            params.reasoning_effort ?? request.reasoningEffort ?? runtime.config.reasoningEffort
-        })
-        const store = yield* AgentWorkflowStore
-        const reservation = WorkflowChildRecord.make({
-          callId: call.id,
-          request: yield* Schema.encodeEffect(AgentRouteRequest)(childRequest),
-          subagentType: params.subagent_type,
-          description: params.description,
-          startedAtMs: Date.now(),
-          workflowRunId: null,
-          result: null
-        })
-        reservationAttempted = true
-        const registry = yield* store.change(parentRunId, context.userId, {
-          type: 'reserve',
-          child: reservation
-        })
-        const child = registry.children.find(child => child.callId === call.id)
-        if (registry.stopped || child === undefined)
-          return {
-            type: 'result',
-            result: yield* Schema.encodeEffect(ToolResult)(
-              failureResult(call.id, 'Child launch stopped or run child limit reached')
-            )
-          } as const
-        const reservedRequest = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(child.request)
-        return {
-          type: 'launch',
-          child: { parentRunId, userId: context.userId, callId: call.id },
-          background: params.background === true,
-          model: reservedRequest.model ?? runtime.config.model,
-          workflowRunId: child.workflowRunId
-        } as const
-      }).pipe(
-        Effect.catch(error =>
-          Effect.gen(function* () {
-            const expectedAuthFailure = [
-              'WorkflowRunForbidden',
-              'OpenAiCodexAuthNotFoundError',
-              'OpenAiCodexAuthInvalidError',
-              'AnthropicClaudeAuthNotFoundError',
-              'AnthropicClaudeAuthInvalidError'
-            ].includes(error._tag)
-            if (!expectedAuthFailure) {
-              // Error messages/causes can contain SQL parameters, prompts or credentials.
-              yield* reportError(
-                {
-                  _tag: 'WorkflowChildPreparationError',
-                  message: 'Child launch preparation failed'
-                },
-                {
-                  operation: 'agent.workflow.child.prepare',
-                  runId: parentRunId,
-                  toolCallId: call.id,
-                  cause_type: error._tag
-                }
-              )
-            }
-            const uncertain = reservationAttempted && !expectedAuthFailure
-            if (uncertain) {
-              // A commit response can be lost; an immutable duplicate reservation may
-              // already have launched. Never free/reuse it or persist a terminal failure.
-              const store = yield* AgentWorkflowStore
-              yield* store
-                .change(parentRunId, context.userId, {
-                  type: 'launch-uncertain',
-                  callId: call.id
-                })
-                .pipe(
-                  Effect.catch(recoveryError =>
-                    reportError(
-                      {
-                        _tag: 'WorkflowChildPreparationError',
-                        message: 'Child reservation recovery unavailable'
-                      },
-                      {
-                        operation: 'agent.workflow.child.prepare.recover',
-                        runId: parentRunId,
-                        toolCallId: call.id,
-                        cause_type: recoveryError._tag
-                      }
-                    )
-                  )
-                )
-            }
-            const result = yield* Schema.encodeEffect(ToolResult)(
-              uncertain
-                ? controlFailureResult(
-                    call.id,
-                    parentRunId,
-                    call.id,
-                    'Child launch preparation failed'
-                  )
-                : failureResult(call.id, 'Child launch preparation failed')
-            )
-            return { type: 'result', result } as const
-          })
-        )
-      )
-    }).pipe(runStore, Effect.provide(AppLayer), Effect.scoped)
+    planWorkflowCall(input).pipe(
+      runChildControl,
+      Effect.provide(AgentTextRuntimeFactoryLive),
+      Effect.provide(AppLayer),
+      Effect.scoped
+    )
   )
 }
 
-export async function admitChildWorkflowStep(input: ChildLaunch) {
-  const workflowRunId = getWorkflowMetadata().workflowRunId
-  return await Effect.runPromise(
-    Effect.gen(function* () {
-      const store = yield* AgentWorkflowStore
-      const registry = yield* store.change(input.parentRunId, input.userId, {
-        type: 'admit',
+export const admitChildWorkflow = (input: ChildLaunch) =>
+  Effect.gen(function* () {
+    const identity = yield* ChildWorkflowIdentity
+    const workflowRunId = identity.workflowRunId()
+    const store = yield* AgentWorkflowStore
+
+    const registry = yield* store.change(input.parentRunId, input.userId, {
+      type: 'admit',
+      callId: input.callId,
+      workflowRunId
+    })
+
+    const child = registry.children.find(child => child.callId === input.callId)
+
+    if (registry.stopped || child === undefined || child.workflowRunId !== workflowRunId)
+      return null
+
+    return {
+      request: child.request,
+      context: {
+        userId: input.userId,
+        parentRunId: input.parentRunId,
         callId: input.callId,
-        workflowRunId
-      })
-      const child = registry.children.find(child => child.callId === input.callId)
-      if (registry.stopped || child === undefined || child.workflowRunId !== workflowRunId)
-        return null
-      return {
-        request: child.request,
-        context: {
-          userId: input.userId,
-          parentRunId: input.parentRunId,
-          callId: input.callId,
-          childType: child.subagentType
-        }
+        childType: child.subagentType
       }
-    }).pipe(runStore)
-  )
+    }
+  })
+
+export async function admitChildWorkflowStep(input: ChildLaunch) {
+  return await Effect.runPromise(admitChildWorkflow(input).pipe(runChildControl))
 }
+
+export const persistChildTerminal = (
+  input: ChildLaunch,
+  terminal: { readonly status: 'completed' | 'error'; readonly state: SerializableWorkflowState }
+) =>
+  Effect.gen(function* () {
+    const identity = yield* ChildWorkflowIdentity
+    const workflowRunId = identity.workflowRunId()
+    const store = yield* AgentWorkflowStore
+    const registry = yield* store.read(input.parentRunId, input.userId)
+    const child = registry.children.find(child => child.callId === input.callId)
+
+    if (child === undefined)
+      return yield* Effect.fail(new WorkflowRegistryError({ message: 'Child reservation missing' }))
+    const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(child.request)
+
+    const messages = yield* Schema.decodeUnknownEffect(Schema.Array(AgentMessage))(
+      terminal.state.createdMessages
+    )
+
+    const usage =
+      terminal.state.usage === undefined
+        ? zeroAgentUsage
+        : yield* Schema.decodeUnknownEffect(AgentUsage)(terminal.state.usage)
+
+    const summary = subagentResultFromEvents([
+      AgentEnd.make({ messages, usage, turns: terminal.state.turn })
+    ])
+
+    const result = makeSubagentToolResult({
+      callId: child.callId,
+      subagentRunId: subagentToolRunId(child.callId),
+      subagentType: child.subagentType,
+      description: child.description,
+      startedAtMs: child.startedAtMs,
+      endedAtMs: Date.now(),
+      model: request.model ?? '',
+      reasoningEffort: request.reasoningEffort,
+      status: terminal.status,
+      output: terminal.status === 'completed' ? summary.text : 'Child workflow failed',
+      usage,
+      turns: terminal.state.turn
+    })
+
+    const encoded = yield* Schema.encodeEffect(ToolResult)(result)
+    yield* store.change(input.parentRunId, input.userId, {
+      type: 'complete',
+      callId: input.callId,
+      workflowRunId,
+      result: encoded
+    })
+
+    return { status: terminal.status, result: encoded }
+  })
 
 export async function persistChildTerminalStep(
   input: ChildLaunch,
   terminal: { readonly status: 'completed' | 'error'; readonly state: SerializableWorkflowState }
 ) {
-  const workflowRunId = getWorkflowMetadata().workflowRunId
-  return await Effect.runPromise(
-    Effect.gen(function* () {
-      const store = yield* AgentWorkflowStore
-      const registry = yield* store.read(input.parentRunId, input.userId)
-      const child = registry.children.find(child => child.callId === input.callId)
-      if (child === undefined)
-        return yield* Effect.fail(
-          new WorkflowRegistryError({ message: 'Child reservation missing' })
-        )
-      const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(child.request)
-      const messages = yield* Schema.decodeUnknownEffect(Schema.Array(AgentMessage))(
-        terminal.state.createdMessages
-      )
-      const usage =
-        terminal.state.usage === undefined
-          ? zeroAgentUsage
-          : yield* Schema.decodeUnknownEffect(AgentUsage)(terminal.state.usage)
-      const summary = subagentResultFromEvents([
-        AgentEnd.make({ messages, usage, turns: terminal.state.turn })
-      ])
-      const result = makeSubagentToolResult({
-        callId: child.callId,
-        subagentRunId: subagentToolRunId(child.callId),
-        subagentType: child.subagentType,
-        description: child.description,
-        startedAtMs: child.startedAtMs,
-        endedAtMs: Date.now(),
-        model: request.model ?? '',
-        reasoningEffort: request.reasoningEffort,
-        status: terminal.status,
-        output: terminal.status === 'completed' ? summary.text : 'Child workflow failed',
-        usage,
-        turns: terminal.state.turn
-      })
-      const encoded = yield* Schema.encodeEffect(ToolResult)(result)
-      yield* store.change(input.parentRunId, input.userId, {
-        type: 'complete',
-        callId: input.callId,
-        workflowRunId,
-        result: encoded
-      })
-      return { status: terminal.status, result: encoded }
-    }).pipe(runStore)
-  )
+  return await Effect.runPromise(persistChildTerminal(input, terminal).pipe(runChildControl))
 }
 
 export type ChildRead = WorkflowChildRead
@@ -429,28 +498,31 @@ export async function readChildWorkflowStep(
           Effect.map(result => ({ done: true, workflowRunId: null, result }))
         )
       ),
-      runStore,
+      runChildControl,
       Effect.provide(VercelWorkflows.layer)
     )
   )
 }
 
+export const attachChildWorkflow = (input: ChildLaunch, workflowRunId: string) =>
+  Effect.gen(function* () {
+    // Response-path repair: if the child already self-admitted this is a no-op. A lost
+    // start response is also safe because the child's own admission does not depend on it.
+    const store = yield* AgentWorkflowStore
+
+    const registry = yield* store.change(input.parentRunId, input.userId, {
+      type: 'admit',
+      callId: input.callId,
+      workflowRunId
+    })
+
+    return registry.stopped
+      ? null
+      : (registry.children.find(child => child.callId === input.callId)?.workflowRunId ?? null)
+  })
+
 export async function attachChildWorkflowStep(input: ChildLaunch, workflowRunId: string) {
-  // Response-path repair: if the child already self-admitted this is a no-op. A lost
-  // start response is also safe because the child's own admission does not depend on it.
-  return await Effect.runPromise(
-    Effect.gen(function* () {
-      const store = yield* AgentWorkflowStore
-      const registry = yield* store.change(input.parentRunId, input.userId, {
-        type: 'admit',
-        callId: input.callId,
-        workflowRunId
-      })
-      return registry.stopped
-        ? null
-        : (registry.children.find(child => child.callId === input.callId)?.workflowRunId ?? null)
-    }).pipe(runStore)
-  )
+  return await Effect.runPromise(attachChildWorkflow(input, workflowRunId).pipe(runChildControl))
 }
 
 export async function childToolResultStep(input: {
@@ -463,26 +535,35 @@ export async function childToolResultStep(input: {
 }) {
   return await Effect.runPromise(
     Effect.gen(function* () {
-      if (!input.lookup && input.background === true && input.child.workflowRunId !== null)
-        return yield* Schema.encodeEffect(ToolResult)(
-          makeSubagentAcceptedToolResult({
-            callId: input.callId,
-            workflowRunId: input.child.workflowRunId,
-            ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId })
-          })
-        )
+      if (!input.lookup && input.background === true && input.child.workflowRunId !== null) {
+        const accepted = {
+          callId: input.callId,
+          workflowRunId: input.child.workflowRunId
+        }
+
+        const acceptedInput =
+          input.parentRunId === undefined
+            ? accepted
+            : { ...accepted, parentRunId: input.parentRunId }
+
+        return yield* Schema.encodeEffect(ToolResult)(makeSubagentAcceptedToolResult(acceptedInput))
+      }
+
       if (!input.lookup && input.child.done && !input.child.uncertain) return input.child.result
+
       // Lookup results deliberately nest the original result. They are observations, not new usage deltas.
       const terminal = input.child.done
         ? yield* Schema.decodeUnknownEffect(ToolResult)(input.child.result)
         : undefined
+
       const content = terminal?.content ?? 'Child is pending or running.'
       const outcomeKnown = input.child.done && !input.child.uncertain
+
       return yield* Schema.encodeEffect(ToolResult)(
         ToolResult.make({
           toolCallId: input.callId,
           content:
-            !outcomeKnown && typeof content === 'string'
+            !outcomeKnown && Predicate.isString(content)
               ? withChildHandle(content, input.childCallId ?? input.callId, input.parentRunId)
               : content,
           isError: terminal?.isError,
@@ -509,7 +590,7 @@ export async function uncertainChildLaunchStep(input: ChildLaunch) {
         type: 'launch-uncertain',
         callId: input.callId
       })
-    }).pipe(runStore)
+    }).pipe(runChildControl)
   )
 }
 

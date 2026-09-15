@@ -5,12 +5,12 @@ import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
-type PackageShape = {
+type PackageManifest = {
   readonly name: string
   readonly exports: ReadonlyArray<string>
 }
 
-const packages: ReadonlyArray<PackageShape> = [
+const packages: ReadonlyArray<PackageManifest> = [
   {
     name: '@yolk-sdk/agent',
     exports: [
@@ -123,10 +123,10 @@ const main = async () => {
   const fixtureDir = mkdtempSync(join(tmpdir(), 'yolk-package-smoke-'))
 
   try {
-    const tarballs = packages.map(packageShape => {
+    const tarballs = packages.map(packageManifest => {
       const output = execFileSync(
         'pnpm',
-        ['--filter', packageShape.name, 'pack', '--pack-destination', fixtureDir],
+        ['--filter', packageManifest.name, 'pack', '--pack-destination', fixtureDir],
         {
           cwd: workspaceRoot,
           encoding: 'utf8',
@@ -140,16 +140,17 @@ const main = async () => {
     const tarballPaths = tarballs.map(tarball =>
       isAbsolute(tarball) ? tarball : join(fixtureDir, tarball)
     )
+
     const packageJson = {
       type: 'module',
       private: true,
       dependencies: {
-        '@effect/platform-node': '4.0.0-beta.80',
+        '@effect/platform-node': '4.0.0-rc.115',
         '@modelcontextprotocol/client': '2.0.0',
         '@modelcontextprotocol/core': '2.0.0',
         '@modelcontextprotocol/server': '2.0.0',
         '@vercel/sandbox': '2.2.1',
-        effect: '4.0.0-beta.80',
+        effect: '4.0.0-rc.115',
         'gpt-tokenizer': '^3.4.0',
         react: '>=19',
         workflow: '5.0.0-beta.42'
@@ -161,20 +162,21 @@ const main = async () => {
     // Match the workspace's tested platform graph rather than a newer prerelease.
     writeFileSync(
       join(fixtureDir, 'pnpm-workspace.yaml'),
-      "overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.80\n"
+      "overrides:\n  '@effect/platform-node-shared': 4.0.0-rc.115\n"
     )
     execFileSync('pnpm', ['install', '--ignore-scripts'], {
       cwd: fixtureDir,
       stdio: 'inherit'
     })
 
-    for (const [index, packageShape] of packages.entries()) {
+    for (const [index, packageManifest] of packages.entries()) {
       const scopedPackageDir = join(
         fixtureDir,
         'node_modules',
         '@yolk-sdk',
-        packageShape.name.replace('@yolk-sdk/', '')
+        packageManifest.name.replace('@yolk-sdk/', '')
       )
+
       mkdirSync(scopedPackageDir, { recursive: true })
       execFileSync(
         'tar',
@@ -186,9 +188,9 @@ const main = async () => {
       )
     }
 
-    const imports = packages.flatMap(packageShape =>
-      packageShape.exports.map(exportPath =>
-        exportPath === '.' ? packageShape.name : `${packageShape.name}/${exportPath.slice(2)}`
+    const imports = packages.flatMap(packageManifest =>
+      packageManifest.exports.map(exportPath =>
+        exportPath === '.' ? packageManifest.name : `${packageManifest.name}/${exportPath.slice(2)}`
       )
     )
 

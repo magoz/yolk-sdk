@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Layer, Option, Result, Stream } from 'effect'
+import { Array as Arr, Effect, Layer, Match, Option, Predicate, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -34,28 +34,23 @@ const config = {
   tools: []
 }
 
-const parseJson = (line: string): unknown => JSON.parse(line)
-const decodeEvent = (value: unknown) => Schema.decodeUnknownEffect(AgentEvent)(value)
+const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEvent))
 
 const decodeEvents = (body: string) =>
   Effect.forEach(
     body
       .trim()
       .split('\n')
-      .filter(line => line.length > 0)
-      .map(parseJson),
-    decodeEvent
+      .filter(line => line.length > 0),
+    line => decodeEvent(line)
   )
 
-const messageContent = (message: AgentMessage) => {
-  switch (message._tag) {
-    case 'Assistant':
-      return assistantContent(message)
-    case 'ToolResult':
-    case 'User':
-      return message.content
-  }
-}
+const messageContent = (message: AgentMessage) =>
+  Match.value(message).pipe(
+    Match.tag('Assistant', current => assistantContent(current)),
+    Match.tag('ToolResult', 'User', current => current.content),
+    Match.exhaustive
+  )
 
 const makeLayer = () =>
   Layer.mergeAll(
@@ -145,6 +140,7 @@ describe('makeAgentPostResponse', () => {
         }),
         config
       ).pipe(Effect.provide(makeLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -195,7 +191,7 @@ describe('makeAgentPostResponse', () => {
 
       const text = new TextDecoder().decode(read.value)
       const firstLine = text.split('\n')[0] ?? ''
-      const event = yield* decodeEvent(parseJson(firstLine))
+      const event = yield* decodeEvent(firstLine)
 
       expect(event._tag).toBe('AgentStart')
     })
@@ -210,6 +206,7 @@ describe('makeAgentPostResponse', () => {
         }),
         config
       ).pipe(Effect.provide(makeFailingLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -241,6 +238,7 @@ describe('makeAgentPostResponse', () => {
           capabilities: noToolReasoningCapabilities
         }
       ).pipe(Effect.provide(makeLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -270,6 +268,7 @@ describe('makeAgentPostResponse', () => {
           tools: [ToolDef.make({ name: 'slow_tool', description: 'Slow.', parameters: {} })]
         }
       ).pipe(Effect.provide(makeFailingToolLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -296,14 +295,15 @@ describe('makeAgentPostResponse', () => {
           isError: true
         }
       })
-      expect(events.some(event => event._tag === 'AgentError')).toBe(false)
-      expect(events.some(event => event._tag === 'AgentEnd')).toBe(true)
+      expect(events.some(event => Predicate.isTagged(event, 'AgentError'))).toBe(false)
+      expect(events.some(event => Predicate.isTagged(event, 'AgentEnd'))).toBe(true)
     })
   )
 
   it.effect('uses the client-provided transcript', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const layer = Layer.mergeAll(
         ContextTransformer.identity,
         LoopConfig.defaultLayer,
@@ -313,10 +313,12 @@ describe('makeAgentPostResponse', () => {
         }),
         TestToolExecutor.layer({})
       )
+
       const firstMessages = [UserMessage.make({ content: 'hello' })] satisfies readonly [
         AgentMessage,
         ...Array<AgentMessage>
       ]
+
       const secondMessages = [
         ...firstMessages,
         AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] }),
@@ -331,12 +333,14 @@ describe('makeAgentPostResponse', () => {
         }),
         config
       ).pipe(Effect.provide(layer))
+
       yield* Effect.promise(() => firstResponse.text())
 
       const secondResponse = yield* makeAgentPostResponse(
         AgentRouteRequest.make({ sessionId: 'session_1', messages: secondMessages }),
         config
       ).pipe(Effect.provide(layer))
+
       yield* Effect.promise(() => secondResponse.text())
 
       expect(requests.map(request => request.messages.map(messageContent))).toEqual([
@@ -350,11 +354,13 @@ describe('makeAgentPostResponse', () => {
   it.effect('executes configured tool calls', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const tool = ToolDef.make({
         name: 'echo',
         description: 'Echo fixture tool.',
         parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] }
       })
+
       const layer = Layer.mergeAll(
         ContextTransformer.identity,
         LoopConfig.defaultLayer,
@@ -371,6 +377,7 @@ describe('makeAgentPostResponse', () => {
         }),
         TestToolExecutor.layer({ echo: 'pong' })
       )
+
       const response = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -378,10 +385,12 @@ describe('makeAgentPostResponse', () => {
         }),
         { ...config, tools: [tool] }
       ).pipe(Effect.provide(layer))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
+
       const toolResultContents = Arr.filterMap(events, event =>
-        event._tag === 'ToolExecutionCompleted'
+        Predicate.isTagged(event, 'ToolExecutionCompleted')
           ? Result.succeed(event.result.content)
           : Result.failVoid
       )
@@ -419,10 +428,11 @@ describe('makeAgentPostResponse', () => {
         messages: []
       }).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'SchemaError' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'SchemaError')).toBe(true)
+      }
     })
   )
 
@@ -446,10 +456,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentImageLimitError', message: 'Attach up to 4 images.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentImageLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Attach up to 4 images.' })
+      }
     })
   )
 
@@ -469,10 +481,14 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentImageLimitError', message: 'Unsupported image type: image/svg+xml' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentImageLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({
+          message: 'Unsupported image type: image/svg+xml'
+        })
+      }
     })
   )
 
@@ -492,16 +508,19 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentImageLimitError', message: 'Invalid image data.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentImageLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Invalid image data.' })
+      }
     })
   )
 
   it.effect('rejects oversized image payloads', () =>
     Effect.gen(function* () {
       const imageData = 'a'.repeat(4 * 1024 * 1024)
+
       const result = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -519,10 +538,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentImageLimitError', message: 'Image payload is too large.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentImageLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Image payload is too large.' })
+      }
     })
   )
 
@@ -545,6 +566,7 @@ describe('makeAgentPostResponse', () => {
         }),
         config
       ).pipe(Effect.provide(makeLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -560,6 +582,7 @@ describe('makeAgentPostResponse', () => {
         mimeType: 'application/pdf',
         filename: 'brief.pdf'
       })
+
       const result = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -572,10 +595,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Attach up to 4 PDFs.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Attach up to 4 PDFs.' })
+      }
     })
   )
 
@@ -599,13 +624,14 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: {
-          _tag: 'AgentDocumentLimitError',
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({
           message: 'Unsupported document type: text/plain'
-        }
-      })
+        })
+      }
     })
   )
 
@@ -629,16 +655,19 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Invalid document data.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Invalid document data.' })
+      }
     })
   )
 
   it.effect('rejects oversized document payloads', () =>
     Effect.gen(function* () {
       const documentData = 'a'.repeat(15 * 1024 * 1024)
+
       const result = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -657,21 +686,25 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Document is too large.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Document is too large.' })
+      }
     })
   )
 
   it.effect('rejects oversized total document payloads', () =>
     Effect.gen(function* () {
       const documentData = 'a'.repeat(8 * 1024 * 1024)
+
       const document = DocumentPart.make({
         source: inlineBase64Source(documentData),
         mimeType: 'application/pdf',
         filename: 'brief.pdf'
       })
+
       const result = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -680,10 +713,12 @@ describe('makeAgentPostResponse', () => {
         config
       ).pipe(Effect.provide(makeLayer()), Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Document payload is too large.' }
-      })
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'AgentDocumentLimitError')).toBe(true)
+        expect(result.failure).toMatchObject({ message: 'Document payload is too large.' })
+      }
     })
   )
 })

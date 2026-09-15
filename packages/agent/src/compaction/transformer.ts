@@ -1,10 +1,10 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import type { AgentMessage } from '@yolk-sdk/agent/protocol'
 import { ContextTransformer } from '@yolk-sdk/agent/loop'
 import {
   applyCompactionPlan,
+  CompactionResult,
   planWindowCompaction,
-  type CompactionResult,
   type SkippedCompactionPlan,
   type SkippedCompactionResult
 } from './window.ts'
@@ -21,13 +21,13 @@ export type WindowCompactionOptions = {
   readonly makeSummaryMessage: SummaryMessageFactory
 }
 
-const skippedCompactionResult = (plan: SkippedCompactionPlan): SkippedCompactionResult => ({
-  _tag: 'Skipped',
-  reason: plan.reason,
-  messages: plan.messages,
-  events: [],
-  beforeTokens: plan.beforeTokens
-})
+const skippedCompactionResult = (plan: SkippedCompactionPlan): SkippedCompactionResult =>
+  CompactionResult.Skipped({
+    reason: plan.reason,
+    messages: plan.messages,
+    events: [],
+    beforeTokens: plan.beforeTokens
+  })
 
 export const compactWindowMessages = (
   messages: ReadonlyArray<AgentMessage>,
@@ -35,7 +35,7 @@ export const compactWindowMessages = (
 ): CompactionResult => {
   const plan = planWindowCompaction(messages, options)
 
-  if (plan._tag === 'Skip') {
+  if (Predicate.isTagged(plan, 'Skip')) {
     return skippedCompactionResult(plan)
   }
 

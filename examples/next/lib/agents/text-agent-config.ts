@@ -4,8 +4,11 @@ import {
 } from '@yolk-sdk/agent/protocol'
 
 export const openAiCodexTextModel = 'gpt-5.5'
+
 export const anthropicClaudeTextModel = 'claude-sonnet-4-6'
+
 export const agentTextModel = openAiCodexTextModel
+
 const agentTextModelConfigById = {
   [openAiCodexTextModel]: {
     model: openAiCodexTextModel,
@@ -32,7 +35,9 @@ const agentTextModelConfigById = {
     maxOutputTokens: 64_000
   }
 } as const
+
 export const agentTextModelOptions = Object.values(agentTextModelConfigById)
+
 export const agentTextReasoningEffortOptions: ReadonlyArray<AgentReasoningEffort> = [
   'minimal',
   'low',
@@ -40,16 +45,24 @@ export const agentTextReasoningEffortOptions: ReadonlyArray<AgentReasoningEffort
   'high',
   'xhigh'
 ]
+
 export const agentTextReasoningEffort: AgentReasoningEffort = 'low'
+
 export const agentTextReasoningSummary = 'auto'
+
 export const agentTextCapabilities = textImageDocumentModelCapabilities
 
 export type AgentTextModel = keyof typeof agentTextModelConfigById
+
 export const isAgentTextModel = (value: string): value is AgentTextModel =>
   agentTextModelOptions.some(option => option.model === value)
+
 export const agentTextModelProvider = (model: AgentTextModel) =>
   agentTextModelConfigById[model].provider
+
 export const agentTextModelMaxOutputTokens = (model: AgentTextModel) =>
   agentTextModelConfigById[model].maxOutputTokens
+
 export type AgentTextReasoningEffort = AgentReasoningEffort
+
 export type AgentTextReasoningSummary = typeof agentTextReasoningSummary

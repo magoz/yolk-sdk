@@ -67,6 +67,7 @@ export const parseOpenAiCodexSubscriptionUsage = (
   return Schema.decodeUnknownEffect(OpenAiCodexSubscriptionUsageWire)(value).pipe(
     Effect.map(decoded => {
       const windows: Array<ProviderSubscriptionUsageWindow> = []
+
       const append = (
         wire: OpenAiCodexSubscriptionUsageWindowWire | null | undefined,
         id: 'primary' | 'secondary'
@@ -76,25 +77,51 @@ export const parseOpenAiCodexSubscriptionUsage = (
         }
 
         const resetAt = wire.reset_at
+
         const resetsAt =
           resetAt === null || resetAt === undefined
             ? undefined
             : canonicalSubscriptionUsageInstant(resetAt)
+
         const resetsAfterSeconds = positiveSubscriptionUsageNumber(wire.reset_after_seconds)
           ? wire.reset_after_seconds
           : undefined
+
         const windowDurationMinutes = positiveSubscriptionUsageNumber(wire.limit_window_seconds)
           ? wire.limit_window_seconds / 60
           : undefined
 
+        type OpenAiCodexUsageWindowFields = {
+          id: typeof id
+          usedPercent: number
+          resetsAt?: string
+          resetsAfterSeconds?: number
+          windowDurationMinutes?: number
+        }
+
         windows.push(
-          ProviderSubscriptionUsageWindow.make({
-            id,
-            usedPercent: wire.used_percent,
-            ...(resetsAt === undefined ? {} : { resetsAt }),
-            ...(resetsAfterSeconds === undefined ? {} : { resetsAfterSeconds }),
-            ...(windowDurationMinutes === undefined ? {} : { windowDurationMinutes })
-          })
+          ProviderSubscriptionUsageWindow.make(
+            (() => {
+              const fields: OpenAiCodexUsageWindowFields = {
+                id,
+                usedPercent: wire.used_percent
+              }
+
+              if (resetsAt !== undefined) {
+                fields.resetsAt = resetsAt
+              }
+
+              if (resetsAfterSeconds !== undefined) {
+                fields.resetsAfterSeconds = resetsAfterSeconds
+              }
+
+              if (windowDurationMinutes !== undefined) {
+                fields.windowDurationMinutes = windowDurationMinutes
+              }
+
+              return fields
+            })()
+          )
         )
       }
 
@@ -158,6 +185,7 @@ export const fetchOpenAiCodexSubscriptionUsage = (
     }
 
     const client = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.get(openAiCodexSubscriptionUsageUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
@@ -165,12 +193,14 @@ export const fetchOpenAiCodexSubscriptionUsage = (
         'chatgpt-account-id': accountId
       })
     )
+
     const json = yield* executeAndReadProviderSubscriptionUsageJson({
       provider: openAiCodexProviderId,
       client,
       request,
       timeoutMs: requestTimeoutMs
     })
+
     const fetchedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
 
     return yield* parseOpenAiCodexSubscriptionUsage(json, fetchedAt)

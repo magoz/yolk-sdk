@@ -5,7 +5,7 @@ import { relations } from './schema'
 
 // PostgreSQL connection layer (internal)
 const PgLive = layerConfig({
-  url: Config.redacted('DATABASE_URL')
+  url: Config.Redacted('DATABASE_URL')
 })
 
 // Service definition

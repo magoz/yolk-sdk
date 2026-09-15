@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Effect, Match, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { resolveCredential } from '../credential.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -8,6 +8,7 @@ import type { ConnectorIntegration } from '../integration.ts'
 import { GoogleOAuthCredentialSlot } from './oauth.ts'
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
+
 const isJsonObject = Schema.is(JsonObject)
 
 export const resolveGoogleAccessToken = (
@@ -17,29 +18,30 @@ export const resolveGoogleAccessToken = (
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, slot)
 
-    switch (credential._tag) {
-      case 'OAuthCredential':
-        return credential.accessToken
-      case 'BearerTokenCredential':
-        return credential.token
-      case 'ApiKeyCredential':
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
-          new ConnectorError({
-            cause: 'credential_invalid',
-            message: 'Google connector requires an OAuth or bearer token credential',
-            connectorId: integration.connectorId,
-            slotId: slot.id
-          })
-        )
-    }
+    const invalidCredential = () =>
+      Effect.fail(
+        new ConnectorError({
+          cause: 'credential_invalid',
+          message: 'Google connector requires an OAuth or bearer token credential',
+          connectorId: integration.connectorId,
+          slotId: slot.id
+        })
+      )
+
+    return yield* Match.value(credential).pipe(
+      Match.tag('OAuthCredential', current => Effect.succeed(current.accessToken)),
+      Match.tag('BearerTokenCredential', current => Effect.succeed(current.token)),
+      Match.tag('ApiKeyCredential', 'UsernamePasswordCredential', invalidCredential),
+      Match.exhaustive
+    )
   })
 
 const decodeJsonObject = (body: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(body).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(body).pipe(
     Effect.result,
     Effect.map(result => {
       if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+
       return result.success
     })
   )
@@ -48,14 +50,19 @@ const jsonMessageField = (body: string, keys: ReadonlyArray<string>) =>
   decodeJsonObject(body).pipe(
     Effect.map(parsed => {
       if (parsed === undefined) return undefined
+
       for (const key of keys) {
         const value = parsed[key]
-        if (typeof value === 'string' && value.trim() !== '') return value
+
+        if (Predicate.isString(value) && value.trim() !== '') return value
       }
+
       const error = parsed.error
+
       if (!isJsonObject(error)) return undefined
       const message = error.message
-      return typeof message === 'string' && message.trim() !== '' ? message : undefined
+
+      return Predicate.isString(message) && message.trim() !== '' ? message : undefined
     })
   )
 
@@ -69,11 +76,14 @@ const googleErrorReasons = (body: string) =>
     Effect.map(parsed => {
       if (parsed === undefined) return []
       const error = parsed.error
+
       if (!isJsonObject(error) || !Array.isArray(error.errors)) return []
+
       return error.errors.flatMap(item => {
         if (!isJsonObject(item)) return []
         const reason = item.reason
-        return typeof reason === 'string' ? [reason] : []
+
+        return Predicate.isString(reason) ? [reason] : []
       })
     })
   )
@@ -106,9 +116,19 @@ const retryAfterMs = (headers: Readonly<Record<string, string>> | undefined) => 
   const retryAfter = Object.entries(headers ?? {}).find(
     ([name]) => name.toLowerCase() === 'retry-after'
   )?.[1]
+
   if (retryAfter === undefined) return undefined
   const seconds = Number(retryAfter)
+
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined
+}
+
+type GoogleProviderFailureFields = {
+  readonly code: string
+  readonly message: string
+  readonly status: number
+  readonly underlying: string
+  retryAfterMs?: number
 }
 
 export const providerFailureFromResponse = (input: {
@@ -122,14 +142,24 @@ export const providerFailureFromResponse = (input: {
     const message = yield* providerMessage(input.message, input.body)
     const reasons = yield* googleErrorReasons(input.body)
     const retry = retryAfterMs(input.headers)
+
     return ActionResult.failure(
-      new ProviderFailure({
-        code: providerCode(input.code, input.status, reasons),
-        message,
-        status: input.status,
-        underlying: input.body,
-        ...(retry === undefined ? {} : { retryAfterMs: retry })
-      })
+      new ProviderFailure(
+        (() => {
+          const fields: GoogleProviderFailureFields = {
+            code: providerCode(input.code, input.status, reasons),
+            message,
+            status: input.status,
+            underlying: input.body
+          }
+
+          if (retry !== undefined) {
+            fields.retryAfterMs = retry
+          }
+
+          return fields
+        })()
+      )
     )
   })
 

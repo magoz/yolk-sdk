@@ -1,11 +1,21 @@
 import { Effect, Layer } from 'effect'
+import type { ConfigError } from 'effect/Config'
+import type { SqlError } from 'effect/unstable/sql/SqlError'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ModelVisibleToolError, modelVisibleToolError } from '@yolk-sdk/agent/tools'
+import { KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
 import { ensureUserKnowledgeCollection } from '@/lib/core/storage/ensure-user-knowledge-collection'
-import type { NotFoundError } from '@/lib/core/errors'
+import type { NotFoundError, PersistenceError } from '@/lib/core/errors'
 import { getStorageObject } from '@/lib/core/storage/get-storage-object'
 import { getUserStorage } from '@/lib/core/storage/get-user-storage'
 import { Db } from '@/lib/services/db/live-layer'
+import type {
+  AppKnowledgeCollectionNotFoundError,
+  AppKnowledgeEmbedderError,
+  AppKnowledgeSearchError,
+  AppKnowledgeSummarizerError
+} from '@/lib/services/knowledge-search/errors'
 import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { searchAppKnowledge } from '@/lib/services/knowledge-search/search-app-knowledge'
 import {
@@ -25,16 +35,27 @@ const storageSourceName = (source: {
   readonly id: string
 }) => source.filename ?? source.url ?? source.id
 
-const unknownToMessage = (error: unknown) =>
+type StorageToolExecutionFailure =
+  | ModelVisibleToolError
+  | EffectDrizzleQueryError
+  | ConfigError
+  | SqlError
+  | PersistenceError
+  | AppKnowledgeSearchError
+  | AppKnowledgeCollectionNotFoundError
+  | AppKnowledgeEmbedderError
+  | AppKnowledgeSummarizerError
+
+const executionFailureMessage = (error: StorageToolExecutionFailure) =>
   error instanceof Error ? error.message : String(error)
 
 const notFoundToolError = (tool: string, error: NotFoundError) =>
   modelVisibleToolError({ tool, message: error.message, reason: 'not_found' })
 
-const fatalToolError = (tool: string, error: unknown) =>
+const fatalToolError = (tool: string, error: StorageToolExecutionFailure) =>
   error instanceof ToolError || error instanceof ModelVisibleToolError
     ? error
-    : new ToolError({ tool, message: unknownToMessage(error), cause: 'execution' })
+    : new ToolError({ tool, message: executionFailureMessage(error), cause: 'execution' })
 
 const truncateText = (input: { readonly text: string; readonly maxChars: number }) => ({
   text: input.text.slice(0, input.maxChars),
@@ -54,7 +75,7 @@ const searchStorageForAgent = (input: {
 
     return yield* searchAppKnowledge({
       userId: input.userId,
-      scope: { _tag: 'KnowledgeScope', id: collection.id },
+      scope: KnowledgeSearchScope.make({ id: collection.id }),
       query: input.query,
       options: {
         limit: input.limit,
@@ -70,18 +91,16 @@ const searchStorageForAgent = (input: {
 const listStorageSourcesForAgent = (input: { readonly userId: string }) =>
   getUserStorage({ userId: input.userId }).pipe(
     Effect.map(rows =>
-      rows.map(
-        (row): StorageSourceSummary => ({
-          id: row.object.id,
-          name: storageSourceName(row.object),
-          sourceType: row.object.sourceType,
-          status: row.document?.status,
-          summary: row.document?.summary ?? undefined,
-          chunkCount: row.document?.chunkCount,
-          tokenCount: row.document?.tokenCount,
-          createdAt: row.object.createdAt.toISOString()
-        })
-      )
+      rows.map((row): StorageSourceSummary => ({
+        id: row.object.id,
+        name: storageSourceName(row.object),
+        sourceType: row.object.sourceType,
+        status: row.document?.status,
+        summary: row.document?.summary ?? undefined,
+        chunkCount: row.document?.chunkCount,
+        tokenCount: row.document?.tokenCount,
+        createdAt: row.object.createdAt.toISOString()
+      }))
     ),
     Effect.provide(Db.layer),
     Effect.mapError(error => fatalToolError('list_storage_sources', error))

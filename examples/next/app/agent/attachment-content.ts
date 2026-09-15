@@ -1,4 +1,4 @@
-import { Array as Arr } from 'effect'
+import { Array as Arr, Data, Predicate } from 'effect'
 import {
   DocumentPart,
   ImagePart,
@@ -6,42 +6,61 @@ import {
   inlineBase64Source,
   type Content
 } from '@yolk-sdk/agent/protocol'
-import type {
-  AgentComposerFailedAttachment,
-  AgentComposerReadyDocumentAttachment,
-  AgentComposerReadyImageAttachment
-} from './agent-composer'
 
-export type ReadyImageAttachment = AgentComposerReadyImageAttachment & {
+export type ReadyImageAttachment = {
+  readonly _tag: 'Ready'
+  readonly kind: 'image'
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
+  readonly previewUrl: string
   readonly data: string
 }
 
-export type ReadyDocumentAttachment = AgentComposerReadyDocumentAttachment & {
+export type ReadyDocumentAttachment = {
+  readonly _tag: 'Ready'
+  readonly kind: 'document'
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
   readonly data: string
 }
 
-export type ReadyAttachment = ReadyImageAttachment | ReadyDocumentAttachment
-
-export type FailedAttachment = AgentComposerFailedAttachment & {
+export type FailedAttachment = {
+  readonly _tag: 'Failed'
+  readonly kind: 'image' | 'document'
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
+  readonly reason: string
   readonly file: File
 }
+
+export const ReadyImageAttachment = Data.taggedEnum<ReadyImageAttachment>().Ready
+
+export const ReadyDocumentAttachment = Data.taggedEnum<ReadyDocumentAttachment>().Ready
+
+export const FailedAttachment = Data.taggedEnum<FailedAttachment>().Failed
+
+export type ReadyAttachment = ReadyImageAttachment | ReadyDocumentAttachment
 
 export type AgentAttachment = ReadyAttachment | FailedAttachment
 
 export const isReadyAttachment = (attachment: AgentAttachment): attachment is ReadyAttachment =>
-  attachment._tag === 'Ready'
+  Predicate.isTagged(attachment, 'Ready')
 
 export const isReadyImageAttachment = (
   attachment: AgentAttachment
-): attachment is ReadyImageAttachment => attachment._tag === 'Ready' && attachment.kind === 'image'
+): attachment is ReadyImageAttachment =>
+  Predicate.isTagged(attachment, 'Ready') && attachment.kind === 'image'
 
 export const isReadyDocumentAttachment = (
   attachment: AgentAttachment
 ): attachment is ReadyDocumentAttachment =>
-  attachment._tag === 'Ready' && attachment.kind === 'document'
+  Predicate.isTagged(attachment, 'Ready') && attachment.kind === 'document'
 
 export const isFailedAttachment = (attachment: AgentAttachment): attachment is FailedAttachment =>
-  attachment._tag === 'Failed'
+  Predicate.isTagged(attachment, 'Failed')
 
 export const contentFromInput = (
   input: string,

@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Ref, Result, Stream } from 'effect'
+import { Effect, Layer, Match, Option, Predicate, Ref, Result, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -97,7 +97,7 @@ type AnthropicToolUseBlock = {
   readonly type: 'tool_use'
   readonly id: string
   readonly name: string
-  readonly input: unknown
+  readonly input: Schema.Json
 }
 
 type AnthropicToolResultContentBlock =
@@ -117,23 +117,24 @@ type AnthropicUserBlock =
   | AnthropicImageBlock
   | AnthropicDocumentBlock
   | AnthropicToolResultBlock
+
 type AnthropicAssistantBlock = AnthropicTextBlock | AnthropicToolUseBlock
 
 type AnthropicMessage =
   | { readonly role: 'user'; readonly content: string | ReadonlyArray<AnthropicUserBlock> }
   | { readonly role: 'assistant'; readonly content: ReadonlyArray<AnthropicAssistantBlock> }
 
-type JsonObject = Readonly<Record<string, unknown>>
 type TopLevelJsonSchemaCombinatorKey = 'anyOf' | 'oneOf' | 'allOf'
+
 type TopLevelJsonSchemaCombinator = {
   readonly key: TopLevelJsonSchemaCombinatorKey
-  readonly items: ReadonlyArray<unknown>
+  readonly items: ReadonlyArray<Schema.Json>
 }
 
 type AnthropicTool = {
   readonly name: string
   readonly description: string
-  readonly input_schema: unknown
+  readonly input_schema: Schema.Json
 }
 
 type AnthropicRequestBody = {
@@ -155,13 +156,21 @@ type AnthropicToolBlockState = {
 }
 
 const anthropicClaudeSystemIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
+
 const anthropicClaudeBillingPrefix = 'x-anthropic-billing-header:'
+
 const anthropicClaudeToolPrefix = 'mcp_'
+
 const anthropicClaudeVersion = '2023-06-01'
+
 const anthropicClaudeCchSalt = '59cf53e54c78'
+
 const anthropicClaudeCchPositions: ReadonlyArray<number> = [4, 7, 20]
+
 const anthropicClaudeEffortBeta = 'effort-2025-11-24'
+
 const anthropicClaudeInterleavedThinkingBeta = 'interleaved-thinking-2025-05-14'
+
 const anthropicClaudeRequiredBetas: ReadonlyArray<string> = [
   'claude-code-20250219',
   'oauth-2025-04-20',
@@ -170,6 +179,7 @@ const anthropicClaudeRequiredBetas: ReadonlyArray<string> = [
   'context-management-2025-06-27',
   'advisor-tool-2026-03-01'
 ]
+
 const anthropicClaudeSystemTextReplacements: ReadonlyArray<{
   readonly match: string
   readonly replacement: string
@@ -183,6 +193,7 @@ const anthropicClaudeSystemTextReplacements: ReadonlyArray<{
     replacement: 'Environment context you are running in:'
   }
 ]
+
 const anthropicClaudeStainlessPackageVersion = '0.81.0'
 
 // Claude subscription OAuth is fingerprinted against Claude Code tool names.
@@ -204,6 +215,7 @@ const unprefixClaudeToolName = (name: string) => {
 }
 
 const anthropicClaudeMessagesUrl = 'https://api.anthropic.com/v1/messages?beta=true'
+
 const anthropicClaudeIdentitySystemBlock: AnthropicSystemBlock = {
   type: 'text',
   text: anthropicClaudeSystemIdentity
@@ -213,7 +225,7 @@ const randomHex = (byteLength: number) => {
   const crypto = globalThis.crypto
   const bytes = new Uint8Array(byteLength)
 
-  if (crypto !== undefined && typeof crypto.getRandomValues === 'function') {
+  if (crypto !== undefined && Predicate.isFunction(crypto.getRandomValues)) {
     crypto.getRandomValues(bytes)
   }
 
@@ -223,7 +235,7 @@ const randomHex = (byteLength: number) => {
 const makeAnthropicClaudeRequestId = () => {
   const crypto = globalThis.crypto
 
-  if (crypto !== undefined && typeof crypto.randomUUID === 'function') {
+  if (crypto !== undefined && Predicate.isFunction(crypto.randomUUID)) {
     return crypto.randomUUID()
   }
 
@@ -253,7 +265,7 @@ const sha256Hex = (value: string): Effect.Effect<string, LLMError> => {
     catch: error =>
       new LLMError({
         cause: 'provider_error',
-        message: `Could not compute Anthropic Claude OAuth billing header: ${unknownToMessage(error)}`,
+        message: `Could not compute Anthropic Claude OAuth billing header: ${error instanceof Error ? error.message : String(error)}`,
         retryable: false
       })
   })
@@ -276,7 +288,7 @@ const firstUserMessageText = (messages: ReadonlyArray<AnthropicMessage>) => {
       continue
     }
 
-    if (typeof message.content === 'string') {
+    if (Predicate.isString(message.content)) {
       return message.content
     }
 
@@ -299,16 +311,14 @@ const makeAnthropicClaudeBillingSystemBlock = (
     cch: computeAnthropicClaudeCch(text),
     suffix: computeAnthropicClaudeVersionSuffix(text)
   }).pipe(
-    Effect.map(
-      ({ cch, suffix }): AnthropicSystemBlock => ({
-        type: 'text',
-        text:
-          `${anthropicClaudeBillingPrefix} ` +
-          `cc_version=${anthropicClaudeCodeVersion}.${suffix}; ` +
-          `cc_entrypoint=${anthropicClaudeCodeEntrypoint}; ` +
-          `cch=${cch};`
-      })
-    )
+    Effect.map(({ cch, suffix }): AnthropicSystemBlock => ({
+      type: 'text',
+      text:
+        `${anthropicClaudeBillingPrefix} ` +
+        `cc_version=${anthropicClaudeCodeVersion}.${suffix}; ` +
+        `cc_entrypoint=${anthropicClaudeCodeEntrypoint}; ` +
+        `cch=${cch};`
+    }))
   )
 }
 
@@ -324,6 +334,7 @@ const sanitizeAnthropicClaudeSystemText = (text: string) => {
 
 const anthropicClaudeBetaHeader = (model: string) => {
   const lowerModel = model.toLowerCase()
+
   const baseBetas = lowerModel.includes('haiku')
     ? anthropicClaudeRequiredBetas.filter(beta => beta !== anthropicClaudeInterleavedThinkingBeta)
     : anthropicClaudeRequiredBetas
@@ -380,7 +391,7 @@ const prependSystemPromptToFirstUserMessage = (
 
     relocated = true
 
-    if (typeof message.content === 'string') {
+    if (Predicate.isString(message.content)) {
       return { ...message, content: `${sanitizedSystemPrompt}\n\n${message.content}` }
     }
 
@@ -411,7 +422,7 @@ class AnthropicToolUseResponseBlock extends Schema.Class<AnthropicToolUseRespons
   type: Schema.Literal('tool_use'),
   id: Schema.String,
   name: Schema.String,
-  input: Schema.Unknown
+  input: Schema.Json
 }) {}
 
 const AnthropicContentResponseBlock = Schema.Union([
@@ -446,19 +457,21 @@ class AnthropicMessageResponse extends Schema.Class<AnthropicMessageResponse>(
   usage: Schema.optional(AnthropicUsageResponse)
 }) {}
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const JsonFromJsonString = Schema.fromJsonString(Schema.Json)
 
-const encodeJsonString = (value: unknown, message: string) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
-    Effect.mapError(
-      error =>
-        new LLMError({
-          cause: 'provider_error',
-          message: `${message}: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    )
+const schemaErrorMessage = (error: Schema.SchemaError) => String(error)
+
+const schemaErrorToLlmError =
+  (cause: LLMError['cause'], message: string) => (error: Schema.SchemaError) =>
+    new LLMError({
+      cause,
+      message: `${message}: ${schemaErrorMessage(error)}`,
+      retryable: false
+    })
+
+const encodeJsonString = (value: Schema.Json, message: string) =>
+  Schema.encodeEffect(JsonFromJsonString)(value).pipe(
+    Effect.mapError(schemaErrorToLlmError('provider_error', message))
   )
 
 const unsupportedContentError = (contentType: string) =>
@@ -470,57 +483,59 @@ const unsupportedContentError = (contentType: string) =>
 
 const imageToAnthropicBlock = (
   part: Extract<ContentPart, { readonly _tag: 'Image' }>
-): Effect.Effect<AnthropicImageBlock, LLMError> => {
-  switch (part.source._tag) {
-    case 'InlineBase64':
-      return Effect.succeed({
+): Effect.Effect<AnthropicImageBlock, LLMError> =>
+  Match.value(part.source).pipe(
+    Match.tag('InlineBase64', (source): Effect.Effect<AnthropicImageBlock, LLMError> =>
+      Effect.succeed({
         type: 'image',
         source: {
           type: 'base64',
           media_type: part.mimeType,
-          data: part.source.data
+          data: source.data
         }
       })
-    case 'Url':
-      return Effect.succeed({
+    ),
+    Match.tag('Url', (source): Effect.Effect<AnthropicImageBlock, LLMError> =>
+      Effect.succeed({
         type: 'image',
         source: {
           type: 'url',
-          url: part.source.url
+          url: source.url
         }
       })
-    case 'Ref':
-      return Effect.fail(unsupportedContentError('Unresolved image source'))
-  }
-}
+    ),
+    Match.tag('Ref', () => Effect.fail(unsupportedContentError('Unresolved image source'))),
+    Match.exhaustive
+  )
 
 const pdfDocumentToAnthropicBlock = (
   part: Extract<ContentPart, { readonly _tag: 'Document' }>
-): Effect.Effect<AnthropicDocumentBlock, LLMError> => {
-  switch (part.source._tag) {
-    case 'InlineBase64':
-      return Effect.succeed({
+): Effect.Effect<AnthropicDocumentBlock, LLMError> =>
+  Match.value(part.source).pipe(
+    Match.tag('InlineBase64', (source): Effect.Effect<AnthropicDocumentBlock, LLMError> =>
+      Effect.succeed({
         type: 'document',
         source: {
           type: 'base64',
           media_type: 'application/pdf',
-          data: part.source.data
+          data: source.data
         },
         title: part.title ?? part.filename
       })
-    case 'Url':
-      return Effect.succeed({
+    ),
+    Match.tag('Url', (source): Effect.Effect<AnthropicDocumentBlock, LLMError> =>
+      Effect.succeed({
         type: 'document',
         source: {
           type: 'url',
-          url: part.source.url
+          url: source.url
         },
         title: part.title ?? part.filename
       })
-    case 'Ref':
-      return Effect.fail(unsupportedContentError('Unresolved document source'))
-  }
-}
+    ),
+    Match.tag('Ref', () => Effect.fail(unsupportedContentError('Unresolved document source'))),
+    Match.exhaustive
+  )
 
 const textDocumentToAnthropicBlock = (part: Extract<ContentPart, { readonly _tag: 'Document' }>) =>
   attachmentSourceText(part.source).pipe(
@@ -542,62 +557,64 @@ const textDocumentToAnthropicBlock = (part: Extract<ContentPart, { readonly _tag
 
 const contentPartToAnthropicBlock = (
   part: ContentPart
-): Effect.Effect<AnthropicToolResultContentBlock, LLMError> => {
-  switch (part._tag) {
-    case 'Text':
-      return Effect.succeed({ type: 'text', text: part.text })
-    case 'Image':
-      return imageToAnthropicBlock(part)
-    case 'Document':
-      return isTextDocumentMimeType(part.mimeType)
-        ? textDocumentToAnthropicBlock(part)
-        : part.mimeType === 'application/pdf'
-          ? pdfDocumentToAnthropicBlock(part)
-          : Effect.fail(unsupportedContentError(`Document ${part.mimeType}`))
-    case 'Audio':
-      return Effect.fail(unsupportedContentError('Audio'))
-  }
-}
+): Effect.Effect<AnthropicToolResultContentBlock, LLMError> =>
+  Match.value(part).pipe(
+    Match.tag('Text', (current): Effect.Effect<AnthropicToolResultContentBlock, LLMError> =>
+      Effect.succeed({ type: 'text', text: current.text })
+    ),
+    Match.tag('Image', current => imageToAnthropicBlock(current)),
+    Match.tag('Document', current =>
+      isTextDocumentMimeType(current.mimeType)
+        ? textDocumentToAnthropicBlock(current)
+        : current.mimeType === 'application/pdf'
+          ? pdfDocumentToAnthropicBlock(current)
+          : Effect.fail(unsupportedContentError(`Document ${current.mimeType}`))
+    ),
+    Match.tag('Audio', () => Effect.fail(unsupportedContentError('Audio'))),
+    Match.exhaustive
+  )
 
 const contentToAnthropicContent = (
   content: Content
 ): Effect.Effect<string | ReadonlyArray<AnthropicToolResultContentBlock>, LLMError> =>
-  typeof content === 'string'
+  Predicate.isString(content)
     ? Effect.succeed(content)
     : Effect.forEach(content, contentPartToAnthropicBlock)
 
-const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<string, LLMError> => {
-  switch (part._tag) {
-    case 'Text':
-      return Effect.succeed(part.text)
-    case 'Image':
-      return Effect.fail(unsupportedContentError(`${owner} image`))
-    case 'Document':
-      return Effect.fail(unsupportedContentError(`${owner} document`))
-    case 'Audio':
-      return Effect.fail(unsupportedContentError(`${owner} audio`))
-  }
-}
+const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<string, LLMError> =>
+  Match.value(part).pipe(
+    Match.tag('Text', current => Effect.succeed(current.text)),
+    Match.tag('Image', () => Effect.fail(unsupportedContentError(`${owner} image`))),
+    Match.tag('Document', () => Effect.fail(unsupportedContentError(`${owner} document`))),
+    Match.tag('Audio', () => Effect.fail(unsupportedContentError(`${owner} audio`))),
+    Match.exhaustive
+  )
 
 const contentToText = (content: Content, owner: string): Effect.Effect<string, LLMError> =>
-  typeof content === 'string'
+  Predicate.isString(content)
     ? Effect.succeed(content)
     : Effect.forEach(content, part => contentPartToText(part, owner)).pipe(
         Effect.map(textParts => textParts.join('\n'))
       )
 
-const toolCallToAnthropicBlock = (call: ToolCall): AnthropicToolUseBlock => ({
-  type: 'tool_use',
-  id: call.id,
-  name: prefixClaudeToolName(call.name),
-  input: call.params
-})
+const toolCallToAnthropicBlock = (call: ToolCall): Effect.Effect<AnthropicToolUseBlock, LLMError> =>
+  Schema.decodeUnknownEffect(Schema.Json)(call.params).pipe(
+    Effect.mapError(
+      schemaErrorToLlmError('provider_error', 'Invalid Anthropic Claude tool arguments JSON')
+    ),
+    Effect.map((input): AnthropicToolUseBlock => ({
+      type: 'tool_use',
+      id: call.id,
+      name: prefixClaudeToolName(call.name),
+      input
+    }))
+  )
 
-const isJsonObject = (value: unknown): value is JsonObject =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
+  value !== undefined && Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
-const jsonObjectField = (value: JsonObject, key: string) =>
-  Object.getOwnPropertyDescriptor(value, key)?.value
+const jsonObjectField = (value: Schema.JsonObject, key: string): Schema.Json | undefined =>
+  Object.hasOwn(value, key) ? value[key] : undefined
 
 // Claude subscription OAuth validates tool schemas more narrowly than the regular
 // Anthropic API: combinators and tuple-only prefixItems can be rejected even when
@@ -618,7 +635,7 @@ const isTopLevelJsonSchemaCombinatorKey = (key: string): key is TopLevelJsonSche
   key === 'anyOf' || key === 'oneOf' || key === 'allOf'
 
 const topLevelJsonSchemaCombinator = (
-  schema: JsonObject
+  schema: Schema.JsonObject
 ): TopLevelJsonSchemaCombinator | undefined => {
   for (const key of topLevelJsonSchemaCombinatorKeys) {
     const value = jsonObjectField(schema, key)
@@ -631,12 +648,12 @@ const topLevelJsonSchemaCombinator = (
   return undefined
 }
 
-const withoutTopLevelJsonSchemaCombinators = (schema: JsonObject): JsonObject =>
+const withoutTopLevelJsonSchemaCombinators = (schema: Schema.JsonObject): Schema.JsonObject =>
   Object.fromEntries(
     Object.entries(schema).filter(([key]) => !isTopLevelJsonSchemaCombinatorKey(key))
   )
 
-const withoutJsonSchemaCombinatorsAndTupleHints = (schema: JsonObject): JsonObject =>
+const withoutJsonSchemaCombinatorsAndTupleHints = (schema: Schema.JsonObject): Schema.JsonObject =>
   Object.fromEntries(
     Object.entries(schema).filter(
       ([key]) =>
@@ -649,27 +666,27 @@ const withoutJsonSchemaCombinatorsAndTupleHints = (schema: JsonObject): JsonObje
     )
   )
 
-const jsonSchemaMap = (schema: JsonObject, key: string) => {
+const jsonSchemaMap = (schema: Schema.JsonObject, key: string) => {
   const value = jsonObjectField(schema, key)
 
   return isJsonObject(value) ? value : {}
 }
 
-const jsonSchemaProperties = (schema: JsonObject) => jsonSchemaMap(schema, 'properties')
+const jsonSchemaProperties = (schema: Schema.JsonObject) => jsonSchemaMap(schema, 'properties')
 
-const jsonSchemaDefinitions = (schema: JsonObject) => {
+const jsonSchemaDefinitions = (schema: Schema.JsonObject) => {
   const definitions = jsonObjectField(schema, '$defs')
 
   return isJsonObject(definitions) ? definitions : {}
 }
 
-const jsonSchemaRequired = (schema: JsonObject) => {
+const jsonSchemaRequired = (schema: Schema.JsonObject) => {
   const required = jsonObjectField(schema, 'required')
 
-  return Array.isArray(required) ? required.filter(item => typeof item === 'string') : []
+  return Array.isArray(required) ? required.filter(item => Predicate.isString(item)) : []
 }
 
-const jsonValueKey = (value: unknown) =>
+const jsonValueKey = (value: Schema.Json) =>
   Result.try(() => JSON.stringify(value)).pipe(
     Result.match({
       onFailure: () => undefined,
@@ -677,9 +694,9 @@ const jsonValueKey = (value: unknown) =>
     })
   )
 
-const uniqueUnknownArray = (items: ReadonlyArray<unknown>): ReadonlyArray<unknown> => {
+const uniqueJsonArray = (items: ReadonlyArray<Schema.Json>): ReadonlyArray<Schema.Json> => {
   const seen = new Set<string>()
-  const result: Array<unknown> = []
+  const result: Array<Schema.Json> = []
 
   for (const item of items) {
     const key = jsonValueKey(item)
@@ -695,11 +712,10 @@ const uniqueUnknownArray = (items: ReadonlyArray<unknown>): ReadonlyArray<unknow
   return result
 }
 
-const mergeEnumPropertySchemas = (left: unknown, right: unknown): unknown | undefined => {
-  if (!isJsonObject(left) || !isJsonObject(right)) {
-    return undefined
-  }
-
+const mergeEnumPropertySchemas = (
+  left: Schema.JsonObject,
+  right: Schema.JsonObject
+): Schema.JsonObject | undefined => {
   const leftEnum = jsonObjectField(left, 'enum')
   const rightEnum = jsonObjectField(right, 'enum')
 
@@ -715,26 +731,39 @@ const mergeEnumPropertySchemas = (left: unknown, right: unknown): unknown | unde
   }
 
   const descriptions = [jsonObjectField(left, 'description'), jsonObjectField(right, 'description')]
-  const description = descriptions.find(value => typeof value === 'string')
+  const description = descriptions.find(value => Predicate.isString(value))
 
-  return {
-    ...(leftType === undefined ? {} : { type: leftType }),
-    enum: uniqueUnknownArray([...leftEnum, ...rightEnum]),
-    ...(description === undefined ? {} : { description })
+  type MergedEnumPropertySchemaFields = {
+    type?: Schema.Json
+    enum: ReadonlyArray<Schema.Json>
+    description?: string
   }
+
+  const fields: MergedEnumPropertySchemaFields =
+    leftType === undefined
+      ? { enum: uniqueJsonArray([...leftEnum, ...rightEnum]) }
+      : { type: leftType, enum: uniqueJsonArray([...leftEnum, ...rightEnum]) }
+
+  if (description !== undefined) {
+    fields.description = description
+  }
+
+  return fields
 }
 
-const mergePropertySchemas = (left: unknown, right: unknown): unknown => {
+const mergePropertySchemas = (left: Schema.Json, right: Schema.Json): Schema.Json => {
   const leftKey = jsonValueKey(left)
 
   if (leftKey !== undefined && leftKey === jsonValueKey(right)) {
     return left
   }
 
-  const mergedEnum = mergeEnumPropertySchemas(left, right)
+  if (isJsonObject(left) && isJsonObject(right)) {
+    const mergedEnum = mergeEnumPropertySchemas(left, right)
 
-  if (mergedEnum !== undefined) {
-    return mergedEnum
+    if (mergedEnum !== undefined) {
+      return mergedEnum
+    }
   }
 
   // Anthropic rejects combinators in tool schemas. An unconstrained schema
@@ -743,16 +772,13 @@ const mergePropertySchemas = (left: unknown, right: unknown): unknown => {
   return {}
 }
 
-const mergeJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject => {
-  const merged = new Map<string, unknown>()
+const mergeJsonSchemaObjects = (objects: ReadonlyArray<Schema.JsonObject>): Schema.JsonObject => {
+  const merged = new Map<string, Schema.Json>()
 
   for (const object of objects) {
     for (const [key, value] of Object.entries(object)) {
-      if (merged.has(key)) {
-        merged.set(key, mergePropertySchemas(merged.get(key), value))
-      } else {
-        merged.set(key, value)
-      }
+      const current = merged.get(key)
+      merged.set(key, current === undefined ? value : mergePropertySchemas(current, value))
     }
   }
 
@@ -760,46 +786,66 @@ const mergeJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject 
 }
 
 const mergeUnionJsonSchemaObjects = (
-  objects: ReadonlyArray<JsonObject>,
-  owners?: ReadonlyArray<JsonObject>
-): JsonObject => {
+  objects: ReadonlyArray<Schema.JsonObject>,
+  owners?: ReadonlyArray<Schema.JsonObject>
+): Schema.JsonObject => {
   const keys = new Set(objects.flatMap(object => Object.keys(object)))
 
   return Object.fromEntries(
     Array.from(keys, key => {
       const values = objects.flatMap((object, index) => {
-        if (Object.hasOwn(object, key)) return [jsonObjectField(object, key)]
+        if (Object.hasOwn(object, key)) {
+          const owned = jsonObjectField(object, key)
+
+          return owned === undefined ? [] : [owned]
+        }
 
         const additionalProperties = owners?.[index]
+
         if (additionalProperties === undefined) return []
 
-        const additionalPropertySchema = jsonObjectField(additionalProperties, 'additionalProperties')
+        const additionalPropertySchema = jsonObjectField(
+          additionalProperties,
+          'additionalProperties'
+        )
+
         if (additionalPropertySchema === false) return []
 
         return [isJsonObject(additionalPropertySchema) ? additionalPropertySchema : {}]
       })
+
       const [first, ...rest] = values
 
-      return [key, rest.reduce(mergePropertySchemas, first)]
+      return [key, first === undefined ? {} : rest.reduce(mergePropertySchemas, first)]
     })
   )
 }
 
-const mergeRightBiasedJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject =>
-  Object.assign({}, ...objects)
+const mergeRightBiasedJsonSchemaObjects = (
+  objects: ReadonlyArray<Schema.JsonObject>
+): Schema.JsonObject => Object.assign({}, ...objects)
 
-const mergeAllOfSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject => {
+const mergeAllOfSchemaObjects = (objects: ReadonlyArray<Schema.JsonObject>): Schema.JsonObject => {
   const merged = mergeRightBiasedJsonSchemaObjects(objects)
   const properties = mergeRightBiasedJsonSchemaObjects(objects.map(jsonSchemaProperties))
   const required = mergeJsonSchemaRequired('allOf', objects)
   const definitions = mergeJsonSchemaObjects(objects.map(jsonSchemaDefinitions))
 
-  return {
-    ...merged,
-    ...(Object.keys(properties).length === 0 ? {} : { properties }),
-    ...(required.length === 0 ? {} : { required }),
-    ...(Object.keys(definitions).length === 0 ? {} : { $defs: definitions })
+  const fields = { ...merged }
+
+  if (Object.keys(properties).length !== 0) {
+    fields.properties = properties
   }
+
+  if (required.length !== 0) {
+    fields.required = required
+  }
+
+  if (Object.keys(definitions).length !== 0) {
+    fields.$defs = definitions
+  }
+
+  return fields
 }
 
 // JSON objects are not always schemas. Values under schema-map keywords are
@@ -815,7 +861,7 @@ const jsonSchemaMapKeywords = new Set([
 
 const jsonSchemaDataKeywords = new Set(['const', 'default', 'enum', 'examples'])
 
-const normalizeJsonSchemaObjectFields = (schema: JsonObject): JsonObject => {
+const normalizeJsonSchemaObjectFields = (schema: Schema.JsonObject): Schema.JsonObject => {
   const normalized = Object.fromEntries(
     Object.entries(withoutJsonSchemaCombinatorsAndTupleHints(schema)).map(([key, value]) => {
       if (jsonSchemaDataKeywords.has(key)) return [key, value]
@@ -855,13 +901,13 @@ const normalizeJsonSchemaObjectFields = (schema: JsonObject): JsonObject => {
   return normalized
 }
 
-const jsonSchemaType = (schema: JsonObject) => {
+const jsonSchemaType = (schema: Schema.JsonObject) => {
   const type = jsonObjectField(schema, 'type')
 
-  return typeof type === 'string' ? type : undefined
+  return Predicate.isString(type) ? type : undefined
 }
 
-const firstJsonObject = (items: ReadonlyArray<JsonObject>) => items[0]
+const firstJsonObject = (items: ReadonlyArray<Schema.JsonObject>) => items[0]
 
 const independentCommonVariantKeys = new Set([
   'type',
@@ -884,9 +930,11 @@ const independentCommonVariantKeys = new Set([
   'description'
 ])
 
-const commonVariantFields = (variants: ReadonlyArray<JsonObject>): JsonObject => {
+const commonVariantFields = (variants: ReadonlyArray<Schema.JsonObject>): Schema.JsonObject => {
   const first = firstJsonObject(variants)
+
   if (first === undefined) return {}
+
   if (variants.length === 1) return first
 
   return Object.fromEntries(
@@ -894,12 +942,22 @@ const commonVariantFields = (variants: ReadonlyArray<JsonObject>): JsonObject =>
       if (!independentCommonVariantKeys.has(key)) return false
 
       const valueKey = jsonValueKey(value)
-      return valueKey !== undefined && variants.every(variant => valueKey === jsonValueKey(jsonObjectField(variant, key)))
+
+      return (
+        valueKey !== undefined &&
+        variants.every(variant => {
+          const other = jsonObjectField(variant, key)
+
+          return other !== undefined && valueKey === jsonValueKey(other)
+        })
+      )
     })
   )
 }
 
-const objectVariant = (variants: ReadonlyArray<JsonObject>): JsonObject | undefined => {
+const objectVariant = (
+  variants: ReadonlyArray<Schema.JsonObject>
+): Schema.JsonObject | undefined => {
   if (variants.length === 0 || variants.some(variant => jsonSchemaType(variant) !== 'object')) {
     return undefined
   }
@@ -912,19 +970,32 @@ const objectVariant = (variants: ReadonlyArray<JsonObject>): JsonObject | undefi
 
   const additionalProperties = mergeAdditionalProperties(variants)
 
-  return {
+  type AnthropicObjectVariantSchemaFields = {
+    type: 'object'
+    properties: ReturnType<typeof mergeUnionJsonSchemaObjects>
+    required: ReturnType<typeof mergeJsonSchemaRequired>
+    $defs: ReturnType<typeof mergeJsonSchemaObjects>
+    additionalProperties?: boolean
+  }
+
+  const fields: AnthropicObjectVariantSchemaFields = {
     type: 'object',
     properties: mergeUnionJsonSchemaObjects(variants.map(jsonSchemaProperties), variants),
     required: mergeJsonSchemaRequired('oneOf', variants),
-    $defs: mergeJsonSchemaObjects(variants.map(jsonSchemaDefinitions)),
-    ...(additionalProperties === undefined ? {} : { additionalProperties })
+    $defs: mergeJsonSchemaObjects(variants.map(jsonSchemaDefinitions))
   }
+
+  if (additionalProperties !== undefined) {
+    fields.additionalProperties = additionalProperties
+  }
+
+  return fields
 }
 
 const normalizeJsonSchemaCombinator = (
-  schema: JsonObject,
+  schema: Schema.JsonObject,
   combinator: TopLevelJsonSchemaCombinator
-): JsonObject => {
+): Schema.JsonObject => {
   const base = normalizeJsonSchemaObjectFields(schema)
   const normalizedItems = combinator.items.map(normalizeAnthropicToolSchema)
   const variants = normalizedItems.filter(isJsonObject)
@@ -935,6 +1006,7 @@ const normalizeJsonSchemaCombinator = (
   }
 
   if (normalizedItems.includes(true)) return base
+
   if (first === undefined) return base
 
   const merged = objectVariant(variants) ?? commonVariantFields(variants)
@@ -942,11 +1014,13 @@ const normalizeJsonSchemaCombinator = (
   return mergeAllOfSchemaObjects([merged, base])
 }
 
-function normalizeAnthropicToolSchema(value: unknown): unknown {
+function normalizeAnthropicToolSchema(value: Schema.Json): Schema.Json {
   if (Array.isArray(value)) return value.map(normalizeAnthropicToolSchema)
+
   if (!isJsonObject(value)) return value
 
   const combinator = topLevelJsonSchemaCombinator(value)
+
   if (combinator !== undefined) return normalizeJsonSchemaCombinator(value, combinator)
 
   return normalizeJsonSchemaObjectFields(value)
@@ -954,7 +1028,7 @@ function normalizeAnthropicToolSchema(value: unknown): unknown {
 
 const mergeJsonSchemaRequired = (
   combinatorKey: TopLevelJsonSchemaCombinatorKey,
-  objects: ReadonlyArray<JsonObject>
+  objects: ReadonlyArray<Schema.JsonObject>
 ): ReadonlyArray<string> => {
   const requiredSets = objects.map(jsonSchemaRequired)
 
@@ -971,7 +1045,7 @@ const mergeJsonSchemaRequired = (
   return first.filter(item => requiredSets.every(required => required.includes(item)))
 }
 
-const mergeAdditionalProperties = (objects: ReadonlyArray<JsonObject>) => {
+const mergeAdditionalProperties = (objects: ReadonlyArray<Schema.JsonObject>) => {
   const values = objects.map(object => jsonObjectField(object, 'additionalProperties'))
 
   if (values.every(value => value === false)) {
@@ -988,15 +1062,18 @@ const mergeAdditionalProperties = (objects: ReadonlyArray<JsonObject>) => {
 // Anthropic rejects root combinators. This widens provider-facing guidance only;
 // tool execution still validates calls against the original registry schema.
 const flattenTopLevelCombinatorToolSchema = (
-  schema: JsonObject,
+  schema: Schema.JsonObject,
   combinator: TopLevelJsonSchemaCombinator
-): JsonObject => {
+) => {
   const base = withoutTopLevelJsonSchemaCombinators(schema)
   const objectVariants = combinator.items.filter(isJsonObject)
+
   const hasUnconstrainedUnion =
     combinator.key !== 'allOf' &&
     combinator.items.some(item => item === true || !isJsonObject(item))
+
   const additionalProperties = mergeAdditionalProperties(objectVariants)
+
   const flattened = {
     ...base,
     type: 'object',
@@ -1005,9 +1082,7 @@ const flattenTopLevelCombinatorToolSchema = (
       : combinator.key === 'allOf'
         ? mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties))
         : mergeUnionJsonSchemaObjects(objectVariants.map(jsonSchemaProperties), objectVariants),
-    required: hasUnconstrainedUnion
-      ? []
-      : mergeJsonSchemaRequired(combinator.key, objectVariants),
+    required: hasUnconstrainedUnion ? [] : mergeJsonSchemaRequired(combinator.key, objectVariants),
     $defs: mergeJsonSchemaObjects([
       jsonSchemaDefinitions(schema),
       ...objectVariants.map(jsonSchemaDefinitions)
@@ -1021,7 +1096,7 @@ const flattenTopLevelCombinatorToolSchema = (
   return { ...flattened, additionalProperties }
 }
 
-const anthropicToolInputSchema = (schema: unknown): unknown => {
+const anthropicToolInputSchema = (schema: Schema.Json): Schema.Json => {
   if (!isJsonObject(schema)) {
     return schema === true
       ? { type: 'object', properties: {} }
@@ -1047,47 +1122,61 @@ const anthropicToolInputSchema = (schema: unknown): unknown => {
 }
 
 const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessage, LLMError> =>
-  Effect.gen(function* () {
-    switch (message._tag) {
-      case 'User':
-        return {
-          role: 'user',
-          content: yield* contentToAnthropicContent(
-            prependMessageContextToContent(message.content, messageContextText(message))
+  Match.value(message).pipe(
+    Match.withReturnType<Effect.Effect<AnthropicMessage, LLMError>>(),
+    Match.tag('User', current =>
+      contentToAnthropicContent(
+        prependMessageContextToContent(current.content, messageContextText(current))
+      ).pipe(Effect.map(content => ({ role: 'user' as const, content })))
+    ),
+    Match.tag('Assistant', current =>
+      contentToText(
+        prependMessageContextToContent(assistantContent(current), messageContextText(current)),
+        'Assistant'
+      ).pipe(
+        Effect.flatMap(text =>
+          Effect.forEach(assistantHostToolCalls(current), toolCallToAnthropicBlock).pipe(
+            Effect.map(toolBlocks => {
+              const textBlocks: ReadonlyArray<AnthropicTextBlock> =
+                text.length === 0 ? [] : [{ type: 'text', text }]
+
+              return { role: 'assistant' as const, content: [...textBlocks, ...toolBlocks] }
+            })
           )
-        }
-      case 'Assistant': {
-        const text = yield* contentToText(
-          prependMessageContextToContent(assistantContent(message), messageContextText(message)),
-          'Assistant'
         )
-        const textBlocks: ReadonlyArray<AnthropicTextBlock> =
-          text.length === 0 ? [] : [{ type: 'text', text }]
-        const toolBlocks = assistantHostToolCalls(message).map(toolCallToAnthropicBlock)
-        return { role: 'assistant', content: [...textBlocks, ...toolBlocks] }
-      }
-      case 'ToolResult':
-        return {
-          role: 'user',
+      )
+    ),
+    Match.tag('ToolResult', current =>
+      contentToAnthropicContent(
+        prependMessageContextToContent(current.content, messageContextText(current))
+      ).pipe(
+        Effect.map(content => ({
+          role: 'user' as const,
           content: [
             {
-              type: 'tool_result',
-              tool_use_id: message.toolCallId,
-              content: yield* contentToAnthropicContent(
-                prependMessageContextToContent(message.content, messageContextText(message))
-              ),
-              is_error: message.isError
+              type: 'tool_result' as const,
+              tool_use_id: current.toolCallId,
+              content,
+              is_error: current.isError
             }
           ]
-        }
-    }
-  })
+        }))
+      )
+    ),
+    Match.exhaustive
+  )
 
-const toAnthropicTool = (tool: ToolDef): AnthropicTool => ({
-  name: prefixClaudeToolName(tool.name),
-  description: tool.description,
-  input_schema: anthropicToolInputSchema(tool.parameters)
-})
+const toAnthropicTool = (tool: ToolDef): Effect.Effect<AnthropicTool, LLMError> =>
+  Schema.decodeUnknownEffect(Schema.Json)(tool.parameters).pipe(
+    Effect.mapError(
+      schemaErrorToLlmError('provider_error', 'Invalid Anthropic Claude tool parameters JSON')
+    ),
+    Effect.map(parameters => ({
+      name: prefixClaudeToolName(tool.name),
+      description: tool.description,
+      input_schema: anthropicToolInputSchema(parameters)
+    }))
+  )
 
 export const toAnthropicClaudeRequestBody = (
   request: LLMRequest,
@@ -1098,17 +1187,31 @@ export const toAnthropicClaudeRequestBody = (
     const rawMessages = yield* Effect.forEach(request.messages, toAnthropicMessage)
     const billingSystemBlock = yield* makeAnthropicClaudeBillingSystemBlock(rawMessages)
     const messages = prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)
+
     const outputConfig =
       request.reasoningEffort === undefined || request.reasoningEffort === 'minimal'
         ? undefined
         : { effort: request.reasoningEffort }
-    const baseBody = {
+
+    type AnthropicBaseRequestBodyFields = {
+      model: string
+      system: ReadonlyArray<AnthropicSystemBlock>
+      messages: ReadonlyArray<AnthropicMessage>
+      max_tokens: number
+      output_config?: AnthropicRequestBody['output_config']
+    }
+
+    const baseBody: AnthropicBaseRequestBodyFields = {
       model: request.model,
       system: [billingSystemBlock, anthropicClaudeIdentitySystemBlock],
       messages,
-      max_tokens: config.maxTokens,
-      ...(outputConfig === undefined ? {} : { output_config: outputConfig })
+      max_tokens: config.maxTokens
     }
+
+    if (outputConfig !== undefined) {
+      baseBody.output_config = outputConfig
+    }
+
     const body: AnthropicRequestBody =
       config.stream === true ? { ...baseBody, stream: true } : baseBody
 
@@ -1118,7 +1221,7 @@ export const toAnthropicClaudeRequestBody = (
 
     return {
       ...body,
-      tools: request.tools.map(toAnthropicTool)
+      tools: yield* Effect.forEach(request.tools, toAnthropicTool)
     }
   })
 
@@ -1138,31 +1241,27 @@ const toHttpClientLlmError =
     })
 
 const decodeJsonString = (raw: string, message: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
-    Effect.mapError(
-      error =>
-        new LLMError({
-          cause: 'invalid_response',
-          message: `${message}: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    )
+  Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
+    Effect.mapError(schemaErrorToLlmError('invalid_response', message))
   )
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null
+const jsonField = (value: Schema.Json | undefined, key: string): Schema.Json | undefined =>
+  value !== undefined && isJsonObject(value) ? jsonObjectField(value, key) : undefined
 
-const field = (value: unknown, key: string) =>
-  isRecord(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined
+const stringField = (value: Schema.Json | undefined, key: string) => {
+  const raw = jsonField(value, key)
 
-const stringField = (value: unknown, key: string) => {
-  const raw = field(value, key)
-  return typeof raw === 'string' ? raw : undefined
+  return Predicate.isString(raw) ? raw : undefined
 }
 
 type AnthropicHttpErrorInfo = {
   readonly message?: string
   readonly providerCode?: string
+}
+
+type AnthropicHttpErrorInfoFields = {
+  message?: string
+  providerCode?: string
 }
 
 const maxAnthropicHttpErrorMessageCharacters = 1_000
@@ -1172,36 +1271,72 @@ const boundedAnthropicHttpErrorMessage = (message: string) =>
     ? message
     : `${message.slice(0, maxAnthropicHttpErrorMessageCharacters)}…`
 
-const decodeAnthropicHttpErrorInfo = (
-  raw: string
-): Effect.Effect<AnthropicHttpErrorInfo> =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
+const decodeAnthropicHttpErrorInfo = (raw: string): Effect.Effect<AnthropicHttpErrorInfo> =>
+  Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
     Effect.map(parsed => {
-      const error = field(parsed, 'error')
+      const error = jsonField(parsed, 'error')
       const message = stringField(error, 'message')
       const providerCode = stringField(error, 'type') ?? stringField(error, 'code')
 
-      return {
-        ...(message === undefined
-          ? {}
-          : { message: boundedAnthropicHttpErrorMessage(message) }),
-        ...(providerCode === undefined ? {} : { providerCode })
+      const fields: AnthropicHttpErrorInfoFields = {}
+
+      if (message !== undefined) {
+        fields.message = boundedAnthropicHttpErrorMessage(message)
       }
+
+      if (providerCode !== undefined) {
+        fields.providerCode = providerCode
+      }
+
+      return fields
     }),
     Effect.catch(() => Effect.succeed({}))
   )
+
+type AnthropicProviderSignalClassifyFields = {
+  provider: string
+  message: string
+  providerCode?: string
+  fallbackKind?: ProviderFailureKind
+}
+
+type AnthropicProviderSignalInputFields = {
+  message: string
+  providerCode?: string
+}
+
+type AnthropicHttpClassifyFields = {
+  provider: string
+  status: number
+  headers: HttpClientResponse.HttpClientResponse['headers']
+  body: string
+  message?: string
+  providerCode?: string
+}
 
 const providerSignalError = (input: {
   readonly message: string
   readonly providerCode?: string
   readonly fallbackKind?: ProviderFailureKind
 }) => {
-  const provider = classifyProviderFailure({
-    provider: anthropicClaudeProvider,
-    message: input.message,
-    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
-    ...(input.fallbackKind === undefined ? {} : { fallbackKind: input.fallbackKind })
-  })
+  const provider = classifyProviderFailure(
+    (() => {
+      const fields: AnthropicProviderSignalClassifyFields = {
+        provider: anthropicClaudeProvider,
+        message: input.message
+      }
+
+      if (input.providerCode !== undefined) {
+        fields.providerCode = input.providerCode
+      }
+
+      if (input.fallbackKind !== undefined) {
+        fields.fallbackKind = input.fallbackKind
+      }
+
+      return fields
+    })()
+  )
 
   return new LLMError({
     cause: providerFailureCause(provider.kind),
@@ -1211,9 +1346,10 @@ const providerSignalError = (input: {
   })
 }
 
-const numberField = (value: unknown, key: string) => {
-  const raw = field(value, key)
-  return typeof raw === 'number' ? raw : undefined
+const numberField = (value: Schema.Json | undefined, key: string) => {
+  const raw = jsonField(value, key)
+
+  return Predicate.isNumber(raw) ? raw : undefined
 }
 
 const sseDataFromBlock = (block: string) =>
@@ -1243,7 +1379,7 @@ const splitCompleteSseBlocks = (buffer: string) => {
   return { completeBlocks: blocks.slice(0, -1), tail }
 }
 
-const parseToolParams = (raw: string) => {
+const parseToolParams = (raw: string): Effect.Effect<Schema.Json, LLMError> => {
   const trimmed = raw.trim()
 
   if (trimmed.length === 0) return Effect.succeed({})
@@ -1328,18 +1464,11 @@ type AnthropicStreamUsageStep = {
   readonly events: ReadonlyArray<LLMEvent>
 }
 
-const usageStepFromUnknown = (
-  usage: unknown,
+const usageStepFromResponse = (
+  usage: AnthropicStreamUsageResponse,
   previous: AnthropicUsageComponents
 ): AnthropicStreamUsageStep => {
-  const parsed = Schema.decodeUnknownOption(AnthropicStreamUsageResponse)(usage)
-
-  if (parsed._tag === 'None') {
-    return { snapshot: previous, events: [] }
-  }
-
-  const value = parsed.value
-  const snapshot = nextAnthropicUsageSnapshot(previous, value)
+  const snapshot = nextAnthropicUsageSnapshot(previous, usage)
   const delta = anthropicUsageDelta(previous, snapshot)
 
   return {
@@ -1349,6 +1478,11 @@ const usageStepFromUnknown = (
       : []
   }
 }
+
+const emptyUsageStep = (previous: AnthropicUsageComponents): AnthropicStreamUsageStep => ({
+  snapshot: previous,
+  events: []
+})
 
 const toLlmEvents = (
   response: AnthropicMessageResponse
@@ -1376,23 +1510,18 @@ const toLlmEvents = (
           )
       }
     })
+
     const stopReason = response.stop_reason === 'tool_use' ? 'tool_use' : 'stop'
+
     const usageEvent =
       response.usage === undefined ? [] : [LLMUsage.make({ usage: toAgentUsage(response.usage) })]
 
     return [...events, LLMDone.make({ stopReason }), ...usageEvent]
   })
 
-const decodeAnthropicMessageResponse = (json: unknown) =>
+const decodeAnthropicMessageResponse = (json: Schema.Json) =>
   Schema.decodeUnknownEffect(AnthropicMessageResponse)(json).pipe(
-    Effect.mapError(
-      error =>
-        new LLMError({
-          cause: 'invalid_response',
-          message: `Invalid Anthropic Claude response: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    )
+    Effect.mapError(schemaErrorToLlmError('invalid_response', 'Invalid Anthropic Claude response'))
   )
 
 const parseAnthropicJsonResponse = (
@@ -1412,6 +1541,13 @@ type AnthropicSseState = {
   readonly hasDone: boolean
   readonly stopReason?: string
   readonly usage: AnthropicUsageComponents
+}
+
+type AnthropicSseStateFields = {
+  hasToolCall: boolean
+  hasDone: boolean
+  stopReason?: string
+  usage: AnthropicUsageComponents
 }
 
 type AnthropicSseStep = {
@@ -1472,19 +1608,28 @@ const anthropicMaxTokensError = () =>
 const makeAnthropicStreamEmitter = () => {
   const toolBlocks = new Map<number, AnthropicToolBlockState>()
 
-  return (state: AnthropicSseState, data: unknown): Effect.Effect<AnthropicSseStep, LLMError> => {
+  return (
+    state: AnthropicSseState,
+    data: Schema.Json
+  ): Effect.Effect<AnthropicSseStep, LLMError> => {
     const type = stringField(data, 'type')
 
     if (type === 'message_start') {
-      const message = field(data, 'message')
-      const step = usageStepFromUnknown(field(message, 'usage'), state.usage)
+      const message = jsonField(data, 'message')
+      const usageInput = jsonField(message, 'usage')
+      const previousUsage = state.usage
+      const parsedUsage = Schema.decodeUnknownOption(AnthropicStreamUsageResponse)(usageInput)
+
+      const step = Predicate.isTagged(parsedUsage, 'None')
+        ? emptyUsageStep(previousUsage)
+        : usageStepFromResponse(parsedUsage.value, previousUsage)
 
       return Effect.succeed({ state: { ...state, usage: step.snapshot }, events: step.events })
     }
 
     if (type === 'content_block_start') {
       const index = numberField(data, 'index')
-      const block = field(data, 'content_block')
+      const block = jsonField(data, 'content_block')
 
       if (index !== undefined && stringField(block, 'type') === 'tool_use') {
         const id = stringField(block, 'id')
@@ -1506,7 +1651,7 @@ const makeAnthropicStreamEmitter = () => {
 
     if (type === 'content_block_delta') {
       const index = numberField(data, 'index')
-      const delta = field(data, 'delta')
+      const delta = jsonField(data, 'delta')
       const deltaType = stringField(delta, 'type')
       const text = stringField(delta, 'text')
       const thinking = stringField(delta, 'thinking')
@@ -1522,6 +1667,7 @@ const makeAnthropicStreamEmitter = () => {
 
       if (index !== undefined && deltaType === 'input_json_delta' && partialJson !== undefined) {
         const current = toolBlocks.get(index)
+
         if (current !== undefined) {
           toolBlocks.set(index, { ...current, partialJson: `${current.partialJson}${partialJson}` })
         }
@@ -1557,16 +1703,30 @@ const makeAnthropicStreamEmitter = () => {
     }
 
     if (type === 'message_delta') {
-      const step = usageStepFromUnknown(field(data, 'usage'), state.usage)
-      const delta = field(data, 'delta')
+      const usageInput = jsonField(data, 'usage')
+      const previousUsage = state.usage
+      const parsedUsage = Schema.decodeUnknownOption(AnthropicStreamUsageResponse)(usageInput)
+
+      const step = Predicate.isTagged(parsedUsage, 'None')
+        ? emptyUsageStep(previousUsage)
+        : usageStepFromResponse(parsedUsage.value, previousUsage)
+
+      const delta = jsonField(data, 'delta')
       const stopReason = stringField(delta, 'stop_reason')
 
       return Effect.succeed({
-        state: {
-          ...state,
-          usage: step.snapshot,
-          ...(stopReason === undefined ? {} : { stopReason })
-        },
+        state: (() => {
+          const nextState: AnthropicSseStateFields = {
+            ...state,
+            usage: step.snapshot
+          }
+
+          if (stopReason !== undefined) {
+            nextState.stopReason = stopReason
+          }
+
+          return nextState
+        })(),
         events: step.events
       })
     }
@@ -1581,14 +1741,23 @@ const makeAnthropicStreamEmitter = () => {
     }
 
     if (type === 'error') {
-      const error = field(data, 'error')
+      const error = jsonField(data, 'error')
       const providerCode = stringField(error, 'type') ?? stringField(error, 'code')
 
       return Effect.fail(
-        providerSignalError({
-          message: stringField(error, 'message') ?? 'Anthropic Claude stream error',
-          ...(providerCode === undefined ? {} : { providerCode })
-        })
+        providerSignalError(
+          (() => {
+            const fields: AnthropicProviderSignalInputFields = {
+              message: stringField(error, 'message') ?? 'Anthropic Claude stream error'
+            }
+
+            if (providerCode !== undefined) {
+              fields.providerCode = providerCode
+            }
+
+            return fields
+          })()
+        )
       )
     }
 
@@ -1710,6 +1879,7 @@ export const streamAnthropicClaudeResponse = (
     Ref.make(initialBodyState).pipe(
       Effect.map(bodyStateRef => {
         const emitData = makeAnthropicStreamEmitter()
+
         const chunks = response.stream.pipe(
           Stream.mapError(
             toHttpClientLlmError('Could not read Anthropic Claude stream', true, 'stream')
@@ -1720,11 +1890,13 @@ export const streamAnthropicClaudeResponse = (
               const state = yield* Ref.get(bodyStateRef)
               const step = yield* processBodyChunk(emitData, state, chunk)
               yield* Ref.set(bodyStateRef, step.bodyState)
+
               return step.events
             })
           ),
           Stream.flatMap(events => Stream.fromIterable(events))
         )
+
         const finalEvents = Stream.fromEffect(
           Ref.get(bodyStateRef).pipe(Effect.flatMap(state => finalizeBodyState(emitData, state)))
         ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
@@ -1742,12 +1914,18 @@ const sendAnthropicClaudeRequest = (
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toAnthropicClaudeRequestBody(request, { ...config, stream: true })
+
     // Replayed transcripts can carry lone surrogates; harden the lowered
     // body so one bad historical string cannot poison every model call.
-    const serializedBody = yield* encodeJsonString(
-      replaceLoneSurrogatesDeep(body),
-      'Could not serialize Anthropic Claude request'
+    const serializedBody = yield* Schema.decodeUnknownEffect(Schema.Json)(
+      replaceLoneSurrogatesDeep(body)
+    ).pipe(
+      Effect.mapError(
+        schemaErrorToLlmError('provider_error', 'Could not serialize Anthropic Claude request')
+      ),
+      Effect.flatMap(json => encodeJsonString(json, 'Could not serialize Anthropic Claude request'))
     )
+
     const httpRequest = HttpClientRequest.post(
       config.messagesUrl ?? anthropicClaudeMessagesUrl
     ).pipe(
@@ -1760,6 +1938,7 @@ const sendAnthropicClaudeRequest = (
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )
+
     const response = yield* client
       .execute(httpRequest)
       .pipe(Effect.mapError(toHttpClientLlmError('Anthropic Claude request failed', true)))
@@ -1775,18 +1954,30 @@ const sendAnthropicClaudeRequest = (
             })
         )
       )
+
       const errorInfo = yield* decodeAnthropicHttpErrorInfo(errorText)
 
-      const provider = classifyProviderFailure({
-        provider: anthropicClaudeProvider,
-        status: response.status,
-        headers: response.headers,
-        body: errorText,
-        ...(errorInfo.message === undefined ? {} : { message: errorInfo.message }),
-        ...(errorInfo.providerCode === undefined
-          ? {}
-          : { providerCode: errorInfo.providerCode })
-      })
+      const provider = classifyProviderFailure(
+        (() => {
+          const fields: AnthropicHttpClassifyFields = {
+            provider: anthropicClaudeProvider,
+            status: response.status,
+            headers: response.headers,
+            body: errorText
+          }
+
+          if (errorInfo.message !== undefined) {
+            fields.message = errorInfo.message
+          }
+
+          if (errorInfo.providerCode !== undefined) {
+            fields.providerCode = errorInfo.providerCode
+          }
+
+          return fields
+        })()
+      )
+
       const message =
         errorInfo.message === undefined
           ? `Anthropic Claude returned ${response.status}`

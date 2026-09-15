@@ -11,10 +11,13 @@ const makeYieldScheduler = (input: {
   shouldYield: fiber => input.shouldYield(fiber),
   makeDispatcher() {
     const tasks: Array<{ task: () => void; priority: number }> = []
+
     const flush = () => {
       const batch = tasks.splice(0).sort((a, b) => a.priority - b.priority)
+
       for (const entry of batch) entry.task()
     }
+
     return {
       scheduleTask(task, priority) {
         tasks.push({ task, priority })
@@ -31,24 +34,30 @@ const probe = (target: number) => {
   let steps = 0
   let ownerId = -1
   let stop = Effect.void
+
   const scheduler = makeYieldScheduler({
     shouldYield(fiber) {
       if (armed && !fired && fiber.id === ownerId && ++steps === target) {
         fired = true
         queueMicrotask(() => Effect.runFork(stop))
+
         return true
       }
+
       return false
     }
   })
+
   const program = Effect.gen(function* () {
     const started = yield* Deferred.make<void>()
     const release = yield* Deferred.make<void>()
     const stopped = yield* Deferred.make<void>()
+
     const observedInbox = Layer.effect(
       Inbox,
       Effect.gen(function* () {
         const inbox = yield* Inbox
+
         return Inbox.of({
           ...inbox,
           endDrain: (...args) =>
@@ -62,15 +71,18 @@ const probe = (target: number) => {
         })
       })
     ).pipe(Layer.provide(makeInMemoryInboxLayer()))
+
     const layer = makeDriverLayer({
       drain: () =>
         Effect.withFiber(fiber => {
           ownerId = fiber.id
+
           return Effect.uninterruptible(
             Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
           )
         })
     }).pipe(Layer.provideMerge(Layer.mergeAll(observedInbox, makeInMemoryRunStoreLayer())))
+
     return yield* Effect.gen(function* () {
       const driver = yield* Driver
       const store = yield* RunStore
@@ -82,11 +94,14 @@ const probe = (target: number) => {
       yield* driver.interrupt('run', { reason: 'shutdown' })
       yield* Deferred.succeed(release, undefined)
       yield* driver.awaitIdle('run')
+
       if (fired) yield* Deferred.await(stopped)
       const claimed = yield* store.isClaimed('run')
+
       return { target, steps, fired, claimed }
     }).pipe(Effect.provide(layer))
   }).pipe(Effect.provideService(Scheduler.Scheduler, scheduler))
+
   return Effect.runPromise(program)
 }
 
@@ -94,11 +109,15 @@ describe('terminal settlement', () => {
   it('controlled scheduler stop after shutdown does not leak claims', async () => {
     const leaked: Array<{ target: number; claimed: boolean }> = []
     let fired = 0
+
     for (let target = 1; target <= 100; target++) {
       const outcome = await probe(target)
+
       if (outcome.fired) fired += 1
+
       if (outcome.fired && outcome.claimed) leaked.push({ target: outcome.target, claimed: true })
     }
+
     expect(fired).toBeGreaterThan(0)
     expect(leaked).toEqual([])
   })
@@ -110,10 +129,12 @@ describe('terminal settlement', () => {
     const releaseHold = await Effect.runPromise(Deferred.make<void>())
     const successorStarted = await Effect.runPromise(Deferred.make<void>())
     const successorRelease = await Effect.runPromise(Deferred.make<void>())
+
     const delayedStore = Layer.effect(
       RunStore,
       Effect.gen(function* () {
         const inner = yield* RunStore
+
         return RunStore.of({
           ...inner,
           release: runId =>
@@ -124,18 +145,22 @@ describe('terminal settlement', () => {
         })
       })
     ).pipe(Layer.provide(makeInMemoryRunStoreLayer()))
+
     const layer = makeDriverLayer({
       drain: () =>
         Effect.gen(function* () {
           if (yield* Deferred.isDone(started)) {
             yield* Deferred.succeed(successorStarted, undefined)
             yield* Deferred.await(successorRelease)
+
             return
           }
+
           yield* Deferred.succeed(started, undefined)
           yield* Deferred.await(release)
         })
     }).pipe(Layer.provideMerge(makeInMemoryInboxLayer()), Layer.provideMerge(delayedStore))
+
     await Effect.runPromise(
       Effect.gen(function* () {
         const driver = yield* Driver
@@ -172,10 +197,12 @@ describe('terminal settlement', () => {
         const releaseEntered = yield* Deferred.make<void>()
         const successorStarted = yield* Deferred.make<void>()
         const successorRelease = yield* Deferred.make<void>()
+
         const wrapInbox = Layer.effect(
           Inbox,
           Effect.gen(function* () {
             const inner = yield* Inbox
+
             return Inbox.of({
               ...inner,
               endDrain: (runId, token, ack) =>
@@ -185,10 +212,12 @@ describe('terminal settlement', () => {
             })
           })
         ).pipe(Layer.provide(makeInMemoryInboxLayer()))
+
         const delayedStore = Layer.effect(
           RunStore,
           Effect.gen(function* () {
             const inner = yield* RunStore
+
             return RunStore.of({
               ...inner,
               release: runId =>
@@ -199,18 +228,22 @@ describe('terminal settlement', () => {
             })
           })
         ).pipe(Layer.provide(makeInMemoryRunStoreLayer()))
+
         const layer = makeDriverLayer({
           drain: () =>
             Effect.gen(function* () {
               if (yield* Deferred.isDone(started)) {
                 yield* Deferred.succeed(successorStarted, undefined)
                 yield* Deferred.await(successorRelease)
+
                 return
               }
+
               yield* Deferred.succeed(started, undefined)
               yield* Effect.never
             })
         }).pipe(Layer.provideMerge(wrapInbox), Layer.provideMerge(delayedStore))
+
         yield* Effect.gen(function* () {
           const driver = yield* Driver
           const store = yield* RunStore

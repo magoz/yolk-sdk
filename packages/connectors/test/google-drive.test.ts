@@ -1,14 +1,16 @@
-import { Chunk, Effect, Layer } from 'effect'
+import { Chunk, Effect, Layer, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
+  ActionResult,
   ConnectorHttpClient,
   ConnectorHttpResponse,
   CredentialResolver,
   makeCredentialBinding,
   makeIntegration,
-  OAuthCredential
+  OAuthCredential,
+  ProviderFailure
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
@@ -54,6 +56,7 @@ const makeHttpLayer = (
   responses: ReadonlyArray<ConnectorHttpResponse>
 ) => {
   let index = 0
+
   return Layer.succeed(
     ConnectorHttpClient,
     ConnectorHttpClient.of({
@@ -61,6 +64,7 @@ const makeHttpLayer = (
         requests.push(request)
         const response = responses.at(index)
         index += 1
+
         return response === undefined
           ? Effect.die(new Error('Missing Google Drive test response'))
           : Effect.succeed(response)
@@ -75,9 +79,9 @@ const makeCredentialLayer = (requestedScopes: Array<ReadonlyArray<string> | unde
     CredentialResolver.of({
       resolve: request => {
         requestedScopes.push(request.slot.requiredScopes)
+
         return Effect.succeed(
           OAuthCredential.make({
-            _tag: 'OAuthCredential',
             provider: 'google',
             accessToken: 'google_access_token',
             expiresAt: Date.now() + 60_000
@@ -92,6 +96,7 @@ describe('Google Drive connector', () => {
     const driveAccess = GoogleConnector.actions
       .filter(action => action.id.startsWith('drive.'))
       .map(action => ({ id: action.id, access: action.access ?? 'read' }))
+
     expect(driveAccess).toEqual([
       { id: 'drive.list_files', access: 'read' },
       { id: 'drive.search_files', access: 'read' },
@@ -122,10 +127,12 @@ describe('Google Drive connector', () => {
   it.effect('generates provider-facing object schemas for every Drive action', () =>
     Effect.gen(function* () {
       const layer = Layer.mergeAll(makeCredentialLayer([]), makeHttpLayer([], []))
+
       const toolSet = yield* resolveTools(
         [makeConnectorToolModule(GoogleConnector, { integration: googleDriveIntegration, layer })],
         {}
       )
+
       const driveTools = toolSet.tools.filter(tool => tool.name.startsWith('drive.'))
 
       expect(driveTools.map(tool => tool.name)).toEqual([
@@ -136,6 +143,7 @@ describe('Google Drive connector', () => {
         'drive.trash_file',
         'drive.delete_file'
       ])
+
       for (const tool of driveTools) {
         expect(tool.parameters).toMatchObject({ type: 'object' })
       }
@@ -148,6 +156,7 @@ describe('Google Drive connector', () => {
       Effect.gen(function* () {
         const requests: Array<ConnectorHttpRequest> = []
         const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+
         const layer = Layer.mergeAll(
           makeCredentialLayer(requestedScopes),
           makeHttpLayer(requests, [
@@ -186,6 +195,7 @@ describe('Google Drive connector', () => {
             }
           })
           .pipe(Effect.provide(layer))
+
         const searchResult = yield* googleDriveSearchFilesAction
           .execute({
             integration: googleDriveIntegration,
@@ -193,14 +203,18 @@ describe('Google Drive connector', () => {
           })
           .pipe(Effect.provide(layer))
 
+        expect(listResult._tag).toBe('Success')
         expect(listResult).toMatchObject({
-          _tag: 'Success',
           value: { nextPageToken: 'page_2', incompleteSearch: false }
         })
-        if (listResult._tag === 'Failure') throw new Error('Expected Google Drive list success')
+
+        if (Predicate.isTagged(listResult, 'Failure'))
+          throw new Error('Expected Google Drive list success')
+
         const listOutput = yield* Schema.decodeUnknownEffect(GoogleDriveListFilesOutput)(
           listResult.value
         )
+
         const files = Chunk.toReadonlyArray(listOutput.files)
         expect(files).toHaveLength(1)
         expect(files.at(0)).toMatchObject({
@@ -212,21 +226,25 @@ describe('Google Drive connector', () => {
         expect(Chunk.toReadonlyArray(files.at(0)?.owners ?? Chunk.empty())).toMatchObject([
           { displayName: 'Alice' }
         ])
-        expect(searchResult).toMatchObject({
-          _tag: 'Success',
-          value: { incompleteSearch: false }
-        })
-        if (searchResult._tag === 'Failure') throw new Error('Expected Google Drive search success')
+        expect(searchResult._tag).toBe('Success')
+        expect(searchResult).toMatchObject({ value: { incompleteSearch: false } })
+
+        if (Predicate.isTagged(searchResult, 'Failure'))
+          throw new Error('Expected Google Drive search success')
+
         const searchOutput = yield* Schema.decodeUnknownEffect(GoogleDriveListFilesOutput)(
           searchResult.value
         )
+
         expect(Chunk.isEmpty(searchOutput.files)).toBe(true)
 
         const listRequest = requests.at(0)
         const searchRequest = requests.at(1)
+
         if (listRequest === undefined || searchRequest === undefined) {
           throw new Error('Expected Google Drive list and search requests')
         }
+
         const listUrl = new URL(listRequest.url)
         const searchUrl = new URL(searchRequest.url)
 
@@ -265,6 +283,7 @@ describe('Google Drive connector', () => {
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
       const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+
       const layer = Layer.mergeAll(
         makeCredentialLayer(requestedScopes),
         makeHttpLayer(requests, [
@@ -288,6 +307,7 @@ describe('Google Drive connector', () => {
           input: { fileId: 'file/1', resourceKey: 'file_1_resource_key' }
         })
         .pipe(Effect.provide(layer))
+
       const createResult = yield* googleDriveCreateFolderAction
         .execute({
           integration: googleDriveIntegration,
@@ -298,12 +318,14 @@ describe('Google Drive connector', () => {
           }
         })
         .pipe(Effect.provide(layer))
+
       const trashResult = yield* googleDriveTrashFileAction
         .execute({
           integration: googleDriveIntegration,
           input: { fileId: 'file/2', resourceKey: 'file_2_resource_key' }
         })
         .pipe(Effect.provide(layer))
+
       const deleteResult = yield* googleDriveDeleteFileAction
         .execute({
           integration: googleDriveIntegration,
@@ -311,27 +333,28 @@ describe('Google Drive connector', () => {
         })
         .pipe(Effect.provide(layer))
 
+      expect(getResult._tag).toBe('Success')
       expect(getResult).toMatchObject({
-        _tag: 'Success',
         value: { id: 'file_1', name: 'Budget.xlsx', md5Checksum: 'abc123' }
       })
-      expect(createResult).toMatchObject({
-        _tag: 'Success',
+
+      const expectedCreateResultFields = {
         value: { id: 'folder_1', mimeType: googleDriveFolderMimeType }
-      })
+      }
+
+      expect(createResult._tag).toBe('Success')
+      expect(createResult).toMatchObject(expectedCreateResultFields)
+      expect(trashResult._tag).toBe('Success')
       expect(trashResult).toMatchObject({
-        _tag: 'Success',
         value: { id: 'file_2', trashed: true, explicitlyTrashed: true }
       })
-      expect(deleteResult).toEqual({
-        _tag: 'Success',
-        value: { deleted: true, fileId: 'file/3' }
-      })
+      expect(deleteResult).toEqual(ActionResult.success({ deleted: true, fileId: 'file/3' }))
 
       const getRequest = requests.at(0)
       const createRequest = requests.at(1)
       const trashRequest = requests.at(2)
       const deleteRequest = requests.at(3)
+
       if (
         getRequest === undefined ||
         createRequest === undefined ||
@@ -340,6 +363,7 @@ describe('Google Drive connector', () => {
       ) {
         throw new Error('Expected Google Drive metadata and mutation requests')
       }
+
       const getUrl = new URL(getRequest.url)
       const createUrl = new URL(createRequest.url)
       const trashUrl = new URL(trashRequest.url)
@@ -413,6 +437,7 @@ describe('Google Drive connector', () => {
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
       const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+
       const layer = Layer.mergeAll(
         makeCredentialLayer(requestedScopes),
         makeHttpLayer(requests, [
@@ -438,67 +463,106 @@ describe('Google Drive connector', () => {
       const invalidList = yield* googleDriveListFilesAction
         .execute({ integration: googleDriveIntegration, input: { pageSize: 1001 } })
         .pipe(Effect.provide(layer), Effect.result)
+
       const invalidSearch = yield* googleDriveSearchFilesAction
         .execute({ integration: googleDriveIntegration, input: { query: '   ' } })
         .pipe(Effect.provide(layer), Effect.result)
+
       const orphanedParentResourceKey = yield* googleDriveListFilesAction
         .execute({ integration: googleDriveIntegration, input: { parentResourceKey: 'orphaned' } })
         .pipe(Effect.provide(layer), Effect.result)
+
       const invalidFileIdHeader = yield* googleDriveGetFileAction
         .execute({
           integration: googleDriveIntegration,
           input: { fileId: 'file\r\nx-injected: yes' }
         })
         .pipe(Effect.provide(layer), Effect.result)
+
       const invalidResourceKeyHeader = yield* googleDriveGetFileAction
         .execute({
           integration: googleDriveIntegration,
           input: { fileId: 'file', resourceKey: 'key\nx-injected: yes' }
         })
         .pipe(Effect.provide(layer), Effect.result)
+
       const providerResult = yield* googleDriveGetFileAction
         .execute({ integration: googleDriveIntegration, input: { fileId: 'missing' } })
         .pipe(Effect.provide(layer))
+
       const rateLimitResult = yield* googleDriveGetFileAction
         .execute({ integration: googleDriveIntegration, input: { fileId: 'rate-limited' } })
         .pipe(Effect.provide(layer))
+
       const permissionResult = yield* googleDriveGetFileAction
         .execute({ integration: googleDriveIntegration, input: { fileId: 'forbidden' } })
         .pipe(Effect.provide(layer))
+
       const malformedResult = yield* googleDriveGetFileAction
         .execute({ integration: googleDriveIntegration, input: { fileId: 'malformed' } })
         .pipe(Effect.provide(layer), Effect.result)
 
-      expect(invalidList).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(invalidSearch).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(orphanedParentResourceKey).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(invalidFileIdHeader).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
-      expect(invalidResourceKeyHeader).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(invalidList)).toBe(true)
+
+      if (Result.isFailure(invalidList)) {
+        expect(Predicate.isTagged(invalidList.failure, 'ConnectorError')).toBe(true)
+        expect(invalidList.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(invalidSearch)).toBe(true)
+
+      if (Result.isFailure(invalidSearch)) {
+        expect(Predicate.isTagged(invalidSearch.failure, 'ConnectorError')).toBe(true)
+        expect(invalidSearch.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(orphanedParentResourceKey)).toBe(true)
+
+      if (Result.isFailure(orphanedParentResourceKey)) {
+        expect(Predicate.isTagged(orphanedParentResourceKey.failure, 'ConnectorError')).toBe(true)
+        expect(orphanedParentResourceKey.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(invalidFileIdHeader)).toBe(true)
+
+      if (Result.isFailure(invalidFileIdHeader)) {
+        expect(Predicate.isTagged(invalidFileIdHeader.failure, 'ConnectorError')).toBe(true)
+        expect(invalidFileIdHeader.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(Result.isFailure(invalidResourceKeyHeader)).toBe(true)
+
+      if (Result.isFailure(invalidResourceKeyHeader)) {
+        expect(Predicate.isTagged(invalidResourceKeyHeader.failure, 'ConnectorError')).toBe(true)
+        expect(invalidResourceKeyHeader.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(providerResult._tag).toBe('Failure')
+
+      if (!Predicate.isTagged(providerResult, 'Failure')) {
+        throw new Error('Expected Google Drive provider failure')
+      }
+
+      expect(providerResult.error).toBeInstanceOf(ProviderFailure)
+      expect(providerResult).not.toHaveProperty('error.retryAfterMs')
       expect(providerResult).toMatchObject({
-        _tag: 'Failure',
         error: {
           code: 'google_not_found',
           message: 'Google Drive get file failed: File not found',
           status: 404
         }
       })
+      expect(JSON.stringify(providerResult)).toBe(
+        String.raw`{"_tag":"Failure","error":{"code":"google_not_found","message":"Google Drive get file failed: File not found","status":404,"underlying":"{\"error\":{\"message\":\"File not found\"}}"}}`
+      )
+      expect(rateLimitResult._tag).toBe('Failure')
+
+      if (!Predicate.isTagged(rateLimitResult, 'Failure')) {
+        throw new Error('Expected Google Drive rate-limit failure')
+      }
+
+      expect(rateLimitResult.error).toBeInstanceOf(ProviderFailure)
       expect(rateLimitResult).toMatchObject({
-        _tag: 'Failure',
         error: {
           code: 'google_rate_limited',
           message: 'Google Drive get file failed: User rate limit exceeded',
@@ -506,18 +570,35 @@ describe('Google Drive connector', () => {
           retryAfterMs: 2_000
         }
       })
+      expect(Object.keys(rateLimitResult.error)).toEqual([
+        'code',
+        'message',
+        'status',
+        'retryAfterMs',
+        'underlying'
+      ])
+      expect(permissionResult._tag).toBe('Failure')
+
+      if (!Predicate.isTagged(permissionResult, 'Failure')) {
+        throw new Error('Expected Google Drive permission failure')
+      }
+
+      expect(permissionResult.error).toBeInstanceOf(ProviderFailure)
+      expect(permissionResult).not.toHaveProperty('error.retryAfterMs')
       expect(permissionResult).toMatchObject({
-        _tag: 'Failure',
         error: {
           code: 'google_unauthorized',
           message: 'Google Drive get file failed: Insufficient permissions',
           status: 403
         }
       })
-      expect(malformedResult).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
-      })
+      expect(Result.isFailure(malformedResult)).toBe(true)
+
+      if (Result.isFailure(malformedResult)) {
+        expect(Predicate.isTagged(malformedResult.failure, 'ConnectorError')).toBe(true)
+        expect(malformedResult.failure).toMatchObject({ cause: 'validation_failed' })
+      }
+
       expect(requests).toHaveLength(4)
     })
   )

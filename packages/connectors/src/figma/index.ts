@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
@@ -8,11 +8,17 @@ import { ActionResult } from '../result.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
 export const figmaConnectorId = 'figma'
+
 export const figmaOAuthSlotId = 'figma.oauth'
+
 export const figmaMcpServerUrl = 'https://mcp.figma.com/mcp'
+
 export const figmaOAuthRegisterUrl = 'https://api.figma.com/v1/oauth/mcp/register'
+
 export const figmaOAuthAuthorizeUrl = 'https://www.figma.com/oauth/mcp'
+
 export const figmaOAuthTokenUrl = 'https://api.figma.com/v1/oauth/token'
+
 export const figmaMcpScope = 'mcp:connect'
 
 export const FigmaOAuthCredentialSlot = CredentialSlot.make({
@@ -21,35 +27,47 @@ export const FigmaOAuthCredentialSlot = CredentialSlot.make({
   requiredScopes: [figmaMcpScope]
 })
 
+type FigmaAccessToken = {
+  readonly accessToken: string
+  readonly expiresAt: number | undefined
+  readonly refreshToken?: string | undefined
+  readonly clientId?: string | undefined
+  readonly clientSecret?: string | undefined
+}
+
 const resolveFigmaAccessToken = (integration: ConnectorIntegration) =>
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, FigmaOAuthCredentialSlot)
 
-    switch (credential._tag) {
-      case 'OAuthCredential':
-        return {
-          accessToken: credential.accessToken,
-          expiresAt: credential.expiresAt,
-          refreshToken: credential.refreshToken,
-          clientId: credential.clientId,
-          clientSecret: credential.clientSecret
-        }
-      case 'BearerTokenCredential':
-        return {
-          accessToken: credential.token,
-          expiresAt: credential.expiresAt
-        }
-      case 'ApiKeyCredential':
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
-          new ConnectorError({
-            cause: 'credential_invalid',
-            message: 'Figma connector requires an OAuth or bearer token credential',
-            connectorId: integration.connectorId,
-            slotId: FigmaOAuthCredentialSlot.id
-          })
-        )
-    }
+    const invalidCredential = () =>
+      Effect.fail(
+        new ConnectorError({
+          cause: 'credential_invalid',
+          message: 'Figma connector requires an OAuth or bearer token credential',
+          connectorId: integration.connectorId,
+          slotId: FigmaOAuthCredentialSlot.id
+        })
+      )
+
+    return yield* Match.value(credential).pipe(
+      Match.tag('OAuthCredential', current =>
+        Effect.succeed<FigmaAccessToken>({
+          accessToken: current.accessToken,
+          expiresAt: current.expiresAt,
+          refreshToken: current.refreshToken,
+          clientId: current.clientId,
+          clientSecret: current.clientSecret
+        })
+      ),
+      Match.tag('BearerTokenCredential', current =>
+        Effect.succeed<FigmaAccessToken>({
+          accessToken: current.token,
+          expiresAt: current.expiresAt
+        })
+      ),
+      Match.tag('ApiKeyCredential', 'UsernamePasswordCredential', invalidCredential),
+      Match.exhaustive
+    )
   })
 
 export class FigmaMcpAuthInput extends Schema.Class<FigmaMcpAuthInput>('FigmaMcpAuthInput')({}) {}
@@ -101,6 +119,7 @@ export const figmaMcpAuthAction = defineAction({
   execute: ({ integration }) =>
     Effect.gen(function* () {
       const token = yield* resolveFigmaAccessToken(integration)
+
       return ActionResult.success(
         makeFigmaMcpAuthData({
           accessToken: token.accessToken,

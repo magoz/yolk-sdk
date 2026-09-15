@@ -1,4 +1,4 @@
-import { Clock, Config, Effect, Layer, Stream } from 'effect'
+import { Clock, Config, Effect, Layer, Match, Predicate, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import {
   ToolError,
@@ -30,7 +30,7 @@ import {
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
-import { runRuntime, runtimeErrorToAgentError } from '@yolk-sdk/agent/runtime'
+import { runRuntime, runtimeErrorToAgentError, RuntimeRequest } from '@yolk-sdk/agent/runtime'
 import { defaultAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import {
   agentTextCapabilities,
@@ -62,6 +62,7 @@ import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'
 import { getTelegramConnectorConfig } from '@/lib/core/agent/telegram-connector'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
 import {
+  AgentSkillCommandInput,
   createAgentSkillWithCommand,
   listAgentSkills,
   updateAgentSkillWithCommand
@@ -70,7 +71,7 @@ import { getPinnedKnowledgeContext } from '@/lib/core/knowledge/get-pinned-knowl
 import { Db } from '@/lib/services/db/live-layer'
 import { KnowledgeLayer } from '@/lib/services/knowledge/live-layer'
 
-type AgentTextRuntimeConfig = {
+export type AgentTextRuntimeConfig = {
   readonly model: string
   readonly reasoningEffort: AgentReasoningEffort
   readonly systemPrompt: string
@@ -78,14 +79,22 @@ type AgentTextRuntimeConfig = {
   readonly capabilities: AgentModelCapabilities
 }
 
-type AgentTextRuntimeLayer = Layer.Layer<
+export type AgentTextRuntimeLayer = Layer.Layer<
   ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
 >
 
-type AgentTextRuntime = {
+export type AgentTextRuntime = {
   readonly input: AgentRouteRequest
   readonly config: AgentTextRuntimeConfig
   readonly layer: AgentTextRuntimeLayer
+}
+
+export type AgentTextRuntimeOptions = {
+  readonly childType?: string
+  readonly executeSubagent?: (
+    input: SubagentExecutionInput<AgentToolContext>
+  ) => Effect.Effect<ToolResult, ToolError>
+  readonly modules?: ReadonlyArray<ToolModule<AgentToolContext>>
 }
 
 const agentTextSubagents: ReadonlyArray<SubagentDefinition> = [
@@ -117,9 +126,6 @@ const toolError = (message: string, cause: ToolError['cause']) =>
 
 const toolRegistryErrorToToolError = (error: { readonly message: string }) =>
   toolError(error.message, 'execution')
-
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
 
 const unexpectedSubagentFailureMessage = 'Unexpected subagent failure'
 
@@ -175,7 +181,7 @@ export const recoverSubagentToolFailure = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   input: SubagentFailureRecoveryInput
 ) => {
-  const recover = (error: unknown) =>
+  const recover = (error: E) =>
     Clock.currentTimeMillis.pipe(
       Effect.map(endedAtMs =>
         makeSubagentFailureToolResult({
@@ -211,12 +217,14 @@ export const collectSubagentEvents = (
 
 const getAgentTextConfig = () =>
   Effect.gen(function* () {
-    const systemPrompt = yield* Config.option(Config.string('AGENT_SYSTEM_PROMPT'))
+    const systemPrompt = yield* Config.option(Config.String('AGENT_SYSTEM_PROMPT'))
 
     return {
       model: agentTextModel,
       reasoningEffort: agentTextReasoningEffort,
-      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultAgentSystemPrompt
+      systemPrompt: Predicate.isTagged(systemPrompt, 'Some')
+        ? systemPrompt.value
+        : defaultAgentSystemPrompt
     }
   })
 
@@ -234,6 +242,7 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
     switch (agentTextModelProvider(model)) {
       case 'anthropic-claude': {
         const token = yield* getValidAnthropicClaudeToken(userId)
+
         return makeAnthropicClaudeProviderLayer({
           token: new OAuthAccessToken({
             provider: anthropicClaudeProviderId,
@@ -243,8 +252,10 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
           maxTokens: agentTextModelMaxOutputTokens(model)
         }).pipe(Layer.provide(FetchHttpClient.layer))
       }
+
       case 'openai-codex': {
         const token = yield* getValidOpenAiCodexToken(userId)
+
         return makeOpenAiCodexProviderLayer({
           token: new OAuthAccessToken({
             provider: openAiCodexProviderId,
@@ -304,158 +315,168 @@ const findSkillForUpdate = (input: {
   })
 
 const manageSkillsForAgent = (action: SkillManagerAction) =>
-  Effect.gen(function* () {
-    switch (action._tag) {
-      case 'List': {
-        yield* Effect.annotateCurrentSpan({
-          'tool.manage_skills.action': 'list',
-          'user.id': action.userId
-        })
-        const skills = yield* listAgentSkills({ userId: action.userId })
-        const data = { skills: skills.map(skillSummary) }
-
-        return {
-          message:
-            skills.length === 0
-              ? 'No saved skills.'
-              : `Saved skills:\n${skills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')}`,
-          data
-        }
-      }
-      case 'Create': {
-        yield* Effect.annotateCurrentSpan({
-          'tool.manage_skills.action': 'create',
-          'user.id': action.userId,
-          'agent_skill.name': action.name,
-          'agent_skill.create_command': action.createCommand,
-          'agent_command.name': action.commandName ?? action.name
-        })
-        const skill = yield* createAgentSkillWithCommand({
-          userId: action.userId,
-          name: action.name,
-          description: action.description,
-          content: action.content,
-          commandInput: action.createCommand
-            ? {
-                _tag: 'CreateCommand',
-                command: {
-                  name: action.commandName ?? action.name,
-                  description: action.description,
-                  template: `Use the ${action.name} skill.\n\n$ARGUMENTS`
-                }
-              }
-            : { _tag: 'SkipCommand' }
-        })
-
-        return {
-          message: `Created skill: ${skill.name}`,
-          data: {
-            skill: skillSummary(skill),
-            commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
-          }
-        }
-      }
-      case 'Update': {
-        const existing = yield* findSkillForUpdate({
-          userId: action.userId,
-          id: action.id,
-          name: action.name
-        })
-        const skillName = action.name ?? existing.name
-        yield* Effect.annotateCurrentSpan({
-          'tool.manage_skills.action': 'update',
-          'user.id': action.userId,
-          'agent_skill.id': existing.id,
-          'agent_skill.name': skillName,
-          'agent_skill.create_command': action.createCommand,
-          'agent_command.name': action.commandName ?? skillName
-        })
-        const skill = yield* updateAgentSkillWithCommand({
-          id: existing.id,
-          userId: action.userId,
-          name: skillName,
-          description: action.description,
-          content: action.content,
-          enabled: action.enabled ?? true,
-          commandInput: action.createCommand
-            ? {
-                _tag: 'CreateCommand',
-                command: {
-                  name: action.commandName ?? skillName,
-                  description: action.description,
-                  template: `Use the ${skillName} skill.\n\n$ARGUMENTS`
-                }
-              }
-            : { _tag: 'SkipCommand' }
-        })
-
-        return {
-          message: `Updated skill: ${skill.name}`,
-          data: {
-            skill: skillSummary(skill),
-            commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
-          }
-        }
-      }
-    }
-  }).pipe(
-    Effect.withSpan('tool.manageSkills'),
-    Effect.provide(SkillManagerLayer),
-    Effect.mapError(error =>
-      error instanceof ToolError
-        ? error
-        : new ToolError({
-            tool: 'manage_skills',
-            message: unknownToMessage(error),
-            cause: 'execution'
+  Match.value(action)
+    .pipe(
+      Match.tag('List', action =>
+        Effect.gen(function* () {
+          yield* Effect.annotateCurrentSpan({
+            'tool.manage_skills.action': 'list',
+            'user.id': action.userId
           })
+          const skills = yield* listAgentSkills({ userId: action.userId })
+          const data = { skills: skills.map(skillSummary) }
+
+          return {
+            message:
+              skills.length === 0
+                ? 'No saved skills.'
+                : `Saved skills:\n${skills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')}`,
+            data
+          }
+        })
+      ),
+      Match.tag('Create', action =>
+        Effect.gen(function* () {
+          yield* Effect.annotateCurrentSpan({
+            'tool.manage_skills.action': 'create',
+            'user.id': action.userId,
+            'agent_skill.name': action.name,
+            'agent_skill.create_command': action.createCommand,
+            'agent_command.name': action.commandName ?? action.name
+          })
+
+          const skill = yield* createAgentSkillWithCommand({
+            userId: action.userId,
+            name: action.name,
+            description: action.description,
+            content: action.content,
+            commandInput: action.createCommand
+              ? AgentSkillCommandInput.CreateCommand({
+                  command: {
+                    name: action.commandName ?? action.name,
+                    description: action.description,
+                    template: `Use the ${action.name} skill.\n\n$ARGUMENTS`
+                  }
+                })
+              : AgentSkillCommandInput.SkipCommand()
+          })
+
+          return {
+            message: `Created skill: ${skill.name}`,
+            data: {
+              skill: skillSummary(skill),
+              commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
+            }
+          }
+        })
+      ),
+      Match.tag('Update', action =>
+        Effect.gen(function* () {
+          const existing = yield* findSkillForUpdate({
+            userId: action.userId,
+            id: action.id,
+            name: action.name
+          })
+
+          const skillName = action.name ?? existing.name
+          yield* Effect.annotateCurrentSpan({
+            'tool.manage_skills.action': 'update',
+            'user.id': action.userId,
+            'agent_skill.id': existing.id,
+            'agent_skill.name': skillName,
+            'agent_skill.create_command': action.createCommand,
+            'agent_command.name': action.commandName ?? skillName
+          })
+
+          const skill = yield* updateAgentSkillWithCommand({
+            id: existing.id,
+            userId: action.userId,
+            name: skillName,
+            description: action.description,
+            content: action.content,
+            enabled: action.enabled ?? true,
+            commandInput: action.createCommand
+              ? AgentSkillCommandInput.CreateCommand({
+                  command: {
+                    name: action.commandName ?? skillName,
+                    description: action.description,
+                    template: `Use the ${skillName} skill.\n\n$ARGUMENTS`
+                  }
+                })
+              : AgentSkillCommandInput.SkipCommand()
+          })
+
+          return {
+            message: `Updated skill: ${skill.name}`,
+            data: {
+              skill: skillSummary(skill),
+              commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
+            }
+          }
+        })
+      ),
+      Match.exhaustive
     )
-  )
+    .pipe(
+      Effect.withSpan('tool.manageSkills'),
+      Effect.provide(SkillManagerLayer),
+      Effect.mapError(error =>
+        error instanceof ToolError
+          ? error
+          : new ToolError({
+              tool: 'manage_skills',
+              message: error instanceof Error ? error.message : String(error),
+              cause: 'execution'
+            })
+      )
+    )
 
 export const makeAgentTextRuntime = (
   input: AgentRouteRequest,
   userId: string,
   route: '/agent/next' | '/agent/workflow',
-  options: {
-    readonly childType?: string
-    readonly executeSubagent?: (
-      input: SubagentExecutionInput<AgentToolContext>
-    ) => Effect.Effect<ToolResult, ToolError>
-    readonly modules?: ReadonlyArray<ToolModule<AgentToolContext>>
-  } = {}
+  options: AgentTextRuntimeOptions = {}
 ) =>
   Effect.gen(function* () {
     const baseConfig = yield* getAgentTextConfig()
     const skillset = yield* loadRuntimeSkillset({ userId })
     const mcpServers = yield* loadProjectMcpServers()
     const baseToolModules = yield* makeTextToolModules(mcpServers)
+
     const pinnedKnowledge = yield* getPinnedKnowledgeContext({ userId }).pipe(
       Effect.provide(KnowledgeLayer),
       Effect.catch(error =>
         Effect.logWarning('Pinned knowledge unavailable', { error }).pipe(Effect.as(''))
       )
     )
+
     const storageToolModule = makeAppStorageKnowledgeSearchToolModule()
     const knowledgeToolModule = makeAppKnowledgeToolModule()
     const telegramConnectorConfig = yield* getTelegramConnectorConfig(userId)
+
     const telegramToolModules =
       telegramConnectorConfig === undefined
         ? []
         : [makeAppTelegramToolModule(telegramConnectorConfig)]
+
     const skillManagerToolModule = makeSkillManagerToolModule(manageSkillsForAgent)
+
     const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...baseToolModules,
       knowledgeToolModule,
       storageToolModule,
       ...telegramToolModules
     ]
+
     const selectedModel = input.model ?? baseConfig.model
     const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
     const providerLayer = yield* providerLayerForModel(model, userId)
+
     const baseSystemPrompt = appendPinnedKnowledge(
       appendAvailableSkills(baseConfig.systemPrompt, skillset),
       pinnedKnowledge
     )
+
     const subagentToolModule = makeNonRecursiveSubagentToolModule<AgentToolContext>({
       subagents: agentTextSubagents,
       background: options.executeSubagent !== undefined,
@@ -478,13 +499,13 @@ export const makeAgentTextRuntime = (
                     subagent: true
                   }
                 }).pipe(Effect.mapError(toolRegistryErrorToToolError))
+
                 const events = yield* collectSubagentEvents(
                   runRuntime(
-                    {
-                      _tag: 'Transcript',
+                    RuntimeRequest.Transcript({
                       sessionId: `${input.sessionId}:subagent:${call.id}`,
                       messages: [UserMessage.make({ content: params.prompt })]
-                    },
+                    }),
                     {
                       systemPrompt: subagentPrompt({
                         subagentType: params.subagent_type,
@@ -504,6 +525,7 @@ export const makeAgentTextRuntime = (
                     )
                   )
                 )
+
                 const summary = subagentResultFromEvents(events)
                 const endedAtMs = yield* Clock.currentTimeMillis
 
@@ -531,12 +553,14 @@ export const makeAgentTextRuntime = (
             )
           }))
     })
+
     const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...subagentToolModules,
       ...(options.childType === undefined
         ? [skillManagerToolModule, subagentToolModule, ...(options.modules ?? [])]
         : [])
     ]
+
     const toolSet = yield* resolveAgentToolSet({
       modules:
         options.childType === undefined
@@ -556,7 +580,9 @@ export const makeAgentTextRuntime = (
         skillset
       }
     })
+
     const normalizedInput = new AgentRouteRequest({ ...input, model })
+
     const config: AgentTextRuntimeConfig = {
       ...baseConfig,
       model,

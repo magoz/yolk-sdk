@@ -5,11 +5,11 @@ Vercel Workflow agent-loop contracts, durable stream helpers, and an Effect-nati
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/vercel-workflows@canary effect@4.0.0-beta.80 workflow@^5.0.0-beta.42
+pnpm add @yolk-sdk/vercel-workflows@canary effect@4.0.0-rc.115 workflow@^5.0.0-beta.42
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
 Requires Node.js 22+ and a server runtime supported by Vercel Workflow.
 
 Requires `workflow@^5.0.0-beta.42`. The 5.x line region-pins Vercel runs so durable streams are
@@ -36,6 +36,8 @@ import {
   makeDurableAgentEventSequencerState,
   noWorkflowStepRetry,
   runVercelAgentWorkflow,
+  VercelAgentWorkflowRunResult,
+  WorkflowStepResult,
   writeDurableAgentEvent
 } from '@yolk-sdk/vercel-workflows'
 ```
@@ -102,6 +104,11 @@ and `'use step'` directive files with `@workflow/vitest` in addition to using th
   same tool batch with accumulated responses
 - close step: flush/close output stream after a successful final model step
 - terminal status: completed, step failure, await-input failure, close failure, or max turns exceeded
+
+`WorkflowStepResult` and `VercelAgentWorkflowRunResult` are `Data.taggedEnum` **values** (plain objects,
+`_tag` last), re-exported from the package root and `./workflow`. `settleWorkflowStep` returns
+`WorkflowStepResult.Success({ value })` / `.Failure({ error })`. Inspect run status with constructors
+or `VercelAgentWorkflowRunResult.$is('Completed')` rather than handwritten `{ _tag }` objects.
 
 Continuation state stays plain serializable data for Workflow persistence.
 
@@ -173,7 +180,10 @@ loop will:
 
 1. pass that payload to `awaitInput`
 2. wait for the hook/webhook response
-3. rerun the same tool batch with `hitlResponses: [...previous, response]`
+3. rerun the same tool batch with the accumulated responses in a fresh `hitlResponses` array
+
+The loop owns its accumulator: host mutation of a supplied array cannot affect a later batch.
+Response order and element identity are preserved; response objects are not deep-cloned.
 
 The host owns `hookToken` construction, auth, resume routes, and response decoding. Use stable
 tokens that the resume side can reconstruct or store.
@@ -264,6 +274,12 @@ The helper never writes the success terminal before `commit` succeeds. If `commi
 the host-provided terminal error event instead. It can protect either a final event or an
 `AgentAwaitingInput` persistence barrier; it never decides closure from `_tag` and never closes
 writers.
+
+`writeCommitError` receives the existing `CommitError` generic from `commit`
+(`Effect.Effect<void, CommitError>`), via `Effect.matchEffect` `onFailure`. Typed failures—not
+defects or interruptions—are passed to that callback. Result `commitError` and `error` fields stay
+`unknown`.
+Existing `(error: unknown) => …` callbacks remain assignable.
 
 `runVercelAgentWorkflow` calls `closeStream` only after `runModelStep` returns `done: true`. On model,
 tool, await-input, or max-turn failure it calls `writeError` best-effort and returns without calling

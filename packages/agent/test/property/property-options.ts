@@ -1,6 +1,7 @@
 const defaultPropertyRuns = 50
 
 const propertyRunsEnv = process.env.PROPERTY_RUNS
+
 const parsedPropertyRuns =
   propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
 
@@ -9,4 +10,4 @@ export const propertyRuns =
     ? parsedPropertyRuns
     : defaultPropertyRuns
 
-export const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
+export const propertyOptions = { arbitrary: { runs: propertyRuns } }

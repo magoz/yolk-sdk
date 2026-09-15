@@ -5,6 +5,7 @@ import {
   ImagePart,
   TextPart,
   ToolDef,
+  ToolJsonSchemaObject,
   ToolResult,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
@@ -12,6 +13,7 @@ import type { Content, ContentPart } from '@yolk-sdk/agent/protocol'
 import { McpError } from './errors.ts'
 
 export const latestMcpProtocolVersion = '2026-07-28'
+
 export const legacyMcpProtocolVersion = '2024-11-05'
 
 export const JsonRpcErrorObject = Schema.Struct({
@@ -19,6 +21,7 @@ export const JsonRpcErrorObject = Schema.Struct({
   message: Schema.String,
   data: Schema.optional(Schema.Unknown)
 })
+
 export type JsonRpcErrorObject = typeof JsonRpcErrorObject.Type
 
 export const JsonRpcSuccessResponse = Schema.Struct({
@@ -26,6 +29,7 @@ export const JsonRpcSuccessResponse = Schema.Struct({
   id: Schema.Union([Schema.String, Schema.Number, Schema.Null]),
   result: Schema.Unknown
 })
+
 export type JsonRpcSuccessResponse = typeof JsonRpcSuccessResponse.Type
 
 export const JsonRpcErrorResponse = Schema.Struct({
@@ -33,9 +37,11 @@ export const JsonRpcErrorResponse = Schema.Struct({
   id: Schema.Union([Schema.String, Schema.Number, Schema.Null]),
   error: JsonRpcErrorObject
 })
+
 export type JsonRpcErrorResponse = typeof JsonRpcErrorResponse.Type
 
 export const JsonRpcResponse = Schema.Union([JsonRpcSuccessResponse, JsonRpcErrorResponse])
+
 export type JsonRpcResponse = typeof JsonRpcResponse.Type
 
 export const JsonRpcRequest = Schema.Struct({
@@ -44,6 +50,7 @@ export const JsonRpcRequest = Schema.Struct({
   method: Schema.String,
   params: Schema.optional(Schema.Unknown)
 })
+
 export type JsonRpcRequest = typeof JsonRpcRequest.Type
 
 export const JsonRpcNotification = Schema.Struct({
@@ -51,36 +58,43 @@ export const JsonRpcNotification = Schema.Struct({
   method: Schema.String,
   params: Schema.optional(Schema.Unknown)
 })
+
 export type JsonRpcNotification = typeof JsonRpcNotification.Type
 
 export const JsonRpcMessage = Schema.Union([JsonRpcRequest, JsonRpcNotification])
+
 export type JsonRpcMessage = typeof JsonRpcMessage.Type
 
 export const McpToolAnnotations = Schema.Record(Schema.String, Schema.Unknown)
+
 export type McpToolAnnotations = typeof McpToolAnnotations.Type
 
 export const McpTool = Schema.Struct({
   name: Schema.String,
   title: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
-  inputSchema: Schema.optional(Schema.Unknown),
+  inputSchema: Schema.optional(ToolJsonSchemaObject),
   outputSchema: Schema.optional(Schema.Unknown),
   annotations: Schema.optional(McpToolAnnotations)
 })
+
 export type McpTool = typeof McpTool.Type
 
 export const ToolsListResult = Schema.Struct({
   tools: Schema.Array(McpTool)
 })
+
 export type ToolsListResult = typeof ToolsListResult.Type
 
 export const TextContentBlock = Schema.Struct({
   type: Schema.Literal('text'),
   text: Schema.String
 })
+
 export type TextContentBlock = typeof TextContentBlock.Type
 
 export const GenericContentBlock = Schema.Record(Schema.String, Schema.Unknown)
+
 export type GenericContentBlock = typeof GenericContentBlock.Type
 
 const EmbeddedResourceContentBlock = Schema.Struct({
@@ -105,35 +119,80 @@ export const ToolCallResult = Schema.Struct({
   isError: Schema.optional(Schema.Boolean),
   structuredContent: Schema.optional(Schema.Unknown)
 })
+
 export type ToolCallResult = typeof ToolCallResult.Type
+
+export const InitializeClientInfo = Schema.Struct({
+  name: Schema.String,
+  version: Schema.String
+})
+
+export type InitializeClientInfo = typeof InitializeClientInfo.Type
+
+export const InitializeParams = Schema.Struct({
+  protocolVersion: Schema.String,
+  capabilities: Schema.Record(Schema.String, Schema.Unknown),
+  clientInfo: InitializeClientInfo
+})
+
+export type InitializeParams = typeof InitializeParams.Type
+
+export const InitializedNotification = Schema.Struct({
+  jsonrpc: Schema.Literal('2.0'),
+  method: Schema.Literal('notifications/initialized')
+})
+
+export type InitializedNotification = typeof InitializedNotification.Type
+
+export const ToolsCallParams = Schema.Struct({
+  name: Schema.String,
+  arguments: Schema.optional(Schema.Unknown)
+})
+
+export type ToolsCallParams = typeof ToolsCallParams.Type
 
 export const makeJsonRpcRequest = (input: {
   readonly id: string | number
   readonly method: string
   readonly params?: unknown
-}): JsonRpcRequest => ({
-  jsonrpc: '2.0',
-  id: input.id,
-  method: input.method,
-  ...(input.params === undefined ? {} : { params: input.params })
-})
+}): JsonRpcRequest => {
+  const id = input.id
+  const method = input.method
 
-export const makeInitializedNotification = (): JsonRpcNotification => ({
-  jsonrpc: '2.0',
-  method: 'notifications/initialized'
-})
+  if (input.params !== undefined) {
+    return JsonRpcRequest.make({
+      jsonrpc: '2.0',
+      id,
+      method,
+      params: input.params
+    })
+  }
+
+  return JsonRpcRequest.make({
+    jsonrpc: '2.0',
+    id,
+    method
+  })
+}
+
+export const makeInitializedNotification = (): JsonRpcNotification =>
+  InitializedNotification.make({
+    jsonrpc: '2.0',
+    method: 'notifications/initialized'
+  })
 
 export const makeInitializeParams = (input: {
   readonly name: string
   readonly version: string
-}) => ({
-  protocolVersion: legacyMcpProtocolVersion,
-  capabilities: {},
-  clientInfo: {
-    name: input.name,
-    version: input.version
-  }
-})
+}): InitializeParams =>
+  InitializeParams.make({
+    protocolVersion: legacyMcpProtocolVersion,
+    capabilities: {},
+    clientInfo: InitializeClientInfo.make({
+      name: input.name,
+      version: input.version
+    })
+  })
 
 export const jsonRpcErrorToMcpError = (server: string, error: JsonRpcErrorObject) =>
   new McpError({
@@ -151,14 +210,12 @@ export const mcpToolToToolDef = (input: { readonly serverName: string; readonly 
 
 export const sanitizeMcpName = (name: string) => {
   const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '_')
+
   return sanitized.length === 0 ? 'mcp' : sanitized
 }
 
-const stringProperty = (block: GenericContentBlock, key: string) => {
-  const value = block[key]
-
-  return typeof value === 'string' ? Option.some(value) : Option.none<string>()
-}
+const stringProperty = (block: GenericContentBlock, key: string) =>
+  Schema.decodeUnknownOption(Schema.String)(block[key])
 
 const contentBlockText = (block: GenericContentBlock): Option.Option<string> => {
   const type = block['type']
@@ -210,6 +267,7 @@ const resourceLinkText = (block: GenericContentBlock): Option.Option<string> =>
   Schema.decodeUnknownOption(ResourceLinkContentBlock)(block).pipe(
     Option.map(({ name, uri }) => {
       const label = name ?? uri
+
       return `MCP resource link: ${label} (${uri})`
     })
   )
@@ -285,6 +343,7 @@ export const toolCallResultToToolResult = (input: {
   readonly result: ToolCallResult
 }) => {
   const content = input.result.content ?? []
+
   const resultContent =
     content.length > 0
       ? contentFromBlocks(content)
@@ -301,14 +360,16 @@ export const toolCallResultToToolResult = (input: {
 }
 
 export const decodeJsonRpcResponse = Schema.decodeUnknownEffect(JsonRpcResponse)
+
 export const decodeToolsListResult = Schema.decodeUnknownEffect(ToolsListResult)
+
 export const decodeToolCallResult = Schema.decodeUnknownEffect(ToolCallResult)
 
 export const encodeJsonRpcMessage = (
   server: string,
   message: JsonRpcRequest | JsonRpcNotification
 ) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(message).pipe(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(message).pipe(
     Effect.mapError(
       error =>
         new McpError({
@@ -320,7 +381,7 @@ export const encodeJsonRpcMessage = (
   )
 
 const decodeJsonString = (server: string, text: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
     Effect.mapError(
       error =>
         new McpError({

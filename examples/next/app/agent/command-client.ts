@@ -39,17 +39,24 @@ const AgentCommandRenderResponse = Schema.Struct({
   content: Schema.String
 })
 
-const encodeJsonString = (value: unknown) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
+type CommandRenderRequest = {
+  readonly command: string
+  readonly arguments: string
+}
+
+const encodeJsonString = (value: CommandRenderRequest) =>
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value)
 
 export const loadAgentCommands = (
   options: CommandClientOptions = {}
 ): Effect.Effect<ReadonlyArray<AgentCommandSummary>, unknown> =>
   Effect.gen(function* () {
     const client = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk)
+
     const response = yield* client.get('/api/agent/commands', {
       headers: { accept: 'application/json' }
     })
+
     const body = yield* HttpClientResponse.schemaBodyJson(AgentCommandListResponse)(response)
 
     return body.commands
@@ -63,10 +70,12 @@ export const renderAgentCommand = (
   Effect.gen(function* () {
     const client = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk)
     const body = yield* encodeJsonString({ command, arguments: argumentsText })
+
     const request = HttpClientRequest.post('/api/agent/commands').pipe(
       HttpClientRequest.setHeaders({ accept: 'application/json' }),
       HttpClientRequest.bodyText(body, 'application/json')
     )
+
     const response = yield* client.execute(request)
     const rendered = yield* HttpClientResponse.schemaBodyJson(AgentCommandRenderResponse)(response)
 

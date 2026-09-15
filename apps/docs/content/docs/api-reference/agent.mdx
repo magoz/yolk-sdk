@@ -9,6 +9,13 @@ Import feature APIs from explicit subpaths. The root package is intentionally ti
 
 `@yolk-sdk/agent/protocol`
 
+`ToolDef.parameters` uses `ToolJsonSchema` (boolean or plain JSON object).
+`ToolJsonSchemaObject` is its object arm; `decodeToolJsonSchema` and
+`decodeToolJsonSchemaObject` return `Option`. Admission preserves identity, rejects accessors unread,
+exotic prototypes, hidden/symbol keys, nonfinite values and cycles, and permits dense arrays,
+null-prototype objects and DAG aliases. This is representation admission, not meta-schema validation;
+provider compatibility and tool execution validation are separate. Params/results/HITL remain opaque.
+
 | Export                                                                                                                    | Purpose                        |
 | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | `UserMessage`, `AssistantAgentMessage`, `ToolResultMessage`                                                               | transcript messages            |
@@ -43,6 +50,10 @@ The helpers preserve typed resolver errors/services and protocol metadata, but d
 payloads or enforce provider capabilities. See [private attachment integration](../guides/private-attachments)
 for fresh signing inside retries.
 
+`PlainHitlResponse` is also a constructor value on `@yolk-sdk/agent/protocol`:
+`PlainHitlResponse.QuestionResponse` and `.ToolApprovalResponse` construct plain encoded payloads.
+Use `plainHitlResponse` to project existing protocol class instances while omitting absent optionals.
+
 ## Loop
 
 `@yolk-sdk/agent/loop`
@@ -65,6 +76,15 @@ for fresh signing inside retries.
 | `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                                                     |
 | `LLMResponseIssue`                                                                  | kernel-only `'missing_done'` literal                                                 |
 | `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                                                           |
+| `LoopConfigSettings`                                                                | settings object for `LoopConfig.layer` (renamed from `LoopConfigShape`)              |
+
+Breaking type import (runtime/wire unchanged, no `Shape` alias):
+
+```ts
+import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
+```
+
+`LoopConfigShape` is removed. Update `import type { LoopConfigShape }` to `LoopConfigSettings`.
 
 ### Whole-batch preflight
 
@@ -113,6 +133,9 @@ Runtime request tags:
 - `Transcript`
 - `AppendInput`
 - `AppendHitlResponse`
+
+`RuntimeRequest` is both a type and a constructor value on `@yolk-sdk/agent/runtime`.
+Its variants are `Transcript`, `AppendInput`, and `AppendHitlResponse`.
 
 ## Tools
 
@@ -326,6 +349,23 @@ registrations remain unchanged. See [Background subagents](../agent/tools-hitl#b
 | `deleteChatTurn`, `editChatUserMessage`, `regenerateChatMessagesFrom`                                                                 | chat editing helpers                          |
 | `AgentChatSessionEvent`, `UserMessageSubmitted`, `ProtocolMessageAppended`, `MessagesRegenerated`, `TurnDeleted`, `UserMessageEdited` | chat session event helpers                    |
 
+Tagged model constructors are also exported from `@yolk-sdk/agent/react`:
+
+| Model family         | Constructor values                                                                                                                                 |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Messages and tools   | `AgentChatPart`, `ChatToolState`                                                                                                                   |
+| Rendered items       | `AgentChatItem`, `ToolRunState`                                                                                                                    |
+| Reducer actions      | `AgentChatAction`                                                                                                                                  |
+| Message edit results | `DeleteChatTurnResult`, `EditChatUserMessageResult`, `RegenerateChatMessagesResult`                                                                |
+| Hook results         | `AgentChatSubmitResult`, `AgentChatDeleteTurnResult`, `AgentChatRegenerateResult`, `AgentChatEditUserMessageResult`, `AgentChatHitlResponseResult` |
+| Duration descriptors | `ToolDurationKnown`, `ToolDurationUnknown`                                                                                                         |
+
+Duration descriptors use `Schema.TaggedStruct.make` (validated plains). The other companions are
+`Data.taggedEnum` values: plain objects with `_tag` last, not Equal/Hash classes. Omit absent
+optionals. Discriminate with `$is` (for example `AgentChatAction.$is('Submit')(action)`).
+`useAgentChat` dispatches `AgentChatAction` constructors and returns the hook-result constructors.
+The existing model types remain available under the same names.
+
 ## Compaction
 
 `@yolk-sdk/agent/compaction`
@@ -386,6 +426,14 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 
 ## Voice
 
+`VoiceSession`, `VoiceController` and `VoiceEventOutbox` are exported from `@yolk-sdk/agent/voice`.
+`VoiceSession.layer` composes a supplied transport layer and optional `eventLog`; configured logging
+runs without an external event consumer, and omission never captures an ambient outbox.
+`makeVoiceController` now requires the `VoiceTransport` service instead of an option value.
+Transport layers are `webSocketVoiceTransportLayer` (`voice`) and `webRtcVoiceTransportLayer`
+(`voice/browser`). Keep a provided layer alive throughout use, or build with an explicit scope.
+`Layer.succeed` injects caller-owned resources; it does not allocate or finalize them.
+
 `@yolk-sdk/agent/voice`
 
 | Export                                                                                                                                                                                                                                               | Purpose                                                                            |
@@ -414,6 +462,10 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 | `useYolkVoice` | headless browser voice hook: lifecycle, drafts, approvals, audio attach |
 
 ## Providers
+
+`OpenAiProviderConfig.extraBody` is JSON-object input (`OpenAiRequestExtras` on the existing
+`providers/openai/provider` subpath). Lowering drops canonical fields unread and snapshots surviving
+portable data; invalid/accessor input fails before HTTP. See [the migration guide](../migration).
 
 | Subpath                                                | Main exports                                                                                        |
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
@@ -468,6 +520,11 @@ sends no output limit. Yolk does not infer limits from model ids. Generic OpenAI
 select `OpenAiProviderConfig.completionTokenField`, add endpoint extensions through `extraBody`, and
 set `providerIdentity` for accurate safe error metadata; canonical request fields and required HTTP
 headers take precedence.
+
+Claude lowering (`toAnthropicClaudeRequestBody` / `makeAnthropicClaudeProviderLayer`) requires
+`ToolDef.parameters` and `ToolCall.params` to decode as `Schema.Json`. Non-JSON fails non-retryable
+`LLMError` `provider_error`. Protocol tool fields stay `Schema.Unknown`. Lone-surrogate rewrite is
+re-decoded as JSON (failure, not skip). HTTP non-JSON errors still classify from status.
 
 ## Result conversion and typed realtime builders
 

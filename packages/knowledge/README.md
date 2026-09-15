@@ -5,11 +5,11 @@ Domain-free knowledge document/source/file/context, ingestion, hybrid search, an
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Model
@@ -40,11 +40,12 @@ Optional files and chunks are modeled as `KnowledgeFile` and `KnowledgeChunk`. F
 metadata and host-owned blob keys; `KnowledgeFileBlobStore` stores the bytes separately. Chunks are
 search-index records. Hosts own blob storage, chunk persistence, transactions, and lifecycle.
 
-`KnowledgeSource` is a separate ingestion ADT:
+`KnowledgeSource` is a separate ingestion ADT. Build variants with `Schema.TaggedStruct` constructors
+from `@yolk-sdk/knowledge/documents`:
 
-- `File`: host-owned `ref` plus optional name/media type
-- `Url`: host-owned URL string
-- `Text`: optional label; bytes/text arrive through `LoadedKnowledgeSource.content`
+- `KnowledgeFileSource.make({ ref, name?, mediaType? })` — host-owned `ref` plus optional name/media type
+- `KnowledgeUrlSource.make({ url })` — host-owned URL string
+- `KnowledgeTextSource.make({ label? })` — optional label; bytes/text arrive through `LoadedKnowledgeSource.content`
 
 `IndexedKnowledgeDocument` is the search-index record. It carries `source`, indexing `status`, and
 optional title/summary/error/hash/count metadata. It is distinct from the content-oriented
@@ -65,7 +66,9 @@ ready/pinned documents and exclude processing, error, or archived records as app
 
 `KnowledgeScope` and `KnowledgeSearchScope` are opaque, caller-provided routing metadata. Hosts
 construct and enforce them; the package does not infer identity, tenancy, or permissions from scope
-ids or kinds.
+ids or kinds. The **value** `KnowledgeSearchScope` is the single-id constructor
+(`KnowledgeSearchScope.make({ id })`, tag `KnowledgeScope`). `KnowledgeSearchScopes.make({ ids })`
+is the non-empty-ids variant. The **type** `KnowledgeSearchScope` remains the union of both.
 
 ## Subpaths
 
@@ -89,7 +92,14 @@ ids or kinds.
 
 ```ts
 import { buildKnowledgeContext, KnowledgeStore } from '@yolk-sdk/knowledge'
-import type { KnowledgeDocument } from '@yolk-sdk/knowledge/documents'
+import {
+  KnowledgeFileSource,
+  KnowledgeSearchScope,
+  KnowledgeSearchScopes,
+  KnowledgeTextSource,
+  KnowledgeUrlSource,
+  type KnowledgeDocument
+} from '@yolk-sdk/knowledge/documents'
 import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'
 import { makeKnowledgeLookupTool, makeKnowledgeManageTool } from '@yolk-sdk/knowledge/agent'
 ```

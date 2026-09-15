@@ -1,5 +1,6 @@
+import { RuntimeContext } from 'alchemy/RuntimeContext'
 import * as Cloudflare from 'alchemy/Cloudflare'
-import { Clock, Context, Effect } from 'effect'
+import { Clock, Context, Effect, Predicate } from 'effect'
 import * as Scope from 'effect/Scope'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
@@ -19,12 +20,15 @@ import {
   latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
   runRuntime,
+  RuntimeRequest,
   type AppendHitlResponseRuntimeRequest,
   type AppendInputRuntimeRequest,
   type RuntimeSessionEventLog
 } from '@yolk-sdk/agent/runtime'
+import { TokenBrokerRequest } from '@yolk-sdk/agent/oauth'
 import {
   AgentError,
+  AgentEvent,
   AgentMessage,
   AgentWebSocketClientMessage,
   SessionSnapshot,
@@ -32,7 +36,6 @@ import {
   UserMessage,
   assistantContent,
   contentText,
-  type AgentEvent as AgentEventType,
   type AgentReasoningEffort,
   type HitlResponse
 } from '@yolk-sdk/agent/protocol'
@@ -81,8 +84,11 @@ type SocketAttachment = {
 }
 
 const bootstrapKey = 'bootstrap'
+
 const harnessStoreKey = 'harness-run-store'
+
 const codexTokenKey = 'codex-access-token'
+
 const anthropicTokenKey = 'anthropic-access-token'
 
 const cloudflareSystemPrompt = 'You are a minimal Yolk Cloudflare runtime smoke-test agent.'
@@ -109,24 +115,24 @@ const runtimeBaseConfig = {
 }
 
 const messageText = (message: string | ArrayBuffer) =>
-  typeof message === 'string' ? message : new TextDecoder().decode(message)
+  Predicate.isString(message) ? message : new TextDecoder().decode(message)
 
 const decodeClientMessage = (message: string | ArrayBuffer) =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(AgentWebSocketClientMessage))(
     messageText(message)
   )
 
-const encodeEvent = (event: AgentEventType) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(event)
+const encodeAgentEventJson = Schema.encodeEffect(Schema.fromJsonString(AgentEvent))
 
-const encodeJson = (value: unknown) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
+const encodeSessionSnapshotJson = Schema.encodeEffect(Schema.fromJsonString(SessionSnapshot))
 
-const sendJson = (socket: Cloudflare.DurableWebSocket, value: unknown) =>
-  encodeJson(value).pipe(Effect.flatMap(encoded => socket.send(encoded)))
+const encodeTokenBrokerRequestJson = Schema.encodeEffect(Schema.fromJsonString(TokenBrokerRequest))
 
-const sendEvent = (socket: Cloudflare.DurableWebSocket, event: AgentEventType) =>
-  encodeEvent(event).pipe(Effect.flatMap(encoded => socket.send(encoded)))
+const sendSnapshot = (socket: Cloudflare.WebSocket, snapshot: SessionSnapshot) =>
+  encodeSessionSnapshotJson(snapshot).pipe(Effect.flatMap(encoded => socket.send(encoded)))
+
+const sendEvent = (socket: Cloudflare.WebSocket, event: AgentEvent) =>
+  encodeAgentEventJson(event).pipe(Effect.flatMap(encoded => socket.send(encoded)))
 
 const toAgentError = (
   error: Parameters<typeof cloudflareRuntimeErrorToAgentError>[0] | AgentError
@@ -152,12 +158,14 @@ const makeFauxProviderLayer = Layer.succeed(
   LLMProvider.of({
     stream: request => {
       const last = request.messages.at(-1)
+
       const text =
         last === undefined
           ? ''
-          : last._tag === 'Assistant'
+          : Predicate.isTagged(last, 'Assistant')
             ? contentText(assistantContent(last))
             : contentText(last.content)
+
       const reply = `faux-cloudflare: ${text}`
 
       return Stream.fromIterable([
@@ -175,20 +183,24 @@ const toolRegistryErrorToAgentError = (error: ToolRegistryError) =>
     retryable: false
   })
 
-export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAgent>()(
+export default class YolkAgent extends Cloudflare.DurableObject<YolkAgent>()(
   'YolkAgent',
   Effect.gen(function* () {
     return Effect.gen(function* () {
       const state = yield* Cloudflare.DurableObjectState
-      const sockets = new Map<string, Cloudflare.DurableWebSocket>()
+      const withRuntime = Effect.provideService(RuntimeContext, yield* RuntimeContext)
+      const sockets = new Map<string, Cloudflare.WebSocket>()
 
       const runtimeEventLogStorage: RuntimeEventLogStorage = {
-        get: () => state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey),
-        put: log => state.storage.put(runtimeEventsStorageKey, log)
+        get: () =>
+          state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey).pipe(withRuntime),
+        put: log => state.storage.put(runtimeEventsStorageKey, log).pipe(withRuntime)
       }
+
       const instanceScope = yield* Scope.make()
       const live = yield* Scope.provide(makeLiveDrain(), instanceScope)
-      const sendConflict = (socket: Cloudflare.DurableWebSocket) =>
+
+      const sendConflict = (socket: Cloudflare.WebSocket) =>
         sendEvent(
           socket,
           AgentError.make({
@@ -197,14 +209,16 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             retryable: false
           })
         )
+
       const harnessContext = yield* Layer.buildWithScope(
         makeDurableObjectDriverLayer({
-          load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey),
-          save: snapshot => state.storage.put(harnessStoreKey, snapshot),
+          load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey).pipe(withRuntime),
+          save: snapshot => state.storage.put(harnessStoreKey, snapshot).pipe(withRuntime),
           drain: () => live.runHeld
         }),
         instanceScope
       )
+
       const driver = Context.get(harnessContext, Driver)
 
       const loadLogOrEmpty = (sessionId: string) =>
@@ -212,6 +226,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
       const loadBootstrap = () =>
         state.storage.get<BootstrapRequestType>(bootstrapKey).pipe(
+          withRuntime,
           Effect.flatMap(bootstrap =>
             bootstrap === undefined
               ? Effect.fail(
@@ -228,7 +243,11 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const requestCodexToken = (bootstrap: BootstrapRequestType) =>
         Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient
-          const body = yield* encodeJson(makeCodexTokenBrokerRequest(bootstrap.userId))
+
+          const body = yield* encodeTokenBrokerRequestJson(
+            makeCodexTokenBrokerRequest(bootstrap.userId)
+          )
+
           const response = yield* client
             .execute(
               HttpClientRequest.post(bootstrap.tokenEndpoint).pipe(
@@ -294,7 +313,11 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const requestAnthropicToken = (bootstrap: BootstrapRequestType) =>
         Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient
-          const body = yield* encodeJson(makeAnthropicTokenBrokerRequest(bootstrap.userId))
+
+          const body = yield* encodeTokenBrokerRequestJson(
+            makeAnthropicTokenBrokerRequest(bootstrap.userId)
+          )
+
           const response = yield* client
             .execute(
               HttpClientRequest.post(bootstrap.tokenEndpoint).pipe(
@@ -360,7 +383,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const getCodexToken = () =>
         Effect.gen(function* () {
           const nowMs = yield* Clock.currentTimeMillis
-          const cached = yield* state.storage.get<CodexAccessTokenType>(codexTokenKey)
+
+          const cached = yield* state.storage
+            .get<CodexAccessTokenType>(codexTokenKey)
+            .pipe(withRuntime)
 
           if (cached !== undefined && isCodexTokenFresh(cached, nowMs)) {
             return cached
@@ -368,7 +394,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
           const bootstrap = yield* loadBootstrap()
           const token = yield* requestCodexToken(bootstrap)
-          yield* state.storage.put(codexTokenKey, token)
+          yield* state.storage.put(codexTokenKey, token).pipe(withRuntime)
 
           return token
         })
@@ -376,7 +402,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const getAnthropicToken = () =>
         Effect.gen(function* () {
           const nowMs = yield* Clock.currentTimeMillis
-          const cached = yield* state.storage.get<CodexAccessTokenType>(anthropicTokenKey)
+
+          const cached = yield* state.storage
+            .get<CodexAccessTokenType>(anthropicTokenKey)
+            .pipe(withRuntime)
 
           if (cached !== undefined && isAnthropicTokenFresh(cached, nowMs)) {
             return cached
@@ -384,14 +413,16 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
           const bootstrap = yield* loadBootstrap()
           const token = yield* requestAnthropicToken(bootstrap)
-          yield* state.storage.put(anthropicTokenKey, token)
+          yield* state.storage.put(anthropicTokenKey, token).pipe(withRuntime)
 
           return token
         })
 
       const resolveCloudflareToolSet = (sessionId: string) =>
         Effect.gen(function* () {
-          const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
+          const bootstrap = yield* state.storage
+            .get<BootstrapRequestType>(bootstrapKey)
+            .pipe(withRuntime)
 
           const modules = yield* makeCloudflareTextToolModules(bootstrap?.mcpServers ?? [])
           const skillset = skillsetFromBootstrap(bootstrap)
@@ -414,6 +445,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       ) =>
         Layer.unwrap(
           state.storage.get<BootstrapRequestType>(bootstrapKey).pipe(
+            withRuntime,
             Effect.flatMap(bootstrap =>
               bootstrap === undefined
                 ? Effect.succeed(makeFauxProviderLayer)
@@ -452,16 +484,16 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         )
 
       const handleRuntimeAppend = Effect.fnUntraced(function* (
-        socket: Cloudflare.DurableWebSocket,
+        socket: Cloudflare.WebSocket,
         sessionId: string,
         socketId: string,
         input: {
           readonly model?: string
           readonly reasoningEffort?: AgentReasoningEffort
         },
-        request:
-          | Omit<AppendInputRuntimeRequest, 'runId'>
-          | Omit<AppendHitlResponseRuntimeRequest, 'runId'>
+        toRuntimeRequest: (
+          runId: string
+        ) => AppendInputRuntimeRequest | AppendHitlResponseRuntimeRequest
       ) {
         const prepareEpoch = yield* live.beginPrepare()
         const log = yield* loadLogOrEmpty(sessionId)
@@ -469,55 +501,66 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
         if (Option.isSome(activeRun) || (yield* driver.isActive(sessionId))) {
           yield* sendConflict(socket)
+
           return
         }
+
         const resolvedToolSet = yield* resolveCloudflareToolSet(sessionId).pipe(Effect.result)
 
-        if (resolvedToolSet._tag === 'Failure') {
+        if (Predicate.isTagged(resolvedToolSet, 'Failure')) {
           yield* sendEvent(socket, resolvedToolSet.failure)
+
           return
         }
 
         const toolSet = resolvedToolSet.success
-        const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
+
+        const bootstrap = yield* state.storage
+          .get<BootstrapRequestType>(bootstrapKey)
+          .pipe(withRuntime)
+
         const skillset = skillsetFromBootstrap(bootstrap)
         const selectedModel = input.model ?? runtimeBaseConfig.model
         const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
 
-        const work = runRuntime(
-          { ...request, runId: crypto.randomUUID() },
-          {
-            ...runtimeBaseConfig,
-            model,
-            systemPrompt: systemPromptWithSkills(skillset),
-            tools: toolSet.tools,
-            reasoningEffort: input.reasoningEffort
-          }
-        ).pipe(
+        const work = runRuntime(toRuntimeRequest(crypto.randomUUID()), {
+          ...runtimeBaseConfig,
+          model,
+          systemPrompt: systemPromptWithSkills(skillset),
+          tools: toolSet.tools,
+          reasoningEffort: input.reasoningEffort
+        }).pipe(
           Stream.runForEach(event => sendEvent(socket, event)),
           Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),
           Effect.catch(error => sendEvent(socket, toAgentError(error))),
           Effect.catch(() => Effect.void)
         )
+
         const started = yield* live.runOwned(prepareEpoch, socketId, work, driver, sessionId)
         yield* notifyRejectedStart(started, sendConflict(socket))
       })
 
       const handleUserInput = (
-        socket: Cloudflare.DurableWebSocket,
+        socket: Cloudflare.WebSocket,
         sessionId: string,
         socketId: string,
         input: UserInput
-      ) =>
-        handleRuntimeAppend(socket, sessionId, socketId, input, {
-          _tag: 'AppendInput',
-          sessionId,
-          input: input.message,
-          expectedRevision: input.expectedRevision
-        })
+      ) => {
+        const message = input.message
+        const expectedRevision = input.expectedRevision
+
+        return handleRuntimeAppend(socket, sessionId, socketId, input, runId =>
+          RuntimeRequest.AppendInput({
+            sessionId,
+            input: message,
+            runId,
+            expectedRevision
+          })
+        )
+      }
 
       const handleHitlResponse = (
-        socket: Cloudflare.DurableWebSocket,
+        socket: Cloudflare.WebSocket,
         sessionId: string,
         socketId: string,
         input: {
@@ -526,13 +569,19 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           readonly model?: string
           readonly reasoningEffort?: AgentReasoningEffort
         }
-      ) =>
-        handleRuntimeAppend(socket, sessionId, socketId, input, {
-          _tag: 'AppendHitlResponse',
-          sessionId,
-          response: input.response,
-          expectedRevision: input.expectedRevision
-        })
+      ) => {
+        const response = input.response
+        const expectedRevision = input.expectedRevision
+
+        return handleRuntimeAppend(socket, sessionId, socketId, input, runId =>
+          RuntimeRequest.AppendHitlResponse({
+            sessionId,
+            response,
+            runId,
+            expectedRevision
+          })
+        )
+      }
 
       for (const socket of yield* state.getWebSockets()) {
         const attachment = socket.deserializeAttachment<SocketAttachment>()
@@ -548,9 +597,9 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
           if (request.method === 'POST') {
             const bootstrap = yield* HttpServerRequest.schemaBodyJson(BootstrapRequest)
-            yield* state.storage.put(bootstrapKey, bootstrap)
-            yield* state.storage.delete(codexTokenKey)
-            yield* state.storage.delete(anthropicTokenKey)
+            yield* state.storage.put(bootstrapKey, bootstrap).pipe(withRuntime)
+            yield* state.storage.delete(codexTokenKey).pipe(withRuntime)
+            yield* state.storage.delete(anthropicTokenKey).pipe(withRuntime)
 
             return yield* HttpServerResponse.json({ ok: true })
           }
@@ -568,7 +617,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
           socket.serializeAttachment({ sessionId, socketId })
           sockets.set(socketId, socket)
-          yield* sendJson(
+          yield* sendSnapshot(
             socket,
             SessionSnapshot.make({
               revision: log.revision,
@@ -579,7 +628,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           return response
         }),
         webSocketMessage: Effect.fnUntraced(function* (
-          socket: Cloudflare.DurableWebSocket,
+          socket: Cloudflare.WebSocket,
           message: string | ArrayBuffer
         ) {
           const attachment = socket.deserializeAttachment<SocketAttachment>()
@@ -593,12 +642,13 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                 retryable: false
               })
             )
+
             return
           }
 
           const decodedInput = yield* decodeClientMessage(message).pipe(Effect.result)
 
-          if (decodedInput._tag === 'Failure') {
+          if (Predicate.isTagged(decodedInput, 'Failure')) {
             return yield* handleUserInput(
               socket,
               attachment.sessionId,
@@ -608,14 +658,16 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           }
 
           const input = decodedInput.success
-          if (input._tag === 'UserInput') {
+
+          if (Predicate.isTagged(input, 'UserInput')) {
             yield* handleUserInput(socket, attachment.sessionId, attachment.socketId, input)
+
             return
           }
 
           yield* handleHitlResponse(socket, attachment.sessionId, attachment.socketId, input)
         }),
-        webSocketClose: Effect.fnUntraced(function* (socket: Cloudflare.DurableWebSocket) {
+        webSocketClose: Effect.fnUntraced(function* (socket: Cloudflare.WebSocket) {
           const attachment = socket.deserializeAttachment<SocketAttachment>()
 
           if (attachment !== null) {

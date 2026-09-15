@@ -1,10 +1,6 @@
 export {
   decodeOpenAiRealtimeServerEvent,
   decodeOpenAiRealtimeToolExecutionResponse,
-  makeOpenAiRealtimeAssistantMessageItem,
-  makeOpenAiRealtimeConversationItemCreateEvent,
-  makeOpenAiRealtimeFunctionCallOutputEvent,
-  makeOpenAiRealtimeResponseCreateEvent,
   OpenAiRealtimeClientEvent,
   OpenAiRealtimeConversationItemCreateEvent,
   OpenAiRealtimeConversationMessageItem,
@@ -22,9 +18,18 @@ export {
   OpenAiRealtimeServerEvent,
   OpenAiRealtimeSessionConfigured,
   OpenAiRealtimeToolExecutionResponse,
-  makeOpenAiRealtimeUserMessageItem,
   readOpenAiRealtimeToolOutput
 } from './events.ts'
+
+export {
+  makeOpenAiRealtimeAssistantMessageItem,
+  makeOpenAiRealtimeConversationItemCreateEvent,
+  makeOpenAiRealtimeFunctionCallOutputEvent,
+  makeOpenAiRealtimeResponseCreateEvent,
+  makeOpenAiRealtimeUserMessageItem,
+  openAiRealtimeVoiceClientCodec
+} from './client-codec.ts'
+
 export {
   defaultOpenAiRealtimeReasoningEffort,
   defaultOpenAiRealtimeTranscriptionModel,
@@ -47,5 +52,5 @@ export {
   type OpenAiRealtimeTranscriptionModel,
   type OpenAiRealtimeVoice
 } from './session-config.ts'
+
 export { openAiRealtimeServerEventToVoiceEvents } from './to-voice.ts'
-export { openAiRealtimeVoiceClientCodec } from './client-codec.ts'

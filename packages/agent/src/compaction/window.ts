@@ -5,8 +5,10 @@ import {
   type AgentMessage
 } from '@yolk-sdk/agent/protocol'
 import { estimateAgentMessagesTokens, type TranscriptTokenEstimator } from './estimator.ts'
+import { Data, Predicate } from 'effect'
 
 export const defaultCompactionTailMessageCount = 16
+
 export const defaultMinimumCompactionMessages = 2
 
 export type CompactionSkipReason =
@@ -22,45 +24,51 @@ export type WindowCompactionPlanOptions = {
   readonly estimateTokens?: TranscriptTokenEstimator
 }
 
-export type SkippedCompactionPlan = {
-  readonly _tag: 'Skip'
-  readonly reason: CompactionSkipReason
-  readonly messages: ReadonlyArray<AgentMessage>
-  readonly beforeTokens: number
-}
+export type WindowCompactionPlan = Data.TaggedEnum<{
+  Skip: {
+    readonly reason: CompactionSkipReason
+    readonly messages: ReadonlyArray<AgentMessage>
+    readonly beforeTokens: number
+  }
+  Compact: {
+    readonly messages: ReadonlyArray<AgentMessage>
+    readonly compactedMessages: ReadonlyArray<AgentMessage>
+    readonly recentMessages: ReadonlyArray<AgentMessage>
+    readonly tailStartIndex: number
+    readonly beforeTokens: number
+  }
+}>
 
-export type CompactCompactionPlan = {
-  readonly _tag: 'Compact'
-  readonly messages: ReadonlyArray<AgentMessage>
-  readonly compactedMessages: ReadonlyArray<AgentMessage>
-  readonly recentMessages: ReadonlyArray<AgentMessage>
-  readonly tailStartIndex: number
-  readonly beforeTokens: number
-}
+export type SkippedCompactionPlan = Extract<WindowCompactionPlan, { readonly _tag: 'Skip' }>
 
-export type WindowCompactionPlan = SkippedCompactionPlan | CompactCompactionPlan
+export type CompactCompactionPlan = Extract<WindowCompactionPlan, { readonly _tag: 'Compact' }>
 
-export type SkippedCompactionResult = {
-  readonly _tag: 'Skipped'
-  readonly reason: CompactionSkipReason
-  readonly messages: ReadonlyArray<AgentMessage>
-  readonly events: ReadonlyArray<AgentEvent>
-  readonly beforeTokens: number
-}
+const WindowCompactionPlan = Data.taggedEnum<WindowCompactionPlan>()
 
-export type CompletedCompactionResult = {
-  readonly _tag: 'Compacted'
-  readonly strategy: string
-  readonly messages: ReadonlyArray<AgentMessage>
-  readonly events: ReadonlyArray<AgentEvent>
-  readonly beforeTokens: number
-  readonly afterTokens: number
-  readonly compactedMessages: ReadonlyArray<AgentMessage>
-  readonly recentMessages: ReadonlyArray<AgentMessage>
-  readonly summaryMessage: AgentMessage
-}
+export type CompactionResult = Data.TaggedEnum<{
+  Skipped: {
+    readonly reason: CompactionSkipReason
+    readonly messages: ReadonlyArray<AgentMessage>
+    readonly events: ReadonlyArray<AgentEvent>
+    readonly beforeTokens: number
+  }
+  Compacted: {
+    readonly strategy: string
+    readonly messages: ReadonlyArray<AgentMessage>
+    readonly events: ReadonlyArray<AgentEvent>
+    readonly beforeTokens: number
+    readonly afterTokens: number
+    readonly compactedMessages: ReadonlyArray<AgentMessage>
+    readonly recentMessages: ReadonlyArray<AgentMessage>
+    readonly summaryMessage: AgentMessage
+  }
+}>
 
-export type CompactionResult = SkippedCompactionResult | CompletedCompactionResult
+export type SkippedCompactionResult = Extract<CompactionResult, { readonly _tag: 'Skipped' }>
+
+export type CompletedCompactionResult = Extract<CompactionResult, { readonly _tag: 'Compacted' }>
+
+export const CompactionResult = Data.taggedEnum<CompactionResult>()
 
 export type ApplyCompactionPlanOptions = {
   readonly strategy: string
@@ -75,13 +83,13 @@ const skippedCompactionResult = (
   reason: CompactionSkipReason,
   messages: ReadonlyArray<AgentMessage>,
   beforeTokens: number
-): SkippedCompactionResult => ({
-  _tag: 'Skipped',
-  reason,
-  messages,
-  events: [],
-  beforeTokens
-})
+): SkippedCompactionResult =>
+  CompactionResult.Skipped({
+    reason,
+    messages,
+    events: [],
+    beforeTokens
+  })
 
 export const windowTailStartIndex = (
   messages: ReadonlyArray<AgentMessage>,
@@ -107,39 +115,51 @@ export const planWindowCompaction = (
   const minMessages = options.minMessages ?? defaultMinimumCompactionMessages
 
   if (messages.length <= minMessages) {
-    return { _tag: 'Skip', reason: 'too_few_messages', messages, beforeTokens }
+    return WindowCompactionPlan.Skip({
+      reason: 'too_few_messages',
+      messages,
+      beforeTokens
+    })
   }
 
   if (beforeTokens < options.thresholdTokens) {
-    return { _tag: 'Skip', reason: 'below_threshold', messages, beforeTokens }
+    return WindowCompactionPlan.Skip({
+      reason: 'below_threshold',
+      messages,
+      beforeTokens
+    })
   }
 
   const tailStart = windowTailStartIndex(
     messages,
     options.tailMessageCount ?? defaultCompactionTailMessageCount
   )
+
   const compactedMessages = messages.slice(0, tailStart)
   const recentMessages = messages.slice(tailStart)
 
   if (compactedMessages.length === 0 || recentMessages.length === 0) {
-    return { _tag: 'Skip', reason: 'empty_window', messages, beforeTokens }
+    return WindowCompactionPlan.Skip({
+      reason: 'empty_window',
+      messages,
+      beforeTokens
+    })
   }
 
-  return {
-    _tag: 'Compact',
+  return WindowCompactionPlan.Compact({
     messages,
     compactedMessages,
     recentMessages,
     tailStartIndex: tailStart,
     beforeTokens
-  }
+  })
 }
 
 export const applyCompactionPlan = (
   plan: WindowCompactionPlan,
   options: ApplyCompactionPlanOptions
 ): CompactionResult => {
-  if (plan._tag === 'Skip') {
+  if (Predicate.isTagged(plan, 'Skip')) {
     return skippedCompactionResult(plan.reason, plan.messages, plan.beforeTokens)
   }
 
@@ -151,8 +171,7 @@ export const applyCompactionPlan = (
     return skippedCompactionResult('not_smaller', plan.messages, plan.beforeTokens)
   }
 
-  return {
-    _tag: 'Compacted',
+  return CompactionResult.Compacted({
     strategy: options.strategy,
     messages,
     events: [
@@ -168,5 +187,5 @@ export const applyCompactionPlan = (
     compactedMessages: plan.compactedMessages,
     recentMessages: plan.recentMessages,
     summaryMessage: options.summaryMessage
-  }
+  })
 }

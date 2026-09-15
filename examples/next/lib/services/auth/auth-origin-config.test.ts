@@ -16,6 +16,7 @@ describe('auth origin config', () => {
         VERCEL_URL: 'deployment.vercel.app',
         VERCEL_BRANCH_URL: 'branch.vercel.app'
       })
+
       expect(config).toEqual({
         baseURL: 'https://feature.yolk.dev.example.com:1355',
         trustedOrigins: ['https://feature.yolk.dev.example.com:1355']
@@ -29,6 +30,7 @@ describe('auth origin config', () => {
         NODE_ENV: 'development',
         PORTLESS_URL: 'https://yolk.localhost'
       })
+
       expect(config.baseURL).toBe('https://yolk.localhost')
     })
   )
@@ -42,6 +44,7 @@ describe('auth origin config', () => {
         VERCEL_URL: 'deployment.vercel.app',
         VERCEL_BRANCH_URL: 'branch.vercel.app'
       })
+
       expect(config).toEqual({
         baseURL: 'https://deployment.vercel.app',
         trustedOrigins: [
@@ -60,6 +63,7 @@ describe('auth origin config', () => {
         PORTLESS_URL: 'https://feature.yolk.localhost',
         NEXT_PUBLIC_PROJECT_URL: 'http://localhost:41773'
       })
+
       expect(config).toEqual({
         baseURL: 'http://localhost:41773',
         trustedOrigins: ['http://localhost:41773']
@@ -75,6 +79,7 @@ describe('auth origin config', () => {
         VERCEL_URL: '',
         VERCEL_BRANCH_URL: ''
       })
+
       expect(config).toEqual({
         baseURL: 'http://localhost:3000',
         trustedOrigins: ['http://localhost:3000']
@@ -89,6 +94,7 @@ describe('auth origin config', () => {
         PORTLESS_URL: 'https://user:secret@yolk.localhost',
         NEXT_PUBLIC_PROJECT_URL: 'https://app.example.com'
       }).pipe(Effect.flip)
+
       expect(result._tag).toBe('AuthConfigError')
       expect(result.message).not.toContain('secret')
     })

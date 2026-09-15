@@ -26,7 +26,7 @@ Import feature APIs from explicit subpaths. The root package is intentionally em
 | Export                      | Purpose                                              |
 | --------------------------- | ---------------------------------------------------- |
 | `RunStore`                  | Claim/release service                                |
-| `RunStoreShape`             | Claim, release, claimed-id, and resume-count methods |
+| `RunStoreApi`               | Claim, release, claimed-id, and resume-count methods |
 | `DurableRunStoreSnapshot`   | `{ claimed, resumes }` snapshot                      |
 | `makeInMemoryRunStoreLayer` | Process-local claim store                            |
 | `makeSnapshotRunStoreLayer` | Persist claims through host `load` / `save`          |

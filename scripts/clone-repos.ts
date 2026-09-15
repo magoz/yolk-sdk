@@ -12,7 +12,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
-import { Data, Effect } from 'effect'
+import { Data, Effect, Match } from 'effect'
+import * as Schema from 'effect/Schema'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -131,17 +132,36 @@ class DependencyNotFoundError extends Data.TaggedError('DependencyNotFoundError'
   readonly depKey: string
 }> {}
 
+class PackageManifestError extends Data.TaggedError('PackageManifestError')<{
+  readonly path: string
+  readonly details: string
+  readonly cause?: unknown
+}> {}
+
+const PackageDependencyMap = Schema.Record(Schema.String, Schema.String)
+
+const RootPackageManifest = Schema.Struct({
+  dependencies: Schema.optionalKey(PackageDependencyMap),
+  devDependencies: Schema.optionalKey(PackageDependencyMap)
+})
+
+const decodeRootPackageManifest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(RootPackageManifest)
+)
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const ROOT = resolve(import.meta.dirname, '..')
+
 const REPOS_DIR = resolve(ROOT, '.repos')
 
 const exec = (cmd: string, cwd?: string) =>
   Effect.tryPromise({
     try: async () => {
       const { execSync } = await import('node:child_process')
+
       return execSync(cmd, { cwd, stdio: 'pipe', encoding: 'utf-8' })
     },
     catch: error =>
@@ -152,28 +172,38 @@ const exec = (cmd: string, cwd?: string) =>
       })
   })
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
 const readVersion = (depKey: string) =>
   Effect.gen(function* () {
     const pkgPath = resolve(ROOT, 'package.json')
-    const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'))
 
-    if (!isRecord(pkg)) {
+    const raw = yield* Effect.try({
+      try: () => readFileSync(pkgPath, 'utf-8'),
+      catch: error =>
+        new PackageManifestError({
+          path: pkgPath,
+          details: 'Could not read package.json',
+          cause: error
+        })
+    })
+
+    const pkg = yield* decodeRootPackageManifest(raw).pipe(
+      Effect.mapError(
+        error =>
+          new PackageManifestError({
+            path: pkgPath,
+            details: error.message,
+            cause: error
+          })
+      )
+    )
+
+    const version = pkg.dependencies?.[depKey] ?? pkg.devDependencies?.[depKey]
+
+    if (version === undefined) {
       return yield* new DependencyNotFoundError({ depKey })
     }
 
-    const deps = isRecord(pkg['dependencies']) ? pkg['dependencies'] : {}
-    const devDeps = isRecord(pkg['devDependencies']) ? pkg['devDependencies'] : {}
-    const value = deps[depKey] ?? devDeps[depKey]
-    const raw = typeof value === 'string' ? value : undefined
-
-    if (raw === undefined) {
-      return yield* new DependencyNotFoundError({ depKey })
-    }
-
-    return raw.replace(/^[\^~]/, '')
+    return version.replace(/^[\^~]/, '')
   })
 
 // ---------------------------------------------------------------------------
@@ -203,6 +233,7 @@ const cloneRepo = (spec: RepoSpec) =>
                 console.log(`  Tag "${tag}" not found, falling back to default branch...`)
               )
               yield* exec(`git clone --depth 1 "${spec.repo}" "${dest}"`)
+
               return ''
             })
           )
@@ -222,6 +253,7 @@ const cloneRepo = (spec: RepoSpec) =>
 
     // Remove .git to save space
     const gitDir = resolve(dest, '.git')
+
     if (existsSync(gitDir)) {
       rmSync(gitDir, { recursive: true, force: true })
     }
@@ -246,14 +278,18 @@ const program = Effect.gen(function* () {
   yield* Effect.sync(() => console.log('Done. Use these for local reference only.'))
 })
 
-const formatError = (error: CommandError | DependencyNotFoundError): string => {
-  switch (error._tag) {
-    case 'DependencyNotFoundError':
-      return `"${error.depKey}" not found in package.json dependencies`
-    case 'CommandError':
-      return `${error.details}\nCommand: ${error.command}`
-  }
-}
+const formatError = (
+  error: CommandError | DependencyNotFoundError | PackageManifestError
+): string =>
+  Match.value(error).pipe(
+    Match.tag(
+      'DependencyNotFoundError',
+      current => `"${current.depKey}" not found in package.json dependencies`
+    ),
+    Match.tag('CommandError', current => `${current.details}\nCommand: ${current.command}`),
+    Match.tag('PackageManifestError', current => `${current.details}\nManifest: ${current.path}`),
+    Match.exhaustive
+  )
 
 await Effect.runPromise(
   program.pipe(

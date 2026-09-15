@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Data, Effect } from 'effect'
 
 export type DurableAgentEventSequencerState = {
   readonly eventSequence: number
@@ -54,29 +54,34 @@ export type CommitThenWriteTerminalEventInput<
   readonly terminal: TerminalEvent
   readonly write: (event: TerminalEvent) => Effect.Effect<TerminalWriteResult, TerminalWriteError>
   readonly writeCommitError: (
-    error: unknown
+    error: CommitError
   ) => Effect.Effect<CommitErrorWriteResult, CommitErrorWriteError>
 }
 
 export type CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> =
-  | {
-      readonly _tag: 'Committed'
+  Data.TaggedEnum<{
+    Committed: {
       readonly writeResult: TerminalWriteResult
     }
-  | {
-      readonly _tag: 'CommitFailed'
+    CommitFailed: {
       readonly commitError: unknown
       readonly writeResult: CommitErrorWriteResult
     }
-  | {
-      readonly _tag: 'TerminalWriteFailed'
+    TerminalWriteFailed: {
       readonly error: unknown
     }
-  | {
-      readonly _tag: 'CommitErrorWriteFailed'
+    CommitErrorWriteFailed: {
       readonly commitError: unknown
       readonly error: unknown
     }
+  }>
+
+interface CommitThenWriteTerminalEventResultDefinition extends Data.TaggedEnum.WithGenerics<2> {
+  readonly taggedEnum: CommitThenWriteTerminalEventResult<this['A'], this['B']>
+}
+
+export const CommitThenWriteTerminalEventResult =
+  Data.taggedEnum<CommitThenWriteTerminalEventResultDefinition>()
 
 const textEncoder = new TextEncoder()
 
@@ -92,14 +97,23 @@ export const sequenceDurableAgentEvent = <Event extends object>(
 ): SequencedDurableAgentEvent<Event> => {
   const eventSequence = input.state.eventSequence
   const nextEventSequence = eventSequence + 1
-  const event = {
+
+  type SequencedDurableAgentEventFields = Event & {
+    eventId: string
+    createdAtMs?: number
+  }
+
+  const event: SequencedDurableAgentEventFields = {
     ...input.event,
     eventId: durableAgentEventId({
       streamId: input.streamId,
       turn: input.turn,
       eventSequence
-    }),
-    ...(input.createdAtMs === undefined ? {} : { createdAtMs: input.createdAtMs })
+    })
+  }
+
+  if (input.createdAtMs !== undefined) {
+    event.createdAtMs = input.createdAtMs
   }
 
   return {
@@ -125,38 +139,6 @@ export const writeDurableAgentEvent = <Event extends object>(
 
     return sequenced
   })
-
-const committedTerminalResult = <TerminalWriteResult, CommitErrorWriteResult>(
-  writeResult: TerminalWriteResult
-): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
-  _tag: 'Committed',
-  writeResult
-})
-
-const commitFailedTerminalResult = <TerminalWriteResult, CommitErrorWriteResult>(
-  commitError: unknown,
-  writeResult: CommitErrorWriteResult
-): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
-  _tag: 'CommitFailed',
-  commitError,
-  writeResult
-})
-
-const terminalWriteFailedResult = <TerminalWriteResult, CommitErrorWriteResult>(
-  error: unknown
-): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
-  _tag: 'TerminalWriteFailed',
-  error
-})
-
-const commitErrorWriteFailedResult = <TerminalWriteResult, CommitErrorWriteResult>(
-  commitError: unknown,
-  error: unknown
-): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
-  _tag: 'CommitErrorWriteFailed',
-  commitError,
-  error
-})
 
 export const commitThenWriteTerminalEvent = <
   TerminalEvent extends object,
@@ -184,24 +166,36 @@ export const commitThenWriteTerminalEvent = <
         input.writeCommitError(commitError).pipe(
           Effect.match({
             onFailure: error =>
-              commitErrorWriteFailedResult<TerminalWriteResult, CommitErrorWriteResult>(
+              CommitThenWriteTerminalEventResult.CommitErrorWriteFailed<
+                TerminalWriteResult,
+                CommitErrorWriteResult
+              >({
                 commitError,
                 error
-              ),
+              }),
             onSuccess: writeResult =>
-              commitFailedTerminalResult<TerminalWriteResult, CommitErrorWriteResult>(
+              CommitThenWriteTerminalEventResult.CommitFailed<
+                TerminalWriteResult,
+                CommitErrorWriteResult
+              >({
                 commitError,
                 writeResult
-              )
+              })
           })
         ),
       onSuccess: () =>
         input.write(input.terminal).pipe(
           Effect.match({
             onFailure: error =>
-              terminalWriteFailedResult<TerminalWriteResult, CommitErrorWriteResult>(error),
+              CommitThenWriteTerminalEventResult.TerminalWriteFailed<
+                TerminalWriteResult,
+                CommitErrorWriteResult
+              >({ error }),
             onSuccess: writeResult =>
-              committedTerminalResult<TerminalWriteResult, CommitErrorWriteResult>(writeResult)
+              CommitThenWriteTerminalEventResult.Committed<
+                TerminalWriteResult,
+                CommitErrorWriteResult
+              >({ writeResult })
           })
         )
     })

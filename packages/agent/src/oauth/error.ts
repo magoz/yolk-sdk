@@ -7,9 +7,10 @@ export const OAuthErrorCause = Schema.Literals([
   'refresh_failed',
   'unauthorized'
 ])
+
 export type OAuthErrorCause = typeof OAuthErrorCause.Type
 
-export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()('OAuthError', {
+export class OAuthError extends Schema.TaggedError<OAuthError>()('OAuthError', {
   cause: OAuthErrorCause,
   message: Schema.String,
   status: Schema.optional(Schema.Number),

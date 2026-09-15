@@ -1,3 +1,3 @@
-import ApiLive from './api.ts'
+import Api from './api.ts'
 
-export default ApiLive
+export default Api

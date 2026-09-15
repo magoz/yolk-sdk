@@ -5,11 +5,11 @@ Effect-native connector primitives and reusable provider actions for hosts that 
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Subpaths
@@ -52,6 +52,20 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 - **R2ObjectClient**: host-provided conditional object port for R2 get/create/update.
 - **ConnectorFileTransferBudget**: host-owned streamed byte/metadata/error limits for those helpers.
 - **EmailClient**: host-provided IMAP, POP3, and SMTP transport port used by generic email actions.
+
+## Portable metadata
+
+`ConnectorIntegration.metadata` and `CredentialBinding.metadata` use the exported
+`PortableMetadata` schema. Omission stays absent. Decode/make admit a snapshot of plain JSON-object
+data: finite primitives, dense ordinary arrays, and plain/null-prototype objects. Objects are copied
+onto null prototypes, own `__proto__`/`constructor` keys survive, and DAG aliases share a copied node.
+Snapshots are not frozen and do not retain input identity. Cycles, nonfinite/undefined/function
+values, exotic prototypes (including Date/Map/classes), hidden/symbol keys, and accessors fail;
+accessors are not invoked. Proxy reflection traps are not covered by a side-effect guarantee.
+
+Migrate annotations to explicit JSON data before constructing integrations/bindings; serialize Dates
+to strings and Maps to the intended data shape yourself. Integration `config`, credential secrets,
+error `underlying`, and host database contracts are unchanged.
 
 ## HTTP port
 
@@ -278,11 +292,23 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
 Gmail discovery omits invalid optional attachment sizes; present sizes are nonnegative integers.
-Provider size metadata is not a substitute for validating actual bytes. The host `ConnectorHttpClient`
-adapter must cap streamed bytes before returning its string body. Keep ordinary/error limits separate
-from successful attachment retrieval limits, allowing bounded base64 expansion and JSON overhead only
-for trusted attachment routes. Hosts also validate encoded length and actual decoded per-file/aggregate
-size, and own canonical encoding checks, MIME policy, storage, scanning, and extraction.
+Best-effort malformed **optional** sizes (`-1`, `1.5`, `null`, `"12"`, missing) still omit size and
+keep siblings, including zero. Null / array-shaped / non-object parts are skipped.
+`message/rfc822` stays an attachment (no nested body recursion). Attachment identity and bytes are
+unchanged. Public action classes, `GmailUnknownOutput`, and `gmail.get_attachment` (`size` plus
+base64url `data`) are unchanged.
+
+`gmail.get_thread` and `gmail.list_attachments` admit internal MIME `payload` as `Schema.Json` after
+`Schema.fromJsonString(Schema.Unknown)`. `Schema.Json` requires finite numbers: raw HTTP JSON `1e999` parses to
+`Infinity` and rejects the **whole** thread/message payload (`ConnectorError` `validation_failed`,
+`Invalid response shape`). That is not a general collapse of malformed optional MIME fields. Do not
+demonstrate overflow with `JSON.stringify(Infinity)` — that becomes `null` and would hit the
+omit-size path. Provider size metadata is not a substitute for validating actual bytes. The host
+`ConnectorHttpClient` adapter must cap streamed bytes before returning its string body. Keep
+ordinary/error limits separate from successful attachment retrieval limits, allowing bounded base64
+expansion and JSON overhead only for trusted attachment routes. Hosts also validate encoded length
+and actual decoded per-file/aggregate size, and own canonical encoding checks, MIME policy, storage,
+scanning, and extraction.
 
 Calendar create/update boundaries use exactly one non-empty field: `{ date, timeZone? }` for an
 all-day boundary or `{ dateTime, timeZone? }` for a date-time boundary. `start` and `end` reject

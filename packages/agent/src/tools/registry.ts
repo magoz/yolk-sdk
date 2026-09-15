@@ -1,9 +1,13 @@
-import { Array as Arr, Effect, Layer, Option } from 'effect'
+import { Array as Arr, Effect, Layer, Option, Predicate, Result, type JsonSchema } from 'effect'
 import * as Schema from 'effect/Schema'
+import * as SchemaAST from 'effect/SchemaAST'
 import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
+  isToolJsonSchemaObject,
   makeErrorToolResult,
   ToolDef,
+  ToolJsonSchema,
+  ToolJsonSchemaObject,
   type ToolApprovalPolicy,
   type ToolCall,
   type ToolResult
@@ -17,9 +21,10 @@ import {
 } from './background.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
+
 export type ToolAccess = typeof ToolAccess.Type
 
-export class ToolRegistryError extends Schema.TaggedErrorClass<ToolRegistryError>()(
+export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
   'ToolRegistryError',
   {
     message: Schema.String,
@@ -42,9 +47,10 @@ export const ModelVisibleToolErrorReason = Schema.Literals([
   'unavailable',
   'timeout'
 ])
+
 export type ModelVisibleToolErrorReason = typeof ModelVisibleToolErrorReason.Type
 
-export class ModelVisibleToolError extends Schema.TaggedErrorClass<ModelVisibleToolError>()(
+export class ModelVisibleToolError extends Schema.TaggedError<ModelVisibleToolError>()(
   'ModelVisibleToolError',
   {
     tool: Schema.String,
@@ -61,6 +67,7 @@ export const ModelVisibleToolErrorStructuredContentSchema = Schema.Struct({
   message: Schema.String,
   details: Schema.optional(Schema.Unknown)
 })
+
 export type ModelVisibleToolErrorStructuredContent =
   typeof ModelVisibleToolErrorStructuredContentSchema.Type
 
@@ -74,15 +81,30 @@ export type ModelVisibleToolErrorInput = {
 export const modelVisibleToolError = (input: ModelVisibleToolErrorInput) =>
   new ModelVisibleToolError(input)
 
+type ModelVisibleToolErrorStructuredContentFields = {
+  type: 'model_visible_tool_error'
+  tool: ModelVisibleToolError['tool']
+  reason: ModelVisibleToolError['reason']
+  message: ModelVisibleToolError['message']
+  details?: ModelVisibleToolError['details']
+}
+
 export const modelVisibleToolErrorStructuredContent = (
   error: ModelVisibleToolError
-): ModelVisibleToolErrorStructuredContent => ({
-  type: 'model_visible_tool_error',
-  tool: error.tool,
-  reason: error.reason,
-  message: error.message,
-  ...(error.details === undefined ? {} : { details: error.details })
-})
+): ModelVisibleToolErrorStructuredContent => {
+  const fields: ModelVisibleToolErrorStructuredContentFields = {
+    type: 'model_visible_tool_error',
+    tool: error.tool,
+    reason: error.reason,
+    message: error.message
+  }
+
+  if (error.details !== undefined) {
+    fields.details = error.details
+  }
+
+  return fields
+}
 
 export const modelVisibleToolErrorResult = (call: ToolCall, error: ModelVisibleToolError) =>
   makeErrorToolResult({
@@ -123,7 +145,7 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
-  readonly invalidParamsMessage?: (error: unknown) => string
+  readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
   readonly execute: (
     input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
   ) => Effect.Effect<ToolResult, ToolError | ModelVisibleToolError>
@@ -176,141 +198,218 @@ const missingToolError = (name: string) =>
     cause: 'not_found'
   })
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const jsonField = (input: Schema.JsonObject, key: string): Schema.Json | undefined =>
+  Object.hasOwn(input, key) ? input[key] : undefined
 
-const objectField = (input: unknown, key: string) =>
-  input !== null && typeof input === 'object'
-    ? Object.getOwnPropertyDescriptor(input, key)?.value
-    : undefined
+const isJsonObject = (input: Schema.Json | undefined): input is Schema.JsonObject =>
+  Predicate.isObject(input)
 
-const isObjectRecord = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && typeof input === 'object' && !Array.isArray(input)
+const jsonObject = (input: Schema.Json | undefined): Schema.JsonObject | undefined =>
+  isJsonObject(input) ? input : undefined
 
-const localDefinitionName = (ref: unknown) => {
-  if (typeof ref !== 'string') {
-    return undefined
+type ToolJsonSchemaDocument = JsonSchema.Document<'draft-2020-12'>
+
+const requireToolJsonSchema = (
+  input: ToolJsonSchemaDocument['schema']
+): typeof ToolJsonSchema.Type => {
+  const result = Schema.decodeUnknownResult(ToolJsonSchema)(input)
+
+  if (Result.isSuccess(result)) {
+    return result.success
   }
 
+  throw new Error(new Schema.SchemaError(result.failure.issue).message, {
+    cause: result.failure.issue
+  })
+}
+
+const requireToolJsonSchemaObject = (
+  input: ToolJsonSchemaDocument['definitions']
+): typeof ToolJsonSchemaObject.Type => {
+  const result = Schema.decodeUnknownResult(ToolJsonSchemaObject)(input)
+
+  if (Result.isSuccess(result)) {
+    return result.success
+  }
+
+  throw new Error(new Schema.SchemaError(result.failure.issue).message, {
+    cause: result.failure.issue
+  })
+}
+
+const localDefinitionName = (ref: string) => {
   const prefix = '#/$defs/'
 
   return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined
 }
 
-const hasJsonSchemaType = (input: unknown, type: string) => objectField(input, 'type') === type
+const hasJsonSchemaType = (input: Schema.Json, type: string) => {
+  const schema = jsonObject(input)
 
-const isEmptyStructJsonSchema = (schema: unknown) => {
-  const anyOf = objectField(schema, 'anyOf')
+  return schema !== undefined && jsonField(schema, 'type') === type
+}
+
+const isEmptyStructSchema = (schema: Schema.Top) => {
+  const ast = Schema.toEncoded(schema).ast
 
   return (
-    Array.isArray(anyOf) &&
-    anyOf.length === 2 &&
-    anyOf.some(item => hasJsonSchemaType(item, 'object')) &&
-    anyOf.some(item => hasJsonSchemaType(item, 'array'))
+    SchemaAST.isObjects(ast) &&
+    ast.propertySignatures.length === 0 &&
+    ast.indexSignatures.length === 0
   )
 }
 
-const isEmptyRecordJsonSchema = (schema: unknown) =>
+const isEmptyRecordJsonSchema = (schema: typeof ToolJsonSchema.Type) =>
+  isToolJsonSchemaObject(schema) &&
   hasJsonSchemaType(schema, 'object') &&
-  objectField(schema, 'additionalProperties') === false &&
-  objectField(schema, 'properties') === undefined &&
-  objectField(schema, 'required') === undefined
+  jsonField(schema, 'additionalProperties') === false &&
+  jsonField(schema, 'properties') === undefined &&
+  jsonField(schema, 'required') === undefined
 
-const emptyObjectJsonSchema = {
+const emptyObjectJsonSchema: typeof ToolJsonSchemaObject.Type = {
   type: 'object',
   properties: {},
   required: [],
   additionalProperties: false
 }
 
-const jsonSchemaFromSchema = (schema: Schema.Top) => {
-  const document = Schema.toJsonSchemaDocument(schema)
-  const definitionName = localDefinitionName(objectField(document.schema, '$ref'))
+const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type => {
+  const document = Schema.toJsonSchemaDocument(schema, { onExcessProperty: 'error' })
+  const documentSchema = requireToolJsonSchema(document.schema)
+
+  const rootRef = isToolJsonSchemaObject(documentSchema)
+    ? jsonField(documentSchema, '$ref')
+    : undefined
+
+  const definitionName = Predicate.isString(rootRef) ? localDefinitionName(rootRef) : undefined
+  const definitions = requireToolJsonSchemaObject(document.definitions)
+
   const localDefinition =
-    definitionName === undefined
-      ? undefined
-      : Object.getOwnPropertyDescriptor(document.definitions, definitionName)?.value
-  const rootSchema = isObjectRecord(localDefinition) ? localDefinition : document.schema
+    definitionName === undefined ? undefined : jsonField(definitions, definitionName)
+
+  const rootSchema = jsonObject(localDefinition) ?? documentSchema
+
   const remainingDefinitions =
     definitionName === undefined
-      ? document.definitions
-      : Object.fromEntries(
-          Object.entries(document.definitions).filter(([name]) => name !== definitionName)
-        )
+      ? definitions
+      : Object.fromEntries(Object.entries(definitions).filter(([name]) => name !== definitionName))
+
   const jsonSchema =
-    isEmptyStructJsonSchema(rootSchema) || isEmptyRecordJsonSchema(rootSchema)
+    isEmptyStructSchema(schema) || isEmptyRecordJsonSchema(rootSchema)
       ? emptyObjectJsonSchema
       : rootSchema
 
-  return Object.keys(remainingDefinitions).length > 0
-    ? { ...jsonSchema, $defs: remainingDefinitions }
-    : jsonSchema
+  if (Object.keys(remainingDefinitions).length === 0) {
+    return jsonSchema
+  }
+
+  if (!isToolJsonSchemaObject(jsonSchema)) {
+    return { allOf: [jsonSchema], $defs: remainingDefinitions }
+  }
+
+  return { ...jsonSchema, $defs: remainingDefinitions }
 }
 
 // Distinguishes makeTool's model-visible schema failures from raw/host ToolErrors.
 class InvalidToolParamsError extends ToolError {}
 
 const invalidParamsMessage = (
-  options: { readonly name: string; readonly invalidParamsMessage?: (error: unknown) => string },
-  error: unknown
-) =>
-  options.invalidParamsMessage?.(error) ??
-  `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
+  options: {
+    readonly name: string
+    readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
+  },
+  error: Schema.SchemaError
+) => options.invalidParamsMessage?.(error) ?? `Invalid ${options.name} arguments: ${String(error)}`
+
+type MakeToolRegistrationFields = {
+  def: ToolDef
+  background?: boolean
+}
+
+type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
+  name: string
+  description: string
+  parameters: ReturnType<typeof jsonSchemaFromSchema>
+  approval: MakeToolOptions<Context, ParamsSchema>['approval']
+  background?: boolean
+}
 
 export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   options: MakeToolOptions<Context, ParamsSchema>
-): ToolRegistration<Context> => ({
-  def: ToolDef.make({
-    name: options.name,
-    description: options.description,
-    parameters: jsonSchemaFromSchema(options.parameters),
-    approval: options.approval,
-    ...(options.background === undefined ? {} : { background: options.background })
-  }),
-  ...(options.background === undefined ? {} : { background: options.background }),
-  validate: call =>
-    Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
-      Effect.asVoid,
-      Effect.mapError(
-        error =>
-          new InvalidToolParamsError({
-            tool: options.name,
-            cause: 'validation',
-            message: invalidParamsMessage(options, error)
-          })
-      )
-    ),
-  access: options.access,
-  approval: options.approval,
-  isEnabled: options.isEnabled,
-  execute: ({ call, context }) =>
-    Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
-      Effect.matchEffect({
-        onFailure: error => {
-          const message = invalidParamsMessage(options, error)
+): ToolRegistration<Context> => {
+  const registration: MakeToolRegistrationFields = {
+    def: ToolDef.make(
+      (() => {
+        const fields: MakeToolDefFields<Context, ParamsSchema> = {
+          name: options.name,
+          description: options.description,
+          parameters: jsonSchemaFromSchema(options.parameters),
+          approval: options.approval
+        }
 
-          return Effect.succeed(
-            modelVisibleToolErrorResult(
-              call,
-              modelVisibleToolError({
-                tool: options.name,
-                message,
-                reason: 'validation'
-              })
-            )
-          )
-        },
-        onSuccess: params =>
-          options
-            .execute({ call, context, params })
-            .pipe(
-              Effect.catchTag('ModelVisibleToolError', error =>
-                Effect.succeed(modelVisibleToolErrorResult(call, error))
+        if (options.background !== undefined) {
+          fields.background = options.background
+        }
+
+        return fields
+      })()
+    )
+  }
+
+  if (options.background !== undefined) {
+    registration.background = options.background
+  }
+
+  const tails: Pick<
+    ToolRegistration<Context>,
+    'validate' | 'access' | 'approval' | 'isEnabled' | 'execute'
+  > = {
+    validate: call =>
+      Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
+        Effect.asVoid,
+        Effect.mapError(
+          error =>
+            new InvalidToolParamsError({
+              tool: options.name,
+              cause: 'validation',
+              message: invalidParamsMessage(options, error)
+            })
+        )
+      ),
+    access: options.access,
+    approval: options.approval,
+    isEnabled: options.isEnabled,
+    execute: ({ call, context }) =>
+      Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
+        Effect.matchEffect({
+          onFailure: error => {
+            const message = invalidParamsMessage(options, error)
+
+            return Effect.succeed(
+              modelVisibleToolErrorResult(
+                call,
+                modelVisibleToolError({
+                  tool: options.name,
+                  message,
+                  reason: 'validation'
+                })
               )
             )
-      })
-    )
-})
+          },
+          onSuccess: params =>
+            options
+              .execute({ call, context, params })
+              .pipe(
+                Effect.catchTag('ModelVisibleToolError', error =>
+                  Effect.succeed(modelVisibleToolErrorResult(call, error))
+                )
+              )
+        })
+      )
+  }
+
+  return Object.assign(registration, tails)
+}
 
 const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistration<Context>>) => {
   const names = Arr.map(resolved, item => item.tool.def.name)
@@ -330,6 +429,7 @@ export const resolveTools = <Context>(
     const resolvedByModule = yield* Effect.forEach(modules, toolModule =>
       resolveModuleTools(toolModule, context)
     )
+
     const resolved = Arr.flatten(resolvedByModule)
     const duplicateName = findDuplicateToolName(resolved)
 
@@ -339,6 +439,7 @@ export const resolveTools = <Context>(
 
     const activated = (tool: ToolRegistration<Context>) =>
       options.backgroundHost !== undefined && (tool.background ?? tool.def.background) === true
+
     for (const { tool } of resolved) {
       // Resolved definitions are advertisements, not reusable business registrations.
       if (tool.def.execution !== undefined) {
@@ -349,6 +450,7 @@ export const resolveTools = <Context>(
           })
         )
       }
+
       // Loop-owned tool names keep their own lifecycle: `question` is intercepted before dispatch
       // and `subagent` already owns an explicit acknowledgement helper keyed on its top-level params.
       if (activated(tool) && loopOwnedToolNames.has(tool.def.name)) {
@@ -359,9 +461,11 @@ export const resolveTools = <Context>(
           })
         )
       }
+
       const unsupportedSchema = activated(tool)
         ? unsupportedBackgroundSchema(tool.def.parameters)
         : undefined
+
       if (unsupportedSchema !== undefined) {
         return yield* Effect.fail(
           new ToolRegistryError({
@@ -370,6 +474,7 @@ export const resolveTools = <Context>(
           })
         )
       }
+
       if (activated(tool) && tool.validate === undefined) {
         return yield* Effect.fail(
           new ToolRegistryError({
@@ -379,9 +484,11 @@ export const resolveTools = <Context>(
         )
       }
     }
+
     const tools = Arr.map(resolved, item =>
       activated(item.tool) ? backgroundToolDef(item.tool.def) : item.tool.def
     )
+
     const metadata = Arr.map(resolved, item => ({
       moduleId: item.moduleId,
       name: item.tool.def.name,
@@ -396,6 +503,7 @@ export const resolveTools = <Context>(
           onSome: match => {
             const host = options.backgroundHost
             const validate = match.tool.validate
+
             return activated(match.tool) && host !== undefined && validate !== undefined
               ? executeBackgroundTool({
                   request: call,

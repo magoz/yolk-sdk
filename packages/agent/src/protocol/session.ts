@@ -41,7 +41,9 @@ export const AgentWebSocketClientMessage = Schema.Union([
   ToolApprovalResponseInput,
   QuestionResponseInput
 ])
+
 export type AgentWebSocketClientMessage = typeof AgentWebSocketClientMessage.Type
 
 export const AgentWebSocketServerMessage = Schema.Union([SessionSnapshot, AgentEvent])
+
 export type AgentWebSocketServerMessage = typeof AgentWebSocketServerMessage.Type

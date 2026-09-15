@@ -65,7 +65,7 @@ const isForbiddenImport = source => {
   return nodeBuiltins.has(source)
 }
 
-/** @type {import('eslint').Rule.RuleModule} */
+/** @type {import('@oxlint/plugins').Rule} */
 export const noNodeDepsInAgentTools = {
   meta: {
     type: 'problem',
@@ -83,6 +83,7 @@ export const noNodeDepsInAgentTools = {
   },
   create(context) {
     const filename = context.filename ?? context.getFilename()
+
     if (!isAgentToolFile(filename)) {
       return {}
     }
@@ -90,6 +91,7 @@ export const noNodeDepsInAgentTools = {
     return {
       ImportDeclaration(node) {
         const source = String(node.source.value)
+
         if (isForbiddenImport(source)) {
           context.report({ node, messageId: 'noNodeImport', data: { source } })
         }

@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ConnectorBinaryHttpClient } from '../binary-http.ts'
 import type { ConnectorBinaryHttpResponse } from '../binary-http.ts'
@@ -29,10 +29,11 @@ export const DropboxDownloadErrorCode = Schema.Literals([
   'unexpected_redirect',
   'partial_content'
 ])
+
 export type DropboxDownloadErrorCode = typeof DropboxDownloadErrorCode.Type
 
 /** Safe boundary: deliberately contains no upstream message, URL, headers, body or cause. */
-export class DropboxDownloadError extends Schema.TaggedErrorClass<DropboxDownloadError>()(
+export class DropboxDownloadError extends Schema.TaggedError<DropboxDownloadError>()(
   'DropboxDownloadError',
   { code: DropboxDownloadErrorCode }
 ) {}
@@ -79,11 +80,15 @@ const DropboxPath = Schema.String.check(
     /^(?:\/[^\u0000-\u001f\u007f]+|id:[^\u0000-\u001f\u007f\s/]+(?:\/[^\u0000-\u001f\u007f]+)?|rev:[0-9a-f]{9,}|ns:[0-9]+\/[^\u0000-\u001f\u007f]+)(?![\s\S])/
   )
 )
+
 const Input = Schema.Struct({ path: DropboxPath })
+
 const ByteLimit = Schema.Int.check(
   Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
 )
+
 const Budget = Schema.Struct({ maxBytes: ByteLimit, maxErrorBodyBytes: ByteLimit })
+
 const Metadata = Schema.Struct({
   '.tag': Schema.optional(Schema.Literal('file')),
   id: Schema.String.check(Schema.isNonEmpty()),
@@ -97,19 +102,21 @@ const Metadata = Schema.Struct({
   is_downloadable: Schema.optional(Schema.Boolean),
   content_hash: Schema.optional(Schema.String)
 })
+
 const ErrorBody = Schema.Struct({ error_summary: Schema.optional(Schema.String) })
 
 const downloadUrl = `${dropboxContentApiBaseUrl}/files/download`
 
 // Dropbox-API-Arg must be HTTP-header-safe JSON: every non-ASCII code unit becomes \uXXXX.
-const headerSafeJson = (value: unknown) =>
-  JSON.stringify(value).replace(
+const dropboxApiArgHeader = (path: string) =>
+  JSON.stringify({ path }).replace(
     /[\u007f-\uffff]/g,
     character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
   )
 
 const singleHeader = (headers: Readonly<Record<string, string>>, name: string) => {
   const matches = Object.entries(headers).filter(([key]) => key.toLowerCase() === name)
+
   return matches.length === 1 ? matches[0]?.[1] : undefined
 }
 
@@ -135,11 +142,17 @@ const statusCode = (status: number): DropboxDownloadErrorCode => {
 // Dropbox reports endpoint-specific failures as HTTP 409 with an error_summary; classify only.
 const conflictCode = (summary: string | undefined): DropboxDownloadErrorCode => {
   if (summary === undefined) return 'upstream_failed'
+
   if (summary.includes('not_found')) return 'not_found'
+
   if (summary.includes('not_file')) return 'not_a_file'
+
   if (summary.includes('unsupported_file')) return 'not_downloadable'
+
   if (summary.includes('restricted_content')) return 'forbidden'
+
   if (summary.includes('malformed_path')) return 'invalid_input'
+
   return 'upstream_failed'
 }
 
@@ -149,10 +162,12 @@ const errorSummary = (bytes: Uint8Array) =>
     try: () => new TextDecoder('utf-8', { fatal: true }).decode(bytes),
     catch: () => new DropboxDownloadError({ code: 'upstream_failed' })
   }).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
     Effect.flatMap(Schema.decodeUnknownEffect(ErrorBody)),
     Effect.result,
-    Effect.map(result => (result._tag === 'Success' ? result.success.error_summary : undefined))
+    Effect.map(result =>
+      Predicate.isTagged(result, 'Success') ? result.success.error_summary : undefined
+    )
   )
 
 const checkBody = (
@@ -161,13 +176,16 @@ const checkBody = (
   maxErrorBodyBytes: number
 ) => {
   const limit = response.status === 200 ? maxBytes : maxErrorBodyBytes
+
   if (response.bytes.byteLength > limit) return fail('response_too_large')
+
   if (
     response.status === 200 &&
     (!response.bodyComplete ||
       Object.keys(response.headers).some(name => name.toLowerCase() === 'content-range'))
   )
     return fail('partial_content')
+
   return Effect.void
 }
 
@@ -189,22 +207,27 @@ export const downloadDropboxFile = (
     const requested = yield* Schema.decodeUnknownEffect(Input)(input).pipe(
       Effect.mapError(() => new DropboxDownloadError({ code: 'invalid_input' }))
     )
+
     const limits = yield* Schema.decodeUnknownEffect(Budget)(budget).pipe(
       Effect.mapError(() => new DropboxDownloadError({ code: 'invalid_input' }))
     )
+
     if (integration.connectorId !== dropboxConnectorId) return yield* fail('invalid_input')
+
     const token = yield* resolveDropboxAccessToken(
       integration,
       DropboxContentReadOAuthCredentialSlot
     ).pipe(Effect.mapError(() => new DropboxDownloadError({ code: 'credential_failed' })))
+
     const http = yield* ConnectorBinaryHttpClient
+
     const response = yield* http
       .request({
         method: 'GET',
         url: downloadUrl,
         headers: {
           ...dropboxAuthorizationHeaders(token),
-          'dropbox-api-arg': headerSafeJson({ path: requested.path })
+          'dropbox-api-arg': dropboxApiArgHeader(requested.path)
         },
         maxBytes: limits.maxBytes,
         maxErrorBodyBytes: limits.maxErrorBodyBytes,
@@ -212,30 +235,27 @@ export const downloadDropboxFile = (
         credentials: 'omit'
       })
       .pipe(
-        Effect.mapError(
-          error =>
-            new DropboxDownloadError({
-              code:
-                error.code === 'response_too_large'
-                  ? 'response_too_large'
-                  : error.code === 'network_policy_rejected'
-                    ? 'network_policy_rejected'
-                    : 'transport_failed'
-            })
-        ),
+        Effect.mapError(error => new DropboxDownloadError({ code: error.code })),
         Effect.tap(response => checkBody(response, limits.maxBytes, limits.maxErrorBodyBytes))
       )
+
     if (response.status === 409)
       return yield* fail(conflictCode(yield* errorSummary(response.bytes)))
+
     if (response.status !== 200) return yield* fail(statusCode(response.status))
 
     // Dropbox returns the served file's metadata in a response header, not the body.
     const result = singleHeader(response.headers, 'dropbox-api-result')
+
     if (result === undefined) return yield* fail('invalid_metadata')
-    const metadata = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(result).pipe(
+
+    const metadata = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+      result
+    ).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(Metadata)),
       Effect.mapError(() => new DropboxDownloadError({ code: 'invalid_metadata' }))
     )
+
     if (
       (requested.path.startsWith('id:') &&
         !requested.path.includes('/') &&
@@ -243,7 +263,9 @@ export const downloadDropboxFile = (
       (requested.path.startsWith('rev:') && metadata.rev !== requested.path.slice('rev:'.length))
     )
       return yield* fail('invalid_metadata')
+
     if (metadata.is_downloadable === false) return yield* fail('not_downloadable')
+
     if (metadata.size !== response.bytes.byteLength) return yield* fail('partial_content')
 
     return {

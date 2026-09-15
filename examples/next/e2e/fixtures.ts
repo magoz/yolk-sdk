@@ -27,9 +27,11 @@ type TestFixtures = {
 export const test = base.extend<TestFixtures>({
   authedContext: async ({ browser, baseURL }, use) => {
     const token = process.env.TEST_SESSION_TOKEN
+
     if (!token) {
       throw new Error('TEST_SESSION_TOKEN not set. Did global-setup run?')
     }
+
     if (baseURL === undefined) {
       throw new Error('baseURL not configured')
     }
@@ -74,6 +76,7 @@ export const test = base.extend<TestFixtures>({
         Accept: 'application/json'
       }
     })
+
     await use(context)
     await context.dispose()
   }

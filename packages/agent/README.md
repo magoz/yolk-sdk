@@ -7,13 +7,13 @@ Root export is intentionally empty. Import feature APIs from explicit subpaths.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/agent@canary effect@4.0.0-beta.80
+pnpm add @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 Add `react` if you use `@yolk-sdk/agent/react` or `@yolk-sdk/agent/voice/react`.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Subpaths
@@ -60,13 +60,14 @@ import {
   isTerminalAgentEvent,
   makeSubagentRunId,
   ProviderErrorInfo,
+  PlainHitlResponse,
   questionResponseStructuredContent,
   repairDanglingHostToolCalls,
   UserMessage,
   validateNoDanglingHostToolCalls
 } from '@yolk-sdk/agent/protocol'
 import { run } from '@yolk-sdk/agent/loop'
-import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { runRuntime, RuntimeRequest } from '@yolk-sdk/agent/runtime'
 import {
   documentPartFromTextFile,
   initialAgentClientState,
@@ -87,12 +88,16 @@ import {
   resolveTools
 } from '@yolk-sdk/agent/tools'
 import {
+  AgentChatAction,
+  AgentChatPart,
   applyAgentEventToChatProjection,
   makeAgentChatEventProjectionState,
   useAgentChat
 } from '@yolk-sdk/agent/react'
 import { makeVercelAiGatewayProviderLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
 ```
+
+`RuntimeRequest` is a value on `@yolk-sdk/agent/runtime` (`Transcript`, `AppendInput`, `AppendHitlResponse`). Pass `RuntimeRequest.Transcript({ sessionId, messages })` into `runRuntime`. For append requests, omitted or `undefined` `expectedRevision` still means use the loaded log revision (`??`).
 
 Test helpers live behind their own subpath:
 
@@ -107,10 +112,21 @@ and actions for submit, stop, edit, regenerate, delete, tool approval, and quest
 package supplies no components, styling, auth, or route ownership, and React remains an optional
 peer used only by React subpaths.
 
+Chat ADTs on `@yolk-sdk/agent/react` are value constructors: `AgentChatPart`, `ChatToolState`,
+`DeleteChatTurnResult`, `EditChatUserMessageResult`, `RegenerateChatMessagesResult`, `AgentChatItem`,
+`ToolRunState`, `AgentChatAction`, and hook results such as `AgentChatSubmitResult`. They are
+`Data.taggedEnum` plain objects (`_tag` last), not Equal/Hash classes. Duration descriptors use
+`ToolDurationKnown` / `ToolDurationUnknown` (`Schema.TaggedStruct.make` validates those plains).
+Prefer `AgentChatPart.Text({ ... })` over handwritten `{ _tag: 'Text', ... }`, omit absent optionals,
+and discriminate with `$is` (for example `AgentChatSubmitResult.$is('Submitted')(result)`).
+`useAgentChat` dispatches `AgentChatAction` constructors and returns those hook-result values.
+
 By default the hook streams HTTP/NDJSON through `@yolk-sdk/agent/client`. Pass an
 `AgentChatTransport` through the `transport` option to use another runtime. A custom transport
 receives the transcript, session/model options, HITL responses, and an `AbortSignal`, and returns an
-`AsyncIterable<AgentEvent>`; the host still owns endpoint auth and persistence.
+`AsyncIterable<AgentEvent>`; the host still owns endpoint auth and persistence. Custom transport
+rejections are normalized to `AgentTransportError` internally while retaining the original cause.
+Native abort causes stop quietly; other non-Error rejections display `Agent request failed`.
 
 ## Quick start
 
@@ -219,6 +235,72 @@ provider-compatible object schema without `anyOf`, `oneOf`, `allOf`, or tuple-on
 When a constraint cannot be represented faithfully, the projection widens the model-facing schema
 rather than excluding a valid call. Tool execution remains safe because `makeTool` validates the
 returned arguments against the original Effect Schema before invoking the executor.
+
+Before projection, `toAnthropicClaudeRequestBody` and the Claude provider decode `ToolDef.parameters`
+and `ToolCall.params` as `Schema.Json`. Non-JSON values fail as non-retryable `LLMError` with
+`cause: 'provider_error'`. `ToolDef.parameters` now admits `ToolJsonSchema` at construction;
+`ToolCall.params` stays opaque. Provider admission also catches post-construction forgeries.
+After lone-surrogate rewrite, the request
+body is decoded as JSON again and fails rather than skipping serialization. HTTP error bodies that
+are not JSON still classify from status.
+
+### Tool parameter documents
+
+`ToolDef.parameters` uses `ToolJsonSchema` from `@yolk-sdk/agent/protocol`: a boolean schema or
+plain JSON object. `ToolJsonSchemaObject` is the object arm; `decodeToolJsonSchema` and
+`decodeToolJsonSchemaObject` return `Option`. This checks representation, not JSON Schema semantics.
+Construction/decode preserve admitted identity and accept finite primitives, dense ordinary arrays,
+plain/null-prototype objects, own `__proto__`/`constructor` keys and DAG aliases. Accessors are
+rejected unread; exotic prototypes, hidden/symbol keys, undefined, nonfinite values and cycles fail.
+No Proxy side-effect immunity or immutability is promised. Tool call parameters/results and HITL
+remain opaque. Background wrapping preserves boolean `true`/`false` as the arguments schema;
+reference/resource restrictions still apply at activation.
+
+### OpenAI Chat Completions, Responses, and extraBody
+
+OpenAI Chat Completions and Responses lowering (including Codex) likewise admits
+`ToolDef.parameters` and tool-call `params` as `Schema.Json` before they are copied onto the request
+body. Non-JSON tool documents and arguments fail as non-retryable `LLMError` `provider_error` before
+transport. `ToolDef.parameters` admits `ToolJsonSchema`; `ToolCall.params` stays opaque. Public Codex wrapper
+`OpenAiCodexTool.parameters` remains `unknown`; that field is not a `Schema.Json` input type.
+
+Optional request-body fields such as `max_output_tokens`, `tools`, `parallel_tool_calls`, and
+`reasoning` are omitted unless present — they are not own-property `undefined`. After lone-surrogate
+rewrite, Chat Completions and Responses request bodies are decoded as `Schema.Json` again and fail
+rather than skipping serialization. Inbound HTTP JSON bodies admit `Schema.Json` before class/helper
+consumption (`invalid_response` on failure). Responses SSE event JSON admits `Schema.Json`;
+non-object JSON events are ignored (not failed), while malformed non-JSON event text still fails
+`invalid_response`. First `response.completed` remains terminal. HTTP error bodies stay raw text for
+`classifyProviderFailure`.
+
+`OpenAiProviderConfig.extraBody` takes `OpenAiRequestExtras` (JSON-object input). Lowering
+projects enumerable own string fields into an independent portable-data snapshot. Canonical
+`model`, `messages`, `stream`, `tools`, `parallel_tool_calls`, `max_completion_tokens`, and
+`max_tokens` are discarded **without reading their values**; `reasoning` is also discarded when
+`reasoningEffortFormat` is `reasoning-object`. Root symbols/non-enumerable fields are not projected.
+Surviving accessors are rejected unread. Nested values must be finite JSON data with plain/null
+prototypes or dense ordinary arrays; exotic objects, cycles, hidden/symbol keys and extra array
+properties fail. DAG aliases remain aliases in the snapshot; the input is not mutated or retained.
+Invalid extras fail with non-retryable `provider_error`, fixed message
+`Invalid … extraBody JSON: expected a JSON object`, and no HTTP request. Messages never echo values.
+The composed request still passes final `Schema.Json` admission after lone-surrogate rewriting.
+This is not a guarantee against Proxy traps. Gateway routing projects its declared `order`, `only`
+and `sort` fields into JSON; canonical headers and provider identity stay host-owned.
+
+### OpenAI Realtime tool JSON
+
+Public `OpenAiRealtimeFunctionTool.parameters` and `openAiRealtimeToolParameters(parameters: Schema.Json)`
+now require admitted JSON. Non-JSON advertisement fails `VoiceToolBridgeError` before transport:
+synchronous `toOpenAiRealtimeTool`, `makeOpenAiRealtimeSessionConfig`, and
+`openAiRealtimeSessionConfigFromVoice` throw; `toOpenAiRealtimeToolEffect`,
+`makeOpenAiRealtimeSessionConfigEffect`, and `openAiRealtimeSessionConfigFromVoiceEffect` fail in the
+Effect error channel. Unexpected mapper defects (for example throwing getters) remain defects via
+`Effect.suspend` / `Result`, not `VoiceToolBridgeError`.
+
+Union-root lowering uses `Map<string, Schema.Json>` plus `Object.fromEntries` so own `__proto__` /
+`constructor` fields merge (first-seen / string-enum union) instead of prototype assignment or
+inherited `constructor` masquerading as Schema.Json. Required intersection, empty-required omission,
+and object-root identity are unchanged.
 
 ## Provider failures and retries
 
@@ -480,7 +562,7 @@ HITL is protocol-level, not UI-level:
   `streamToolApprovalResponseEventStream`.
 - Denials become model-visible `ToolResult` messages with `isError = true`.
 - Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels. The loop intercepts questions only when the tool is enabled in `tools`; omitted questions return an unavailable result without HITL or executor dispatch, even if a provider emits one.
-- Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON.
+- Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON. `PlainHitlResponse` is a `Data.taggedEnum` value (`QuestionResponse` / `ToolApprovalResponse`); the helpers omit absent optionals then call those constructors (`_tag` last, plain objects, not Schema classes).
 - Use `toolRunsFromHitlRequests` to hydrate paused UI state from `AgentAwaitingInput.requests`.
 - Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive.
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
@@ -526,6 +608,20 @@ request matching. Hosts expose the run endpoints and validate access/response id
 
 ## Voice
 
+`VoiceSession.layer` (`@yolk-sdk/agent/voice`) composes a supplied `VoiceTransport` layer,
+`VoiceController`, and an optional `VoiceEventOutbox`. Configured `eventLog` captures events without
+an external stream consumer; omitting it never captures an ambient outbox. The returned event stream
+has one queue consumer and is not a broadcast subscription. Without a consumer, events accumulate
+in memory; hosts should normally drain it. Seeds run during acquisition.
+
+Breaking 0.x migration: `makeVoiceController` no longer takes `options.transport`; provide
+`VoiceTransport` with `Effect.provideService`, or use `VoiceSession.layer`.
+`webRtcVoiceTransportLayer` (`voice/browser`) and `webSocketVoiceTransportLayer` (`voice`) acquire
+scoped transports. `Layer.succeed(VoiceTransport, transport)` injects a caller-owned value; it does
+not allocate/finalize it or guarantee fresh resources. Keep the entire usage effect inside a
+provided layer, or use `Layer.buildWithScope` when an explicit session scope owns its lifetime.
+`useYolkVoice` builds each attempt in that attempt's scope and retains stop/unmount cleanup.
+
 Voice is a first-class modality: browser WebRTC transport, client controller, server tool
 handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
 
@@ -551,6 +647,17 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
   `VoiceSpeechRequest.instructions` steers delivery style only, and
   provider 429s (rate limit or exhausted credits) surface as `VoiceSpeechError` code
   `rate_limited` so hosts can distinguish quota from outage.
+- Browser WebRTC hosts that implement `WebRtcPeerConnectionLike`
+  (`@yolk-sdk/agent/voice/browser`) treat `addTrack(track, stream)` as a void command. The
+  transport discards the DOM `RTCRtpSender`. Hosts and fakes must not read a sender from this
+  capability. Real `RTCPeerConnection.addTrack` remains assignable.
+- `protocolToolCallFromVoice` still returns `ToolCall`. Voice raw argument JSON admits finite
+  JSON (`Schema.Json`). Actual `null`, `false`, and `0` still admit as those values. Non-JSON
+  and non-finite numbers fail admission: raw text `1e999` projects as the argument string
+  `'1e999'`, and `decideVoiceToolCall` approval display params are `{ argumentsJson: '1e999' }`
+  (not `Infinity`; do not demonstrate with `JSON.stringify(Infinity)`, which is `null`). Nested
+  overflow such as `{"n":1e999}` takes the same mapper-specific fallbacks. Approval identifiers,
+  gates, deny, and execution schema validation are unchanged.
 
 ## Subagents
 
@@ -622,10 +729,12 @@ Without a host, definitions, approval ids, and inline behavior are unchanged.
   replays cannot replace accepted calls or receipts, including across turn cleanup and hydration.
 - Activated definitions are unsupported in voice/realtime, including foreground envelope calls.
   Resolve voice toolsets without a background host. Synchronous realtime tool/config mappers throw
-  `VoiceToolBridgeError`; use `toOpenAiRealtimeToolEffect`, `makeOpenAiRealtimeSessionConfigEffect`,
-  or `openAiRealtimeSessionConfigFromVoiceEffect` inside Effect programs to catch that typed error.
-  Voice handlers deny before approval matching, and the low-level bridge
-  rejects activated registry dispatch before validation, inline execution, or admission.
+  `VoiceToolBridgeError` for unsupported activation **and** for non-JSON tool `parameters`; use
+  `toOpenAiRealtimeToolEffect`, `makeOpenAiRealtimeSessionConfigEffect`, or
+  `openAiRealtimeSessionConfigFromVoiceEffect` inside Effect programs to catch that typed error.
+  Unexpected mapper defects stay defects, not `VoiceToolBridgeError`. Voice handlers deny before
+  approval matching, and the low-level bridge rejects activated registry dispatch before validation,
+  inline execution, or admission.
 - Raw `ToolRegistration` objects need a side-effect-free `validate` to activate; the loop-owned
   `question` and `subagent` tools cannot activate (subagents keep `makeSubagentAcceptedToolResult`).
 - Manual approval fences the whole batch; activated calls bind the approval `requestId` to the tool
@@ -642,6 +751,13 @@ from, such as invalid arguments, not-found resources, denied policy, or unavaila
 data. `makeTool` converts these failures into `ToolResult.isError = true` so the agent can
 see the message and continue. The result includes structured content with `type`, `tool`,
 `reason`, `message`, and optional `details` for UI/runtime handling.
+
+Optional `makeTool({ invalidParamsMessage })` receives the `Schema.SchemaError` produced by
+`Schema.decodeUnknownEffect` on `parameters` (validate and execute). The decode error is passed
+through unwrapped. Default text is `Invalid ${name} arguments: ${String(error)}`, which keeps the
+`SchemaError(...)` wrapper. In Effect rc.115, `SchemaError` extends native `Error`, but the
+wrapper remains part of this tool-message contract; do not default to `.message`.
+Existing `(error: unknown) => string` callbacks remain assignable.
 
 Thrown `ToolError`s become model-visible failed tool results plus `ToolExecutionError` events,
 so keep messages safe and non-secret. Reserve stream failure for provider/runtime defects,

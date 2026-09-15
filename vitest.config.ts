@@ -1,4 +1,5 @@
 import './examples/next/lib/dotenv'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
@@ -7,7 +8,17 @@ import tsconfigPaths from 'vite-tsconfig-paths'
 
 const workspaceRoot = dirname(fileURLToPath(import.meta.url))
 
+const requireFromExample = createRequire(join(workspaceRoot, 'examples/next/package.json'))
+
 export default defineConfig({
+  // pnpm peer contexts can install multiple copies of Workflow. Its mocked
+  // platform boundary must resolve to the same module from app and SDK code.
+  resolve: {
+    alias: [
+      { find: /^workflow$/, replacement: requireFromExample.resolve('workflow') },
+      { find: /^workflow\/api$/, replacement: requireFromExample.resolve('workflow/api') }
+    ]
+  },
   plugins: [
     tsconfigPaths({
       projects: [
@@ -23,6 +34,17 @@ export default defineConfig({
       '**/e2e/**',
       '**/node_modules/**',
       '**/.repos/**',
+      // Sole runner is `pnpm test:anti-slop` (tools/oxlint/vitest.config.ts:
+      // node env, 120s timeouts, no dotenv/DB). Keep this tree out of the root
+      // suite to avoid duplicate/conflicting runs.
+      'tools/oxlint/**',
+      // Sole runner is the DB-free tooling gate
+      // (`vitest run --config tools/tooling/vitest.config.ts` via
+      // `pnpm test:tooling`: node env, no dotenv/DB). Keep these trees out of
+      // the root jsdom suite to avoid a duplicate runner.
+      'tools/tooling/**',
+      'eslint-local-rules/**',
+      'scripts/**',
       '**/*.integration.test.ts',
       // Package suites run in their own node-environment vitest configs (see
       // `pnpm --filter './packages/*' test:run`). Running them again under the

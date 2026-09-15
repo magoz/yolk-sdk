@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, Fiber, Layer, Ref, Stream } from 'effect'
+import { Cause, Duration, Effect, Exit, Fiber, Layer, Predicate, Ref, Result, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -33,11 +33,14 @@ import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/test
 import {
   attemptModelTurn,
   attemptToolBatch,
+  HitlMatch,
   matchHitlResponse,
+  OverflowCompactionResult,
   resumeHitlIfMatched
 } from '../src/outcome.ts'
 
 const loopLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
+
 const noRetryLoopLayer = Layer.mergeAll(
   ContextTransformer.identity,
   LoopConfig.layer({
@@ -93,7 +96,8 @@ describe('attemptModelTurn', () => {
       })
 
       expect(outcome._tag).toBe('Completed')
-      if (outcome._tag !== 'Completed') return
+
+      if (!Predicate.isTagged(outcome, 'Completed')) return
       expect(outcome.needsContinuation).toBe(false)
       expect(outcome.stopReason).toBe('stop')
     }).pipe(Effect.provide(Layer.mergeAll(FauxProvider.layer(Reply.text('ok')), loopLayer)))
@@ -110,7 +114,8 @@ describe('attemptModelTurn', () => {
       })
 
       expect(outcome._tag).toBe('Completed')
-      if (outcome._tag !== 'Completed') return
+
+      if (!Predicate.isTagged(outcome, 'Completed')) return
       expect(outcome.needsContinuation).toBe(true)
       expect(outcome.toolCalls).toHaveLength(1)
     }).pipe(
@@ -134,7 +139,8 @@ describe('attemptModelTurn', () => {
       }).pipe(Effect.flip)
 
       expect(error._tag).toBe('AbortError')
-      if (error._tag !== 'AbortError') return
+
+      if (!Predicate.isTagged(error, 'AbortError')) return
       expect(error.reason).toBe('user')
     }).pipe(
       Effect.provide(
@@ -162,7 +168,8 @@ describe('attemptModelTurn', () => {
       })
 
       expect(outcome._tag).toBe('Retry')
-      if (outcome._tag !== 'Retry') return
+
+      if (!Predicate.isTagged(outcome, 'Retry')) return
       expect(outcome.error._tag).toBe('LLMError')
     }).pipe(
       Effect.provide(
@@ -189,6 +196,7 @@ describe('attemptModelTurn', () => {
   it.effect('lets runModelTurn consume LoopConfig.maxRetries before classifying', () =>
     Effect.gen(function* () {
       let attempts = 0
+
       const running = attemptModelTurn(turnConfig).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -197,6 +205,7 @@ describe('attemptModelTurn', () => {
               LLMProvider.of({
                 stream: () => {
                   attempts += 1
+
                   return attempts === 1
                     ? Stream.fail(rateLimitError())
                     : Stream.fromIterable([
@@ -218,6 +227,7 @@ describe('attemptModelTurn', () => {
           )
         )
       )
+
       const fiber = yield* running.pipe(Effect.forkChild)
       yield* TestClock.adjust(Duration.millis(10))
       const outcome = yield* Fiber.join(fiber)
@@ -264,9 +274,11 @@ describe('attemptModelTurn', () => {
       const outcome = yield* attemptModelTurn(turnConfig)
 
       expect(outcome._tag).toBe('Continue')
-      if (outcome._tag !== 'Continue') return
+
+      if (!Predicate.isTagged(outcome, 'Continue')) return
       expect(outcome.error._tag).toBe('LLMError')
       expect(outcome.assistantMessage?._tag).toBe('Assistant')
+
       if (outcome.assistantMessage?._tag !== 'Assistant') return
       expect(assistantContent(outcome.assistantMessage)).toBe('hi')
     }).pipe(
@@ -283,6 +295,7 @@ describe('attemptModelTurn', () => {
   it.effect('returns Compacted when overflow happens before output and compact succeeds', () =>
     Effect.gen(function* () {
       const compacted = [UserMessage.make({ content: 'summarized' })]
+
       const outcome = yield* attemptModelTurn(
         {
           messages: [UserMessage.make({ content: 'hello' })],
@@ -292,12 +305,13 @@ describe('attemptModelTurn', () => {
           turn: 1
         },
         {
-          compact: () => Effect.succeed({ _tag: 'Compacted', messages: compacted })
+          compact: () => Effect.succeed(OverflowCompactionResult.Compacted({ messages: compacted }))
         }
       )
 
       expect(outcome._tag).toBe('Compacted')
-      if (outcome._tag !== 'Compacted') return
+
+      if (!Predicate.isTagged(outcome, 'Compacted')) return
       expect(outcome.messages).toEqual(compacted)
       expect(outcome.overflowCompactionAttempt).toBe(1)
     }).pipe(
@@ -334,12 +348,17 @@ describe('attemptModelTurn', () => {
         },
         {
           compact: () =>
-            Effect.succeed({ _tag: 'Compacted', messages: [UserMessage.make({ content: 'nope' })] })
+            Effect.succeed(
+              OverflowCompactionResult.Compacted({
+                messages: [UserMessage.make({ content: 'nope' })]
+              })
+            )
         }
       ).pipe(Effect.flip)
 
       expect(error._tag).toBe('LLMError')
-      if (error._tag !== 'LLMError') return
+
+      if (!Predicate.isTagged(error, 'LLMError')) return
       expect(error.cause).toBe('context_overflow')
     }).pipe(
       Effect.provide(
@@ -383,11 +402,13 @@ describe('attemptModelTurn', () => {
                 )
         },
         compact: () =>
-          Effect.succeed({
-            _tag: 'Compacted',
-            messages: [UserMessage.make({ content: 'summarized' })]
-          })
+          Effect.succeed(
+            OverflowCompactionResult.Compacted({
+              messages: [UserMessage.make({ content: 'summarized' })]
+            })
+          )
       })
+
       const outcome = yield* attemptModelTurn({
         messages: [UserMessage.make({ content: 'hello' })],
         systemPrompt: 'Be brief.',
@@ -397,7 +418,8 @@ describe('attemptModelTurn', () => {
       }).pipe(Effect.provideService(LLMProvider, provider))
 
       expect(outcome._tag).toBe('Completed')
-      if (outcome._tag !== 'Completed') return
+
+      if (!Predicate.isTagged(outcome, 'Completed')) return
       expect(outcome.stopReason).toBe('stop')
     }).pipe(Effect.provide(loopLayer))
   )
@@ -407,9 +429,10 @@ describe('attemptModelTurn', () => {
       const outcome = yield* attemptModelTurn(turnConfig)
 
       expect(outcome._tag).toBe('RecoverFull')
-      if (outcome._tag !== 'RecoverFull') return
+
+      if (!Predicate.isTagged(outcome, 'RecoverFull')) return
+      expect(Predicate.isTagged(outcome.error, 'LLMError')).toBe(true)
       expect(outcome.error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false,
         responseIssue: 'missing_done'
@@ -422,8 +445,10 @@ describe('attemptModelTurn', () => {
       const outcome = yield* attemptModelTurn(turnConfig)
 
       expect(outcome._tag).toBe('Continue')
-      if (outcome._tag !== 'Continue') return
+
+      if (!Predicate.isTagged(outcome, 'Continue')) return
       expect(outcome.error).toMatchObject({ responseIssue: 'missing_done', retryable: false })
+
       if (outcome.assistantMessage?._tag !== 'Assistant') return
       expect(assistantContent(outcome.assistantMessage)).toBe('partial')
       expect(outcome.toolCalls).toEqual([])
@@ -434,8 +459,8 @@ describe('attemptModelTurn', () => {
     Effect.gen(function* () {
       const error = yield* attemptModelTurn(turnConfig).pipe(Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false,
         provider: { providerCode: 'content_filter' }
@@ -465,8 +490,8 @@ describe('attemptModelTurn', () => {
     Effect.gen(function* () {
       const error = yield* attemptModelTurn(turnConfig).pipe(Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false,
         message: 'Expected exactly one LLM done event, received 2'
@@ -489,10 +514,11 @@ describe('attemptModelTurn', () => {
     Effect.gen(function* () {
       const overflow = yield* attemptModelTurn(turnConfig, {
         compact: () =>
-          Effect.succeed({
-            _tag: 'Compacted',
-            messages: [UserMessage.make({ content: 'nope' })]
-          })
+          Effect.succeed(
+            OverflowCompactionResult.Compacted({
+              messages: [UserMessage.make({ content: 'nope' })]
+            })
+          )
       }).pipe(
         Effect.provide(
           providerLayer(
@@ -503,7 +529,9 @@ describe('attemptModelTurn', () => {
         ),
         Effect.flip
       )
-      expect(overflow).toMatchObject({ _tag: 'LLMError', cause: 'context_overflow' })
+
+      expect(Predicate.isTagged(overflow, 'LLMError')).toBe(true)
+      expect(overflow).toMatchObject({ cause: 'context_overflow' })
 
       const continued = yield* attemptModelTurn(turnConfig).pipe(
         Effect.provide(
@@ -514,8 +542,11 @@ describe('attemptModelTurn', () => {
           )
         )
       )
+
       expect(continued._tag).toBe('Continue')
-      if (continued._tag !== 'Continue') return
+
+      if (!Predicate.isTagged(continued, 'Continue')) return
+
       if (continued.assistantMessage?._tag !== 'Assistant') return
       expect(assistantReasoningText(continued.assistantMessage)).toBe('thinking')
     })
@@ -524,12 +555,14 @@ describe('attemptModelTurn', () => {
   it.effect('treats provider tool results as published output', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({ id: 'p1', name: 'search', params: {} })
+
       const error = yield* attemptModelTurn(turnConfig, {
         compact: () =>
-          Effect.succeed({
-            _tag: 'Compacted',
-            messages: [UserMessage.make({ content: 'nope' })]
-          })
+          Effect.succeed(
+            OverflowCompactionResult.Compacted({
+              messages: [UserMessage.make({ content: 'nope' })]
+            })
+          )
       }).pipe(
         Effect.provide(
           providerLayer(
@@ -544,7 +577,8 @@ describe('attemptModelTurn', () => {
         Effect.flip
       )
 
-      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'context_overflow' })
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
+      expect(error).toMatchObject({ cause: 'context_overflow' })
     })
   )
 
@@ -553,7 +587,8 @@ describe('attemptModelTurn', () => {
       const outcome = yield* attemptModelTurn(turnConfig)
 
       expect(outcome._tag).toBe('Continue')
-      if (outcome._tag !== 'Continue') return
+
+      if (!Predicate.isTagged(outcome, 'Continue')) return
       expect(outcome.toolCalls).toEqual([])
     }).pipe(
       Effect.provide(
@@ -568,7 +603,8 @@ describe('attemptModelTurn', () => {
         onEvent: () => Effect.fail(rateLimitError())
       }).pipe(Effect.flip)
 
-      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'rate_limit', retryable: true })
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
+      expect(error).toMatchObject({ cause: 'rate_limit', retryable: true })
     }).pipe(Effect.provide(providerLayer(Stream.make(LLMTextDelta.make({ text: 'partial' })))))
   )
 
@@ -576,22 +612,29 @@ describe('attemptModelTurn', () => {
     Effect.gen(function* () {
       const typed = rateLimitError()
       const defect = new Error('sink defect')
+
       const exit = yield* attemptModelTurn(turnConfig, {
         onEvent: () => Effect.failCause(Cause.combine(Cause.fail(typed), Cause.die(defect)))
       }).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
-      if (exit._tag !== 'Failure') return
+
+      if (!Exit.isFailure(exit)) return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
-      expect(Cause.findError(exit.cause)).toMatchObject({ _tag: 'Success', success: typed })
-      expect(Cause.findDefect(exit.cause)).toMatchObject({ _tag: 'Success', success: defect })
+      const foundError = Cause.findError(exit.cause)
+      const foundDefect = Cause.findDefect(exit.cause)
+      expect(Result.isSuccess(foundError)).toBe(true)
+      expect(Result.isSuccess(foundDefect)).toBe(true)
+      expect(foundError).toMatchObject({ success: typed })
+      expect(foundDefect).toMatchObject({ success: defect })
     }).pipe(Effect.provide(providerLayer(Stream.make(LLMTextDelta.make({ text: 'partial' })))))
   )
 
   it.effect('isolates sequential and concurrent Effect reuse', () =>
     Effect.gen(function* () {
       const attempt = attemptModelTurn(turnConfig)
+
       const afterOutput = Layer.mergeAll(
         Layer.succeed(
           LLMProvider,
@@ -604,6 +647,7 @@ describe('attemptModelTurn', () => {
         ),
         noRetryLoopLayer
       )
+
       const beforeOutput = providerLayer(Stream.fail(rateLimitError()))
 
       const first = yield* attempt.pipe(Effect.provide(afterOutput))
@@ -615,6 +659,7 @@ describe('attemptModelTurn', () => {
         [attempt.pipe(Effect.provide(afterOutput)), attempt.pipe(Effect.provide(beforeOutput))],
         { concurrency: 'unbounded' }
       )
+
       expect(left._tag).toBe('Continue')
       expect(right._tag).toBe('Retry')
     })
@@ -624,17 +669,17 @@ describe('attemptModelTurn', () => {
     Effect.gen(function* () {
       const compactedMessages = [UserMessage.make({ content: 'summarized' })]
       let compactCalls = 0
+
       const compact = () => {
         compactCalls += 1
-        return Effect.succeed({
-          _tag: 'Compacted' as const,
-          messages: compactedMessages
-        })
+
+        return Effect.succeed(OverflowCompactionResult.Compacted({ messages: compactedMessages }))
       }
 
       const first = yield* attemptModelTurn(turnConfig, { compact, overflowCompactionAttempt: 0 })
       expect(first._tag).toBe('Compacted')
-      if (first._tag !== 'Compacted') return
+
+      if (!Predicate.isTagged(first, 'Compacted')) return
       expect(first.overflowCompactionAttempt).toBe(1)
       expect(compactCalls).toBe(1)
 
@@ -642,7 +687,9 @@ describe('attemptModelTurn', () => {
         compact,
         overflowCompactionAttempt: first.overflowCompactionAttempt
       }).pipe(Effect.flip)
-      expect(second).toMatchObject({ _tag: 'LLMError', cause: 'context_overflow' })
+
+      expect(Predicate.isTagged(second, 'LLMError')).toBe(true)
+      expect(second).toMatchObject({ cause: 'context_overflow' })
       expect(compactCalls).toBe(1)
     }).pipe(Effect.provide(providerLayer(Stream.fail(overflowError()))))
   )
@@ -652,7 +699,9 @@ describe('attemptModelTurn', () => {
       const aborted = yield* attemptModelTurn(turnConfig, {
         compact: () => Effect.fail(new AbortError({ reason: 'user' }))
       }).pipe(Effect.flip)
-      expect(aborted).toMatchObject({ _tag: 'AbortError', reason: 'user' })
+
+      expect(Predicate.isTagged(aborted, 'AbortError')).toBe(true)
+      expect(aborted).toMatchObject({ reason: 'user' })
 
       const failed = yield* attemptModelTurn(turnConfig, {
         compact: () =>
@@ -664,24 +713,29 @@ describe('attemptModelTurn', () => {
             })
           )
       }).pipe(Effect.flip)
-      expect(failed).toMatchObject({ _tag: 'LLMError', cause: 'provider_error' })
+
+      expect(Predicate.isTagged(failed, 'LLMError')).toBe(true)
+      expect(failed).toMatchObject({ cause: 'provider_error' })
     }).pipe(Effect.provide(providerLayer(Stream.fail(overflowError()))))
   )
 
   it.effect('rejects invalid overflowCompactionAttempt counts', () =>
     Effect.gen(function* () {
       const counts = [Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5]
+
       for (const overflowCompactionAttempt of counts) {
         const error = yield* attemptModelTurn(turnConfig, {
           overflowCompactionAttempt,
           compact: () =>
-            Effect.succeed({
-              _tag: 'Compacted' as const,
-              messages: [UserMessage.make({ content: 'nope' })]
-            })
+            Effect.succeed(
+              OverflowCompactionResult.Compacted({
+                messages: [UserMessage.make({ content: 'nope' })]
+              })
+            )
         }).pipe(Effect.flip)
+
+        expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
         expect(error).toMatchObject({
-          _tag: 'LLMError',
           cause: 'validation_error'
         })
       }
@@ -697,7 +751,8 @@ describe('attemptToolBatch', () => {
       })
 
       expect(outcome._tag).toBe('Completed')
-      if (outcome._tag !== 'Completed') return
+
+      if (!Predicate.isTagged(outcome, 'Completed')) return
       expect(outcome.needsContinuation).toBe(true)
       expect(outcome.stopReason).toBe('tool_use')
       expect(outcome.toolCalls).toEqual([
@@ -719,7 +774,7 @@ describe('attemptToolBatch', () => {
         },
         {
           onEvent: event =>
-            event._tag === 'ToolExecutionCompleted'
+            Predicate.isTagged(event, 'ToolExecutionCompleted')
               ? Ref.update(events, current => [...current, String(event.result.content)])
               : Effect.void
         }
@@ -772,7 +827,8 @@ describe('attemptToolBatch', () => {
       })
 
       expect(outcome._tag).toBe('AwaitingInput')
-      if (outcome._tag !== 'AwaitingInput') return
+
+      if (!Predicate.isTagged(outcome, 'AwaitingInput')) return
       expect('toolCalls' in outcome).toBe(false)
     }).pipe(
       Effect.provide(
@@ -808,11 +864,21 @@ describe('attemptToolBatch', () => {
           ToolDef.make({ name: 'question', description: 'Ask', parameters: {} })
         ]
       })
+
       expect(outcome._tag).toBe('AwaitingInput')
-      if (outcome._tag !== 'AwaitingInput') return
-      const approval = outcome.requests.find(request => request._tag === 'ToolApprovalRequest')
-      const question = outcome.requests.find(request => request._tag === 'QuestionRequest')
+
+      if (!Predicate.isTagged(outcome, 'AwaitingInput')) return
+
+      const approval = outcome.requests.find(request =>
+        Predicate.isTagged(request, 'ToolApprovalRequest')
+      )
+
+      const question = outcome.requests.find(request =>
+        Predicate.isTagged(request, 'QuestionRequest')
+      )
+
       expect(approval !== undefined && question !== undefined).toBe(true)
+
       if (approval === undefined || question === undefined) return
 
       expect(
@@ -825,7 +891,7 @@ describe('attemptToolBatch', () => {
             source: 'user'
           })
         )
-      ).toEqual({ _tag: 'Match', requestId: approval.requestId })
+      ).toEqual(HitlMatch.Match({ requestId: approval.requestId }))
 
       expect(
         matchHitlResponse(
@@ -836,8 +902,8 @@ describe('attemptToolBatch', () => {
             decision: 'approved',
             source: 'user'
           })
-        )._tag
-      ).toBe('Mismatch')
+        )
+      ).toEqual(HitlMatch.Mismatch())
 
       expect(
         matchHitlResponse(
@@ -850,9 +916,10 @@ describe('attemptToolBatch', () => {
             answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
           })
         )
-      ).toEqual({ _tag: 'Match', requestId: question.requestId })
+      ).toEqual(HitlMatch.Match({ requestId: question.requestId }))
 
       const resumed = yield* Ref.make(false)
+
       const skipped = yield* resumeHitlIfMatched({
         pending: outcome.requests,
         response: ToolApprovalResponse.make({
@@ -863,7 +930,8 @@ describe('attemptToolBatch', () => {
         }),
         resume: () => Ref.set(resumed, true).pipe(Effect.as({ _tag: 'Resumed' as const }))
       })
-      expect(skipped).toEqual({ _tag: 'Mismatch' })
+
+      expect(skipped).toEqual(HitlMatch.Mismatch())
       expect(yield* Ref.get(resumed)).toBe(false)
     }).pipe(
       Effect.provide(
@@ -886,6 +954,7 @@ describe('attemptToolBatch', () => {
             }
           })
         ]
+
         const tools = [
           ToolDef.make({
             name: 'weather',
@@ -895,13 +964,23 @@ describe('attemptToolBatch', () => {
           }),
           ToolDef.make({ name: 'question', description: 'Ask', parameters: {} })
         ]
+
         const paused = yield* attemptToolBatch({ calls, tools })
         expect(paused._tag).toBe('AwaitingInput')
-        if (paused._tag !== 'AwaitingInput') return
-        const approval = paused.requests.find(request => request._tag === 'ToolApprovalRequest')
-        const question = paused.requests.find(request => request._tag === 'QuestionRequest')
+
+        if (!Predicate.isTagged(paused, 'AwaitingInput')) return
+
+        const approval = paused.requests.find(request =>
+          Predicate.isTagged(request, 'ToolApprovalRequest')
+        )
+
+        const question = paused.requests.find(request =>
+          Predicate.isTagged(request, 'QuestionRequest')
+        )
+
         expect(approval).toBeDefined()
         expect(question).toBeDefined()
+
         if (approval === undefined || question === undefined) return
 
         const partial = yield* attemptToolBatch({
@@ -916,8 +995,10 @@ describe('attemptToolBatch', () => {
             })
           ]
         })
+
         expect(partial._tag).toBe('AwaitingInput')
-        if (partial._tag !== 'AwaitingInput') return
+
+        if (!Predicate.isTagged(partial, 'AwaitingInput')) return
         expect('toolCalls' in partial).toBe(false)
 
         const completed = yield* attemptToolBatch({
@@ -939,8 +1020,10 @@ describe('attemptToolBatch', () => {
             })
           ]
         })
+
         expect(completed._tag).toBe('Completed')
-        if (completed._tag !== 'Completed') return
+
+        if (!Predicate.isTagged(completed, 'Completed')) return
         expect(completed.toolCalls.some(call => call.id === 'call_1')).toBe(true)
       }).pipe(
         Effect.provide(

@@ -3,8 +3,11 @@ export {
   noWorkflowStepRetry,
   retryWorkflowStep,
   runVercelAgentWorkflow,
-  settleWorkflowStep
+  settleWorkflowStep,
+  VercelAgentWorkflowRunResult,
+  WorkflowStepResult
 } from './workflow-loop.ts'
+
 export {
   commitThenWriteTerminalEvent,
   durableAgentEventId,
@@ -12,6 +15,7 @@ export {
   sequenceDurableAgentEvent,
   writeDurableAgentEvent
 } from './workflow-events.ts'
+
 export type {
   SerializableWorkflowState,
   VercelAgentWorkflowAwaitingInput,
@@ -19,12 +23,11 @@ export type {
   VercelAgentWorkflowLoopConfig,
   VercelAgentWorkflowModelStepInput,
   VercelAgentWorkflowModelStepResult,
-  VercelAgentWorkflowRunResult,
   VercelAgentWorkflowStepRetryPolicy,
   VercelAgentWorkflowToolBatchStepInput,
-  VercelAgentWorkflowToolBatchStepResult,
-  WorkflowStepResult
+  VercelAgentWorkflowToolBatchStepResult
 } from './workflow-loop.ts'
+
 export type {
   DurableAgentEvent,
   DurableAgentEventIdInput,
@@ -35,4 +38,5 @@ export type {
   SequencedDurableAgentEvent,
   WriteDurableAgentEventInput
 } from './workflow-events.ts'
+
 export { awaitWorkflowChild, orchestrateWorkflowToolBatch } from './workflow-children.ts'

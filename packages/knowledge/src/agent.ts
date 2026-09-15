@@ -13,8 +13,11 @@ import {
 } from './documents.ts'
 
 const OptionalNonEmptyTrimmedString = Schema.optional(Schema.NullOr(NonEmptyTrimmedString))
+
 const OptionalPositiveInteger = Schema.optional(Schema.NullOr(PositiveInteger))
+
 const OptionalNonNegativeInteger = Schema.optional(Schema.NullOr(NonNegativeInteger))
+
 const OptionalNumber = Schema.optional(Schema.NullOr(Schema.Number))
 
 const KnowledgeTargetParamsSchema = Schema.Struct({
@@ -64,7 +67,9 @@ const KnowledgeManageParams = Schema.Union([
 ])
 
 type KnowledgeTargetParams = typeof KnowledgeTargetParamsSchema.Type
+
 type KnowledgeLookupParams = typeof KnowledgeLookupParams.Type
+
 type KnowledgeManageParams = typeof KnowledgeManageParams.Type
 
 export type KnowledgeTarget = {
@@ -124,9 +129,6 @@ export type KnowledgeManageHandlers<Context> = {
     readonly target: KnowledgeTarget
   }) => Effect.Effect<KnowledgeSavedDocument, ToolError>
 }
-
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
 
 const optionalValue = <Value>(value: Value | null | undefined) => value ?? undefined
 
@@ -190,7 +192,8 @@ export const makeKnowledgeLookupTool = <Context>(
       'Look up durable knowledge. Search for semantic discovery; get when document_id or slug is known.',
     parameters: KnowledgeLookupParams,
     access: 'read',
-    invalidParamsMessage: error => `Invalid knowledge lookup arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid knowledge lookup arguments: ${error instanceof Error ? error.message : String(error)}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         if (params.operation === 'search') {
@@ -210,6 +213,7 @@ export const makeKnowledgeLookupTool = <Context>(
           id: optionalValue(params.id),
           target: optionalTargetFromParams(params.target)
         })
+
         return ToolResult.make({ toolCallId: call.id, content: formatDocument(document) })
       })
   })
@@ -228,7 +232,8 @@ export const makeKnowledgeManageTool = <Context>(
       'Create, replace, pin, archive, rename, or delete durable knowledge. Use only when explicitly asked.',
     parameters: KnowledgeManageParams,
     access: 'write',
-    invalidParamsMessage: error => `Invalid knowledge manage arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid knowledge manage arguments: ${error instanceof Error ? error.message : String(error)}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         switch (params.operation) {
@@ -242,38 +247,45 @@ export const makeKnowledgeManageTool = <Context>(
               content: params.content,
               availability: params.availability
             })
+
             return ToolResult.make({
               toolCallId: call.id,
               content: formatSaved('Knowledge upserted', document)
             })
           }
+
           case 'set_availability': {
             const document = yield* handlers.setAvailability({
               context,
               target: targetFromParams(params.target),
               availability: params.availability
             })
+
             return ToolResult.make({
               toolCallId: call.id,
               content: formatSaved('Knowledge availability updated', document)
             })
           }
+
           case 'rename_slug': {
             const document = yield* handlers.renameSlug({
               context,
               target: targetFromParams(params.target),
               nextSlug: params.nextSlug
             })
+
             return ToolResult.make({
               toolCallId: call.id,
               content: formatSaved('Knowledge slug renamed', document)
             })
           }
+
           case 'delete': {
             const document = yield* handlers.delete({
               context,
               target: targetFromParams(params.target)
             })
+
             return ToolResult.make({
               toolCallId: call.id,
               content: formatSaved('Knowledge deleted', document)

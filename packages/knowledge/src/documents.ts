@@ -1,22 +1,28 @@
 import * as Schema from 'effect/Schema'
 
 export const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
 export const NonNegativeInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+
 export const PositiveInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
 
 export const KnowledgeMetadataSchema = Schema.Record(Schema.String, Schema.Unknown)
+
 export type KnowledgeMetadata = Schema.Schema.Type<typeof KnowledgeMetadataSchema>
 
 export const KnowledgeAvailabilitySchema = Schema.Literals(['pinned', 'searchable', 'archived'])
+
 export type KnowledgeAvailability = Schema.Schema.Type<typeof KnowledgeAvailabilitySchema>
 
 export const KnowledgeDocumentStatusSchema = Schema.Literals(['processing', 'ready', 'error'])
+
 export type KnowledgeDocumentStatus = Schema.Schema.Type<typeof KnowledgeDocumentStatusSchema>
 
 export const KnowledgeScopeSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
   kind: Schema.optional(NonEmptyTrimmedString)
 })
+
 export type KnowledgeScope = Schema.Schema.Type<typeof KnowledgeScopeSchema>
 
 export const KnowledgeDocumentSchema = Schema.Struct({
@@ -35,6 +41,7 @@ export const KnowledgeDocumentSchema = Schema.Struct({
   createdAt: Schema.DateTimeUtc,
   updatedAt: Schema.DateTimeUtc
 })
+
 export type KnowledgeDocument = Schema.Schema.Type<typeof KnowledgeDocumentSchema>
 
 export const CreateKnowledgeDocumentInputSchema = Schema.Struct({
@@ -48,6 +55,7 @@ export const CreateKnowledgeDocumentInputSchema = Schema.Struct({
   summary: Schema.optional(Schema.String),
   metadata: Schema.optional(KnowledgeMetadataSchema)
 })
+
 export type CreateKnowledgeDocumentInput = Schema.Schema.Type<
   typeof CreateKnowledgeDocumentInputSchema
 >
@@ -67,6 +75,7 @@ export const UpdateKnowledgeDocumentInputSchema = Schema.Struct({
   reviewedAt: Schema.optional(Schema.DateTimeUtc),
   metadata: Schema.optional(KnowledgeMetadataSchema)
 })
+
 export type UpdateKnowledgeDocumentInput = Schema.Schema.Type<
   typeof UpdateKnowledgeDocumentInputSchema
 >
@@ -81,6 +90,7 @@ export const KnowledgeFileSchema = Schema.Struct({
   metadata: Schema.optional(KnowledgeMetadataSchema),
   createdAt: Schema.DateTimeUtc
 })
+
 export type KnowledgeFile = Schema.Schema.Type<typeof KnowledgeFileSchema>
 
 export const KnowledgeChunkSchema = Schema.Struct({
@@ -92,34 +102,45 @@ export const KnowledgeChunkSchema = Schema.Struct({
   tokenCount: PositiveInteger,
   metadata: Schema.optional(KnowledgeMetadataSchema)
 })
+
 export type KnowledgeChunk = Schema.Schema.Type<typeof KnowledgeChunkSchema>
 
+export const KnowledgeSearchScope = Schema.TaggedStruct('KnowledgeScope', {
+  id: NonEmptyTrimmedString
+})
+
+export const KnowledgeSearchScopes = Schema.TaggedStruct('KnowledgeScopes', {
+  ids: Schema.NonEmptyArray(NonEmptyTrimmedString)
+})
+
 export const KnowledgeSearchScopeSchema = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal('KnowledgeScope'), id: NonEmptyTrimmedString }),
-  Schema.Struct({
-    _tag: Schema.Literal('KnowledgeScopes'),
-    ids: Schema.NonEmptyArray(NonEmptyTrimmedString)
-  })
+  KnowledgeSearchScope,
+  KnowledgeSearchScopes
 ])
-export type KnowledgeSearchScope = Schema.Schema.Type<typeof KnowledgeSearchScopeSchema>
+
+export type KnowledgeSearchScope = typeof KnowledgeSearchScopeSchema.Type
+
+export const KnowledgeFileSource = Schema.TaggedStruct('File', {
+  ref: NonEmptyTrimmedString,
+  name: Schema.optional(NonEmptyTrimmedString),
+  mediaType: Schema.optional(NonEmptyTrimmedString)
+})
+
+export const KnowledgeUrlSource = Schema.TaggedStruct('Url', {
+  url: NonEmptyTrimmedString
+})
+
+export const KnowledgeTextSource = Schema.TaggedStruct('Text', {
+  label: Schema.optional(NonEmptyTrimmedString)
+})
 
 export const KnowledgeSourceSchema = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.Literal('File'),
-    ref: NonEmptyTrimmedString,
-    name: Schema.optional(NonEmptyTrimmedString),
-    mediaType: Schema.optional(NonEmptyTrimmedString)
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal('Url'),
-    url: NonEmptyTrimmedString
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal('Text'),
-    label: Schema.optional(NonEmptyTrimmedString)
-  })
+  KnowledgeFileSource,
+  KnowledgeUrlSource,
+  KnowledgeTextSource
 ])
-export type KnowledgeSource = Schema.Schema.Type<typeof KnowledgeSourceSchema>
+
+export type KnowledgeSource = typeof KnowledgeSourceSchema.Type
 
 export const IndexedKnowledgeDocumentSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
@@ -134,6 +155,7 @@ export const IndexedKnowledgeDocumentSchema = Schema.Struct({
   chunkCount: Schema.optional(NonNegativeInteger),
   metadata: Schema.optional(KnowledgeMetadataSchema)
 })
+
 export type IndexedKnowledgeDocument = Schema.Schema.Type<typeof IndexedKnowledgeDocumentSchema>
 
 export const ExtractedKnowledgeDocumentSchema = Schema.Struct({
@@ -142,6 +164,7 @@ export const ExtractedKnowledgeDocumentSchema = Schema.Struct({
   summary: Schema.optional(Schema.String),
   metadata: Schema.optional(KnowledgeMetadataSchema)
 })
+
 export type ExtractedKnowledgeDocument = Schema.Schema.Type<typeof ExtractedKnowledgeDocumentSchema>
 
 export const defaultKnowledgeChunkMaxTokens = 512

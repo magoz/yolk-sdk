@@ -1,4 +1,4 @@
-import { Clock, Effect, Option, Ref, Stream } from 'effect'
+import { Clock, Data, Effect, Match, Option, Predicate, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AgentAwaitingInput,
@@ -66,7 +66,7 @@ import {
 import type { LLMEvent } from './llm-event.ts'
 import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
 import { LLMProvider, type LLMRequest } from './services/llm-provider.ts'
-import { LoopConfig, type LoopConfigShape } from './services/loop-config.ts'
+import { LoopConfig, type LoopConfigSettings } from './services/loop-config.ts'
 import { ToolExecutor, unavailableToolExecutor } from './services/tool-executor.ts'
 
 export type AgentLoopRunId = string
@@ -101,24 +101,26 @@ type SubagentCallMetadata = {
   readonly description: string
 }
 
-const objectField = (input: unknown, key: string) =>
-  input !== null && typeof input === 'object'
-    ? Object.getOwnPropertyDescriptor(input, key)?.value
-    : undefined
+const objectField = (input: unknown, key: string): string | undefined => {
+  if (!Predicate.isObjectOrArray(input)) {
+    return undefined
+  }
 
-const nonEmptyStringField = (input: unknown, key: string) => {
-  const value = objectField(input, key)
+  const value: unknown = Object.getOwnPropertyDescriptor(input, key)?.value
 
-  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+  return Predicate.isString(value) ? value : undefined
 }
+
+const nonEmptyStringField = (value: string | undefined): string | undefined =>
+  value !== undefined && value.trim().length > 0 ? value : undefined
 
 const subagentCallMetadata = (call: ToolCall): SubagentCallMetadata | undefined => {
   if (call.name !== subagentToolName) {
     return undefined
   }
 
-  const subagentType = nonEmptyStringField(call.params, 'subagent_type')
-  const description = nonEmptyStringField(call.params, 'description')
+  const subagentType = nonEmptyStringField(objectField(call.params, 'subagent_type'))
+  const description = nonEmptyStringField(objectField(call.params, 'description'))
 
   if (subagentType === undefined || description === undefined) {
     return undefined
@@ -158,6 +160,7 @@ const subagentCompletedEvent = (input: {
   readonly endedAtMs: number
 }) => {
   const metadata = subagentCallMetadata(input.call)
+
   const accepted =
     objectField(input.result.structuredContent, 'type') === 'subagent_accepted' &&
     objectField(input.result.structuredContent, 'status') === 'accepted' &&
@@ -200,7 +203,9 @@ const toolCompletionEvents = (input: {
       })
     ]
   }
+
   const completed = subagentCompletedEvent(input)
+
   const toolCompleted = ToolExecutionCompleted.make({
     call: input.call,
     result: input.result,
@@ -247,36 +252,42 @@ const unsupportedInputError = (message: string) =>
   })
 
 const validateContent = (message: AgentMessage, capabilities: AgentModelCapabilities) =>
-  Effect.forEach(contentPartsFromMessage(message), part => {
-    switch (part._tag) {
-      case 'Text':
-        return capabilities.input.text
+  Effect.forEach(contentPartsFromMessage(message), part =>
+    Match.value(part).pipe(
+      Match.tag('Text', () =>
+        capabilities.input.text
           ? Effect.void
           : Effect.fail(unsupportedInputError('Text input is not supported by this model'))
-      case 'Image':
-        return capabilities.input.image
+      ),
+      Match.tag('Image', () =>
+        capabilities.input.image
           ? Effect.void
           : Effect.fail(unsupportedInputError('Image input is not supported by this model'))
-      case 'Document':
-        return capabilities.input.document
+      ),
+      Match.tag('Document', () =>
+        capabilities.input.document
           ? Effect.void
           : Effect.fail(unsupportedInputError('Document input is not supported by this model'))
-      case 'Audio':
-        return capabilities.input.audio
+      ),
+      Match.tag('Audio', () =>
+        capabilities.input.audio
           ? Effect.void
           : Effect.fail(unsupportedInputError('Audio input is not supported by this model'))
-    }
-  })
+      ),
+      Match.exhaustive
+    )
+  )
 
-const contentPartsFromMessage = (message: AgentMessage) => {
-  switch (message._tag) {
-    case 'User':
-    case 'ToolResult':
-      return contentParts(message.content)
-    case 'Assistant':
-      return message.parts.flatMap(part => (part._tag === 'Text' ? contentParts(part.content) : []))
-  }
-}
+const contentPartsFromMessage = (message: AgentMessage) =>
+  Match.value(message).pipe(
+    Match.tag('User', 'ToolResult', current => contentParts(current.content)),
+    Match.tag('Assistant', current =>
+      current.parts.flatMap(part =>
+        Predicate.isTagged(part, 'Text') ? contentParts(part.content) : []
+      )
+    ),
+    Match.exhaustive
+  )
 
 const validateCapabilities = (
   config: RunConfig,
@@ -301,42 +312,40 @@ const validateCapabilities = (
   )
 }
 
-const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> => {
-  switch (event._tag) {
-    case 'TextDelta':
-      return [AgentLLMTextDelta.make({ text: event.text })]
-    case 'ReasoningDelta':
-      return [AgentLLMReasoningDelta.make({ text: event.text })]
-    case 'ToolCall':
-      return [ToolInputEnd.make({ call: event.call })]
-    case 'ToolInputStart':
-      return [ToolInputStart.make({ id: event.id, name: event.name })]
-    case 'ToolInputDelta':
-      return [ToolInputDelta.make({ id: event.id, delta: event.delta })]
-    case 'ProviderToolResult':
-      return [ProviderToolResult.make({ call: event.call, result: event.result })]
-    case 'Usage':
-      return [UsageUpdate.make({ usage: event.usage })]
-    case 'Done':
-      return []
-  }
-}
+const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> =>
+  Match.value(event).pipe(
+    Match.tag('TextDelta', current => [AgentLLMTextDelta.make({ text: current.text })]),
+    Match.tag('ReasoningDelta', current => [AgentLLMReasoningDelta.make({ text: current.text })]),
+    Match.tag('ToolCall', current => [ToolInputEnd.make({ call: current.call })]),
+    Match.tag('ToolInputStart', current => [
+      ToolInputStart.make({ id: current.id, name: current.name })
+    ]),
+    Match.tag('ToolInputDelta', current => [
+      ToolInputDelta.make({ id: current.id, delta: current.delta })
+    ]),
+    Match.tag('ProviderToolResult', current => [
+      ProviderToolResult.make({ call: current.call, result: current.result })
+    ]),
+    Match.tag('Usage', current => [UsageUpdate.make({ usage: current.usage })]),
+    Match.tag('Done', () => []),
+    Match.exhaustive
+  )
 
-const isLlmEvent = (event: LLMEvent | AgentEvent | AgentRetry): event is LLMEvent => {
-  switch (event._tag) {
-    case 'TextDelta':
-    case 'ReasoningDelta':
-    case 'Done':
-    case 'ToolCall':
-    case 'ToolInputStart':
-    case 'ToolInputDelta':
-    case 'ProviderToolResult':
-    case 'Usage':
-      return true
-    default:
-      return false
-  }
-}
+const isLlmEvent = (event: LLMEvent | AgentEvent | AgentRetry): event is LLMEvent =>
+  Match.value(event).pipe(
+    Match.tag(
+      'TextDelta',
+      'ReasoningDelta',
+      'Done',
+      'ToolCall',
+      'ToolInputStart',
+      'ToolInputDelta',
+      'ProviderToolResult',
+      'Usage',
+      () => true
+    ),
+    Match.orElse(() => false)
+  )
 
 type TurnStreamInput = {
   readonly config: RunConfig
@@ -345,7 +354,7 @@ type TurnStreamInput = {
       messages: ReadonlyArray<AgentMessage>
     ) => Effect.Effect<ContextTransformResult, AgentLoopError>
   }
-  readonly loopConfig: LoopConfigShape
+  readonly loopConfig: LoopConfigSettings
   readonly provider: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMProviderError>
   }
@@ -359,6 +368,7 @@ type TurnStreamInput = {
 }
 
 const maxUnhintedRetryDelayMs = 30_000
+
 const maxHintedRetryDelayMs = 2_147_483_647
 
 const validDelayMs = (delayMs: number) =>
@@ -421,15 +431,27 @@ const withProviderRetries = (
                     }
 
                     const delayMs = retryDelayMs(loopConfig.retryBaseDelayMs, attempt, error)
-                    return Stream.make(
-                      AgentRetry.make({
-                        attempt,
-                        reason: retryReason(error),
-                        delayMs,
-                        message: error.message,
-                        ...(error.provider === undefined ? {} : { provider: error.provider })
-                      })
-                    ).pipe(
+
+                    type AgentRetryFields = {
+                      attempt: number
+                      reason: ReturnType<typeof retryReason>
+                      delayMs: number
+                      message: string
+                      provider?: LLMError['provider']
+                    }
+
+                    const retryFields: AgentRetryFields = {
+                      attempt,
+                      reason: retryReason(error),
+                      delayMs,
+                      message: error.message
+                    }
+
+                    if (error.provider !== undefined) {
+                      retryFields.provider = error.provider
+                    }
+
+                    return Stream.make(AgentRetry.make(retryFields)).pipe(
                       Stream.concat(sleepStream(delayMs)),
                       Stream.concat(
                         withProviderRetries(makeStream(), loopConfig, makeStream, attempt + 1)
@@ -455,6 +477,7 @@ const makeToolExecutionStream = (
     Effect.gen(function* () {
       const startedAtMs = yield* Clock.currentTimeMillis
       const started = subagentStartedEvent({ call, model, startedAtMs })
+
       const startEvents: ReadonlyArray<AgentEvent> =
         started === undefined
           ? [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs })]
@@ -511,25 +534,25 @@ type IndexedToolCall = {
   readonly call: ToolCall
 }
 
-type PreparedToolCall =
-  | {
-      readonly _tag: 'Execute'
-      readonly index: number
-      readonly call: ToolCall
-      readonly events: ReadonlyArray<AgentEvent>
-    }
-  | {
-      readonly _tag: 'Result'
-      readonly index: number
-      readonly call: ToolCall
-      readonly result: ToolResult
-      readonly events: ReadonlyArray<AgentEvent>
-    }
-  | {
-      readonly _tag: 'Pending'
-      readonly request: HitlRequest
-      readonly events: ReadonlyArray<AgentEvent>
-    }
+type PreparedToolCall = Data.TaggedEnum<{
+  Execute: {
+    readonly index: number
+    readonly call: ToolCall
+    readonly events: ReadonlyArray<AgentEvent>
+  }
+  Result: {
+    readonly index: number
+    readonly call: ToolCall
+    readonly result: ToolResult
+    readonly events: ReadonlyArray<AgentEvent>
+  }
+  Pending: {
+    readonly request: HitlRequest
+    readonly events: ReadonlyArray<AgentEvent>
+  }
+}>
+
+const PreparedToolCall = Data.taggedEnum<PreparedToolCall>()
 
 export type PreparedToolBatch = {
   readonly callsToExecute: ReadonlyArray<IndexedToolCall>
@@ -542,7 +565,7 @@ export type PreparedToolBatch = {
 
 type NonEmptyHitlRequests = readonly [HitlRequest, ...Array<HitlRequest>]
 
-const boundedToolConcurrency = (loopConfig: LoopConfigShape) =>
+const boundedToolConcurrency = (loopConfig: LoopConfigSettings) =>
   Math.max(1, loopConfig.toolConcurrency)
 
 const toolDefFor = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
@@ -553,8 +576,10 @@ const approvalRequired = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
 
 // Lossless canonical binding (not a collision-prone hash). Hosts must echo the opaque ID.
 const canonicalJson = (value: Schema.Json): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (!Predicate.isObjectKeyword(value) || Predicate.isFunction(value)) return JSON.stringify(value)
+
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+
   return `{${Object.keys(value)
     .sort()
     .map(
@@ -600,14 +625,16 @@ const approvalResponseFor = (
   tools: ReadonlyArray<ToolDef>
 ) =>
   responses.flatMap(response =>
-    response._tag === 'ToolApprovalResponse' && matchesApproval(response, call, tools)
+    Predicate.isTagged(response, 'ToolApprovalResponse') && matchesApproval(response, call, tools)
       ? [response]
       : []
   )[0]
 
 const questionResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolCall) =>
   responses.flatMap(response =>
-    response._tag === 'QuestionResponse' && matchesQuestion(response, call) ? [response] : []
+    Predicate.isTagged(response, 'QuestionResponse') && matchesQuestion(response, call)
+      ? [response]
+      : []
   )[0]
 
 const toolApprovalRequest = (tools: ReadonlyArray<ToolDef>, call: ToolCall): ToolApprovalRequest =>
@@ -663,26 +690,24 @@ const prepareQuestionCall = (
       Effect.result
     )
 
-    if (decoded._tag === 'Failure') {
-      return {
-        _tag: 'Result',
+    if (Predicate.isTagged(decoded, 'Failure')) {
+      return PreparedToolCall.Result({
         index,
         call,
         result: invalidQuestionToolResult(call),
         events: []
-      }
+      })
     }
 
     const response = questionResponseFor(responses, call)
 
     if (response !== undefined) {
-      return {
-        _tag: 'Result',
+      return PreparedToolCall.Result({
         index,
         call,
         result: questionToolResult(response, decoded.success.questions),
         events: [hitlResponseEvent(response)]
-      }
+      })
     }
 
     const request = QuestionRequest.make({
@@ -692,11 +717,10 @@ const prepareQuestionCall = (
       questions: decoded.success.questions
     })
 
-    return {
-      _tag: 'Pending',
+    return PreparedToolCall.Pending({
       request,
       events: [QuestionRequested.make({ request })]
-    }
+    })
   })
 
 const prepareApprovalCall = (
@@ -709,8 +733,7 @@ const prepareApprovalCall = (
 
   // Never ask a human to approve, or launch, an activated call whose envelope is malformed.
   if (envelope !== undefined && Option.isNone(envelope)) {
-    return {
-      _tag: 'Result',
+    return PreparedToolCall.Result({
       index,
       call,
       events: [],
@@ -719,40 +742,37 @@ const prepareApprovalCall = (
         isError: true,
         content: 'Expected exactly execution (foreground or background) and arguments.'
       })
-    }
+    })
   }
 
   if (!approvalRequired(tools, call)) {
-    return { _tag: 'Execute', index, call, events: [] }
+    return PreparedToolCall.Execute({ index, call, events: [] })
   }
 
   const request = toolApprovalRequest(tools, call)
   const response = approvalResponseFor(responses, call, tools)
 
   if (response === undefined) {
-    return {
-      _tag: 'Pending',
+    return PreparedToolCall.Pending({
       request,
       events: [ToolApprovalRequested.make({ call, request })]
-    }
+    })
   }
 
   if (response.decision === 'denied') {
-    return {
-      _tag: 'Result',
+    return PreparedToolCall.Result({
       index,
       call,
       result: deniedToolResult(call, response),
       events: [hitlResponseEvent(response)]
-    }
+    })
   }
 
-  return {
-    _tag: 'Execute',
+  return PreparedToolCall.Execute({
     index,
     call,
     events: [hitlResponseEvent(response)]
-  }
+  })
 }
 
 const prepareToolCall = (input: {
@@ -764,17 +784,18 @@ const prepareToolCall = (input: {
   input.call.name === questionToolName
     ? input.tools.some(tool => tool.name === questionToolName)
       ? prepareQuestionCall(input.call, input.index, input.responses)
-      : Effect.succeed({
-          _tag: 'Result',
-          index: input.index,
-          call: input.call,
-          events: [],
-          result: ToolResult.make({
-            toolCallId: input.call.id,
-            content: 'Question tool is unavailable',
-            isError: true
+      : Effect.succeed(
+          PreparedToolCall.Result({
+            index: input.index,
+            call: input.call,
+            events: [],
+            result: ToolResult.make({
+              toolCallId: input.call.id,
+              content: 'Question tool is unavailable',
+              isError: true
+            })
           })
-        })
+        )
     : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
 
 /** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution. */
@@ -790,17 +811,21 @@ export const prepareToolBatch = (input: {
 
     return {
       callsToExecute: prepared.flatMap(item =>
-        item._tag === 'Execute' ? [{ index: item.index, call: item.call }] : []
+        Predicate.isTagged(item, 'Execute') ? [{ index: item.index, call: item.call }] : []
       ),
       resultMessages: prepared.flatMap(item =>
-        item._tag === 'Result'
+        Predicate.isTagged(item, 'Result')
           ? [{ index: item.index, message: toolResultMessageFromResult(item.result) }]
           : []
       ),
       resultEvents: syntheticToolCompletionEvents(prepared),
-      events: prepared.flatMap(item => (item._tag === 'Pending' ? [] : item.events)),
-      pendingRequests: prepared.flatMap(item => (item._tag === 'Pending' ? [item.request] : [])),
-      pendingEvents: prepared.flatMap(item => (item._tag === 'Pending' ? item.events : []))
+      events: prepared.flatMap(item => (Predicate.isTagged(item, 'Pending') ? [] : item.events)),
+      pendingRequests: prepared.flatMap(item =>
+        Predicate.isTagged(item, 'Pending') ? [item.request] : []
+      ),
+      pendingEvents: prepared.flatMap(item =>
+        Predicate.isTagged(item, 'Pending') ? item.events : []
+      )
     }
   })
 
@@ -811,19 +836,23 @@ const syntheticToolCompletionEvents = (
   prepared: ReadonlyArray<PreparedToolCall>
 ): ReadonlyArray<AgentEvent> =>
   prepared.flatMap(item =>
-    item._tag === 'Result'
+    Predicate.isTagged(item, 'Result')
       ? [ToolExecutionCompleted.make({ call: item.call, result: item.result })]
       : []
   )
 
 const toolResultIds = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<string> =>
-  new Set(messages.flatMap(message => (message._tag === 'ToolResult' ? [message.toolCallId] : [])))
+  new Set(
+    messages.flatMap(message =>
+      Predicate.isTagged(message, 'ToolResult') ? [message.toolCallId] : []
+    )
+  )
 
 const pendingHostToolCalls = (messages: ReadonlyArray<AgentMessage>) => {
   const completed = toolResultIds(messages)
 
   return messages.flatMap(message =>
-    message._tag === 'Assistant'
+    Predicate.isTagged(message, 'Assistant')
       ? assistantHostToolCalls(message).filter(call => !completed.has(call.id))
       : []
   )
@@ -840,7 +869,7 @@ const nonEmptyHitlRequests = (
 const parallelToolExecutionStream = (input: {
   readonly calls: ReadonlyArray<IndexedToolCall>
   readonly executor: TurnStreamInput['executor']
-  readonly loopConfig: LoopConfigShape
+  readonly loopConfig: LoopConfigSettings
   readonly model: string
   readonly results: Ref.Ref<ReadonlyArray<IndexedToolResultMessage>>
 }) =>
@@ -848,7 +877,10 @@ const parallelToolExecutionStream = (input: {
     input.calls.map(({ call, index }) =>
       makeToolExecutionStream(input.executor, call, input.model).pipe(
         Stream.tap(event => {
-          if (event._tag !== 'ToolExecutionCompleted' && event._tag !== 'ToolExecutionAccepted') {
+          if (
+            !Predicate.isTagged(event, 'ToolExecutionCompleted') &&
+            !Predicate.isTagged(event, 'ToolExecutionAccepted')
+          ) {
             return Effect.void
           }
 
@@ -887,7 +919,7 @@ type TurnCompletion = {
 const validateTurnCompletion = (
   events: ReadonlyArray<LLMEvent>
 ): Effect.Effect<TurnCompletion, LLMError> => {
-  const doneEvents = events.filter(event => event._tag === 'Done')
+  const doneEvents = events.filter(event => Predicate.isTagged(event, 'Done'))
   const toolCalls = collectToolCalls(events)
   const stopReason: TurnCompletion['stopReason'] = toolCalls.length === 0 ? 'stop' : 'tool_use'
 
@@ -936,6 +968,7 @@ const makeAfterLlmStream = (
       const llmEvents = yield* Ref.get(llmEventsRef)
       const completion = yield* validateTurnCompletion(llmEvents)
       const assistantMessage = accumulateAssistantMessage(llmEvents)
+
       const turnEndEvents: ReadonlyArray<AgentEvent> = [
         LLMStreamEnd.make({ turn: input.turn }),
         AssistantMessageEvent.make({ message: assistantMessage })
@@ -959,6 +992,7 @@ const makeAfterLlmStream = (
       }
 
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+
       const prepared = yield* prepareToolBatch({
         tools: input.config.tools,
         responses: input.config.hitlResponses ?? [],
@@ -977,6 +1011,7 @@ const makeAfterLlmStream = (
         }
 
         const readyResults = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
+
         if (readyResults.length > 0) {
           yield* Ref.update(input.createdMessages, messages => [...messages, ...readyResults])
         }
@@ -1005,6 +1040,7 @@ const makeAfterLlmStream = (
         model: input.config.model,
         results: toolResultMessages
       })
+
       const nextTurnStream = Stream.unwrap(
         Ref.get(toolResultMessages).pipe(
           Effect.flatMap(results => {
@@ -1086,7 +1122,7 @@ const makeLlmStream = (
 
         const appendEvent = Ref.update(llmEvents, events => [...events, event])
 
-        if (event._tag !== 'Usage') {
+        if (!Predicate.isTagged(event, 'Usage')) {
           return appendEvent
         }
 
@@ -1095,7 +1131,7 @@ const makeLlmStream = (
         )
       }),
       Stream.flatMap(event =>
-        event._tag === 'AgentRetry'
+        Predicate.isTagged(event, 'AgentRetry')
           ? Stream.make(event)
           : isLlmEvent(event)
             ? Stream.fromIterable(toLlmEvent(event))
@@ -1129,7 +1165,7 @@ const makeModelOnlyLlmStream = (
 
         const appendEvent = Ref.update(llmEvents, events => [...events, event])
 
-        if (event._tag !== 'Usage') {
+        if (!Predicate.isTagged(event, 'Usage')) {
           return appendEvent
         }
 
@@ -1138,7 +1174,7 @@ const makeModelOnlyLlmStream = (
         )
       }),
       Stream.flatMap(event =>
-        event._tag === 'AgentRetry'
+        Predicate.isTagged(event, 'AgentRetry')
           ? Stream.make(event)
           : isLlmEvent(event)
             ? Stream.fromIterable(toLlmEvent(event))
@@ -1182,6 +1218,7 @@ const makePendingToolResumeStream = (
       }
 
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+
       const prepared = yield* prepareToolBatch({
         tools: input.config.tools,
         responses: input.config.hitlResponses ?? [],
@@ -1200,6 +1237,7 @@ const makePendingToolResumeStream = (
         }
 
         const readyResults = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
+
         if (readyResults.length > 0) {
           yield* Ref.update(input.createdMessages, messages => [...messages, ...readyResults])
         }
@@ -1226,6 +1264,7 @@ const makePendingToolResumeStream = (
         model: input.config.model,
         results: toolResultMessages
       })
+
       const nextTurnStream = Stream.unwrap(
         Ref.get(toolResultMessages).pipe(
           Effect.flatMap(results => {
@@ -1310,14 +1349,17 @@ export const runToolBatch = (
       const executor = yield* ToolExecutor
       const loopConfig = yield* LoopConfig
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+
       const prepared = yield* prepareToolBatch({
         tools: config.tools ?? [],
         responses: config.hitlResponses ?? [],
         calls: config.calls
       })
+
       const hasPendingRequests = prepared.pendingRequests.length > 0
       const resultEvents = hasPendingRequests ? [] : prepared.resultEvents
       const pendingRequests = nonEmptyHitlRequests(prepared.pendingRequests)
+
       const awaitingEvents: ReadonlyArray<AgentEvent> =
         pendingRequests === undefined
           ? []

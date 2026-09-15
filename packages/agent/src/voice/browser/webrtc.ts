@@ -1,4 +1,14 @@
-import { Deferred, Duration, Effect, Queue, Stream, type Cause, type Scope } from 'effect'
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Predicate,
+  Queue,
+  Stream,
+  type Cause,
+  type Scope
+} from 'effect'
 import {
   VoiceErrorEvent,
   VoiceSessionClosed,
@@ -6,7 +16,7 @@ import {
   VoiceSessionOpening,
   type VoiceEvent
 } from '../protocol.ts'
-import type { VoiceTransportApi } from '../transport.ts'
+import { VoiceTransport, type VoiceTransportApi } from '../transport.ts'
 
 // Minimal structural WebRTC types. Real DOM objects satisfy these shapes, and
 // tests can provide plain fakes without jsdom WebRTC support.
@@ -43,7 +53,7 @@ export type WebRtcSessionDescriptionLike = {
 export type WebRtcPeerConnectionLike = {
   readonly connectionState: string
   createDataChannel(label: string): WebRtcDataChannelLike
-  addTrack(track: WebRtcTrackLike, stream: WebRtcMediaStreamLike): unknown
+  addTrack(track: WebRtcTrackLike, stream: WebRtcMediaStreamLike): void
   createOffer(): Promise<WebRtcSessionDescriptionLike>
   setLocalDescription(description: WebRtcSessionDescriptionLike): Promise<void>
   setRemoteDescription(description: {
@@ -148,6 +158,7 @@ export const makeWebRtcVoiceTransport = (
           }
         })
     )
+
     const audioTrack = mediaStream.getAudioTracks()[0]
 
     if (audioTrack === undefined) {
@@ -163,35 +174,43 @@ export const makeWebRtcVoiceTransport = (
       Effect.sync(() => runtime.makePeerConnection()),
       connection => Effect.sync(() => connection.close())
     )
+
     const dataChannel = peerConnection.createDataChannel(options.dataChannelLabel)
     yield* Effect.addFinalizer(() => Effect.sync(() => dataChannel.close()))
     peerConnection.addTrack(audioTrack, mediaStream)
 
     const ready = yield* Deferred.make<void, VoiceSessionError>()
+
     const runBackground = <A, E>(effect: Effect.Effect<A, E>) => {
       Effect.runFork(effect.pipe(Effect.asVoid))
     }
+
     const failReady = (message: string) => {
       runBackground(
         Deferred.fail(ready, new VoiceSessionError({ code: 'transport_failed', message }))
       )
     }
+
     const checkReady = () => {
       if (peerConnection.connectionState === 'connected' && dataChannel.readyState === 'open') {
         runBackground(Deferred.succeed(ready, undefined))
       }
     }
+
     const emitAndEnd = (event: VoiceEvent) => {
       runBackground(Queue.offer(queue, event).pipe(Effect.andThen(Queue.end(queue))))
     }
+
     const failWithEvent = (readyMessage: string, eventMessage: string) => {
       failReady(readyMessage)
       emitAndEnd(VoiceErrorEvent.make({ code: 'transport_failed', message: eventMessage }))
     }
+
     const closeWithEvent = (message: string) => {
       failReady(message)
       emitAndEnd(VoiceSessionClosed.make({ reason: 'data_channel_closed' }))
     }
+
     const handleTrack = (event: WebRtcTrackEventLike) => {
       const stream = event.streams[0]
 
@@ -199,35 +218,45 @@ export const makeWebRtcVoiceTransport = (
         options.onRemoteAudioStream?.(stream)
       }
     }
+
     const handleConnectionStateChange = () => {
       if (
         peerConnection.connectionState === 'failed' ||
         peerConnection.connectionState === 'closed'
       ) {
         failWithEvent('WebRTC connection failed', 'Voice connection failed')
+
         return
       }
 
       checkReady()
     }
+
     const handleChannelOpen = () => {
       checkReady()
     }
+
     const handleChannelClose = () => {
       closeWithEvent('Voice data channel closed before ready')
     }
+
     const handleChannelError = () => {
       failWithEvent('Voice data channel failed', 'Voice data channel failed')
     }
+
     const handleChannelMessage = (event: WebRtcMessageEventLike) => {
-      if (typeof event.data !== 'string') {
+      if (!Predicate.isString(event.data)) {
         return
       }
 
       runBackground(
-        Effect.forEach(options.decodeMessage(event.data), voiceEvent => Queue.offer(queue, voiceEvent), {
-          discard: true
-        })
+        Effect.forEach(
+          options.decodeMessage(event.data),
+          voiceEvent => Queue.offer(queue, voiceEvent),
+          {
+            discard: true
+          }
+        )
       )
     }
 
@@ -255,6 +284,7 @@ export const makeWebRtcVoiceTransport = (
       try: () => peerConnection.createOffer(),
       catch: setupError('Could not create WebRTC offer')
     })
+
     yield* Effect.tryPromise({
       try: () => peerConnection.setLocalDescription(offer),
       catch: setupError('Could not set local WebRTC description')
@@ -304,3 +334,8 @@ export const makeWebRtcVoiceTransport = (
       events: Stream.fromQueue(queue)
     }
   })
+
+export const webRtcVoiceTransportLayer = (
+  options: WebRtcVoiceTransportOptions
+): Layer.Layer<VoiceTransport, VoiceSessionError> =>
+  Layer.effect(VoiceTransport, makeWebRtcVoiceTransport(options))

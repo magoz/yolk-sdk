@@ -31,10 +31,12 @@ export const makeEffectFetch =
   (http: HttpClient.HttpClient): FetchLike =>
   async (input, init) => {
     const webRequest = new Request(input, init)
+
     const bytes =
       webRequest.method === 'GET' || webRequest.method === 'HEAD'
         ? undefined
         : new Uint8Array(await webRequest.arrayBuffer())
+
     const headers: Record<string, string> = {}
     webRequest.headers.forEach((value, key) => {
       headers[key] = value
@@ -50,6 +52,7 @@ export const makeEffectFetch =
     }
 
     const response = await Effect.runPromise(http.execute(request), { signal: webRequest.signal })
+
     const body = hasResponseBody(webRequest, response.status)
       ? new Uint8Array(await Effect.runPromise(response.arrayBuffer))
       : undefined

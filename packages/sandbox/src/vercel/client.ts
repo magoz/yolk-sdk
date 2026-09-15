@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Match } from 'effect'
 import {
   APIError,
   Sandbox as VercelSdkSandbox,
@@ -9,6 +9,7 @@ import {
 import type { SandboxInitialSource, SandboxResources, SandboxSnapshotRetention } from '../model.ts'
 
 export type VercelSandboxRuntime = 'node22' | 'node24' | 'node26' | 'python3.13'
+
 export type VercelNetworkPolicy = NetworkPolicy
 
 export type VercelCommandOutput = {
@@ -84,8 +85,11 @@ export class VercelSandboxClient extends Context.Service<
   VercelSandboxClientApi
 >()('@yolk-sdk/sandbox/vercel/VercelSandboxClient') {}
 
-export const isVercelMissingSandboxError = (error: unknown) =>
-  error instanceof APIError && (error.response.status === 404 || error.response.status === 410)
+export const isVercelMissingSandboxError = (
+  error: unknown
+): error is APIError<unknown> & {
+  readonly response: Response & { readonly status: 404 | 410 }
+} => error instanceof APIError && (error.response.status === 404 || error.response.status === 410)
 
 const tryVercelPromise = <A>(body: () => Promise<A>) =>
   Effect.tryPromise({
@@ -115,27 +119,59 @@ const toDetachedCommand = (command: Command): VercelDetachedCommand => ({
   output: commandOutput(command)
 })
 
+type VercelWriteFilePayload = {
+  readonly path: string
+  readonly content: string
+  mode?: number
+}
+
+type VercelRunCommandPayload = {
+  readonly cmd: string
+  readonly args: Array<string>
+  cwd?: string
+}
+
+type VercelSnapshotRetentionPayload = {
+  readonly count: number
+  expiration?: number
+  deleteEvicted?: boolean
+}
+
 const toHandle = (sandbox: VercelSdkSandbox): VercelSandboxHandle => ({
   name: sandbox.name,
   writeFiles: files =>
     tryVercelPromise(() =>
       sandbox.writeFiles(
-        files.map(file => ({
-          path: file.path,
-          content: file.content,
-          ...(file.mode === undefined ? {} : { mode: file.mode })
-        }))
+        files.map(file => {
+          const payload: VercelWriteFilePayload = {
+            path: file.path,
+            content: file.content
+          }
+
+          if (file.mode !== undefined) {
+            payload.mode = file.mode
+          }
+
+          return payload
+        })
       )
     ),
   runDetachedCommand: input =>
-    tryVercelPromise(() =>
-      sandbox.runCommand({
+    tryVercelPromise(() => {
+      const command: VercelRunCommandPayload = {
         cmd: input.cmd,
-        args: input.args === undefined ? [] : [...input.args],
-        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        args: input.args === undefined ? [] : [...input.args]
+      }
+
+      if (input.cwd !== undefined) {
+        command.cwd = input.cwd
+      }
+
+      return sandbox.runCommand({
+        ...command,
         detached: true
       })
-    ).pipe(Effect.map(toDetachedCommand)),
+    }).pipe(Effect.map(toDetachedCommand)),
   getCommand: id =>
     tryVercelPromise(() => sandbox.getCommand(id)).pipe(Effect.map(toDetachedCommand)),
   extendTimeout: durationMs =>
@@ -147,20 +183,31 @@ const toHandle = (sandbox: VercelSdkSandbox): VercelSandboxHandle => ({
 const envObject = (env?: Readonly<Record<string, string>>) =>
   env === undefined ? undefined : Object.fromEntries(Object.entries(env))
 
-const retentionObject = (retention?: SandboxSnapshotRetention) =>
-  retention === undefined
-    ? undefined
-    : {
-        count: retention.count,
-        ...(retention.expirationMs === undefined ? {} : { expiration: retention.expirationMs }),
-        ...(retention.deleteEvicted === undefined ? {} : { deleteEvicted: retention.deleteEvicted })
-      }
+const retentionObject = (retention?: SandboxSnapshotRetention) => {
+  if (retention === undefined) {
+    return undefined
+  }
+
+  const value: VercelSnapshotRetentionPayload = {
+    count: retention.count
+  }
+
+  if (retention.expirationMs !== undefined) {
+    value.expiration = retention.expirationMs
+  }
+
+  if (retention.deleteEvicted !== undefined) {
+    value.deleteEvicted = retention.deleteEvicted
+  }
+
+  return value
+}
 
 type AnonymousGitSource = {
   readonly type: 'git'
   readonly url: string
-  readonly depth?: number
-  readonly revision?: string
+  depth?: number
+  revision?: string
 }
 
 type BasicAuthGitSource = AnonymousGitSource & {
@@ -188,51 +235,72 @@ const gitSource = (
   }
 
   if (source.auth !== undefined) {
-    return {
+    const git: BasicAuthGitSource = {
       type: 'git',
       url: source.url,
       username: source.auth.username,
-      password: source.auth.password,
-      ...(source.depth === undefined ? {} : { depth: source.depth }),
-      ...(source.revision === undefined ? {} : { revision: source.revision })
+      password: source.auth.password
     }
+
+    if (source.depth !== undefined) {
+      git.depth = source.depth
+    }
+
+    if (source.revision !== undefined) {
+      git.revision = source.revision
+    }
+
+    return git
   }
 
-  return {
+  const git: AnonymousGitSource = {
     type: 'git',
-    url: source.url,
-    ...(source.depth === undefined ? {} : { depth: source.depth }),
-    ...(source.revision === undefined ? {} : { revision: source.revision })
+    url: source.url
   }
+
+  if (source.depth !== undefined) {
+    git.depth = source.depth
+  }
+
+  if (source.revision !== undefined) {
+    git.revision = source.revision
+  }
+
+  return git
 }
 
 const createSandbox = (input: VercelSandboxCreateInput) => {
   const common = commonCreateOptions(input)
 
-  switch (input.source._tag) {
-    case 'Empty':
-      return VercelSdkSandbox.create({
+  return Match.value(input.source).pipe(
+    Match.tag('Empty', () =>
+      VercelSdkSandbox.create({
         ...common,
         runtime: input.runtime
       })
-    case 'Snapshot':
-      return VercelSdkSandbox.create({
+    ),
+    Match.tag('Snapshot', source =>
+      VercelSdkSandbox.create({
         ...common,
-        source: { type: 'snapshot', snapshotId: input.source.snapshotId }
+        source: { type: 'snapshot', snapshotId: source.snapshotId }
       })
-    case 'Git':
-      return VercelSdkSandbox.create({
-        ...common,
-        runtime: input.runtime,
-        source: gitSource(input.source)
-      })
-    case 'Tarball':
-      return VercelSdkSandbox.create({
+    ),
+    Match.tag('Git', source =>
+      VercelSdkSandbox.create({
         ...common,
         runtime: input.runtime,
-        source: { type: 'tarball', url: input.source.url }
+        source: gitSource(source)
       })
-  }
+    ),
+    Match.tag('Tarball', source =>
+      VercelSdkSandbox.create({
+        ...common,
+        runtime: input.runtime,
+        source: { type: 'tarball', url: source.url }
+      })
+    ),
+    Match.exhaustive
+  )
 }
 
 export const VercelSandboxClientLive = Layer.succeed(
@@ -241,13 +309,9 @@ export const VercelSandboxClientLive = Layer.succeed(
     get: input =>
       tryVercelPromise(() => VercelSdkSandbox.get({ name: input.name })).pipe(
         Effect.map(toHandle),
-        Effect.catch((error: unknown) => {
-          if (isVercelMissingSandboxError(error)) {
-            return Effect.succeed(null)
-          }
-
-          return Effect.fail(error)
-        })
+        Effect.catch(error =>
+          isVercelMissingSandboxError(error) ? Effect.succeed(null) : Effect.fail(error)
+        )
       ),
     create: input => tryVercelPromise(() => createSandbox(input)).pipe(Effect.map(toHandle))
   })

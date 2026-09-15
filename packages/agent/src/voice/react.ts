@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { Effect, Exit, Scope, Stream } from 'effect'
+import { Context, Data, Effect, Exit, Layer, Match, Predicate, Scope, Stream } from 'effect'
 import type {
   HitlResponse,
   ToolApprovalRequest,
@@ -9,13 +9,13 @@ import type {
 } from '@yolk-sdk/agent/protocol'
 import { ToolApprovalResponse as ToolApprovalResponseClass } from '@yolk-sdk/agent/protocol'
 import {
-  makeWebRtcVoiceTransport,
+  webRtcVoiceTransportLayer,
   type WebRtcMediaStreamLike,
   type WebRtcVoiceRuntime
 } from './browser/index.ts'
 import type { VoiceClientCodec } from './client-codec.ts'
-import { makeVoiceController, type VoiceControllerApi } from './controller.ts'
-import { makeVoiceEventOutbox, type VoiceEventOutboxOptions } from './outbox.ts'
+import type { VoiceControllerApi } from './controller.ts'
+import type { VoiceEventOutboxOptions } from './outbox.ts'
 import {
   VoiceSessionError,
   type VoiceEvent,
@@ -27,6 +27,7 @@ import {
   type VoiceSeedText,
   type VoiceSeedTextOptions
 } from './projection.ts'
+import { VoiceSession } from './session.ts'
 
 export type YolkVoiceStatus = 'idle' | 'connecting' | 'live' | 'error'
 
@@ -49,7 +50,7 @@ export type UseYolkVoiceOptions = {
   /**
    * Durable session-log outbox: every session event is buffered as a
    * replay-safe `StoredVoiceEvent` and batch-flushed to the host endpoint
-   * (see `makeVoiceEventOutbox`). Use a keepalive-capable `flush` so the
+   * (see `VoiceEventOutbox`). Use a keepalive-capable `flush` so the
    * final batch survives page unload; the host folds batches with
    * `foldStoredVoiceEvents`.
    */
@@ -96,6 +97,8 @@ type VoiceHookAction =
   | { readonly _tag: 'Event'; readonly event: VoiceEvent }
   | { readonly _tag: 'ApprovalSubmitted'; readonly requestId: string }
 
+const VoiceHookAction = Data.taggedEnum<VoiceHookAction>()
+
 const initialVoiceHookState: VoiceHookState = {
   status: 'idle',
   error: null,
@@ -103,61 +106,56 @@ const initialVoiceHookState: VoiceHookState = {
   pendingApprovals: []
 }
 
-const applyEvent = (state: VoiceHookState, event: VoiceEvent): VoiceHookState => {
-  switch (event._tag) {
-    case 'UserTranscriptDelta':
-      return { ...state, userDraft: `${state.userDraft}${event.delta}` }
-    case 'UserTranscriptFinal':
-      return { ...state, userDraft: '' }
-    case 'AwaitingInput': {
-      const approvals = event.requests.filter(request => request._tag === 'ToolApprovalRequest')
+const applyEvent = (state: VoiceHookState, event: VoiceEvent): VoiceHookState =>
+  Match.value(event).pipe(
+    Match.withReturnType<VoiceHookState>(),
+    Match.tag('UserTranscriptDelta', current => ({
+      ...state,
+      userDraft: `${state.userDraft}${current.delta}`
+    })),
+    Match.tag('UserTranscriptFinal', () => ({ ...state, userDraft: '' })),
+    Match.tag('AwaitingInput', current => {
+      const approvals = current.requests.filter(request =>
+        Predicate.isTagged(request, 'ToolApprovalRequest')
+      )
 
       return approvals.length === 0
         ? state
         : { ...state, pendingApprovals: [...state.pendingApprovals, ...approvals] }
-    }
-    case 'ToolCallCompleted':
-    case 'ToolCallFailed':
-      return {
-        ...state,
-        pendingApprovals: state.pendingApprovals.filter(
-          request => request.toolCallId !== event.callId
-        )
-      }
-    case 'Error':
-      return {
-        ...state,
-        status: 'error',
-        error: new VoiceSessionError({ code: event.code, message: event.message })
-      }
-    case 'SessionClosed':
-      return state.status === 'error' ? state : { ...state, status: 'idle', userDraft: '' }
-    default:
-      return state
-  }
-}
+    }),
+    Match.tag('ToolCallCompleted', 'ToolCallFailed', current => ({
+      ...state,
+      pendingApprovals: state.pendingApprovals.filter(
+        request => request.toolCallId !== current.callId
+      )
+    })),
+    Match.tag('Error', current => ({
+      ...state,
+      status: 'error',
+      error: new VoiceSessionError({ code: current.code, message: current.message })
+    })),
+    Match.tag('SessionClosed', () =>
+      state.status === 'error' ? state : { ...state, status: 'idle', userDraft: '' }
+    ),
+    Match.orElse(() => state)
+  )
 
-const reduceVoiceHookState = (state: VoiceHookState, action: VoiceHookAction): VoiceHookState => {
-  switch (action._tag) {
-    case 'Connecting':
-      return { ...initialVoiceHookState, status: 'connecting' }
-    case 'Live':
-      return { ...state, status: 'live', error: null }
-    case 'Stopped':
-      return { ...state, status: 'idle', userDraft: '' }
-    case 'Errored':
-      return { ...state, status: 'error', error: action.error }
-    case 'Event':
-      return applyEvent(state, action.event)
-    case 'ApprovalSubmitted':
-      return {
-        ...state,
-        pendingApprovals: state.pendingApprovals.filter(
-          request => request.requestId !== action.requestId
-        )
-      }
-  }
-}
+const reduceVoiceHookState = (state: VoiceHookState, action: VoiceHookAction): VoiceHookState =>
+  Match.value(action).pipe(
+    Match.withReturnType<VoiceHookState>(),
+    Match.tag('Connecting', () => ({ ...initialVoiceHookState, status: 'connecting' })),
+    Match.tag('Live', () => ({ ...state, status: 'live', error: null })),
+    Match.tag('Stopped', () => ({ ...state, status: 'idle', userDraft: '' })),
+    Match.tag('Errored', current => ({ ...state, status: 'error', error: current.error })),
+    Match.tag('Event', current => applyEvent(state, current.event)),
+    Match.tag('ApprovalSubmitted', current => ({
+      ...state,
+      pendingApprovals: state.pendingApprovals.filter(
+        request => request.requestId !== current.requestId
+      )
+    })),
+    Match.exhaustive
+  )
 
 const isDomMediaStream = (
   stream: WebRtcMediaStreamLike
@@ -165,11 +163,10 @@ const isDomMediaStream = (
   typeof MediaStream !== 'undefined' && stream instanceof MediaStream
 
 /**
- * Headless browser voice hook over the Yolk WebRTC transport and voice
- * controller. Owns connection lifecycle, event-derived UI state, and HITL
- * approval submission. Rendering, chat projection, and product policy stay
- * host-owned; subscribe with `onEvent` to project transcripts into chat
- * state.
+ * Headless browser voice hook over a `VoiceSession` resource graph. The
+ * session layer owns transport, controller, optional outbox, and scope
+ * teardown. This hook bridges latest callbacks, UI state, HITL submission,
+ * and audio-element identity.
  */
 export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
   const [state, dispatch] = useReducer(reduceVoiceHookState, initialVoiceHookState)
@@ -203,7 +200,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
   const stop = useCallback(() => {
     attemptIdRef.current += 1
     closeSession()
-    dispatch({ _tag: 'Stopped' })
+    dispatch(VoiceHookAction.Stopped())
   }, [closeSession])
 
   const start = useCallback(() => {
@@ -213,22 +210,24 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
 
     const attemptId = attemptIdRef.current + 1
     attemptIdRef.current = attemptId
-    dispatch({ _tag: 'Connecting' })
+    dispatch(VoiceHookAction.Connecting())
 
     const program = Effect.gen(function* () {
       const scope = yield* Scope.make()
 
       if (attemptIdRef.current !== attemptId) {
         yield* Scope.close(scope, Exit.void)
+
         return
       }
 
       scopeRef.current = scope
 
       const opts = optionsRef.current
-      const { session, outbox } = yield* Scope.provide(
-        Effect.gen(function* () {
-          const transport = yield* makeWebRtcVoiceTransport({
+
+      const services = yield* Layer.buildWithScope(
+        VoiceSession.layer({
+          transport: webRtcVoiceTransportLayer({
             negotiate: opts.negotiate,
             decodeMessage: opts.decodeMessage,
             dataChannelLabel: opts.dataChannelLabel,
@@ -241,19 +240,15 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
                 element.srcObject = stream
               }
             }
-          })
-          const controller = yield* makeVoiceController({
-            transport,
-            codec: opts.codec,
-            executeToolCall: opts.executeToolCall
-          })
-          const eventOutbox =
-            opts.eventLog === undefined ? null : yield* makeVoiceEventOutbox(opts.eventLog)
-
-          return { session: controller, outbox: eventOutbox }
+          }),
+          codec: opts.codec,
+          executeToolCall: opts.executeToolCall,
+          eventLog: opts.eventLog
         }),
         scope
       )
+
+      const session = Context.get(services, VoiceSession)
 
       controllerRef.current = session
 
@@ -268,23 +263,19 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
       )
 
       if (attemptIdRef.current === attemptId) {
-        dispatch({ _tag: 'Live' })
+        dispatch(VoiceHookAction.Live())
       }
 
       yield* Stream.runForEach(session.events, event =>
-        Effect.gen(function* () {
+        Effect.sync(() => {
           if (attemptIdRef.current !== attemptId) {
             return
           }
 
-          if (outbox !== null) {
-            yield* outbox.offer(event)
-          }
-
           optionsRef.current.onEvent?.(event)
-          dispatch({ _tag: 'Event', event })
+          dispatch(VoiceHookAction.Event({ event }))
 
-          if (event._tag === 'Error') {
+          if (Predicate.isTagged(event, 'Error')) {
             optionsRef.current.onError?.(
               new VoiceSessionError({ code: event.code, message: event.message })
             )
@@ -301,7 +292,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
               closeSession()
 
               if (attemptIdRef.current === attemptId) {
-                dispatch({ _tag: 'Errored', error })
+                dispatch(VoiceHookAction.Errored({ error }))
                 optionsRef.current.onError?.(error)
               }
             }),
@@ -309,7 +300,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
             Effect.sync(() => {
               if (attemptIdRef.current === attemptId) {
                 closeSession()
-                dispatch({ _tag: 'Stopped' })
+                dispatch(VoiceHookAction.Stopped())
               }
             })
         })
@@ -320,6 +311,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
   const toggle = useCallback(() => {
     if (isConnecting || isLive) {
       stop()
+
       return
     }
 
@@ -347,8 +339,8 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
       return
     }
 
-    if (response._tag === 'ToolApprovalResponse') {
-      dispatch({ _tag: 'ApprovalSubmitted', requestId: response.requestId })
+    if (Predicate.isTagged(response, 'ToolApprovalResponse')) {
+      dispatch(VoiceHookAction.ApprovalSubmitted({ requestId: response.requestId }))
     }
 
     Effect.runFork(controller.submitHitlResponse(response))
@@ -371,13 +363,22 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
   const denyTool = useCallback(
     (requestId: string, toolCallId: string, reason?: string) => {
       submitHitlResponse(
-        ToolApprovalResponseClass.make({
-          requestId,
-          toolCallId,
-          decision: 'denied',
-          source: 'user',
-          ...(reason === undefined ? {} : { reason })
-        })
+        ToolApprovalResponseClass.make(
+          reason === undefined
+            ? {
+                requestId,
+                toolCallId,
+                decision: 'denied',
+                source: 'user'
+              }
+            : {
+                requestId,
+                toolCallId,
+                decision: 'denied',
+                source: 'user',
+                reason
+              }
+        )
       )
     },
     [submitHitlResponse]
@@ -414,4 +415,5 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
 }
 
 export { voiceSeedTextsFromMessages }
+
 export type { VoiceSeedText, VoiceSeedTextOptions }

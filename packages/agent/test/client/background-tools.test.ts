@@ -28,23 +28,28 @@ import {
   markAgentAborted,
   markAgentError
 } from '@yolk-sdk/agent/client'
+import { AgentToolRun } from '../../src/client/state.ts'
 
 const call = ToolCall.make({
   id: 'work',
   name: 'work',
   params: { execution: 'background', arguments: {} }
 })
+
 const result = makeBackgroundToolAcceptedResult({
   toolCallId: call.id,
   acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:work' })
 })
+
 const started = ToolExecutionStarted.make({ call })
+
 const accepted = ToolExecutionAccepted.make({ call, result })
 
 describe('public client background replay', () => {
   it('keeps Accepted inactive with its original receipt/timing across Started and input replays without event ids', () => {
     const state = applyAgentEvent(applyAgentEvent(initialAgentClientState, started), accepted)
     let replay = state
+
     for (const event of [
       started,
       ToolInputStart.make({ id: call.id, name: call.name }),
@@ -64,13 +69,14 @@ describe('public client background replay', () => {
       expect(replay.toolRuns).toEqual(state.toolRuns)
       expect(replay.toolRuns.some(isActiveToolRun)).toBe(false)
       expect(replay.toolRuns).toMatchObject([
-        { _tag: 'Accepted', result, startedAtMs: 0, endedAtMs: 0 }
+        AgentToolRun.Accepted({ call, result, startedAtMs: 0, endedAtMs: 0 })
       ])
     }
+
     // Fencing is per call, not a global ban on subsequent tool activity.
     const sibling = applyAgentEvent(replay, ToolInputStart.make({ id: 'next', name: 'work' }))
     expect(sibling.toolRuns.filter(isActiveToolRun)).toMatchObject([
-      { _tag: 'InputStreaming', id: 'next' }
+      AgentToolRun.InputStreaming({ id: 'next', name: 'work', input: '' })
     ])
   })
 })
@@ -80,11 +86,14 @@ it('retains Accepted across AgentEnd, submit, start and error/abort cleanup', ()
     AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] }),
     ToolResultMessage.make({ ...result })
   ]
+
   const state = applyAgentEvent(applyAgentEvent(initialAgentClientState, started), accepted)
+
   let next = applyAgentEvent(
     state,
     AgentEnd.make({ messages: transcript, turns: 1, usage: zeroAgentUsage })
   )
+
   for (const cleanup of [
     (value: typeof next) => value,
     (value: typeof next) => submitAgentUserMessage(value, UserMessage.make({ content: 'next' })),
@@ -105,6 +114,7 @@ it('fences active events against acknowledged hydrated transcripts without retai
     AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] }),
     ToolResultMessage.make({ ...result })
   ]
+
   for (const event of [
     started,
     ToolInputStart.make({ id: call.id }),

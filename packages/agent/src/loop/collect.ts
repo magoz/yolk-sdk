@@ -1,4 +1,4 @@
-import { Cause, Data, Effect, Exit, Ref, Result, Stream } from 'effect'
+import { Cause, Data, Effect, Exit, Match, Ref, Result, Stream } from 'effect'
 import {
   AssistantAgentMessage,
   addAgentUsage,
@@ -30,10 +30,25 @@ export type ModelTurnCollection = ModelTurnResult & {
   readonly partialAssistantMessage: AgentMessage | undefined
 }
 
-export type CollectModelTurnAttemptResult<E, E2 = never> =
-  | { readonly _tag: 'Collected'; readonly collection: ModelTurnCollection }
-  | { readonly _tag: 'StreamFailed'; readonly error: E; readonly collection: ModelTurnCollection }
-  | { readonly _tag: 'SinkFailed'; readonly error: E2; readonly collection: ModelTurnCollection }
+export type CollectModelTurnAttemptResult<E, E2 = never> = Data.TaggedEnum<{
+  Collected: {
+    readonly collection: ModelTurnCollection
+  }
+  StreamFailed: {
+    readonly error: E
+    readonly collection: ModelTurnCollection
+  }
+  SinkFailed: {
+    readonly error: E2
+    readonly collection: ModelTurnCollection
+  }
+}>
+
+interface CollectModelTurnAttemptResultDef extends Data.TaggedEnum.WithGenerics<2> {
+  readonly taggedEnum: CollectModelTurnAttemptResult<this['A'], this['B']>
+}
+
+const CollectModelTurnAttemptResult = Data.taggedEnum<CollectModelTurnAttemptResultDef>()
 
 class CollectModelTurnSinkError<E2> extends Data.TaggedError('CollectModelTurnSinkError')<{
   readonly error: E2
@@ -63,9 +78,11 @@ const restoreAttemptCause = <E, E2>(
       if (!Cause.isFailReason(reason)) {
         return reason
       }
+
       if (reason.error instanceof CollectModelTurnSinkError) {
         return mapFailReason(reason, reason.error.error)
       }
+
       return mapFailReason(reason, reason.error)
     })
   )
@@ -98,35 +115,31 @@ const toModelTurnResult = (collection: ModelTurnCollection): ModelTurnResult => 
   stopReason: collection.stopReason
 })
 
-const eventStartsOutput = (event: AgentEvent) => {
-  switch (event._tag) {
-    case 'LLMTextDelta':
-    case 'LLMReasoningDelta':
-    case 'AssistantMessage':
-    case 'ToolInputStart':
-    case 'ToolInputDelta':
-    case 'ToolInputEnd':
-    case 'ProviderToolResult':
-      return true
-    default:
-      return false
-  }
-}
+const eventStartsOutput = (event: AgentEvent) =>
+  Match.value(event).pipe(
+    Match.tag(
+      'LLMTextDelta',
+      'LLMReasoningDelta',
+      'AssistantMessage',
+      'ToolInputStart',
+      'ToolInputDelta',
+      'ToolInputEnd',
+      'ProviderToolResult',
+      () => true
+    ),
+    Match.orElse(() => false)
+  )
 
-const llmEventFromAgentEvent = (event: AgentEvent): LLMEvent | undefined => {
-  switch (event._tag) {
-    case 'LLMTextDelta':
-      return LLMTextDelta.make({ text: event.text })
-    case 'LLMReasoningDelta':
-      return LLMReasoningDelta.make({ text: event.text })
-    case 'ToolInputEnd':
-      return LLMToolCall.make({ call: event.call })
-    case 'ProviderToolResult':
-      return LLMProviderToolResult.make({ call: event.call, result: event.result })
-    default:
-      return undefined
-  }
-}
+const llmEventFromAgentEvent = (event: AgentEvent): LLMEvent | undefined =>
+  Match.value(event).pipe(
+    Match.tag('LLMTextDelta', current => LLMTextDelta.make({ text: current.text })),
+    Match.tag('LLMReasoningDelta', current => LLMReasoningDelta.make({ text: current.text })),
+    Match.tag('ToolInputEnd', current => LLMToolCall.make({ call: current.call })),
+    Match.tag('ProviderToolResult', current =>
+      LLMProviderToolResult.make({ call: current.call, result: current.result })
+    ),
+    Match.orElse(() => undefined)
+  )
 
 const assistantParts = (message: AgentMessage | undefined): ReadonlyArray<AssistantPart> =>
   message?._tag === 'Assistant' ? message.parts : []
@@ -139,44 +152,51 @@ const applyPartialAssistant = (
   event: AgentEvent
 ): AgentMessage | undefined => {
   const llmEvent = llmEventFromAgentEvent(event)
+
   if (llmEvent === undefined) return message
+
   return withAssistantParts(applyAssistantLlmEvent(assistantParts(message), llmEvent))
 }
 
 const applyModelTurnEvent = (acc: ModelTurnCollection, event: AgentEvent): ModelTurnCollection => {
   const outputStarted = acc.outputStarted || eventStartsOutput(event)
-  const partialAssistantMessage =
-    event._tag === 'AssistantMessage'
-      ? event.message
-      : applyPartialAssistant(acc.partialAssistantMessage, event)
 
-  switch (event._tag) {
-    case 'AssistantMessage':
-      return {
-        ...acc,
-        assistantMessage: event.message,
-        partialAssistantMessage,
-        outputStarted
-      }
-    case 'ToolInputEnd':
-      return {
-        ...acc,
-        toolCalls: [...acc.toolCalls, event.call],
-        partialAssistantMessage,
-        outputStarted
-      }
-    case 'TurnEnd':
-      return { ...acc, stopReason: event.reason, partialAssistantMessage, outputStarted }
-    case 'UsageUpdate':
-      return {
-        ...acc,
-        usage: addAgentUsage(acc.usage, event.usage),
-        partialAssistantMessage,
-        outputStarted
-      }
-    default:
-      return { ...acc, partialAssistantMessage, outputStarted }
-  }
+  const partialAssistantMessage = Match.value(event).pipe(
+    Match.tag('AssistantMessage', current => current.message),
+    Match.orElse(current => applyPartialAssistant(acc.partialAssistantMessage, current))
+  )
+
+  return Match.value(event).pipe(
+    Match.tag('AssistantMessage', current => ({
+      ...acc,
+      assistantMessage: current.message,
+      partialAssistantMessage,
+      outputStarted
+    })),
+    Match.tag('ToolInputEnd', current => ({
+      ...acc,
+      toolCalls: [...acc.toolCalls, current.call],
+      partialAssistantMessage,
+      outputStarted
+    })),
+    Match.tag('TurnEnd', current => ({
+      ...acc,
+      stopReason: current.reason,
+      partialAssistantMessage,
+      outputStarted
+    })),
+    Match.tag('UsageUpdate', current => ({
+      ...acc,
+      usage: addAgentUsage(acc.usage, current.usage),
+      partialAssistantMessage,
+      outputStarted
+    })),
+    Match.orElse(() => ({
+      ...acc,
+      partialAssistantMessage,
+      outputStarted
+    }))
+  )
 }
 
 export const collectModelTurnAttempt = <E, R, E2 = never, R2 = never>(
@@ -189,6 +209,7 @@ export const collectModelTurnAttempt = <E, R, E2 = never, R2 = never>(
   Effect.gen(function* () {
     const collection = yield* Ref.make(emptyCollection(options?.initialUsage))
     const onEvent = options?.onEvent
+
     const exit = yield* stream.pipe(
       Stream.runForEach(event =>
         Ref.update(collection, current => applyModelTurnEvent(current, event)).pipe(
@@ -199,10 +220,11 @@ export const collectModelTurnAttempt = <E, R, E2 = never, R2 = never>(
       ),
       Effect.exit
     )
+
     const state = yield* Ref.get(collection)
 
     if (Exit.isSuccess(exit)) {
-      return { _tag: 'Collected', collection: state }
+      return CollectModelTurnAttemptResult.Collected({ collection: state })
     }
 
     if (!isPureTypedFailure(exit.cause)) {
@@ -210,15 +232,22 @@ export const collectModelTurnAttempt = <E, R, E2 = never, R2 = never>(
     }
 
     const found = Cause.findError(exit.cause)
+
     if (Result.isFailure(found)) {
       return yield* Effect.failCause(restoreAttemptCause(exit.cause))
     }
 
     if (found.success instanceof CollectModelTurnSinkError) {
-      return { _tag: 'SinkFailed', error: found.success.error, collection: state }
+      return CollectModelTurnAttemptResult.SinkFailed({
+        error: found.success.error,
+        collection: state
+      })
     }
 
-    return { _tag: 'StreamFailed', error: found.success, collection: state }
+    return CollectModelTurnAttemptResult.StreamFailed({
+      error: found.success,
+      collection: state
+    })
   })
 
 export const collectModelTurn = <E, R, E2 = never, R2 = never>(
@@ -229,10 +258,11 @@ export const collectModelTurn = <E, R, E2 = never, R2 = never>(
   }
 ): Effect.Effect<ModelTurnResult, E | E2, R | R2> =>
   collectModelTurnAttempt(stream, options).pipe(
-    Effect.flatMap((outcome): Effect.Effect<ModelTurnResult, E | E2> => {
-      if (outcome._tag === 'Collected') {
-        return Effect.succeed(toModelTurnResult(outcome.collection))
-      }
-      return Effect.fail(outcome.error)
-    })
+    Effect.flatMap((outcome): Effect.Effect<ModelTurnResult, E | E2> =>
+      Match.value(outcome).pipe(
+        Match.tag('Collected', current => Effect.succeed(toModelTurnResult(current.collection))),
+        Match.tag('StreamFailed', 'SinkFailed', current => Effect.fail(current.error)),
+        Match.exhaustive
+      )
+    )
   )

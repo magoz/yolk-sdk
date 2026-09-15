@@ -5,9 +5,10 @@ export const SandboxInputErrorCause = Schema.Literals([
   'invalid_cwd',
   'invalid_timeout'
 ])
+
 export type SandboxInputErrorCause = typeof SandboxInputErrorCause.Type
 
-export class SandboxInputError extends Schema.TaggedErrorClass<SandboxInputError>()(
+export class SandboxInputError extends Schema.TaggedError<SandboxInputError>()(
   'SandboxInputError',
   {
     cause: SandboxInputErrorCause,
@@ -15,7 +16,7 @@ export class SandboxInputError extends Schema.TaggedErrorClass<SandboxInputError
   }
 ) {}
 
-export class SandboxConfigError extends Schema.TaggedErrorClass<SandboxConfigError>()(
+export class SandboxConfigError extends Schema.TaggedError<SandboxConfigError>()(
   'SandboxConfigError',
   {
     message: Schema.String,
@@ -23,7 +24,7 @@ export class SandboxConfigError extends Schema.TaggedErrorClass<SandboxConfigErr
   }
 ) {}
 
-export class SandboxExpiredError extends Schema.TaggedErrorClass<SandboxExpiredError>()(
+export class SandboxExpiredError extends Schema.TaggedError<SandboxExpiredError>()(
   'SandboxExpiredError',
   {
     message: Schema.String,
@@ -31,7 +32,7 @@ export class SandboxExpiredError extends Schema.TaggedErrorClass<SandboxExpiredE
   }
 ) {}
 
-export class SandboxStateError extends Schema.TaggedErrorClass<SandboxStateError>()(
+export class SandboxStateError extends Schema.TaggedError<SandboxStateError>()(
   'SandboxStateError',
   {
     message: Schema.String,
@@ -40,7 +41,7 @@ export class SandboxStateError extends Schema.TaggedErrorClass<SandboxStateError
   }
 ) {}
 
-export class SandboxStateStoreError extends Schema.TaggedErrorClass<SandboxStateStoreError>()(
+export class SandboxStateStoreError extends Schema.TaggedError<SandboxStateStoreError>()(
   'SandboxStateStoreError',
   {
     message: Schema.String,
@@ -49,7 +50,7 @@ export class SandboxStateStoreError extends Schema.TaggedErrorClass<SandboxState
   }
 ) {}
 
-export class SandboxProviderError extends Schema.TaggedErrorClass<SandboxProviderError>()(
+export class SandboxProviderError extends Schema.TaggedError<SandboxProviderError>()(
   'SandboxProviderError',
   {
     provider: Schema.Literal('vercel'),
@@ -66,6 +67,3 @@ export type SandboxError =
   | SandboxStateError
   | SandboxStateStoreError
   | SandboxProviderError
-
-export const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)

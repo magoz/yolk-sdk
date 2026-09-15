@@ -26,16 +26,19 @@ import {
   decodeToolCallResult,
   decodeToolsListResult,
   encodeJsonRpcMessage,
+  InitializeClientInfo,
+  InitializeParams,
+  InitializedNotification,
   jsonRpcErrorToMcpError,
-  makeInitializedNotification,
-  makeInitializeParams,
-  makeJsonRpcRequest,
+  JsonRpcRequest,
+  legacyMcpProtocolVersion,
   mcpToolToToolDef,
   toolCallResultToToolResult,
+  ToolsCallParams,
   type McpToolAnnotations,
   type JsonRpcNotification,
-  type JsonRpcRequest,
-  type JsonRpcResponse
+  type JsonRpcResponse,
+  type ToolsListResult
 } from './protocol.ts'
 import { makeEffectFetch } from './effect-fetch.ts'
 
@@ -126,6 +129,7 @@ const mapUnknownToMcpError =
 
 const findDuplicateToolName = (tools: ReadonlyArray<McpResolvedTool>) => {
   const names = tools.map(tool => tool.def.name)
+
   return Option.fromNullishOr(names.find((name, index) => names.indexOf(name) !== index))
 }
 
@@ -140,6 +144,7 @@ const sdkFailureCause = (error: unknown): McpError['cause'] => {
     }
 
     const message = error.message.toLowerCase()
+
     return message.includes('content type') || message.includes('json') || message.includes('parse')
       ? 'protocol'
       : 'transport'
@@ -165,17 +170,21 @@ const withRemoteSdkClient = <A>(
   Effect.gen(function* () {
     const url = yield* validateRemoteUrl(config, securityPolicy(options))
     const http = yield* HttpClient.HttpClient
+
     const sdkClient = yield* Effect.try({
       try: () => {
         const client = new SdkClient(clientInfo(options), {
           ...options?.sdk,
           versionNegotiation: options?.sdk?.versionNegotiation ?? { mode: 'auto' }
         })
+
         options?.configureClient?.(client)
+
         return client
       },
       catch: mapSdkError(config.name, 'Could not configure MCP client')
     })
+
     const transport = new StreamableHTTPClientTransport(new URL(url), {
       fetch: makeEffectFetch(http),
       requestInit: { headers: new Headers(config.headers) }
@@ -220,11 +229,13 @@ const requestLocalEncoded = (
   options?: McpClientOptions
 ) => {
   const policy = securityPolicy(options)
+
   if (!policy.allowLocalServers) {
     return fail(config.name, 'Local MCP servers are disabled by policy', 'security')
   }
 
   const command = config.command[0]
+
   if (command === undefined) {
     return fail(config.name, 'Local MCP command must not be empty', 'validation')
   }
@@ -233,12 +244,14 @@ const requestLocalEncoded = (
     const stdin = Stream.fromIterable(messages.map(message => `${message.line}\n`)).pipe(
       Stream.encodeText
     )
+
     const child = yield* ChildProcess.make(command, config.command.slice(1), {
       env: config.environment ?? {},
       extendEnv: false,
       stdin: { stream: stdin, endOnDone: true },
       stderr: 'ignore'
     })
+
     const lines = yield* child.stdout.pipe(
       Stream.decodeText,
       Stream.splitLines,
@@ -246,6 +259,7 @@ const requestLocalEncoded = (
       Stream.take(expectedResponses),
       Stream.runCollect
     )
+
     const responses = yield* Effect.forEach(lines, line =>
       decodeJsonRpcResponseFromJson(config.name, line)
     )
@@ -281,20 +295,37 @@ const requestLocal = (
     return yield* requestLocalEncoded(config, messages, expectedResponses, options)
   })
 
-const initializeRequest = (options?: McpClientOptions) =>
-  makeJsonRpcRequest({
+const initializeRequest = (options?: McpClientOptions) => {
+  const info = clientInfo(options)
+
+  return JsonRpcRequest.make({
+    jsonrpc: '2.0',
     id: 1,
     method: 'initialize',
-    params: makeInitializeParams(clientInfo(options))
+    params: InitializeParams.make({
+      protocolVersion: legacyMcpProtocolVersion,
+      capabilities: {},
+      clientInfo: InitializeClientInfo.make({ name: info.name, version: info.version })
+    })
+  })
+}
+
+const listToolsRequest = () =>
+  JsonRpcRequest.make({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/list'
   })
 
-const listToolsRequest = () => makeJsonRpcRequest({ id: 2, method: 'tools/list' })
-
 const callToolRequest = (input: { readonly toolName: string; readonly params: unknown }) =>
-  makeJsonRpcRequest({
+  JsonRpcRequest.make({
+    jsonrpc: '2.0',
     id: 3,
     method: 'tools/call',
-    params: { name: input.toolName, arguments: input.params }
+    params: ToolsCallParams.make({
+      name: input.toolName,
+      arguments: input.params
+    })
   })
 
 const responseById = (responses: ReadonlyArray<JsonRpcResponse>, id: string | number) =>
@@ -307,50 +338,49 @@ const requestLocalSession = (
 ) =>
   Effect.gen(function* () {
     const initialize = initializeRequest(options)
+
     const responses = yield* requestLocal(
       config,
-      [initialize, makeInitializedNotification(), request],
+      [
+        initialize,
+        InitializedNotification.make({
+          jsonrpc: '2.0',
+          method: 'notifications/initialized'
+        }),
+        request
+      ],
       2,
       options
     )
+
     const initializeResponse = responseById(responses, initialize.id)
+
     if (Option.isNone(initializeResponse)) {
       return yield* fail(config.name, 'Local MCP did not return initialize response', 'protocol')
     }
+
     yield* unwrapResponse(config.name, initializeResponse.value)
 
     return responses
   }).pipe(
     Effect.flatMap(responses => {
       const response = responseById(responses, request.id)
+
       return Option.isNone(response)
         ? fail(config.name, 'Local MCP did not return expected response', 'protocol')
         : unwrapResponse(config.name, response.value)
     })
   )
 
-const resolveMcpTools = (config: McpServerConfig, result: unknown) =>
-  Effect.gen(function* () {
-    const tools = yield* decodeToolsListResult(result).pipe(
-      Effect.mapError(
-        error =>
-          new McpError({
-            server: config.name,
-            message: `Invalid tools/list result: ${unknownToMessage(error)}`,
-            cause: 'validation'
-          })
-      )
-    )
-
-    return tools.tools.map(tool => ({
-      serverName: config.name,
-      mcpToolName: tool.name,
-      title: tool.title,
-      outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
-      def: mcpToolToToolDef({ serverName: config.name, tool })
-    }))
-  })
+const resolvedMcpTools = (config: McpServerConfig, listed: ToolsListResult) =>
+  listed.tools.map(tool => ({
+    serverName: config.name,
+    mcpToolName: tool.name,
+    title: tool.title,
+    outputSchema: tool.outputSchema,
+    annotations: tool.annotations,
+    def: mcpToolToToolDef({ serverName: config.name, tool })
+  }))
 
 export const listRemoteMcpServerTools = (
   config: McpRemoteServerConfig,
@@ -364,7 +394,19 @@ export const listRemoteMcpServerTools = (
     const result = yield* withRemoteSdkClient(config, options, client =>
       client.listTools(undefined, sdkRequestOptions(options))
     )
-    return yield* resolveMcpTools(config, result)
+
+    const listed = yield* decodeToolsListResult(result).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: config.name,
+            message: `Invalid tools/list result: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
+    )
+
+    return resolvedMcpTools(config, listed)
   })
 
 export const listLocalMcpServerTools = (
@@ -382,7 +424,19 @@ export const listLocalMcpServerTools = (
 
     yield* validateLocal(config, securityPolicy(options))
     const result = yield* requestLocalSession(config, listToolsRequest(), options)
-    return yield* resolveMcpTools(config, result)
+
+    const listed = yield* decodeToolsListResult(result).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: config.name,
+            message: `Invalid tools/list result: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
+    )
+
+    return resolvedMcpTools(config, listed)
   })
 
 export const listMcpServerTools = (config: McpServerConfig, options?: McpClientOptions) =>
@@ -406,22 +460,6 @@ export type CallMcpServerToolInput = {
   readonly options?: McpClientOptions
 }
 
-const resolveMcpToolResult = (input: CallMcpServerToolInput, result: unknown) =>
-  Effect.gen(function* () {
-    const toolCallResult = yield* decodeToolCallResult(result).pipe(
-      Effect.mapError(
-        error =>
-          new McpError({
-            server: input.config.name,
-            message: `Invalid tools/call result: ${unknownToMessage(error)}`,
-            cause: 'validation'
-          })
-      )
-    )
-
-    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
-  })
-
 export const callRemoteMcpServerTool = (
   input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpRemoteServerConfig }
 ): Effect.Effect<ToolResult, McpError, HttpClient.HttpClient> =>
@@ -436,14 +474,28 @@ export const callRemoteMcpServerTool = (
           })
       )
     )
+
     const result = yield* withRemoteSdkClient(input.config, input.options, async client => {
       await client.listTools(undefined, sdkRequestOptions(input.options))
+
       return client.callTool(
         { name: input.mcpToolName, arguments: args },
         sdkRequestOptions(input.options)
       )
     })
-    return yield* resolveMcpToolResult(input, result)
+
+    const toolCallResult = yield* decodeToolCallResult(result).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: input.config.name,
+            message: `Invalid tools/call result: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
+    )
+
+    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
   })
 
 export const callLocalMcpServerTool = (
@@ -455,7 +507,19 @@ export const callLocalMcpServerTool = (
       callToolRequest({ toolName: input.mcpToolName, params: input.params }),
       input.options
     )
-    return yield* resolveMcpToolResult(input, result)
+
+    const toolCallResult = yield* decodeToolCallResult(result).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: input.config.name,
+            message: `Invalid tools/call result: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
+    )
+
+    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
   })
 
 export const callMcpServerTool = (
@@ -487,6 +551,7 @@ export const listMcpTools = (configs: ReadonlyArray<McpServerConfig>, options?: 
     tools => {
       const resolved = tools.flat()
       const duplicate = findDuplicateToolName(resolved)
+
       if (Option.isSome(duplicate)) {
         return fail('mcp', `Duplicate MCP tool name: ${duplicate.value}`, 'validation')
       }

@@ -7,8 +7,10 @@
  *
  * @see https://github.com/sst/opencode (packages/core/src/session/run-coordinator.ts)
  */
-import { Deferred, Effect, Fiber, FiberSet } from 'effect'
-import type { Exit, Scope } from 'effect'
+import { Cause, Context, Deferred, Effect, Exit, Fiber, FiberSet, Layer } from 'effect'
+import type { Scope } from 'effect'
+import { StopReceipt as stopReceipt } from './outcome-constructors-internal.ts'
+import { RunStore } from './store.ts'
 
 // Private settlement receipt: succeed the Deferred with Exit as a value so
 // interrupt fan-out does not skip Effect 4.0.0-beta.80 Deferred listeners.
@@ -18,6 +20,9 @@ const awaitDone = <E>(done: Deferred.Deferred<Exit.Exit<void, E>>): Effect.Effec
 
 /** `"input"` subsumes `"steer"` when coalescing wakes. */
 export type Promotable = 'input' | 'steer'
+
+/** Shutdown retains the claim; explicit user stop releases it after settlement. */
+export type InterruptReason = 'user' | 'shutdown'
 
 export type CapturedRun<E> =
   | { readonly _tag: 'Started'; readonly join: Effect.Effect<void, E> }
@@ -95,6 +100,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
     ): Effect.Effect<void, E> =>
       Effect.suspend(() => {
         if (execution.stopping) return Effect.void
+
         return options.drain(key, force, execution.scope)
       }).pipe(
         Effect.andThen(
@@ -102,6 +108,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
             if (execution.stopping || execution.pendingWake === undefined) return Effect.void
             execution.scope = execution.pendingWake
             execution.pendingWake = undefined
+
             return Effect.yieldNow.pipe(Effect.andThen(loop(key, execution, false)))
           })
         )
@@ -110,6 +117,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
     const settle = (key: Key, execution: Execution<E, Reason>, exit: Exit.Exit<void, E>) => {
       if (execution.pendingWake !== undefined) start(key, false, execution.pendingWake)
       else executions.delete(key)
+
       return Deferred.succeed(execution.done, exit).pipe(Effect.asVoid)
     }
 
@@ -119,6 +127,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
         scope,
         stopping: false
       }
+
       executions.set(key, execution)
       execution.owner = fork(
         Effect.yieldNow.pipe(
@@ -129,6 +138,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
           Effect.onExit(exit =>
             Effect.suspend(() => {
               execution.owner = undefined
+
               return options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void
             })
           ),
@@ -137,6 +147,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
           Effect.asVoid
         )
       )
+
       return execution
     }
 
@@ -146,11 +157,15 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
     const interruptNow = (key: Key, reason?: Reason): Effect.Effect<boolean> =>
       Effect.suspend(() => {
         const execution = executions.get(key)
+
         if (execution === undefined || execution.stopping) return Effect.succeed(false)
+
         if (execution.owner === undefined) {
           execution.pendingWake = undefined
+
           return Effect.succeed(false)
         }
+
         const owner = execution.owner
         execution.stopping = true
         execution.pendingWake = undefined
@@ -162,13 +177,16 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
         // finalizers inline until they suspend. Do not await owner settlement.
         const request = forkInterruptionRequest(owner)
         execution.request = request
+
         return Fiber.join(request).pipe(Effect.as(true))
       })
 
     const awaitIdle = (key: Key): Effect.Effect<void> =>
       Effect.suspend(() => {
         const execution = executions.get(key)
+
         if (execution === undefined) return Effect.void
+
         return awaitDone(execution.done).pipe(Effect.ignoreCause, Effect.andThen(awaitIdle(key)))
       })
 
@@ -178,13 +196,17 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       run: key =>
         Effect.suspend(() => {
           const execution = executions.get(key)
+
           if (execution === undefined) return awaitDone(start(key, true, 'input').done)
+
           if (!execution.stopping) return awaitDone(execution.done)
+
           return awaitDone(execution.done).pipe(
             Effect.ignoreCause,
             Effect.andThen(
               Effect.suspend(() => {
                 const next = executions.get(key)
+
                 return next === undefined
                   ? awaitDone(start(key, true, 'input').done)
                   : awaitDone(next.done)
@@ -195,13 +217,17 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       captureRun: key =>
         Effect.sync(() => {
           const execution = executions.get(key)
+
           if (execution === undefined) {
             const started = start(key, true, 'input')
+
             return { _tag: 'Started' as const, join: awaitDone(started.done) }
           }
+
           if (!execution.stopping) {
             return { _tag: 'Joined' as const, join: awaitDone(execution.done) }
           }
+
           return {
             _tag: 'Stopping' as const,
             awaitSettlement: awaitDone(execution.done).pipe(Effect.ignoreCause)
@@ -210,15 +236,19 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       wake: (key, scope = 'input') =>
         Effect.sync(() => {
           const execution = executions.get(key)
+
           if (execution !== undefined) {
             execution.pendingWake = widerScope(execution.pendingWake, scope)
+
             return
           }
+
           start(key, false, scope)
         }),
       interrupt: (key, reason, options) =>
         Effect.suspend(() => {
           const execution = executions.get(key)
+
           return interruptNow(key, reason).pipe(
             Effect.tap(() =>
               options?.awaitSettlement === true && execution !== undefined
@@ -230,25 +260,96 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       terminalStop: (key, reason) =>
         Effect.suspend((): Effect.Effect<StopReceipt> => {
           const execution = executions.get(key)
-          if (execution === undefined) return Effect.succeed({ _tag: 'Idle' } as const)
+
+          if (execution === undefined) return Effect.succeed(stopReceipt.Idle())
           execution.pendingWake = undefined
+
           if (execution.owner === undefined) {
             execution.stopping = true
-            return Effect.succeed({ _tag: 'Settling' } as const)
+
+            return Effect.succeed(stopReceipt.Settling())
           }
+
           execution.interruptionReason = reason
+
           if (execution.stopping) {
             const request = execution.request
+
             return request === undefined
-              ? Effect.succeed({ _tag: 'LiveStopping' } as const)
-              : Fiber.join(request).pipe(Effect.as({ _tag: 'LiveStopping' } as const))
+              ? Effect.succeed(stopReceipt.LiveStopping())
+              : Fiber.join(request).pipe(Effect.as(stopReceipt.LiveStopping()))
           }
+
           const owner = execution.owner
           execution.stopping = true
           const request = forkInterruptionRequest(owner)
           execution.request = request
-          return Fiber.join(request).pipe(Effect.as({ _tag: 'Interrupted' } as const))
+
+          return Fiber.join(request).pipe(Effect.as(stopReceipt.Interrupted()))
         }),
       awaitIdle
     }
   })
+
+/** Owning coordinator layer, with per-acquisition claim receipts and settlement policy. */
+export class RunCoordinator extends Context.Service<
+  RunCoordinator,
+  Coordinator<string, never, InterruptReason>
+>()('@yolk-sdk/harness/RunCoordinator') {
+  static layer = (options?: {
+    readonly drain?: (runId: string, force: boolean, scope: Promotable) => Effect.Effect<void>
+  }): Layer.Layer<RunCoordinator, never, RunStore> =>
+    Layer.effect(
+      this,
+      Effect.gen(function* () {
+        const store = yield* RunStore
+        const drain = options?.drain ?? ((_runId, _force, _scope) => Effect.void)
+        const acquired = new Set<string>()
+
+        return yield* makeCoordinator<string, never, InterruptReason>({
+          drain,
+          started: runId =>
+            store.claim(runId).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  acquired.add(runId)
+                })
+              )
+            ),
+          settled: (runId, exit, reason) =>
+            Effect.suspend(() => {
+              const owned = acquired.delete(runId)
+
+              if (
+                owned &&
+                (reason === 'user' || (reason === undefined && !Exit.hasInterrupts(exit)))
+              ) {
+                return store.release(runId)
+              }
+
+              // Acquisition receipt guards automatic failed-start settlement only.
+              // Explicit user-terminal authority still releases a leftover claim
+              // after this owner has actually settled, matching Idle/Settling stop.
+              if (reason === 'user' && !owned) {
+                return store
+                  .isClaimed(runId)
+                  .pipe(Effect.flatMap(claimed => (claimed ? store.release(runId) : Effect.void)))
+              }
+
+              return Effect.void
+            }).pipe(
+              Effect.exit,
+              Effect.flatMap(settledExit => {
+                if (Exit.isSuccess(settledExit)) return Effect.void
+
+                return Effect.failCause(
+                  Exit.isFailure(exit)
+                    ? Cause.combine(exit.cause, settledExit.cause)
+                    : settledExit.cause
+                )
+              })
+            )
+        })
+      })
+    )
+}

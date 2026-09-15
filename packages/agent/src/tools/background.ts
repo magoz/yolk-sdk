@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect, Option, Predicate } from 'effect'
 import {
   VoiceToolDispatch,
   backgroundVoiceUnsupportedMessage
@@ -10,7 +10,9 @@ import {
   ToolCall,
   ToolDef,
   decodeBackgroundToolInput,
+  isToolJsonSchemaObject,
   makeBackgroundToolAcceptedResult,
+  type ToolJsonSchema,
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
 
@@ -29,8 +31,8 @@ export type BackgroundToolHost<Context> = {
   }) => Effect.Effect<BackgroundToolAccepted, ToolError>
 }
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
+  Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
 // Only traverse JSON Schema positions. Keywords in defaults/examples/const/enum are business data.
 const schemaMaps = new Set([
@@ -40,7 +42,9 @@ const schemaMaps = new Set([
   'definitions',
   'dependentSchemas'
 ])
+
 const schemaArrays = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems'])
+
 const schemaValues = new Set([
   'items',
   'additionalItems',
@@ -55,6 +59,7 @@ const schemaValues = new Set([
   'else',
   'contentSchema'
 ])
+
 const unsupportedResourceKeywords = new Set([
   '$id',
   'id',
@@ -68,16 +73,19 @@ const unsupportedResourceKeywords = new Set([
 /** Narrow relocation contract, not a reference compiler: only document-root $defs pointers
  * survive hoisting. Resource boundaries and other reference forms must fail activation.
  */
-export const unsupportedBackgroundSchema = (schema: unknown): string | undefined => {
-  if (!isRecord(schema)) return undefined
+export const unsupportedBackgroundSchema = (schema: Schema.Json): string | undefined => {
+  if (!isJsonObject(schema)) return undefined
+
   for (const [key, value] of Object.entries(schema)) {
     if (unsupportedResourceKeywords.has(key)) return key
-    if (key === '$ref' && (typeof value !== 'string' || !/^#\/\$defs\/[^#%]+$/.test(value))) {
+
+    if (key === '$ref' && (!Predicate.isString(value) || !/^#\/\$defs\/[^#%]+$/.test(value))) {
       return '$ref (only #/$defs/... pointers are supported)'
     }
+
     const children =
       schemaMaps.has(key) || key === 'dependencies'
-        ? isRecord(value)
+        ? isJsonObject(value)
           ? Object.values(value)
           : []
         : schemaArrays.has(key) || (key === 'items' && Array.isArray(value))
@@ -87,11 +95,14 @@ export const unsupportedBackgroundSchema = (schema: unknown): string | undefined
           : schemaValues.has(key)
             ? [value]
             : []
+
     for (const child of children) {
       const unsupported = unsupportedBackgroundSchema(child)
+
       if (unsupported !== undefined) return unsupported
     }
   }
+
   return undefined
 }
 
@@ -99,21 +110,46 @@ export const unsupportedBackgroundSchema = (schema: unknown): string | undefined
  * original parameters nest under `arguments`; document-root `$defs` remain at the root.
  */
 export const backgroundToolDef = (def: ToolDef): ToolDef => {
-  const parameters = isRecord(def.parameters) ? def.parameters : {}
-  const { $defs, ...argumentsSchema } = parameters
+  let argumentsSchema: ToolJsonSchema = def.parameters
+  let $defs: Schema.Json | undefined
+
+  if (isToolJsonSchemaObject(def.parameters)) {
+    const { $defs: definitions, ...rest } = def.parameters
+    argumentsSchema = rest
+    $defs = definitions
+  }
+
   return ToolDef.make({
     ...def,
     execution: 'background-v1',
-    parameters: {
-      type: 'object',
-      properties: {
-        execution: { type: 'string', enum: ['foreground', 'background'] },
-        arguments: argumentsSchema
-      },
-      required: ['execution', 'arguments'],
-      additionalProperties: false,
-      ...($defs === undefined ? {} : { $defs })
-    }
+    parameters: (() => {
+      type BackgroundToolParametersFields = {
+        type: 'object'
+        properties: {
+          execution: { type: 'string'; enum: ['foreground', 'background'] }
+          arguments: ToolJsonSchema
+        }
+        required: ['execution', 'arguments']
+        additionalProperties: false
+        $defs?: Schema.Json
+      }
+
+      const fields: BackgroundToolParametersFields = {
+        type: 'object',
+        properties: {
+          execution: { type: 'string', enum: ['foreground', 'background'] },
+          arguments: argumentsSchema
+        },
+        required: ['execution', 'arguments'],
+        additionalProperties: false
+      }
+
+      if ($defs !== undefined) {
+        fields.$defs = $defs
+      }
+
+      return fields
+    })()
   })
 }
 
@@ -134,6 +170,7 @@ export const executeBackgroundTool = <Context>(input: {
         })
       )
     }
+
     const envelope = yield* Option.match(decodeBackgroundToolInput(input.request.params), {
       onNone: () =>
         Effect.fail(
@@ -145,16 +182,21 @@ export const executeBackgroundTool = <Context>(input: {
         ),
       onSome: Effect.succeed
     })
+
     const call = ToolCall.make({ ...input.request, params: envelope.arguments })
     // Decode business arguments before admission, without running business effects.
     const invalidResult = yield* input.validate(call)
+
     if (invalidResult !== undefined) return invalidResult
+
     if (envelope.execution === 'foreground') return yield* input.execute(call)
+
     const receipt = yield* input.host.accept({
       call,
       request: input.request,
       context: input.context
     })
+
     const acceptance = yield* Schema.decodeUnknownEffect(BackgroundToolAccepted)(receipt).pipe(
       Effect.mapError(
         () =>
@@ -165,5 +207,6 @@ export const executeBackgroundTool = <Context>(input: {
           })
       )
     )
+
     return makeBackgroundToolAcceptedResult({ toolCallId: call.id, acceptance })
   })

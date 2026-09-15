@@ -1,4 +1,5 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Match, Predicate } from 'effect'
+import type * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -22,6 +23,7 @@ import {
 import type { AgentToolContext } from './tool-context.ts'
 
 const telegramToolName = 'telegram_send_message'
+
 const telegramCredentialRef = 'app:telegram_bot_token'
 
 export type TelegramToolConfig = {
@@ -29,8 +31,7 @@ export type TelegramToolConfig = {
   readonly chatId: string
 }
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const schemaErrorToMessage = (error: Schema.SchemaError) => String(error)
 
 const makeToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({ tool: telegramToolName, message, cause })
@@ -42,8 +43,9 @@ const providerFailureContent = (error: {
   readonly underlying?: unknown
 }) => {
   const status = error.status === undefined ? '' : ` (HTTP ${error.status})`
+
   const underlying =
-    typeof error.underlying === 'string' && error.underlying.length > 0
+    Predicate.isString(error.underlying) && error.underlying.length > 0
       ? `: ${error.underlying}`
       : ''
 
@@ -81,6 +83,7 @@ const makeConnectorHttpClientLayer = Layer.effect(
         Effect.gen(function* () {
           const httpRequest = makeConnectorHttpRequest(request)
           const response = yield* http.execute(httpRequest)
+
           const body = yield* response.text.pipe(
             Effect.mapError(
               error =>
@@ -122,7 +125,6 @@ const makeCredentialResolverLayer = (config: TelegramToolConfig) =>
         request.binding.credentialRef === telegramCredentialRef
           ? Effect.succeed(
               ApiKeyCredential.make({
-                _tag: 'ApiKeyCredential',
                 key: config.botToken
               })
             )
@@ -170,7 +172,7 @@ export const makeAppTelegramToolModule = (
         isEnabled: context =>
           Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
         invalidParamsMessage: error =>
-          `Invalid Telegram message arguments: ${unknownToMessage(error)}`,
+          `Invalid Telegram message arguments: ${schemaErrorToMessage(error)}`,
         execute: ({ call, params }) =>
           TelegramConnector.invoke({
             integration,
@@ -178,27 +180,28 @@ export const makeAppTelegramToolModule = (
             input: params
           }).pipe(
             Effect.provide(layer),
-            Effect.map(result => {
-              switch (result._tag) {
-                case 'Success':
-                  return ToolResult.make({
+            Effect.map(result =>
+              Match.value(result).pipe(
+                Match.tag('Success', success =>
+                  ToolResult.make({
                     toolCallId: call.id,
                     content: 'Sent Telegram message.',
-                    structuredContent: result.value
+                    structuredContent: success.value
                   })
-                case 'Failure':
-                  return ToolResult.make({
+                ),
+                Match.tag('Failure', failure =>
+                  ToolResult.make({
                     toolCallId: call.id,
-                    content: providerFailureContent(result.error),
+                    content: providerFailureContent(failure.error),
                     isError: true,
-                    structuredContent: result.error
+                    structuredContent: failure.error
                   })
-              }
-            }),
-            Effect.mapError(error =>
-              error instanceof ToolError
-                ? error
-                : makeToolError(`Telegram send failed: ${unknownToMessage(error)}`, 'execution')
+                ),
+                Match.exhaustive
+              )
+            ),
+            Effect.mapError((error: ConnectorError) =>
+              makeToolError(`Telegram send failed: ${error.message}`, 'execution')
             )
           )
       })

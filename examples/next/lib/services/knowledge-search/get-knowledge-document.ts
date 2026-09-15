@@ -1,24 +1,16 @@
 import { and, eq } from 'drizzle-orm'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import {
-  AppKnowledgeDocumentNotFoundError,
-  AppSearchIndexStoreError,
-  isAppKnowledgeDocumentNotFoundError
-} from './errors'
-import type { AppKnowledgeDocumentRecord } from './document-records'
+import { AppKnowledgeDocumentNotFoundError, AppSearchIndexStoreError } from './errors'
+import { decodeAppKnowledgeDocumentRecord } from './document-records'
 
-const mapStoreError = (error: unknown) => {
-  if (isAppKnowledgeDocumentNotFoundError(error)) {
-    return error
-  }
-
-  return new AppSearchIndexStoreError({
+const sqlStoreError = (error: EffectDrizzleQueryError) =>
+  new AppSearchIndexStoreError({
     message: 'Could not get knowledge search document',
     cause: error
   })
-}
 
 export const getKnowledgeDocument = (input: {
   readonly userId: string
@@ -26,6 +18,7 @@ export const getKnowledgeDocument = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [row] = yield* db
       .select({ document: schema.knowledgeDocument, storageRecord: schema.storageObject })
       .from(schema.knowledgeDocument)
@@ -49,5 +42,8 @@ export const getKnowledgeDocument = (input: {
       )
     }
 
-    return row satisfies AppKnowledgeDocumentRecord
-  }).pipe(Effect.withSpan('knowledge_search.document.get'), Effect.mapError(mapStoreError))
+    return yield* decodeAppKnowledgeDocumentRecord(row)
+  }).pipe(
+    Effect.withSpan('knowledge_search.document.get'),
+    Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
+  )

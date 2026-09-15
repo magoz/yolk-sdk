@@ -17,7 +17,7 @@ const bridgeSecretHeader = 'x-yolk-cloudflare-secret'
 
 const handler = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest
-  const secret = yield* Config.redacted('YOLK_CLOUDFLARE_BRIDGE_SECRET')
+  const secret = yield* Config.Redacted('YOLK_CLOUDFLARE_BRIDGE_SECRET')
   const provided = request.headers[bridgeSecretHeader]
 
   if (provided !== Redacted.value(secret)) {
@@ -26,12 +26,14 @@ const handler = Effect.gen(function* () {
 
   const client = yield* HttpClient.HttpClient
   const body = yield* request.text
+
   const response = yield* client.execute(
     HttpClientRequest.post(openAiCodexResponsesUrl).pipe(
       HttpClientRequest.setHeaders(forwardedHeaders(request.headers)),
       HttpClientRequest.bodyText(body, request.headers['content-type'] ?? 'application/json')
     )
   )
+
   const responseBody = yield* response.stream.pipe(Stream.toReadableStreamEffect())
 
   return HttpServerResponse.raw(responseBody, {

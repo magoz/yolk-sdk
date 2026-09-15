@@ -5,15 +5,16 @@ import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
 import YolkAgent from './yolk-agent.ts'
 
 const connectPath = '/connect/'
+
 const bootstrapPath = '/bootstrap/'
 
-export class Api extends Cloudflare.Worker<Api>()('Api', {
-  name: 'yolkagentworker-api-dev-magoz-acgmzjtxyqsevrst',
-  main: './src/api-runtime.ts',
-  observability: { enabled: true }
-}) {}
-
-export const ApiLive = Api.make(
+export class Api extends Cloudflare.Worker<Api>()(
+  'Api',
+  {
+    name: 'yolkagentworker-api-dev-magoz-acgmzjtxyqsevrst',
+    main: './src/api-runtime.ts',
+    observability: { enabled: true }
+  },
   Effect.gen(function* () {
     const agents = yield* YolkAgent
 
@@ -49,6 +50,6 @@ export const ApiLive = Api.make(
       })
     }
   })
-)
+) {}
 
-export default ApiLive
+export default Api

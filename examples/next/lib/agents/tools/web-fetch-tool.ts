@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import type { HttpClientError } from 'effect/unstable/http/HttpClientError'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
 import {
@@ -15,12 +16,17 @@ import {
 import type { AgentToolContext } from './tool-context.ts'
 
 const webFetchToolName = 'web_fetch'
+
 const maxResponseSizeBytes = 5 * 1024 * 1024
+
 const defaultTimeoutSeconds = 30
+
 const maxTimeoutSeconds = 120
+
 const maxRedirects = 5
 
 const WebFetchFormat = Schema.Literals(['markdown', 'text', 'html'])
+
 const WebFetchParams = Schema.Struct({
   url: Schema.String.pipe(
     Schema.annotate({ description: 'Fully-qualified public http(s) URL to fetch.' })
@@ -34,7 +40,9 @@ const WebFetchParams = Schema.Struct({
 })
 
 type WebFetchFormat = typeof WebFetchFormat.Type
+
 type WebFetchParams = typeof WebFetchParams.Type
+
 type WebFetchToolError = ToolError | ModelVisibleToolError
 
 export type WebFetchHttpResponse = {
@@ -57,8 +65,7 @@ const webFetchToolDescription = [
   'This tool does not search the web, click links, run page JavaScript, use cookies, or access logged-in pages.'
 ].join(' ')
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const schemaErrorToMessage = (error: Schema.SchemaError) => String(error)
 
 const makeModelVisibleError = (message: string, reason: ModelVisibleToolErrorReason) =>
   modelVisibleToolError({
@@ -66,13 +73,6 @@ const makeModelVisibleError = (message: string, reason: ModelVisibleToolErrorRea
     message,
     reason
   })
-
-const decodeWebFetchParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(WebFetchParams)(params).pipe(
-    Effect.mapError(error =>
-      makeModelVisibleError(`Invalid web fetch arguments: ${unknownToMessage(error)}`, 'validation')
-    )
-  )
 
 const normalizeFormat = (format: WebFetchFormat | undefined): WebFetchFormat => format ?? 'markdown'
 
@@ -96,9 +96,11 @@ const parsePublicHttpUrl = (rawUrl: string) => {
   }
 
   const url = new URL(trimmed)
+
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return Effect.fail(makeModelVisibleError('URL must use http or https', 'validation'))
   }
+
   if (url.username.length > 0 || url.password.length > 0) {
     return Effect.fail(makeModelVisibleError('URL credentials are not allowed', 'validation'))
   }
@@ -125,6 +127,7 @@ export const parseIpv4Parts = (address: string) => {
 
 export const isBlockedIpv4 = (address: string) => {
   const parts = parseIpv4Parts(address)
+
   if (parts.length !== 4) {
     return false
   }
@@ -178,6 +181,7 @@ export const isBlockedAddress = (address: string) =>
 
 export const ensurePublicUrlWithoutDns = (url: URL) => {
   const hostname = normalizeHostname(url.hostname)
+
   if (hostname.length === 0 || isLocalHostname(hostname)) {
     return Effect.fail(makeModelVisibleError('URL host is not public', 'permission'))
   }
@@ -212,12 +216,14 @@ const manualRedirectRequestInit: RequestInit = { redirect: 'manual' }
 export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.get(url.toString()).pipe(
       HttpClientRequest.setHeaders(requestHeaders)
     )
+
     const response = yield* http.execute(request).pipe(
-      Effect.mapError(error =>
-        makeModelVisibleError(`Request failed: ${unknownToMessage(error)}`, 'unavailable')
+      Effect.mapError((error: HttpClientError) =>
+        makeModelVisibleError(`Request failed: ${error.message}`, 'unavailable')
       ),
       Effect.timeoutOrElse({
         duration: timeoutMs,
@@ -229,11 +235,8 @@ export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
       status: response.status,
       headers: response.headers,
       body: response.arrayBuffer.pipe(
-        Effect.mapError(error =>
-          makeModelVisibleError(
-            `Could not read response body: ${unknownToMessage(error)}`,
-            'unavailable'
-          )
+        Effect.mapError((error: HttpClientError) =>
+          makeModelVisibleError(`Could not read response body: ${error.message}`, 'unavailable')
         )
       )
     }
@@ -277,6 +280,7 @@ const fetchWithRedirects = (
     }
 
     const location = headerValue(response.headers, 'location')
+
     if (location === undefined || location.length === 0) {
       return yield* Effect.fail(
         makeModelVisibleError(`Redirect ${response.status} missing Location header`, 'unavailable')
@@ -295,6 +299,7 @@ const ensureSuccessfulStatus = (status: number) =>
 
 const ensureContentLength = (headers: Readonly<Record<string, string | undefined>>) => {
   const rawContentLength = headerValue(headers, 'content-length')
+
   if (rawContentLength === undefined) {
     return Effect.void
   }
@@ -334,11 +339,17 @@ const normalizeWhitespace = (input: string) =>
 const decodeHtmlEntities = (input: string) =>
   input.replace(/&(#\d+|#x[0-9a-f]+|amp|lt|gt|quot|apos|nbsp);/gi, (entity, value) => {
     const normalized = value.toLowerCase()
+
     if (normalized === 'amp') return '&'
+
     if (normalized === 'lt') return '<'
+
     if (normalized === 'gt') return '>'
+
     if (normalized === 'quot') return '"'
+
     if (normalized === 'apos') return "'"
+
     if (normalized === 'nbsp') return ' '
 
     const codePoint = normalized.startsWith('#x')
@@ -383,6 +394,7 @@ const htmlToMarkdown = (html: string) =>
         )
         .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href, text) => {
           const label = inlineMarkdown(text)
+
           return label.length > 0 ? `${label} (${href})` : href
         })
         .replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_match, text) => `\n- ${inlineMarkdown(text)}`)
@@ -430,17 +442,20 @@ export const fetchWebPage = (params: WebFetchParams, deps: WebFetchToolDependenc
     const url = yield* parsePublicHttpUrl(params.url)
     const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
     const format = normalizeFormat(params.format)
+
     const { url: finalUrl, response } = yield* fetchWithRedirects(
       deps,
       url,
       timeoutMs,
       maxRedirects
     )
+
     yield* ensureSuccessfulStatus(response.status)
     yield* ensureContentLength(response.headers)
 
     const contentType = headerValue(response.headers, 'content-type')
     const mime = contentTypeMime(contentType)
+
     if (!isTextLikeMime(mime)) {
       return yield* Effect.fail(
         makeModelVisibleError(`Unsupported content type: ${mime}`, 'unavailable')
@@ -473,7 +488,15 @@ export const executeWebFetchTool = (call: ToolCall, deps: WebFetchToolDependenci
   }
 
   return Effect.gen(function* () {
-    const params = yield* decodeWebFetchParams(call.params)
+    const params = yield* Schema.decodeUnknownEffect(WebFetchParams)(call.params).pipe(
+      Effect.mapError(error =>
+        makeModelVisibleError(
+          `Invalid web fetch arguments: ${schemaErrorToMessage(error)}`,
+          'validation'
+        )
+      )
+    )
+
     const content = yield* fetchWebPage(params, deps)
 
     return ToolResult.make({ toolCallId: call.id, content })
@@ -493,7 +516,7 @@ export const makeWebFetchToolRegistration = (
     parameters: WebFetchParams,
     access: 'read',
     isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-    invalidParamsMessage: error => `Invalid web fetch arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error => `Invalid web fetch arguments: ${schemaErrorToMessage(error)}`,
     execute: ({ call, params }) =>
       fetchWebPage(params, deps).pipe(
         Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))
@@ -506,3 +529,10 @@ export const makeWebFetchToolModule = (
   id: 'browser',
   tools: [makeWebFetchToolRegistration(deps)]
 })
+
+export const workerWebFetchToolDependencies: WebFetchToolDependencies = {
+  ensurePublicUrl: ensurePublicUrlWithoutDns,
+  request: requestWithHttpClient
+}
+
+export const webFetchWorkerToolModule = makeWebFetchToolModule(workerWebFetchToolDependencies)

@@ -2,7 +2,7 @@
 
 This document describes TypeScript configuration and coding conventions for this project.
 
-## Code Style (Prettier)
+## Code Style (Oxfmt)
 
 - **No semicolons** (`semi: false`)
 - **No trailing commas** (`trailingComma: "none"`)
@@ -99,11 +99,11 @@ entrypoints.
 
 ---
 
-## ESLint Disable Comments
+## Lint Disable Comments
 
 ### Always Require Justification
 
-When you must disable an ESLint rule, **always include a comment explaining WHY**. Never disable `no-explicit-any` or `consistent-type-assertions`; use `unknown`, Schema, generics, or a typed wrapper.
+When you must disable a lint rule, **always include a comment explaining WHY**. Never disable `no-explicit-any` or `consistent-type-assertions`; use `unknown`, Schema, generics, or a typed wrapper. Oxlint honors legacy `eslint-disable` namespaces (`@typescript-eslint/*`, `@next/next/*`, `react-hooks/*`) as well as `oxlint-disable`.
 
 ```typescript
 // WRONG - no explanation, disables banned rule
@@ -115,11 +115,13 @@ const data: unknown = externalLib.getData()
 const parsedEffect = Schema.decodeUnknownEffect(ExternalData)(data)
 ```
 
+`unknown` and `object` at decode, JSON-walk, and opaque-reject contracts are required honesty, not slop. Do not "fix" lint with `type X = unknown` aliases, casts, or tagged constructors on independent/negative wire. Known-value widening, `any`, and chained assertions stay banned, including in tests.
+
 ### Valid Reasons for Disabling Rules
 
-| Rule                                | Valid Reason                                      |
-| ----------------------------------- | ------------------------------------------------- |
-| `@typescript-eslint/no-unused-vars` | Destructuring to omit properties (use `_` prefix) |
+| Rule                                                   | Valid Reason                                      |
+| ------------------------------------------------------ | ------------------------------------------------- |
+| `no-unused-vars` / `@typescript-eslint/no-unused-vars` | Destructuring to omit properties (use `_` prefix) |
 
 ### Invalid Reasons (Never Do This)
 

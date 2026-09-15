@@ -1,4 +1,5 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Cause, Effect, Exit, Layer, Predicate, Result, Stream } from 'effect'
+import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -32,8 +33,10 @@ const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) 
     maxTokens: 123
   }).pipe(Layer.provide(httpClientLayer))
 
+const isJson = Schema.is(Schema.Json)
+
 const makeHttpClientLayer = (
-  responseBody: unknown,
+  responseBody: Schema.Json,
   requests: Array<CapturedRequest>,
   status = 200
 ): Layer.Layer<HttpClient.HttpClient> =>
@@ -42,6 +45,10 @@ const makeHttpClientLayer = (
     HttpClient.make(request =>
       Effect.sync(() => {
         requests.push({ request })
+
+        if (!isJson(responseBody)) {
+          throw new TypeError('JSON fixture requires a finite JSON value')
+        }
 
         return HttpClientResponse.fromWeb(
           request,
@@ -66,9 +73,60 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
 }
 
 describe('AnthropicClaudeProviderLayer', () => {
+  it.effect('rejects non-finite JSON fixtures when the fake request executes', () =>
+    Effect.gen(function* () {
+      for (const body of [Infinity, { n: Infinity }]) {
+        const requests: Array<CapturedRequest> = []
+        const layer = makeHttpClientLayer(body, requests)
+        expect(requests).toHaveLength(0)
+
+        const exit = yield* Effect.gen(function* () {
+          const client = yield* HttpClient.HttpClient
+
+          return yield* client.get('https://fixture.invalid')
+        }).pipe(Effect.provide(layer), Effect.exit)
+
+        if (Exit.isSuccess(exit)) {
+          expect.fail('Expected finite JSON fixture rejection')
+        }
+
+        expect(Cause.hasFails(exit.cause)).toBe(false)
+        expect(Cause.hasInterrupts(exit.cause)).toBe(false)
+        expect(exit.cause.reasons).toHaveLength(1)
+        expect(Cause.findDefect(exit.cause)).toEqual(
+          Result.succeed(new TypeError('JSON fixture requires a finite JSON value'))
+        )
+        expect(requests).toHaveLength(1)
+      }
+    })
+  )
+
+  it.effect('serializes fixture values at request time with raw own keys intact', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const body = { ['__proto__']: { owned: true }, constructor: null, enabled: false, count: 0 }
+      const layer = makeHttpClientLayer(body, requests, 418)
+      body.count = 2
+      expect(requests).toHaveLength(0)
+
+      const response = yield* Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+
+        return yield* client.get('https://fixture.invalid')
+      }).pipe(Effect.provide(layer))
+
+      const text = yield* response.text
+      expect(text).toBe('{"__proto__":{"owned":true},"constructor":null,"enabled":false,"count":2}')
+      expect(response.status).toBe(418)
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.request).toBe(response.request)
+    })
+  )
+
   it.effect('maps text and tools to Anthropic messages', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -82,6 +140,7 @@ describe('AnthropicClaudeProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -121,6 +180,7 @@ describe('AnthropicClaudeProviderLayer', () => {
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
       const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -133,6 +193,7 @@ describe('AnthropicClaudeProviderLayer', () => {
 
       yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [
@@ -196,6 +257,7 @@ describe('AnthropicClaudeProviderLayer', () => {
   it.effect('maps Anthropic thinking, tool use, and cache usage events', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -217,6 +279,7 @@ describe('AnthropicClaudeProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'weather?' })],
@@ -251,12 +314,14 @@ describe('AnthropicClaudeProviderLayer', () => {
   it.effect('maps non-OK Anthropic responses to retryable LLM errors', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer({ error: { message: 'too many requests' } }, requests, 429)
       )
 
       const error = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -267,8 +332,8 @@ describe('AnthropicClaudeProviderLayer', () => {
           .pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer), Effect.flip)
 
+      expect(Predicate.isTagged(error, 'LLMError')).toBe(true)
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'rate_limit',
         retryable: true
       })

@@ -47,10 +47,12 @@ const makeHandle = (input: {
   name: input.name,
   writeFiles: files => {
     input.files.push(...files)
+
     return Effect.void
   },
   runDetachedCommand: command => {
     input.commands.push(command)
+
     return Effect.succeed(
       detachedCommand({ id: 'cmd_1', exitCode: input.background === true ? null : 0 })
     )
@@ -72,6 +74,7 @@ describe('vercel sandbox layer', () => {
       const deleted: Array<string> = []
       const name = makeVercelSandboxName('session_1')
       const handle = makeHandle({ name, files, commands, deleted })
+
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
@@ -79,11 +82,14 @@ describe('vercel sandbox layer', () => {
           create: () => Effect.succeed(handle)
         })
       )
+
       const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId: 'session_1' }).pipe(
         Layer.provide(Layer.mergeAll(clientLayer, makeInMemorySandboxStateStoreLayer()))
       )
+
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
+
         return yield* sandbox.run({ command: 'pwd', cwd: 'packages/sandbox' })
       }).pipe(Effect.provide(layer))
 
@@ -105,21 +111,26 @@ describe('vercel sandbox layer', () => {
       const name = makeVercelSandboxName(sandboxSessionId)
       const handle = makeHandle({ name, files, commands, deleted })
       let createCount = 0
+
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
           get: () => Effect.succeed(handle),
           create: () => {
             createCount = createCount + 1
+
             return Effect.succeed(handle)
           }
         })
       )
+
       const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId }).pipe(
         Layer.provide(Layer.mergeAll(clientLayer, makeInMemorySandboxStateStoreLayer()))
       )
+
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
+
         return yield* sandbox.run({ command: 'pwd' })
       }).pipe(Effect.provide(layer))
 
@@ -137,6 +148,7 @@ describe('vercel sandbox layer', () => {
       const sandboxSessionId = 'session_expired'
       const name = makeVercelSandboxName(sandboxSessionId)
       const handle = makeHandle({ name, files, commands, deleted })
+
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
@@ -144,6 +156,7 @@ describe('vercel sandbox layer', () => {
           create: () => Effect.succeed(handle)
         })
       )
+
       const expiredState = VercelSandboxState.make({
         name,
         createdAtMs: 0,
@@ -151,14 +164,18 @@ describe('vercel sandbox layer', () => {
         expiresAtMs: 0,
         maxExpiresAtMs: 0
       })
+
       const stateLayer = makeInMemorySandboxStateStoreLayer([
         { sandboxSessionId, state: expiredState }
       ])
+
       const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId }).pipe(
         Layer.provide(Layer.mergeAll(clientLayer, stateLayer))
       )
+
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
+
         return yield* sandbox.run({ command: 'pwd' })
       }).pipe(Effect.provide(layer))
 
@@ -176,16 +193,19 @@ describe('vercel sandbox layer', () => {
       const name = makeVercelSandboxName(sandboxSessionId)
       const handle = makeHandle({ name, files, commands, deleted })
       let createCount = 0
+
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
           get: () => Effect.succeed(handle),
           create: () => {
             createCount += 1
+
             return Effect.succeed(handle)
           }
         })
       )
+
       const expiredState = VercelSandboxState.make({
         name,
         createdAtMs: 0,
@@ -193,15 +213,19 @@ describe('vercel sandbox layer', () => {
         expiresAtMs: 0,
         maxExpiresAtMs: Number.MAX_SAFE_INTEGER
       })
+
       const stateLayer = makeInMemorySandboxStateStoreLayer([
         { sandboxSessionId, state: expiredState }
       ])
+
       const layer = makeVercelSandboxLayerWithClient({
         sandboxSessionId,
         lifecycle: PersistentSandboxLifecycle.make({ idleTtlMs: 30 * 60_000 })
       }).pipe(Layer.provide(Layer.mergeAll(clientLayer, stateLayer)))
+
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
+
         return yield* sandbox.run({ command: 'pwd' })
       }).pipe(Effect.provide(layer))
 
@@ -220,16 +244,19 @@ describe('vercel sandbox layer', () => {
       const name = makeVercelSandboxName(sandboxSessionId)
       const handle = makeHandle({ name, files, commands, deleted })
       let createCount = 0
+
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
           get: () => Effect.succeed(null),
           create: () => {
             createCount += 1
+
             return Effect.succeed(handle)
           }
         })
       )
+
       const stateLayer = makeInMemorySandboxStateStoreLayer([
         {
           sandboxSessionId,
@@ -242,12 +269,15 @@ describe('vercel sandbox layer', () => {
           })
         }
       ])
+
       const layer = makeVercelSandboxLayerWithClient({
         sandboxSessionId,
         lifecycle: PersistentSandboxLifecycle.make({ idleTtlMs: 30 * 60_000 })
       }).pipe(Layer.provide(Layer.mergeAll(clientLayer, stateLayer)))
+
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
+
         return yield* sandbox.run({ command: 'pwd' })
       }).pipe(Effect.provide(layer))
 
@@ -265,6 +295,7 @@ describe('vercel sandbox layer', () => {
       const sandboxSessionId = 'session_background'
       const name = makeVercelSandboxName(sandboxSessionId)
       const handle = makeHandle({ name, files, commands, deleted, background: true })
+
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
@@ -272,13 +303,17 @@ describe('vercel sandbox layer', () => {
           create: () => Effect.succeed(handle)
         })
       )
+
       const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId }).pipe(
         Layer.provide(Layer.mergeAll(clientLayer, makeInMemorySandboxStateStoreLayer()))
       )
+
       const fiber = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
+
         return yield* sandbox.run({ command: 'pnpm dev', background: true })
       }).pipe(Effect.provide(layer), Effect.forkChild)
+
       yield* TestClock.adjust(Duration.millis(2_100))
       const result = yield* Fiber.join(fiber)
 

@@ -51,15 +51,18 @@ const handler = Effect.gen(function* () {
   yield* getSession()
 
   const { audio, mimeType } = yield* readAudioBody
-  const apiKey = yield* Config.redacted('OPENAI_API_KEY')
+  const apiKey = yield* Config.Redacted('OPENAI_API_KEY')
+
   const transcriberLayer = makeOpenAiTranscriberLayer({ apiKey }).pipe(
     Layer.provide(FetchHttpClient.layer)
   )
+
   const result = yield* Effect.gen(function* () {
     const transcriber = yield* VoiceTranscriber
 
     return yield* transcriber.transcribe({ audio, mimeType, language: 'en' })
   }).pipe(Effect.provide(transcriberLayer))
+
   const encoded = yield* encodeResult(result)
 
   return yield* HttpServerResponse.json(encoded, {

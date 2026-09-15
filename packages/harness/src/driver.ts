@@ -1,7 +1,10 @@
-import { Cause, Context, Data, Effect, Exit, Layer, Semaphore } from 'effect'
-import { makeCoordinator, type Promotable } from './coordinator.ts'
+import { Context, Data, Effect, Exit, Layer, Predicate, Semaphore } from 'effect'
+import { StopDecision as stopDecision } from './outcome-constructors-internal.ts'
+import { RunCoordinator, type InterruptReason, type Promotable } from './coordinator.ts'
 import {
+  DrainBegin,
   Inbox,
+  RecoveryAttempt,
   type HitlAdmission,
   type HitlDecision,
   type InboxItem,
@@ -10,7 +13,7 @@ import {
 } from './inbox.ts'
 import { RunStore } from './store.ts'
 
-export type InterruptReason = 'user' | 'shutdown'
+export type { InterruptReason } from './coordinator.ts'
 
 export const defaultMaxResumeAttempts = 10
 
@@ -47,7 +50,9 @@ export type StopDecision =
   | { readonly _tag: 'ParkCleared' }
   | { readonly _tag: 'Idle' }
 
-export type DriverShape = {
+export const StopDecision = stopDecision
+
+export type DriverApi = {
   readonly active: Effect.Effect<ReadonlySet<string>>
   readonly isActive: (runId: string) => Effect.Effect<boolean>
   readonly run: (runId: string) => Effect.Effect<void>
@@ -68,7 +73,179 @@ export type DriverShape = {
   readonly stop: (runId: string) => Effect.Effect<StopDecision>
 }
 
-export class Driver extends Context.Service<Driver, DriverShape>()('@yolk-sdk/harness/Driver') {}
+export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harness/Driver') {
+  static layer(): Layer.Layer<Driver, never, RunStore | Inbox | RunCoordinator>
+  static layer(options?: {
+    readonly maxResumeAttempts?: undefined
+  }): Layer.Layer<Driver, never, RunStore | Inbox | RunCoordinator>
+  static layer(
+    options?: Pick<DriverLayerOptions, 'maxResumeAttempts'>
+  ): Layer.Layer<Driver, InvalidMaxResumeAttempts, RunStore | Inbox | RunCoordinator>
+  static layer(options?: Pick<DriverLayerOptions, 'maxResumeAttempts'>) {
+    return Layer.effect(
+      Driver,
+      Effect.gen(function* () {
+        const maxResumeAttempts = options?.maxResumeAttempts ?? defaultMaxResumeAttempts
+
+        if (!isValidMaxResumeAttempts(maxResumeAttempts)) {
+          return yield* Effect.fail(new InvalidMaxResumeAttempts({ maxResumeAttempts }))
+        }
+
+        const store = yield* RunStore
+        const inbox = yield* Inbox
+        const sweep = yield* Semaphore.make(1)
+        const coordinator = yield* RunCoordinator
+
+        const resumeSuspended = sweep.withPermits(1)(
+          Effect.gen(function* () {
+            const claimed = yield* store.claimed
+            const resumed: Array<string> = []
+            const exhausted: Array<string> = []
+
+            for (const runId of claimed) {
+              const admission = yield* inbox.admitRecovery(
+                runId,
+                Effect.gen(function* () {
+                  if (yield* coordinator.isActive(runId)) return RecoveryAttempt.Skip()
+
+                  if (!(yield* store.isClaimed(runId))) return RecoveryAttempt.Skip()
+                  const count = yield* store.resumeCount(runId)
+
+                  if (count >= maxResumeAttempts) {
+                    yield* store.release(runId)
+
+                    return RecoveryAttempt.Exhausted()
+                  }
+
+                  yield* store.incrementResumeCount(runId)
+
+                  return RecoveryAttempt.Resume()
+                }),
+                coordinator.wake(runId, 'input')
+              )
+
+              if (Predicate.isTagged(admission, 'Resumed')) resumed.push(runId)
+              else if (Predicate.isTagged(admission, 'Exhausted')) exhausted.push(runId)
+            }
+
+            return { resumed, exhausted }
+          })
+        )
+
+        return Driver.of({
+          active: coordinator.active,
+          isActive: coordinator.isActive,
+          run: runId => {
+            const continueRun = (): Effect.Effect<void> =>
+              inbox.startIfUnblocked(runId, coordinator.captureRun(runId)).pipe(
+                Effect.flatMap(ticket => {
+                  if (ticket === undefined) return Effect.void
+
+                  if (Predicate.isTagged(ticket, 'Stopping')) {
+                    return ticket.awaitSettlement.pipe(Effect.andThen(Effect.suspend(continueRun)))
+                  }
+
+                  return ticket.join
+                })
+              )
+
+            return continueRun()
+          },
+          wake: (runId, scope = 'input') =>
+            inbox.wakeIfUnblocked(runId, scope, coordinator.wake(runId, scope)).pipe(Effect.asVoid),
+          interrupt: (runId, interruptOptions) =>
+            coordinator.interrupt(runId, interruptOptions?.reason ?? 'user', interruptOptions),
+          awaitIdle: coordinator.awaitIdle,
+          resumeSuspended,
+          admit: item =>
+            inbox.enqueueAndWake(
+              item,
+              coordinator.wake(item.runId, item.delivery === 'steer' ? 'steer' : 'input')
+            ),
+          pause: (runId, requestIds, drainToken) => inbox.park(runId, requestIds, drainToken),
+          resumeHitl: (runId, admission) =>
+            inbox.acceptHitl(runId, admission, coordinator.wake(runId, 'input')),
+          stop: runId =>
+            inbox
+              .invalidate(
+                runId,
+                coordinator
+                  .terminalStop(runId, 'user')
+                  .pipe(
+                    Effect.map(
+                      receipt =>
+                        Predicate.isTagged(receipt, 'Interrupted') ||
+                        Predicate.isTagged(receipt, 'LiveStopping')
+                    )
+                  ),
+                store
+                  .isClaimed(runId)
+                  .pipe(Effect.flatMap(claimed => (claimed ? store.release(runId) : Effect.void)))
+              )
+              .pipe(
+                Effect.map(result => {
+                  if (result.interrupted) return StopDecision.Interrupted()
+
+                  if (result.hadPark) return StopDecision.ParkCleared()
+
+                  return StopDecision.Idle()
+                })
+              )
+        })
+      })
+    )
+  }
+
+  static coordinatedLayer(): Layer.Layer<Driver, never, RunStore | Inbox>
+  static coordinatedLayer(options?: {
+    readonly drain?: Drain
+    readonly maxResumeAttempts?: undefined
+  }): Layer.Layer<Driver, never, RunStore | Inbox>
+  static coordinatedLayer(
+    options?: DriverLayerOptions
+  ): Layer.Layer<Driver, InvalidMaxResumeAttempts, RunStore | Inbox>
+  static coordinatedLayer(options?: DriverLayerOptions) {
+    return Layer.unwrap(
+      Effect.gen(function* () {
+        const store = yield* RunStore
+        const inbox = yield* Inbox
+        // Keep compatibility option reads lazy and in drain/max order.
+        const hostDrain = options?.drain ?? ((_runId, _force, _scope, _context) => Effect.void)
+        const maxResumeAttempts = options?.maxResumeAttempts ?? defaultMaxResumeAttempts
+        const storeLayer = Layer.succeed(RunStore, store)
+        const inboxLayer = Layer.succeed(Inbox, inbox)
+
+        const coordinator = RunCoordinator.layer({
+          drain: (runId, force, scope) =>
+            inbox.beginDrain(runId, scope).pipe(
+              Effect.flatMap(begun => {
+                if (DrainBegin.$is('Skip')(begun)) return Effect.void
+
+                return Effect.suspend(() =>
+                  hostDrain(runId, force, scope, {
+                    drainToken: begun.drainToken,
+                    readyResponses: begun.readyResponses
+                  })
+                ).pipe(
+                  Effect.provideService(Inbox, inbox),
+                  Effect.provideService(RunStore, store),
+                  Effect.onExit(exit =>
+                    inbox.endDrain(runId, begun.drainToken, Exit.isSuccess(exit))
+                  )
+                )
+              })
+            )
+        }).pipe(Layer.provide(storeLayer))
+
+        return Driver.layer({ maxResumeAttempts }).pipe(
+          Layer.provide(coordinator),
+          Layer.provide(storeLayer),
+          Layer.provide(inboxLayer)
+        )
+      })
+    )
+  }
+}
 
 export const makeHarness = <DE, DR, SE, SR, IE, IR>(input: {
   readonly driver: Layer.Layer<Driver, DE, DR>
@@ -79,159 +256,6 @@ export const makeHarness = <DE, DR, SE, SR, IE, IR>(input: {
 
 export const admit = (item: InboxItem) => Effect.flatMap(Driver, driver => driver.admit(item))
 
-const makeValidatedDriverLayer = (
-  maxResumeAttempts: number,
-  hostDrain: Drain
-): Layer.Layer<Driver, never, RunStore | Inbox> =>
-  Layer.effect(
-    Driver,
-    Effect.gen(function* () {
-      const store = yield* RunStore
-      const inbox = yield* Inbox
-      const sweep = yield* Semaphore.make(1)
-      const acquired = new Set<string>()
-      const coordinator = yield* makeCoordinator<string, never, InterruptReason>({
-        drain: (runId, force, scope) =>
-          inbox.beginDrain(runId, scope).pipe(
-            Effect.flatMap(begun => {
-              if (begun._tag === 'Skip') return Effect.void
-              return Effect.suspend(() =>
-                hostDrain(runId, force, scope, {
-                  drainToken: begun.drainToken,
-                  readyResponses: begun.readyResponses
-                })
-              ).pipe(
-                Effect.provideService(Inbox, inbox),
-                Effect.provideService(RunStore, store),
-                Effect.onExit(exit => inbox.endDrain(runId, begun.drainToken, Exit.isSuccess(exit)))
-              )
-            })
-          ),
-        started: runId =>
-          store.claim(runId).pipe(
-            Effect.tap(() =>
-              Effect.sync(() => {
-                acquired.add(runId)
-              })
-            )
-          ),
-        settled: (runId, exit, reason) =>
-          Effect.suspend(() => {
-            const owned = acquired.delete(runId)
-            if (
-              owned &&
-              (reason === 'user' || (reason === undefined && !Exit.hasInterrupts(exit)))
-            ) {
-              return store.release(runId)
-            }
-            // Acquisition receipt guards automatic failed-start settlement only.
-            // Explicit user-terminal authority still releases a leftover claim
-            // after this owner has actually settled, matching Idle/Settling stop.
-            if (reason === 'user' && !owned) {
-              return store
-                .isClaimed(runId)
-                .pipe(Effect.flatMap(claimed => (claimed ? store.release(runId) : Effect.void)))
-            }
-            return Effect.void
-          }).pipe(
-            Effect.exit,
-            Effect.flatMap(settledExit => {
-              if (Exit.isSuccess(settledExit)) return Effect.void
-              return Effect.failCause(
-                Exit.isFailure(exit)
-                  ? Cause.combine(exit.cause, settledExit.cause)
-                  : settledExit.cause
-              )
-            })
-          )
-      })
-
-      const resumeSuspended = sweep.withPermits(1)(
-        Effect.gen(function* () {
-          const claimed = yield* store.claimed
-          const resumed: Array<string> = []
-          const exhausted: Array<string> = []
-
-          for (const runId of claimed) {
-            const admission = yield* inbox.admitRecovery(
-              runId,
-              Effect.gen(function* () {
-                if (yield* coordinator.isActive(runId)) return { _tag: 'Skip' } as const
-                if (!(yield* store.isClaimed(runId))) return { _tag: 'Skip' } as const
-                const count = yield* store.resumeCount(runId)
-                if (count >= maxResumeAttempts) {
-                  yield* store.release(runId)
-                  return { _tag: 'Exhausted' } as const
-                }
-                yield* store.incrementResumeCount(runId)
-                return { _tag: 'Resume' } as const
-              }),
-              coordinator.wake(runId, 'input')
-            )
-            if (admission._tag === 'Resumed') resumed.push(runId)
-            else if (admission._tag === 'Exhausted') exhausted.push(runId)
-          }
-
-          return { resumed, exhausted }
-        })
-      )
-
-      return Driver.of({
-        active: coordinator.active,
-        isActive: coordinator.isActive,
-        run: runId => {
-          const continueRun = (): Effect.Effect<void> =>
-            inbox.startIfUnblocked(runId, coordinator.captureRun(runId)).pipe(
-              Effect.flatMap(ticket => {
-                if (ticket === undefined) return Effect.void
-                if (ticket._tag === 'Stopping') {
-                  return ticket.awaitSettlement.pipe(Effect.andThen(Effect.suspend(continueRun)))
-                }
-                return ticket.join
-              })
-            )
-          return continueRun()
-        },
-        wake: (runId, scope = 'input') =>
-          inbox.wakeIfUnblocked(runId, scope, coordinator.wake(runId, scope)).pipe(Effect.asVoid),
-        interrupt: (runId, interruptOptions) =>
-          coordinator.interrupt(runId, interruptOptions?.reason ?? 'user', interruptOptions),
-        awaitIdle: coordinator.awaitIdle,
-        resumeSuspended,
-        admit: item =>
-          inbox.enqueueAndWake(
-            item,
-            coordinator.wake(item.runId, item.delivery === 'steer' ? 'steer' : 'input')
-          ),
-        pause: (runId, requestIds, drainToken) => inbox.park(runId, requestIds, drainToken),
-        resumeHitl: (runId, admission) =>
-          inbox.acceptHitl(runId, admission, coordinator.wake(runId, 'input')),
-        stop: runId =>
-          inbox
-            .invalidate(
-              runId,
-              coordinator
-                .terminalStop(runId, 'user')
-                .pipe(
-                  Effect.map(
-                    receipt => receipt._tag === 'Interrupted' || receipt._tag === 'LiveStopping'
-                  )
-                ),
-              store
-                .isClaimed(runId)
-                .pipe(Effect.flatMap(claimed => (claimed ? store.release(runId) : Effect.void)))
-            )
-            .pipe(
-              Effect.map(result => {
-                if (result.interrupted) return { _tag: 'Interrupted' } as const
-                if (result.hadPark) return { _tag: 'ParkCleared' } as const
-                return { _tag: 'Idle' } as const
-              })
-            )
-      })
-    })
-  )
-
 export function makeDriverLayer(): Layer.Layer<Driver, never, RunStore | Inbox>
 export function makeDriverLayer(options?: {
   readonly drain?: Drain
@@ -241,10 +265,5 @@ export function makeDriverLayer(
   options?: DriverLayerOptions
 ): Layer.Layer<Driver, InvalidMaxResumeAttempts, RunStore | Inbox>
 export function makeDriverLayer(options?: DriverLayerOptions) {
-  const hostDrain = options?.drain ?? ((_runId, _force, _scope, _context) => Effect.void)
-  const maxResumeAttempts = options?.maxResumeAttempts ?? defaultMaxResumeAttempts
-  if (!isValidMaxResumeAttempts(maxResumeAttempts)) {
-    return Layer.effect(Driver, Effect.fail(new InvalidMaxResumeAttempts({ maxResumeAttempts })))
-  }
-  return makeValidatedDriverLayer(maxResumeAttempts, hostDrain)
+  return options === undefined ? Driver.coordinatedLayer() : Driver.coordinatedLayer(options)
 }

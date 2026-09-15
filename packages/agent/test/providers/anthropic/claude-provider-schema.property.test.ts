@@ -1,4 +1,5 @@
-import { Effect, Schema } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Effect, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -6,14 +7,18 @@ import { EmptyToolParams, makeTool } from '@yolk-sdk/agent/tools'
 import { toAnthropicClaudeRequestBody } from '../../../src/providers/anthropic/claude-provider.ts'
 
 const defaultPropertyRuns = 50
+
 const propertyRunsEnv = process.env.PROPERTY_RUNS
+
 const parsedPropertyRuns =
   propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
+
 const propertyRuns =
   Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
     ? parsedPropertyRuns
     : defaultPropertyRuns
-const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
+
+const propertyOptions = { arbitrary: { runs: propertyRuns } }
 
 const schemaVariant = Schema.Literals([
   'emptyParams',
@@ -34,23 +39,23 @@ const schemaVariant = Schema.Literals([
   'rootUnion'
 ])
 
-const schemaVariantArbitrary = Schema.toArbitrary(schemaVariant)
+const schemaVariantArbitrary = Arbitrary.schema(schemaVariant)
 
-const isJsonObject = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && typeof input === 'object' && !Array.isArray(input)
+const isJsonObject = (input: Schema.Json): input is Schema.JsonObject =>
+  Predicate.isObjectOrArray(input) && !Array.isArray(input)
 
-const field = (input: unknown, key: string) =>
-  isJsonObject(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+const field = (input: Schema.Json | undefined, key: string): Schema.Json | undefined =>
+  input !== undefined && isJsonObject(input) && Object.hasOwn(input, key) ? input[key] : undefined
 
-const localDefinitionName = (ref: unknown) => {
-  if (typeof ref !== 'string') return undefined
+const localDefinitionName = (ref: Schema.Json | undefined) => {
+  if (!Predicate.isString(ref)) return undefined
 
   const prefix = '#/$defs/'
 
   return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined
 }
 
-const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
+const collectLocalRefs = (input: Schema.Json): ReadonlyArray<string> => {
   const ref = localDefinitionName(field(input, '$ref'))
   const current = ref === undefined ? [] : [ref]
 
@@ -65,12 +70,15 @@ const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
   return [...current, ...Object.values(input).flatMap(collectLocalRefs)]
 }
 
-const collectKeywordValues = (input: unknown, keyword: string): ReadonlyArray<unknown> => {
+const collectKeywordValues = (input: Schema.Json, keyword: string): ReadonlyArray<Schema.Json> => {
   if (Array.isArray(input)) return input.flatMap(value => collectKeywordValues(value, keyword))
+
   if (!isJsonObject(input)) return []
 
+  const owned = Object.hasOwn(input, keyword) ? field(input, keyword) : undefined
+
   return [
-    ...(Object.hasOwn(input, keyword) ? [field(input, keyword)] : []),
+    ...(owned === undefined ? [] : [owned]),
     ...Object.values(input).flatMap(value => collectKeywordValues(value, keyword))
   ]
 }
@@ -152,7 +160,7 @@ const schemaProbeTool = <
 const providerSafeTool = (variant: typeof schemaVariant.Type) =>
   schemaProbeTool(schemaParameters(variant))
 
-const assertProviderSafeParameters = (parameters: unknown) => {
+const assertProviderSafeParameters = (parameters: Schema.Json) => {
   expect(field(parameters, 'type')).toBe('object')
   expect(field(parameters, '$ref')).toBeUndefined()
   expect(field(parameters, 'anyOf')).toBeUndefined()
@@ -162,6 +170,7 @@ const assertProviderSafeParameters = (parameters: unknown) => {
   for (const keyword of ['anyOf', 'oneOf', 'allOf', 'prefixItems']) {
     expect(collectKeywordValues(parameters, keyword)).toEqual([])
   }
+
   for (const maxLength of collectKeywordValues(parameters, 'maxLength')) {
     expect(maxLength).toEqual(expect.any(Number))
     expect(Number.isInteger(maxLength)).toBe(true)
@@ -169,6 +178,7 @@ const assertProviderSafeParameters = (parameters: unknown) => {
   }
 
   const definitions = field(parameters, '$defs')
+
   for (const ref of collectLocalRefs(parameters)) {
     expect(field(definitions, ref)).toBeDefined()
   }
@@ -189,9 +199,15 @@ describe('Anthropic Claude provider schema properties', () => {
           },
           { maxTokens: 123 }
         )
-        const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
 
-        assertProviderSafeParameters(field(tool, 'input_schema'))
+        const tool = body.tools?.[0]
+        expect(tool).toBeDefined()
+
+        if (tool === undefined) {
+          expect.fail('Expected Anthropic request tool')
+        }
+
+        assertProviderSafeParameters(tool.input_schema)
       }),
     propertyOptions
   )

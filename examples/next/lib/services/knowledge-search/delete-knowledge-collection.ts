@@ -1,23 +1,15 @@
 import { and, eq } from 'drizzle-orm'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import {
-  AppKnowledgeCollectionNotFoundError,
-  AppSearchIndexStoreError,
-  isAppKnowledgeCollectionNotFoundError
-} from './errors'
+import { AppKnowledgeCollectionNotFoundError, AppSearchIndexStoreError } from './errors'
 
-const mapDeleteError = (error: unknown) => {
-  if (isAppKnowledgeCollectionNotFoundError(error)) {
-    return error
-  }
-
-  return new AppSearchIndexStoreError({
+const sqlStoreError = (error: EffectDrizzleQueryError) =>
+  new AppSearchIndexStoreError({
     message: 'Could not delete knowledge collection',
     cause: error
   })
-}
 
 export const deleteKnowledgeCollection = (input: {
   readonly userId: string
@@ -25,6 +17,7 @@ export const deleteKnowledgeCollection = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [deleted] = yield* db
       .delete(schema.knowledgeCollection)
       .where(
@@ -43,4 +36,7 @@ export const deleteKnowledgeCollection = (input: {
         })
       )
     }
-  }).pipe(Effect.withSpan('knowledge_search.set.delete'), Effect.mapError(mapDeleteError))
+  }).pipe(
+    Effect.withSpan('knowledge_search.set.delete'),
+    Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
+  )

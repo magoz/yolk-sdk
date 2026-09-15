@@ -5,14 +5,14 @@ packages:
   - 'cloudflare/*'
 catalog:
   '@effect/language-service': ^0.77.0
-  '@effect/opentelemetry': 4.0.0-beta.80
-  '@effect/platform-bun': 4.0.0-beta.80
-  '@effect/platform-node': 4.0.0-beta.80
-  '@effect/sql-pg': 4.0.0-beta.80
-  '@effect/vitest': 4.0.0-beta.80
-  effect: 4.0.0-beta.80
+  '@effect/opentelemetry': 4.0.0-rc.115
+  '@effect/platform-bun': 4.0.0-rc.115
+  '@effect/platform-node': 4.0.0-rc.115
+  '@effect/sql-pg': 4.0.0-rc.115
+  '@effect/vitest': 4.0.0-rc.115
+  effect: 4.0.0-rc.115
   typescript: ^5.9.3
-  vitest: ^4.0.17
+  vitest: ^5.0.1
 allowBuilds:
   '@mongodb-js/zstd': false
   '@nestjs/core': false
@@ -28,4 +28,19 @@ allowBuilds:
   unrs-resolver: true
   workerd: true
 overrides:
-  '@effect/platform-node-shared': 4.0.0-beta.80
+  '@effect/platform-node-shared': 4.0.0-rc.115
+  # beta.6 imports S3 commands absent from the older lockfile resolution.
+  '@effect-aws/client-s3>@aws-sdk/client-s3': 3.1132.0
+  # beta.5 corrects commons' Effect prerelease peer range upstream.
+  '@effect-aws/client-s3>@effect-aws/commons': 1.0.0-beta.5
+patchedDependencies:
+  '@alchemy.run/cloudflare-runtime@2.0.0-beta.77': patches/@alchemy.run__cloudflare-runtime@2.0.0-beta.77.patch
+  '@distilled.cloud/aws@1.0.0-rc.9': patches/@distilled.cloud__aws@1.0.0-rc.9.patch
+  '@distilled.cloud/axiom@1.0.0-rc.9': patches/@distilled.cloud__axiom@1.0.0-rc.9.patch
+  '@distilled.cloud/cloudflare@1.0.0-rc.9': patches/@distilled.cloud__cloudflare@1.0.0-rc.9.patch
+  '@distilled.cloud/core@1.0.0-rc.9': patches/@distilled.cloud__core@1.0.0-rc.9.patch
+  '@distilled.cloud/fly-io@1.0.0-rc.9': patches/@distilled.cloud__fly-io@1.0.0-rc.9.patch
+  '@distilled.cloud/hetzner@1.0.0-rc.9': patches/@distilled.cloud__hetzner@1.0.0-rc.9.patch
+  '@distilled.cloud/planetscale@1.0.0-rc.9': patches/@distilled.cloud__planetscale@1.0.0-rc.9.patch
+  '@distilled.cloud/railway@1.0.0-rc.9': patches/@distilled.cloud__railway@1.0.0-rc.9.patch
+  alchemy@2.0.0-beta.77: patches/alchemy@2.0.0-beta.77.patch

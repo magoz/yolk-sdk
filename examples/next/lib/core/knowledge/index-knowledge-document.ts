@@ -1,16 +1,18 @@
 import { Array as Arr, Effect } from 'effect'
 import { eq, sql } from 'drizzle-orm'
 import { KnowledgeChunker } from '@yolk-sdk/knowledge/chunking'
+import type { KnowledgeMetadata } from '@yolk-sdk/knowledge/documents'
 import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
+import { encodePersistedMetadata } from './encode-persisted-metadata'
 
 export const indexKnowledgeDocument = (input: {
   readonly userId: string
   readonly documentId: string
   readonly content: string
-  readonly metadata?: Record<string, unknown>
+  readonly metadata?: KnowledgeMetadata
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
@@ -28,6 +30,7 @@ export const indexKnowledgeDocument = (input: {
       content: input.content,
       metadata: input.metadata
     })
+
     const embeddings = yield* embedder.embedTexts(chunks.map(chunk => chunk.content))
 
     if (embeddings.length !== chunks.length) {
@@ -39,26 +42,34 @@ export const indexKnowledgeDocument = (input: {
       )
     }
 
+    const indexedChunks = Arr.zip(chunks, embeddings)
+
+    const chunkRows = yield* Effect.forEach(indexedChunks, ([chunk, embedding]) =>
+      encodePersistedMetadata({
+        value: chunk.metadata === undefined ? {} : chunk.metadata,
+        entity: 'userKnowledgeChunk'
+      }).pipe(
+        Effect.map(metadata => ({
+          id: chunk.id,
+          scopeId: input.userId,
+          documentId: input.documentId,
+          content: chunk.content,
+          embedding: Array.from(embedding),
+          position: chunk.position,
+          tokenCount: chunk.tokenCount,
+          metadata
+        }))
+      )
+    )
+
     return yield* db.transaction(tx =>
       Effect.gen(function* () {
         yield* tx
           .delete(schema.userKnowledgeChunk)
           .where(eq(schema.userKnowledgeChunk.documentId, input.documentId))
 
-        const indexedChunks = Arr.zip(chunks, embeddings)
-        if (indexedChunks.length > 0) {
-          yield* tx.insert(schema.userKnowledgeChunk).values(
-            indexedChunks.map(([chunk, embedding]) => ({
-              id: chunk.id,
-              scopeId: input.userId,
-              documentId: input.documentId,
-              content: chunk.content,
-              embedding: Array.from(embedding),
-              position: chunk.position,
-              tokenCount: chunk.tokenCount,
-              metadata: chunk.metadata ?? {}
-            }))
-          )
+        if (chunkRows.length > 0) {
+          yield* tx.insert(schema.userKnowledgeChunk).values(chunkRows)
         }
 
         return yield* tx
@@ -93,6 +104,7 @@ export const indexKnowledgeDocument = (input: {
             updatedAt: sql`CURRENT_TIMESTAMP`
           })
           .where(eq(schema.userKnowledgeDocument.id, input.documentId))
+
         return yield* Effect.fail(error)
       })
     )

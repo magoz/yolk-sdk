@@ -1,3 +1,4 @@
+import { Data } from 'effect'
 import {
   workflowReadableResponse,
   workflowStreamResponse,
@@ -11,17 +12,20 @@ export type WorkflowCancelableRun = WorkflowReadableRun & {
 
 export type WorkflowRunResolver = (runId: string) => WorkflowCancelableRun
 
-export type WorkflowResumeStartIndexParseResult =
-  | {
-      readonly _tag: 'ValidStartIndex'
-      readonly startIndex?: number
-    }
-  | {
-      readonly _tag: 'InvalidStartIndex'
-      readonly raw: string
-    }
+export type WorkflowResumeStartIndexParseResult = Data.TaggedEnum<{
+  readonly ValidStartIndex: {
+    readonly startIndex?: number
+  }
+  readonly InvalidStartIndex: {
+    readonly raw: string
+  }
+}>
+
+export const WorkflowResumeStartIndexParseResult =
+  Data.taggedEnum<WorkflowResumeStartIndexParseResult>()
 
 const routeUrlBase = 'http://yolk.local'
+
 const nonnegativeSafeIntegerPattern = /^(0|[1-9]\d*)$/
 
 export const workflowResumeStartIndexFromUrl = (
@@ -30,20 +34,20 @@ export const workflowResumeStartIndexFromUrl = (
   const raw = new URL(url, routeUrlBase).searchParams.get('startIndex')
 
   if (raw === null) {
-    return { _tag: 'ValidStartIndex' }
+    return WorkflowResumeStartIndexParseResult.ValidStartIndex({})
   }
 
   const value = raw.trim()
 
   if (!nonnegativeSafeIntegerPattern.test(value)) {
-    return { _tag: 'InvalidStartIndex', raw }
+    return WorkflowResumeStartIndexParseResult.InvalidStartIndex({ raw })
   }
 
   const startIndex = Number.parseInt(value, 10)
 
   return Number.isSafeInteger(startIndex)
-    ? { _tag: 'ValidStartIndex', startIndex }
-    : { _tag: 'InvalidStartIndex', raw }
+    ? WorkflowResumeStartIndexParseResult.ValidStartIndex({ startIndex })
+    : WorkflowResumeStartIndexParseResult.InvalidStartIndex({ raw })
 }
 
 export const workflowResumeResponse = (

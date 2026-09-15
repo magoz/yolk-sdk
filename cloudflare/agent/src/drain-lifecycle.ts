@@ -1,5 +1,5 @@
-import { Cause, Deferred, Effect, Exit, Ref, Semaphore } from 'effect'
-import type { DriverShape } from '@yolk-sdk/harness/driver'
+import { Cause, Data, Deferred, Effect, Exit, Match, Predicate, Ref, Semaphore } from 'effect'
+import type { DriverApi } from '@yolk-sdk/harness/driver'
 import { makeDrainOccupancy, type DrainToken, type DrainWork } from './drain-occupancy.ts'
 
 export type LiveToken = DrainToken & {
@@ -11,10 +11,16 @@ export type StartResult =
   | { readonly _tag: 'Conflict' }
   | { readonly _tag: 'Stale' }
 
+export const StartResult = Data.taggedEnum<StartResult>()
+
 export const notifyRejectedStart = <E, R>(
   started: StartResult,
   notifyConflict: Effect.Effect<void, E, R>
-): Effect.Effect<void, E, R> => (started._tag === 'Accepted' ? Effect.void : notifyConflict)
+): Effect.Effect<void, E, R> =>
+  Match.value(started).pipe(
+    Match.tag('Accepted', () => Effect.void),
+    Match.orElse(() => notifyConflict)
+  )
 
 type LiveOwner = {
   readonly token: LiveToken
@@ -30,7 +36,7 @@ export type LiveDrainOptions = {
   readonly afterInterrupt?: Effect.Effect<void>
 }
 
-const userInterrupt = (driver: DriverShape, sessionId: string) =>
+const userInterrupt = (driver: DriverApi, sessionId: string) =>
   driver.interrupt(sessionId, { reason: 'user', awaitSettlement: true })
 
 const awaitOwner = (owner: LiveOwner) =>
@@ -60,11 +66,14 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
       withGate(
         Effect.gen(function* () {
           const current = yield* Ref.get(liveOwner)
+
           if (current === undefined || current.token.id !== token.id) {
             return false
           }
+
           yield* occupancy.releaseIf(token)
           yield* Ref.set(liveOwner, undefined)
+
           return true
         })
       )
@@ -78,26 +87,32 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
         })
       )
 
-    const interruptIfToken = (token: LiveToken, driver: DriverShape, sessionId: string) =>
+    const interruptIfToken = (token: LiveToken, driver: DriverApi, sessionId: string) =>
       withGate(
         Effect.gen(function* () {
           const current = yield* Ref.get(liveOwner)
+
           if (current === undefined || current.token.id !== token.id) {
             return undefined
           }
+
           yield* userInterrupt(driver, sessionId)
+
           return current
         })
       )
 
-    const interruptIfSocket = (socketId: string, driver: DriverShape, sessionId: string) =>
+    const interruptIfSocket = (socketId: string, driver: DriverApi, sessionId: string) =>
       withGate(
         Effect.gen(function* () {
           const current = yield* Ref.get(liveOwner)
+
           if (current === undefined || current.token.socketId !== socketId) {
             return undefined
           }
+
           yield* userInterrupt(driver, sessionId)
+
           return current
         })
       )
@@ -105,28 +120,33 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
     const admitUnderGate = (prepareEpoch: number, socketId: string, work: DrainWork) =>
       Effect.gen(function* () {
         if ((yield* Ref.get(epoch)) !== prepareEpoch || (yield* Ref.get(reconnecting))) {
-          return { _tag: 'Stale' as const }
+          return StartResult.Stale()
         }
+
         const id = yield* Ref.modify(nextId, current => [current + 1, current + 1] as const)
         const token: LiveToken = { id, socketId }
+
         if (!(yield* occupancy.occupy(work, token))) {
-          return { _tag: 'Conflict' as const }
+          return StartResult.Conflict()
         }
-        return { _tag: 'Accepted' as const, token }
+
+        return StartResult.Accepted({ token })
       })
 
     const registerUnderGate = (
       prepareEpoch: number,
       socketId: string,
       work: DrainWork,
-      driver: DriverShape,
+      driver: DriverApi,
       sessionId: string
     ) =>
       Effect.gen(function* () {
         const admitted = yield* admitUnderGate(prepareEpoch, socketId, work)
-        if (admitted._tag !== 'Accepted') {
+
+        if (!Predicate.isTagged(admitted, 'Accepted')) {
           return admitted
         }
+
         const done = yield* Deferred.make<Exit.Exit<void, unknown>>()
         yield* driver.run(sessionId).pipe(
           Effect.interruptible,
@@ -135,6 +155,7 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
           Effect.forkDetach({ startImmediately: true, uninterruptible: false })
         )
         yield* Ref.set(liveOwner, { token: admitted.token, done })
+
         return admitted
       })
 
@@ -145,7 +166,7 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
         prepareEpoch: number,
         socketId: string,
         work: DrainWork,
-        driver: DriverShape,
+        driver: DriverApi,
         sessionId: string
       ) =>
         Effect.uninterruptibleMask(restore =>
@@ -153,12 +174,16 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
             const started = yield* withGate(
               registerUnderGate(prepareEpoch, socketId, work, driver, sessionId)
             )
-            if (started._tag !== 'Accepted') {
+
+            if (!Predicate.isTagged(started, 'Accepted')) {
               return started
             }
+
             const owner = yield* Ref.get(liveOwner)
+
             const done =
               owner !== undefined && owner.token.id === started.token.id ? owner.done : undefined
+
             const exit = yield* restore(
               done === undefined
                 ? Effect.void
@@ -170,14 +195,17 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
                     )
                   )
             ).pipe(Effect.exit)
+
             yield* casRelease(started.token)
-            if (exit._tag === 'Success') {
+
+            if (Exit.isSuccess(exit)) {
               return started
             }
+
             return yield* Effect.failCause(exit.cause)
           })
         ),
-      reconnect: (driver: DriverShape, sessionId: string, finalize: Effect.Effect<void>) =>
+      reconnect: (driver: DriverApi, sessionId: string, finalize: Effect.Effect<void>) =>
         Effect.uninterruptibleMask(restore =>
           Effect.gen(function* () {
             const captured = yield* withGate(
@@ -186,32 +214,40 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
                   reconnectGeneration,
                   current => [current + 1, current + 1] as const
                 )
+
                 yield* Ref.update(epoch, current => current + 1)
                 yield* Ref.set(reconnecting, true)
                 const owner = yield* Ref.get(liveOwner)
+
                 if (owner !== undefined) {
                   yield* userInterrupt(driver, sessionId)
                 }
+
                 return { generation, owner }
               })
             )
+
             yield* restore(
               Effect.gen(function* () {
                 if (captured.owner !== undefined) {
                   yield* awaitOwner(captured.owner)
                 }
+
                 yield* withGate(
                   Effect.gen(function* () {
                     if ((yield* Ref.get(reconnectGeneration)) !== captured.generation) {
                       return
                     }
+
                     if (captured.owner !== undefined) {
                       const current = yield* Ref.get(liveOwner)
+
                       if (current !== undefined && current.token.id === captured.owner.token.id) {
                         yield* occupancy.releaseIf(captured.owner.token)
                         yield* Ref.set(liveOwner, undefined)
                       }
                     }
+
                     yield* finalize
                   })
                 )
@@ -219,13 +255,15 @@ export const makeLiveDrain = (options?: LiveDrainOptions) =>
             ).pipe(Effect.ensuring(clearReconnectingIf(captured.generation)))
           })
         ),
-      closeOwner: (socketId: string, driver: DriverShape, sessionId: string) =>
+      closeOwner: (socketId: string, driver: DriverApi, sessionId: string) =>
         Effect.gen(function* () {
           const owner = yield* interruptIfSocket(socketId, driver, sessionId)
           yield* afterInterrupt
+
           if (owner === undefined) {
             return
           }
+
           yield* awaitOwner(owner)
           yield* casRelease(owner.token)
         })

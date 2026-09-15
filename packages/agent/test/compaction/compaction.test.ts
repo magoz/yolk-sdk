@@ -1,4 +1,4 @@
-import { Effect, Ref, Stream } from 'effect'
+import { Effect, Predicate, Ref, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
@@ -38,6 +38,7 @@ import {
   makeWindowCompactionTransformer,
   planWindowCompaction
 } from '../../src/compaction'
+import { ContextOverflowRetryCompactionResult } from '../../src/compaction/retry.ts'
 
 const user = (content: string) => UserMessage.make({ content })
 
@@ -145,23 +146,27 @@ describe('agent compaction', () => {
 
   it('compacts old messages and emits lifecycle events', () => {
     const recent = [user('recent question'), assistant('recent answer')]
+
     const messages = [
       user('old context '.repeat(20)),
       assistant('old answer '.repeat(20)),
       ...recent
     ]
+
     const result = compactWindowMessages(messages, compactionOptions)
 
-    if (result._tag !== 'Compacted') {
+    if (!Predicate.isTagged(result, 'Compacted')) {
       throw new Error(`Expected compaction, got ${result._tag}`)
     }
 
     expect(result.events.map(event => event._tag)).toEqual(['CompactionStart', 'CompactionEnd'])
     expect(result.messages.slice(-recent.length)).toEqual(recent)
     const summaryMessage = result.messages[0]
+
     if (summaryMessage?._tag !== 'User') {
       throw new Error('Expected summary user message')
     }
+
     expect(summaryMessage.content).toContain('Earlier conversation compacted')
     expect(result.afterTokens).toBeLessThan(result.beforeTokens)
     expect(estimateAgentMessagesTokens(result.messages)).toBe(result.afterTokens)
@@ -175,9 +180,10 @@ describe('agent compaction', () => {
       toolCallingAssistant(),
       toolResult()
     ]
+
     const result = compactWindowMessages(messages, { ...compactionOptions, tailMessageCount: 1 })
 
-    if (result._tag !== 'Compacted') {
+    if (!Predicate.isTagged(result, 'Compacted')) {
       throw new Error(`Expected compaction, got ${result._tag}`)
     }
 
@@ -188,6 +194,7 @@ describe('agent compaction', () => {
   it.effect('creates a ContextTransformer layer', () =>
     Effect.gen(function* () {
       const transformer = yield* ContextTransformer
+
       const result = yield* transformer.transform([
         user('old context '.repeat(20)),
         assistant('old answer '.repeat(20)),
@@ -196,9 +203,11 @@ describe('agent compaction', () => {
 
       expect(result.events.map(event => event._tag)).toEqual(['CompactionStart', 'CompactionEnd'])
       const lastMessage = result.messages.at(-1)
+
       if (lastMessage?._tag !== 'User') {
         throw new Error('Expected recent user message')
       }
+
       expect(lastMessage.content).toBe('recent')
     }).pipe(Effect.provide(makeWindowCompactionTransformer(compactionOptions)))
   )
@@ -209,8 +218,10 @@ describe('agent compaction', () => {
       recent: '[User]: recent',
       createdAtMs: 1
     })
+
     const next = user('continue')
-    if (checkpoint._tag !== 'User') throw new Error('Expected user checkpoint')
+
+    if (!Predicate.isTagged(checkpoint, 'User')) throw new Error('Expected user checkpoint')
 
     expect(checkpoint.content).toContain('<conversation-checkpoint>')
     expect(checkpoint.content).toContain('Summary text')
@@ -231,11 +242,13 @@ describe('agent compaction', () => {
 
   it('formats rich compaction source text', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'lookup', params: { query: 'abc' } })
+
     const providerCall = ToolCall.make({
       id: 'provider_1',
       name: 'web',
       params: { url: 'x' }
     })
+
     const assistantMessage = AssistantAgentMessage.make({
       parts: [
         AssistantTextPart.make({ content: 'I will look' }),
@@ -249,6 +262,7 @@ describe('agent compaction', () => {
         AssistantTextPart.make({ content: 'done' })
       ]
     })
+
     const formatted = formatAgentMessagesForCompaction(
       [
         user('hello'),
@@ -278,20 +292,26 @@ describe('agent compaction', () => {
       const requests: Array<ReadonlyArray<AgentMessage>> = []
       const compactCalls: Array<ReadonlyArray<AgentMessage>> = []
       const messagesRef = yield* Ref.make<ReadonlyArray<AgentMessage>>(original)
+
       const provider: TestProvider = {
         stream: request => {
           requests.push(request.messages)
+
           if (requests.length === 1) return Stream.fail(contextOverflowError())
 
           return Stream.make(LLMTextDelta.make({ text: 'ok' }))
         }
       }
+
       const retryProvider = yield* makeContextOverflowRetryProvider({
         provider,
         messagesRef,
         compact: messages => {
           compactCalls.push(messages)
-          return Effect.succeed({ _tag: 'Compacted', messages: compacted })
+
+          return Effect.succeed(
+            ContextOverflowRetryCompactionResult.Compacted({ messages: compacted })
+          )
         }
       })
 
@@ -314,9 +334,11 @@ describe('agent compaction', () => {
       const compactedB = [user('checkpoint-b')]
       const requests: Array<ReadonlyArray<AgentMessage>> = []
       const compactCalls: Array<ReadonlyArray<AgentMessage>> = []
+
       const provider: TestProvider = {
         stream: request => {
           requests.push(request.messages)
+
           if (request.messages === originalA || request.messages === originalB) {
             return Stream.fail(contextOverflowError())
           }
@@ -326,21 +348,24 @@ describe('agent compaction', () => {
           return Stream.make(LLMTextDelta.make({ text }))
         }
       }
+
       const retryProvider = yield* makeContextOverflowRetryProvider({
         provider,
         compact: messages => {
           compactCalls.push(messages)
 
-          return Effect.succeed({
-            _tag: 'Compacted',
-            messages: messages === originalA ? compactedA : compactedB
-          })
+          return Effect.succeed(
+            ContextOverflowRetryCompactionResult.Compacted({
+              messages: messages === originalA ? compactedA : compactedB
+            })
+          )
         }
       })
 
       const eventsA = yield* retryProvider
         .stream({ messages: originalA, tools: [], model: 'test', systemPrompt: 'test' })
         .pipe(Stream.runCollect)
+
       const eventsB = yield* retryProvider
         .stream({ messages: originalB, tools: [], model: 'test', systemPrompt: 'test' })
         .pipe(Stream.runCollect)
@@ -358,15 +383,19 @@ describe('agent compaction', () => {
       const compacted = [user('checkpoint')]
       const overflow = contextOverflowError()
       const requests: Array<ReadonlyArray<AgentMessage>> = []
+
       const provider: TestProvider = {
         stream: request => {
           requests.push(request.messages)
+
           return Stream.fail(overflow)
         }
       }
+
       const retryProvider = yield* makeContextOverflowRetryProvider({
         provider,
-        compact: () => Effect.succeed({ _tag: 'Compacted', messages: compacted })
+        compact: () =>
+          Effect.succeed(ContextOverflowRetryCompactionResult.Compacted({ messages: compacted }))
       })
 
       const error = yield* retryProvider
@@ -383,6 +412,7 @@ describe('agent compaction', () => {
       const original = [user('original')]
       const overflow = contextOverflowError()
       let compactCalls = 0
+
       const retryProvider = yield* makeContextOverflowRetryProvider({
         provider: {
           stream: () =>
@@ -392,7 +422,10 @@ describe('agent compaction', () => {
         },
         compact: () => {
           compactCalls += 1
-          return Effect.succeed({ _tag: 'Compacted', messages: [user('checkpoint')] })
+
+          return Effect.succeed(
+            ContextOverflowRetryCompactionResult.Compacted({ messages: [user('checkpoint')] })
+          )
         }
       })
 
@@ -404,4 +437,24 @@ describe('agent compaction', () => {
       expect(compactCalls).toBe(0)
     })
   )
+
+  it('omits createdAtMs on checkpoint messages unless supplied, including zero', () => {
+    const omitted = makeCompactionCheckpointMessage({
+      summary: 's',
+      recent: 'r'
+    })
+
+    expect(omitted).toBeInstanceOf(UserMessage)
+    expect(Object.keys(omitted)).toEqual(['_tag', 'content'])
+    expect(Object.hasOwn(omitted, 'createdAtMs')).toBe(false)
+
+    const zero = makeCompactionCheckpointMessage({
+      summary: 's',
+      recent: 'r',
+      createdAtMs: 0
+    })
+
+    expect(Object.keys(zero)).toEqual(['_tag', 'createdAtMs', 'content'])
+    expect(zero.createdAtMs).toBe(0)
+  })
 })

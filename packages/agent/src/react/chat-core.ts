@@ -1,3 +1,4 @@
+import { Match, Predicate } from 'effect'
 import {
   hitlResponseEvent,
   type AgentError,
@@ -115,262 +116,271 @@ export type AgentChatAction =
 export const reduceAgentChatState = (
   state: AgentChatState,
   action: AgentChatAction
-): AgentChatState => {
-  switch (action._tag) {
-    case 'HydrateMessage':
-      return {
-        ...state,
-        chatMessages: appendProtocolMessage(state.chatMessages, action.message),
-        error: null,
-        errorInfo: null,
-        retryInfo: null
-      }
-    case 'Submit':
-      return {
-        ...state,
-        status: 'running',
-        error: null,
-        errorInfo: null,
-        retryInfo: null,
-        seenEventIds: [],
-        chatMessages: appendProtocolMessage(state.chatMessages, action.message),
-        sessionEvents: [
-          ...state.sessionEvents,
-          UserMessageSubmitted.make({ message: action.message })
-        ]
-      }
-    case 'AppendMessage':
-      return {
-        ...state,
-        chatMessages: appendProtocolMessage(state.chatMessages, action.message),
-        error: null,
-        errorInfo: null,
-        retryInfo: null,
-        sessionEvents: [
-          ...state.sessionEvents,
-          ProtocolMessageAppended.make({ message: action.message })
-        ]
-      }
-    case 'SubmitHitlResponse':
-      return {
-        ...state,
-        status: 'running',
-        error: null,
-        errorInfo: null,
-        retryInfo: null,
-        seenEventIds: [],
-        chatMessages: applyAgentEventToChatMessages(
-          state.chatMessages,
-          hitlResponseEvent(action.response)
-        )
-      }
-    case 'DeleteTurn': {
-      const next = deleteChatTurn(state.chatMessages, action.messageId)
-
-      if (next._tag === 'NotFound') {
+): AgentChatState =>
+  Match.value(action).pipe(
+    Match.withReturnType<AgentChatState>(),
+    Match.tag('HydrateMessage', current => ({
+      ...state,
+      chatMessages: appendProtocolMessage(state.chatMessages, current.message),
+      error: null,
+      errorInfo: null,
+      retryInfo: null
+    })),
+    Match.tag('Submit', current => ({
+      ...state,
+      status: 'running',
+      error: null,
+      errorInfo: null,
+      retryInfo: null,
+      seenEventIds: [],
+      chatMessages: appendProtocolMessage(state.chatMessages, current.message),
+      sessionEvents: [
+        ...state.sessionEvents,
+        UserMessageSubmitted.make({ message: current.message })
+      ]
+    })),
+    Match.tag('AppendMessage', current => ({
+      ...state,
+      chatMessages: appendProtocolMessage(state.chatMessages, current.message),
+      error: null,
+      errorInfo: null,
+      retryInfo: null,
+      sessionEvents: [
+        ...state.sessionEvents,
+        ProtocolMessageAppended.make({ message: current.message })
+      ]
+    })),
+    Match.tag('SubmitHitlResponse', current => ({
+      ...state,
+      status: 'running',
+      error: null,
+      errorInfo: null,
+      retryInfo: null,
+      seenEventIds: [],
+      chatMessages: applyAgentEventToChatMessages(
+        state.chatMessages,
+        hitlResponseEvent(current.response)
+      )
+    })),
+    Match.tag('DeleteTurn', current =>
+      Match.value(deleteChatTurn(state.chatMessages, current.messageId)).pipe(
+        Match.withReturnType<AgentChatState>(),
+        Match.tag('NotFound', () => state),
+        Match.tag('Deleted', next => ({
+          ...state,
+          error: null,
+          errorInfo: null,
+          retryInfo: null,
+          chatMessages: next.messages,
+          sessionEvents: [
+            ...state.sessionEvents,
+            TurnDeleted.make({
+              turnStartMessageId: next.turnStartMessageId,
+              deletedMessageIds: next.deletedMessageIds
+            })
+          ]
+        })),
+        Match.exhaustive
+      )
+    ),
+    Match.tag('RegenerateFrom', current =>
+      Match.value(regenerateChatMessagesFrom(state.chatMessages, current.messageId)).pipe(
+        Match.withReturnType<AgentChatState>(),
+        Match.tag('NotFound', () => state),
+        Match.tag('Regenerated', next => ({
+          ...state,
+          status: 'running',
+          error: null,
+          errorInfo: null,
+          retryInfo: null,
+          seenEventIds: [],
+          chatMessages: next.messages,
+          sessionEvents: [
+            ...state.sessionEvents,
+            MessagesRegenerated.make({
+              fromMessageId: current.messageId,
+              keptMessageIds: next.messages.map(message => message.id)
+            })
+          ]
+        })),
+        Match.exhaustive
+      )
+    ),
+    Match.tag('EditUserMessage', current =>
+      Match.value(editChatUserMessage(state.chatMessages, current.messageId, current.content)).pipe(
+        Match.withReturnType<AgentChatState>(),
+        Match.tag('NotFound', 'NotUserMessage', () => state),
+        Match.tag('Edited', next => ({
+          ...state,
+          status: 'running',
+          error: null,
+          errorInfo: null,
+          retryInfo: null,
+          seenEventIds: [],
+          chatMessages: next.messages,
+          sessionEvents: [
+            ...state.sessionEvents,
+            UserMessageEdited.make({
+              messageId: next.messageId,
+              content: current.content,
+              keptMessageIds: next.messages.map(message => message.id)
+            })
+          ]
+        })),
+        Match.exhaustive
+      )
+    ),
+    Match.tag('Event', current => {
+      if (hasSeenEvent(state, current.event)) {
         return state
       }
 
-      return {
-        ...state,
-        error: null,
-        errorInfo: null,
-        retryInfo: null,
-        chatMessages: next.messages,
-        sessionEvents: [
-          ...state.sessionEvents,
-          TurnDeleted.make({
-            turnStartMessageId: next.turnStartMessageId,
-            deletedMessageIds: next.deletedMessageIds
-          })
-        ]
-      }
-    }
-    case 'RegenerateFrom': {
-      const next = regenerateChatMessagesFrom(state.chatMessages, action.messageId)
-
-      if (next._tag === 'NotFound') {
-        return state
-      }
-
-      return {
-        ...state,
-        status: 'running',
-        error: null,
-        errorInfo: null,
-        retryInfo: null,
-        seenEventIds: [],
-        chatMessages: next.messages,
-        sessionEvents: [
-          ...state.sessionEvents,
-          MessagesRegenerated.make({
-            fromMessageId: action.messageId,
-            keptMessageIds: next.messages.map(message => message.id)
-          })
-        ]
-      }
-    }
-    case 'EditUserMessage': {
-      const next = editChatUserMessage(state.chatMessages, action.messageId, action.content)
-
-      if (next._tag !== 'Edited') {
-        return state
-      }
-
-      return {
-        ...state,
-        status: 'running',
-        error: null,
-        errorInfo: null,
-        retryInfo: null,
-        seenEventIds: [],
-        chatMessages: next.messages,
-        sessionEvents: [
-          ...state.sessionEvents,
-          UserMessageEdited.make({
-            messageId: next.messageId,
-            content: action.content,
-            keptMessageIds: next.messages.map(message => message.id)
-          })
-        ]
-      }
-    }
-    case 'Event': {
-      if (hasSeenEvent(state, action.event)) {
-        return state
-      }
-
-      switch (action.event._tag) {
-        case 'AgentStart':
-          return rememberEvent(
+      return Match.value(current.event).pipe(
+        Match.withReturnType<AgentChatState>(),
+        Match.tag('AgentStart', event =>
+          rememberEvent(
             {
               ...state,
               status: 'running',
               error: null,
               errorInfo: null,
               retryInfo: null,
-              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, current)
             },
-            action.event
+            event
           )
-        case 'AgentError':
-          return rememberEvent(
+        ),
+        Match.tag('AgentError', event =>
+          rememberEvent(
             {
               ...state,
               status: 'error',
-              error: action.event.message,
-              errorInfo: action.event,
+              error: event.message,
+              errorInfo: event,
               retryInfo: null,
-              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, current)
             },
-            action.event
+            event
           )
-        case 'AgentEnd':
-          return rememberEvent(
+        ),
+        Match.tag('AgentEnd', event =>
+          rememberEvent(
             {
               ...state,
               status: 'done',
               error: null,
               errorInfo: null,
               retryInfo: null,
-              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, current)
             },
-            action.event
+            event
           )
-        case 'AgentAwaitingInput':
-          return rememberEvent(
+        ),
+        Match.tag('AgentAwaitingInput', event =>
+          rememberEvent(
             {
               ...state,
               status: 'waiting',
               error: null,
               errorInfo: null,
               retryInfo: null,
-              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, current)
             },
-            action.event
+            event
           )
-        case 'AgentRetry':
-          return rememberEvent(
+        ),
+        Match.tag('AgentRetry', event =>
+          rememberEvent(
             {
               ...state,
-              retryInfo: action.event,
-              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+              retryInfo: event,
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, current)
             },
-            action.event
+            event
           )
-        case 'CompactionEnd':
-        case 'AssistantMessage':
-        case 'CompactionStart':
-        case 'LLMReasoningDelta':
-        case 'LLMStreamEnd':
-        case 'LLMStreamStart':
-        case 'LLMTextDelta':
-        case 'ProviderToolResult':
-        case 'QuestionAnswered':
-        case 'QuestionCancelled':
-        case 'QuestionRequested':
-        case 'SubagentCompleted':
-        case 'SubagentStarted':
-        case 'ToolApprovalDenied':
-        case 'ToolApprovalGranted':
-        case 'ToolApprovalRequested':
-        case 'ToolExecutionAccepted':
-        case 'ToolExecutionCompleted':
-        case 'ToolExecutionError':
-        case 'ToolExecutionStarted':
-        case 'ToolInputDelta':
-        case 'ToolInputEnd':
-        case 'ToolInputStart':
-        case 'TurnEnd':
-        case 'TurnStart':
-        case 'UsageUpdate':
-        case 'UserMessage':
-          return rememberEvent(
-            clearRetryInfo({
-              ...state,
-              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-            }),
-            action.event
-          )
-      }
-    }
-    case 'Error': {
-      return {
-        ...state,
-        status: 'error',
-        error: action.message,
-        errorInfo: null,
-        retryInfo: null,
-        chatMessages: markChatError(state.chatMessages, action.message)
-      }
-    }
-    case 'Abort':
-      return { ...state, status: 'aborted', error: null, errorInfo: null, retryInfo: null }
-  }
-}
+        ),
+        Match.tag(
+          'CompactionEnd',
+          'AssistantMessage',
+          'CompactionStart',
+          'LLMReasoningDelta',
+          'LLMStreamEnd',
+          'LLMStreamStart',
+          'LLMTextDelta',
+          'ProviderToolResult',
+          'QuestionAnswered',
+          'QuestionCancelled',
+          'QuestionRequested',
+          'SubagentCompleted',
+          'SubagentStarted',
+          'ToolApprovalDenied',
+          'ToolApprovalGranted',
+          'ToolApprovalRequested',
+          'ToolExecutionAccepted',
+          'ToolExecutionCompleted',
+          'ToolExecutionError',
+          'ToolExecutionStarted',
+          'ToolInputDelta',
+          'ToolInputEnd',
+          'ToolInputStart',
+          'TurnEnd',
+          'TurnStart',
+          'UsageUpdate',
+          'UserMessage',
+          event =>
+            rememberEvent(
+              clearRetryInfo({
+                ...state,
+                chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, current)
+              }),
+              event
+            )
+        ),
+        Match.exhaustive
+      )
+    }),
+    Match.tag('Error', current => ({
+      ...state,
+      status: 'error',
+      error: current.message,
+      errorInfo: null,
+      retryInfo: null,
+      chatMessages: markChatError(state.chatMessages, current.message)
+    })),
+    Match.tag('Abort', () => ({
+      ...state,
+      status: 'aborted',
+      error: null,
+      errorInfo: null,
+      retryInfo: null
+    })),
+    Match.exhaustive
+  )
 
 export const hasAgentMessageReasoning = (message: AgentMessage) =>
-  message._tag === 'Assistant' &&
-  message.parts.some(part => part._tag === 'Reasoning' && part.text.length > 0)
+  Predicate.isTagged(message, 'Assistant') &&
+  message.parts.some(part => Predicate.isTagged(part, 'Reasoning') && part.text.length > 0)
 
 export const hasAgentChatReasoningSummary = (state: AgentChatState) =>
   state.chatMessages.some(message =>
-    message.parts.some(part => part._tag === 'Reasoning' && part.text.length > 0)
+    message.parts.some(part => Predicate.isTagged(part, 'Reasoning') && part.text.length > 0)
   )
 
 export const isActiveChatToolPart = (part: AgentChatPart) =>
-  part._tag === 'ToolCall' &&
-  part.state._tag !== 'Completed' &&
-  part.state._tag !== 'Accepted' &&
-  part.state._tag !== 'ProviderCompleted' &&
-  part.state._tag !== 'QuestionAnswered' &&
-  part.state._tag !== 'QuestionCancelled' &&
-  part.state._tag !== 'Errored' &&
-  part.state._tag !== 'Denied'
+  Predicate.isTagged(part, 'ToolCall') &&
+  !Predicate.isTagged(part.state, 'Completed') &&
+  !Predicate.isTagged(part.state, 'Accepted') &&
+  !Predicate.isTagged(part.state, 'ProviderCompleted') &&
+  !Predicate.isTagged(part.state, 'QuestionAnswered') &&
+  !Predicate.isTagged(part.state, 'QuestionCancelled') &&
+  !Predicate.isTagged(part.state, 'Errored') &&
+  !Predicate.isTagged(part.state, 'Denied')
+
 export type ActiveChatToolPart = Extract<AgentChatPart, { readonly _tag: 'ToolCall' }>
 
 export const isCompletedChatToolPart = (part: AgentChatPart) =>
-  part._tag === 'ToolCall' && part.state._tag === 'Completed'
+  Predicate.isTagged(part, 'ToolCall') && Predicate.isTagged(part.state, 'Completed')
+
 export type CompletedChatToolPart = Extract<AgentChatPart, { readonly _tag: 'ToolCall' }>
 
 export const getActiveChatToolParts = (messages: ReadonlyArray<AgentChatMessage>) =>

@@ -14,6 +14,7 @@ import { ensureTestEnv } from './ensure-test-env'
  */
 function signCookieValue(value: string, secret: string): string {
   const signature = createHmac('sha256', secret).update(value).digest('base64')
+
   return encodeURIComponent(`${value}.${signature}`)
 }
 
@@ -28,7 +29,7 @@ export const createTestAuthSession = (userId: string) =>
   Effect.gen(function* () {
     yield* ensureTestEnv('Create Test Auth Session')
     const db = yield* Db
-    const secret = yield* Config.string('BETTER_AUTH_SECRET')
+    const secret = yield* Config.String('BETTER_AUTH_SECRET')
 
     const token = createId()
     const now = new Date()
@@ -50,5 +51,6 @@ export const createTestAuthSession = (userId: string) =>
     }
 
     const signedToken = signCookieValue(token, secret)
+
     return { session, token: signedToken }
   })

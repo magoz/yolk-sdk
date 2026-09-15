@@ -41,6 +41,18 @@ Durable transports may replay events. Prefer event ids and projection helpers fo
 - `buildAgentChatItems`
 - `applyAgentEventToChatProjection`
 - chat reducer and selectors
+- tagged constructors: `AgentChatPart`, `ChatToolState`, `AgentChatItem`, `ToolRunState`,
+  `DeleteChatTurnResult`, `EditChatUserMessageResult`, `RegenerateChatMessagesResult`,
+  `AgentChatAction`, and hook results (`AgentChatSubmitResult`, `AgentChatDeleteTurnResult`,
+  `AgentChatRegenerateResult`, `AgentChatEditUserMessageResult`, `AgentChatHitlResponseResult`)
+- `ToolDurationKnown` / `ToolDurationUnknown` (`Schema.TaggedStruct`)
+
+The tagged chat ADTs are `Data.taggedEnum` values (plain objects, `_tag` last, not Equal/Hash
+classes). Build parts with `AgentChatPart.Text({ id, content, state })` rather than handwritten
+`{ _tag: 'Text', ... }`. Omit absent optionals. Discriminate with `$is`, for example
+`AgentChatSubmitResult.$is('Submitted')(result)`. `useAgentChat` dispatches `AgentChatAction`
+constructors and returns the hook-result constructors. Duration descriptors use
+`Schema.TaggedStruct.make`.
 
 The package is headless. It does not ship Yolk UI components, styling, auth, uploads, or route handlers. Your UI owns the input box, message bubbles, attachments, voice controls, pending states, and errors.
 

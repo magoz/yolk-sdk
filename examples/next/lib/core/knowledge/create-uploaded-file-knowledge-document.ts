@@ -6,6 +6,7 @@ import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
+import { encodePersistedMetadata } from './encode-persisted-metadata'
 import { indexKnowledgeDocument } from './index-knowledge-document'
 import { knowledgeSlugFromTitle } from './slug'
 
@@ -28,6 +29,16 @@ export const createUploadedFileKnowledgeDocument = (input: {
     const documentId = createId()
     const title = extracted.metadata.title ?? input.filename
 
+    const documentMetadata = yield* encodePersistedMetadata({
+      value: { filename: input.filename, mediaType: input.mediaType, ...extracted.metadata },
+      entity: 'userKnowledgeDocument'
+    })
+
+    const fileMetadata = yield* encodePersistedMetadata({
+      value: { filename: input.filename, ...extracted.metadata },
+      entity: 'userKnowledgeFile'
+    })
+
     const [document] = yield* db
       .insert(schema.userKnowledgeDocument)
       .values({
@@ -44,7 +55,7 @@ export const createUploadedFileKnowledgeDocument = (input: {
           extracted.content.length <= 500
             ? extracted.content
             : `${extracted.content.slice(0, 500)}…`,
-        metadata: { filename: input.filename, mediaType: input.mediaType, ...extracted.metadata }
+        metadata: documentMetadata
       })
       .returning()
 
@@ -66,7 +77,7 @@ export const createUploadedFileKnowledgeDocument = (input: {
           storageKey: input.storageKey,
           mediaType: input.mediaType.length > 0 ? input.mediaType : extracted.metadata.format,
           byteSize,
-          metadata: { filename: input.filename, ...extracted.metadata }
+          metadata: fileMetadata
         })
         .returning()
 
@@ -83,7 +94,7 @@ export const createUploadedFileKnowledgeDocument = (input: {
         userId: input.userId,
         documentId: document.id,
         content: extracted.content,
-        metadata: { filename: input.filename, ...extracted.metadata }
+        metadata: fileMetadata
       })
     }).pipe(
       Effect.catch(error =>

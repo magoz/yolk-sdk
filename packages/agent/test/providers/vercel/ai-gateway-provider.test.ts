@@ -1,8 +1,13 @@
 import { Effect, Layer, Redacted, Schema, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { LLMProvider } from '@yolk-sdk/agent/loop'
-import { ToolResult, UserMessage, type AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
+import { LLMDone, LLMProvider, LLMTextDelta, LLMToolCall, LLMUsage } from '@yolk-sdk/agent/loop'
+import {
+  ToolCall,
+  ToolResult,
+  UserMessage,
+  type AgentReasoningEffort
+} from '@yolk-sdk/agent/protocol'
 import { makeTool } from '@yolk-sdk/agent/tools'
 import {
   makeVercelAiGatewayProviderLayer,
@@ -19,6 +24,7 @@ const makeHttpClientLayer = (response: Response, requests: Array<CapturedRequest
     HttpClient.make(request =>
       Effect.sync(() => {
         requests.push({ request })
+
         return HttpClientResponse.fromWeb(request, response)
       })
     )
@@ -51,16 +57,20 @@ const runProvider = (
 ) =>
   Effect.gen(function* () {
     const provider = yield* LLMProvider
+
+    const streamInput = {
+      model: request.model ?? 'anthropic/claude-sonnet',
+      systemPrompt: 'Be concise.',
+      messages: [UserMessage.make({ content: 'Hello' })],
+      tools: []
+    }
+
     return yield* provider
-      .stream({
-        model: request.model ?? 'anthropic/claude-sonnet',
-        systemPrompt: 'Be concise.',
-        messages: [UserMessage.make({ content: 'Hello' })],
-        tools: [],
-        ...(request.reasoningEffort === undefined
-          ? {}
-          : { reasoningEffort: request.reasoningEffort })
-      })
+      .stream(
+        request.reasoningEffort === undefined
+          ? streamInput
+          : { ...streamInput, reasoningEffort: request.reasoningEffort }
+      )
       .pipe(Stream.runCollect)
   }).pipe(
     Effect.provide(
@@ -74,6 +84,7 @@ describe('Vercel AI Gateway provider', () => {
   it.effect('uses the Gateway endpoint, required auth, routing, and fallback models', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const events = yield* runProvider(
         new Response(
           JSON.stringify({
@@ -118,8 +129,8 @@ describe('Vercel AI Gateway provider', () => {
       expect(readCapturedBody(requests)).not.toHaveProperty('max_completion_tokens')
       expect(readCapturedBody(requests)).not.toHaveProperty('reasoning')
       expect(Array.from(events)).toMatchObject([
-        { _tag: 'TextDelta', text: 'Hello from Gateway' },
-        { _tag: 'Done', stopReason: 'stop' }
+        LLMTextDelta.make({ text: 'Hello from Gateway' }),
+        LLMDone.make({ stopReason: 'stop' })
       ])
     })
   )
@@ -144,6 +155,7 @@ describe('Vercel AI Gateway provider', () => {
   it.effect('normalizes tool calls and usage', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeVercelAiGatewayProviderLayer({
         apiKey: Redacted.make('gateway-key'),
         maxCompletionTokens: 2_000
@@ -187,8 +199,10 @@ describe('Vercel AI Gateway provider', () => {
         execute: ({ call }) =>
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
+
       const events = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             model: 'openai/gpt-test',
@@ -200,18 +214,16 @@ describe('Vercel AI Gateway provider', () => {
       }).pipe(Effect.provide(layer))
 
       expect(Array.from(events)).toMatchObject([
-        {
-          _tag: 'ToolCall',
-          call: { id: 'call-1', name: 'search', params: { query: 'yolk' } }
-        },
-        { _tag: 'Done', stopReason: 'tool_use' },
-        {
-          _tag: 'Usage',
+        LLMToolCall.make({
+          call: ToolCall.make({ id: 'call-1', name: 'search', params: { query: 'yolk' } })
+        }),
+        LLMDone.make({ stopReason: 'tool_use' }),
+        LLMUsage.make({
           usage: {
             input: { total: 10, uncached: 8, cacheRead: 2 },
             output: { total: 5, reasoning: 3, text: 2 }
           }
-        }
+        })
       ])
       expect(readCapturedBody(requests)).toMatchObject({
         tools: [
@@ -267,6 +279,7 @@ describe('Vercel AI Gateway provider', () => {
 
       for (const finishReason of finishReasons) {
         const requests: Array<CapturedRequest> = []
+
         const error = yield* runProvider(
           new Response(
             JSON.stringify({
@@ -281,8 +294,7 @@ describe('Vercel AI Gateway provider', () => {
           requests
         ).pipe(Effect.flip)
 
-        expect(error).toMatchObject({
-          _tag: 'LLMError',
+        const expectedErrorFields = {
           cause: 'invalid_response',
           message: `Vercel AI Gateway response stopped with ${finishReason}`,
           retryable: false,
@@ -291,7 +303,10 @@ describe('Vercel AI Gateway provider', () => {
             kind: 'invalid_response',
             providerCode: finishReason
           }
-        })
+        }
+
+        expect(error._tag).toBe('LLMError')
+        expect(error).toMatchObject(expectedErrorFields)
       }
     })
   )
@@ -299,6 +314,7 @@ describe('Vercel AI Gateway provider', () => {
   it.effect('classifies rate limits with Gateway identity and sanitized errors', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const error = yield* runProvider(
         new Response(JSON.stringify({ error: { message: 'secret upstream detail' } }), {
           status: 429,
@@ -307,8 +323,8 @@ describe('Vercel AI Gateway provider', () => {
         requests
       ).pipe(Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'rate_limit',
         message: 'Vercel AI Gateway returned 429',
         retryable: true,
@@ -326,14 +342,15 @@ describe('Vercel AI Gateway provider', () => {
   it.effect('rejects invalid host output limits before sending a request', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const error = yield* runProvider(new Response(JSON.stringify({ choices: [] })), requests, {
         apiKey: Redacted.make('gateway-key'),
         maxCompletionTokens: 0
       }).pipe(Effect.flip)
 
       expect(requests).toHaveLength(0)
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'validation_error',
         message: 'Vercel AI Gateway maxCompletionTokens must be a positive safe integer',
         retryable: false

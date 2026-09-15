@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Stream } from 'effect'
+import { Array as Arr, Effect, Match, Option, Predicate, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   assistantContent,
@@ -16,23 +16,28 @@ import {
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import type { AgentLoopError } from '@yolk-sdk/agent/loop'
-import { runRuntime, runtimeErrorToAgentError, type RuntimeError } from '@yolk-sdk/agent/runtime'
+import {
+  runRuntime,
+  runtimeErrorToAgentError,
+  RuntimeRequest,
+  type RuntimeError
+} from '@yolk-sdk/agent/runtime'
 
-export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentResponseEncodingError>()(
+export class AgentResponseEncodingError extends Schema.TaggedError<AgentResponseEncodingError>()(
   'AgentResponseEncodingError',
   {
     message: Schema.String
   }
 ) {}
 
-export class AgentImageLimitError extends Schema.TaggedErrorClass<AgentImageLimitError>()(
+export class AgentImageLimitError extends Schema.TaggedError<AgentImageLimitError>()(
   'AgentImageLimitError',
   {
     message: Schema.String
   }
 ) {}
 
-export class AgentDocumentLimitError extends Schema.TaggedErrorClass<AgentDocumentLimitError>()(
+export class AgentDocumentLimitError extends Schema.TaggedError<AgentDocumentLimitError>()(
   'AgentDocumentLimitError',
   {
     message: Schema.String
@@ -42,17 +47,24 @@ export class AgentDocumentLimitError extends Schema.TaggedErrorClass<AgentDocume
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
 const maxImageCount = 4
+
 const maxImageBase64Chars = 5 * 1024 * 1024
+
 const maxTotalImageBase64Chars = 12 * 1024 * 1024
+
 const maxDocumentCount = 4
+
 const maxDocumentBase64Chars = 14 * 1024 * 1024
+
 const maxTotalDocumentBase64Chars = 28 * 1024 * 1024
+
 const allowedImageMimeTypes: ReadonlyArray<string> = [
   'image/png',
   'image/jpeg',
   'image/webp',
   'image/gif'
 ]
+
 const allowedDocumentMimeTypes: ReadonlyArray<string> = ['application/pdf']
 
 const isAllowedImageMimeType = (mimeType: string) =>
@@ -64,29 +76,25 @@ const isAllowedDocumentMimeType = (mimeType: string) =>
 const isValidBase64 = (data: string) =>
   data.length > 0 && data.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(data)
 
-const messageContentParts = (message: AgentMessage): ReadonlyArray<ContentPart> => {
-  switch (message._tag) {
-    case 'Assistant':
-      return contentParts(assistantContent(message))
-    case 'ToolResult':
-    case 'User':
-      return contentParts(message.content)
-  }
-}
+const messageContentParts = (message: AgentMessage): ReadonlyArray<ContentPart> =>
+  Match.value(message).pipe(
+    Match.tag('Assistant', current => contentParts(assistantContent(current))),
+    Match.tag('ToolResult', 'User', current => contentParts(current.content)),
+    Match.exhaustive
+  )
 
 const requestImageParts = (input: AgentRouteRequest) =>
-  Arr.filter(
-    Arr.flatMap(input.messages, messageContentParts),
-    (part): part is ImagePart => part._tag === 'Image'
+  Arr.filter(Arr.flatMap(input.messages, messageContentParts), (part): part is ImagePart =>
+    Predicate.isTagged(part, 'Image')
   )
 
 const requestDocumentParts = (input: AgentRouteRequest) =>
-  Arr.filter(
-    Arr.flatMap(input.messages, messageContentParts),
-    (part): part is DocumentPart => part._tag === 'Document'
+  Arr.filter(Arr.flatMap(input.messages, messageContentParts), (part): part is DocumentPart =>
+    Predicate.isTagged(part, 'Document')
   )
 
 const imageLimitError = (message: string) => new AgentImageLimitError({ message })
+
 const documentLimitError = (message: string) => new AgentDocumentLimitError({ message })
 
 const inlineData = (source: ImagePart['source'] | DocumentPart['source']) =>
@@ -139,6 +147,7 @@ const documentPartLimitError = (document: DocumentPart) => {
 export const validateAgentRouteImages = (input: AgentRouteRequest) =>
   Effect.gen(function* () {
     const images = requestImageParts(input)
+
     const totalBase64Chars = Arr.reduce(
       images,
       0,
@@ -172,6 +181,7 @@ export const validateAgentRouteImages = (input: AgentRouteRequest) =>
 export const validateAgentRouteDocuments = (input: AgentRouteRequest) =>
   Effect.gen(function* () {
     const documents = requestDocumentParts(input)
+
     const totalBase64Chars = Arr.reduce(
       documents,
       0,
@@ -226,7 +236,7 @@ const ndjsonHeaders = {
 
 const textEncoder = new TextEncoder()
 
-const unknownToMessage = (error: unknown) =>
+const unknownToMessage = (error: Schema.SchemaError) =>
   error instanceof Error ? error.message : String(error)
 
 type AgentStreamError = AgentLoopError | RuntimeError
@@ -249,7 +259,7 @@ const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStre
   )
 
 export const encodeAgentNdjsonEvent = (event: AgentEvent) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(event).pipe(
+  Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(event).pipe(
     Effect.mapError(
       error =>
         new AgentResponseEncodingError({
@@ -265,11 +275,10 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
     yield* validateAgentRouteDocuments(input)
 
     const body = yield* runRuntime(
-      {
-        _tag: 'Transcript',
+      RuntimeRequest.Transcript({
         sessionId: input.sessionId,
         messages: input.messages
-      },
+      }),
       {
         systemPrompt: config.systemPrompt,
         tools: config.tools,

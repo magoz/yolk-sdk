@@ -1,6 +1,8 @@
 import { Config, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import type { HttpBodyError } from 'effect/unstable/http/HttpBody'
+import type { HttpClientError } from 'effect/unstable/http/HttpClientError'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
 import {
@@ -14,15 +16,23 @@ import {
 import type { AgentToolContext } from './tool-context.ts'
 
 const webSearchToolName = 'web_search'
+
 const defaultNumResults = 8
+
 const maxNumResults = 20
+
 const defaultContextMaxCharacters = 10_000
+
 const maxContextMaxCharacters = 50_000
+
 const searchTimeoutMs = 25_000
 
 const WebSearchProvider = Schema.Literals(['exa', 'parallel'])
+
 const WebSearchType = Schema.Literals(['auto', 'fast', 'deep'])
+
 const WebSearchLiveCrawl = Schema.Literals(['fallback', 'preferred'])
+
 const WebSearchParams = Schema.Struct({
   query: Schema.String.pipe(Schema.annotate({ description: 'Web search query.' })),
   numResults: Schema.optional(Schema.Number).pipe(
@@ -43,8 +53,11 @@ const WebSearchParams = Schema.Struct({
 })
 
 type WebSearchProvider = typeof WebSearchProvider.Type
+
 type WebSearchType = typeof WebSearchType.Type
+
 type WebSearchLiveCrawl = typeof WebSearchLiveCrawl.Type
+
 type WebSearchParams = typeof WebSearchParams.Type
 
 type NormalizedWebSearchParams = {
@@ -103,8 +116,9 @@ const webSearchToolDescription = [
   'Use web_fetch instead when the user gives a specific URL.'
 ].join(' ')
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const schemaErrorToMessage = (error: Schema.SchemaError) => String(error)
+
+const configErrorToMessage = (error: Config.ConfigError) => String(error)
 
 const makeToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({
@@ -139,16 +153,6 @@ const modelVisibleReasonFromToolError = (error: ToolError): ModelVisibleToolErro
   }
 }
 
-const decodeWebSearchParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(WebSearchParams)(params).pipe(
-    Effect.mapError(error =>
-      makeModelVisibleError(
-        `Invalid web search arguments: ${unknownToMessage(error)}`,
-        'validation'
-      )
-    )
-  )
-
 const normalizePositiveInteger = (input: {
   readonly value: number | undefined
   readonly defaultValue: number
@@ -169,6 +173,7 @@ const normalizePositiveInteger = (input: {
 const normalizeWebSearchParams = (params: WebSearchParams) =>
   Effect.gen(function* () {
     const query = params.query.trim()
+
     if (query.length === 0) {
       return yield* Effect.fail(makeModelVisibleError('query must not be empty', 'validation'))
     }
@@ -179,6 +184,7 @@ const normalizeWebSearchParams = (params: WebSearchParams) =>
       maxValue: maxNumResults,
       name: 'numResults'
     })
+
     const contextMaxCharacters = yield* normalizePositiveInteger({
       value: params.contextMaxCharacters,
       defaultValue: defaultContextMaxCharacters,
@@ -202,9 +208,9 @@ const providerOverrideFromString = (provider: string | undefined): WebSearchProv
   provider === 'exa' || provider === 'parallel' ? provider : undefined
 
 const loadWebSearchConfig: Effect.Effect<WebSearchConfig, ToolError> = Effect.gen(function* () {
-  const providerOption = yield* Config.option(Config.string('YOLK_WEBSEARCH_PROVIDER'))
-  const exaApiKeyOption = yield* Config.option(Config.string('EXA_API_KEY'))
-  const parallelApiKeyOption = yield* Config.option(Config.string('PARALLEL_API_KEY'))
+  const providerOption = yield* Config.option(Config.String('YOLK_WEBSEARCH_PROVIDER'))
+  const exaApiKeyOption = yield* Config.option(Config.String('EXA_API_KEY'))
+  const parallelApiKeyOption = yield* Config.option(Config.String('PARALLEL_API_KEY'))
   const provider = optionString(providerOption)
   const exaApiKey = optionString(exaApiKeyOption)
   const parallelApiKey = optionString(parallelApiKeyOption)
@@ -216,7 +222,7 @@ const loadWebSearchConfig: Effect.Effect<WebSearchConfig, ToolError> = Effect.ge
   }
 }).pipe(
   Effect.mapError(error =>
-    makeToolError(`Invalid web search environment: ${unknownToMessage(error)}`, 'validation')
+    makeToolError(`Invalid web search environment: ${configErrorToMessage(error)}`, 'validation')
   )
 )
 
@@ -283,6 +289,7 @@ const mcpRequestForProvider = (
 const requestMcpWebSearch = (input: McpWebSearchRequest) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
+
     const request = yield* HttpClientRequest.post(input.url).pipe(
       HttpClientRequest.accept('application/json, text/event-stream'),
       HttpClientRequest.setHeaders(input.headers),
@@ -295,15 +302,16 @@ const requestMcpWebSearch = (input: McpWebSearchRequest) =>
           arguments: input.arguments
         }
       }),
-      Effect.mapError(error =>
-        makeToolError(`Could not encode search request: ${unknownToMessage(error)}`, 'execution')
+      Effect.mapError((error: HttpBodyError) =>
+        makeToolError(`Could not encode search request: ${error.message}`, 'execution')
       )
     )
+
     const response = yield* HttpClient.filterStatusOk(http)
       .execute(request)
       .pipe(
-        Effect.mapError(error =>
-          makeToolError(`Search request failed: ${unknownToMessage(error)}`, 'execution')
+        Effect.mapError((error: HttpClientError) =>
+          makeToolError(`Search request failed: ${error.message}`, 'execution')
         ),
         Effect.timeoutOrElse({
           duration: input.timeoutMs,
@@ -312,8 +320,8 @@ const requestMcpWebSearch = (input: McpWebSearchRequest) =>
       )
 
     return yield* response.text.pipe(
-      Effect.mapError(error =>
-        makeToolError(`Could not read search response: ${unknownToMessage(error)}`, 'execution')
+      Effect.mapError((error: HttpClientError) =>
+        makeToolError(`Could not read search response: ${error.message}`, 'execution')
       )
     )
   }).pipe(Effect.provide(FetchHttpClient.layer))
@@ -325,13 +333,14 @@ const liveWebSearchDependencies: WebSearchDependencies = {
 const parseMcpPayload = (payload: string) =>
   Effect.gen(function* () {
     const trimmed = payload.trim()
+
     if (!trimmed.startsWith('{')) {
       return undefined
     }
 
     const data = yield* decodeMcpResult(trimmed).pipe(
       Effect.mapError(error =>
-        makeToolError(`Invalid search response: ${unknownToMessage(error)}`, 'execution')
+        makeToolError(`Invalid search response: ${schemaErrorToMessage(error)}`, 'execution')
       )
     )
 
@@ -341,6 +350,7 @@ const parseMcpPayload = (payload: string) =>
 export const parseMcpWebSearchResponse = (body: string) =>
   Effect.gen(function* () {
     const direct = yield* parseMcpPayload(body)
+
     if (direct !== undefined) {
       return direct
     }
@@ -348,6 +358,7 @@ export const parseMcpWebSearchResponse = (body: string) =>
     for (const line of body.split('\n')) {
       if (line.startsWith('data: ')) {
         const parsed = yield* parseMcpPayload(line.substring('data: '.length))
+
         if (parsed !== undefined) {
           return parsed
         }
@@ -406,6 +417,7 @@ export const searchWeb = (
     const config = yield* loadWebSearchConfig
     const override = config.providerOverride
     const provider = selectWebSearchProvider(normalized.query, override)
+
     const result = yield* runSearchWithFallback(deps, provider, normalized, override, config).pipe(
       Effect.mapError(error =>
         makeModelVisibleError(error.message, modelVisibleReasonFromToolError(error))
@@ -434,7 +446,15 @@ export const executeWebSearchTool = (
   }
 
   return Effect.gen(function* () {
-    const params = yield* decodeWebSearchParams(call.params)
+    const params = yield* Schema.decodeUnknownEffect(WebSearchParams)(call.params).pipe(
+      Effect.mapError(error =>
+        makeModelVisibleError(
+          `Invalid web search arguments: ${schemaErrorToMessage(error)}`,
+          'validation'
+        )
+      )
+    )
+
     const content = yield* searchWeb(params, deps)
 
     return ToolResult.make({ toolCallId: call.id, content })
@@ -451,7 +471,7 @@ export const webSearchToolRegistration: ToolRegistration<AgentToolContext> = mak
   parameters: WebSearchParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-  invalidParamsMessage: error => `Invalid web search arguments: ${unknownToMessage(error)}`,
+  invalidParamsMessage: error => `Invalid web search arguments: ${schemaErrorToMessage(error)}`,
   execute: ({ call, params }) =>
     searchWeb(params, liveWebSearchDependencies).pipe(
       Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))

@@ -1,4 +1,5 @@
-import { Effect, Schema } from 'effect'
+import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Effect, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -7,14 +8,18 @@ import { toOpenAiCodexRequestBody } from '../../../src/providers/openai/codex-pr
 import { toOpenAiRequestBody } from '../../../src/providers/openai/provider.ts'
 
 const defaultPropertyRuns = 50
+
 const propertyRunsEnv = process.env.PROPERTY_RUNS
+
 const parsedPropertyRuns =
   propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
+
 const propertyRuns =
   Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
     ? parsedPropertyRuns
     : defaultPropertyRuns
-const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
+
+const propertyOptions = { arbitrary: { runs: propertyRuns } }
 
 const schemaVariant = Schema.Literals([
   'emptyParams',
@@ -31,23 +36,23 @@ const schemaVariant = Schema.Literals([
   'unionField'
 ])
 
-const schemaVariantArbitrary = Schema.toArbitrary(schemaVariant)
+const schemaVariantArbitrary = Arbitrary.schema(schemaVariant)
 
-const isJsonObject = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && typeof input === 'object' && !Array.isArray(input)
+const isJsonObject = (input: Schema.Json): input is Schema.JsonObject =>
+  Predicate.isObjectOrArray(input) && !Array.isArray(input)
 
-const field = (input: unknown, key: string) =>
-  isJsonObject(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+const field = (input: Schema.Json | undefined, key: string): Schema.Json | undefined =>
+  input !== undefined && isJsonObject(input) && Object.hasOwn(input, key) ? input[key] : undefined
 
-const localDefinitionName = (ref: unknown) => {
-  if (typeof ref !== 'string') return undefined
+const localDefinitionName = (ref: Schema.Json | undefined) => {
+  if (!Predicate.isString(ref)) return undefined
 
   const prefix = '#/$defs/'
 
   return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined
 }
 
-const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
+const collectLocalRefs = (input: Schema.Json): ReadonlyArray<string> => {
   const ref = localDefinitionName(field(input, '$ref'))
   const current = ref === undefined ? [] : [ref]
 
@@ -124,7 +129,7 @@ const schemaProbeTool = <
 const providerSafeTool = (variant: typeof schemaVariant.Type) =>
   schemaProbeTool(schemaParameters(variant))
 
-const assertProviderSafeParameters = (parameters: unknown) => {
+const assertProviderSafeParameters = (parameters: Schema.Json) => {
   expect(field(parameters, 'type')).toBe('object')
   expect(field(parameters, '$ref')).toBeUndefined()
 
@@ -132,6 +137,7 @@ const assertProviderSafeParameters = (parameters: unknown) => {
   expect(Array.isArray(anyOf) && anyOf.some(item => field(item, 'type') === 'array')).toBe(false)
 
   const definitions = field(parameters, '$defs')
+
   for (const ref of collectLocalRefs(parameters)) {
     expect(field(definitions, ref)).toBeDefined()
   }
@@ -153,10 +159,15 @@ describe('OpenAI provider schema properties', () => {
         const body = yield* toOpenAiRequestBody(requestForTool(variant), {
           maxCompletionTokens: 123
         })
-        const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
-        const functionSchema = field(tool, 'function')
 
-        assertProviderSafeParameters(field(functionSchema, 'parameters'))
+        const tool = body.tools?.[0]
+        expect(tool).toBeDefined()
+
+        if (tool === undefined) {
+          expect.fail('Expected OpenAI Chat Completions request tool')
+        }
+
+        assertProviderSafeParameters(tool.function.parameters)
       }),
     propertyOptions
   )
@@ -169,9 +180,17 @@ describe('OpenAI provider schema properties', () => {
         const body = yield* toOpenAiCodexRequestBody(requestForTool(variant), {
           maxOutputTokens: 123
         })
-        const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
 
-        assertProviderSafeParameters(field(tool, 'parameters'))
+        const tool = body.tools?.[0]
+        expect(tool).toBeDefined()
+
+        if (tool === undefined) {
+          expect.fail('Expected OpenAI Codex request tool')
+        }
+
+        const parameters = yield* Schema.decodeUnknownEffect(Schema.Json)(tool.parameters)
+
+        assertProviderSafeParameters(parameters)
       }),
     propertyOptions
   )

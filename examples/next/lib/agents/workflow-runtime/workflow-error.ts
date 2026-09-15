@@ -37,27 +37,35 @@ const knownRuntimeError = (error: unknown): RuntimeError | AgentLoopError | unde
   if (Schema.is(SessionNotFoundError)(error)) {
     return error
   }
+
   if (Schema.is(SessionLoadError)(error)) {
     return error
   }
+
   if (Schema.is(SessionSaveError)(error)) {
     return error
   }
+
   if (Schema.is(SessionConflictError)(error)) {
     return error
   }
+
   if (Schema.is(LLMError)(error)) {
     return error
   }
+
   if (Schema.is(ToolError)(error)) {
     return error
   }
+
   if (Schema.is(ContextTransformError)(error)) {
     return error
   }
+
   if (Schema.is(AbortError)(error)) {
     return error
   }
+
   if (Schema.is(FauxExhaustedError)(error)) {
     return error
   }
@@ -71,6 +79,7 @@ export const workflowErrorEvent = (error: unknown) => {
   }
 
   const runtimeError = knownRuntimeError(error)
+
   if (runtimeError !== undefined) {
     return runtimeErrorToAgentError(runtimeError)
   }
