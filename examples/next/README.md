@@ -76,6 +76,24 @@ Portless still needs `NEXT_PUBLIC_PROJECT_URL` set to the intended app origin.
 Malformed or credential-bearing Portless URLs fail closed; request headers do not
 expand the trusted-origin list.
 
+## Authentication compatibility
+
+The example uses Better Auth `^1.7.5`, which supports the workspace's Vitest 5.
+The configured plugins are email OTP and Next cookies, with explicit validated
+origins and the built-in Drizzle adapter. Better Auth 1.7.3+ removed the temporary
+1.7.0–1.7.2 account `issuer` requirement; do not add that obsolete column.
+
+`lib/services/auth/compatibility.test.ts` checks actual Drizzle-backed initialization
+and existing column coverage without DB queries, plus an OTP/signed-cookie
+roundtrip using the same options with in-memory storage and fake email transport.
+This is not a live database or email-delivery test.
+
+Before a separately authorized rollout, review the [1.7 upgrade guide](https://better-auth.com/docs/guides/1-7-upgrade-guide),
+including duplicate account keys and the OTP security change: proving mailbox
+control for an unverified account can remove unproven linked credentials and revoke
+old sessions. No database migration or data inspection is implicit in dependency
+installation or these tests.
+
 ## Lease verification and lifecycle
 
 ```bash

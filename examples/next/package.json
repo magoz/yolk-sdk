@@ -34,7 +34,7 @@
     "@yolk-sdk/knowledge": "workspace:^",
     "@yolk-sdk/mcp": "workspace:^",
     "@yolk-sdk/vercel-workflows": "workspace:^",
-    "better-auth": "^1.4.14",
+    "better-auth": "^1.7.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "1.0.0-rc.5-ab785fc",
