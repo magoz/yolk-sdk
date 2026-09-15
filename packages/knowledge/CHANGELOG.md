@@ -1,5 +1,35 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.78
+
+### Minor Changes
+
+- 5ff44d6: Export canonical tagged constructors on existing subpaths: `PlainHitlResponse` and `RuntimeRequest` values, React chat ADTs, harness inbox/outcome/`StopDecision` companions, knowledge source/scope `.make`, and workflow `WorkflowStepResult` / `VercelAgentWorkflowRunResult`.
+
+  `Data.taggedEnum` values are plain objects with `_tag` last, not Equal/Hash classes. Prefer constructors over handwritten `{ _tag }` objects and omit absent optionals.
+
+- 5ff44d6: Upgrade the coordinated Effect runtime and platform dependencies to 4.0.0-rc.115. Hosts must use the matching Effect version.
+
+  Adopt rc.115 schema-order construction, including `_tag` first: JSON field values and optional presence remain unchanged, but serialized property order can change. Schema errors now use the rc.115 native Error/SchemaIssue representation. Preserve strict Calendar boundary validation, closed empty tool schemas, portable custom JSON Schema output, and explicit WebSocket close semantics.
+
+  Contributor property tests use native Effect arbitraries and Vitest 5. See the migration guide for API replacements and JSON Schema definition-name changes.
+
+### Patch Changes
+
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [00e4d60]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+  - @yolk-sdk/agent@0.1.0-canary.78
+
 ## 0.1.0-canary.77
 
 ### Patch Changes
@@ -351,6 +381,7 @@
 ### Patch Changes
 
 - Voice as a first-class agent modality in `@yolk-sdk/agent`:
+
   - `@yolk-sdk/agent/voice`: provider-neutral voice protocol, client controller, server tool handler with approval HITL, transcript projection, durable voice event ids, WebSocket transport, and one-shot TTS/STT service contracts (`VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest.instructions` for delivery-style steering).
   - `@yolk-sdk/agent/voice/browser`: Effect-native browser WebRTC voice transport with a fakeable runtime seam.
   - `@yolk-sdk/agent/voice/react`: headless `useYolkVoice` browser hook.

@@ -1,5 +1,47 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.78
+
+### Minor Changes
+
+- 5ff44d6: Upgrade the coordinated Effect runtime and platform dependencies to 4.0.0-rc.115. Hosts must use the matching Effect version.
+
+  Adopt rc.115 schema-order construction, including `_tag` first: JSON field values and optional presence remain unchanged, but serialized property order can change. Schema errors now use the rc.115 native Error/SchemaIssue representation. Preserve strict Calendar boundary validation, closed empty tool schemas, portable custom JSON Schema output, and explicit WebSocket close semantics.
+
+  Contributor property tests use native Effect arbitraries and Vitest 5. See the migration guide for API replacements and JSON Schema definition-name changes.
+
+- 5ff44d6: `ConnectorIntegration` and `CredentialBinding` `metadata` is now `PortableMetadata`. Decode and `make` return a **snapshot copy** (null-prototype objects, new dense arrays; DAG aliases share snapshot nodes; input identity is not kept; snapshots are not frozen).
+
+  Admitted data: own enumerable data keys (including `__proto__` / `constructor`), unknown extension keys, JSON `null` values, booleans, strings, finite numbers, nested plain/`null`-prototype objects, and dense arrays. Omitted metadata is absent.
+
+  Rejected at every depth (no silent Date/Map/class→`{}`): root `null`/arrays/primitives, inherited or class prototypes, `Date`, `Map`, functions, `undefined` values, nonfinite numbers, cycles, sparse arrays, hidden/symbol keys, and accessor payload fields (getters are not invoked). `decodeUnknownEffect` fails with `SchemaError`; synchronous constructors/factories throw `Error` with a `SchemaIssue` cause. Proxy reflection traps are not covered by a general immunity claim.
+
+  Integration `config` stays `Record<string, unknown>`. Credential secrets stay `credentialRef` + host `CredentialResolver`. Error `underlying` stays `unknown`. Hosts loading untrusted JSON should decode `PortableMetadata` (or the parent class).
+
+### Patch Changes
+
+- 5ff44d6: OpenAI Chat Completions and Responses admit `ToolDef.parameters` and tool-call `params` as `Schema.Json` before transport. Non-JSON fails non-retryable `LLMError` `provider_error`. `ToolDef.parameters` admits a `ToolJsonSchema` representation at construction; tool-call params and results stay opaque. Public Codex `OpenAiCodexTool.parameters` remains `unknown`. Inbound HTTP JSON and Responses SSE JSON admit `Schema.Json`; non-object SSE JSON is ignored, malformed non-JSON event text fails `invalid_response`, and HTTP error bodies stay raw text.
+
+  `OpenAiProviderConfig.extraBody` now takes `OpenAiRequestExtras` JSON-object input, also used by Gateway. Request lowering snapshots surviving fields and discards canonical keys without reading their values. Surviving accessors and non-JSON values fail non-retryable `provider_error` with `Invalid … extraBody JSON: expected a JSON object`; getters are not invoked. Composed-body `Schema.Json` serialization after lone-surrogate rewriting remains the final finite-JSON defense.
+
+  Public Realtime `OpenAiRealtimeFunctionTool.parameters` and `openAiRealtimeToolParameters` now require `Schema.Json`. Non-JSON advertisement fails `VoiceToolBridgeError` (sync throw / Effect fail). Mapper defects stay defects. Union-root lowering merges own `__proto__` / `constructor` via `Map`.
+
+  Gmail `get_thread` / `list_attachments` MIME `payload` admits `Schema.Json` after JSON parse. Best-effort optional size omission and sibling preservation are unchanged. Raw HTTP `1e999` → `Infinity` rejects the whole payload (`ConnectorError` `validation_failed`). Public Gmail action classes and `gmail.get_attachment` are unchanged.
+
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [00e4d60]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+  - @yolk-sdk/agent@0.1.0-canary.78
+
 ## 0.1.0-canary.77
 
 ### Patch Changes
@@ -381,6 +423,7 @@
 ### Patch Changes
 
 - Voice as a first-class agent modality in `@yolk-sdk/agent`:
+
   - `@yolk-sdk/agent/voice`: provider-neutral voice protocol, client controller, server tool handler with approval HITL, transcript projection, durable voice event ids, WebSocket transport, and one-shot TTS/STT service contracts (`VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest.instructions` for delivery-style steering).
   - `@yolk-sdk/agent/voice/browser`: Effect-native browser WebRTC voice transport with a fakeable runtime seam.
   - `@yolk-sdk/agent/voice/react`: headless `useYolkVoice` browser hook.
