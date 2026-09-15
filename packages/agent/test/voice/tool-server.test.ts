@@ -61,6 +61,64 @@ describe('decideVoiceToolCall', () => {
     expect(decision).toMatchObject({ request: { call: { params: { argumentsJson: '{broken' } } } })
   })
 
+  it('admits actual JSON null/false/0 as approval display params', () => {
+    const nullDecision = decideVoiceToolCall(
+      [sandboxTool],
+      VoiceToolCall.make({ callId: 'call_1', name: 'sandbox', argumentsJson: 'null' })
+    )
+
+    const falseDecision = decideVoiceToolCall(
+      [sandboxTool],
+      VoiceToolCall.make({ callId: 'call_2', name: 'sandbox', argumentsJson: 'false' })
+    )
+
+    const zeroDecision = decideVoiceToolCall(
+      [sandboxTool],
+      VoiceToolCall.make({ callId: 'call_3', name: 'sandbox', argumentsJson: '0' })
+    )
+
+    const objectDecision = decideVoiceToolCall(
+      [sandboxTool],
+      VoiceToolCall.make({
+        callId: 'call_4',
+        name: 'sandbox',
+        argumentsJson: '{"n":0,"ok":false,"x":null}'
+      })
+    )
+
+    expect(nullDecision).toMatchObject({ request: { call: { params: null } } })
+    expect(falseDecision).toMatchObject({ request: { call: { params: false } } })
+    expect(zeroDecision).toMatchObject({ request: { call: { params: 0 } } })
+    expect(objectDecision).toMatchObject({
+      request: { call: { params: { n: 0, ok: false, x: null } } }
+    })
+  })
+
+  it('keeps finite overflow as the existing approval display object, not Infinity', () => {
+    // Raw JSON 1e999 parses to Infinity. Schema.Json requires finite numbers, so
+    // display params become { argumentsJson: '1e999' } instead of Infinity.
+    // Do not JSON.stringify(Infinity) (that is null).
+    const decision = decideVoiceToolCall(
+      [sandboxTool],
+      VoiceToolCall.make({ callId: 'call_1', name: 'sandbox', argumentsJson: '1e999' })
+    )
+
+    expect(decision._tag).toBe('RequireApproval')
+    expect(decision).toMatchObject({ request: { call: { params: { argumentsJson: '1e999' } } } })
+  })
+
+  it('uses the whole raw nested-overflow document for approval display without changing the gate', () => {
+    const raw = '{"n":1e999,"ok":false}'
+
+    const decision = decideVoiceToolCall(
+      [sandboxTool],
+      VoiceToolCall.make({ callId: 'nested-overflow', name: 'sandbox', argumentsJson: raw })
+    )
+
+    expect(decision._tag).toBe('RequireApproval')
+    expect(decision).toMatchObject({ request: { call: { params: { argumentsJson: raw } } } })
+  })
+
   it('executes unknown tools so the executor can return a model-visible failure', () => {
     const decision = decideVoiceToolCall(
       [sandboxTool],

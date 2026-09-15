@@ -20,14 +20,18 @@ import {
   JsonRpcMessage,
   listLocalMcpServerTools,
   callRemoteMcpServerTool,
-  listRemoteMcpServerTools
+  listRemoteMcpServerTools,
+  McpError,
+  ProtocolError,
+  SdkError,
+  SdkErrorCode
 } from '../../src/client'
 import {
   callLocalMcpServerToolNode,
   listLocalMcpServerToolsNode,
   listMcpToolsNode
 } from '../../src/client/node.ts'
-import type { McpError, McpServerConfig } from '../../src/client'
+import type { McpClientOptions, McpServerConfig } from '../../src/client'
 
 const stdioFixturePath = process.cwd().endsWith(join('packages', 'mcp'))
   ? join(process.cwd(), 'test/server/fixtures/fake-stdio-mcp-server.ts')
@@ -317,6 +321,19 @@ const expectMcpFailureCause = (
   }
 }
 
+const mcpErrorBrands = Symbol.for('mcp.sdk.errorBrands')
+
+const listRemoteConfigureClientFailure = (
+  configureClient: NonNullable<McpClientOptions['configureClient']>
+) =>
+  listRemoteMcpServerTools(
+    { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+    {
+      securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false },
+      configureClient
+    }
+  ).pipe(Effect.provide(makeFakeRemoteMcpLayer('json')), Effect.result)
+
 describe('MCP client', () => {
   it.effect('lists and calls remote JSON-RPC tools', () =>
     Effect.gen(function* () {
@@ -546,6 +563,43 @@ describe('MCP client', () => {
     })
   )
 
+  it.effect('maps non-object and nonfinite inputSchema wire data to typed validation errors', () =>
+    Effect.gen(function* () {
+      const initializeResponse =
+        '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"local","version":"0"}}}'
+
+      const toolsResponses = [
+        '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo","inputSchema":false}]}}',
+        '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo","inputSchema":true}]}}',
+        '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo","inputSchema":{"n":1e999,"private_marker":"do-not-echo"}}]}}'
+      ]
+
+      for (const toolsResponse of toolsResponses) {
+        const result = yield* listLocalMcpServerTools(
+          {
+            name: 'local',
+            type: 'local',
+            command: ['fake-mcp'],
+            environment: { MCP_TOKEN: 'token' }
+          },
+          { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+        ).pipe(
+          Effect.provide(makeFakeLocalMcpLayer([initializeResponse, toolsResponse])),
+          Effect.result
+        )
+
+        expectMcpFailureCause(result, 'validation')
+
+        if (Predicate.isTagged(result, 'Failure')) {
+          expect(Schema.is(McpError)(result.failure)).toBe(true)
+          expect(result.failure.message).toContain('Invalid tools/list result:')
+          expect(result.failure.message).toContain('JSON Schema')
+          expect(result.failure.message).not.toContain('do-not-echo')
+        }
+      }
+    })
+  )
+
   it.effect('maps local stdio early exit to protocol errors', () =>
     Effect.gen(function* () {
       const result = yield* listLocalMcpServerToolsNode(
@@ -623,6 +677,434 @@ describe('MCP client', () => {
         method: 'notifications/initialized'
       })
       expect(yield* requestMessage(nonJsonRpcObject)).toEqual({ id: null, method: 'unknown' })
+    })
+  )
+
+  it.effect('rejects invalid remote MCP URLs as validation errors', () =>
+    Effect.gen(function* () {
+      const result = yield* listRemoteMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'not-a-url' },
+        { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('json')), Effect.result)
+
+      expectMcpFailureCause(result, 'validation')
+    })
+  )
+
+  it.effect('rejects non-https remote MCP URLs as security errors', () =>
+    Effect.gen(function* () {
+      const result = yield* listRemoteMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'http://example.com/mcp' },
+        { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('json')), Effect.result)
+
+      expectMcpFailureCause(result, 'security')
+    })
+  )
+
+  it.effect('rejects localhost http unless the dev policy is enabled', () =>
+    Effect.gen(function* () {
+      const result = yield* listRemoteMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'http://localhost/mcp' },
+        { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('json')), Effect.result)
+
+      expectMcpFailureCause(result, 'security')
+    })
+  )
+
+  it.effect('maps malformed local JSON-RPC lines to parse errors', () =>
+    Effect.gen(function* () {
+      const result = yield* listLocalMcpServerTools(
+        {
+          name: 'local',
+          type: 'local',
+          command: ['fake-mcp'],
+          environment: { MCP_TOKEN: 'token' }
+        },
+        { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeLocalMcpLayer(['not json'])), Effect.result)
+
+      expectMcpFailureCause(result, 'parse')
+    })
+  )
+
+  it.effect('maps invalid local JSON-RPC objects to validation errors', () =>
+    Effect.gen(function* () {
+      const result = yield* listLocalMcpServerTools(
+        {
+          name: 'local',
+          type: 'local',
+          command: ['fake-mcp'],
+          environment: { MCP_TOKEN: 'token' }
+        },
+        { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+      ).pipe(
+        Effect.provide(makeFakeLocalMcpLayer([JSON.stringify({ jsonrpc: '2.0', id: 1 })])),
+        Effect.result
+      )
+
+      expectMcpFailureCause(result, 'validation')
+    })
+  )
+
+  it.effect('keeps thrown McpError identity from configureClient', () =>
+    Effect.gen(function* () {
+      const existing = new McpError({
+        server: 'remote',
+        message: 'keep-me',
+        cause: 'tool_error'
+      })
+
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw existing
+      })
+
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure).toBe(existing)
+        expect(result.failure.message).toBe('keep-me')
+        expect(result.failure.cause).toBe('tool_error')
+      }
+    })
+  )
+
+  it.effect('stringifies opaque host throws before any SDK cause probe', () =>
+    Effect.gen(function* () {
+      const reads: Array<string> = []
+
+      const opaque = {
+        get code() {
+          reads.push('code')
+
+          return SdkErrorCode.RequestTimeout
+        },
+        get message() {
+          reads.push('message')
+          throw new Error('message getter must not run')
+        },
+        toString() {
+          reads.push('toString')
+
+          return 'opaque-host'
+        }
+      }
+
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw opaque
+      })
+
+      expect(reads).toEqual(['toString'])
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: opaque-host')
+        expect(result.failure.cause).toBe('transport')
+        expect(result.failure.server).toBe('remote')
+      }
+    })
+  )
+
+  it.effect('maps non-Error primitive configure throws to transport', () =>
+    Effect.gen(function* () {
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw 0
+      })
+
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: 0')
+        expect(result.failure.cause).toBe('transport')
+      }
+    })
+  )
+
+  it.effect('maps real SdkError timeout after Error.message projection', () =>
+    Effect.gen(function* () {
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw new SdkError(SdkErrorCode.RequestTimeout, 'json parse timed out')
+      })
+
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: json parse timed out')
+        expect(result.failure.cause).toBe('timeout')
+      }
+    })
+  )
+
+  it.effect('maps real SdkError parse messages to protocol after projection', () =>
+    Effect.gen(function* () {
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw new SdkError(SdkErrorCode.SendFailed, 'Unable to parse JSON body')
+      })
+
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe(
+          'Could not configure MCP client: Unable to parse JSON body'
+        )
+        expect(result.failure.cause).toBe('protocol')
+      }
+    })
+  )
+
+  it.effect('maps real ProtocolError to protocol after Error.message projection', () =>
+    Effect.gen(function* () {
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw new ProtocolError(-32_600, 'invalid request')
+      })
+
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: invalid request')
+        expect(result.failure.cause).toBe('protocol')
+      }
+    })
+  )
+
+  it.effect('uses String() for branded non-Error SdkError before code/message probes', () =>
+    Effect.gen(function* () {
+      const reads: Array<string> = []
+
+      const forged = {
+        get code() {
+          reads.push('code')
+
+          return SdkErrorCode.RequestTimeout
+        },
+        get message() {
+          reads.push('message')
+
+          return 'JSON parse failed'
+        },
+        toString() {
+          reads.push('toString')
+
+          return 'branded-string'
+        }
+      }
+
+      Object.defineProperty(forged, mcpErrorBrands, {
+        value: new Set(['mcp.SdkError']),
+        enumerable: false,
+        configurable: true
+      })
+
+      expect(forged instanceof SdkError).toBe(true)
+      expect(forged instanceof Error).toBe(false)
+      expect(forged instanceof ProtocolError).toBe(false)
+
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw forged
+      })
+
+      expect(reads).toEqual(['toString', 'code'])
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: branded-string')
+        expect(result.failure.cause).toBe('timeout')
+      }
+    })
+  )
+
+  it.effect('reads branded SdkError message getter only after code when not timeout', () =>
+    Effect.gen(function* () {
+      const reads: Array<string> = []
+
+      const forged = {
+        get code() {
+          reads.push('code')
+
+          return SdkErrorCode.SendFailed
+        },
+        get message() {
+          reads.push('message')
+
+          return 'JSON parse failed'
+        },
+        toString() {
+          reads.push('toString')
+
+          return 'branded-parse'
+        }
+      }
+
+      Object.defineProperty(forged, mcpErrorBrands, {
+        value: new Set(['mcp.SdkError']),
+        enumerable: false,
+        configurable: true
+      })
+
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw forged
+      })
+
+      expect(reads).toEqual(['toString', 'code', 'message'])
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: branded-parse')
+        expect(result.failure.cause).toBe('protocol')
+      }
+    })
+  )
+
+  it.effect('does not read code or message getters for branded ProtocolError cause', () =>
+    Effect.gen(function* () {
+      const reads: Array<string> = []
+
+      const forged = {
+        get code() {
+          reads.push('code')
+
+          return SdkErrorCode.RequestTimeout
+        },
+        get message() {
+          reads.push('message')
+
+          return 'JSON parse failed'
+        },
+        toString() {
+          reads.push('toString')
+
+          return 'branded-protocol'
+        }
+      }
+
+      Object.defineProperty(forged, mcpErrorBrands, {
+        value: new Set(['mcp.ProtocolError']),
+        enumerable: false,
+        configurable: true
+      })
+
+      expect(forged instanceof ProtocolError).toBe(true)
+      expect(forged instanceof Error).toBe(false)
+
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw forged
+      })
+
+      expect(reads).toEqual(['toString'])
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: branded-protocol')
+        expect(result.failure.cause).toBe('protocol')
+      }
+    })
+  )
+
+  it.effect('lets ProtocolError brand win over SdkError brand without code reads', () =>
+    Effect.gen(function* () {
+      const reads: Array<string> = []
+
+      const forged = {
+        get code() {
+          reads.push('code')
+
+          return SdkErrorCode.RequestTimeout
+        },
+        get message() {
+          reads.push('message')
+
+          return 'JSON parse failed'
+        },
+        toString() {
+          reads.push('toString')
+
+          return 'dual-brand'
+        }
+      }
+
+      Object.defineProperty(forged, mcpErrorBrands, {
+        value: new Set(['mcp.ProtocolError', 'mcp.SdkError']),
+        enumerable: false,
+        configurable: true
+      })
+
+      expect(forged instanceof ProtocolError).toBe(true)
+      expect(forged instanceof SdkError).toBe(true)
+
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw forged
+      })
+
+      expect(reads).toEqual(['toString'])
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: dual-brand')
+        expect(result.failure.cause).toBe('protocol')
+      }
+    })
+  )
+
+  it.effect('observes String() projection before Protocol then SdkError Set.has brand probes', () =>
+    Effect.gen(function* () {
+      const reads: Array<string> = []
+      const brandProbes: Array<string> = []
+
+      const forged = {
+        get code() {
+          reads.push('code')
+
+          return SdkErrorCode.RequestTimeout
+        },
+        get message() {
+          reads.push('message')
+
+          return 'JSON parse failed'
+        },
+        toString() {
+          reads.push('toString')
+
+          return 'brand-probe-order'
+        }
+      }
+
+      const brands = new Set(['mcp.SdkError'])
+      const setHas = brands.has.bind(brands)
+
+      brands.has = (brand: string) => {
+        brandProbes.push(brand)
+        reads.push(`brand:${brand}`)
+
+        return setHas(brand)
+      }
+
+      Object.defineProperty(forged, mcpErrorBrands, {
+        value: brands,
+        enumerable: false,
+        configurable: true
+      })
+
+      expect(forged instanceof SdkError).toBe(true)
+      expect(forged instanceof ProtocolError).toBe(false)
+      expect(forged instanceof Error).toBe(false)
+
+      brandProbes.length = 0
+      reads.length = 0
+
+      const result = yield* listRemoteConfigureClientFailure(() => {
+        throw forged
+      })
+
+      expect(reads[0]).toBe('toString')
+      expect(brandProbes).toEqual(['mcp.ProtocolError', 'mcp.SdkError'])
+      expect(reads).toEqual(['toString', 'brand:mcp.ProtocolError', 'brand:mcp.SdkError', 'code'])
+      expect(result._tag).toBe('Failure')
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.failure.message).toBe('Could not configure MCP client: brand-probe-order')
+        expect(result.failure.cause).toBe('timeout')
+      }
     })
   )
 })

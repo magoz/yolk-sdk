@@ -1,8 +1,9 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { getRun } from 'workflow/api'
 import { WorkflowRunCancelledError } from 'workflow/errors'
 import { waitForHook, waitForSleep } from '@workflow/vitest'
+import { VercelAgentWorkflowRunResult } from '@yolk-sdk/vercel-workflows'
 import {
   VercelWorkflows,
   type VercelWorkflowsClient,
@@ -95,8 +96,9 @@ describe('package-owned workflow directives', () => {
 
     await workflowsEffect(api => api.resumeHook(hook.token, 'approved'))
 
-    await expect(Effect.runPromise(run.returnValue)).resolves.toMatchObject({
-      _tag: 'Completed',
+    const result = await Effect.runPromise(run.returnValue)
+    expect(VercelAgentWorkflowRunResult.$is('Completed')(result)).toBe(true)
+    expect(result).toMatchObject({
       state: {
         messages: ['request-1', 'assistant-1', 'result-approval-tool-approved', 'assistant-2'],
         eventSequence: 9
@@ -128,9 +130,11 @@ describe('package-owned workflow directives', () => {
     await workflowsEffect(api => api.cancel(run.runId))
 
     await expect(Effect.runPromise(run.status)).resolves.toBe('cancelled')
-    await expect(Effect.runPromise(run.returnValue)).rejects.toMatchObject({
-      _tag: 'VercelWorkflowsError',
-      operation: 'returnValue'
+    await expect(Effect.runPromise(run.returnValue)).rejects.toSatisfy(error => {
+      expect(Predicate.isTagged(error, 'VercelWorkflowsError')).toBe(true)
+      expect(error).toMatchObject({ operation: 'returnValue' })
+
+      return true
     })
     await expect(getRun(run.runId).returnValue).rejects.toSatisfy(WorkflowRunCancelledError.is)
   })

@@ -1,4 +1,5 @@
-import { Effect, Layer, Predicate } from 'effect'
+import { Effect, Layer, Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -9,9 +10,17 @@ import {
   OPENAI_DEVICE_AUTH_USERCODE_URL,
   OPENAI_DEVICE_VERIFICATION_URL,
   OPENAI_TOKEN_ENDPOINT,
+  OpenAiCodexDevicePollResult,
   OpenAiCodexOAuth,
+  extractAccountId,
   makeOpenAiCodexOAuthLayer
 } from './live-layer'
+import {
+  OpenAiCodexAccountIdClaimSchema,
+  OpenAiCodexAuthClaimSchema,
+  OpenAiCodexOrganizationsClaimSchema,
+  OpenAiCodexOrganizationIdClaimSchema
+} from './schemas'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest
@@ -23,8 +32,20 @@ type ResponseSpec = {
   readonly contentType?: string
 }
 
-const jwtWithPayload = (payload: unknown) =>
-  ['header', Buffer.from(JSON.stringify(payload)).toString('base64url'), 'signature'].join('.')
+const isJson = Schema.is(Schema.Json)
+
+const jwtWithPayload = (payload: Schema.Json) => {
+  if (!isJson(payload)) {
+    throw new TypeError('JSON fixture requires a finite JSON value')
+  }
+
+  return ['header', Buffer.from(JSON.stringify(payload)).toString('base64url'), 'signature'].join(
+    '.'
+  )
+}
+
+const jwtWithRawPayload = (rawJson: string) =>
+  ['header', Buffer.from(rawJson).toString('base64url'), 'signature'].join('.')
 
 const makeHttpClientLayer = (
   responses: ReadonlyArray<ResponseSpec>,
@@ -80,6 +101,212 @@ const readBodyText = (request: HttpClientRequest.HttpClientRequest) => {
 }
 
 describe('OpenAiCodexOAuth', () => {
+  it('claim schemas ignore inherited getters and admit own string claims', () => {
+    class InheritedClaims {
+      get chatgpt_account_id() {
+        throw new Error('Inherited account claim must not be read')
+      }
+
+      get ['https://api.openai.com/auth']() {
+        throw new Error('Inherited auth claim must not be read')
+      }
+
+      get organizations() {
+        throw new Error('Inherited organizations claim must not be read')
+      }
+
+      get id() {
+        throw new Error('Inherited organization id must not be read')
+      }
+    }
+
+    const inherited = new InheritedClaims()
+    expect(Schema.decodeUnknownOption(OpenAiCodexAccountIdClaimSchema)(inherited)).toEqual(
+      Option.none()
+    )
+    expect(Schema.decodeUnknownOption(OpenAiCodexAuthClaimSchema)(inherited)).toEqual(Option.none())
+    expect(Schema.decodeUnknownOption(OpenAiCodexOrganizationsClaimSchema)(inherited)).toEqual(
+      Option.none()
+    )
+    expect(Schema.decodeUnknownOption(OpenAiCodexOrganizationIdClaimSchema)(inherited)).toEqual(
+      Option.none()
+    )
+    expect(
+      Schema.decodeUnknownOption(OpenAiCodexAccountIdClaimSchema)({ chatgpt_account_id: '' })
+    ).toEqual(Option.some({ chatgpt_account_id: '' }))
+    expect(Schema.decodeUnknownOption(OpenAiCodexOrganizationIdClaimSchema)({ id: 'own' })).toEqual(
+      Option.some({ id: 'own' })
+    )
+    expect(
+      Schema.decodeUnknownOption(OpenAiCodexAuthClaimSchema)({
+        'https://api.openai.com/auth': inherited
+      })
+    ).toEqual(Option.none())
+  })
+
+  it('extracts own claims in direct, nested and first-valid-organization order', () => {
+    expect(
+      extractAccountId(
+        jwtWithRawPayload(
+          '{"chatgpt_account_id":"direct","https://api.openai.com/auth":false,"organizations":null}'
+        )
+      )
+    ).toBe('direct')
+    expect(
+      extractAccountId(
+        jwtWithRawPayload(
+          '{"chatgpt_account_id":"","https://api.openai.com/auth":{"chatgpt_account_id":"nested"}}'
+        )
+      )
+    ).toBe('')
+    expect(
+      extractAccountId(
+        jwtWithRawPayload(
+          '{"chatgpt_account_id":1,"https://api.openai.com/auth":{"chatgpt_account_id":"nested"},"organizations":[{"id":"org"}]}'
+        )
+      )
+    ).toBe('nested')
+    expect(
+      extractAccountId(
+        jwtWithRawPayload(
+          '{"https://api.openai.com/auth":{"chatgpt_account_id":""},"organizations":[{"id":"org"}]}'
+        )
+      )
+    ).toBe('')
+    expect(
+      extractAccountId(
+        jwtWithRawPayload(
+          '{"chatgpt_account_id":false,"https://api.openai.com/auth":{"chatgpt_account_id":null},"organizations":[null,false,0,[],{"id":2},{"id":""},{"id":"later"}]}'
+        )
+      )
+    ).toBe('')
+    expect(
+      extractAccountId(jwtWithRawPayload('{"organizations":[{"id":"first"},{"id":"second"}]}'))
+    ).toBe('first')
+  })
+
+  it('keeps valid claims when unrelated raw JSON numbers overflow', () => {
+    expect(extractAccountId(jwtWithRawPayload('{"chatgpt_account_id":"direct","n":1e999}'))).toBe(
+      'direct'
+    )
+    expect(
+      extractAccountId(
+        jwtWithRawPayload(
+          '{"chatgpt_account_id":1e999,"https://api.openai.com/auth":{"chatgpt_account_id":"nested","n":1e999}}'
+        )
+      )
+    ).toBe('nested')
+    expect(
+      extractAccountId(jwtWithRawPayload('{"organizations":[1e999,{"id":"org","n":1e999}]}'))
+    ).toBe('org')
+    expect(extractAccountId(jwtWithRawPayload('{"n":1e999}'))).toBeUndefined()
+  })
+
+  it('ignores invalid claims, arrays and own __proto__ data without accepting malformed tokens', () => {
+    for (const raw of [
+      '{',
+      'null',
+      'false',
+      '0',
+      '"text"',
+      '{}',
+      '{"chatgpt_account_id":null}',
+      '{"chatgpt_account_id":false}',
+      '{"chatgpt_account_id":0}',
+      '[{"chatgpt_account_id":"not-a-claim-list"}]',
+      '{"__proto__":{"chatgpt_account_id":"not-inherited"}}',
+      '{"https://api.openai.com/auth":{"__proto__":{"chatgpt_account_id":"not-inherited"}}}',
+      '{"organizations":[{"__proto__":{"id":"not-inherited"}}]}'
+    ]) {
+      expect(extractAccountId(jwtWithRawPayload(raw))).toBeUndefined()
+    }
+
+    for (const token of ['', 'a', 'a.b', 'a.b.c.d', 'a..c', 'a.!.c']) {
+      expect(extractAccountId(token)).toBeUndefined()
+    }
+  })
+
+  it.effect('keeps an empty id-token account claim ahead of access-token and current IDs', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const access = jwtWithRawPayload('{"chatgpt_account_id":"access"}')
+
+      const layer = makeOpenAiCodexOAuthLayer(
+        makeHttpClientLayer(
+          [
+            {
+              body: {
+                id_token: jwtWithRawPayload('{"chatgpt_account_id":""}'),
+                access_token: access
+              }
+            }
+          ],
+          requests
+        )
+      )
+
+      const result = yield* Effect.gen(function* () {
+        const oauth = yield* OpenAiCodexOAuth
+
+        return yield* oauth.refreshToken('refresh_old', 'current')
+      }).pipe(Effect.provide(layer))
+
+      expect(result.accountId).toBe('')
+      expect(result.access).toBe(access)
+      expect(result.refresh).toBe('refresh_old')
+      expect(requests).toHaveLength(1)
+    })
+  )
+
+  it.effect(
+    'falls back from malformed id-token claims to access-token claims before current ID',
+    () =>
+      Effect.gen(function* () {
+        const requests: Array<CapturedRequest> = []
+        const access = jwtWithRawPayload('{"organizations":[{"id":"access-org"}]}')
+
+        const layer = makeOpenAiCodexOAuthLayer(
+          makeHttpClientLayer(
+            [
+              {
+                body: {
+                  id_token: jwtWithRawPayload('{'),
+                  access_token: access
+                }
+              }
+            ],
+            requests
+          )
+        )
+
+        const result = yield* Effect.gen(function* () {
+          const oauth = yield* OpenAiCodexOAuth
+
+          return yield* oauth.refreshToken('refresh_old', 'current')
+        }).pipe(Effect.provide(layer))
+
+        expect(result.accountId).toBe('access-org')
+        expect(result.access).toBe(access)
+        expect(requests).toHaveLength(1)
+      })
+  )
+
+  it('rejects non-finite JSON JWT fixtures before encoding', () => {
+    expect(() => jwtWithPayload(Infinity)).toThrow('JSON fixture requires a finite JSON value')
+    expect(() => jwtWithPayload({ n: Infinity })).toThrow(
+      'JSON fixture requires a finite JSON value'
+    )
+  })
+
+  it('preserves raw JWT fixture framing and null or falsy payload bytes', () => {
+    expect(jwtWithPayload({ chatgpt_account_id: 'acct_1' })).toBe(
+      'header.eyJjaGF0Z3B0X2FjY291bnRfaWQiOiJhY2N0XzEifQ.signature'
+    )
+    expect(jwtWithPayload(null)).toBe('header.bnVsbA.signature')
+    expect(jwtWithPayload(false)).toBe('header.ZmFsc2U.signature')
+    expect(jwtWithPayload(0)).toBe('header.MA.signature')
+  })
+
   it.effect('starts device flow with JSON request', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
@@ -137,7 +364,7 @@ describe('OpenAiCodexOAuth', () => {
         device_auth_id: 'device_1',
         user_code: 'user_1'
       })
-      expect(result).toEqual({ _tag: 'Pending' })
+      expect(result).toEqual(OpenAiCodexDevicePollResult.Pending())
     })
   )
 

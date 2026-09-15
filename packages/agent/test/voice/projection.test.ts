@@ -14,6 +14,7 @@ import {
   emptyVoiceProjectionState,
   initialVoiceEventSequencerState,
   projectVoiceEvent,
+  protocolToolCallFromVoice,
   sequenceVoiceEvent,
   VoiceAssistantTranscriptDelta,
   VoiceAssistantTranscriptFinal,
@@ -170,6 +171,56 @@ describe('projectVoiceEvent', () => {
     expect(messages[2]).toMatchObject({ toolCallId: 'call_2', isError: true })
     expect(messages[3]).toMatchObject({ parts: [{ content: 'Done.' }] })
     expect(Predicate.isTagged(validateNoDanglingHostToolCalls(messages), 'Valid')).toBe(true)
+  })
+
+  it('admits actual JSON null/false/0 and keeps finite overflow as the raw argument string', () => {
+    expect(
+      protocolToolCallFromVoice(
+        VoiceToolCall.make({ callId: 'call_null', name: 'web_search', argumentsJson: 'null' })
+      )
+    ).toEqual(ToolCall.make({ id: 'call_null', name: 'web_search', params: null }))
+    expect(
+      protocolToolCallFromVoice(
+        VoiceToolCall.make({ callId: 'call_false', name: 'web_search', argumentsJson: 'false' })
+      )
+    ).toEqual(ToolCall.make({ id: 'call_false', name: 'web_search', params: false }))
+    expect(
+      protocolToolCallFromVoice(
+        VoiceToolCall.make({ callId: 'call_zero', name: 'web_search', argumentsJson: '0' })
+      )
+    ).toEqual(ToolCall.make({ id: 'call_zero', name: 'web_search', params: 0 }))
+    expect(
+      protocolToolCallFromVoice(
+        VoiceToolCall.make({
+          callId: 'call_object',
+          name: 'web_search',
+          argumentsJson: '{"n":0,"ok":false,"x":null}'
+        })
+      )
+    ).toEqual(
+      ToolCall.make({
+        id: 'call_object',
+        name: 'web_search',
+        params: { n: 0, ok: false, x: null }
+      })
+    )
+    // Raw JSON 1e999 parses to Infinity. Schema.Json requires finite numbers, so
+    // projection keeps the independent raw argument string. Do not stringify Infinity.
+    expect(
+      protocolToolCallFromVoice(
+        VoiceToolCall.make({ callId: 'call_overflow', name: 'web_fetch', argumentsJson: '1e999' })
+      )
+    ).toEqual(ToolCall.make({ id: 'call_overflow', name: 'web_fetch', params: '1e999' }))
+  })
+
+  it('keeps a raw nested non-finite argument document instead of a partially parsed object', () => {
+    const raw = '{"n":1e999,"ok":false}'
+
+    const call = protocolToolCallFromVoice(
+      VoiceToolCall.make({ callId: 'nested-overflow', name: 'web_fetch', argumentsJson: raw })
+    )
+
+    expect(call.params).toBe(raw)
   })
 
   it('drops unsettled tool calls so interrupted sessions never persist dangling calls', () => {

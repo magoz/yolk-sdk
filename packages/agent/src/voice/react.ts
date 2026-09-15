@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { Data, Effect, Exit, Match, Predicate, Scope, Stream } from 'effect'
+import { Context, Data, Effect, Exit, Layer, Match, Predicate, Scope, Stream } from 'effect'
 import type {
   HitlResponse,
   ToolApprovalRequest,
@@ -9,13 +9,13 @@ import type {
 } from '@yolk-sdk/agent/protocol'
 import { ToolApprovalResponse as ToolApprovalResponseClass } from '@yolk-sdk/agent/protocol'
 import {
-  makeWebRtcVoiceTransport,
+  webRtcVoiceTransportLayer,
   type WebRtcMediaStreamLike,
   type WebRtcVoiceRuntime
 } from './browser/index.ts'
 import type { VoiceClientCodec } from './client-codec.ts'
-import { makeVoiceController, type VoiceControllerApi } from './controller.ts'
-import { makeVoiceEventOutbox, type VoiceEventOutboxOptions } from './outbox.ts'
+import type { VoiceControllerApi } from './controller.ts'
+import type { VoiceEventOutboxOptions } from './outbox.ts'
 import {
   VoiceSessionError,
   type VoiceEvent,
@@ -27,6 +27,7 @@ import {
   type VoiceSeedText,
   type VoiceSeedTextOptions
 } from './projection.ts'
+import { VoiceSession } from './session.ts'
 
 export type YolkVoiceStatus = 'idle' | 'connecting' | 'live' | 'error'
 
@@ -49,7 +50,7 @@ export type UseYolkVoiceOptions = {
   /**
    * Durable session-log outbox: every session event is buffered as a
    * replay-safe `StoredVoiceEvent` and batch-flushed to the host endpoint
-   * (see `makeVoiceEventOutbox`). Use a keepalive-capable `flush` so the
+   * (see `VoiceEventOutbox`). Use a keepalive-capable `flush` so the
    * final batch survives page unload; the host folds batches with
    * `foldStoredVoiceEvents`.
    */
@@ -162,11 +163,10 @@ const isDomMediaStream = (
   typeof MediaStream !== 'undefined' && stream instanceof MediaStream
 
 /**
- * Headless browser voice hook over the Yolk WebRTC transport and voice
- * controller. Owns connection lifecycle, event-derived UI state, and HITL
- * approval submission. Rendering, chat projection, and product policy stay
- * host-owned; subscribe with `onEvent` to project transcripts into chat
- * state.
+ * Headless browser voice hook over a `VoiceSession` resource graph. The
+ * session layer owns transport, controller, optional outbox, and scope
+ * teardown. This hook bridges latest callbacks, UI state, HITL submission,
+ * and audio-element identity.
  */
 export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
   const [state, dispatch] = useReducer(reduceVoiceHookState, initialVoiceHookState)
@@ -225,9 +225,9 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
 
       const opts = optionsRef.current
 
-      const { session, outbox } = yield* Scope.provide(
-        Effect.gen(function* () {
-          const transport = yield* makeWebRtcVoiceTransport({
+      const services = yield* Layer.buildWithScope(
+        VoiceSession.layer({
+          transport: webRtcVoiceTransportLayer({
             negotiate: opts.negotiate,
             decodeMessage: opts.decodeMessage,
             dataChannelLabel: opts.dataChannelLabel,
@@ -240,21 +240,15 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
                 element.srcObject = stream
               }
             }
-          })
-
-          const controller = yield* makeVoiceController({
-            transport,
-            codec: opts.codec,
-            executeToolCall: opts.executeToolCall
-          })
-
-          const eventOutbox =
-            opts.eventLog === undefined ? null : yield* makeVoiceEventOutbox(opts.eventLog)
-
-          return { session: controller, outbox: eventOutbox }
+          }),
+          codec: opts.codec,
+          executeToolCall: opts.executeToolCall,
+          eventLog: opts.eventLog
         }),
         scope
       )
+
+      const session = Context.get(services, VoiceSession)
 
       controllerRef.current = session
 
@@ -273,13 +267,9 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
       }
 
       yield* Stream.runForEach(session.events, event =>
-        Effect.gen(function* () {
+        Effect.sync(() => {
           if (attemptIdRef.current !== attemptId) {
             return
-          }
-
-          if (outbox !== null) {
-            yield* outbox.offer(event)
           }
 
           optionsRef.current.onEvent?.(event)

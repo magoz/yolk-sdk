@@ -145,6 +145,7 @@ export {
   QuestionResponseOutcome,
   QuestionToolParams,
   formatQuestionResponseContent,
+  PlainHitlResponse,
   plainHitlResponse,
   plainQuestionAnswer,
   plainQuestionResponse,
@@ -161,14 +162,18 @@ export {
   BackgroundToolExecution,
   BackgroundToolInput,
   decodeBackgroundToolInput,
+  decodeToolJsonSchema,
+  decodeToolJsonSchemaObject,
+  isToolJsonSchemaObject,
   makeBackgroundToolAcceptedResult,
   ToolDef,
+  ToolJsonSchema,
+  ToolJsonSchemaObject,
   ToolResult
 } from './tool.ts'
 
 export type {
   ErrorToolResultInput,
-  PlainHitlResponse,
   PlainQuestionAnswer,
   PlainQuestionResponse,
   PlainToolApprovalResponse,

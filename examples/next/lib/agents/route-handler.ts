@@ -16,7 +16,12 @@ import {
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import type { AgentLoopError } from '@yolk-sdk/agent/loop'
-import { runRuntime, runtimeErrorToAgentError, type RuntimeError } from '@yolk-sdk/agent/runtime'
+import {
+  runRuntime,
+  runtimeErrorToAgentError,
+  RuntimeRequest,
+  type RuntimeError
+} from '@yolk-sdk/agent/runtime'
 
 export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentResponseEncodingError>()(
   'AgentResponseEncodingError',
@@ -231,7 +236,7 @@ const ndjsonHeaders = {
 
 const textEncoder = new TextEncoder()
 
-const unknownToMessage = (error: unknown) =>
+const unknownToMessage = (error: Schema.SchemaError) =>
   error instanceof Error ? error.message : String(error)
 
 type AgentStreamError = AgentLoopError | RuntimeError
@@ -270,11 +275,10 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
     yield* validateAgentRouteDocuments(input)
 
     const body = yield* runRuntime(
-      {
-        _tag: 'Transcript',
+      RuntimeRequest.Transcript({
         sessionId: input.sessionId,
         messages: input.messages
-      },
+      }),
       {
         systemPrompt: config.systemPrompt,
         tools: config.tools,

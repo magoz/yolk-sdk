@@ -49,8 +49,17 @@ const oauth = OAuthCredential.make({
   expiresAt: 4_000_000_000_000
 })
 
-const response = (body: unknown, status = 200, headers: Readonly<Record<string, string>> = {}) =>
-  ConnectorHttpResponse.make({ status, headers, body: JSON.stringify(body) })
+const isJson = Schema.is(Schema.Json)
+
+const response = (
+  body: Schema.Json,
+  status = 200,
+  headers: Readonly<Record<string, string>> = {}
+) => {
+  if (!isJson(body)) throw new TypeError('JSON fixture requires a finite JSON value')
+
+  return ConnectorHttpResponse.make({ status, headers, body: JSON.stringify(body) })
+}
 
 const meta = (currentPage = 1, totalPages = 1, totalResources = 1) => ({
   '@CurrentPage': currentPage,
@@ -96,10 +105,24 @@ const makeHarness = (
   return { layer, requests, scopes }
 }
 
-const invoke = (action: string, input: unknown = {}) =>
+type FortnoxReadInput = {
+  readonly customerNumber?: string
+  readonly documentNumber?: string
+  readonly supplierNumber?: string
+  readonly givenNumber?: string
+}
+
+const invoke = (action: string, input: FortnoxReadInput | Schema.Json = {}) =>
   FortnoxConnector.invoke({ integration, action, input })
 
-const reads = [
+const reads: ReadonlyArray<{
+  readonly action: string
+  readonly input: FortnoxReadInput
+  readonly path: string
+  readonly scope: string
+  readonly body: Schema.Json
+  readonly expected: Schema.Json
+}> = [
   {
     action: 'fortnox.get_company_information',
     input: {},
@@ -162,7 +185,13 @@ const reads = [
   }
 ]
 
-const lists = [
+const lists: ReadonlyArray<{
+  readonly action: string
+  readonly resource: string
+  readonly key: string
+  readonly scope: string
+  readonly item: Schema.Json
+}> = [
   {
     action: 'fortnox.list_customers',
     resource: 'customers',
@@ -193,27 +222,31 @@ const lists = [
   }
 ]
 
-const decodeListItems = (value: unknown) =>
-  Schema.decodeUnknownEffect(
-    Schema.Union([
-      FortnoxListCustomersOutput,
-      FortnoxListInvoicesOutput,
-      FortnoxListSuppliersOutput,
-      FortnoxListSupplierInvoicesOutput
-    ])
-  )(value).pipe(
-    Effect.map(output => {
-      if ('customers' in output) return Chunk.toReadonlyArray(output.customers)
+const FortnoxListOutput = Schema.Union([
+  FortnoxListCustomersOutput,
+  FortnoxListInvoicesOutput,
+  FortnoxListSuppliersOutput,
+  FortnoxListSupplierInvoicesOutput
+])
 
-      if ('invoices' in output) return Chunk.toReadonlyArray(output.invoices)
+const decodeListOutput = Schema.decodeUnknownEffect(FortnoxListOutput)
 
-      if ('suppliers' in output) return Chunk.toReadonlyArray(output.suppliers)
+const listItems = (output: typeof FortnoxListOutput.Type) => {
+  if ('customers' in output) return Chunk.toReadonlyArray(output.customers)
 
-      return Chunk.toReadonlyArray(output.supplierInvoices)
-    })
-  )
+  if ('invoices' in output) return Chunk.toReadonlyArray(output.invoices)
+
+  if ('suppliers' in output) return Chunk.toReadonlyArray(output.suppliers)
+
+  return Chunk.toReadonlyArray(output.supplierInvoices)
+}
 
 describe('Fortnox connector', () => {
+  it('rejects non-finite JSON fixture bodies before stringify', () => {
+    expect(() => response(Infinity)).toThrow('JSON fixture requires a finite JSON value')
+    expect(() => response({ n: Infinity })).toThrow('JSON fixture requires a finite JSON value')
+  })
+
   it('exports only ten reads and shared resource-scoped OAuth bindings', () => {
     expect(FortnoxConnector.id).toBe('fortnox')
     expect(FortnoxConnector.actions.map(action => action.id).sort()).toEqual(
@@ -297,7 +330,7 @@ describe('Fortnox connector', () => {
         })
 
         if (!Predicate.isTagged(result, 'Success')) throw new Error('Expected list success')
-        const items = yield* decodeListItems(result.value)
+        const items = yield* decodeListOutput(result.value).pipe(Effect.map(listItems))
         expect(items).toMatchObject([item.item])
 
         const last = yield* invoke(item.action, {
@@ -309,7 +342,7 @@ describe('Fortnox connector', () => {
         if (!Predicate.isTagged(last, 'Success')) throw new Error('Expected final page success')
         expect(last.value).toMatchObject({ pagination: { currentPage: 3 } })
         expect(last.value).not.toHaveProperty('pagination.nextPage')
-        expect(yield* decodeListItems(last.value)).toEqual([])
+        expect(yield* decodeListOutput(last.value).pipe(Effect.map(listItems))).toEqual([])
         expect(harness.requests[0]?.url).toBe(
           `https://api.fortnox.se/3/${item.resource}?page=2&limit=2&lastmodified=2026-01-01+12%3A00`
         )
@@ -443,7 +476,10 @@ describe('Fortnox connector', () => {
     })
   )
 
-  const invalidInputs = [
+  const invalidInputs: ReadonlyArray<{
+    readonly action: string
+    readonly input: Schema.Json
+  }> = [
     { action: 'fortnox.get_customer', input: {} },
     ...['', ' ', '.', '..', '\r\n', '\uD800'].map(customerNumber => ({
       action: 'fortnox.get_customer',

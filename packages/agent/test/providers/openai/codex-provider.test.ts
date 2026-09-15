@@ -236,6 +236,62 @@ describe('OpenAI Codex provider', () => {
     })
   )
 
+  it.effect(
+    'rejects forged non-JSON tool parameter documents at the Codex Responses boundary',
+    () =>
+      Effect.gen(function* () {
+        const parameters = { type: 'object' }
+
+        const tool = ToolDef.make({
+          name: 'search',
+          description: 'Search docs',
+          parameters
+        })
+
+        Object.assign(parameters, { extra: () => undefined })
+
+        const error = yield* toOpenAiCodexRequestBody({
+          model: 'gpt-5.4',
+          systemPrompt: '',
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: [tool]
+        }).pipe(Effect.flip)
+
+        expect(error._tag).toBe('LLMError')
+        expect(error).toMatchObject({ cause: 'provider_error', retryable: false })
+        expect(error.message).toContain('Invalid OpenAI Codex tool parameters JSON')
+      })
+  )
+
+  it.effect('rejects non-JSON tool arguments before Codex Responses transport', () =>
+    Effect.gen(function* () {
+      const error = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'search' }),
+          AssistantAgentMessage.make({
+            parts: [
+              HostToolCallPart.make({
+                call: ToolCall.make({
+                  id: 'call-1',
+                  name: 'search',
+                  params: { extra: () => undefined }
+                })
+              })
+            ]
+          }),
+          ToolResultMessage.make({ toolCallId: 'call-1', content: 'ok' })
+        ],
+        tools: []
+      }).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'provider_error', retryable: false })
+      expect(error.message).toContain('Could not serialize OpenAI Codex tool arguments')
+    })
+  )
+
   it.effect('lowers rich tool results to Codex function output content', () =>
     Effect.gen(function* () {
       const body = yield* toOpenAiCodexRequestBody({

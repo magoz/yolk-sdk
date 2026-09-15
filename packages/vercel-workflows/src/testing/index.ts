@@ -92,7 +92,7 @@ export const defaultTestWorkflowStepMaxRetries = 3
 
 type HookRecord = {
   readonly resolve: (payload: unknown) => void
-  readonly reject: (error: unknown) => void
+  readonly reject: (error: TestWorkflowRunCancelledError) => void
 }
 
 type TestWorkflowRunRecord = {
@@ -373,7 +373,7 @@ export class TestWorkflowWorld {
   private makeHook<T>(run: TestWorkflowRunRecord, token: string): TestWorkflowHook<T> {
     let resolveHook: (payload: unknown) => void = () => {}
 
-    let rejectHook: (error: unknown) => void = () => {}
+    let rejectHook: (error: TestWorkflowRunCancelledError) => void = () => {}
 
     const promise = new Promise<T>((resolve, reject) => {
       // SAFETY: Hook payloads are caller-typed on the platform (`createHook<T>`).

@@ -1,4 +1,5 @@
 import { Effect, Layer, Match, Predicate } from 'effect'
+import type * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -30,8 +31,7 @@ export type TelegramToolConfig = {
   readonly chatId: string
 }
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const schemaErrorToMessage = (error: Schema.SchemaError) => String(error)
 
 const makeToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({ tool: telegramToolName, message, cause })
@@ -172,7 +172,7 @@ export const makeAppTelegramToolModule = (
         isEnabled: context =>
           Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
         invalidParamsMessage: error =>
-          `Invalid Telegram message arguments: ${unknownToMessage(error)}`,
+          `Invalid Telegram message arguments: ${schemaErrorToMessage(error)}`,
         execute: ({ call, params }) =>
           TelegramConnector.invoke({
             integration,
@@ -200,10 +200,8 @@ export const makeAppTelegramToolModule = (
                 Match.exhaustive
               )
             ),
-            Effect.mapError(error =>
-              error instanceof ToolError
-                ? error
-                : makeToolError(`Telegram send failed: ${unknownToMessage(error)}`, 'execution')
+            Effect.mapError((error: ConnectorError) =>
+              makeToolError(`Telegram send failed: ${error.message}`, 'execution')
             )
           )
       })

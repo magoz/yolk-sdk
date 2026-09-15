@@ -2,6 +2,7 @@ import { Context, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ConnectorError } from './error.ts'
 import type { ConnectorIntegration } from './integration.ts'
+import { PortableMetadata } from './portable-metadata.ts'
 
 export const CredentialKind = Schema.Literals([
   'api_key',
@@ -21,7 +22,7 @@ export class CredentialSlot extends Schema.Class<CredentialSlot>('CredentialSlot
 export class CredentialBinding extends Schema.Class<CredentialBinding>('CredentialBinding')({
   slotId: Schema.String,
   credentialRef: Schema.String,
-  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+  metadata: Schema.optionalKey(PortableMetadata)
 }) {}
 
 export class ApiKeyCredential extends Schema.TaggedClass<ApiKeyCredential>()('ApiKeyCredential', {
@@ -84,8 +85,14 @@ export class CredentialResolver extends Context.Service<
 export const makeCredentialBinding = (input: {
   readonly slotId: string
   readonly credentialRef: string
-  readonly metadata?: Readonly<Record<string, unknown>>
-}) => CredentialBinding.make(input)
+  readonly metadata?: PortableMetadata
+}) => {
+  const fields = { slotId: input.slotId, credentialRef: input.credentialRef }
+
+  if (input.metadata === undefined) return CredentialBinding.make(fields)
+
+  return CredentialBinding.make({ ...fields, metadata: input.metadata })
+}
 
 export const findCredentialBinding = (integration: ConnectorIntegration, slot: CredentialSlot) =>
   Option.fromNullishOr(integration.credentialBindings.find(binding => binding.slotId === slot.id))

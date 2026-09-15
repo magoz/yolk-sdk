@@ -15,6 +15,12 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 | `retryWorkflowStep`       | retry helper for Workflow callback promises         |
 | `settleWorkflowStep`      | convert a promise into `Success` / `Failure` result |
 
+`WorkflowStepResult` and `VercelAgentWorkflowRunResult` are both types and constructor values
+on the package root and `@yolk-sdk/vercel-workflows/workflow`. Use
+`WorkflowStepResult.Success({ value })` / `.Failure({ error })` for settled steps and
+`VercelAgentWorkflowRunResult.Completed({ turns, state })` or its failure variants for terminal results.
+Their `$is(tag)` helpers narrow to a specific variant.
+
 ## Independent child helpers
 
 Both helpers are exported from root and `./workflow` and run in Workflow orchestration, not inside
@@ -174,6 +180,19 @@ Import from `@yolk-sdk/vercel-workflows/testing`.
 | `AwaitInputFailed`    | HITL hook failed or missing handler |
 | `CloseStreamFailed`   | close callback failed               |
 | `MaxTurnsExceeded`    | exceeded `maxTurns`                 |
+
+## Harness constructors
+
+The separate `@yolk-sdk/harness` package exposes lifecycle model companions:
+
+| Subpath                     | Constructor values                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| `@yolk-sdk/harness/inbox`   | `HitlDecision`, `PauseDecision`, `RecoveryAttempt`, `RecoveryAdmission`, `DrainBegin` |
+| `@yolk-sdk/harness/driver`  | `StopDecision`                                                                        |
+| `@yolk-sdk/harness/outcome` | `OverflowCompactionResult`, `StepOutcome`, `HitlMatch`                                |
+
+These are `Data.taggedEnum` constructors for the corresponding public types. They construct
+receipt values, not lifecycle operations: hosts still use Driver/Inbox services to perform work.
 
 ## Terminal helper results
 

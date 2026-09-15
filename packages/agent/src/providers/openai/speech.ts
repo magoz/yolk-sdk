@@ -34,7 +34,7 @@ const defaultTranscriptionModel = 'gpt-4o-mini-transcribe'
 
 const defaultVoice = 'alloy'
 
-const audioMimeTypes: Readonly<Record<string, string>> = {
+const audioMimeTypes = {
   mp3: 'audio/mpeg',
   opus: 'audio/opus',
   aac: 'audio/aac',
@@ -45,7 +45,7 @@ const audioMimeTypes: Readonly<Record<string, string>> = {
 
 // OpenAI transcription detects the container format from the uploaded file
 // extension, so the multipart filename must match the audio MIME type.
-const transcriptionFileExtensions: Readonly<Record<string, string>> = {
+const transcriptionFileExtensions = {
   'audio/mpeg': 'mp3',
   'audio/mp3': 'mp3',
   'audio/mp4': 'mp4',
@@ -60,9 +60,15 @@ const transcriptionFileExtensions: Readonly<Record<string, string>> = {
   'audio/mpga': 'mpga'
 }
 
+const inheritedStringFallback = (
+  table: Readonly<Record<string, string>>,
+  key: string,
+  fallback: string
+) => table[key] ?? fallback
+
 const transcriptionFilename = (mimeType: string) => {
   const bareMimeType = mimeType.split(';')[0]?.trim().toLowerCase() ?? mimeType
-  const extension = transcriptionFileExtensions[bareMimeType] ?? 'mp3'
+  const extension = inheritedStringFallback(transcriptionFileExtensions, bareMimeType, 'mp3')
 
   return `audio.${extension}`
 }
@@ -174,7 +180,11 @@ export const makeOpenAiSpeechSynthesizerLayer = (config: OpenAiSpeechConfig) =>
 
             return {
               audio: new Uint8Array(audio),
-              mimeType: audioMimeTypes[outputFormat] ?? 'application/octet-stream'
+              mimeType: inheritedStringFallback(
+                audioMimeTypes,
+                outputFormat,
+                'application/octet-stream'
+              )
             }
           })
       })

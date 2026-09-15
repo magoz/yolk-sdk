@@ -3,7 +3,9 @@ export {
   noWorkflowStepRetry,
   retryWorkflowStep,
   runVercelAgentWorkflow,
-  settleWorkflowStep
+  settleWorkflowStep,
+  VercelAgentWorkflowRunResult,
+  WorkflowStepResult
 } from './workflow-loop.ts'
 
 export {
@@ -21,11 +23,9 @@ export type {
   VercelAgentWorkflowLoopConfig,
   VercelAgentWorkflowModelStepInput,
   VercelAgentWorkflowModelStepResult,
-  VercelAgentWorkflowRunResult,
   VercelAgentWorkflowStepRetryPolicy,
   VercelAgentWorkflowToolBatchStepInput,
-  VercelAgentWorkflowToolBatchStepResult,
-  WorkflowStepResult
+  VercelAgentWorkflowToolBatchStepResult
 } from './workflow-loop.ts'
 
 export type {

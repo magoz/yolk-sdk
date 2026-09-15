@@ -6,7 +6,9 @@ import {
   contentText,
   type AgentMessage,
   type AssistantPart,
-  type Content
+  type Content,
+  type HostToolCallPart,
+  type ProviderToolCallPart
 } from '@yolk-sdk/agent/protocol'
 
 export type PreviewSummaryMessageOptions = {
@@ -57,7 +59,7 @@ const isNonEmptyString = (value: string) => value.length > 0
 
 const formatToolCallForCompaction = (
   label: string,
-  part: { readonly call: { readonly name: string; readonly params: unknown } },
+  part: HostToolCallPart | ProviderToolCallPart,
   options: CompactionMessageFormatOptions
 ) => `${label}: ${part.call.name}(${jsonPreview(part.call.params, options)})`
 

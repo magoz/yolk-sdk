@@ -5,6 +5,7 @@ import {
   ImagePart,
   TextPart,
   ToolDef,
+  ToolJsonSchemaObject,
   ToolResult,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
@@ -72,7 +73,7 @@ export const McpTool = Schema.Struct({
   name: Schema.String,
   title: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
-  inputSchema: Schema.optional(Schema.Unknown),
+  inputSchema: Schema.optional(ToolJsonSchemaObject),
   outputSchema: Schema.optional(Schema.Unknown),
   annotations: Schema.optional(McpToolAnnotations)
 })
@@ -121,47 +122,77 @@ export const ToolCallResult = Schema.Struct({
 
 export type ToolCallResult = typeof ToolCallResult.Type
 
-type JsonRpcRequestFields = {
-  readonly jsonrpc: '2.0'
-  readonly id: string | number
-  readonly method: string
-  params?: JsonRpcRequest['params']
-}
+export const InitializeClientInfo = Schema.Struct({
+  name: Schema.String,
+  version: Schema.String
+})
+
+export type InitializeClientInfo = typeof InitializeClientInfo.Type
+
+export const InitializeParams = Schema.Struct({
+  protocolVersion: Schema.String,
+  capabilities: Schema.Record(Schema.String, Schema.Unknown),
+  clientInfo: InitializeClientInfo
+})
+
+export type InitializeParams = typeof InitializeParams.Type
+
+export const InitializedNotification = Schema.Struct({
+  jsonrpc: Schema.Literal('2.0'),
+  method: Schema.Literal('notifications/initialized')
+})
+
+export type InitializedNotification = typeof InitializedNotification.Type
+
+export const ToolsCallParams = Schema.Struct({
+  name: Schema.String,
+  arguments: Schema.optional(Schema.Unknown)
+})
+
+export type ToolsCallParams = typeof ToolsCallParams.Type
 
 export const makeJsonRpcRequest = (input: {
   readonly id: string | number
   readonly method: string
   readonly params?: unknown
 }): JsonRpcRequest => {
-  const request: JsonRpcRequestFields = {
-    jsonrpc: '2.0',
-    id: input.id,
-    method: input.method
-  }
+  const id = input.id
+  const method = input.method
 
   if (input.params !== undefined) {
-    request.params = input.params
+    return JsonRpcRequest.make({
+      jsonrpc: '2.0',
+      id,
+      method,
+      params: input.params
+    })
   }
 
-  return request
+  return JsonRpcRequest.make({
+    jsonrpc: '2.0',
+    id,
+    method
+  })
 }
 
-export const makeInitializedNotification = (): JsonRpcNotification => ({
-  jsonrpc: '2.0',
-  method: 'notifications/initialized'
-})
+export const makeInitializedNotification = (): JsonRpcNotification =>
+  InitializedNotification.make({
+    jsonrpc: '2.0',
+    method: 'notifications/initialized'
+  })
 
 export const makeInitializeParams = (input: {
   readonly name: string
   readonly version: string
-}) => ({
-  protocolVersion: legacyMcpProtocolVersion,
-  capabilities: {},
-  clientInfo: {
-    name: input.name,
-    version: input.version
-  }
-})
+}): InitializeParams =>
+  InitializeParams.make({
+    protocolVersion: legacyMcpProtocolVersion,
+    capabilities: {},
+    clientInfo: InitializeClientInfo.make({
+      name: input.name,
+      version: input.version
+    })
+  })
 
 export const jsonRpcErrorToMcpError = (server: string, error: JsonRpcErrorObject) =>
   new McpError({

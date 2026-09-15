@@ -163,6 +163,12 @@ host-owned recovery handle. See the [callback signatures](../api-reference/workf
 
 ## Run result tags
 
+`runVercelAgentWorkflow` returns `VercelAgentWorkflowRunResult` values from
+`@yolk-sdk/vercel-workflows` (`Data.taggedEnum` plain objects, `_tag` last). Construct or match
+with `VercelAgentWorkflowRunResult.Completed({ turns, state })` and siblings, or
+`VercelAgentWorkflowRunResult.$is('Completed')`. `settleWorkflowStep` returns
+`WorkflowStepResult.Success({ value })` / `WorkflowStepResult.Failure({ error })`.
+
 | Tag                   | Meaning                                                   |
 | --------------------- | --------------------------------------------------------- |
 | `Completed`           | model ended and `closeStream` succeeded                   |
@@ -216,6 +222,11 @@ const result =
 The helper never writes success terminal before `commit` succeeds, cannot infer finality from the
 event tag, and never closes the writer. It may guard a resumable `AgentAwaitingInput` persistence
 barrier; release the writer lock but leave the Workflow stream open in that case.
+
+`writeCommitError` is typed as `(error: CommitError) => …`, where `CommitError` is the existing
+generic on `commit`. The producer is `Effect.matchEffect` `onFailure`; defects do not enter the
+callback. `CommitThenWriteTerminalEventResult` still carries `commitError` and `error` as
+`unknown`. Existing `(error: unknown) => …` callbacks remain assignable.
 
 `runVercelAgentWorkflow` invokes `closeStream` only after a model step returns `done: true`.
 Failure paths call `writeError` and return without invoking `closeStream`; `writeError` must write

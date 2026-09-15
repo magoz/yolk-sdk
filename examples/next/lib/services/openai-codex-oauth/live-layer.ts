@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, Option, Predicate } from 'effect'
+import { Clock, Context, Data, Effect, Layer, Option } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -18,6 +18,10 @@ import {
 } from '@yolk-sdk/agent/providers/openai/codex'
 import { OpenAiCodexOAuthError } from './errors'
 import {
+  OpenAiCodexAccountIdClaimSchema,
+  OpenAiCodexAuthClaimSchema,
+  OpenAiCodexOrganizationsClaimSchema,
+  OpenAiCodexOrganizationIdClaimSchema,
   OpenAiCodexDeviceAuthTokenResponseSchema,
   OpenAiCodexDeviceAuthUserCodeResponseSchema,
   OpenAiCodexTokenResponseSchema,
@@ -26,6 +30,13 @@ import {
   type OpenAiCodexOAuthToken,
   type OpenAiCodexTokenResponse
 } from './schemas'
+
+export type OpenAiCodexDevicePollResult =
+  | { readonly _tag: 'Pending' }
+  | { readonly _tag: 'Failed'; readonly message: string }
+  | { readonly _tag: 'Authorized'; readonly deviceToken: OpenAiCodexDeviceAuthTokenResponse }
+
+export const OpenAiCodexDevicePollResult = Data.taggedEnum<OpenAiCodexDevicePollResult>()
 
 export const OPENAI_CODEX_CLIENT_ID = openAiCodexClientId
 
@@ -41,56 +52,45 @@ export const OPENAI_TOKEN_ENDPOINT = openAiCodexTokenEndpoint
 
 export const OPENAI_CODEX_REFRESH_BUFFER_MS = openAiCodexRefreshBufferMs
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Predicate.isObjectOrArray(value) && value !== null
-
-const parseJwtPayload = (token: string): unknown | undefined => {
+export const extractAccountId = (token: string): string | undefined => {
   const parts = token.split('.')
-  const payload = parts[1]
+  const encodedPayload = parts[1]
 
-  if (parts.length !== 3 || payload === undefined) {
-    return undefined
+  const payload =
+    parts.length !== 3 || encodedPayload === undefined
+      ? undefined
+      : Option.getOrUndefined(
+          Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
+            Buffer.from(encodedPayload, 'base64url').toString()
+          )
+        )
+
+  const direct = Schema.decodeUnknownOption(OpenAiCodexAccountIdClaimSchema)(payload)
+
+  if (Option.isSome(direct)) {
+    return direct.value.chatgpt_account_id
   }
 
-  return Option.getOrUndefined(
-    Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
-      Buffer.from(payload, 'base64url').toString()
-    )
-  )
-}
+  const auth = Schema.decodeUnknownOption(OpenAiCodexAuthClaimSchema)(payload)
 
-const accountIdFromPayload = (payload: unknown): string | undefined => {
-  if (!isRecord(payload)) {
-    return undefined
+  if (Option.isSome(auth)) {
+    return auth.value['https://api.openai.com/auth'].chatgpt_account_id
   }
 
-  const direct = payload.chatgpt_account_id
+  const organizations = Schema.decodeUnknownOption(OpenAiCodexOrganizationsClaimSchema)(payload)
 
-  if (Predicate.isString(direct)) {
-    return direct
-  }
+  if (Option.isSome(organizations)) {
+    for (const organization of organizations.value.organizations) {
+      const claim = Schema.decodeUnknownOption(OpenAiCodexOrganizationIdClaimSchema)(organization)
 
-  const auth = payload['https://api.openai.com/auth']
-
-  if (isRecord(auth) && Predicate.isString(auth.chatgpt_account_id)) {
-    return auth.chatgpt_account_id
-  }
-
-  const organizations = payload.organizations
-
-  if (Array.isArray(organizations)) {
-    for (const organization of organizations) {
-      if (isRecord(organization) && Predicate.isString(organization.id)) {
-        return organization.id
+      if (Option.isSome(claim)) {
+        return claim.value.id
       }
     }
   }
 
   return undefined
 }
-
-export const extractAccountId = (token: string): string | undefined =>
-  accountIdFromPayload(parseJwtPayload(token))
 
 const extractAccountIdFromTokens = (tokens: OpenAiCodexTokenResponse): string | undefined =>
   (tokens.id_token === undefined ? undefined : extractAccountId(tokens.id_token)) ??
@@ -262,16 +262,15 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
         )
 
         if (response.status === 403 || response.status === 404) {
-          return { _tag: 'Pending' as const }
+          return OpenAiCodexDevicePollResult.Pending()
         }
 
         if (!isOkStatus(response.status)) {
           const text = yield* readErrorBody(response, 'device token poll')
 
-          return {
-            _tag: 'Failed' as const,
+          return OpenAiCodexDevicePollResult.Failed({
             message: `Device authorization failed: ${response.status} ${text}`
-          }
+          })
         }
 
         const deviceToken = yield* parseResponseJson(
@@ -280,7 +279,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           'device token poll'
         )
 
-        return { _tag: 'Authorized' as const, deviceToken }
+        return OpenAiCodexDevicePollResult.Authorized({ deviceToken })
       }).pipe(Effect.withSpan('OpenAiCodexOAuth.pollDeviceFlow'))
 
     const exchangeDeviceToken = (deviceToken: OpenAiCodexDeviceAuthTokenResponse) =>

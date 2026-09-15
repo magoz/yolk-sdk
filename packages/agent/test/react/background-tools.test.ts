@@ -37,6 +37,7 @@ import {
   isActiveToolRun
 } from '../../src/client/state.ts'
 import {
+  AgentChatAction,
   applyAgentEventToChatMessages,
   reduceAgentChatState,
   initialAgentChatState,
@@ -146,13 +147,13 @@ describe('background acceptance projection', () => {
 it('preserves the whole accepted call across all active replays, end and a new turn', () => {
   const changed = ToolCall.make({ ...call, name: 'replayed-name', params: { changed: true } })
 
-  let reducerState = reduceAgentChatState(initialAgentChatState, {
-    _tag: 'Event',
-    event: ToolExecutionAccepted.make({ call, result })
-  })
+  let reducerState = reduceAgentChatState(
+    initialAgentChatState,
+    AgentChatAction.Event({ event: ToolExecutionAccepted.make({ call, result }) })
+  )
 
   const apply = (event: AgentEvent) => {
-    reducerState = reduceAgentChatState(reducerState, { _tag: 'Event', event })
+    reducerState = reduceAgentChatState(reducerState, AgentChatAction.Event({ event }))
 
     return reducerState.chatMessages
   }
@@ -254,23 +255,25 @@ it('gives a persisted acceptance precedence over stale active client runs on hyd
 
 it('keeps active siblings in the same assistant message when an accepted call is replayed', () => {
   const sibling = ToolCall.make({ ...call, id: 'sibling' })
-  let state = reduceAgentChatState(initialAgentChatState, { _tag: 'Event', event: started })
-  state = reduceAgentChatState(state, {
-    _tag: 'Event',
-    event: ToolExecutionStarted.make({ call: sibling })
-  })
-  state = reduceAgentChatState(state, { _tag: 'Event', event: accepted })
+  let state = reduceAgentChatState(initialAgentChatState, AgentChatAction.Event({ event: started }))
+  state = reduceAgentChatState(
+    state,
+    AgentChatAction.Event({ event: ToolExecutionStarted.make({ call: sibling }) })
+  )
+  state = reduceAgentChatState(state, AgentChatAction.Event({ event: accepted }))
   const original = state.chatMessages
-  state = reduceAgentChatState(state, {
-    _tag: 'Event',
-    event: AssistantMessageEvent.make({
-      message: AssistantAgentMessage.make({
-        parts: [
-          HostToolCallPart.make({ call: ToolCall.make({ ...call, params: { changed: true } }) })
-        ]
+  state = reduceAgentChatState(
+    state,
+    AgentChatAction.Event({
+      event: AssistantMessageEvent.make({
+        message: AssistantAgentMessage.make({
+          parts: [
+            HostToolCallPart.make({ call: ToolCall.make({ ...call, params: { changed: true } }) })
+          ]
+        })
       })
     })
-  })
+  )
   expect(state.chatMessages).toEqual(original)
   expect(getActiveChatToolParts(state.chatMessages)).toMatchObject([{ call: sibling }])
 })
@@ -285,7 +288,7 @@ it('preserves accepted calls and active siblings through mixed assistant replays
       : [started, ToolExecutionStarted.make({ call: sibling }), accepted]
 
     let state = events.reduce(
-      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
+      (current, event) => reduceAgentChatState(current, AgentChatAction.Event({ event })),
       initialAgentChatState
     )
 
@@ -298,10 +301,12 @@ it('preserves accepted calls and active siblings through mixed assistant replays
       [HostToolCallPart.make({ call: sibling })]
     ]) {
       for (let retry = 0; retry < 2; retry++) {
-        state = reduceAgentChatState(state, {
-          _tag: 'Event',
-          event: AssistantMessageEvent.make({ message: AssistantAgentMessage.make({ parts }) })
-        })
+        state = reduceAgentChatState(
+          state,
+          AgentChatAction.Event({
+            event: AssistantMessageEvent.make({ message: AssistantAgentMessage.make({ parts }) })
+          })
+        )
 
         const calls = state.chatMessages
           .flatMap(message => message.parts)
@@ -339,7 +344,8 @@ it('hydrates accepted receipts through the public hook reducer and fences subseq
   const transcript = [assistant, acknowledgement]
 
   let state = transcript.reduce(
-    (current, message) => reduceAgentChatState(current, { _tag: 'HydrateMessage', message }),
+    (current, message) =>
+      reduceAgentChatState(current, AgentChatAction.HydrateMessage({ message })),
     initialAgentChatState
   )
 
@@ -364,11 +370,11 @@ it('hydrates accepted receipts through the public hook reducer and fences subseq
     AssistantMessageEvent.make({ message: assistant }),
     ToolExecutionAccepted.make({ call, result })
   ]) {
-    state = reduceAgentChatState(state, { _tag: 'Event', event })
+    state = reduceAgentChatState(state, AgentChatAction.Event({ event }))
     assertSettled()
   }
 
-  state = reduceAgentChatState(state, { _tag: 'HydrateMessage', message: acknowledgement })
+  state = reduceAgentChatState(state, AgentChatAction.HydrateMessage({ message: acknowledgement }))
   assertSettled()
 })
 

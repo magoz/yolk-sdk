@@ -105,34 +105,42 @@ export const KnowledgeChunkSchema = Schema.Struct({
 
 export type KnowledgeChunk = Schema.Schema.Type<typeof KnowledgeChunkSchema>
 
+export const KnowledgeSearchScope = Schema.TaggedStruct('KnowledgeScope', {
+  id: NonEmptyTrimmedString
+})
+
+export const KnowledgeSearchScopes = Schema.TaggedStruct('KnowledgeScopes', {
+  ids: Schema.NonEmptyArray(NonEmptyTrimmedString)
+})
+
 export const KnowledgeSearchScopeSchema = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal('KnowledgeScope'), id: NonEmptyTrimmedString }),
-  Schema.Struct({
-    _tag: Schema.Literal('KnowledgeScopes'),
-    ids: Schema.NonEmptyArray(NonEmptyTrimmedString)
-  })
+  KnowledgeSearchScope,
+  KnowledgeSearchScopes
 ])
 
-export type KnowledgeSearchScope = Schema.Schema.Type<typeof KnowledgeSearchScopeSchema>
+export type KnowledgeSearchScope = typeof KnowledgeSearchScopeSchema.Type
+
+export const KnowledgeFileSource = Schema.TaggedStruct('File', {
+  ref: NonEmptyTrimmedString,
+  name: Schema.optional(NonEmptyTrimmedString),
+  mediaType: Schema.optional(NonEmptyTrimmedString)
+})
+
+export const KnowledgeUrlSource = Schema.TaggedStruct('Url', {
+  url: NonEmptyTrimmedString
+})
+
+export const KnowledgeTextSource = Schema.TaggedStruct('Text', {
+  label: Schema.optional(NonEmptyTrimmedString)
+})
 
 export const KnowledgeSourceSchema = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.Literal('File'),
-    ref: NonEmptyTrimmedString,
-    name: Schema.optional(NonEmptyTrimmedString),
-    mediaType: Schema.optional(NonEmptyTrimmedString)
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal('Url'),
-    url: NonEmptyTrimmedString
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal('Text'),
-    label: Schema.optional(NonEmptyTrimmedString)
-  })
+  KnowledgeFileSource,
+  KnowledgeUrlSource,
+  KnowledgeTextSource
 ])
 
-export type KnowledgeSource = Schema.Schema.Type<typeof KnowledgeSourceSchema>
+export type KnowledgeSource = typeof KnowledgeSourceSchema.Type
 
 export const IndexedKnowledgeDocumentSchema = Schema.Struct({
   id: NonEmptyTrimmedString,

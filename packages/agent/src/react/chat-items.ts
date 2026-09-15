@@ -22,32 +22,6 @@ export const ToolDurationKnown = Schema.TaggedStruct('Known', {
 
 export const ToolDurationUnknown = Schema.TaggedStruct('Unknown', {})
 
-const AgentChatItemReasoning = Schema.TaggedStruct('Reasoning', {
-  id: Schema.String,
-  messageId: Schema.String,
-  text: Schema.String
-})
-
-const AgentChatItemUserDraft = Schema.TaggedStruct('UserDraft', {
-  id: Schema.String,
-  text: Schema.String
-})
-
-const AgentChatItemAssistantDraft = Schema.TaggedStruct('AssistantDraft', {
-  id: Schema.String,
-  text: Schema.String
-})
-
-const AgentChatItemAssistantStatus = Schema.TaggedStruct('AssistantStatus', {
-  id: Schema.String,
-  label: Schema.String
-})
-
-const AgentChatItemError = Schema.TaggedStruct('Error', {
-  id: Schema.String,
-  message: Schema.String
-})
-
 type ToolRunNoTiming = {
   readonly duration: { readonly _tag: 'Unknown' }
   readonly startedAtMs?: undefined
@@ -290,14 +264,14 @@ const textItemFromPart = (
     switch (message.role) {
       case 'user':
         return Option.some(
-          AgentChatItemUserDraft.make({
+          AgentChatItem.UserDraft({
             id: part.id,
             text: contentText(part.content)
           })
         )
       case 'assistant':
         return Option.some(
-          AgentChatItemAssistantDraft.make({
+          AgentChatItem.AssistantDraft({
             id: part.id,
             text: contentText(part.content)
           })
@@ -338,7 +312,7 @@ const itemFromPart = (
     Match.tag('Text', current => textItemFromPart(message, current)),
     Match.tag('Reasoning', current =>
       Option.some(
-        AgentChatItemReasoning.make({
+        AgentChatItem.Reasoning({
           id: current.id,
           messageId: message.id,
           text: current.text
@@ -368,7 +342,7 @@ const itemFromPart = (
       )
     ),
     Match.tag('Error', current =>
-      Option.some(AgentChatItemError.make({ id: current.id, message: current.message }))
+      Option.some(AgentChatItem.Error({ id: current.id, message: current.message }))
     ),
     Match.exhaustive
   )
@@ -392,7 +366,7 @@ export const buildAgentChatItems = ({
 
     return [
       ...items,
-      AgentChatItemAssistantStatus.make({
+      AgentChatItem.AssistantStatus({
         id: 'assistant-status',
         label: activeStatusLabel({ messages, activeToolLabel })
       })

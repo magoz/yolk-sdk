@@ -16,6 +16,13 @@ import {
   zeroAgentUsage,
   type AgentEvent
 } from '@yolk-sdk/agent/protocol'
+import {
+  AgentChatDeleteTurnResult,
+  AgentChatEditUserMessageResult,
+  AgentChatHitlResponseResult,
+  AgentChatRegenerateResult,
+  AgentChatSubmitResult
+} from '../../src/react/chat-actions.ts'
 import { TurnDeleted, UserMessageEdited } from '../../src/react/chat-session-events.ts'
 import {
   useAgentChat,
@@ -113,7 +120,14 @@ describe('useAgentChat', () => {
 
     await act(async () => {
       const result = hook.value.submitText(' hello ')
-      expect(result._tag).toBe('Submitted')
+      const message = UserMessage.make({ content: 'hello' })
+      expect(result).toEqual(
+        AgentChatSubmitResult.Submitted({
+          content: 'hello',
+          message,
+          messages: [message]
+        })
+      )
       await tick()
     })
     await waitFor(() => hook.value.status === 'done')
@@ -141,7 +155,7 @@ describe('useAgentChat', () => {
     const hook = renderUseAgentChat({ sessionId: 'session-1', transport })
 
     act(() => {
-      expect(hook.value.submitText('   ')).toEqual({ _tag: 'Ignored' })
+      expect(hook.value.submitText('   ')).toEqual(AgentChatSubmitResult.Ignored())
     })
 
     expect(requests).toEqual([])
@@ -168,6 +182,7 @@ describe('useAgentChat', () => {
       await tick()
     })
     expect(hook.value.status).toBe('running')
+    expect(hook.value.deleteTurn('message-0-user')).toEqual(AgentChatDeleteTurnResult.Ignored())
 
     await act(async () => {
       hook.value.stop()
@@ -176,6 +191,56 @@ describe('useAgentChat', () => {
     await waitFor(() => hook.value.status === 'aborted')
 
     expect(hook.value.error).toBeNull()
+
+    hook.unmount()
+  })
+
+  it('reports injected transport failures without treating them as abort', async () => {
+    const messages: Array<string> = []
+
+    const transport: AgentChatTransport = async function* () {
+      throw new Error('upstream failed')
+    }
+
+    const hook = renderUseAgentChat({
+      sessionId: 'session-1',
+      transport,
+      onError: message => messages.push(message)
+    })
+
+    await act(async () => {
+      hook.value.submitText('hello')
+      await tick()
+    })
+    await waitFor(() => hook.value.status === 'error')
+
+    expect(hook.value.error).toBe('upstream failed')
+    expect(messages).toEqual(['upstream failed'])
+
+    hook.unmount()
+  })
+
+  it('uses a fixed message when the transport rejects with a non-Error value', async () => {
+    const messages: Array<string> = []
+
+    const transport: AgentChatTransport = async function* () {
+      throw 'forged'
+    }
+
+    const hook = renderUseAgentChat({
+      sessionId: 'session-1',
+      transport,
+      onError: message => messages.push(message)
+    })
+
+    await act(async () => {
+      hook.value.submitText('hello')
+      await tick()
+    })
+    await waitFor(() => hook.value.status === 'error')
+
+    expect(hook.value.error).toBe('Agent request failed')
+    expect(messages).toEqual(['Agent request failed'])
 
     hook.unmount()
   })
@@ -227,7 +292,12 @@ describe('useAgentChat', () => {
 
     await act(async () => {
       const result = hook.value.submitToolApprovalResponse(approvalResponse)
-      expect(result._tag).toBe('Submitted')
+      expect(result).toEqual(
+        AgentChatHitlResponseResult.Submitted({
+          response: approvalResponse,
+          messages: [UserMessage.make({ content: 'weather' }), assistant]
+        })
+      )
       await tick()
     })
     await waitFor(() => hook.value.status === 'done')
@@ -283,11 +353,13 @@ describe('useAgentChat', () => {
     expect(hook.value.state.sessionEvents).toEqual([])
 
     act(() => {
-      expect(hook.value.deleteTurn('message-1-assistant')).toEqual({
-        _tag: 'Deleted',
-        turnStartMessageId: 'message-0-user',
-        deletedMessageIds: ['message-0-user', 'message-1-assistant']
-      })
+      expect(hook.value.deleteTurn('missing')).toEqual(AgentChatDeleteTurnResult.Ignored())
+      expect(hook.value.deleteTurn('message-1-assistant')).toEqual(
+        AgentChatDeleteTurnResult.Deleted({
+          turnStartMessageId: 'message-0-user',
+          deletedMessageIds: ['message-0-user', 'message-1-assistant']
+        })
+      )
     })
 
     expect(requests).toEqual([])
@@ -322,7 +394,12 @@ describe('useAgentChat', () => {
 
     await act(async () => {
       const result = hook.value.regenerateFrom('message-1-assistant')
-      expect(result._tag).toBe('Regenerated')
+      expect(result).toEqual(
+        AgentChatRegenerateResult.Regenerated({
+          messageId: 'message-1-assistant',
+          messages: [UserMessage.make({ content: 'one' })]
+        })
+      )
       await tick()
     })
     await waitFor(() => hook.value.status === 'done')
@@ -359,7 +436,16 @@ describe('useAgentChat', () => {
 
     await act(async () => {
       const result = hook.value.editUserMessage('message-2-user', 'updated')
-      expect(result._tag).toBe('Edited')
+      expect(result).toEqual(
+        AgentChatEditUserMessageResult.Edited({
+          messageId: 'message-2-user',
+          messages: [
+            UserMessage.make({ content: 'one' }),
+            AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+            UserMessage.make({ content: 'updated' })
+          ]
+        })
+      )
       await tick()
     })
     await waitFor(() => hook.value.status === 'done')
@@ -383,6 +469,55 @@ describe('useAgentChat', () => {
         keptMessageIds: ['message-0-user', 'message-1-assistant', 'message-2-user']
       })
     )
+
+    hook.unmount()
+  })
+
+  it('ignores missing, non-user, empty, and idle HITL mutations', () => {
+    const requests: Array<AgentChatTransportRequest> = []
+
+    const transport: AgentChatTransport = async function* (request) {
+      requests.push(request)
+    }
+
+    const hook = renderUseAgentChat({
+      sessionId: 'session-1',
+      transport,
+      initialMessages: [
+        UserMessage.make({ content: 'one' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] })
+      ]
+    })
+
+    const approvalResponse = ToolApprovalResponse.make({
+      requestId: 'approval:call_1',
+      toolCallId: 'call_1',
+      decision: 'approved',
+      source: 'user'
+    })
+
+    act(() => {
+      expect(hook.value.regenerateFrom('missing')).toEqual(AgentChatRegenerateResult.Ignored())
+      expect(hook.value.editUserMessage('missing', 'updated')).toEqual(
+        AgentChatEditUserMessageResult.Ignored()
+      )
+      expect(hook.value.editUserMessage('message-1-assistant', 'updated')).toEqual(
+        AgentChatEditUserMessageResult.Ignored()
+      )
+      expect(hook.value.editUserMessage('message-0-user', '')).toEqual(
+        AgentChatEditUserMessageResult.Ignored()
+      )
+      expect(hook.value.submitToolApprovalResponse(approvalResponse)).toEqual(
+        AgentChatHitlResponseResult.Ignored()
+      )
+    })
+
+    expect(requests).toEqual([])
+    expect(hook.value.status).toBe('idle')
+    expect(hook.value.messages).toEqual([
+      UserMessage.make({ content: 'one' }),
+      AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] })
+    ])
 
     hook.unmount()
   })

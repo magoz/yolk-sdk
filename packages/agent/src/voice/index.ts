@@ -50,7 +50,11 @@ export {
 
 export { VoiceTransport, type VoiceTransportApi } from './transport.ts'
 
-export { makeWebSocketVoiceTransport, type WebSocketVoiceTransportOptions } from './websocket.ts'
+export {
+  makeWebSocketVoiceTransport,
+  webSocketVoiceTransportLayer,
+  type WebSocketVoiceTransportOptions
+} from './websocket.ts'
 
 export {
   speechResultToAudioPart,
@@ -69,6 +73,7 @@ export { type VoiceClientCodec } from './client-codec.ts'
 
 export {
   makeVoiceController,
+  VoiceController,
   type VoiceControllerApi,
   type VoiceControllerOptions
 } from './controller.ts'
@@ -96,9 +101,12 @@ export {
 
 export {
   makeVoiceEventOutbox,
+  VoiceEventOutbox,
   type VoiceEventOutboxApi,
   type VoiceEventOutboxOptions
 } from './outbox.ts'
+
+export { VoiceSession, type VoiceSessionApi, type VoiceSessionOptions } from './session.ts'
 
 export {
   dedupeStoredVoiceEvents,

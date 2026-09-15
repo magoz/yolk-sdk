@@ -62,8 +62,7 @@ const response = (
   bodyComplete = true
 ): ConnectorBinaryHttpResponse => ({ bytes, status, headers, bodyComplete })
 
-const metadata = (value: unknown = file) =>
-  response(new TextEncoder().encode(JSON.stringify(value)))
+const metadata = (json = JSON.stringify(file)) => response(new TextEncoder().encode(json))
 
 const redirect = (location: string, status = 302) =>
   response(new Uint8Array(), status, { Location: location })
@@ -150,7 +149,13 @@ describe('host-only OneDrive download', () => {
         if (candidate === undefined) return
 
         const h = host([
-          metadata({ ...file, '@microsoft.graph.downloadUrl': 'SIGNED-SECRET', raw: 'RAW-SECRET' }),
+          metadata(
+            JSON.stringify({
+              ...file,
+              '@microsoft.graph.downloadUrl': 'SIGNED-SECRET',
+              raw: 'RAW-SECRET'
+            })
+          ),
           response()
         ])
 
@@ -187,7 +192,7 @@ describe('host-only OneDrive download', () => {
   it.effect('supports /me and preserves unknown drive identity without inventing it', () =>
     Effect.gen(function* () {
       const h = host([
-        metadata({ id: 'id', name: 'empty', size: 0, file: {} }),
+        metadata(JSON.stringify({ id: 'id', name: 'empty', size: 0, file: {} })),
         response(new Uint8Array())
       ])
 
@@ -202,11 +207,13 @@ describe('host-only OneDrive download', () => {
   it.effect('resolves remoteItem into explicit SharePoint drive IDs before downloading', () =>
     Effect.gen(function* () {
       const h = host([
-        metadata({
-          id: 'shortcut',
-          name: 'shortcut',
-          remoteItem: { id: file.id, parentReference: file.parentReference }
-        }),
+        metadata(
+          JSON.stringify({
+            id: 'shortcut',
+            name: 'shortcut',
+            remoteItem: { id: file.id, parentReference: file.parentReference }
+          })
+        ),
         metadata(),
         response()
       ])
@@ -221,11 +228,13 @@ describe('host-only OneDrive download', () => {
   it.effect('rejects remote loops and incomplete targets', () =>
     Effect.gen(function* () {
       const loop = host([
-        metadata({
-          id: 'id',
-          name: 'loop',
-          remoteItem: { id: 'id', parentReference: { driveId: 'drive' } }
-        })
+        metadata(
+          JSON.stringify({
+            id: 'id',
+            name: 'loop',
+            remoteItem: { id: 'id', parentReference: { driveId: 'drive' } }
+          })
+        )
       ])
 
       expect(yield* loop.run({ itemId: 'id', driveId: 'drive' }).pipe(Effect.flip)).toMatchObject({
@@ -234,7 +243,7 @@ describe('host-only OneDrive download', () => {
       expect(loop.requests).toHaveLength(1)
 
       const incomplete = host([
-        metadata({ id: file.id, name: 'remote', remoteItem: { id: 'target' } })
+        metadata(JSON.stringify({ id: file.id, name: 'remote', remoteItem: { id: 'target' } }))
       ])
 
       expect(yield* incomplete.run().pipe(Effect.flip)).toMatchObject({
@@ -243,11 +252,13 @@ describe('host-only OneDrive download', () => {
 
       const chain = host(
         Array.from({ length: 5 }, (_, i) =>
-          metadata({
-            id: `id${i}`,
-            name: 'remote',
-            remoteItem: { id: `id${i + 1}`, parentReference: { driveId: 'drive' } }
-          })
+          metadata(
+            JSON.stringify({
+              id: `id${i}`,
+              name: 'remote',
+              remoteItem: { id: `id${i + 1}`, parentReference: { driveId: 'drive' } }
+            })
+          )
         )
       )
 
@@ -392,7 +403,11 @@ describe('host-only OneDrive download', () => {
     'propagates distinct host budgets and checks actual returned bytes, not metadata sizes',
     () =>
       Effect.gen(function* () {
-        const h = host([metadata({ ...file, size: 0 }), response(new Uint8Array(33))])
+        const h = host([
+          metadata(JSON.stringify({ ...file, size: 0 })),
+          response(new Uint8Array(33))
+        ])
+
         expect(yield* h.run().pipe(Effect.flip)).toMatchObject({ code: 'response_too_large' })
         expect(h.requests.map(r => [r.maxBytes, r.maxErrorBodyBytes])).toEqual([
           [4096, 64],
@@ -402,7 +417,7 @@ describe('host-only OneDrive download', () => {
         expect(yield* oversizedMetadata.run().pipe(Effect.flip)).toMatchObject({
           code: 'response_too_large'
         })
-        const hint = host([metadata({ ...file, size: 33 })])
+        const hint = host([metadata(JSON.stringify({ ...file, size: 33 }))])
         expect(yield* hint.run().pipe(Effect.flip)).toMatchObject({ code: 'response_too_large' })
         expect(hint.requests).toHaveLength(1)
         const errorBody = host([response(new Uint8Array(65), 403)])
@@ -484,7 +499,7 @@ describe('host-only OneDrive download', () => {
         { id: file.id, name: 'package' },
         { ...file, folder: {} }
       ]) {
-        const h = host([metadata(item)])
+        const h = host([metadata(JSON.stringify(item))])
         expect(yield* h.run().pipe(Effect.flip)).toMatchObject({ code: 'not_a_file' })
         expect(h.requests).toHaveLength(1)
       }
@@ -549,7 +564,12 @@ describe('host-only OneDrive download', () => {
         code: 'invalid_input'
       })
       expect(invalid.requests).toHaveLength(0)
-      const h = host([metadata({ id: '%2e%2e', name: 'opaque', file: {} }), response()])
+
+      const h = host([
+        metadata(JSON.stringify({ id: '%2e%2e', name: 'opaque', file: {} })),
+        response()
+      ])
+
       yield* h.run({ itemId: '%2e%2e', driveId: '%2e' })
       expect(h.requests[1]?.url).toContain('/drives/%252e/items/%252e%252e/content')
     })

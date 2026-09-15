@@ -3,6 +3,8 @@ import {
   runVercelAgentWorkflow,
   retryWorkflowStep,
   settleWorkflowStep,
+  VercelAgentWorkflowRunResult,
+  WorkflowStepResult,
   type SerializableWorkflowState,
   type VercelAgentWorkflowLoopConfig,
   type VercelAgentWorkflowModelStepInput,
@@ -269,6 +271,74 @@ describe('runVercelAgentWorkflow', () => {
     expect(closeCount).toBe(1)
   })
 
+  it('appends HITL responses in order without aliasing prior tool-batch snapshots', async () => {
+    const receivedHitlResponses: Array<ReadonlyArray<unknown>> = []
+    const suppliedArrays: Array<ReadonlyArray<unknown>> = []
+    const firstApproval = { decision: 'approved' }
+    const secondApproval = { decision: 'retry' }
+    let toolBatchRound = 0
+
+    const awaiting = (hookToken: string, eventSequence: number) => ({
+      hookToken,
+      requests: [`request-${hookToken}`],
+      messages: ['assistant-1'],
+      usage: { turns: 1 },
+      turns: 1,
+      eventSequence
+    })
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: input =>
+        step(() => (input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input))),
+      runToolBatchStep: input =>
+        step(() => {
+          toolBatchRound += 1
+          const snapshot = input.hitlResponses ?? []
+          receivedHitlResponses.push(snapshot.slice())
+          suppliedArrays.push(snapshot)
+
+          // A hostile host can mutate a readonly-typed array at the JavaScript boundary.
+          Object.assign(snapshot, { 0: 'host-mutated' })
+
+          if (toolBatchRound === 1) {
+            return {
+              ...toolBatchResult(input),
+              awaitingInput: awaiting('hook-1', 3),
+              eventSequence: 3
+            }
+          }
+
+          if (toolBatchRound === 2) {
+            return {
+              ...toolBatchResult(input),
+              awaitingInput: awaiting('hook-2', 5),
+              eventSequence: 5
+            }
+          }
+
+          return { ...toolBatchResult(input), eventSequence: 9 }
+        }),
+      awaitInput: input =>
+        step(() => (input.hookToken === 'hook-1' ? firstApproval : secondApproval)),
+      closeStream: emptyStep,
+      writeError: emptyStep
+    })
+
+    expect(result._tag).toBe('Completed')
+    expect(toolBatchRound).toBe(3)
+    expect(receivedHitlResponses).toEqual([[], [firstApproval], [firstApproval, secondApproval]])
+    expect(suppliedArrays[0]).not.toBe(suppliedArrays[1])
+    expect(suppliedArrays[1]).not.toBe(suppliedArrays[2])
+    expect(suppliedArrays).toEqual([
+      ['host-mutated'],
+      ['host-mutated'],
+      ['host-mutated', secondApproval]
+    ])
+    expect(receivedHitlResponses[1]?.[0]).toBe(firstApproval)
+    expect(receivedHitlResponses[2]?.[1]).toBe(secondApproval)
+  })
+
   it('fails when awaiting input without handler', async () => {
     const errors: Array<unknown> = []
 
@@ -335,14 +405,41 @@ describe('runVercelAgentWorkflow', () => {
         })
     })
 
-    expect(result).toEqual({
-      _tag: 'ModelStepFailed',
-      turn: 1,
-      error,
-      state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
-    })
+    expect(result).toEqual(
+      VercelAgentWorkflowRunResult.ModelStepFailed({
+        turn: 1,
+        error,
+        state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+      })
+    )
     expect(errors).toEqual([error])
     expect(closeCount).toBe(0)
+  })
+
+  it('preserves non-Error model step rejections by identity', async () => {
+    const error = { reason: 'model-denied' }
+    const errors: Array<unknown> = []
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: () => failStep(error),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: emptyStep,
+      writeError: value =>
+        step(() => {
+          errors.push(value)
+        })
+    })
+
+    expect(result).toEqual(
+      VercelAgentWorkflowRunResult.ModelStepFailed({
+        turn: 1,
+        error,
+        state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+      })
+    )
+    expect(errors).toEqual([error])
+    expect(errors[0]).toBe(error)
   })
 
   it('preserves the original failure when writeError also fails', async () => {
@@ -612,19 +709,20 @@ describe('runVercelAgentWorkflow', () => {
       writeError: emptyStep
     })
 
-    expect(result).toEqual({
-      _tag: 'ToolBatchStepFailed',
-      turn: 1,
-      error,
-      state: {
-        request: 'request-1',
-        messages: ['request-1', 'assistant-1'],
-        createdMessages: ['assistant-1'],
-        usage: { turns: 1, subagentTurns: 2 },
+    expect(result).toEqual(
+      VercelAgentWorkflowRunResult.ToolBatchStepFailed({
         turn: 1,
-        eventSequence: 9
-      }
-    })
+        error,
+        state: {
+          request: 'request-1',
+          messages: ['request-1', 'assistant-1'],
+          createdMessages: ['assistant-1'],
+          usage: { turns: 1, subagentTurns: 2 },
+          turn: 1,
+          eventSequence: 9
+        }
+      })
+    )
   })
 
   it('writes close errors after terminal model step', async () => {
@@ -642,19 +740,20 @@ describe('runVercelAgentWorkflow', () => {
         })
     })
 
-    expect(result).toEqual({
-      _tag: 'CloseStreamFailed',
-      turns: 1,
-      error,
-      state: {
-        request: 'request-1',
-        messages: ['request-1', 'assistant-1'],
-        createdMessages: ['assistant-1'],
-        usage: { turns: 1 },
-        turn: 1,
-        eventSequence: 0
-      }
-    })
+    expect(result).toEqual(
+      VercelAgentWorkflowRunResult.CloseStreamFailed({
+        turns: 1,
+        error,
+        state: {
+          request: 'request-1',
+          messages: ['request-1', 'assistant-1'],
+          createdMessages: ['assistant-1'],
+          usage: { turns: 1 },
+          turn: 1,
+          eventSequence: 0
+        }
+      })
+    )
     expect(errors).toEqual([error])
   })
 
@@ -737,14 +836,12 @@ describe('settleWorkflowStep', () => {
   it('captures success and failure without throwing', async () => {
     const error = new Error('nope')
 
-    await expect(settleWorkflowStep(Promise.resolve('ok'))).resolves.toEqual({
-      _tag: 'Success',
-      value: 'ok'
-    })
-    await expect(settleWorkflowStep(Promise.reject(error))).resolves.toEqual({
-      _tag: 'Failure',
-      error
-    })
+    await expect(settleWorkflowStep(Promise.resolve('ok'))).resolves.toEqual(
+      WorkflowStepResult.Success({ value: 'ok' })
+    )
+    await expect(settleWorkflowStep(Promise.reject(error))).resolves.toEqual(
+      WorkflowStepResult.Failure({ error })
+    )
   })
 })
 

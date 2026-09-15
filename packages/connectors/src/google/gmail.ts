@@ -208,7 +208,7 @@ const GmailThreadWireMessage = Schema.Struct({
   labelIds: Schema.optional(Schema.Array(Schema.String)),
   snippet: Schema.optional(Schema.String),
   internalDate: Schema.optional(Schema.String),
-  payload: Schema.optional(Schema.Unknown)
+  payload: Schema.optional(Schema.Json)
 })
 
 const GmailThreadWireOutput = Schema.Struct({
@@ -232,20 +232,20 @@ export class GmailListSendAsOutput extends Schema.Class<GmailListSendAsOutput>(
 
 export const GmailUnknownOutput = Schema.Unknown
 
-const isUnknownRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  Predicate.isObjectOrArray(value)
+const isGmailJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
+  value !== undefined && Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
-const unknownField = (value: unknown, key: string) =>
-  isUnknownRecord(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined
+const gmailJsonField = (value: Schema.JsonObject, key: string): Schema.Json | undefined =>
+  Object.hasOwn(value, key) ? value[key] : undefined
 
-const unknownStringField = (value: unknown, key: string) => {
-  const field = unknownField(value, key)
+const gmailJsonStringField = (value: Schema.JsonObject, key: string) => {
+  const field = gmailJsonField(value, key)
 
   return Predicate.isString(field) ? field : undefined
 }
 
-const unknownArrayField = (value: unknown, key: string) => {
-  const field = unknownField(value, key)
+const gmailJsonArrayField = (value: Schema.JsonObject, key: string): ReadonlyArray<Schema.Json> => {
+  const field = gmailJsonField(value, key)
 
   return Array.isArray(field) ? field : []
 }
@@ -264,19 +264,29 @@ const gmailThreadHeaderNames = new Set([
   'to'
 ])
 
-const gmailPartHeaders = (part: unknown) =>
-  unknownArrayField(part, 'headers').flatMap(header => {
-    const name = unknownStringField(header, 'name')
-    const value = unknownStringField(header, 'value')
+type GmailThreadHeaderFields = {
+  readonly name: string
+  readonly value: string
+}
+
+const gmailPartHeaders = (part: Schema.Json | undefined) => {
+  if (!isGmailJsonObject(part)) return []
+
+  return gmailJsonArrayField(part, 'headers').flatMap(header => {
+    if (!isGmailJsonObject(header)) return []
+
+    const name = gmailJsonStringField(header, 'name')
+    const value = gmailJsonStringField(header, 'value')
 
     return name === undefined || value === undefined ? [] : [{ name, value }]
   })
+}
 
-const selectedGmailPartHeaders = (part: unknown) =>
-  gmailPartHeaders(part).filter(header => gmailThreadHeaderNames.has(header.name.toLowerCase()))
+const selectedGmailPartHeaders = (headers: ReadonlyArray<GmailThreadHeaderFields>) =>
+  headers.filter(header => gmailThreadHeaderNames.has(header.name.toLowerCase()))
 
-const gmailPartHeader = (part: unknown, name: string) =>
-  gmailPartHeaders(part).find(header => header.name.toLowerCase() === name.toLowerCase())?.value
+const gmailPartHeader = (headers: ReadonlyArray<GmailThreadHeaderFields>, name: string) =>
+  headers.find(header => header.name.toLowerCase() === name.toLowerCase())?.value
 
 const decodeBase64Bytes = (value: string, urlEncoded: boolean) => {
   const compact = value.replaceAll(/\s/g, '')
@@ -326,19 +336,7 @@ const decodeQuotedPrintable = (value: string) => {
   return new TextDecoder().decode(new Uint8Array(bytes))
 }
 
-const decodeGmailTextBody = (part: unknown) => {
-  const body = unknownField(part, 'body')
-  const data = unknownStringField(body, 'data')
-
-  if (data === undefined) return undefined
-
-  const bytes = decodeBase64Bytes(data, true)
-
-  if (bytes === undefined) return undefined
-
-  const value = new TextDecoder().decode(bytes)
-  const transferEncoding = gmailPartHeader(part, 'content-transfer-encoding')?.toLowerCase()
-
+const decodeCapturedGmailTextBody = (value: string, transferEncoding: string | undefined) => {
   if (transferEncoding === 'quoted-printable') return decodeQuotedPrintable(value)
 
   if (transferEncoding === 'base64') {
@@ -350,6 +348,29 @@ const decodeGmailTextBody = (part: unknown) => {
   return value
 }
 
+const decodeGmailTextBody = (part: Schema.JsonObject) => {
+  const body = gmailJsonField(part, 'body')
+
+  if (!isGmailJsonObject(body)) return undefined
+
+  const data = gmailJsonStringField(body, 'data')
+
+  if (data === undefined) return undefined
+
+  const bytes = decodeBase64Bytes(data, true)
+
+  if (bytes === undefined) return undefined
+
+  const value = new TextDecoder().decode(bytes)
+
+  const transferEncoding = gmailPartHeader(
+    gmailPartHeaders(part),
+    'content-transfer-encoding'
+  )?.toLowerCase()
+
+  return decodeCapturedGmailTextBody(value, transferEncoding)
+}
+
 type GmailThreadAttachmentFields = {
   partId?: string
   filename?: string
@@ -358,11 +379,6 @@ type GmailThreadAttachmentFields = {
   attachmentId?: string
   inline?: boolean
   contentId?: string
-}
-
-type GmailThreadHeaderFields = {
-  readonly name: string
-  readonly value: string
 }
 
 type GmailThreadMessagePrefixFields = {
@@ -395,20 +411,29 @@ type GmailCollectedParts = {
   readonly attachments: Array<GmailThreadAttachment>
 }
 
-const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void => {
-  if (!isUnknownRecord(part)) return
+const collectGmailParts = (part: Schema.Json | undefined, collected: GmailCollectedParts): void => {
+  if (!isGmailJsonObject(part)) return
 
-  const partId = unknownStringField(part, 'partId')
-  const filename = unknownStringField(part, 'filename')
-  const mimeType = unknownStringField(part, 'mimeType')
-  const body = unknownField(part, 'body')
+  const partId = gmailJsonStringField(part, 'partId')
+  const filename = gmailJsonStringField(part, 'filename')
+  const mimeType = gmailJsonStringField(part, 'mimeType')
+  const body = gmailJsonField(part, 'body')
+  const bodyObject = isGmailJsonObject(body) ? body : undefined
+
   // MIME discovery is best-effort; invalid optional sizes must not become byte budgets.
-  const rawSize = unknownField(body, 'size')
+  const rawSize = bodyObject === undefined ? undefined : gmailJsonField(bodyObject, 'size')
   const size = isGmailAttachmentSize(rawSize) ? rawSize : undefined
-  const attachmentId = unknownStringField(body, 'attachmentId')
+
+  const attachmentId =
+    bodyObject === undefined ? undefined : gmailJsonStringField(bodyObject, 'attachmentId')
+
   const hasFilename = filename !== undefined && filename.trim() !== ''
-  const contentDisposition = gmailPartHeader(part, 'content-disposition')?.trim().toLowerCase()
-  const contentId = gmailPartHeader(part, 'content-id')
+
+  const contentDisposition = gmailPartHeader(gmailPartHeaders(part), 'content-disposition')
+    ?.trim()
+    .toLowerCase()
+
+  const contentId = gmailPartHeader(gmailPartHeaders(part), 'content-id')
   const isInline = contentDisposition?.startsWith('inline') === true || contentId !== undefined
   const isTextBody = mimeType === 'text/plain' || mimeType === 'text/html'
 
@@ -470,12 +495,12 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
     }
   }
 
-  for (const child of unknownArrayField(part, 'parts')) {
+  for (const child of gmailJsonArrayField(part, 'parts')) {
     collectGmailParts(child, collected)
   }
 }
 
-const gmailAttachmentsFromPayload = (payload: unknown) => {
+const gmailAttachmentsFromPayload = (payload: Schema.Json | undefined) => {
   const collected: GmailCollectedParts = { plain: [], html: [], attachments: [] }
   collectGmailParts(payload, collected)
 
@@ -515,7 +540,7 @@ const normalizeGmailThreadMessage = (
 
       const fields: GmailThreadMessageWithHeadersFields = {
         ...prefix,
-        headers: selectedGmailPartHeaders(message.payload)
+        headers: selectedGmailPartHeaders(gmailPartHeaders(message.payload))
       }
 
       if (body !== undefined) {

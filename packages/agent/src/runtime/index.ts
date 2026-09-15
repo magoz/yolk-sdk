@@ -8,13 +8,12 @@ export {
 
 export type { RuntimeError } from './error.ts'
 
-export { runRuntime } from './run-runtime.ts'
+export { runRuntime, RuntimeRequest } from './run-runtime.ts'
 
 export type {
   AppendInputRuntimeRequest,
   AppendHitlResponseRuntimeRequest,
   RuntimeConfig,
-  RuntimeRequest,
   RuntimeTranscript,
   TranscriptRuntimeRequest
 } from './run-runtime.ts'

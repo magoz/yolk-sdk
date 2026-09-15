@@ -1,15 +1,20 @@
 import { Effect } from 'effect'
+import { admitTelemetryLogContext, type TelemetryLogContext } from './telemetry-context'
+
+export type { TelemetryLogContext }
 
 export const reportError = <E extends { _tag: string; message: string }>(
   error: E,
-  context?: Record<string, unknown>
+  context?: TelemetryLogContext
 ) =>
   Effect.gen(function* () {
-    const errorTag = error._tag
-    const errorMessage = error.message
+    const admitted = yield* admitTelemetryLogContext(context)
 
-    yield* Effect.logError(errorMessage, {
-      error_type: errorTag,
-      ...context
-    })
+    // Context projection never sanitizes messages; callers own message privacy.
+    yield* Effect.logError(error.message).pipe(
+      Effect.annotateLogs({
+        ...admitted,
+        error_type: error._tag
+      })
+    )
   })

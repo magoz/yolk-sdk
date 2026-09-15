@@ -137,13 +137,14 @@ describe('knowledge tool', () => {
       readonly contextChunks: number
     }> = []
 
-    const toolModule = makeKnowledgeToolModule(input =>
-      Effect.sync(() => {
-        calls.push(input)
+    const toolModule = makeKnowledgeToolModule({
+      search: input =>
+        Effect.sync(() => {
+          calls.push(input)
 
-        return [searchResult]
-      })
-    )
+          return [searchResult]
+        })
+    })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
@@ -170,7 +171,7 @@ describe('knowledge tool', () => {
   })
 
   it.effect('returns model-visible errors for blank queries', () => {
-    const toolModule = makeKnowledgeToolModule(() => Effect.succeed([]))
+    const toolModule = makeKnowledgeToolModule({ search: () => Effect.succeed([]) })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({
@@ -193,13 +194,14 @@ describe('knowledge tool', () => {
   it.effect('runs multiple knowledge queries', () => {
     const calls: Array<string> = []
 
-    const toolModule = makeKnowledgeToolModule(input =>
-      Effect.sync(() => {
-        calls.push(input.query)
+    const toolModule = makeKnowledgeToolModule({
+      search: input =>
+        Effect.sync(() => {
+          calls.push(input.query)
 
-        return []
-      })
-    )
+          return []
+        })
+    })
 
     return Effect.gen(function* () {
       const toolSet = yield* resolveAgentToolSet({

@@ -572,7 +572,7 @@ const approvalRequired = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
 
 // Lossless canonical binding (not a collision-prone hash). Hosts must echo the opaque ID.
 const canonicalJson = (value: Schema.Json): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (!Predicate.isObjectKeyword(value) || Predicate.isFunction(value)) return JSON.stringify(value)
 
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
 

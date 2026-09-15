@@ -54,7 +54,7 @@ export type CommitThenWriteTerminalEventInput<
   readonly terminal: TerminalEvent
   readonly write: (event: TerminalEvent) => Effect.Effect<TerminalWriteResult, TerminalWriteError>
   readonly writeCommitError: (
-    error: unknown
+    error: CommitError
   ) => Effect.Effect<CommitErrorWriteResult, CommitErrorWriteError>
 }
 

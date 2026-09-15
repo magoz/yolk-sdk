@@ -1,13 +1,9 @@
 import { eq, sql } from 'drizzle-orm'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import {
-  AppKnowledgeDocumentNotFoundError,
-  AppSearchIndexStoreError,
-  isAppKnowledgeDocumentNotFoundError,
-  isAppSearchIndexStoreError
-} from './errors'
+import { AppKnowledgeDocumentNotFoundError, AppSearchIndexStoreError } from './errors'
 import { getKnowledgeDocument } from './get-knowledge-document'
 
 export type UpdateKnowledgeDocumentFields = {
@@ -22,16 +18,11 @@ export type UpdateKnowledgeDocumentInput = {
   readonly fields: UpdateKnowledgeDocumentFields
 }
 
-const mapUpdateError = (error: unknown) => {
-  if (isAppKnowledgeDocumentNotFoundError(error) || isAppSearchIndexStoreError(error)) {
-    return error
-  }
-
-  return new AppSearchIndexStoreError({
+const sqlStoreError = (error: EffectDrizzleQueryError) =>
+  new AppSearchIndexStoreError({
     message: 'Could not update knowledge search document',
     cause: error
   })
-}
 
 type KnowledgeDocumentPatch = {
   updatedAt: ReturnType<typeof sql>
@@ -82,4 +73,7 @@ export const updateKnowledgeDocument = (input: UpdateKnowledgeDocumentInput) =>
     }
 
     return yield* getKnowledgeDocument({ userId: input.userId, documentId: document.id })
-  }).pipe(Effect.withSpan('knowledge_search.document.update'), Effect.mapError(mapUpdateError))
+  }).pipe(
+    Effect.withSpan('knowledge_search.document.update'),
+    Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
+  )

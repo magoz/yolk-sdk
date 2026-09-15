@@ -1,12 +1,12 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk-sdk/agent/loop'
+import type { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   EmptyToolParams,
   makeTool,
   modelVisibleToolError,
-  ModelVisibleToolError,
+  type ModelVisibleToolError,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
 import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/search'
@@ -141,15 +141,7 @@ const storageGetSourceToolDescription = [
 const isStorageToolEnabled = (context: AgentToolContext) =>
   Effect.succeed(context.surface === 'text' || context.surface === 'voice')
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
-const makeToolError = (message: string, cause: ToolError['cause'], tool = storageSearchToolName) =>
-  new ToolError({
-    tool,
-    message,
-    cause
-  })
+const schemaErrorMessage = (error: Schema.SchemaError) => error.message
 
 const makeModelVisibleError = (message: string, tool = storageSearchToolName) =>
   modelVisibleToolError({
@@ -251,14 +243,13 @@ const sourceLabel = (result: KnowledgeSearchResult) => {
     return title
   }
 
-  switch (result.document.source._tag) {
-    case 'File':
-      return result.document.source.name ?? result.document.source.ref
-    case 'Url':
-      return result.document.source.url
-    case 'Text':
-      return result.document.source.label ?? result.document.id
-  }
+  return Match.value(result.document.source).pipe(
+    Match.tagsExhaustive({
+      File: source => source.name ?? source.ref,
+      Url: source => source.url,
+      Text: source => source.label ?? result.document.id
+    })
+  )
 }
 
 const resultText = (result: KnowledgeSearchResult) =>
@@ -382,7 +373,8 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
     parameters: StorageSearchParams,
     access: 'read',
     isEnabled: isStorageToolEnabled,
-    invalidParamsMessage: error => `Invalid storage search arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid storage search arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalizedParams = yield* normalizeStorageSearchParams(params)
@@ -405,15 +397,7 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
           content: formatSearchResults(items),
           structuredContent: structuredSearchResult(items)
         })
-      }).pipe(
-        Effect.mapError(error =>
-          error instanceof ToolError
-            ? error
-            : error instanceof ModelVisibleToolError
-              ? error
-              : makeToolError(`Storage search failed: ${unknownToMessage(error)}`, 'execution')
-        )
-      )
+      })
   })
 
 const listSourcesTool = (
@@ -433,15 +417,6 @@ const listSourcesTool = (
             content: formatSources(sources),
             structuredContent: { sources }
           })
-        ),
-        Effect.mapError(error =>
-          error instanceof ToolError
-            ? error
-            : makeToolError(
-                `Storage source listing failed: ${unknownToMessage(error)}`,
-                'execution',
-                storageListSourcesToolName
-              )
         )
       )
   })
@@ -456,7 +431,7 @@ const getSourceTool = (
     access: 'read',
     isEnabled: isStorageToolEnabled,
     invalidParamsMessage: error =>
-      `Invalid storage source read arguments: ${unknownToMessage(error)}`,
+      `Invalid storage source read arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalizedParams = yield* normalizeStorageGetSourceParams(params)
@@ -472,19 +447,7 @@ const getSourceTool = (
           content: formatSourceDetail(source),
           structuredContent: { source }
         })
-      }).pipe(
-        Effect.mapError(error =>
-          error instanceof ToolError
-            ? error
-            : error instanceof ModelVisibleToolError
-              ? error
-              : makeToolError(
-                  `Storage source read failed: ${unknownToMessage(error)}`,
-                  'execution',
-                  storageGetSourceToolName
-                )
-        )
-      )
+      })
   })
 
 const storageTools = (
@@ -501,13 +464,8 @@ const storageTools = (
 }
 
 export const makeStorageSearchToolModule = (
-  searchOrHandlers: StorageSearchHandler | StorageKnowledgeSearchToolHandlers
-): ToolModule<AgentToolContext> => {
-  const handlers =
-    typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
-
-  return {
-    id: 'storage-search',
-    tools: storageTools(handlers)
-  }
-}
+  handlers: StorageKnowledgeSearchToolHandlers
+): ToolModule<AgentToolContext> => ({
+  id: 'storage-search',
+  tools: storageTools(handlers)
+})

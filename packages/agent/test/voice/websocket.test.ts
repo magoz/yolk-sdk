@@ -22,10 +22,10 @@ class FakeWebSocket implements WebSocket {
   readonly protocol = ''
   readyState = 0
   readonly url: string
-  onclose: ((this: WebSocket, ev: CloseEvent) => unknown) | null = null
-  onerror: ((this: WebSocket, ev: Event) => unknown) | null = null
-  onmessage: ((this: WebSocket, ev: MessageEvent) => unknown) | null = null
-  onopen: ((this: WebSocket, ev: Event) => unknown) | null = null
+  onclose: ((this: WebSocket, ev: CloseEvent) => void) | null = null
+  onerror: ((this: WebSocket, ev: Event) => void) | null = null
+  onmessage: ((this: WebSocket, ev: MessageEvent) => void) | null = null
+  onopen: ((this: WebSocket, ev: Event) => void) | null = null
   readonly sent: Array<string> = []
   private readonly listeners = new Map<string, Array<FakeSocketListener>>()
 

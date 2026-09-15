@@ -8,6 +8,8 @@ export {
   runVercelAgentWorkflow,
   sequenceDurableAgentEvent,
   settleWorkflowStep,
+  VercelAgentWorkflowRunResult,
+  WorkflowStepResult,
   writeDurableAgentEvent
 } from './workflow.ts'
 
@@ -25,11 +27,9 @@ export type {
   VercelAgentWorkflowLoopConfig,
   VercelAgentWorkflowModelStepInput,
   VercelAgentWorkflowModelStepResult,
-  VercelAgentWorkflowRunResult,
   VercelAgentWorkflowStepRetryPolicy,
   VercelAgentWorkflowToolBatchStepInput,
   VercelAgentWorkflowToolBatchStepResult,
-  WorkflowStepResult,
   WriteDurableAgentEventInput
 } from './workflow.ts'
 

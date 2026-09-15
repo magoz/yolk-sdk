@@ -36,6 +36,8 @@ useYolkVoice
 
 Tools never execute in the browser. The controller forwards each provider tool call to your authenticated endpoint as a `VoiceSessionToolCallRequest` and submits the returned output back to the provider.
 
+`WebRtcPeerConnectionLike.addTrack(track, stream)` on `@yolk-sdk/agent/voice/browser` is a void command. The transport discards the DOM `RTCRtpSender`. Hosts and fakes must not read a sender from this capability (`addTrack: () => {}` is sufficient). Real `RTCPeerConnection.addTrack` remains assignable.
+
 ## Browser hook
 
 This fragment shows the host-owned wiring; `negotiate` posts SDP to your session route and `executeToolCall` posts to your tool route.
@@ -90,6 +92,17 @@ const outcome =
 
 `handleVoiceToolCall` never executes a tool whose `ToolDef.approval` is `manual` without a matching approved response. Denials return model-visible denial output.
 
+`protocolToolCallFromVoice` still maps `VoiceToolCall` to protocol `ToolCall`. Raw `argumentsJson` admits finite JSON (`Schema.Json`). Actual JSON `null`, `false`, and `0` (and objects containing them) still admit as those values.
+
+Raw text `1e999` is valid JSON syntax but is not finite JSON, so admission fails and each mapper uses its existing malformed fallback:
+
+| Public mapper                          | Previous params | New params                    |
+| -------------------------------------- | --------------- | ----------------------------- |
+| `protocolToolCallFromVoice`            | `Infinity`      | raw argument string `'1e999'` |
+| `decideVoiceToolCall` approval display | `Infinity`      | `{ argumentsJson: '1e999' }`  |
+
+Do not demonstrate this with `JSON.stringify(Infinity)` (that is `null`). Nested overflow such as `{"n":1e999}` fails whole-value admission and takes the same mapper-specific fallbacks. Approval identifiers, gates, deny, and execution schema validation are unchanged.
+
 ## Approvals in voice
 
 Approval-gated calls pause: the controller emits `AwaitingInput`, the hook exposes `pendingApprovals`, and `approveTool`/`denyTool` resume through your tool endpoint. If the session ends while waiting, the approval stays pending host-side; reconnect replays context and applies the stored response. The package `question` tool is deferred for voice sessions in v1.
@@ -141,6 +154,20 @@ steers delivery style — tone, pacing, emotion — per synthesis request; OpenA
 ### Hold-to-speak pattern
 
 The one-shot services compose into a second voice mode alongside realtime: record while a button is held, transcribe on release into the chat input, send through your normal text agent runtime, and optionally speak assistant replies with TTS. This trades realtime's low latency for the full text stack — any model provider, the complete toolset including subagents, and `question` HITL. The Next example implements this (host integration, not SDK API): STT/TTS routes wrap the OpenAI layers, a hold-to-speak hook drives MediaRecorder capture and streamed sentence playback, and the composer offers hold-to-speak, realtime, and speak-replies controls side by side.
+
+## Realtime tool JSON
+
+`OpenAiRealtimeFunctionTool.parameters` and `openAiRealtimeToolParameters` require admitted
+`Schema.Json`. Non-JSON tool advertisement fails `VoiceToolBridgeError` before transport.
+Synchronous `toOpenAiRealtimeTool`, `makeOpenAiRealtimeSessionConfig`, and
+`openAiRealtimeSessionConfigFromVoice` throw that error. Use `toOpenAiRealtimeToolEffect`,
+`makeOpenAiRealtimeSessionConfigEffect`, and `openAiRealtimeSessionConfigFromVoiceEffect` inside
+Effect programs so advertisement failures stay in the typed error channel. Unexpected mapper defects
+(for example throwing getters) remain defects, not `VoiceToolBridgeError`.
+
+Union-root lowering merges own `__proto__` / `constructor` fields with a `Map` plus
+`Object.fromEntries` (first-seen / string-enum union). Required intersection, empty-required
+omission, and object-root identity are unchanged. `events.ts` still uses `UnknownFromJsonString`.
 
 ## Host responsibilities
 

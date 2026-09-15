@@ -100,6 +100,12 @@ const event = UserMessageEvent.make({
 })
 ```
 
+Durable HITL payloads that must be plain JSON use `plainHitlResponse` /
+`plainQuestionResponse` / `plainToolApprovalResponse`. Those helpers omit absent optionals and
+call `PlainHitlResponse.QuestionResponse` / `PlainHitlResponse.ToolApprovalResponse`
+(`Data.taggedEnum` plain objects, `_tag` last, not Schema classes). `QuestionResponse` and
+`ToolApprovalResponse` remain Schema classes for protocol values.
+
 Use `isTerminalAgentEvent` to detect logical stream termination.
 
 ```ts

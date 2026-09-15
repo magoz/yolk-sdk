@@ -26,15 +26,17 @@ import {
   decodeToolCallResult,
   decodeToolsListResult,
   encodeJsonRpcMessage,
+  InitializeClientInfo,
+  InitializeParams,
+  InitializedNotification,
   jsonRpcErrorToMcpError,
-  makeInitializedNotification,
-  makeInitializeParams,
-  makeJsonRpcRequest,
+  JsonRpcRequest,
+  legacyMcpProtocolVersion,
   mcpToolToToolDef,
   toolCallResultToToolResult,
+  ToolsCallParams,
   type McpToolAnnotations,
   type JsonRpcNotification,
-  type JsonRpcRequest,
   type JsonRpcResponse,
   type ToolsListResult
 } from './protocol.ts'
@@ -293,20 +295,37 @@ const requestLocal = (
     return yield* requestLocalEncoded(config, messages, expectedResponses, options)
   })
 
-const initializeRequest = (options?: McpClientOptions) =>
-  makeJsonRpcRequest({
+const initializeRequest = (options?: McpClientOptions) => {
+  const info = clientInfo(options)
+
+  return JsonRpcRequest.make({
+    jsonrpc: '2.0',
     id: 1,
     method: 'initialize',
-    params: makeInitializeParams(clientInfo(options))
+    params: InitializeParams.make({
+      protocolVersion: legacyMcpProtocolVersion,
+      capabilities: {},
+      clientInfo: InitializeClientInfo.make({ name: info.name, version: info.version })
+    })
+  })
+}
+
+const listToolsRequest = () =>
+  JsonRpcRequest.make({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/list'
   })
 
-const listToolsRequest = () => makeJsonRpcRequest({ id: 2, method: 'tools/list' })
-
 const callToolRequest = (input: { readonly toolName: string; readonly params: unknown }) =>
-  makeJsonRpcRequest({
+  JsonRpcRequest.make({
+    jsonrpc: '2.0',
     id: 3,
     method: 'tools/call',
-    params: { name: input.toolName, arguments: input.params }
+    params: ToolsCallParams.make({
+      name: input.toolName,
+      arguments: input.params
+    })
   })
 
 const responseById = (responses: ReadonlyArray<JsonRpcResponse>, id: string | number) =>
@@ -322,7 +341,14 @@ const requestLocalSession = (
 
     const responses = yield* requestLocal(
       config,
-      [initialize, makeInitializedNotification(), request],
+      [
+        initialize,
+        InitializedNotification.make({
+          jsonrpc: '2.0',
+          method: 'notifications/initialized'
+        }),
+        request
+      ],
       2,
       options
     )

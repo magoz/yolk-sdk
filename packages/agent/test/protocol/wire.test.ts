@@ -73,6 +73,7 @@ import {
   addAgentUsage,
   hitlResponseEvent,
   inlineBase64Source,
+  PlainHitlResponse,
   plainHitlResponse,
   questionResponseStructuredContent,
   textImageModelCapabilities,
@@ -357,14 +358,15 @@ describe('protocol wire schemas', () => {
       reason: 'unsafe'
     })
 
-    expect(plainHitlResponse(answered)).toEqual({
-      _tag: 'QuestionResponse',
-      requestId: 'question:call_1',
-      toolCallId: 'call_1',
-      outcome: 'answered',
-      source: 'user',
-      answers: [{ questionId: 'choice', optionIds: ['a'] }]
-    })
+    expect(plainHitlResponse(answered)).toEqual(
+      PlainHitlResponse.QuestionResponse({
+        requestId: 'question:call_1',
+        toolCallId: 'call_1',
+        outcome: 'answered',
+        source: 'user',
+        answers: [{ questionId: 'choice', optionIds: ['a'] }]
+      })
+    )
     expect(questionResponseStructuredContent(answered)).toEqual({
       type: 'question_response',
       outcome: 'answered',

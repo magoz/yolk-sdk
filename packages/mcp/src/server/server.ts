@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Match, Option, Predicate } from 'effect'
+import { Array as Arr, Effect, Match, Option, Predicate, Result } from 'effect'
 import type { Context } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
@@ -382,13 +382,7 @@ export const makeMcpToolServer = <R>(input: {
         default:
           return errorResponse(request.id, -32_601, `Method not found: ${request.method}`)
       }
-    }).pipe(
-      Effect.catch(error =>
-        error instanceof McpServerError
-          ? Effect.succeed(protocolErrorResponse(request.id, error))
-          : Effect.succeed(errorResponse(request.id, -32_000, unknownToMessage(error)))
-      )
-    )
+    }).pipe(Effect.catch(error => Effect.succeed(protocolErrorResponse(request.id, error))))
 
   const handleLine = (line: string) =>
     Effect.gen(function* () {
@@ -448,13 +442,17 @@ export const makeMcpToolServer = <R>(input: {
           return jsonResponse(body, { status: 405, headers: { allow: 'POST' } })
         }
 
-        const body = yield* Effect.promise(() => request.text()).pipe(
-          Effect.mapError(error => unknownToMessage(error)),
-          Effect.catch(error => badRequestBody(`Could not read request body: ${error}`))
-        )
+        const body = yield* Effect.tryPromise({
+          try: () => request.text(),
+          catch: error => `Could not read request body: ${unknownToMessage(error)}`
+        }).pipe(Effect.result)
 
-        const responseBody = yield* handleJson(body).pipe(
-          Effect.catch(error => badRequestBody(unknownToMessage(error)))
+        if (Result.isFailure(body)) {
+          return jsonResponse(yield* badRequestBody(body.failure))
+        }
+
+        const responseBody = yield* handleJson(body.success).pipe(
+          Effect.catch(error => badRequestBody(error.message))
         )
 
         return jsonResponse(responseBody)

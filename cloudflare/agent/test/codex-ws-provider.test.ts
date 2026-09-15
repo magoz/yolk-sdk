@@ -106,7 +106,7 @@ describe('Codex WS headers', () => {
   it('includes auth and protocol headers without Upgrade', () => {
     const headers = codexWsHeaders({ token })
 
-    expect(headers.Upgrade).toBeUndefined()
+    expect(Object.hasOwn(headers, 'Upgrade')).toBe(false)
     expect(headers.Authorization).toBe('Bearer access')
     expect(headers['OpenAI-Beta']).toBe('responses_websockets=2026-02-06')
     expect(headers.originator).toBe('opencode')
@@ -292,6 +292,52 @@ describe('Codex WS event mapping', () => {
     expect(Predicate.isTagged(result, 'Events')).toBe(true)
     const tc = events(result)[0]
     expect(tc).toBeInstanceOf(LLMToolCall)
+    expect(Predicate.isTagged(tc, 'ToolCall') ? tc.call.params : undefined).toEqual({ q: 'test' })
+  })
+
+  it('keeps JSON-null, false, and zero function-call arguments', () => {
+    const paramsOf = (argumentsJson: string) => {
+      const result = mapWsMessage(
+        {
+          type: 'response.output_item.done',
+          item: {
+            type: 'function_call',
+            call_id: 'call_1',
+            name: 'web_search',
+            arguments: argumentsJson
+          }
+        },
+        0
+      )
+
+      const tc = events(result)[0]
+
+      return Predicate.isTagged(tc, 'ToolCall') ? tc.call.params : undefined
+    }
+
+    expect(paramsOf('null')).toBe(null)
+    expect(paramsOf('false')).toBe(false)
+    expect(paramsOf('0')).toBe(0)
+  })
+
+  it('keeps raw function-call arguments when they are not JSON', () => {
+    const result = mapWsMessage(
+      {
+        type: 'response.output_item.done',
+        item: {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'web_search',
+          arguments: '{'
+        }
+      },
+      0
+    )
+
+    const tc = events(result)[0]
+
+    expect(Predicate.isTagged(result, 'Events')).toBe(true)
+    expect(Predicate.isTagged(tc, 'ToolCall') ? tc.call.params : undefined).toBe('{')
   })
 
   it('maps completed with stop reason and usage', () => {

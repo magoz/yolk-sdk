@@ -67,15 +67,5 @@ export const jsonPreview = (value: JsonPreviewValue) => {
   return truncate(encoded ?? String(value))
 }
 
-export const unknownPreview = (value: unknown) => {
-  if (isJsonPreviewValue(value)) {
-    return jsonPreview(value)
-  }
-
-  const encoded = JSON.stringify(value)
-
-  return truncate(encoded ?? String(value))
-}
-
 export const countLabel = (count: number, singular: string) =>
   `${count} ${count === 1 ? singular : `${singular}s`}`

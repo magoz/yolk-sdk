@@ -21,6 +21,7 @@ import {
   EmailDraftId,
   EmailFolderName,
   EmailIncomingCredentialSlot,
+  type EmailSecurity,
   EmailSendMessageOutput,
   EmailSmtpCredentialSlot,
   emailCreateDraftAction,
@@ -265,6 +266,8 @@ describe('generic email connector', () => {
       if (Result.isFailure(result)) {
         expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
         expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+        expect(result.failure.underlying instanceof Error).toBe(false)
+        expect(Schema.isSchemaError(result.failure.underlying)).toBe(true)
       }
     })
   })
@@ -519,6 +522,80 @@ describe('generic email connector', () => {
       })
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
+
+  it.effect('selects SMTP and IMAP default ports from EmailSecurity owners', () =>
+    Effect.gen(function* () {
+      const smtpCases: ReadonlyArray<readonly [EmailSecurity, number]> = [
+        ['tls', 465],
+        ['starttls', 587],
+        ['none', 25]
+      ]
+
+      for (const [security, port] of smtpCases) {
+        const requests = makeRequests()
+
+        const result = yield* EmailConnector.invoke({
+          integration: makeIntegration({
+            connectorId: 'email',
+            config: { smtpHost: 'smtp.example.com', smtpSecurity: security },
+            credentialBindings: [smtpBinding]
+          }),
+          action: 'email.send_message',
+          input: {
+            message: { to: [{ address: 'bob@example.com' }], body: { text: 'Hello' } }
+          }
+        }).pipe(Effect.provide(makeHostLayer({ requests })))
+
+        expect(result).toEqual(
+          ActionResult.success({ accepted: true, submissionId: 'submission-1' })
+        )
+        expect(requests.send[0]?.connection).toMatchObject({
+          protocol: 'smtp',
+          port,
+          security
+        })
+      }
+
+      const incomingCases: ReadonlyArray<readonly [EmailSecurity, number]> = [
+        ['tls', 993],
+        ['starttls', 143],
+        ['none', 143]
+      ]
+
+      for (const [security, port] of incomingCases) {
+        const requests = makeRequests()
+
+        const result = yield* EmailConnector.invoke({
+          integration: makeIntegration({
+            connectorId: 'email',
+            config: { incomingHost: 'imap.example.com', incomingSecurity: security },
+            credentialBindings: [incomingBinding]
+          }),
+          action: 'email.get_attachment',
+          input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
+        }).pipe(Effect.provide(makeHostLayer({ requests })))
+
+        expect(result).toEqual(
+          ActionResult.success({
+            attachment: {
+              id: 'mime-part-2',
+              filename: 'invoice.pdf',
+              contentType: 'application/pdf',
+              size: 4,
+              inline: false,
+              contentBase64: 'JVBERg=='
+            }
+          })
+        )
+        expect(requests.attachment[0]?.connection).toMatchObject({
+          protocol: 'imap',
+          port,
+          security
+        })
+        expect(requests.attachment[0]?.attachmentId).toBe('mime-part-2')
+      }
+    })
+  )
 
   it.effect('honors POP3 and SMTP connection overrides and separate credential bindings', () => {
     const requests = makeRequests()

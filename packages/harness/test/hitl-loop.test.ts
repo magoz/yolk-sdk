@@ -1,4 +1,4 @@
-import { Effect, Layer, Ref } from 'effect'
+import { Effect, Layer, Predicate, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   QuestionAnswer,
@@ -15,7 +15,7 @@ import { TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import { Driver } from '../src/driver.ts'
 import { makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
 import { Inbox } from '../src/inbox.ts'
-import { attemptToolBatch, resumeHitlIfMatched } from '../src/outcome.ts'
+import { attemptToolBatch, HitlMatch, resumeHitlIfMatched } from '../src/outcome.ts'
 
 const weatherTool = ToolDef.make({
   name: 'weather',
@@ -77,7 +77,7 @@ describe('HITL loop bridge', () => {
                 { calls, tools, hitlResponses },
                 {
                   onEvent: event => {
-                    if (event._tag !== 'ToolExecutionCompleted') return Effect.void
+                    if (!Predicate.isTagged(event, 'ToolExecutionCompleted')) return Effect.void
 
                     return Ref.update(completions, current => [
                       ...current,
@@ -91,7 +91,7 @@ describe('HITL loop bridge', () => {
                 }
               ).pipe(Effect.provide(loopLayer), Effect.orDie)
 
-              if (outcome._tag === 'Completed') {
+              if (Predicate.isTagged(outcome, 'Completed')) {
                 yield* Ref.set(
                   executed,
                   outcome.toolCalls.map(call => call.id)
@@ -106,7 +106,7 @@ describe('HITL loop bridge', () => {
               Effect.orDie
             )
 
-            if (outcome._tag !== 'AwaitingInput') return
+            if (!Predicate.isTagged(outcome, 'AwaitingInput')) return
             yield* Ref.set(pending, outcome.requests)
             yield* inbox.park(
               runId,
@@ -129,8 +129,12 @@ describe('HITL loop bridge', () => {
         expect(parked?.requestIds).toHaveLength(2)
 
         if (parked === undefined) return
-        const approval = requests.find(request => request._tag === 'ToolApprovalRequest')
-        const question = requests.find(request => request._tag === 'QuestionRequest')
+
+        const approval = requests.find(request =>
+          Predicate.isTagged(request, 'ToolApprovalRequest')
+        )
+
+        const question = requests.find(request => Predicate.isTagged(request, 'QuestionRequest'))
         expect(approval).toBeDefined()
         expect(question).toBeDefined()
 
@@ -158,7 +162,7 @@ describe('HITL loop bridge', () => {
             )
         })
 
-        expect(mismatch._tag).toBe('Mismatch')
+        expect(mismatch).toEqual(HitlMatch.Mismatch())
         expect(yield* Ref.get(resumed)).toBe(false)
         expect(yield* Ref.get(drains)).toBe(1)
 
@@ -237,7 +241,7 @@ describe('HITL loop bridge', () => {
 
       expect(paused._tag).toBe('AwaitingInput')
 
-      if (paused._tag !== 'AwaitingInput') return
+      if (!Predicate.isTagged(paused, 'AwaitingInput')) return
       const request = paused.requests[0]
       expect(request).toBeDefined()
 
@@ -264,11 +268,14 @@ describe('HITL loop bridge', () => {
         },
         {
           onEvent: event => {
-            if (event._tag === 'ToolExecutionStarted') {
+            if (Predicate.isTagged(event, 'ToolExecutionStarted')) {
               return Ref.update(started, current => [...current, event.call.id])
             }
 
-            if (event._tag === 'ToolExecutionCompleted' && event.result.isError === true) {
+            if (
+              Predicate.isTagged(event, 'ToolExecutionCompleted') &&
+              event.result.isError === true
+            ) {
               return Ref.update(errorResults, current => [
                 ...current,
                 { callId: event.call.id, content: String(event.result.content) }
@@ -298,7 +305,7 @@ describe('HITL loop bridge', () => {
 
       expect(paused._tag).toBe('AwaitingInput')
 
-      if (paused._tag !== 'AwaitingInput') return
+      if (!Predicate.isTagged(paused, 'AwaitingInput')) return
       const request = paused.requests[0]
       expect(request).toBeDefined()
 
@@ -321,9 +328,9 @@ describe('HITL loop bridge', () => {
         },
         {
           onEvent: event =>
-            event._tag === 'ToolExecutionStarted'
+            Predicate.isTagged(event, 'ToolExecutionStarted')
               ? Ref.update(started, current => [...current, event.call.id])
-              : event._tag === 'ToolExecutionCompleted' && event.result.isError === true
+              : Predicate.isTagged(event, 'ToolExecutionCompleted') && event.result.isError === true
                 ? Ref.update(started, current => [
                     ...current,
                     `error:${String(event.result.content)}`

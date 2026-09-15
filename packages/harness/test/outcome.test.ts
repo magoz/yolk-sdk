@@ -33,10 +33,11 @@ import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/test
 import {
   attemptModelTurn,
   attemptToolBatch,
+  HitlMatch,
   matchHitlResponse,
+  OverflowCompactionResult,
   resumeHitlIfMatched
 } from '../src/outcome.ts'
-import { OverflowCompactionResult } from '../src/outcome-constructors-internal.ts'
 
 const loopLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
 
@@ -866,9 +867,16 @@ describe('attemptToolBatch', () => {
 
       expect(outcome._tag).toBe('AwaitingInput')
 
-      if (outcome._tag !== 'AwaitingInput') return
-      const approval = outcome.requests.find(request => request._tag === 'ToolApprovalRequest')
-      const question = outcome.requests.find(request => request._tag === 'QuestionRequest')
+      if (!Predicate.isTagged(outcome, 'AwaitingInput')) return
+
+      const approval = outcome.requests.find(request =>
+        Predicate.isTagged(request, 'ToolApprovalRequest')
+      )
+
+      const question = outcome.requests.find(request =>
+        Predicate.isTagged(request, 'QuestionRequest')
+      )
+
       expect(approval !== undefined && question !== undefined).toBe(true)
 
       if (approval === undefined || question === undefined) return
@@ -883,7 +891,7 @@ describe('attemptToolBatch', () => {
             source: 'user'
           })
         )
-      ).toEqual({ _tag: 'Match', requestId: approval.requestId })
+      ).toEqual(HitlMatch.Match({ requestId: approval.requestId }))
 
       expect(
         matchHitlResponse(
@@ -894,8 +902,8 @@ describe('attemptToolBatch', () => {
             decision: 'approved',
             source: 'user'
           })
-        )._tag
-      ).toBe('Mismatch')
+        )
+      ).toEqual(HitlMatch.Mismatch())
 
       expect(
         matchHitlResponse(
@@ -908,7 +916,7 @@ describe('attemptToolBatch', () => {
             answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
           })
         )
-      ).toEqual({ _tag: 'Match', requestId: question.requestId })
+      ).toEqual(HitlMatch.Match({ requestId: question.requestId }))
 
       const resumed = yield* Ref.make(false)
 
@@ -923,7 +931,7 @@ describe('attemptToolBatch', () => {
         resume: () => Ref.set(resumed, true).pipe(Effect.as({ _tag: 'Resumed' as const }))
       })
 
-      expect(skipped).toEqual({ _tag: 'Mismatch' })
+      expect(skipped).toEqual(HitlMatch.Mismatch())
       expect(yield* Ref.get(resumed)).toBe(false)
     }).pipe(
       Effect.provide(
@@ -960,9 +968,16 @@ describe('attemptToolBatch', () => {
         const paused = yield* attemptToolBatch({ calls, tools })
         expect(paused._tag).toBe('AwaitingInput')
 
-        if (paused._tag !== 'AwaitingInput') return
-        const approval = paused.requests.find(request => request._tag === 'ToolApprovalRequest')
-        const question = paused.requests.find(request => request._tag === 'QuestionRequest')
+        if (!Predicate.isTagged(paused, 'AwaitingInput')) return
+
+        const approval = paused.requests.find(request =>
+          Predicate.isTagged(request, 'ToolApprovalRequest')
+        )
+
+        const question = paused.requests.find(request =>
+          Predicate.isTagged(request, 'QuestionRequest')
+        )
+
         expect(approval).toBeDefined()
         expect(question).toBeDefined()
 
@@ -983,7 +998,7 @@ describe('attemptToolBatch', () => {
 
         expect(partial._tag).toBe('AwaitingInput')
 
-        if (partial._tag !== 'AwaitingInput') return
+        if (!Predicate.isTagged(partial, 'AwaitingInput')) return
         expect('toolCalls' in partial).toBe(false)
 
         const completed = yield* attemptToolBatch({
@@ -1008,7 +1023,7 @@ describe('attemptToolBatch', () => {
 
         expect(completed._tag).toBe('Completed')
 
-        if (completed._tag !== 'Completed') return
+        if (!Predicate.isTagged(completed, 'Completed')) return
         expect(completed.toolCalls.some(call => call.id === 'call_1')).toBe(true)
       }).pipe(
         Effect.provide(

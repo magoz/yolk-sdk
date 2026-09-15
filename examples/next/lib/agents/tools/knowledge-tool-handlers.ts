@@ -1,11 +1,19 @@
 import { Effect, Layer } from 'effect'
+import type { ConfigError } from 'effect/Config'
+import type { SqlError } from 'effect/unstable/sql/SqlError'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ModelVisibleToolError, modelVisibleToolError } from '@yolk-sdk/agent/tools'
+import type { KnowledgeEmbeddingError } from '@yolk-sdk/knowledge/errors'
 import type { NotFoundError, ValidationError } from '@/lib/core/errors'
 import { getKnowledgeContext } from '@/lib/core/knowledge/get-knowledge-context'
 import { listUserKnowledgeDocuments } from '@/lib/core/knowledge/list-user-knowledge-documents'
 import { searchUserKnowledge } from '@/lib/core/knowledge/search-user-knowledge'
 import { Db } from '@/lib/services/db/live-layer'
+import type {
+  AppKnowledgeEmbedderError,
+  AppKnowledgeSummarizerError
+} from '@/lib/services/knowledge-search/errors'
 import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { makeKnowledgeToolModule } from './knowledge-tool.ts'
 import type { KnowledgeAvailability } from '@/lib/core/knowledge/availability'
@@ -15,7 +23,16 @@ const KnowledgeToolLayer = Layer.mergeAll(
   AppKnowledgeSearchLayer.pipe(Layer.provide(Db.layer))
 )
 
-const unknownToMessage = (error: unknown) =>
+type KnowledgeToolExecutionFailure =
+  | ModelVisibleToolError
+  | EffectDrizzleQueryError
+  | ConfigError
+  | SqlError
+  | KnowledgeEmbeddingError
+  | AppKnowledgeEmbedderError
+  | AppKnowledgeSummarizerError
+
+const executionFailureMessage = (error: KnowledgeToolExecutionFailure) =>
   error instanceof Error ? error.message : String(error)
 
 const validationToolError = (tool: string, error: ValidationError) =>
@@ -24,10 +41,10 @@ const validationToolError = (tool: string, error: ValidationError) =>
 const notFoundToolError = (tool: string, error: NotFoundError) =>
   modelVisibleToolError({ tool, message: error.message, reason: 'not_found' })
 
-const fatalToolError = (tool: string, error: unknown) =>
+const fatalToolError = (tool: string, error: KnowledgeToolExecutionFailure) =>
   error instanceof ToolError || error instanceof ModelVisibleToolError
     ? error
-    : new ToolError({ tool, message: unknownToMessage(error), cause: 'execution' })
+    : new ToolError({ tool, message: executionFailureMessage(error), cause: 'execution' })
 
 const listKnowledgeForAgent = (input: {
   readonly userId: string

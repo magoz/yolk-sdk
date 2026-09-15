@@ -1,7 +1,8 @@
 import { Config, Effect, Layer, type Redacted } from 'effect'
+import type * as Schema from 'effect/Schema'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { LLMError } from '@yolk-sdk/agent/loop'
-import { makeOpenAiProviderLayer } from '../openai/provider.ts'
+import { makeOpenAiProviderLayer, type OpenAiRequestExtras } from '../openai/provider.ts'
 
 export const vercelAiGatewayProviderId = 'vercel_ai_gateway'
 
@@ -31,23 +32,32 @@ const vercelAiGatewayProviderIdentity = {
   name: 'Vercel AI Gateway'
 }
 
-type GatewayExtraBodyFields = {
-  models?: VercelAiGatewayProviderConfig['fallbackModels']
-  providerOptions?: { gateway: VercelAiGatewayRoutingOptions }
-}
-
-const gatewayExtraBody = (config: VercelAiGatewayProviderConfig) => {
-  const fields: GatewayExtraBodyFields = {}
+const gatewayExtraBody = (config: VercelAiGatewayProviderConfig): OpenAiRequestExtras => {
+  const extras: { [key: string]: Schema.Json } = {}
 
   if (config.fallbackModels !== undefined) {
-    fields.models = config.fallbackModels
+    extras.models = [...config.fallbackModels]
   }
 
   if (config.routing !== undefined) {
-    fields.providerOptions = { gateway: config.routing }
+    const gateway: { [key: string]: Schema.Json } = {}
+
+    if (config.routing.order !== undefined) {
+      gateway.order = [...config.routing.order]
+    }
+
+    if (config.routing.only !== undefined) {
+      gateway.only = [...config.routing.only]
+    }
+
+    if (config.routing.sort !== undefined) {
+      gateway.sort = config.routing.sort
+    }
+
+    extras.providerOptions = { gateway }
   }
 
-  return fields
+  return extras
 }
 
 type VercelAiGatewayOpenAiLayerFields = {
@@ -57,7 +67,7 @@ type VercelAiGatewayOpenAiLayerFields = {
   reasoningEffortFormat: 'reasoning-object'
   chatCompletionsUrl: string
   providerIdentity: typeof vercelAiGatewayProviderIdentity
-  extraBody: ReturnType<typeof gatewayExtraBody>
+  extraBody: OpenAiRequestExtras
   extraHeaders?: VercelAiGatewayProviderConfig['extraHeaders']
 }
 

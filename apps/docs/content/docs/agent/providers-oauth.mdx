@@ -65,6 +65,25 @@ with sanitized errors.
 
 Provider layers implement `LLMProvider`. The loop calls that service with messages, tool definitions, system prompt, model id, and optional capabilities. The provider emits text deltas, tool calls, usage, and done/error events.
 
+## OpenAI JSON admission
+
+OpenAI Chat Completions and Responses lowering admits `ToolDef.parameters` and tool-call `params` as
+`Schema.Json` before transport. Non-JSON values fail as non-retryable `LLMError` `provider_error`.
+`ToolDef.parameters` now admits `ToolJsonSchema` at construction; call params/results remain opaque.
+Public Codex `OpenAiCodexTool.parameters` remains
+`unknown`. Inbound HTTP JSON and Responses SSE event JSON admit `Schema.Json` before helpers;
+non-object SSE JSON is ignored, malformed non-JSON event text fails `invalid_response`, and HTTP
+error bodies stay raw text for classification.
+
+`OpenAiProviderConfig.extraBody` takes JSON-object input. Lowering discards canonical request fields
+without reading their values and snapshots surviving enumerable own data. Accessors are rejected
+unread, not evaluated; nonfinite values, cycles and exotic objects fail with a fixed
+`Invalid … extraBody JSON: expected a JSON object` and no HTTP request. Root symbols/hidden fields
+are omitted; nested hidden/symbol keys and extra array properties fail. DAG aliases are supported;
+mutating the input after lowering does not mutate the snapshot. Proxy traps are not guaranteed
+side-effect-free. Final composed-body `Schema.Json` admission after lone-surrogate rewriting remains.
+Gateway routing projects its declared JSON fields. See [the migration guide](../migration).
+
 ## Errors and retries
 
 Provider adapters classify safe metadata into `ProviderErrorInfo`. Raw provider response bodies stay out of protocol/UI. The loop owns bounded retry behavior and usage aggregation.

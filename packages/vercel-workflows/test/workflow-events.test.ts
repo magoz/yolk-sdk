@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Effect } from 'effect'
+import { Cause, Effect, Exit } from 'effect'
 import {
   commitThenWriteTerminalEvent,
   durableAgentEventId,
@@ -32,19 +32,19 @@ describe('durable workflow agent events', () => {
       event: { _tag: 'LLMTextDelta', text: ' då' }
     })
 
-    expect(first.event).toMatchObject({
+    expect(first.event).toEqual({
       _tag: 'LLMTextDelta',
       text: 'hej',
       eventId: 'workflow:run-1:2:4',
       createdAtMs: 123
     })
-    expect(first.event.createdAtMs).toBe(123)
     expect(first.nextEventSequence).toBe(5)
-    expect(second.event).toMatchObject({
+    expect(second.event).toEqual({
       _tag: 'LLMTextDelta',
       text: ' då',
       eventId: 'workflow:run-1:2:5'
     })
+    expect(Object.hasOwn(second.event, 'createdAtMs')).toBe(false)
     expect(second.nextEventSequence).toBe(6)
   })
 
@@ -102,10 +102,12 @@ describe('durable workflow agent events', () => {
       event: { _tag: 'AgentError', code: 'unknown', message: 'Nope', retryable: false }
     })
 
-    expect(result.event).toMatchObject({
+    expect(result.event).toEqual({
       _tag: 'AgentError',
-      eventId: 'workflow:run-1:1:0',
-      message: 'Nope'
+      code: 'unknown',
+      message: 'Nope',
+      retryable: false,
+      eventId: 'workflow:run-1:1:0'
     })
     expect(result.nextState).toEqual({ eventSequence: 1 })
   })
@@ -137,22 +139,33 @@ describe('durable workflow agent events', () => {
 
     if (firstChunk === undefined) throw new Error('Missing NDJSON chunk')
 
-    expect(result.event.eventId).toBe('workflow:run-1:1:0')
-    expect(new TextDecoder().decode(firstChunk)).toBe(`${JSON.stringify(result.event)}\n`)
+    expect(result.event).toEqual({
+      _tag: 'LLMTextDelta',
+      text: 'hej',
+      eventId: 'workflow:run-1:1:0'
+    })
+    expect(result.nextEventSequence).toBe(1)
+    expect(chunks).toHaveLength(1)
+    expect(new TextDecoder().decode(firstChunk)).toBe(
+      '{"_tag":"LLMTextDelta","text":"hej","eventId":"workflow:run-1:1:0"}\n'
+    )
   })
 
   it('commits before writing terminal events', async () => {
     const operations: Array<string> = []
+    const terminal = { text: 'last' }
+    let written: typeof terminal | undefined
 
     const result = await Effect.runPromise(
       commitThenWriteTerminalEvent({
-        terminal: { _tag: 'AgentEnd' },
+        terminal,
         commit: Effect.sync(() => {
           operations.push('commit')
         }),
         write: event =>
           Effect.sync(() => {
-            operations.push(`write:${event._tag}`)
+            written = event
+            operations.push(`write:${event.text}`)
 
             return { nextEventSequence: 2 }
           }),
@@ -165,7 +178,8 @@ describe('durable workflow agent events', () => {
       })
     )
 
-    expect(operations).toEqual(['commit', 'write:AgentEnd'])
+    expect(operations).toEqual(['commit', 'write:last'])
+    expect(written).toBe(terminal)
     expect(result._tag).toBe('Committed')
     expect(result).toMatchObject({ writeResult: { nextEventSequence: 2 } })
   })
@@ -279,5 +293,93 @@ describe('durable workflow agent events', () => {
         error: writeError
       })
     )
+  })
+
+  it('passes typed non-Error commit failures by identity to writeCommitError', async () => {
+    const operations: Array<string> = []
+    const commitError = { reason: 'commit-denied' }
+    let captured: typeof commitError | undefined
+    const terminal = { text: 'commit-denied-terminal' }
+
+    const result = await Effect.runPromise(
+      commitThenWriteTerminalEvent({
+        terminal,
+        commit: Effect.gen(function* () {
+          yield* Effect.sync(() => {
+            operations.push('commit')
+          })
+          yield* Effect.fail(commitError)
+        }),
+        write: event =>
+          Effect.sync(() => {
+            operations.push(`write:${event.text}`)
+
+            return event
+          }),
+        writeCommitError: error =>
+          Effect.sync(() => {
+            captured = error
+            operations.push(
+              error === commitError && error.reason === 'commit-denied'
+                ? 'write-error:commit'
+                : 'write-error:unknown'
+            )
+
+            return { written: true }
+          })
+      })
+    )
+
+    expect(operations).toEqual(['commit', 'write-error:commit'])
+    expect(terminal.text).toBe('commit-denied-terminal')
+    expect(captured).toBe(commitError)
+    expect(result).toEqual(
+      CommitThenWriteTerminalEventResult.CommitFailed({
+        commitError,
+        writeResult: { written: true }
+      })
+    )
+  })
+
+  it('does not route commit defects through writeCommitError', async () => {
+    const operations: Array<string> = []
+    const defect = { phase: 'commit' }
+    const terminal = { text: 'defect-terminal' }
+
+    const exit = await Effect.runPromiseExit(
+      commitThenWriteTerminalEvent({
+        terminal,
+        commit: Effect.gen(function* () {
+          yield* Effect.sync(() => {
+            operations.push('commit')
+          })
+          yield* Effect.die(defect)
+        }),
+        write: event =>
+          Effect.sync(() => {
+            operations.push(`write:${event.text}`)
+
+            return event
+          }),
+        writeCommitError: () =>
+          Effect.sync(() => {
+            operations.push('write-error')
+
+            return { written: true }
+          })
+      })
+    )
+
+    expect(operations).toEqual(['commit'])
+    expect(terminal.text).toBe('defect-terminal')
+    expect(Exit.isFailure(exit)).toBe(true)
+
+    if (!Exit.isFailure(exit)) {
+      throw new Error('expected commit defect to bypass writeCommitError')
+    }
+
+    expect(Cause.hasDies(exit.cause)).toBe(true)
+    expect(Cause.hasFails(exit.cause)).toBe(false)
+    expect(Cause.squash(exit.cause)).toBe(defect)
   })
 })

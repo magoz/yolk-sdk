@@ -24,6 +24,34 @@ pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
 | `@yolk-sdk/harness/driver/durable-object` | Durable Object storage-backed claims + driver                                                           |
 | `@yolk-sdk/harness/outcome`               | Classify one model/tool attempt: Completed / Retry / Continue / RecoverFull / Compacted / AwaitingInput |
 
+## Tagged constructors
+
+Inbox, driver, and outcome ADTs are `Data.taggedEnum` **values** on the existing subpaths. They are
+plain objects with `_tag` last, not `Equal`/`Hash` Data classes.
+
+```ts
+import {
+  DrainBegin,
+  HitlDecision,
+  PauseDecision,
+  RecoveryAdmission,
+  RecoveryAttempt
+} from '@yolk-sdk/harness/inbox'
+import { StopDecision } from '@yolk-sdk/harness/driver'
+import { HitlMatch, OverflowCompactionResult, StepOutcome } from '@yolk-sdk/harness/outcome'
+```
+
+| Subpath   | Value constructors                                                                    |
+| --------- | ------------------------------------------------------------------------------------- |
+| `inbox`   | `HitlDecision`, `PauseDecision`, `RecoveryAttempt`, `RecoveryAdmission`, `DrainBegin` |
+| `driver`  | `StopDecision` (`Idle` / `Interrupted` / `ParkCleared`)                               |
+| `outcome` | `OverflowCompactionResult`, `StepOutcome`, `HitlMatch`                                |
+
+`StopDecision` is the same internal tagged enum, re-exported as `export type` + `export const` from
+`./driver`. Driver recovery uses Inbox `RecoveryAttempt` (`Skip` / `Exhausted` / `Resume`). Prefer
+`Match.tag` / `Predicate.isTagged` over `_tag ===`. `HitlMatch.Match({ requestId })` /
+`HitlMatch.Mismatch()` replace handwritten `{ _tag: 'Match' | 'Mismatch' }` objects.
+
 ## Example
 
 Omitting `drain` uses a no-op (`Effect.void`): `driver.run` only claims and releases ownership. Attach host work with a custom drain. `Inbox.takePromotable` requires that drain's live `drainToken`.

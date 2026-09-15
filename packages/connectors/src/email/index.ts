@@ -10,7 +10,7 @@ import {
   isBytes,
   validateTransfer
 } from '../transfer-internal.ts'
-import { Context, Effect, Predicate } from 'effect'
+import { Context, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
@@ -404,16 +404,23 @@ export class EmailClient extends Context.Service<EmailClient, EmailClientApi>()(
 const configValue = (integration: ConnectorIntegration, key: string) =>
   Object.getOwnPropertyDescriptor(integration.config, key)?.value
 
-const validationError = (
+const validationError = (integration: ConnectorIntegration, message: string) =>
+  new ConnectorError({
+    cause: 'validation_failed',
+    message,
+    connectorId: integration.connectorId
+  })
+
+const invalidHostOutput = (
   integration: ConnectorIntegration,
   message: string,
-  underlying?: unknown
+  error: Schema.SchemaError
 ) =>
   new ConnectorError({
     cause: 'validation_failed',
     message,
     connectorId: integration.connectorId,
-    underlying
+    underlying: error
   })
 
 const requiredHost = (integration: ConnectorIntegration, key: string) => {
@@ -443,11 +450,12 @@ const enumConfig = <Value extends string>(input: {
   if (match !== undefined) return Effect.succeed(match)
 
   return Effect.fail(
-    validationError(
-      input.integration,
-      `Invalid integration config ${input.key}; expected ${input.allowed.join(' | ')}`,
-      value
-    )
+    new ConnectorError({
+      cause: 'validation_failed',
+      message: `Invalid integration config ${input.key}; expected ${input.allowed.join(' | ')}`,
+      connectorId: input.integration.connectorId,
+      underlying: value
+    })
   )
 }
 
@@ -471,9 +479,25 @@ const portConfig = (
   }
 
   return Effect.fail(
-    validationError(integration, `Invalid integration config ${key}; expected port 1-65535`, value)
+    new ConnectorError({
+      cause: 'validation_failed',
+      message: `Invalid integration config ${key}; expected port 1-65535`,
+      connectorId: integration.connectorId,
+      underlying: value
+    })
   )
 }
+
+const incomingDefaultPort = {
+  imap: { tls: 993, starttls: 143, none: 143 },
+  pop3: { tls: 995, starttls: 110, none: 110 }
+} satisfies Record<EmailIncomingProtocol, Record<EmailSecurity, number>>
+
+const smtpDefaultPort = {
+  tls: 465,
+  starttls: 587,
+  none: 25
+} satisfies Record<EmailSecurity, number>
 
 const incomingConnection = (integration: ConnectorIntegration) =>
   Effect.gen(function* () {
@@ -493,8 +517,7 @@ const incomingConnection = (integration: ConnectorIntegration) =>
       fallback: 'tls' as const
     })
 
-    const defaultPort =
-      protocol === 'imap' ? (security === 'tls' ? 993 : 143) : security === 'tls' ? 995 : 110
+    const defaultPort = incomingDefaultPort[protocol][security]
 
     const port = yield* portConfig(integration, emailIncomingPortConfigKey, defaultPort)
 
@@ -519,7 +542,7 @@ const smtpConnection = (integration: ConnectorIntegration) =>
       fallback: 'starttls' as const
     })
 
-    const defaultPort = security === 'tls' ? 465 : security === 'starttls' ? 587 : 25
+    const defaultPort = smtpDefaultPort[security]
     const port = yield* portConfig(integration, emailSmtpPortConfigKey, defaultPort)
 
     return EmailSmtpConnection.make({ protocol, host, port, security })
@@ -529,19 +552,21 @@ const usableCredential = (
   integration: ConnectorIntegration,
   credential: RuntimeCredential,
   slot: CredentialSlot
-): Effect.Effect<UsernamePasswordCredential, ConnectorError> => {
-  if (Predicate.isTagged(credential, 'UsernamePasswordCredential'))
-    return Effect.succeed(credential)
-
-  return Effect.fail(
-    new ConnectorError({
-      cause: 'credential_invalid',
-      message: `Credential slot ${slot.id} requires username/password`,
-      connectorId: integration.connectorId,
-      slotId: slot.id
-    })
+): Effect.Effect<UsernamePasswordCredential, ConnectorError> =>
+  Match.value(credential).pipe(
+    Match.tag('UsernamePasswordCredential', current => Effect.succeed(current)),
+    Match.tag('ApiKeyCredential', 'BearerTokenCredential', 'OAuthCredential', () =>
+      Effect.fail(
+        new ConnectorError({
+          cause: 'credential_invalid',
+          message: `Credential slot ${slot.id} requires username/password`,
+          connectorId: integration.connectorId,
+          slotId: slot.id
+        })
+      )
+    ),
+    Match.exhaustive
   )
-}
 
 const requireRecipient = (integration: ConnectorIntegration, message: EmailComposeMessage) =>
   message.to.length > 0 || (message.cc?.length ?? 0) > 0 || (message.bcc?.length ?? 0) > 0
@@ -666,7 +691,7 @@ export const emailGetAttachmentAction = defineAction({
 
       const output = yield* Schema.decodeUnknownEffect(EmailGetAttachmentOutput)(result.value).pipe(
         Effect.mapError(error =>
-          validationError(integration, 'EmailClient returned invalid attachment output', error)
+          invalidHostOutput(integration, 'EmailClient returned invalid attachment output', error)
         )
       )
 
@@ -764,7 +789,7 @@ export const emailSetReadAction = defineAction({
 
       const output = yield* Schema.decodeUnknownEffect(EmailSetReadOutput)(result.value).pipe(
         Effect.mapError(error =>
-          validationError(integration, 'EmailClient returned invalid setRead output', error)
+          invalidHostOutput(integration, 'EmailClient returned invalid setRead output', error)
         )
       )
 
@@ -803,7 +828,7 @@ export const emailTrashAction = defineAction({
 
       const output = yield* Schema.decodeUnknownEffect(EmailMoveMessageOutput)(result.value).pipe(
         Effect.mapError(error =>
-          validationError(integration, 'EmailClient returned invalid trash output', error)
+          invalidHostOutput(integration, 'EmailClient returned invalid trash output', error)
         )
       )
 
@@ -842,7 +867,7 @@ export const emailUntrashAction = defineAction({
 
       const output = yield* Schema.decodeUnknownEffect(EmailMoveMessageOutput)(result.value).pipe(
         Effect.mapError(error =>
-          validationError(integration, 'EmailClient returned invalid untrash output', error)
+          invalidHostOutput(integration, 'EmailClient returned invalid untrash output', error)
         )
       )
 

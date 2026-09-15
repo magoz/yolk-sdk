@@ -51,14 +51,6 @@ const resolveAccess = (
   return resolver ?? actionAccess ?? 'read'
 }
 
-const unknownToMessage = (error: unknown) => {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}
-
 const failureContent = (failure: ProviderFailure) => `${failure.code}: ${failure.message}`
 
 const successContent = (value: unknown) => {
@@ -85,7 +77,8 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
     description: action?.description ?? `Invoke connector action ${actionId}.`,
     parameters: action?.inputSchema ?? Schema.Unknown,
     access: resolveAccess(options.access, actionId, action?.access),
-    invalidParamsMessage: error => `Invalid ${name} arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid ${name} arguments: ${error instanceof Error ? error.message : String(error)}`,
     execute: ({ call, context, params }) =>
       resolveIntegration(options.integration, context).pipe(
         Effect.flatMap(integration =>
@@ -121,7 +114,7 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
           error =>
             new ToolError({
               tool: name,
-              message: unknownToMessage(error),
+              message: error instanceof Error ? error.message : String(error),
               cause: 'execution'
             })
         )

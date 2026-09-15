@@ -108,8 +108,8 @@ const ErrorBody = Schema.Struct({ error_summary: Schema.optional(Schema.String) 
 const downloadUrl = `${dropboxContentApiBaseUrl}/files/download`
 
 // Dropbox-API-Arg must be HTTP-header-safe JSON: every non-ASCII code unit becomes \uXXXX.
-const headerSafeJson = (value: unknown) =>
-  JSON.stringify(value).replace(
+const dropboxApiArgHeader = (path: string) =>
+  JSON.stringify({ path }).replace(
     /[\u007f-\uffff]/g,
     character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
   )
@@ -227,7 +227,7 @@ export const downloadDropboxFile = (
         url: downloadUrl,
         headers: {
           ...dropboxAuthorizationHeaders(token),
-          'dropbox-api-arg': headerSafeJson({ path: requested.path })
+          'dropbox-api-arg': dropboxApiArgHeader(requested.path)
         },
         maxBytes: limits.maxBytes,
         maxErrorBodyBytes: limits.maxErrorBodyBytes,
@@ -235,17 +235,7 @@ export const downloadDropboxFile = (
         credentials: 'omit'
       })
       .pipe(
-        Effect.mapError(
-          error =>
-            new DropboxDownloadError({
-              code:
-                error.code === 'response_too_large'
-                  ? 'response_too_large'
-                  : error.code === 'network_policy_rejected'
-                    ? 'network_policy_rejected'
-                    : 'transport_failed'
-            })
-        ),
+        Effect.mapError(error => new DropboxDownloadError({ code: error.code })),
         Effect.tap(response => checkBody(response, limits.maxBytes, limits.maxErrorBodyBytes))
       )
 

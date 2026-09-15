@@ -34,18 +34,15 @@ const config = {
   tools: []
 }
 
-const parseJson = (line: string): unknown => JSON.parse(line)
-
-const decodeEvent = (value: unknown) => Schema.decodeUnknownEffect(AgentEvent)(value)
+const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEvent))
 
 const decodeEvents = (body: string) =>
   Effect.forEach(
     body
       .trim()
       .split('\n')
-      .filter(line => line.length > 0)
-      .map(parseJson),
-    decodeEvent
+      .filter(line => line.length > 0),
+    line => decodeEvent(line)
   )
 
 const messageContent = (message: AgentMessage) =>
@@ -194,7 +191,7 @@ describe('makeAgentPostResponse', () => {
 
       const text = new TextDecoder().decode(read.value)
       const firstLine = text.split('\n')[0] ?? ''
-      const event = yield* decodeEvent(parseJson(firstLine))
+      const event = yield* decodeEvent(firstLine)
 
       expect(event._tag).toBe('AgentStart')
     })

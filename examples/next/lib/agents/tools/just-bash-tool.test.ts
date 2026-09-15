@@ -1,10 +1,34 @@
-import { Effect } from 'effect'
+import { Effect, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveAgentTools } from './registry'
-import { executeJustBashTool } from './just-bash-tool'
+import { executeJustBashTool, justBashHostFailure } from './just-bash-tool'
 
 describe('just_bash tool', () => {
+  it('does not stringify arbitrary host rejections', () => {
+    const error = {
+      toString() {
+        throw new Error('private rejection must not be stringified')
+      }
+    }
+
+    const failure = justBashHostFailure(error)
+
+    expect(failure.cause).toBe('execution')
+    expect(failure.message).toBe('just-bash execution failed')
+    expect(justBashHostFailure(Symbol('private')).message).toBe('just-bash execution failed')
+  })
+
+  it('distinguishes native timeout and execution failures', () => {
+    const timeout = justBashHostFailure(new DOMException('aborted', 'AbortError'))
+    const execution = justBashHostFailure(new Error('command failed'))
+
+    expect(timeout.cause).toBe('timeout')
+    expect(timeout.message).toContain('timed out')
+    expect(execution.cause).toBe('execution')
+    expect(execution.message).toBe('just-bash execution failed: command failed')
+  })
+
   it.effect('runs a data-processing script', () =>
     Effect.gen(function* () {
       const result = yield* executeJustBashTool(
@@ -51,6 +75,52 @@ describe('just_bash tool', () => {
       expect(result.content).toContain('exit_code: 2')
       expect(result.content).toContain('nope')
       expect(result.isError).toBe(true)
+    })
+  )
+
+  it.effect('treats abort timeout as a model-visible error, not a successful empty result', () =>
+    Effect.gen(function* () {
+      const result = yield* executeJustBashTool(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'just_bash',
+          params: {
+            script: 'sleep 30',
+            timeoutSeconds: 0.05
+          }
+        })
+      ).pipe(Effect.result)
+
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe('ToolError')
+        expect(result.failure.cause).toBe('timeout')
+        expect(result.failure.message).toContain('timed out')
+
+        return
+      }
+
+      expect(result.success.isError).toBe(true)
+      expect(result.success.content).toContain('timed_out: true')
+    })
+  )
+
+  it.effect('keeps SchemaError wrapper on invalid just-bash arguments', () =>
+    Effect.gen(function* () {
+      const result = yield* executeJustBashTool(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'just_bash',
+          params: { script: false }
+        })
+      ).pipe(Effect.result)
+
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe('ToolError')
+        expect(result.failure.cause).toBe('validation')
+        expect(result.failure.message).toContain('Invalid just-bash arguments: SchemaError(')
+      }
     })
   )
 

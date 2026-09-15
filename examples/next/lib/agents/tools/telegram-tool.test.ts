@@ -1,6 +1,7 @@
-import { Predicate } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { makeConnectorHttpRequest } from './telegram-tool'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
+import { makeAppTelegramToolModule, makeConnectorHttpRequest } from './telegram-tool'
 import { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 
 describe('telegram connector tool adapter', () => {
@@ -21,4 +22,38 @@ describe('telegram connector tool adapter', () => {
       contentType: 'application/json'
     })
   })
+
+  it.effect('keeps SchemaError wrapper on invalid Telegram arguments', () =>
+    Effect.gen(function* () {
+      const toolModule = makeAppTelegramToolModule({
+        botToken: 'token',
+        chatId: '1'
+      })
+
+      const tool = toolModule.tools[0]
+      const validate = tool?.validate
+
+      expect(validate).toBeDefined()
+
+      if (validate === undefined) {
+        return
+      }
+
+      const result = yield* validate(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'telegram_send_message',
+          params: { message: false }
+        })
+      ).pipe(Effect.result)
+
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe('ToolError')
+        expect(result.failure.cause).toBe('validation')
+        expect(result.failure.message).toContain('Invalid Telegram message arguments: SchemaError(')
+      }
+    })
+  )
 })

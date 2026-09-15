@@ -15,7 +15,9 @@ const hasIsTransient = (error: unknown): error is { isTransient: true } =>
   'isTransient' in error &&
   error.isTransient === true
 
-export const isTransientError = (error: unknown): boolean =>
+export const isTransientError = (
+  error: unknown
+): error is { readonly isTransient: true } | SqlError =>
   hasIsTransient(error) || error instanceof SqlError
 
 // Usage example:

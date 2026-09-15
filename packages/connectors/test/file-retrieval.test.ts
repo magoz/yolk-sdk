@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
   ConnectorBinaryHttpClient,
   CredentialResolver,
@@ -34,7 +35,13 @@ const response = (body = bytes, status = 200, headers = {}): ConnectorBinaryHttp
   bodyComplete: true
 })
 
-const json = (value: unknown) => response(new TextEncoder().encode(JSON.stringify(value)))
+const isJson = Schema.is(Schema.Json)
+
+const json = (value: Schema.Json) => {
+  if (!isJson(value)) throw new TypeError('JSON fixture requires a finite JSON value')
+
+  return response(new TextEncoder().encode(JSON.stringify(value)))
+}
 
 const host = (responses: readonly ConnectorBinaryHttpResponse[]) => {
   const requests: ConnectorBinaryHttpRequest[] = []
@@ -78,6 +85,11 @@ const driveMetadata = {
 }
 
 describe('bounded document retrieval', () => {
+  it('rejects non-finite JSON fixture values before stringify', () => {
+    expect(() => json(Infinity)).toThrow('JSON fixture requires a finite JSON value')
+    expect(() => json({ n: Infinity })).toThrow('JSON fixture requires a finite JSON value')
+  })
+
   it.effect('Drive blob uses content consent, resource keys and shared-drive support', () =>
     Effect.gen(function* () {
       const h = host([

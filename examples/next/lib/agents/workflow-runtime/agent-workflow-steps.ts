@@ -600,12 +600,24 @@ export async function mergeWorkflowToolResultsStep(
               })
             ))
 
+      const createdMessages = [...input.createdMessages, ...messages]
+      const encodedUsage = yield* encodeUsage(usage)
+
+      if (failure === undefined) {
+        return {
+          messages,
+          createdMessages,
+          usage: encodedUsage,
+          eventSequence: input.eventSequence
+        }
+      }
+
       return {
         messages,
-        createdMessages: [...input.createdMessages, ...messages],
-        usage: yield* encodeUsage(usage),
+        createdMessages,
+        usage: encodedUsage,
         eventSequence: input.eventSequence,
-        ...(failure === undefined ? {} : { failure })
+        failure
       }
     })
   )

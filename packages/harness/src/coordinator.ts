@@ -9,6 +9,7 @@
  */
 import { Cause, Context, Deferred, Effect, Exit, Fiber, FiberSet, Layer } from 'effect'
 import type { Scope } from 'effect'
+import { StopReceipt as stopReceipt } from './outcome-constructors-internal.ts'
 import { RunStore } from './store.ts'
 
 // Private settlement receipt: succeed the Deferred with Exit as a value so
@@ -260,13 +261,13 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
         Effect.suspend((): Effect.Effect<StopReceipt> => {
           const execution = executions.get(key)
 
-          if (execution === undefined) return Effect.succeed({ _tag: 'Idle' } as const)
+          if (execution === undefined) return Effect.succeed(stopReceipt.Idle())
           execution.pendingWake = undefined
 
           if (execution.owner === undefined) {
             execution.stopping = true
 
-            return Effect.succeed({ _tag: 'Settling' } as const)
+            return Effect.succeed(stopReceipt.Settling())
           }
 
           execution.interruptionReason = reason
@@ -275,8 +276,8 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
             const request = execution.request
 
             return request === undefined
-              ? Effect.succeed({ _tag: 'LiveStopping' } as const)
-              : Fiber.join(request).pipe(Effect.as({ _tag: 'LiveStopping' } as const))
+              ? Effect.succeed(stopReceipt.LiveStopping())
+              : Fiber.join(request).pipe(Effect.as(stopReceipt.LiveStopping()))
           }
 
           const owner = execution.owner
@@ -284,7 +285,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
           const request = forkInterruptionRequest(owner)
           execution.request = request
 
-          return Fiber.join(request).pipe(Effect.as({ _tag: 'Interrupted' } as const))
+          return Fiber.join(request).pipe(Effect.as(stopReceipt.Interrupted()))
         }),
       awaitIdle
     }

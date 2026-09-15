@@ -58,6 +58,9 @@ describe('loadConfigSkillsetManifest', () => {
 
         if (Result.isFailure(result)) {
           expect(Predicate.isTagged(result.failure, 'ConfigSkillsetError')).toBe(true)
+          expect(result.failure.message).toContain(
+            'Could not load skillset config: Invalid YOLK_SKILLSET: SchemaError('
+          )
         }
       }),
       { YOLK_SKILLSET: '{' }

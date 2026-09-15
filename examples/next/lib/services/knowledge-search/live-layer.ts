@@ -7,6 +7,7 @@ import {
   type HttpClientError,
   type HttpClientResponse
 } from 'effect/unstable/http'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import * as Schema from 'effect/Schema'
 import { DefaultKnowledgeChunkerLive } from '@yolk-sdk/knowledge/chunking'
 import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
@@ -24,9 +25,9 @@ import type {
 } from '@yolk-sdk/knowledge/store'
 import type {
   ExtractedKnowledgeDocument,
-  IndexedKnowledgeDocument,
   KnowledgeChunk,
   KnowledgeMetadata,
+  KnowledgeSearchScope,
   KnowledgeSource
 } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
@@ -34,6 +35,7 @@ import * as dbSchema from '@/lib/services/db/schema'
 import { isTransientError, retryPolicy } from '@/lib/services/retry'
 import { OpenAiKnowledgeDocumentSummarizerLayer } from './document-summarizer'
 import { AppKnowledgeEmbedderError } from './errors'
+import { knowledgeSourceFromStorageRow } from './storage-source'
 
 const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings'
 
@@ -46,24 +48,6 @@ const OpenAiEmbeddingResponseSchema = Schema.Struct({
 })
 
 type StorageSourceType = (typeof dbSchema.storageSourceType.enumValues)[number]
-
-const hasStringMessage = (error: unknown): error is { readonly message: string } =>
-  Predicate.isObjectOrArray(error) &&
-  error !== null &&
-  'message' in error &&
-  Predicate.isString(error.message)
-
-const hasTag = <Tag extends string>(error: unknown, tag: Tag): error is { readonly _tag: Tag } =>
-  Predicate.isObjectOrArray(error) && error !== null && '_tag' in error && error._tag === tag
-
-const isSearchIndexStoreError = (error: unknown): error is SearchIndexStoreError =>
-  hasTag(error, 'SearchIndexStoreError')
-
-const isKnowledgeExtractionError = (error: unknown): error is KnowledgeExtractionError =>
-  hasTag(error, 'KnowledgeExtractionError')
-
-const unknownToMessage = (error: unknown) =>
-  hasStringMessage(error) ? error.message : String(error)
 
 const metadataString = (metadata: KnowledgeMetadata | undefined, key: string) => {
   const value = metadata?.[key]
@@ -79,50 +63,40 @@ const sourceTypeFromKnowledgeSource = (source: KnowledgeSource): StorageSourceTy
     Match.exhaustive
   )
 
-const sourceFromRows = (input: {
-  readonly sourceType: StorageSourceType
-  readonly r2Key: string | null
-  readonly url: string | null
-  readonly filename: string | null
-  readonly mediaType: string | null
-}): KnowledgeSource => {
-  switch (input.sourceType) {
-    case 'file':
-      return {
-        _tag: 'File',
-        ref: input.r2Key ?? '',
-        name: input.filename ?? undefined,
-        mediaType: input.mediaType ?? undefined
-      }
-    case 'url':
-      return { _tag: 'Url', url: input.url ?? '' }
-    case 'text':
-      return { _tag: 'Text', label: input.filename ?? undefined }
-  }
-}
+const searchScopeIds = (scope: KnowledgeSearchScope) =>
+  Match.value(scope).pipe(
+    Match.tagsExhaustive({
+      KnowledgeScope: ({ id }) => [id],
+      KnowledgeScopes: ({ ids }) => ids
+    })
+  )
 
 const toKnowledgeDocument = (input: {
   readonly document: typeof dbSchema.knowledgeDocument.$inferSelect
   readonly storage: typeof dbSchema.storageObject.$inferSelect
-}): IndexedKnowledgeDocument => ({
-  id: input.document.id,
-  scopeId: input.document.collectionId,
-  source: sourceFromRows({
+}) =>
+  knowledgeSourceFromStorageRow({
+    id: input.storage.id,
     sourceType: input.storage.sourceType,
     r2Key: input.storage.r2Key,
     url: input.storage.url,
     filename: input.storage.filename,
     mediaType: input.storage.mediaType
-  }),
-  status: input.document.status,
-  title: input.document.title ?? undefined,
-  summary: input.document.summary ?? undefined,
-  errorMessage: input.document.errorMessage ?? undefined,
-  contentHash: input.document.contentHash ?? undefined,
-  tokenCount: input.document.tokenCount,
-  chunkCount: input.document.chunkCount,
-  metadata: input.document.metadata
-})
+  }).pipe(
+    Effect.map(source => ({
+      id: input.document.id,
+      scopeId: input.document.collectionId,
+      source,
+      status: input.document.status,
+      title: input.document.title ?? undefined,
+      summary: input.document.summary ?? undefined,
+      errorMessage: input.document.errorMessage ?? undefined,
+      contentHash: input.document.contentHash ?? undefined,
+      tokenCount: input.document.tokenCount,
+      chunkCount: input.document.chunkCount,
+      metadata: input.document.metadata
+    }))
+  )
 
 const toKnowledgeChunk = (row: typeof dbSchema.knowledgeChunk.$inferSelect): KnowledgeChunk => ({
   id: row.id,
@@ -139,13 +113,8 @@ const storageObjectIdForDocument = (input: UpsertIndexedKnowledgeDocumentInput) 
 
 const notFound = (label: string) => new SearchIndexStoreError({ message: `${label} not found` })
 
-const mapStoreError = (error: unknown) => {
-  if (isSearchIndexStoreError(error)) {
-    return error
-  }
-
-  return new SearchIndexStoreError({ message: unknownToMessage(error), cause: error })
-}
+const sqlStoreError = (error: EffectDrizzleQueryError) =>
+  new SearchIndexStoreError({ message: error.message, cause: error })
 
 const isOkStatus = (status: number) => status >= 200 && status < 300
 
@@ -211,10 +180,10 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
           return yield* Effect.fail(notFound('knowledge search document'))
         }
 
-        return toKnowledgeDocument(row)
+        return yield* toKnowledgeDocument(row)
       }).pipe(
         Effect.withSpan('SearchIndexStore.getDocument'),
-        Effect.catch(error => Effect.fail(mapStoreError(error)))
+        Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
       )
 
     const api: SearchIndexStoreApi = {
@@ -261,7 +230,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
           return yield* getDocument(row.id)
         }).pipe(
           Effect.withSpan('SearchIndexStore.upsertDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       markDocumentProcessing: input =>
@@ -279,7 +248,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
           return yield* getDocument(input.documentId)
         }).pipe(
           Effect.withSpan('SearchIndexStore.markDocumentProcessing'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       replaceDocumentChunks: input =>
@@ -315,7 +284,10 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
           )
         }).pipe(
           Effect.withSpan('SearchIndexStore.replaceDocumentChunks'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error))),
+          Effect.catchTag('SqlError', error =>
+            Effect.fail(new SearchIndexStoreError({ message: error.message, cause: error }))
+          )
         ),
 
       markDocumentReady: input =>
@@ -348,7 +320,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
           return yield* getDocument(row.id)
         }).pipe(
           Effect.withSpan('SearchIndexStore.markDocumentReady'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       markDocumentError: input =>
@@ -368,7 +340,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             )
         }).pipe(
           Effect.withSpan('SearchIndexStore.markDocumentError'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       deleteDocument: input =>
@@ -383,7 +355,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             )
         }).pipe(
           Effect.withSpan('SearchIndexStore.deleteDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       searchChunks: input =>
@@ -395,13 +367,12 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
 
           const score = sql<number>`1 - (${distance})`
 
-          const scopeIds = Predicate.isTagged(input.scope, 'KnowledgeScope')
-            ? [input.scope.id]
-            : [...input.scope.ids]
+          const scopeIds = searchScopeIds(input.scope)
+          const [singleScopeId] = scopeIds
 
           const scopeCondition =
-            scopeIds.length === 1
-              ? eq(dbSchema.knowledgeChunk.collectionId, scopeIds[0] ?? '')
+            scopeIds.length === 1 && singleScopeId !== undefined
+              ? eq(dbSchema.knowledgeChunk.collectionId, singleScopeId)
               : inArray(dbSchema.knowledgeChunk.collectionId, scopeIds)
 
           const minScoreCondition =
@@ -429,25 +400,28 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .orderBy(asc(distance))
             .limit(input.limit)
 
-          return matches.map(match => ({
-            chunk: toKnowledgeChunk(match.chunk),
-            score: match.score,
-            document: toKnowledgeDocument({ document: match.document, storage: match.storage })
-          }))
+          return yield* Effect.forEach(matches, match =>
+            toKnowledgeDocument({ document: match.document, storage: match.storage }).pipe(
+              Effect.map(document => ({
+                chunk: toKnowledgeChunk(match.chunk),
+                score: match.score,
+                document
+              }))
+            )
+          )
         }).pipe(
           Effect.withSpan('SearchIndexStore.searchChunks'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       searchChunksByText: input =>
         Effect.gen(function* () {
-          const scopeIds = Predicate.isTagged(input.scope, 'KnowledgeScope')
-            ? [input.scope.id]
-            : [...input.scope.ids]
+          const scopeIds = searchScopeIds(input.scope)
+          const [singleScopeId] = scopeIds
 
           const scopeCondition =
-            scopeIds.length === 1
-              ? eq(dbSchema.knowledgeChunk.collectionId, scopeIds[0] ?? '')
+            scopeIds.length === 1 && singleScopeId !== undefined
+              ? eq(dbSchema.knowledgeChunk.collectionId, singleScopeId)
               : inArray(dbSchema.knowledgeChunk.collectionId, scopeIds)
 
           const searchVector = sql`to_tsvector('english', ${dbSchema.knowledgeChunk.content})`
@@ -480,14 +454,18 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .orderBy(desc(score))
             .limit(input.limit)
 
-          return matches.map(match => ({
-            chunk: toKnowledgeChunk(match.chunk),
-            score: match.score,
-            document: toKnowledgeDocument({ document: match.document, storage: match.storage })
-          }))
+          return yield* Effect.forEach(matches, match =>
+            toKnowledgeDocument({ document: match.document, storage: match.storage }).pipe(
+              Effect.map(document => ({
+                chunk: toKnowledgeChunk(match.chunk),
+                score: match.score,
+                document
+              }))
+            )
+          )
         }).pipe(
           Effect.withSpan('SearchIndexStore.searchChunksByText'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       getContextChunks: input =>
@@ -511,7 +489,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
           return rows.map(toKnowledgeChunk)
         }).pipe(
           Effect.withSpan('SearchIndexStore.getContextChunks'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         )
     }
 
@@ -543,15 +521,7 @@ export const TextKnowledgeExtractorLayer = Layer.succeed(KnowledgeExtractor, {
         title,
         metadata: source.metadata
       } satisfies ExtractedKnowledgeDocument
-    }).pipe(
-      Effect.mapError(error => {
-        if (isKnowledgeExtractionError(error)) {
-          return error
-        }
-
-        return new KnowledgeExtractionError({ message: unknownToMessage(error), cause: error })
-      })
-    )
+    })
 })
 
 type OpenAiEmbeddingsConfigValues = {
@@ -616,8 +586,8 @@ export const OpenAiKnowledgeEmbedderLayer = Layer.effect(
         return parsed.data.map(item => item.embedding)
       }).pipe(
         Effect.retry({ while: isTransientError, schedule: retryPolicy }),
-        Effect.mapError(
-          error => new KnowledgeEmbeddingError({ message: unknownToMessage(error), cause: error })
+        Effect.catchTag('AppKnowledgeEmbedderError', error =>
+          Effect.fail(new KnowledgeEmbeddingError({ message: error.message, cause: error }))
         )
       )
 

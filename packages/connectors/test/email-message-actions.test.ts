@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
@@ -349,6 +350,11 @@ describe('generic email message actions', () => {
 
         expect(result._tag).toBe('Failure')
         expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
+
+        if (Predicate.isTagged(result, 'Failure')) {
+          expect(result.failure.underlying instanceof Error).toBe(false)
+          expect(Schema.isSchemaError(result.failure.underlying)).toBe(true)
+        }
       })
     )
 

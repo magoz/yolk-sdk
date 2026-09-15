@@ -1,8 +1,16 @@
 import { Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
+import * as SchemaIssue from 'effect/SchemaIssue'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
-import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  decodeToolJsonSchema,
+  ToolCall,
+  ToolDef,
+  ToolJsonSchema,
+  ToolJsonSchemaObject,
+  ToolResult
+} from '@yolk-sdk/agent/protocol'
 import {
   EmptyToolParams,
   makeTool as makeSchemaTool,
@@ -158,6 +166,38 @@ describe('resolveTools', () => {
     })
   )
 
+  it('rejects non-portable schema annotations with the synchronous constructor error owner', () => {
+    const fields = [
+      Schema.Number.annotate({ examples: [Infinity] }),
+      Schema.Number.annotate({ identifier: 'NonfiniteExample', examples: [Infinity] })
+    ]
+
+    for (const field of fields) {
+      let caught: unknown
+
+      try {
+        makeSchemaTool({
+          name: 'nonfinite_example',
+          description: 'Invalid JSON Schema example.',
+          parameters: Schema.Struct({ n: field }),
+          access: 'read',
+          execute: ({ call }) =>
+            Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unreachable' }))
+        })
+      } catch (error) {
+        caught = error
+      }
+
+      expect(caught).toBeInstanceOf(Error)
+      expect(Schema.isSchemaError(caught)).toBe(false)
+
+      if (caught instanceof Error) {
+        expect(SchemaIssue.isIssue(caught.cause)).toBe(true)
+        expect(caught.message).toContain('JSON Schema')
+      }
+    }
+  })
+
   it.effect('derives empty object parameters for no-arg tools', () =>
     Effect.gen(function* () {
       const tool = makeSchemaTool({
@@ -224,15 +264,92 @@ describe('resolveTools', () => {
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',
-        content: expect.stringContaining('Invalid empty_params arguments'),
+        content: expect.stringContaining('Invalid empty_params arguments: SchemaError('),
         isError: true,
         structuredContent: {
           type: 'model_visible_tool_error',
           tool: 'empty_params',
           reason: 'validation',
-          message: expect.stringContaining('Invalid empty_params arguments')
+          message: expect.stringContaining('Invalid empty_params arguments: SchemaError(')
         }
       })
+    })
+  )
+
+  it.effect('passes Schema.SchemaError through validate and execute', () =>
+    Effect.gen(function* () {
+      const captured: Schema.SchemaError[] = []
+
+      const tool = makeSchemaTool({
+        name: 'empty_params',
+        description: 'No args.',
+        parameters: EmptyToolParams,
+        access: 'read',
+        invalidParamsMessage: error => {
+          captured.push(error)
+
+          return `typed:${String(error)}`
+        },
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+
+      const call = ToolCall.make({
+        id: 'call_1',
+        name: 'empty_params',
+        params: { extra: true }
+      })
+
+      const validateParams = tool.validate
+
+      if (validateParams === undefined) {
+        return yield* Effect.fail(new Error('makeTool empty_params registration omitted validate'))
+      }
+
+      const validated = yield* validateParams(call).pipe(Effect.result)
+
+      expect(Result.isFailure(validated)).toBe(true)
+
+      if (!Result.isFailure(validated)) {
+        return yield* Effect.fail(
+          new Error('expected makeTool validate to fail Schema.SchemaError')
+        )
+      }
+
+      const validateError = captured[0]
+
+      if (validateError === undefined) {
+        return yield* Effect.fail(new Error('expected validate to capture Schema.SchemaError'))
+      }
+
+      expect(validated.failure.message).toBe(`typed:${String(validateError)}`)
+      expect(validated.failure.cause).toBe('validation')
+      expect(Schema.isSchemaError(validateError)).toBe(true)
+      expect(String(validateError)).toBe(`SchemaError(${validateError.message})`)
+
+      const executed = yield* tool.execute({ call, context: { enabled: true } })
+      const executeError = captured[1]
+
+      expect(captured).toHaveLength(2)
+
+      if (executeError === undefined) {
+        return yield* Effect.fail(new Error('expected execute to capture Schema.SchemaError'))
+      }
+
+      expect(executed).toMatchObject({
+        toolCallId: 'call_1',
+        content: `typed:${String(executeError)}`,
+        isError: true,
+        structuredContent: {
+          type: 'model_visible_tool_error',
+          tool: 'empty_params',
+          reason: 'validation',
+          message: `typed:${String(executeError)}`
+        }
+      })
+      expect(Schema.isSchemaError(executeError)).toBe(true)
+      expect(String(executeError)).toBe(`SchemaError(${executeError.message})`)
+      expect(executeError).not.toBe(validateError)
     })
   )
 
@@ -365,5 +482,167 @@ describe('resolveTools', () => {
       'parameters',
       'approval'
     ])
+  })
+})
+
+const toolDefFields = (parameters: unknown) => ({
+  name: 'echo',
+  description: 'echo',
+  parameters
+})
+
+const expectRejectedParameters = (parameters: unknown) => {
+  const decoded = Schema.decodeUnknownResult(ToolDef)(toolDefFields(parameters))
+  const schemaDecoded = Schema.decodeUnknownResult(ToolJsonSchema)(parameters)
+
+  expect(Result.isFailure(decoded)).toBe(true)
+  expect(Result.isFailure(schemaDecoded)).toBe(true)
+  expect(decodeToolJsonSchema(parameters)._tag).toBe('None')
+
+  if (Result.isFailure(decoded)) {
+    expect(Schema.isSchemaError(decoded.failure)).toBe(true)
+    expect(decoded.failure.message).toContain('JSON Schema')
+  }
+}
+
+describe('ToolDef.parameters JSON Schema representation', () => {
+  it('admits boolean schemas, plain objects, DAG aliases, and own __proto__/constructor without cloning', () => {
+    const leaf = { type: 'string' }
+
+    const objectParameters = {
+      type: 'object',
+      properties: { flag: true, a: leaf, b: leaf },
+      additionalProperties: false,
+      'x-vendor': { note: 'annotation' }
+    }
+
+    const objectDef = ToolDef.make({
+      name: 'echo',
+      description: 'echo',
+      parameters: objectParameters
+    })
+
+    const booleanDef = ToolDef.make({
+      name: 'echo',
+      description: 'echo',
+      parameters: true
+    })
+
+    const nullProto = Object.assign(Object.create(null), { type: 'object' })
+    Object.defineProperty(nullProto, '__proto__', {
+      value: { type: 'string' },
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
+    Object.defineProperty(nullProto, 'constructor', {
+      value: 'owned',
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
+
+    expect(objectDef.parameters).toBe(objectParameters)
+    expect(booleanDef.parameters).toBe(true)
+    expect(
+      ToolDef.make({
+        name: 'echo',
+        description: 'echo',
+        parameters: false
+      }).parameters
+    ).toBe(false)
+    expect(
+      ToolDef.make({
+        name: 'echo',
+        description: 'echo',
+        parameters: nullProto
+      }).parameters
+    ).toBe(nullProto)
+    expect(Object.getOwnPropertyDescriptor(nullProto, '__proto__')?.value).toEqual({
+      type: 'string'
+    })
+    expect(Object.getOwnPropertyDescriptor(nullProto, 'constructor')?.value).toBe('owned')
+    expect(decodeToolJsonSchema(objectParameters)._tag).toBe('Some')
+    expect(decodeToolJsonSchema(true)._tag).toBe('Some')
+    expect(Schema.decodeUnknownResult(ToolDef)(toolDefFields(objectParameters))._tag).toBe(
+      'Success'
+    )
+    expect(Schema.decodeUnknownResult(ToolDef)(toolDefFields(nullProto))._tag).toBe('Success')
+  })
+
+  it('rejects accessors without invoking them, plus nonfinite/exotic/cyclic/sparse data', () => {
+    let reads = 0
+
+    const accessorDocument = {
+      type: 'object',
+      get extra() {
+        reads += 1
+
+        return 1
+      }
+    }
+
+    const cyclic = { type: 'object' }
+
+    Object.assign(cyclic, { self: cyclic })
+    const sparseItems: Array<{ type: string }> = []
+    sparseItems[1] = { type: 'string' }
+    sparseItems.length = 2
+
+    class Custom {
+      type = 'object'
+    }
+
+    expectRejectedParameters(accessorDocument)
+
+    const objectDecoded = Schema.decodeUnknownResult(ToolJsonSchemaObject)(accessorDocument)
+
+    expect(Result.isFailure(objectDecoded)).toBe(true)
+
+    if (Result.isFailure(objectDecoded)) {
+      expect(objectDecoded.failure.message).toContain('Expected a plain JSON Schema object')
+    }
+
+    expect(reads).toBe(0)
+
+    let rejectedByConstructor = false
+
+    try {
+      ToolDef.make({
+        name: 'echo',
+        description: 'echo',
+        parameters: accessorDocument
+      })
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+
+      expect(SchemaIssue.isIssue(error.cause)).toBe(true)
+      rejectedByConstructor = true
+    }
+
+    expect(rejectedByConstructor).toBe(true)
+    expect(reads).toBe(0)
+
+    const rejected = [
+      'object',
+      1,
+      null,
+      [{ type: 'object' }],
+      { n: Infinity },
+      { n: Number.NaN },
+      { extra: () => undefined },
+      { extra: undefined },
+      { default: new Date('2020-01-01T00:00:00.000Z') },
+      { default: new Map() },
+      new Date('2020-01-01T00:00:00.000Z'),
+      new Map(),
+      new Custom(),
+      cyclic,
+      { type: 'object', items: sparseItems }
+    ]
+
+    for (const parameters of rejected) {
+      expectRejectedParameters(parameters)
+    }
   })
 })

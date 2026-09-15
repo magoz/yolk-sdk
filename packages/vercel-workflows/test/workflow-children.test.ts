@@ -123,10 +123,10 @@ describe('workflow child orchestration', () => {
       if (existing !== undefined) return existing
       launches++
 
-      const receipt: { readonly version: 1; readonly executionId: string } = {
+      const receipt = {
         version: 1,
         executionId: `owner:${id}`
-      }
+      } satisfies { readonly version: 1; readonly executionId: string }
 
       receipts.set(id, receipt)
 

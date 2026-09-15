@@ -28,9 +28,6 @@ const toToolError = (tool: string, message: string) =>
     cause: 'execution'
   })
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
 const emptyMcpResolvedTools: ReadonlyArray<McpResolvedTool> = []
 
 type McpHttpClientLayer = Layer.Layer<HttpClient.HttpClient>
@@ -85,7 +82,7 @@ export const makeMcpToolModule = (
         Effect.catch(error =>
           Effect.logWarning('MCP server unavailable', {
             server: config.name,
-            error: unknownToMessage(error)
+            error: error.message
           }).pipe(Effect.as(emptyMcpResolvedTools))
         )
       )

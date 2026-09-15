@@ -42,6 +42,11 @@ export interface GoogleDriveDownloadBudget extends ConnectorFileTransferBudget {
   readonly contentAccess?: 'app_files' | 'readonly'
 }
 
+type DriveDownloadHeaders = {
+  readonly authorization: string
+  'X-Goog-Drive-Resource-Keys'?: string
+}
+
 const Input = Schema.Struct({
   fileId: OpaqueId.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)),
   resourceKey: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)))
@@ -128,7 +133,7 @@ const transfer = (
         : GoogleDriveFileOAuthCredentialSlot
     ).pipe(Effect.mapError(credentialFailure), Effect.flatMap(safeToken))
 
-    const headers: Record<string, string> = { authorization: `Bearer ${token}` }
+    const headers: DriveDownloadHeaders = { authorization: `Bearer ${token}` }
 
     if (target.resourceKey !== undefined)
       headers['X-Goog-Drive-Resource-Keys'] = `${target.fileId}/${target.resourceKey}`

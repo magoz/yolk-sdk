@@ -12,6 +12,7 @@ import {
   type ToolApprovalResponse
 } from '@yolk-sdk/agent/protocol'
 import {
+  AgentChatPart,
   buildAgentChatItems,
   getActiveChatToolParts,
   getAgentChatLiveActivityCount,
@@ -813,12 +814,11 @@ export function AgentPlayground({
                   sequence: -1,
                   role: 'user',
                   parts: [
-                    {
-                      _tag: 'Text',
+                    AgentChatPart.Text({
                       id: 'draft-user-text',
                       content: voiceUserDraft,
                       state: 'streaming'
-                    }
+                    })
                   ]
                 }
               ]

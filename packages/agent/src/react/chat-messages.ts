@@ -1,5 +1,4 @@
 import { Array as Arr, Data, Match, Option, Predicate } from 'effect'
-import * as Schema from 'effect/Schema'
 import type { AgentToolRun } from '@yolk-sdk/agent/client'
 import {
   AssistantAgentMessage,
@@ -150,46 +149,6 @@ export const RegenerateChatMessagesResult = Data.taggedEnum<RegenerateChatMessag
 export type ApplyAgentEventToChatMessagesOptions = {
   readonly nowMs?: number
 }
-
-const ChatToolStateCalled = Schema.TaggedStruct('Called', {})
-
-const ChatToolStateRunning = Schema.TaggedStruct('Running', {
-  startedAtMs: Schema.Number
-})
-
-const ChatToolStateInputStreaming = Schema.TaggedStruct('InputStreaming', {
-  input: Schema.String
-})
-
-const ChatToolStateDenied = Schema.TaggedStruct('Denied', {
-  reason: Schema.String
-})
-
-const ChatToolStateErroredEnded = Schema.TaggedStruct('Errored', {
-  message: Schema.String,
-  endedAtMs: Schema.Number
-})
-
-const AgentChatPartReasoning = Schema.TaggedStruct('Reasoning', {
-  id: Schema.String,
-  text: Schema.String,
-  state: Schema.Literals(['streaming', 'done'])
-})
-
-const AgentChatPartStreamingText = Schema.TaggedStruct('Text', {
-  id: Schema.String,
-  content: Schema.String,
-  state: Schema.Literal('streaming')
-})
-
-const AgentChatPartError = Schema.TaggedStruct('Error', {
-  id: Schema.String,
-  message: Schema.String
-})
-
-const ChatMessageOpNotFound = Schema.TaggedStruct('NotFound', {})
-
-const ChatMessageOpNotUserMessage = Schema.TaggedStruct('NotUserMessage', {})
 
 const messageId = (sequence: number, role: AgentChatMessage['role']) =>
   `message-${sequence}-${role}`
@@ -415,11 +374,11 @@ const toolStateFor = (
   }
 
   if (Predicate.isTagged(run, 'Executing')) {
-    return ChatToolStateRunning.make({ startedAtMs: run.startedAtMs })
+    return ChatToolState.Running({ startedAtMs: run.startedAtMs })
   }
 
   if (Predicate.isTagged(run, 'InputStreaming')) {
-    return ChatToolStateInputStreaming.make({ input: run.input })
+    return ChatToolState.InputStreaming({ input: run.input })
   }
 
   if (Predicate.isTagged(run, 'ApprovalRequested')) {
@@ -427,7 +386,7 @@ const toolStateFor = (
   }
 
   if (Predicate.isTagged(run, 'Denied')) {
-    return ChatToolStateDenied.make({ reason: run.reason })
+    return ChatToolState.Denied({ reason: run.reason })
   }
 
   if (Predicate.isTagged(run, 'QuestionRequested')) {
@@ -465,7 +424,7 @@ const toolStateFor = (
   }
 
   if (Predicate.isTagged(run, 'Errored')) {
-    return ChatToolStateErroredEnded.make({ message: run.message, endedAtMs: run.endedAtMs })
+    return ChatToolState.Errored({ message: run.message, endedAtMs: run.endedAtMs })
   }
 
   if (Predicate.isTagged(run, 'ProviderCompleted')) {
@@ -478,7 +437,7 @@ const toolStateFor = (
       : ChatToolState.Accepted({ result })
   }
 
-  return ChatToolStateCalled.make({})
+  return ChatToolState.Called()
 }
 
 const assistantPartsFromMessage = ({
@@ -498,7 +457,7 @@ const assistantPartsFromMessage = ({
       Match.tag('Reasoning', current =>
         current.text.length > 0
           ? [
-              AgentChatPartReasoning.make({
+              AgentChatPart.Reasoning({
                 id: `message-${messageIndex}-reasoning-${partIndex}`,
                 text: current.text,
                 state: 'done'
@@ -593,13 +552,13 @@ export const deleteChatTurn = (
   const targetIndex = findMessageIndex(messages, messageId)
 
   if (targetIndex === -1) {
-    return ChatMessageOpNotFound.make({})
+    return DeleteChatTurnResult.NotFound()
   }
 
   const target = messages[targetIndex]
 
   if (target === undefined) {
-    return ChatMessageOpNotFound.make({})
+    return DeleteChatTurnResult.NotFound()
   }
 
   const deletedMessages = messages.filter(message => message.turnId === target.turnId)
@@ -619,13 +578,13 @@ export const regenerateChatMessagesFrom = (
   const targetIndex = findMessageIndex(messages, messageId)
 
   if (targetIndex === -1) {
-    return ChatMessageOpNotFound.make({})
+    return RegenerateChatMessagesResult.NotFound()
   }
 
   const target = messages[targetIndex]
 
   if (target === undefined) {
-    return ChatMessageOpNotFound.make({})
+    return RegenerateChatMessagesResult.NotFound()
   }
 
   return RegenerateChatMessagesResult.Regenerated({
@@ -641,17 +600,17 @@ export const editChatUserMessage = (
   const targetIndex = findMessageIndex(messages, messageId)
 
   if (targetIndex === -1) {
-    return ChatMessageOpNotFound.make({})
+    return EditChatUserMessageResult.NotFound()
   }
 
   const target = messages[targetIndex]
 
   if (target === undefined) {
-    return ChatMessageOpNotFound.make({})
+    return EditChatUserMessageResult.NotFound()
   }
 
   if (target.role !== 'user') {
-    return ChatMessageOpNotUserMessage.make({})
+    return EditChatUserMessageResult.NotUserMessage()
   }
 
   return EditChatUserMessageResult.Edited({
@@ -719,7 +678,7 @@ const appendAssistantTextDelta = (
 
     return appendAssistantPart(
       messages,
-      AgentChatPartStreamingText.make({
+      AgentChatPart.Text({
         id: `message-${sequence}-assistant-text`,
         content,
         state: 'streaming'
@@ -742,7 +701,7 @@ const appendAssistantTextDelta = (
               )
             : [
                 ...message.parts,
-                AgentChatPartStreamingText.make({
+                AgentChatPart.Text({
                   id: `message-${message.sequence}-assistant-text`,
                   content,
                   state: 'streaming'
@@ -765,7 +724,7 @@ const appendAssistantReasoningDelta = (
 
     return appendAssistantPart(
       messages,
-      AgentChatPartReasoning.make({
+      AgentChatPart.Reasoning({
         id: `message-${sequence}-reasoning`,
         text,
         state: 'streaming'
@@ -787,7 +746,7 @@ const appendAssistantReasoningDelta = (
               )
             : [
                 ...message.parts,
-                AgentChatPartReasoning.make({
+                AgentChatPart.Reasoning({
                   id: `message-${message.sequence}-reasoning`,
                   text,
                   state: 'streaming'
@@ -1237,7 +1196,7 @@ export const markChatError = (
     turnId: 'error-turn',
     sequence: nextMessageSequence(messages),
     role: 'system',
-    parts: [AgentChatPartError.make({ id: 'error', message })]
+    parts: [AgentChatPart.Error({ id: 'error', message })]
   }
 ]
 
@@ -1267,7 +1226,7 @@ export const applyAgentEventToChatMessages = (
         })
       ),
       Match.tag('ToolInputEnd', current =>
-        upsertToolCallPart(messages, current.call, ChatToolStateCalled.make({}))
+        upsertToolCallPart(messages, current.call, ChatToolState.Called())
       ),
       Match.tag('UserMessage', current => appendProtocolMessage(messages, current.message)),
       Match.tag('AssistantMessage', current =>
@@ -1277,7 +1236,7 @@ export const applyAgentEventToChatMessages = (
         upsertToolCallPart(
           messages,
           inputStreamingToolCall(current.id, current.name),
-          ChatToolStateInputStreaming.make({ input: '' })
+          ChatToolState.InputStreaming({ input: '' })
         )
       ),
       Match.tag('ToolInputDelta', current =>
@@ -1298,7 +1257,7 @@ export const applyAgentEventToChatMessages = (
           ...message,
           parts: message.parts.map(part =>
             Predicate.isTagged(part, 'ToolCall') && part.call.id === current.toolCallId
-              ? { ...part, state: ChatToolStateDenied.make({ reason: current.reason }) }
+              ? { ...part, state: ChatToolState.Denied({ reason: current.reason }) }
               : part
           )
         }))
@@ -1346,7 +1305,7 @@ export const applyAgentEventToChatMessages = (
         upsertToolCallPart(
           messages,
           current.call,
-          ChatToolStateRunning.make({ startedAtMs: eventTimeMs })
+          ChatToolState.Running({ startedAtMs: eventTimeMs })
         )
       ),
       Match.tag('ToolExecutionAccepted', 'ToolExecutionCompleted', current =>
@@ -1362,7 +1321,7 @@ export const applyAgentEventToChatMessages = (
         upsertToolCallPart(
           messages,
           current.call,
-          ChatToolStateErroredEnded.make({ message: current.message, endedAtMs: eventTimeMs })
+          ChatToolState.Errored({ message: current.message, endedAtMs: eventTimeMs })
         )
       ),
       Match.tag('ProviderToolResult', current =>
@@ -1458,7 +1417,7 @@ const draftUserMessage = (userDraft: string): ReadonlyArray<AgentChatMessage> =>
           sequence: -1,
           role: 'user',
           parts: [
-            AgentChatPartStreamingText.make({
+            AgentChatPart.Text({
               id: 'draft-user-text',
               content: userDraft,
               state: 'streaming'
@@ -1471,7 +1430,7 @@ const draftUserMessage = (userDraft: string): ReadonlyArray<AgentChatMessage> =>
 const draftReasoningPart = (reasoningDraft: string): ReadonlyArray<AgentChatPart> =>
   reasoningDraft.length > 0
     ? [
-        AgentChatPartReasoning.make({
+        AgentChatPart.Reasoning({
           id: 'draft-reasoning',
           text: reasoningDraft,
           state: 'streaming'
@@ -1482,7 +1441,7 @@ const draftReasoningPart = (reasoningDraft: string): ReadonlyArray<AgentChatPart
 const draftTextPart = (assistantDraft: string): ReadonlyArray<AgentChatPart> =>
   assistantDraft.length > 0
     ? [
-        AgentChatPartStreamingText.make({
+        AgentChatPart.Text({
           id: 'draft-assistant-text',
           content: assistantDraft,
           state: 'streaming'
@@ -1532,7 +1491,7 @@ const errorChatMessage = (message: string | null): ReadonlyArray<AgentChatMessag
           turnId: 'error-turn',
           sequence: -1,
           role: 'system',
-          parts: [AgentChatPartError.make({ id: 'error', message })]
+          parts: [AgentChatPart.Error({ id: 'error', message })]
         }
       ]
 

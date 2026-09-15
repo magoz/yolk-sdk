@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Ref } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { Driver } from '../src/driver.ts'
 import { makeDurableObjectDriverLayer } from '../src/driver/durable-object.ts'
@@ -102,7 +102,7 @@ describe('durable object driver', () => {
       yield* Effect.gen(function* () {
         const store = yield* RunStore
         const exit = yield* store.claim('run_1').pipe(Effect.exit)
-        expect(exit._tag).toBe('Failure')
+        expect(Exit.isFailure(exit)).toBe(true)
         expect(yield* store.isClaimed('run_1')).toBe(false)
         expect(yield* Ref.get(snapshot)).toBeUndefined()
       }).pipe(Effect.provide(layer))

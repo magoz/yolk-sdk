@@ -68,9 +68,9 @@ const segmentKey = (event: {
   readonly responseId: string | null
 }): string | null => event.itemId ?? event.responseId
 
-const decodeParamsOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeParamsOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
-const toolCallParams = (argumentsJson: string): unknown =>
+const toolCallParams = (argumentsJson: string): Schema.Json =>
   Option.getOrElse(decodeParamsOption(argumentsJson), () => argumentsJson)
 
 export const protocolToolCallFromVoice = (call: VoiceToolCall): ToolCall =>

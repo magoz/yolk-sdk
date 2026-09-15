@@ -28,9 +28,9 @@ export const VoiceToolCallDecision = Data.taggedEnum<VoiceToolCallDecision>()
 /** Matches the loop's deterministic approval request id convention. */
 export const voiceApprovalRequestId = (callId: string) => `approval:${callId}`
 
-const decodeArgumentsOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeArgumentsOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
-const argumentsForApprovalDisplay = (argumentsJson: string): unknown =>
+const argumentsForApprovalDisplay = (argumentsJson: string): Schema.Json =>
   Option.getOrElse(decodeArgumentsOption(argumentsJson), () => ({ argumentsJson }))
 
 /**

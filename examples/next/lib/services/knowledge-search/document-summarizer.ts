@@ -75,9 +75,6 @@ const KnowledgeDocumentSummarizerConfigLayer = Layer.effect(
   )
 )
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
 const truncateContent = (content: string) =>
   content.length <= maxDocumentCharacters ? content : content.slice(0, maxDocumentCharacters)
 
@@ -249,10 +246,7 @@ export const OpenAiKnowledgeDocumentSummarizerLayer = Layer.effect(
         Effect.mapError(
           error =>
             new KnowledgeSummarizationError({
-              message:
-                error instanceof AppKnowledgeSummarizerError
-                  ? error.message
-                  : unknownToMessage(error),
+              message: error.message,
               cause: error
             })
         )

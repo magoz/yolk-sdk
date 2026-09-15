@@ -236,7 +236,7 @@ export const attachmentSourceUrl = (source: AttachmentSource, mimeType: string) 
 const normalizeMimeType = (mimeType: string) =>
   mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
 
-const textDocumentMimeTypeByExtension: Readonly<Record<string, string>> = {
+const textDocumentMimeTypeByExtension = {
   '.csv': 'text/csv',
   '.css': 'text/css',
   '.gql': 'application/graphql',

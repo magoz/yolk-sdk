@@ -3,7 +3,19 @@ title: Integration APIs
 description: Public MCP, knowledge, connector, and sandbox APIs.
 ---
 
+## Portable connector annotations
+
+`PortableMetadata` is exported from `@yolk-sdk/connectors` and owns optional integration/binding
+metadata. Decode/make produce mutable snapshot data (null-prototype objects, dense ordinary arrays,
+finite JSON primitives); input identity is not preserved and DAG aliases share copied nodes.
+Exotics, cycles, hidden/symbol keys and accessors fail, without invoking accessors. Omission stays
+absent. This does not narrow integration config, credential secrets, error causes or host DB columns.
+
 ## MCP
+
+Yolk tool discovery admits object-root plain JSON `inputSchema` documents. Boolean roots fail with
+typed `McpError` validation; omitted schemas retain the permissive object default. This is not
+JSON Schema meta-validation.
 
 | Subpath                     | Main exports                                                                                                                                     |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -31,6 +43,19 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 | `@yolk-sdk/knowledge/extraction`    | `KnowledgeExtractor` and source types                                                                  |
 | `@yolk-sdk/knowledge/summarization` | `KnowledgeSummarizer`, `NoopKnowledgeSummarizerLive`                                                   |
 | `@yolk-sdk/knowledge/agent`         | `makeKnowledgeLookupTool`, `makeKnowledgeManageTool`                                                   |
+
+`@yolk-sdk/knowledge/documents` exposes validated source/scope constructors:
+
+| Constructor                  | Variant / fields                             |
+| ---------------------------- | -------------------------------------------- |
+| `KnowledgeFileSource.make`   | `File`: `ref`, optional `name` / `mediaType` |
+| `KnowledgeUrlSource.make`    | `Url`: `url`                                 |
+| `KnowledgeTextSource.make`   | `Text`: optional `label`                     |
+| `KnowledgeSearchScope.make`  | `KnowledgeScope`: `id`                       |
+| `KnowledgeSearchScopes.make` | `KnowledgeScopes`: non-empty `ids`           |
+
+The type `KnowledgeSearchScope` remains the union of both scope variants; its value constructor
+creates only the single-id variant. Hosts still enforce access to those scopes.
 
 ## Connectors
 

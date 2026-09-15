@@ -2,6 +2,12 @@ import { createId } from '@paralleldrive/cuid2'
 import { eq } from 'drizzle-orm'
 import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
+import {
+  KnowledgeFileSource,
+  KnowledgeSearchScope,
+  KnowledgeTextSource,
+  KnowledgeUrlSource
+} from '@yolk-sdk/knowledge/documents'
 import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { KnowledgeExtractor } from '@yolk-sdk/knowledge/extraction'
 import { SearchIndexStore } from '@yolk-sdk/knowledge/store'
@@ -13,6 +19,7 @@ import { getKnowledgeDocument } from './get-knowledge-document'
 import { getKnowledgeDocuments } from './get-knowledge-documents'
 import { getKnowledgeDocumentsContent } from './get-knowledge-documents-content'
 import { DrizzleSearchIndexStoreLayer, TextKnowledgeExtractorLayer } from './live-layer'
+import { knowledgeSourceFromStorageRow } from './storage-source'
 import { searchAppKnowledge } from './search-app-knowledge'
 import { updateKnowledgeDocument } from './update-knowledge-document'
 
@@ -27,7 +34,7 @@ describe('TextKnowledgeExtractorLayer', () => {
       const extractor = yield* KnowledgeExtractor
 
       const extracted = yield* extractor.extract({
-        source: { _tag: 'Text', label: 'Original title' },
+        source: KnowledgeTextSource.make({ label: 'Original title' }),
         content: '  Alpha beta.  ',
         metadata: { title: 'Original title' }
       })
@@ -41,6 +48,137 @@ describe('TextKnowledgeExtractorLayer', () => {
       Effect.provide(TextKnowledgeExtractorLayer),
       Effect.provide(NoopKnowledgeSummarizerLive)
     )
+  )
+})
+
+describe('knowledgeSourceFromStorageRow', () => {
+  it.effect('reconstructs file sources from storage object id when r2Key is absent', () =>
+    Effect.gen(function* () {
+      const source = yield* knowledgeSourceFromStorageRow({
+        id: 'file_obj_1',
+        sourceType: 'file',
+        r2Key: null,
+        url: null,
+        filename: 'notes.bin',
+        mediaType: 'application/pdf'
+      })
+
+      expect(source).toEqual(
+        KnowledgeFileSource.make({
+          ref: 'file_obj_1',
+          name: 'notes.bin',
+          mediaType: 'application/pdf'
+        })
+      )
+    })
+  )
+
+  it.effect('keeps file identity on object id even when a legacy r2Key column is present', () =>
+    Effect.gen(function* () {
+      const source = yield* knowledgeSourceFromStorageRow({
+        id: 'file_obj_1',
+        sourceType: 'file',
+        r2Key: 'uploads/user/notes.bin',
+        url: 'https://example.test/not-used',
+        filename: 'notes.bin',
+        mediaType: 'application/pdf'
+      })
+
+      expect(source).toEqual(
+        KnowledgeFileSource.make({
+          ref: 'file_obj_1',
+          name: 'notes.bin',
+          mediaType: 'application/pdf'
+        })
+      )
+    })
+  )
+
+  it.effect('fails file rows whose id has surrounding whitespace', () =>
+    Effect.gen(function* () {
+      const error = yield* knowledgeSourceFromStorageRow({
+        id: ' file_obj_1 ',
+        sourceType: 'file',
+        r2Key: null,
+        url: null,
+        filename: 'notes.bin',
+        mediaType: 'application/pdf'
+      }).pipe(Effect.flip)
+
+      expect(error._tag).toBe('SearchIndexStoreError')
+      expect(error.message).toBe('Storage file source id has surrounding whitespace')
+    })
+  )
+
+  it.effect('reconstructs url sources from the stored url column', () =>
+    Effect.gen(function* () {
+      const source = yield* knowledgeSourceFromStorageRow({
+        id: 'url_obj_1',
+        sourceType: 'url',
+        r2Key: null,
+        url: 'https://example.test/doc',
+        filename: null,
+        mediaType: null
+      })
+
+      expect(source).toEqual(KnowledgeUrlSource.make({ url: 'https://example.test/doc' }))
+    })
+  )
+
+  it.effect('rejects surrounding whitespace without changing URL identity', () =>
+    Effect.gen(function* () {
+      const error = yield* knowledgeSourceFromStorageRow({
+        id: 'url_obj_1',
+        sourceType: 'url',
+        r2Key: null,
+        url: ' https://example.test/doc ',
+        filename: null,
+        mediaType: null
+      }).pipe(Effect.flip)
+
+      expect(error.message).toBe('Storage url source url has surrounding whitespace')
+    })
+  )
+
+  it.effect('fails url rows with missing url instead of using storage identity', () =>
+    Effect.gen(function* () {
+      const error = yield* knowledgeSourceFromStorageRow({
+        id: 'url_obj_1',
+        sourceType: 'url',
+        r2Key: null,
+        url: null,
+        filename: null,
+        mediaType: null
+      }).pipe(Effect.flip)
+
+      expect(error._tag).toBe('SearchIndexStoreError')
+      expect(error.message).toBe('Storage url source url is missing')
+    })
+  )
+
+  it.effect('reconstructs text sources and omits empty optional labels', () =>
+    Effect.gen(function* () {
+      const labeled = yield* knowledgeSourceFromStorageRow({
+        id: 'text_obj_1',
+        sourceType: 'text',
+        r2Key: null,
+        url: null,
+        filename: '  Test note  ',
+        mediaType: 'text/plain'
+      })
+
+      const unlabeled = yield* knowledgeSourceFromStorageRow({
+        id: 'text_obj_2',
+        sourceType: 'text',
+        r2Key: null,
+        url: null,
+        filename: '   ',
+        mediaType: null
+      })
+
+      expect(labeled).toEqual(KnowledgeTextSource.make({ label: 'Test note' }))
+      expect(unlabeled).toEqual(KnowledgeTextSource.make({}))
+    })
   )
 })
 
@@ -103,7 +241,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
           document: {
             id: documentId,
             scopeId: collectionId,
-            source: { _tag: 'Text', label: 'Test note' },
+            source: KnowledgeTextSource.make({ label: 'Test note' }),
             status: 'processing',
             metadata: { storageObjectId }
           }
@@ -160,14 +298,14 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
         })
 
         const results = yield* store.searchChunks({
-          scope: { _tag: 'KnowledgeScope', id: collectionId },
+          scope: KnowledgeSearchScope.make({ id: collectionId }),
           embedding: embedding(0),
           limit: 2,
           minScore: 0.8
         })
 
         const textResults = yield* store.searchChunksByText({
-          scope: { _tag: 'KnowledgeScope', id: collectionId },
+          scope: KnowledgeSearchScope.make({ id: collectionId }),
           query: 'beta after',
           limit: 2
         })
@@ -192,7 +330,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
 
         const appSearchResults = yield* searchAppKnowledge({
           userId,
-          scope: { _tag: 'KnowledgeScope', id: collectionId },
+          scope: KnowledgeSearchScope.make({ id: collectionId }),
           query: 'alpha',
           options: { limit: 1, contextChunks: 1 }
         })
@@ -216,7 +354,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
         yield* store.deleteDocument({ scopeId: collectionId, documentId })
 
         const afterDelete = yield* store.searchChunks({
-          scope: { _tag: 'KnowledgeScope', id: collectionId },
+          scope: KnowledgeSearchScope.make({ id: collectionId }),
           embedding: embedding(0),
           limit: 2,
           minScore: 0.8

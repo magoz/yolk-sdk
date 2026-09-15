@@ -1,7 +1,7 @@
 import { Deferred, Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { RunCoordinator } from '../src/coordinator.ts'
-import { Driver, makeDriverLayer } from '../src/driver.ts'
+import { Driver, makeDriverLayer, StopDecision } from '../src/driver.ts'
 import { makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
 import { Inbox } from '../src/inbox.ts'
 import { RunStore, makeInMemoryRunStoreLayer } from '../src/store.ts'
@@ -96,6 +96,37 @@ describe('owner layer topology', () => {
         yield* Deferred.succeed(release, undefined)
         yield* driver.awaitIdle('run_compat')
         expect(yield* runStore.isClaimed('run_compat')).toBe(true)
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
+  it.effect('stop returns canonical Idle and Interrupted without changing occupancy', () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+
+      const layer = makeInMemoryHarnessLayer({
+        drain: () =>
+          Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
+      })
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const store = yield* RunStore
+
+        expect(yield* driver.stop('run_stop')).toEqual(StopDecision.Idle())
+        expect(yield* store.isClaimed('run_stop')).toBe(false)
+        expect(yield* driver.isActive('run_stop')).toBe(false)
+
+        yield* driver.wake('run_stop')
+        yield* Deferred.await(started)
+        expect(yield* driver.stop('run_stop')).toEqual(StopDecision.Interrupted())
+        expect(yield* driver.isActive('run_stop')).toBe(true)
+        expect(yield* store.isClaimed('run_stop')).toBe(true)
+        yield* Deferred.succeed(release, undefined)
+        yield* driver.awaitIdle('run_stop')
+        expect(yield* driver.isActive('run_stop')).toBe(false)
+        expect(yield* store.isClaimed('run_stop')).toBe(false)
       }).pipe(Effect.provide(layer))
     })
   )

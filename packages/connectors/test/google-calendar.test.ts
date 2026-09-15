@@ -7,13 +7,14 @@ import {
   GoogleCalendarEventDateTime
 } from '@yolk-sdk/connectors/google'
 
-const objectField = (value: unknown, key: string): unknown =>
-  Predicate.isObjectOrArray(value) && value !== null
-    ? Object.getOwnPropertyDescriptor(value, key)?.value
-    : undefined
+const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
+  Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
-const objectKeys = (value: unknown): Array<string> =>
-  Predicate.isObjectOrArray(value) && value !== null ? Object.keys(value) : []
+const objectField = (value: Schema.Json | undefined, key: string) =>
+  isJsonObject(value) && Object.hasOwn(value, key) ? value[key] : undefined
+
+const objectKeys = (value: Schema.Json | undefined): Array<string> =>
+  isJsonObject(value) ? Object.keys(value) : []
 
 describe('Google Calendar event date/time boundaries', () => {
   it.effect('decodes date-only and timed boundaries', () =>
@@ -54,49 +55,54 @@ describe('Google Calendar event date/time boundaries', () => {
     })
   )
 
-  it('advertises two strict non-null alternatives through makeTool', () => {
-    const registration = makeTool({
-      name: googleCalendarCreateEventAction.id,
-      description: googleCalendarCreateEventAction.description ?? 'Create a Google Calendar event.',
-      parameters: googleCalendarCreateEventAction.inputSchema,
-      access: 'write',
-      execute: () => Effect.die('schema-only test')
+  it.effect('advertises two strict non-null alternatives through makeTool', () =>
+    Effect.gen(function* () {
+      const registration = makeTool({
+        name: googleCalendarCreateEventAction.id,
+        description:
+          googleCalendarCreateEventAction.description ?? 'Create a Google Calendar event.',
+        parameters: googleCalendarCreateEventAction.inputSchema,
+        access: 'write',
+        execute: () => Effect.die('schema-only test')
+      })
+
+      const parameters = yield* Schema.decodeUnknownEffect(Schema.Json)(registration.def.parameters)
+
+      const properties = objectField(parameters, 'properties')
+      const start = objectField(properties, 'start')
+      const end = objectField(properties, 'end')
+      const alternatives = objectField(start, 'anyOf')
+
+      expect(Array.isArray(alternatives)).toBe(true)
+
+      if (!Array.isArray(alternatives)) return
+
+      expect(alternatives).toHaveLength(2)
+      expect(end).toEqual(start)
+
+      const dateOnly = alternatives[0]
+      const timed = alternatives[1]
+      const dateOnlyProperties = objectField(dateOnly, 'properties')
+      const timedProperties = objectField(timed, 'properties')
+      const date = objectField(dateOnlyProperties, 'date')
+      const dateTime = objectField(timedProperties, 'dateTime')
+
+      expect(dateOnly).toMatchObject({
+        type: 'object',
+        required: ['date'],
+        additionalProperties: false
+      })
+      expect(timed).toMatchObject({
+        type: 'object',
+        required: ['dateTime'],
+        additionalProperties: false
+      })
+      expect(objectKeys(dateOnlyProperties).sort()).toEqual(['date', 'timeZone'])
+      expect(objectKeys(timedProperties).sort()).toEqual(['dateTime', 'timeZone'])
+      expect(objectField(date, 'type')).toBe('string')
+      expect(objectField(dateTime, 'type')).toBe('string')
+      expect(JSON.stringify(date)).not.toContain('null')
+      expect(JSON.stringify(dateTime)).not.toContain('null')
     })
-
-    const properties = objectField(registration.def.parameters, 'properties')
-    const start = objectField(properties, 'start')
-    const end = objectField(properties, 'end')
-    const alternatives = objectField(start, 'anyOf')
-
-    expect(Array.isArray(alternatives)).toBe(true)
-
-    if (!Array.isArray(alternatives)) return
-
-    expect(alternatives).toHaveLength(2)
-    expect(end).toEqual(start)
-
-    const dateOnly = alternatives[0]
-    const timed = alternatives[1]
-    const dateOnlyProperties = objectField(dateOnly, 'properties')
-    const timedProperties = objectField(timed, 'properties')
-    const date = objectField(dateOnlyProperties, 'date')
-    const dateTime = objectField(timedProperties, 'dateTime')
-
-    expect(dateOnly).toMatchObject({
-      type: 'object',
-      required: ['date'],
-      additionalProperties: false
-    })
-    expect(timed).toMatchObject({
-      type: 'object',
-      required: ['dateTime'],
-      additionalProperties: false
-    })
-    expect(objectKeys(dateOnlyProperties).sort()).toEqual(['date', 'timeZone'])
-    expect(objectKeys(timedProperties).sort()).toEqual(['dateTime', 'timeZone'])
-    expect(objectField(date, 'type')).toBe('string')
-    expect(objectField(dateTime, 'type')).toBe('string')
-    expect(JSON.stringify(date)).not.toContain('null')
-    expect(JSON.stringify(dateTime)).not.toContain('null')
-  })
+  )
 })

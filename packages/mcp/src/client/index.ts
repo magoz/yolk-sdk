@@ -32,6 +32,9 @@ export {
   decodeToolsListResult,
   encodeJsonRpcMessage,
   GenericContentBlock,
+  InitializeClientInfo,
+  InitializedNotification,
+  InitializeParams,
   JsonRpcErrorObject,
   JsonRpcErrorResponse,
   JsonRpcMessage,
@@ -51,6 +54,7 @@ export {
   TextContentBlock,
   ToolCallResult,
   toolCallResultToToolResult,
+  ToolsCallParams,
   ToolsListResult
 } from './protocol.ts'
 

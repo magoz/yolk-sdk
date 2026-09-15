@@ -85,8 +85,11 @@ export class VercelSandboxClient extends Context.Service<
   VercelSandboxClientApi
 >()('@yolk-sdk/sandbox/vercel/VercelSandboxClient') {}
 
-export const isVercelMissingSandboxError = (error: unknown) =>
-  error instanceof APIError && (error.response.status === 404 || error.response.status === 410)
+export const isVercelMissingSandboxError = (
+  error: unknown
+): error is APIError<unknown> & {
+  readonly response: Response & { readonly status: 404 | 410 }
+} => error instanceof APIError && (error.response.status === 404 || error.response.status === 410)
 
 const tryVercelPromise = <A>(body: () => Promise<A>) =>
   Effect.tryPromise({
@@ -306,13 +309,9 @@ export const VercelSandboxClientLive = Layer.succeed(
     get: input =>
       tryVercelPromise(() => VercelSdkSandbox.get({ name: input.name })).pipe(
         Effect.map(toHandle),
-        Effect.catch((error: unknown) => {
-          if (isVercelMissingSandboxError(error)) {
-            return Effect.succeed(null)
-          }
-
-          return Effect.fail(error)
-        })
+        Effect.catch(error =>
+          isVercelMissingSandboxError(error) ? Effect.succeed(null) : Effect.fail(error)
+        )
       ),
     create: input => tryVercelPromise(() => createSandbox(input)).pipe(Effect.map(toHandle))
   })

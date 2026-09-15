@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Ref, Semaphore } from 'effect'
+import { Context, Data, Effect, Layer, Predicate, Ref, Semaphore } from 'effect'
 import type { CapturedRun, Promotable } from './coordinator.ts'
 
 export type InboxKind = 'input' | 'hitl'
@@ -57,6 +57,16 @@ export type DrainBegin =
       readonly drainToken: string
       readonly readyResponses: ReadonlyArray<ParkedResponse>
     }
+
+export const HitlDecision = Data.taggedEnum<HitlDecision>()
+
+export const PauseDecision = Data.taggedEnum<PauseDecision>()
+
+export const RecoveryAttempt = Data.taggedEnum<RecoveryAttempt>()
+
+export const RecoveryAdmission = Data.taggedEnum<RecoveryAdmission>()
+
+export const DrainBegin = Data.taggedEnum<DrainBegin>()
 
 export type InboxApi = {
   readonly enqueue: (item: InboxItem) => Effect.Effect<void>
@@ -194,11 +204,11 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
         const acceptHitlPure = (control: RunControl, admission: HitlAdmission): HitlDecision => {
           const park = control.park
 
-          if (park === undefined) return { _tag: 'NotParked' }
+          if (park === undefined) return HitlDecision.NotParked()
 
-          if (park.generation !== admission.generation) return { _tag: 'Stale' }
+          if (park.generation !== admission.generation) return HitlDecision.Stale()
 
-          if (!park.requestIds.includes(admission.requestId)) return { _tag: 'UnknownRequest' }
+          if (!park.requestIds.includes(admission.requestId)) return HitlDecision.UnknownRequest()
 
           if (
             park.responses.some(
@@ -206,17 +216,19 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 response.itemId === admission.itemId || response.requestId === admission.requestId
             )
           ) {
-            return { _tag: 'Duplicate' }
+            return HitlDecision.Duplicate()
           }
 
-          if (park.readyWoken) return { _tag: 'Duplicate' }
+          if (park.readyWoken) return HitlDecision.Duplicate()
 
           const responses = [
             ...park.responses,
             { itemId: admission.itemId, requestId: admission.requestId }
           ]
 
-          return parkComplete({ ...park, responses }) ? { _tag: 'Ready' } : { _tag: 'Accepted' }
+          return parkComplete({ ...park, responses })
+            ? HitlDecision.Ready()
+            : HitlDecision.Accepted()
         }
 
         return Inbox.of({
@@ -260,7 +272,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
 
-                  if (control.liveToken !== drainToken) return { _tag: 'Stale' } as const
+                  if (control.liveToken !== drainToken) return PauseDecision.Stale()
                   generationSeq += 1
                   const generation = String(generationSeq)
                   yield* writeControl(runId, {
@@ -275,7 +287,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     }
                   })
 
-                  return { _tag: 'Parked', generation } as const
+                  return PauseDecision.Parked({ generation })
                 })
               )
             ),
@@ -286,13 +298,16 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                   const control = yield* getControl(runId)
                   const decision = acceptHitlPure(control, admission)
 
-                  if (decision._tag !== 'Accepted' && decision._tag !== 'Ready') {
+                  if (
+                    !Predicate.isTagged(decision, 'Accepted') &&
+                    !Predicate.isTagged(decision, 'Ready')
+                  ) {
                     return decision
                   }
 
                   const park = control.park
 
-                  if (park === undefined) return { _tag: 'NotParked' } as const
+                  if (park === undefined) return HitlDecision.NotParked()
 
                   const nextPark: Park = {
                     ...park,
@@ -300,20 +315,19 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                       ...park.responses,
                       { itemId: admission.itemId, requestId: admission.requestId }
                     ],
-                    readyWoken: decision._tag === 'Ready'
+                    readyWoken: Predicate.isTagged(decision, 'Ready')
                   }
 
                   yield* writeControl(runId, {
-                    pending:
-                      decision._tag === 'Ready'
-                        ? widerPending(control.pending, 'input')
-                        : control.pending,
+                    pending: Predicate.isTagged(decision, 'Ready')
+                      ? widerPending(control.pending, 'input')
+                      : control.pending,
                     liveToken: control.liveToken,
                     leasedGeneration: control.leasedGeneration,
                     park: nextPark
                   })
 
-                  if (decision._tag === 'Ready') yield* onReady
+                  if (Predicate.isTagged(decision, 'Ready')) yield* onReady
 
                   return decision
                 })
@@ -348,7 +362,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                   const pending = control.pending
 
                   if (parkBlocked(control.park) || pending === undefined) {
-                    return { _tag: 'Skip' } as const
+                    return DrainBegin.Skip()
                   }
 
                   drainSeq += 1
@@ -362,11 +376,10 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     leasedGeneration: ready?.generation
                   })
 
-                  return {
-                    _tag: 'Run',
+                  return DrainBegin.Run({
                     drainToken,
                     readyResponses: ready === undefined ? [] : ready.responses
-                  } as const
+                  })
                 })
               )
             ),
@@ -457,7 +470,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                   if (parkBlocked(control.park)) return undefined
                   const ticket = yield* start
 
-                  if (ticket._tag === 'Started') {
+                  if (Predicate.isTagged(ticket, 'Started')) {
                     yield* writeControl(runId, {
                       pending: widerPending(control.pending, 'input'),
                       liveToken: control.liveToken,
@@ -477,10 +490,10 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                   Effect.gen(function* () {
                     const control = yield* getControl(runId)
 
-                    if (parkBlocked(control.park)) return { _tag: 'Skip' } as const
+                    if (parkBlocked(control.park)) return RecoveryAdmission.Skip()
                     const decision = yield* attempt
 
-                    if (decision._tag !== 'Resume') return decision
+                    if (!RecoveryAttempt.$is('Resume')(decision)) return decision
                     yield* writeControl(runId, {
                       pending: widerPending(control.pending, 'input'),
                       liveToken: control.liveToken,
@@ -489,7 +502,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     })
                     yield* wake
 
-                    return { _tag: 'Resumed' } as const
+                    return RecoveryAdmission.Resumed()
                   }).pipe(Effect.ensuring(gate.release(1)))
                 )
               )

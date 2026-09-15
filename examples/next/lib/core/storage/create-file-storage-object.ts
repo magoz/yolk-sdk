@@ -1,10 +1,21 @@
 import { Effect } from 'effect'
+import { KnowledgeFileSource } from '@yolk-sdk/knowledge/documents'
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
 import { ensureUserKnowledgeCollection } from './ensure-user-knowledge-collection'
+
+const presentSourceText = (value: string | null) => {
+  if (value === null) {
+    return undefined
+  }
+
+  const trimmed = value.trim()
+
+  return trimmed.length > 0 ? trimmed : undefined
+}
 
 export const createFileStorageObject = (input: {
   readonly userId: string
@@ -46,12 +57,11 @@ export const createFileStorageObject = (input: {
       documentId: object.id,
       maxTokens: collection.chunkMaxTokens,
       source: {
-        source: {
-          _tag: 'File',
+        source: KnowledgeFileSource.make({
           ref: object.id,
-          name: object.filename ?? undefined,
-          mediaType: object.mediaType ?? undefined
-        },
+          name: presentSourceText(object.filename),
+          mediaType: presentSourceText(object.mediaType)
+        }),
         content: extracted.content,
         mediaType: object.mediaType ?? undefined,
         metadata: {

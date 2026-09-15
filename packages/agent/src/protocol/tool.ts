@@ -1,8 +1,192 @@
-import { Match } from 'effect'
+import { Data, Effect, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
+import * as SchemaIssue from 'effect/SchemaIssue'
 import { Content } from './content.ts'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
+const isPlainObjectPrototype = (value: object) => {
+  const proto = Object.getPrototypeOf(value)
+
+  return proto === Object.prototype || proto === null
+}
+
+const dataOwnValue = (value: object, key: string): PropertyDescriptor | undefined => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key)
+
+  if (
+    descriptor === undefined ||
+    descriptor.enumerable !== true ||
+    descriptor.get !== undefined ||
+    descriptor.set !== undefined ||
+    !Object.hasOwn(descriptor, 'value')
+  ) {
+    return undefined
+  }
+
+  return descriptor
+}
+
+const isPortableJsonArray = (
+  value: Array<unknown>,
+  onPath: Set<object>,
+  validated: Set<object>
+): boolean => {
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    return false
+  }
+
+  for (const key of Reflect.ownKeys(value)) {
+    if (key === 'length') {
+      continue
+    }
+
+    if (!Predicate.isString(key)) {
+      return false
+    }
+
+    const index = Number(key)
+
+    if (!Number.isInteger(index) || index < 0 || index >= value.length || String(index) !== key) {
+      return false
+    }
+  }
+
+  for (let index = 0; index < value.length; index++) {
+    const owned = dataOwnValue(value, String(index))
+
+    if (owned === undefined || !isPortableJson(owned.value, onPath, validated)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+const isPortableJsonObjectNode = (
+  value: object,
+  onPath: Set<object>,
+  validated: Set<object>
+): boolean => {
+  if (!isPlainObjectPrototype(value)) {
+    return false
+  }
+
+  for (const key of Reflect.ownKeys(value)) {
+    if (!Predicate.isString(key)) {
+      return false
+    }
+
+    const owned = dataOwnValue(value, key)
+
+    if (owned === undefined || !isPortableJson(owned.value, onPath, validated)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+/** Plain JSON data: null, boolean, string, finite number, dense Array.prototype arrays,
+ * and plain/null-prototype objects with enumerable data-only own string keys (including
+ * own `__proto__` / `constructor`). Cycles fail; DAG aliases reuse memoized nodes.
+ * Accessors are rejected via descriptors and are not invoked. Identity of admitted
+ * values is preserved (not a Record snapshot). Not JSON Schema meta-schema validation.
+ * Proxy traps on ownKeys/getOwnPropertyDescriptor are not claimed immune.
+ */
+const isPortableJson = (
+  value: unknown,
+  onPath: Set<object>,
+  validated: Set<object>
+): value is Schema.Json => {
+  if (value === null || Predicate.isString(value) || Predicate.isBoolean(value)) {
+    return true
+  }
+
+  if (Predicate.isNumber(value)) {
+    return Number.isFinite(value)
+  }
+
+  if (!Predicate.isObjectOrArray(value)) {
+    return false
+  }
+
+  if (onPath.has(value)) {
+    return false
+  }
+
+  if (validated.has(value)) {
+    return true
+  }
+
+  onPath.add(value)
+
+  const portable = Array.isArray(value)
+    ? isPortableJsonArray(value, onPath, validated)
+    : Predicate.isObject(value) && isPortableJsonObjectNode(value, onPath, validated)
+
+  onPath.delete(value)
+
+  if (portable) {
+    validated.add(value)
+  }
+
+  return portable
+}
+
+const isPortableJsonObject = (value: unknown): value is Schema.JsonObject =>
+  Predicate.isObject(value) && isPortableJson(value, new Set(), new Set())
+
+/** Provider-facing JSON Schema object node. Unknown annotation keywords are legal
+ * JSON values. Root shape is not a claim of full JSON Schema semantic validity.
+ * Failure issues omit the unsafe input: constructor error formatting must not
+ * walk it again and invoke rejected accessors.
+ */
+export const ToolJsonSchemaObject = Schema.declareConstructor<Schema.JsonObject>()(
+  [],
+  () => input =>
+    isPortableJsonObject(input)
+      ? Effect.succeed(input)
+      : Effect.fail(
+          new SchemaIssue.InvalidValue(Option.none(), {
+            message: 'Expected a plain JSON Schema object'
+          })
+        ),
+  {
+    identifier: 'ToolJsonSchemaObject',
+    title: 'JSON Schema object',
+    description:
+      'Plain JSON object representation for tool parameter documents. Identity-preserving; accessors, exotic prototypes, nonfinite values, and cycles are rejected.',
+    expected: 'plain JSON Schema object'
+  }
+)
+
+export type ToolJsonSchemaObject = typeof ToolJsonSchemaObject.Type
+
+/** JSON Schema representation: boolean schema or plain JSON object.
+ * One admission avoids a failing Boolean union branch retaining unsafe input.
+ */
+export const ToolJsonSchema = Schema.declareConstructor<boolean | Schema.JsonObject>()(
+  [],
+  () => input =>
+    Predicate.isBoolean(input) || isPortableJsonObject(input)
+      ? Effect.succeed(input)
+      : Effect.fail(
+          new SchemaIssue.InvalidValue(Option.none(), {
+            message: 'Expected a boolean or plain JSON Schema object'
+          })
+        ),
+  { identifier: 'ToolJsonSchema', title: 'JSON Schema representation' }
+)
+
+export type ToolJsonSchema = typeof ToolJsonSchema.Type
+
+export const decodeToolJsonSchema = Schema.decodeUnknownOption(ToolJsonSchema)
+
+export const decodeToolJsonSchemaObject = Schema.decodeUnknownOption(ToolJsonSchemaObject)
+
+export const isToolJsonSchemaObject = (schema: ToolJsonSchema): schema is ToolJsonSchemaObject =>
+  !Predicate.isBoolean(schema)
 
 export const HitlResponseSource = Schema.Literals(['user', 'policy', 'replay'])
 
@@ -30,7 +214,8 @@ export class ToolCall extends Schema.Class<ToolCall>('ToolCall')({
 export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   name: NonEmptyTrimmedString,
   description: Schema.String,
-  parameters: Schema.Unknown,
+  /** JSON Schema representation only (boolean | plain object). Not tool args, results, or HITL. */
+  parameters: ToolJsonSchema,
   approval: Schema.optional(ToolApprovalPolicy),
   background: Schema.optional(Schema.Boolean),
   execution: Schema.optional(Schema.Literal('background-v1'))
@@ -187,26 +372,35 @@ export class QuestionResponse extends Schema.TaggedClass<QuestionResponse>()('Qu
   reason: Schema.optional(Schema.String)
 }) {}
 
-export type PlainQuestionResponse = {
-  readonly _tag: 'QuestionResponse'
-  readonly requestId: string
-  readonly toolCallId: string
-  readonly outcome: QuestionResponseOutcome
-  readonly source: HitlResponseSource
-  readonly answers?: ReadonlyArray<PlainQuestionAnswer>
-  readonly reason?: string
-}
+export type PlainHitlResponse = Data.TaggedEnum<{
+  QuestionResponse: {
+    readonly requestId: string
+    readonly toolCallId: string
+    readonly outcome: QuestionResponseOutcome
+    readonly source: HitlResponseSource
+    readonly answers?: ReadonlyArray<PlainQuestionAnswer>
+    readonly reason?: string
+  }
+  ToolApprovalResponse: {
+    readonly requestId: string
+    readonly toolCallId: string
+    readonly decision: ToolApprovalDecision
+    readonly source: HitlResponseSource
+    readonly reason?: string
+  }
+}>
 
-export type PlainToolApprovalResponse = {
-  readonly _tag: 'ToolApprovalResponse'
-  readonly requestId: string
-  readonly toolCallId: string
-  readonly decision: ToolApprovalDecision
-  readonly source: HitlResponseSource
-  readonly reason?: string
-}
+export const PlainHitlResponse = Data.taggedEnum<PlainHitlResponse>()
 
-export type PlainHitlResponse = PlainToolApprovalResponse | PlainQuestionResponse
+export type PlainQuestionResponse = Extract<
+  PlainHitlResponse,
+  { readonly _tag: 'QuestionResponse' }
+>
+
+export type PlainToolApprovalResponse = Extract<
+  PlainHitlResponse,
+  { readonly _tag: 'ToolApprovalResponse' }
+>
 
 export type QuestionResponseStructuredContent = {
   readonly type: 'question_response'
@@ -240,7 +434,6 @@ export const plainQuestionAnswer = (answer: QuestionAnswer): PlainQuestionAnswer
 
 export const plainQuestionResponse = (response: QuestionResponse): PlainQuestionResponse => {
   type PlainQuestionResponseFields = {
-    _tag: 'QuestionResponse'
     requestId: PlainQuestionResponse['requestId']
     toolCallId: PlainQuestionResponse['toolCallId']
     outcome: PlainQuestionResponse['outcome']
@@ -250,7 +443,6 @@ export const plainQuestionResponse = (response: QuestionResponse): PlainQuestion
   }
 
   const fields: PlainQuestionResponseFields = {
-    _tag: 'QuestionResponse',
     requestId: response.requestId,
     toolCallId: response.toolCallId,
     outcome: response.outcome,
@@ -265,14 +457,13 @@ export const plainQuestionResponse = (response: QuestionResponse): PlainQuestion
     fields.reason = response.reason
   }
 
-  return fields
+  return PlainHitlResponse.QuestionResponse(fields)
 }
 
 export const plainToolApprovalResponse = (
   response: ToolApprovalResponse
 ): PlainToolApprovalResponse => {
   type PlainToolApprovalResponseFields = {
-    _tag: 'ToolApprovalResponse'
     requestId: PlainToolApprovalResponse['requestId']
     toolCallId: PlainToolApprovalResponse['toolCallId']
     decision: PlainToolApprovalResponse['decision']
@@ -281,7 +472,6 @@ export const plainToolApprovalResponse = (
   }
 
   const fields: PlainToolApprovalResponseFields = {
-    _tag: 'ToolApprovalResponse',
     requestId: response.requestId,
     toolCallId: response.toolCallId,
     decision: response.decision,
@@ -292,7 +482,7 @@ export const plainToolApprovalResponse = (
     fields.reason = response.reason
   }
 
-  return fields
+  return PlainHitlResponse.ToolApprovalResponse(fields)
 }
 
 export const plainHitlResponse = (response: HitlResponse): PlainHitlResponse =>

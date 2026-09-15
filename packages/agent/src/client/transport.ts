@@ -34,6 +34,7 @@ import type {
   AgentEvent as AgentEventType,
   AgentMessage,
   AgentReasoningEffort,
+  AgentWebSocketClientMessage,
   AgentWebSocketServerMessage as AgentWebSocketServerMessageType,
   HitlResponse,
   QuestionResponse,
@@ -359,7 +360,7 @@ const agentRunEndpointWithStartIndexEffect = (endpoint: string, startIndex: numb
 const nextAgentRunStartIndex = (startIndex: number | undefined, count: number) =>
   (startIndex ?? 0) + count
 
-const unknownToMessage = (error: unknown) =>
+const unknownToMessage = (error: Schema.SchemaError) =>
   error instanceof Error ? error.message : String(error)
 
 const toTransportError = (message: string, cause: unknown) =>
@@ -371,7 +372,22 @@ const toTransportError = (message: string, cause: unknown) =>
 const toHttpClientTransportError = (message: string) => (error: HttpClientError.HttpClientError) =>
   toTransportError(`${message}: ${error.message}`, error)
 
-const encodeJsonString = (value: unknown, message: string) =>
+type AgentHttpEventsRequestJson = Pick<
+  StreamAgentEventsRequest,
+  'sessionId' | 'messages' | 'hitlResponses' | 'model' | 'reasoningEffort'
+>
+
+type AgentHttpHitlResponseRequestJson = Pick<
+  StreamAgentRunHitlResponseEventsRequest,
+  'hitlResponses'
+>
+
+type TransportJsonStringInput =
+  | AgentWebSocketClientMessage
+  | AgentHttpEventsRequestJson
+  | AgentHttpHitlResponseRequestJson
+
+const encodeJsonString = (value: TransportJsonStringInput, message: string) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
     Effect.mapError(
       error =>

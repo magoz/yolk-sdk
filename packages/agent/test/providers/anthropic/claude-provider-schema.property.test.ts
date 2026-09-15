@@ -40,13 +40,13 @@ const schemaVariant = Schema.Literals([
 
 const schemaVariantArbitrary = Schema.toArbitrary(schemaVariant)
 
-const isJsonObject = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && Predicate.isObjectOrArray(input) && !Array.isArray(input)
+const isJsonObject = (input: Schema.Json): input is Schema.JsonObject =>
+  Predicate.isObjectOrArray(input) && !Array.isArray(input)
 
-const field = (input: unknown, key: string) =>
-  isJsonObject(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+const field = (input: Schema.Json | undefined, key: string): Schema.Json | undefined =>
+  input !== undefined && isJsonObject(input) && Object.hasOwn(input, key) ? input[key] : undefined
 
-const localDefinitionName = (ref: unknown) => {
+const localDefinitionName = (ref: Schema.Json | undefined) => {
   if (!Predicate.isString(ref)) return undefined
 
   const prefix = '#/$defs/'
@@ -54,7 +54,7 @@ const localDefinitionName = (ref: unknown) => {
   return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined
 }
 
-const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
+const collectLocalRefs = (input: Schema.Json): ReadonlyArray<string> => {
   const ref = localDefinitionName(field(input, '$ref'))
   const current = ref === undefined ? [] : [ref]
 
@@ -69,13 +69,15 @@ const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
   return [...current, ...Object.values(input).flatMap(collectLocalRefs)]
 }
 
-const collectKeywordValues = (input: unknown, keyword: string): ReadonlyArray<unknown> => {
+const collectKeywordValues = (input: Schema.Json, keyword: string): ReadonlyArray<Schema.Json> => {
   if (Array.isArray(input)) return input.flatMap(value => collectKeywordValues(value, keyword))
 
   if (!isJsonObject(input)) return []
 
+  const owned = Object.hasOwn(input, keyword) ? field(input, keyword) : undefined
+
   return [
-    ...(Object.hasOwn(input, keyword) ? [field(input, keyword)] : []),
+    ...(owned === undefined ? [] : [owned]),
     ...Object.values(input).flatMap(value => collectKeywordValues(value, keyword))
   ]
 }
@@ -157,7 +159,7 @@ const schemaProbeTool = <
 const providerSafeTool = (variant: typeof schemaVariant.Type) =>
   schemaProbeTool(schemaParameters(variant))
 
-const assertProviderSafeParameters = (parameters: unknown) => {
+const assertProviderSafeParameters = (parameters: Schema.Json) => {
   expect(field(parameters, 'type')).toBe('object')
   expect(field(parameters, '$ref')).toBeUndefined()
   expect(field(parameters, 'anyOf')).toBeUndefined()
@@ -197,9 +199,14 @@ describe('Anthropic Claude provider schema properties', () => {
           { maxTokens: 123 }
         )
 
-        const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
+        const tool = body.tools?.[0]
+        expect(tool).toBeDefined()
 
-        assertProviderSafeParameters(field(tool, 'input_schema'))
+        if (tool === undefined) {
+          expect.fail('Expected Anthropic request tool')
+        }
+
+        assertProviderSafeParameters(tool.input_schema)
       }),
     propertyOptions
   )

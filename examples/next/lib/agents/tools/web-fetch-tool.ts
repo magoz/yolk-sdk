@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import type { HttpClientError } from 'effect/unstable/http/HttpClientError'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
 import {
@@ -64,8 +65,7 @@ const webFetchToolDescription = [
   'This tool does not search the web, click links, run page JavaScript, use cookies, or access logged-in pages.'
 ].join(' ')
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const schemaErrorToMessage = (error: Schema.SchemaError) => String(error)
 
 const makeModelVisibleError = (message: string, reason: ModelVisibleToolErrorReason) =>
   modelVisibleToolError({
@@ -222,8 +222,8 @@ export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
     )
 
     const response = yield* http.execute(request).pipe(
-      Effect.mapError(error =>
-        makeModelVisibleError(`Request failed: ${unknownToMessage(error)}`, 'unavailable')
+      Effect.mapError((error: HttpClientError) =>
+        makeModelVisibleError(`Request failed: ${error.message}`, 'unavailable')
       ),
       Effect.timeoutOrElse({
         duration: timeoutMs,
@@ -235,11 +235,8 @@ export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
       status: response.status,
       headers: response.headers,
       body: response.arrayBuffer.pipe(
-        Effect.mapError(error =>
-          makeModelVisibleError(
-            `Could not read response body: ${unknownToMessage(error)}`,
-            'unavailable'
-          )
+        Effect.mapError((error: HttpClientError) =>
+          makeModelVisibleError(`Could not read response body: ${error.message}`, 'unavailable')
         )
       )
     }
@@ -494,7 +491,7 @@ export const executeWebFetchTool = (call: ToolCall, deps: WebFetchToolDependenci
     const params = yield* Schema.decodeUnknownEffect(WebFetchParams)(call.params).pipe(
       Effect.mapError(error =>
         makeModelVisibleError(
-          `Invalid web fetch arguments: ${unknownToMessage(error)}`,
+          `Invalid web fetch arguments: ${schemaErrorToMessage(error)}`,
           'validation'
         )
       )
@@ -519,7 +516,7 @@ export const makeWebFetchToolRegistration = (
     parameters: WebFetchParams,
     access: 'read',
     isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-    invalidParamsMessage: error => `Invalid web fetch arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error => `Invalid web fetch arguments: ${schemaErrorToMessage(error)}`,
     execute: ({ call, params }) =>
       fetchWebPage(params, deps).pipe(
         Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))

@@ -1,4 +1,4 @@
-import { NodeSdk } from '@effect/opentelemetry'
+import * as NodeSdk from '@effect/opentelemetry/NodeSdk'
 import { BatchLogRecordProcessor, ConsoleLogRecordExporter } from '@opentelemetry/sdk-logs'
 
 // Note: Uses process.env because NodeSdk.layer() requires a synchronous callback

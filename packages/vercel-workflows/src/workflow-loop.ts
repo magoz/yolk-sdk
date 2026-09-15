@@ -1,4 +1,4 @@
-import { Predicate } from 'effect'
+import { Data, Predicate } from 'effect'
 
 export type VercelAgentWorkflowInput = {
   readonly request: unknown
@@ -63,57 +63,59 @@ export type VercelAgentWorkflowToolBatchStepResult = {
   readonly failure?: unknown
 }
 
-export type WorkflowStepResult<A> =
-  | {
-      readonly _tag: 'Success'
-      readonly value: A
-    }
-  | {
-      readonly _tag: 'Failure'
-      readonly error: unknown
-    }
+export type WorkflowStepResult<A> = Data.TaggedEnum<{
+  Success: {
+    readonly value: A
+  }
+  Failure: {
+    readonly error: unknown
+  }
+}>
+
+interface WorkflowStepResultDefinition extends Data.TaggedEnum.WithGenerics<1> {
+  readonly taggedEnum: WorkflowStepResult<this['A']>
+}
+
+export const WorkflowStepResult = Data.taggedEnum<WorkflowStepResultDefinition>()
 
 export type VercelAgentWorkflowStepRetryPolicy = {
   readonly maxAttempts: number
 }
 
-export type VercelAgentWorkflowRunResult =
-  | {
-      readonly _tag: 'Completed'
-      readonly turns: number
-      readonly state: SerializableWorkflowState
-    }
-  | {
-      readonly _tag: 'ModelStepFailed'
-      readonly turn: number
-      readonly error: unknown
-      readonly state: SerializableWorkflowState
-    }
-  | {
-      readonly _tag: 'ToolBatchStepFailed'
-      readonly turn: number
-      readonly error: unknown
-      readonly state: SerializableWorkflowState
-    }
-  | {
-      readonly _tag: 'AwaitInputFailed'
-      readonly turn: number
-      readonly error: unknown
-      readonly awaitingInput: VercelAgentWorkflowAwaitingInput
-      readonly state: SerializableWorkflowState
-    }
-  | {
-      readonly _tag: 'CloseStreamFailed'
-      readonly turns: number
-      readonly error: unknown
-      readonly state: SerializableWorkflowState
-    }
-  | {
-      readonly _tag: 'MaxTurnsExceeded'
-      readonly maxTurns: number
-      readonly error: Error
-      readonly state: SerializableWorkflowState
-    }
+export type VercelAgentWorkflowRunResult = Data.TaggedEnum<{
+  Completed: {
+    readonly turns: number
+    readonly state: SerializableWorkflowState
+  }
+  ModelStepFailed: {
+    readonly turn: number
+    readonly error: unknown
+    readonly state: SerializableWorkflowState
+  }
+  ToolBatchStepFailed: {
+    readonly turn: number
+    readonly error: unknown
+    readonly state: SerializableWorkflowState
+  }
+  AwaitInputFailed: {
+    readonly turn: number
+    readonly error: unknown
+    readonly awaitingInput: VercelAgentWorkflowAwaitingInput
+    readonly state: SerializableWorkflowState
+  }
+  CloseStreamFailed: {
+    readonly turns: number
+    readonly error: unknown
+    readonly state: SerializableWorkflowState
+  }
+  MaxTurnsExceeded: {
+    readonly maxTurns: number
+    readonly error: Error
+    readonly state: SerializableWorkflowState
+  }
+}>
+
+export const VercelAgentWorkflowRunResult = Data.taggedEnum<VercelAgentWorkflowRunResult>()
 
 export type VercelAgentWorkflowLoopConfig = {
   readonly input: VercelAgentWorkflowInput
@@ -146,8 +148,8 @@ export const noWorkflowStepRetry: VercelAgentWorkflowStepRetryPolicy = { maxAtte
 
 export const settleWorkflowStep = <A>(promise: Promise<A>): Promise<WorkflowStepResult<A>> =>
   promise.then(
-    value => ({ _tag: 'Success', value }),
-    error => ({ _tag: 'Failure', error })
+    value => WorkflowStepResult.Success<A>({ value }),
+    error => WorkflowStepResult.Failure<A>({ error })
   )
 
 const workflowMaxTurnsError = (maxTurns: number) =>
@@ -230,12 +232,11 @@ export async function runVercelAgentWorkflow(
     if (Predicate.isTagged(modelResult, 'Failure')) {
       await writeErrorSafely(writeError, modelResult.error)
 
-      return {
-        _tag: 'ModelStepFailed',
+      return VercelAgentWorkflowRunResult.ModelStepFailed({
         turn: state.turn,
         error: modelResult.error,
         state
-      }
+      })
     }
 
     if (modelResult.value.done) {
@@ -253,19 +254,17 @@ export async function runVercelAgentWorkflow(
       if (Predicate.isTagged(closeResult, 'Failure')) {
         await writeErrorSafely(writeError, closeResult.error)
 
-        return {
-          _tag: 'CloseStreamFailed',
+        return VercelAgentWorkflowRunResult.CloseStreamFailed({
           turns: modelResult.value.turn,
           error: closeResult.error,
           state: terminalState
-        }
+        })
       }
 
-      return {
-        _tag: 'Completed',
+      return VercelAgentWorkflowRunResult.Completed({
         turns: modelResult.value.turn,
         state: terminalState
-      }
+      })
     }
 
     if (modelResult.value.toolCalls.length === 0) {
@@ -281,7 +280,7 @@ export async function runVercelAgentWorkflow(
     }
 
     let completedToolsResult: VercelAgentWorkflowToolBatchStepResult | undefined
-    let toolHitlResponses: ReadonlyArray<unknown> = []
+    const toolHitlResponses: Array<unknown> = []
     let cumulativeUsage = modelResult.value.usage
     let toolEventSequence = modelResult.value.eventSequence ?? state.eventSequence
 
@@ -308,7 +307,7 @@ export async function runVercelAgentWorkflow(
               request: input.request,
               calls: modelResult.value.toolCalls,
               createdMessages: modelResult.value.createdMessages,
-              hitlResponses: toolHitlResponses,
+              hitlResponses: toolHitlResponses.slice(),
               usage: cumulativeUsage,
               turn: modelResult.value.turn,
               eventSequence: toolEventSequence
@@ -320,12 +319,11 @@ export async function runVercelAgentWorkflow(
       if (Predicate.isTagged(toolsResult, 'Failure')) {
         await writeErrorSafely(writeError, toolsResult.error)
 
-        return {
-          _tag: 'ToolBatchStepFailed',
+        return VercelAgentWorkflowRunResult.ToolBatchStepFailed({
           turn: modelResult.value.turn,
           error: toolsResult.error,
           state: currentTurnState()
-        }
+        })
       }
 
       cumulativeUsage = toolsResult.value.usage ?? cumulativeUsage
@@ -334,12 +332,11 @@ export async function runVercelAgentWorkflow(
       if (toolsResult.value.failure !== undefined) {
         await writeErrorSafely(writeError, toolsResult.value.failure)
 
-        return {
-          _tag: 'ToolBatchStepFailed',
+        return VercelAgentWorkflowRunResult.ToolBatchStepFailed({
           turn: modelResult.value.turn,
           error: toolsResult.value.failure,
           state: currentTurnState(toolsResult.value)
-        }
+        })
       }
 
       if (toolsResult.value.awaitingInput === undefined) {
@@ -364,28 +361,26 @@ export async function runVercelAgentWorkflow(
       if (Predicate.isTagged(hitlResponse, 'Failure')) {
         await writeErrorSafely(writeError, hitlResponse.error)
 
-        return {
-          _tag: 'AwaitInputFailed',
+        return VercelAgentWorkflowRunResult.AwaitInputFailed({
           turn: modelResult.value.turn,
           error: hitlResponse.error,
           awaitingInput,
           state: currentTurnState(toolsResult.value)
-        }
+        })
       }
 
-      toolHitlResponses = [...toolHitlResponses, hitlResponse.value]
+      toolHitlResponses.push(hitlResponse.value)
     }
 
     if (completedToolsResult === undefined) {
       const error = new Error('Vercel agent workflow tool batch did not complete')
       await writeErrorSafely(writeError, error)
 
-      return {
-        _tag: 'ToolBatchStepFailed',
+      return VercelAgentWorkflowRunResult.ToolBatchStepFailed({
         turn: modelResult.value.turn,
         error,
         state
-      }
+      })
     }
 
     state = {
@@ -401,10 +396,9 @@ export async function runVercelAgentWorkflow(
   const error = workflowMaxTurnsError(maxTurns)
   await writeErrorSafely(writeError, error)
 
-  return {
-    _tag: 'MaxTurnsExceeded',
+  return VercelAgentWorkflowRunResult.MaxTurnsExceeded({
     maxTurns,
     error,
     state
-  }
+  })
 }

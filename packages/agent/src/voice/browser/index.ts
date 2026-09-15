@@ -1,6 +1,7 @@
 export {
   defaultWebRtcVoiceRuntime,
   makeWebRtcVoiceTransport,
+  webRtcVoiceTransportLayer,
   type WebRtcDataChannelLike,
   type WebRtcMediaStreamLike,
   type WebRtcMessageEventLike,

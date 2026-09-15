@@ -145,6 +145,28 @@ describe('web_search tool', () => {
     })
   )
 
+  it.effect('keeps SchemaError wrapper on invalid web search arguments', () =>
+    Effect.gen(function* () {
+      const { deps, requested } = makeDependencies(() => Effect.succeed(mcpResult('unused')))
+
+      const result = yield* executeWebSearchTool(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'web_search',
+          params: { query: false }
+        }),
+        deps
+      )
+
+      expect(requested).toEqual([])
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        isError: true
+      })
+      expect(result.content).toContain('Invalid web search arguments: SchemaError(')
+    })
+  )
+
   it.effect('returns model-visible errors for blank queries', () =>
     Effect.gen(function* () {
       const { deps, requested } = makeDependencies(() => Effect.succeed(mcpResult('unused')))

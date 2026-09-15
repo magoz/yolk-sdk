@@ -6,11 +6,13 @@ import {
   QuestionPrompt,
   QuestionRequest,
   ToolApprovalRequest,
+  ToolApprovalResponse,
   ToolCall
 } from '@yolk-sdk/agent/protocol'
 import {
   VoiceAwaitingInput,
   VoiceCommand,
+  VoiceConnect,
   VoiceEvent,
   VoiceSendText,
   VoiceSessionConfig,
@@ -25,6 +27,8 @@ const decodeEvent = Schema.decodeUnknownEffect(VoiceEvent)
 const encodeEvent = Schema.encodeEffect(VoiceEvent)
 
 const decodeCommand = Schema.decodeUnknownEffect(VoiceCommand)
+
+const encodeCommand = Schema.encodeEffect(VoiceCommand)
 
 const decodeSessionConfig = Schema.decodeUnknownEffect(VoiceSessionConfig)
 
@@ -93,19 +97,32 @@ describe('voice protocol', () => {
 
   it.effect('decodes voice commands by tag', () =>
     Effect.gen(function* () {
-      const connect = yield* decodeCommand({ _tag: 'Connect' })
-      const sendText = yield* decodeCommand({ _tag: 'SendText', text: 'hi' })
+      const connectEncoded: unknown = JSON.parse(
+        JSON.stringify(yield* encodeCommand(VoiceConnect.make({})))
+      )
 
-      const hitl = yield* decodeCommand({
-        _tag: 'SubmitHitlResponse',
-        response: {
-          _tag: 'ToolApprovalResponse',
-          requestId: 'req_1',
-          toolCallId: 'call_1',
-          decision: 'approved',
-          source: 'user'
-        }
-      })
+      const sendTextEncoded: unknown = JSON.parse(
+        JSON.stringify(yield* encodeCommand(VoiceSendText.make({ text: 'hi' })))
+      )
+
+      const hitlEncoded: unknown = JSON.parse(
+        JSON.stringify(
+          yield* encodeCommand(
+            VoiceSubmitHitlResponse.make({
+              response: ToolApprovalResponse.make({
+                requestId: 'req_1',
+                toolCallId: 'call_1',
+                decision: 'approved',
+                source: 'user'
+              })
+            })
+          )
+        )
+      )
+
+      const connect = yield* decodeCommand(connectEncoded)
+      const sendText = yield* decodeCommand(sendTextEncoded)
+      const hitl = yield* decodeCommand(hitlEncoded)
 
       expect(connect._tag).toBe('Connect')
       expect(sendText).toEqual(VoiceSendText.make({ text: 'hi' }))

@@ -17,8 +17,12 @@ const configSourceId = 'config'
 
 const decodeSkillsetManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(SkillsetManifest))
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const schemaErrorToMessage = (error: Schema.SchemaError) => String(error)
+
+const configErrorToMessage = (error: Config.ConfigError) => String(error)
+
+const configLoadFailureMessage = (error: Config.ConfigError | ConfigSkillsetError) =>
+  error instanceof ConfigSkillsetError ? error.message : configErrorToMessage(error)
 
 const withConfigSource = (manifest: SkillsetManifestType): SkillsetManifestType => ({
   version: 1,
@@ -47,14 +51,16 @@ export const loadConfigSkillsetManifest = (): Effect.Effect<
       Effect.map(withConfigSource),
       Effect.mapError(
         error =>
-          new ConfigSkillsetError({ message: `Invalid YOLK_SKILLSET: ${unknownToMessage(error)}` })
+          new ConfigSkillsetError({
+            message: `Invalid YOLK_SKILLSET: ${schemaErrorToMessage(error)}`
+          })
       )
     )
   }).pipe(
-    Effect.catch(error =>
+    Effect.catch((error: Config.ConfigError | ConfigSkillsetError) =>
       Effect.fail(
         new ConfigSkillsetError({
-          message: `Could not load skillset config: ${unknownToMessage(error)}`
+          message: `Could not load skillset config: ${configLoadFailureMessage(error)}`
         })
       )
     )

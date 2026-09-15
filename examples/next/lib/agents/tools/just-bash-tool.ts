@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { Bash } from 'just-bash/browser'
 import { ToolError } from '@yolk-sdk/agent/loop'
@@ -40,8 +40,7 @@ const justBashToolDescription = [
   'No host filesystem access, external binaries, persistent state, JS, or Python is available.'
 ].join(' ')
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const schemaErrorToMessage = (error: Schema.SchemaError) => String(error)
 
 const makeToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({
@@ -49,6 +48,47 @@ const makeToolError = (message: string, cause: ToolError['cause']) =>
     message,
     cause
   })
+
+type JustBashExecResult = {
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+  readonly timedOut: boolean
+}
+
+const isJustBashTimeoutError = (error: Error | DOMException) =>
+  error.name === 'AbortError' ||
+  error.name === 'TimeoutError' ||
+  error.name === 'ExecutionAbortedError'
+
+export const justBashHostFailure = (error: unknown) => {
+  if (
+    (Predicate.isError(error) || error instanceof DOMException) &&
+    isJustBashTimeoutError(error)
+  ) {
+    const message = error.message.trim()
+
+    return makeToolError(
+      message.length === 0
+        ? 'just-bash execution timed out'
+        : `just-bash execution timed out: ${message}`,
+      'timeout'
+    )
+  }
+
+  if (Predicate.isError(error) || error instanceof DOMException) {
+    const message = error.message.trim()
+
+    return makeToolError(
+      message.length === 0
+        ? 'just-bash execution failed'
+        : `just-bash execution failed: ${message}`,
+      'execution'
+    )
+  }
+
+  return makeToolError('just-bash execution failed', 'execution')
+}
 
 const resolveTimeoutMs = (timeoutSeconds: number | undefined) => {
   const timeout = timeoutSeconds ?? defaultTimeoutSeconds
@@ -92,25 +132,28 @@ const runWithTimeout = (params: JustBashParams, timeoutMs: number) =>
           }
         })
 
-        return await bash.exec(params.script, {
+        const result = await bash.exec(params.script, {
           stdin: params.stdin,
           signal: controller.signal,
           rawScript: true
         })
+
+        return {
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          timedOut: controller.signal.aborted
+        } satisfies JustBashExecResult
       } finally {
         clearTimeout(timeoutId)
       }
     },
-    catch: error =>
-      makeToolError(`just-bash execution failed: ${unknownToMessage(error)}`, 'execution')
+    catch: justBashHostFailure
   })
 
-const formatResult = (input: {
-  readonly exitCode: number
-  readonly stdout: string
-  readonly stderr: string
-}) =>
+const formatResult = (input: JustBashExecResult) =>
   [
+    ...(input.timedOut ? ['timed_out: true'] : []),
     `exit_code: ${input.exitCode}`,
     '<stdout>',
     truncate(input.stdout),
@@ -120,25 +163,18 @@ const formatResult = (input: {
     '</stderr>'
   ].join('\n')
 
-const justBashToolResult = (
-  call: ToolCall,
-  result: {
-    readonly exitCode: number
-    readonly stdout: string
-    readonly stderr: string
-  }
-) =>
+const justBashToolResult = (call: ToolCall, result: JustBashExecResult) =>
   ToolResult.make({
     toolCallId: call.id,
     content: formatResult(result),
-    isError: result.exitCode === 0 ? undefined : true
+    isError: result.timedOut || result.exitCode !== 0 ? true : undefined
   })
 
 export const executeJustBashTool = (call: ToolCall) =>
   Effect.gen(function* () {
     const params = yield* Schema.decodeUnknownEffect(JustBashParams)(call.params).pipe(
       Effect.mapError(error =>
-        makeToolError(`Invalid just-bash arguments: ${unknownToMessage(error)}`, 'validation')
+        makeToolError(`Invalid just-bash arguments: ${schemaErrorToMessage(error)}`, 'validation')
       )
     )
 
@@ -154,7 +190,7 @@ const justBashTool: ToolRegistration<AgentToolContext> = makeTool({
   parameters: JustBashParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text'),
-  invalidParamsMessage: error => `Invalid just-bash arguments: ${unknownToMessage(error)}`,
+  invalidParamsMessage: error => `Invalid just-bash arguments: ${schemaErrorToMessage(error)}`,
   execute: ({ call, params }) =>
     Effect.gen(function* () {
       const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)

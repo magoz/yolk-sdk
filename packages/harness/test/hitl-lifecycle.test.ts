@@ -1,6 +1,6 @@
 import { Deferred, Effect, Fiber, Layer, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { admit, Driver, makeDriverLayer } from '../src/driver.ts'
+import { admit, Driver, makeDriverLayer, StopDecision } from '../src/driver.ts'
 import { makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
 import { Inbox, makeInMemoryInboxLayer } from '../src/inbox.ts'
 import { makeInMemoryRunStoreLayer, RunStore } from '../src/store.ts'
@@ -742,7 +742,7 @@ describe('HITL park lifecycle', () => {
         const store = yield* RunStore
         yield* driver.wake('run_1')
         yield* Deferred.await(started)
-        expect(yield* driver.stop('run_1')).toEqual({ _tag: 'Interrupted' })
+        expect(yield* driver.stop('run_1')).toEqual(StopDecision.Interrupted())
         expect(yield* driver.isActive('run_1')).toBe(true)
         expect(yield* store.isClaimed('run_1')).toBe(true)
         yield* driver.stop('run_1')

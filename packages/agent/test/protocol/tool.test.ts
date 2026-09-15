@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
   makeErrorToolResult,
+  PlainHitlResponse,
   plainQuestionAnswer,
   plainQuestionResponse,
   plainToolApprovalResponse,
@@ -104,24 +105,33 @@ describe('tool protocol helpers', () => {
       })
     )
 
+    expect(omittedResponse).toEqual(
+      PlainHitlResponse.QuestionResponse({
+        requestId: 'question:call_1',
+        toolCallId: 'call_1',
+        outcome: 'answered',
+        source: 'user'
+      })
+    )
+    expect(omittedResponse instanceof QuestionResponse).toBe(false)
     expect(Object.keys(omittedResponse)).toEqual([
-      '_tag',
       'requestId',
       'toolCallId',
       'outcome',
-      'source'
+      'source',
+      '_tag'
     ])
     expect(JSON.stringify(omittedResponse)).toBe(
-      '{"_tag":"QuestionResponse","requestId":"question:call_1","toolCallId":"call_1","outcome":"answered","source":"user"}'
+      '{"requestId":"question:call_1","toolCallId":"call_1","outcome":"answered","source":"user","_tag":"QuestionResponse"}'
     )
     expect(Object.keys(presentResponse)).toEqual([
-      '_tag',
       'requestId',
       'toolCallId',
       'outcome',
       'source',
       'answers',
-      'reason'
+      'reason',
+      '_tag'
     ])
 
     const omittedApproval = plainToolApprovalResponse(
@@ -143,21 +153,30 @@ describe('tool protocol helpers', () => {
       })
     )
 
+    expect(omittedApproval).toEqual(
+      PlainHitlResponse.ToolApprovalResponse({
+        requestId: 'approval:call_1',
+        toolCallId: 'call_1',
+        decision: 'approved',
+        source: 'user'
+      })
+    )
+    expect(omittedApproval instanceof ToolApprovalResponse).toBe(false)
     expect(Object.keys(omittedApproval)).toEqual([
-      '_tag',
-      'requestId',
-      'toolCallId',
-      'decision',
-      'source'
-    ])
-    expect(Object.hasOwn(omittedApproval, 'reason')).toBe(false)
-    expect(Object.keys(presentApproval)).toEqual([
-      '_tag',
       'requestId',
       'toolCallId',
       'decision',
       'source',
-      'reason'
+      '_tag'
+    ])
+    expect(Object.hasOwn(omittedApproval, 'reason')).toBe(false)
+    expect(Object.keys(presentApproval)).toEqual([
+      'requestId',
+      'toolCallId',
+      'decision',
+      'source',
+      'reason',
+      '_tag'
     ])
 
     const omittedStructured = questionResponseStructuredContent(

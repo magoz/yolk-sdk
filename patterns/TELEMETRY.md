@@ -117,6 +117,15 @@ Effect.catch(error => {
 })
 ```
 
+In the Next example, `context?: TelemetryLogContext` adds searchable metadata through
+`Effect.annotateLogs`, not an arbitrary second log-message object. The allowlist is string fields
+`operation`, `runId`, `toolCallId`, `cause_type`, `entityId`, `userId`, and finite numeric fields
+`status`, `retries`. Runtime admission reads own data descriptors only and skips invalid fields
+individually; inherited/symbol/unknown fields and accessors are ignored without invoking getters.
+Arrays/functions are not context records. Canonical `error_type`/`warning_type` comes from the
+reported error, never caller context. Projection is **not message sanitization**: callers must keep
+credentials and private payloads out of messages and the allowed string fields.
+
 The `context` parameter adds searchable metadata:
 
 ```typescript

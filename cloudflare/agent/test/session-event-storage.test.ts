@@ -9,6 +9,7 @@ import {
   latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
   runRuntime,
+  RuntimeRequest,
   RunAwaitingInput,
   RunCompleted,
   RunFailed,
@@ -279,15 +280,13 @@ const runWsUserInput = (input: {
 
     const revision = expectedRevision(input.command.kind, before.revision)
 
-    const request = {
-      _tag: 'AppendInput' as const,
-      sessionId: 'session_1',
-      input: UserMessage.make({ content: `ws_user_${input.index}` }),
-      runId: `ws_user_run_${input.index}`
-    }
-
     const result = yield* runRuntime(
-      revision === undefined ? request : { ...request, expectedRevision: revision },
+      RuntimeRequest.AppendInput({
+        sessionId: 'session_1',
+        input: UserMessage.make({ content: `ws_user_${input.index}` }),
+        runId: `ws_user_run_${input.index}`,
+        expectedRevision: revision
+      }),
       wsRuntimeConfig
     ).pipe(Stream.runCollect, Effect.result)
 
@@ -310,15 +309,13 @@ const runWsHitlResponse = (input: {
 
     const revision = expectedRevision(input.command.kind, before.revision)
 
-    const request = {
-      _tag: 'AppendHitlResponse' as const,
-      sessionId: 'session_1',
-      response: input.response,
-      runId: `ws_hitl_run_${input.index}`
-    }
-
     const result = yield* runRuntime(
-      revision === undefined ? request : { ...request, expectedRevision: revision },
+      RuntimeRequest.AppendHitlResponse({
+        sessionId: 'session_1',
+        response: input.response,
+        runId: `ws_hitl_run_${input.index}`,
+        expectedRevision: revision
+      }),
       wsRuntimeConfig
     ).pipe(Stream.runCollect, Effect.result)
 
@@ -350,11 +347,11 @@ describe('Cloudflare session event storage', () => {
 
       yield* Effect.gen(function* () {
         yield* runRuntime(
-          { _tag: 'AppendInput', sessionId, input: firstInput, runId: 'run_1' },
+          RuntimeRequest.AppendInput({ sessionId, input: firstInput, runId: 'run_1' }),
           runtimeConfig
         ).pipe(Stream.runCollect)
         yield* runRuntime(
-          { _tag: 'AppendInput', sessionId, input: secondInput, runId: 'run_2' },
+          RuntimeRequest.AppendInput({ sessionId, input: secondInput, runId: 'run_2' }),
           runtimeConfig
         ).pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer))
@@ -427,13 +424,12 @@ describe('Cloudflare session event storage', () => {
       const requests: Array<LLMRequest> = []
 
       const result = yield* runRuntime(
-        {
-          _tag: 'AppendHitlResponse',
+        RuntimeRequest.AppendHitlResponse({
           sessionId,
           response: approvalResponse,
           runId: 'run_2',
           expectedRevision: before.revision + 1
-        },
+        }),
         wsRuntimeConfig
       ).pipe(Stream.runCollect, Effect.provide(makeWsLayer(storage, requests)), Effect.result)
 

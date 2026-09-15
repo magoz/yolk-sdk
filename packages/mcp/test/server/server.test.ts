@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -65,11 +65,21 @@ const richResultServer = makeMcpToolServer({
   ]
 })
 
-const requestLine = (value: unknown) => JSON.stringify(value)
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
+  Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
-const handleJson = (value: unknown) =>
+const requestLine = (value: Schema.Json) =>
+  JSON.stringify(
+    Option.getOrThrowWith(
+      Schema.decodeUnknownOption(Schema.Json)(value),
+      () => new Error('Expected JSON fixture')
+    )
+  )
+
+const handleJson = (value: Schema.Json) =>
   Effect.gen(function* () {
-    const response = yield* server.handleLine(requestLine(value))
+    const json = yield* Schema.decodeUnknownEffect(Schema.Json)(value)
+    const response = yield* server.handleLine(JSON.stringify(json))
 
     if (Option.isNone(response)) {
       return yield* Effect.fail(new Error('Expected MCP response'))
@@ -78,10 +88,12 @@ const handleJson = (value: unknown) =>
     return yield* decodeJson(response.value)
   })
 
-const handleHttpJson = (value: unknown) =>
+const handleHttpJson = (value: Schema.Json) =>
   Effect.gen(function* () {
+    const json = yield* Schema.decodeUnknownEffect(Schema.Json)(value)
+
     const response = yield* server.handleHttpRequest(
-      new Request('https://example.com/mcp', { method: 'POST', body: requestLine(value) })
+      new Request('https://example.com/mcp', { method: 'POST', body: JSON.stringify(json) })
     )
 
     const body = yield* Effect.promise(() => response.text())
@@ -98,10 +110,15 @@ const modernMeta = {
 const modernHttpRequest = (input: {
   readonly method: string
   readonly id?: string | number
-  readonly params?: Readonly<Record<string, unknown>>
+  readonly params?: Schema.JsonObject
   readonly headers?: Readonly<Record<string, string>>
-}) =>
-  new Request('https://example.com/mcp', {
+}) => {
+  const params = Option.getOrThrowWith(
+    Option.filter(Schema.decodeUnknownOption(Schema.Json)(input.params ?? {}), isJsonObject),
+    () => new Error('Expected JSON object fixture params')
+  )
+
+  return new Request('https://example.com/mcp', {
     method: 'POST',
     headers: {
       accept: 'application/json, text/event-stream',
@@ -114,9 +131,10 @@ const modernHttpRequest = (input: {
       jsonrpc: '2.0',
       id: input.id ?? 1,
       method: input.method,
-      params: { ...(input.params ?? {}), _meta: modernMeta }
+      params: { ...params, _meta: modernMeta }
     })
   })
+}
 
 describe('MCP tool server', () => {
   it.effect('handles initialize', () =>
@@ -353,6 +371,61 @@ describe('MCP tool server', () => {
 
       expect(response.status).toBe(405)
       expect(json).toMatchObject({ error: { code: -32_600 } })
+    })
+  )
+
+  it.effect('maps consumed HTTP request bodies to JSON-RPC bad request', () =>
+    Effect.gen(function* () {
+      const request = new Request('https://example.com/mcp', {
+        method: 'POST',
+        body: requestLine({ jsonrpc: '2.0', id: 1, method: 'initialize' })
+      })
+
+      yield* Effect.promise(() => request.text())
+
+      const response = yield* server.handleHttpRequest(request)
+      const body = yield* Effect.promise(() => response.text())
+      const json = yield* decodeJson(body)
+
+      expect(json).toMatchObject({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32_600 }
+      })
+      expect(JSON.stringify(json)).toContain('Could not read request body:')
+    })
+  )
+
+  it('rejects non-finite JSON requestLine fixtures before stringify', () => {
+    expect(() => requestLine(Infinity)).toThrow('Expected JSON fixture')
+    expect(() => requestLine({ n: Infinity })).toThrow('Expected JSON fixture')
+  })
+
+  it.effect('rejects non-finite JSON in Effect fixture helpers', () =>
+    Effect.gen(function* () {
+      const rootLine = yield* handleJson(Infinity).pipe(Effect.result)
+      const nestedLine = yield* handleJson({ n: Infinity }).pipe(Effect.result)
+      const rootHttp = yield* handleHttpJson(Infinity).pipe(Effect.result)
+      const nestedHttp = yield* handleHttpJson({ n: Infinity }).pipe(Effect.result)
+
+      expect(Result.isFailure(rootLine)).toBe(true)
+      expect(Result.isFailure(nestedLine)).toBe(true)
+      expect(Result.isFailure(rootHttp)).toBe(true)
+      expect(Result.isFailure(nestedHttp)).toBe(true)
+
+      if (
+        !Result.isFailure(rootLine) ||
+        !Result.isFailure(nestedLine) ||
+        !Result.isFailure(rootHttp) ||
+        !Result.isFailure(nestedHttp)
+      ) {
+        return yield* Effect.fail(new Error('expected non-finite JSON fixtures to fail admission'))
+      }
+
+      expect(Schema.isSchemaError(rootLine.failure)).toBe(true)
+      expect(Schema.isSchemaError(nestedLine.failure)).toBe(true)
+      expect(Schema.isSchemaError(rootHttp.failure)).toBe(true)
+      expect(Schema.isSchemaError(nestedHttp.failure)).toBe(true)
     })
   )
 })

@@ -1,4 +1,5 @@
 import { Effect, Layer, Predicate, Stream } from 'effect'
+import type * as Schema from 'effect/Schema'
 import {
   HttpClient,
   HttpClientError,
@@ -122,10 +123,13 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
   return new TextDecoder().decode(body.body)
 }
 
-const collectKeys = (value: unknown): ReadonlyArray<string> => {
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
+  Predicate.isObjectOrArray(value) && !Array.isArray(value)
+
+const collectKeys = (value: Schema.Json): ReadonlyArray<string> => {
   if (Array.isArray(value)) return value.flatMap(collectKeys)
 
-  if (!Predicate.isObjectOrArray(value) || value === null) return []
+  if (!isJsonObject(value)) return []
 
   return Object.entries(value).flatMap(([key, child]) => [key, ...collectKeys(child)])
 }
@@ -717,6 +721,12 @@ describe('Anthropic Claude provider', () => {
       })
 
       const schema = body.tools?.[0]?.input_schema
+      expect(schema).toBeDefined()
+
+      if (schema === undefined) {
+        expect.fail('Expected Anthropic tool input schema')
+      }
+
       const keys = collectKeys(schema)
 
       expect(keys).not.toContain('anyOf')
@@ -774,6 +784,31 @@ describe('Anthropic Claude provider', () => {
           tuple: { type: 'array', items: {} }
         }
       })
+    })
+  )
+
+  it.effect('rejects forged non-JSON tool parameter documents at the Anthropic boundary', () =>
+    Effect.gen(function* () {
+      const parameters = { type: 'object' }
+
+      const tool = ToolDef.make({
+        name: 'search',
+        description: 'Search docs',
+        parameters
+      })
+
+      Object.assign(parameters, { extra: () => undefined })
+
+      const error = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'hello' })],
+        tools: [tool]
+      }).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'provider_error', retryable: false })
+      expect(error.message).toContain('Invalid Anthropic Claude tool parameters JSON')
     })
   )
 

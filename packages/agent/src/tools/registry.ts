@@ -1,9 +1,12 @@
-import { Array as Arr, Effect, Layer, Option, Predicate } from 'effect'
+import { Array as Arr, Effect, Layer, Option, Predicate, Result, type JsonSchema } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
+  isToolJsonSchemaObject,
   makeErrorToolResult,
   ToolDef,
+  ToolJsonSchema,
+  ToolJsonSchemaObject,
   type ToolApprovalPolicy,
   type ToolCall,
   type ToolResult
@@ -141,7 +144,7 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
-  readonly invalidParamsMessage?: (error: unknown) => string
+  readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
   readonly execute: (
     input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
   ) => Effect.Effect<ToolResult, ToolError | ModelVisibleToolError>
@@ -194,29 +197,59 @@ const missingToolError = (name: string) =>
     cause: 'not_found'
   })
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const jsonField = (input: Schema.JsonObject, key: string): Schema.Json | undefined =>
+  Object.hasOwn(input, key) ? input[key] : undefined
 
-const objectField = (input: unknown, key: string) =>
-  Predicate.isObjectOrArray(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+const isJsonObject = (input: Schema.Json | undefined): input is Schema.JsonObject =>
+  Predicate.isObject(input)
 
-const isObjectRecord = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && Predicate.isObjectOrArray(input) && !Array.isArray(input)
+const jsonObject = (input: Schema.Json | undefined): Schema.JsonObject | undefined =>
+  isJsonObject(input) ? input : undefined
 
-const localDefinitionName = (ref: unknown) => {
-  if (!Predicate.isString(ref)) {
-    return undefined
+type ToolJsonSchemaDocument = JsonSchema.Document<'draft-2020-12'>
+
+const requireToolJsonSchema = (
+  input: ToolJsonSchemaDocument['schema']
+): typeof ToolJsonSchema.Type => {
+  const result = Schema.decodeUnknownResult(ToolJsonSchema)(input)
+
+  if (Result.isSuccess(result)) {
+    return result.success
   }
 
+  throw new Error(result.failure.issue.toString(), { cause: result.failure.issue })
+}
+
+const requireToolJsonSchemaObject = (
+  input: ToolJsonSchemaDocument['definitions']
+): typeof ToolJsonSchemaObject.Type => {
+  const result = Schema.decodeUnknownResult(ToolJsonSchemaObject)(input)
+
+  if (Result.isSuccess(result)) {
+    return result.success
+  }
+
+  throw new Error(result.failure.issue.toString(), { cause: result.failure.issue })
+}
+
+const localDefinitionName = (ref: string) => {
   const prefix = '#/$defs/'
 
   return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined
 }
 
-const hasJsonSchemaType = (input: unknown, type: string) => objectField(input, 'type') === type
+const hasJsonSchemaType = (input: Schema.Json, type: string) => {
+  const schema = jsonObject(input)
 
-const isEmptyStructJsonSchema = (schema: unknown) => {
-  const anyOf = objectField(schema, 'anyOf')
+  return schema !== undefined && jsonField(schema, 'type') === type
+}
+
+const isEmptyStructJsonSchema = (schema: typeof ToolJsonSchema.Type) => {
+  if (!isToolJsonSchemaObject(schema)) {
+    return false
+  }
+
+  const anyOf = jsonField(schema, 'anyOf')
 
   return (
     Array.isArray(anyOf) &&
@@ -226,56 +259,67 @@ const isEmptyStructJsonSchema = (schema: unknown) => {
   )
 }
 
-const isEmptyRecordJsonSchema = (schema: unknown) =>
+const isEmptyRecordJsonSchema = (schema: typeof ToolJsonSchema.Type) =>
+  isToolJsonSchemaObject(schema) &&
   hasJsonSchemaType(schema, 'object') &&
-  objectField(schema, 'additionalProperties') === false &&
-  objectField(schema, 'properties') === undefined &&
-  objectField(schema, 'required') === undefined
+  jsonField(schema, 'additionalProperties') === false &&
+  jsonField(schema, 'properties') === undefined &&
+  jsonField(schema, 'required') === undefined
 
-const emptyObjectJsonSchema = {
+const emptyObjectJsonSchema: typeof ToolJsonSchemaObject.Type = {
   type: 'object',
   properties: {},
   required: [],
   additionalProperties: false
 }
 
-const jsonSchemaFromSchema = (schema: Schema.Top) => {
+const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type => {
   const document = Schema.toJsonSchemaDocument(schema)
-  const definitionName = localDefinitionName(objectField(document.schema, '$ref'))
+  const documentSchema = requireToolJsonSchema(document.schema)
+
+  const rootRef = isToolJsonSchemaObject(documentSchema)
+    ? jsonField(documentSchema, '$ref')
+    : undefined
+
+  const definitionName = Predicate.isString(rootRef) ? localDefinitionName(rootRef) : undefined
+  const definitions = requireToolJsonSchemaObject(document.definitions)
 
   const localDefinition =
-    definitionName === undefined
-      ? undefined
-      : Object.getOwnPropertyDescriptor(document.definitions, definitionName)?.value
+    definitionName === undefined ? undefined : jsonField(definitions, definitionName)
 
-  const rootSchema = isObjectRecord(localDefinition) ? localDefinition : document.schema
+  const rootSchema = jsonObject(localDefinition) ?? documentSchema
 
   const remainingDefinitions =
     definitionName === undefined
-      ? document.definitions
-      : Object.fromEntries(
-          Object.entries(document.definitions).filter(([name]) => name !== definitionName)
-        )
+      ? definitions
+      : Object.fromEntries(Object.entries(definitions).filter(([name]) => name !== definitionName))
 
   const jsonSchema =
     isEmptyStructJsonSchema(rootSchema) || isEmptyRecordJsonSchema(rootSchema)
       ? emptyObjectJsonSchema
       : rootSchema
 
-  return Object.keys(remainingDefinitions).length > 0
-    ? { ...jsonSchema, $defs: remainingDefinitions }
-    : jsonSchema
+  if (Object.keys(remainingDefinitions).length === 0) {
+    return jsonSchema
+  }
+
+  if (!isToolJsonSchemaObject(jsonSchema)) {
+    return { allOf: [jsonSchema], $defs: remainingDefinitions }
+  }
+
+  return { ...jsonSchema, $defs: remainingDefinitions }
 }
 
 // Distinguishes makeTool's model-visible schema failures from raw/host ToolErrors.
 class InvalidToolParamsError extends ToolError {}
 
 const invalidParamsMessage = (
-  options: { readonly name: string; readonly invalidParamsMessage?: (error: unknown) => string },
-  error: unknown
-) =>
-  options.invalidParamsMessage?.(error) ??
-  `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
+  options: {
+    readonly name: string
+    readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
+  },
+  error: Schema.SchemaError
+) => options.invalidParamsMessage?.(error) ?? `Invalid ${options.name} arguments: ${String(error)}`
 
 type MakeToolRegistrationFields = {
   def: ToolDef

@@ -4,6 +4,7 @@ import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import {
   type VoiceSessionError,
+  VoiceSessionOpening,
   VoiceToolCallApprovalRequiredOutcome,
   VoiceToolCallExecutedOutcome,
   VoiceToolCall,
@@ -12,6 +13,7 @@ import {
   VoiceUserTranscriptFinal,
   voiceApprovalRequestId,
   type VoiceClientCodec,
+  type StoredVoiceEvent,
   type VoiceEvent,
   type VoiceToolCallOutcome
 } from '../../src/voice/index.ts'
@@ -22,7 +24,7 @@ import {
   type ToolApprovalResponse
 } from '@yolk-sdk/agent/protocol'
 import { useYolkVoice, type UseYolkVoiceOptions, type YolkVoiceApi } from '../../src/voice/react.ts'
-import { makeFakeWorld, type FakeWorld } from './helpers/fake-webrtc.ts'
+import { listenerCount, makeFakeWorld, type FakeWorld } from './helpers/fake-webrtc.ts'
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean
@@ -59,8 +61,8 @@ const renderUseYolkVoice = (options: UseYolkVoiceOptions) => {
   const root = createRoot(container)
   let value: YolkVoiceApi | undefined
 
-  function TestComponent() {
-    const hook = useYolkVoice(options)
+  function TestComponent({ hookOptions }: { readonly hookOptions: UseYolkVoiceOptions }) {
+    const hook = useYolkVoice(hookOptions)
 
     useEffect(() => {
       value = hook
@@ -69,14 +71,19 @@ const renderUseYolkVoice = (options: UseYolkVoiceOptions) => {
     return null
   }
 
-  act(() => {
-    root.render(createElement(TestComponent))
-  })
+  const renderWith = (hookOptions: UseYolkVoiceOptions) => {
+    act(() => {
+      root.render(createElement(TestComponent, { hookOptions }))
+    })
+  }
+
+  renderWith(options)
 
   return {
     get value() {
       return readHook(value)
     },
+    rerender: renderWith,
     unmount: () => {
       act(() => {
         root.unmount()
@@ -259,6 +266,213 @@ describe('useYolkVoice', () => {
     await waitFor(() => world.state.sent.length >= 2)
 
     expect(world.state.sent).toEqual(['user:earlier question', 'assistant:earlier answer'])
+
+    hook.unmount()
+  })
+
+  it('ignores start while a session is already live', async () => {
+    const world = makeFakeWorld()
+    const hook = renderUseYolkVoice(makeOptions(world))
+
+    act(() => {
+      hook.value.start()
+    })
+    await waitFor(() => hook.value.status === 'live')
+
+    const created = world.state.peerCreateCount
+    act(() => {
+      hook.value.start()
+    })
+    await act(async () => {
+      await tick()
+    })
+
+    expect(hook.value.status).toBe('live')
+    expect(world.state.peerCreateCount).toBe(created)
+    expect(world.state.peerClosed).toBe(false)
+
+    hook.unmount()
+  })
+
+  it('does not close resources twice on a second stop', async () => {
+    const world = makeFakeWorld()
+    const hook = renderUseYolkVoice(makeOptions(world))
+
+    act(() => {
+      hook.value.start()
+    })
+    await waitFor(() => hook.value.status === 'live')
+
+    act(() => {
+      hook.value.stop()
+    })
+    await waitFor(() => hook.value.status === 'idle')
+
+    const stoppedTracks = world.state.stoppedTracks
+    act(() => {
+      hook.value.stop()
+    })
+    await act(async () => {
+      await tick()
+    })
+
+    expect(hook.value.status).toBe('idle')
+    expect(world.state.stoppedTracks).toBe(stoppedTracks)
+
+    hook.unmount()
+  })
+
+  it('cancels a connecting session on unmount without going live', async () => {
+    const world = makeFakeWorld()
+    const hook = renderUseYolkVoice(makeOptions(world, { negotiate: () => Effect.never }))
+
+    act(() => {
+      hook.value.start()
+    })
+    await waitFor(() => hook.value.status === 'connecting')
+    await waitFor(() => listenerCount(world.peerListeners) > 0)
+
+    hook.unmount()
+    await waitFor(() => world.state.peerClosed)
+    expect(world.state.channelClosed).toBe(true)
+    expect(world.state.stoppedTracks).toBeGreaterThan(0)
+  })
+
+  it('starts a new session after stop instead of reusing the previous graph', async () => {
+    const world = makeFakeWorld()
+    const hook = renderUseYolkVoice(makeOptions(world))
+
+    act(() => {
+      hook.value.start()
+    })
+    await waitFor(() => hook.value.status === 'live')
+    expect(world.state.peerCreateCount).toBe(1)
+
+    const first = world.connections[0]
+
+    if (first === undefined) {
+      throw new Error('Expected the first peer connection')
+    }
+
+    act(() => {
+      hook.value.stop()
+    })
+    await waitFor(() => hook.value.status === 'idle')
+    expect(world.state.peerClosed).toBe(true)
+    expect(first.isPeerClosed()).toBe(true)
+    expect(first.isChannelClosed()).toBe(true)
+
+    act(() => {
+      hook.value.start()
+    })
+    await waitFor(() => hook.value.status === 'live')
+
+    const second = world.connections[1]
+
+    if (second === undefined) {
+      throw new Error('Expected a distinct second peer connection')
+    }
+
+    expect(world.state.peerCreateCount).toBe(2)
+    expect(world.state.peerClosed).toBe(false)
+    expect(first.peer).not.toBe(second.peer)
+    expect(first.channel).not.toBe(second.channel)
+    expect(first.isPeerClosed()).toBe(true)
+    expect(first.isChannelClosed()).toBe(true)
+    expect(world.state.remoteDescriptions).toEqual(['answer-sdp', 'answer-sdp'])
+
+    act(() => {
+      world.fireChannelMessageOn(first, 'user-delta')
+    })
+    await act(async () => {
+      await tick()
+    })
+    expect(hook.value.userDraft).toBe('')
+
+    act(() => {
+      world.fireChannelMessage('user-delta')
+    })
+    await waitFor(() => hook.value.userDraft === 'Hi ')
+
+    hook.unmount()
+  })
+
+  it('uses the latest onEvent callback after rerender', async () => {
+    const world = makeFakeWorld()
+    const first: Array<VoiceEvent['_tag']> = []
+    const second: Array<VoiceEvent['_tag']> = []
+    const base = makeOptions(world, { onEvent: event => first.push(event._tag) })
+    const hook = renderUseYolkVoice(base)
+
+    act(() => {
+      hook.value.start()
+    })
+    await waitFor(() => hook.value.status === 'live')
+
+    hook.rerender({ ...base, onEvent: event => second.push(event._tag) })
+    await act(async () => {
+      await tick()
+    })
+
+    act(() => {
+      world.fireChannelMessage('user-final')
+    })
+    await waitFor(() => second.includes('UserTranscriptFinal'))
+
+    expect(first).not.toContain('UserTranscriptFinal')
+    expect(second).toContain('UserTranscriptFinal')
+
+    hook.unmount()
+  })
+
+  it('flushes the event log when the session stops', async () => {
+    const world = makeFakeWorld()
+    const batches: Array<ReadonlyArray<StoredVoiceEvent>> = []
+
+    const hook = renderUseYolkVoice(
+      makeOptions(world, {
+        eventLog: {
+          streamId: 'hook-session',
+          flushIntervalMs: 60_000,
+          flush: batch =>
+            Effect.sync(() => {
+              batches.push(batch)
+            })
+        }
+      })
+    )
+
+    act(() => {
+      hook.value.start()
+    })
+    await waitFor(() => hook.value.status === 'live')
+
+    act(() => {
+      world.fireChannelMessage('user-delta')
+    })
+    await waitFor(() => hook.value.userDraft === 'Hi ')
+    expect(batches).toEqual([])
+
+    act(() => {
+      hook.value.stop()
+    })
+    await waitFor(
+      () =>
+        hook.value.status === 'idle' &&
+        world.state.peerClosed &&
+        world.state.channelClosed &&
+        batches.length > 0
+    )
+
+    expect(batches).toHaveLength(1)
+    expect(batches.flatMap(batch => batch.map(entry => entry.event))).toEqual([
+      VoiceSessionOpening.make({}),
+      VoiceUserTranscriptDelta.make({ itemId: 'item_1', delta: 'Hi ' })
+    ])
+    expect(batches.flatMap(batch => batch.map(entry => entry.eventId))).toEqual([
+      'hook-session:0',
+      'hook-session:1'
+    ])
 
     hook.unmount()
   })

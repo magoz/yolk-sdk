@@ -1,7 +1,10 @@
-import { Context, Data, Effect, Exit, Layer, Semaphore } from 'effect'
+import { Context, Data, Effect, Exit, Layer, Predicate, Semaphore } from 'effect'
+import { StopDecision as stopDecision } from './outcome-constructors-internal.ts'
 import { RunCoordinator, type InterruptReason, type Promotable } from './coordinator.ts'
 import {
+  DrainBegin,
   Inbox,
+  RecoveryAttempt,
   type HitlAdmission,
   type HitlDecision,
   type InboxItem,
@@ -46,6 +49,8 @@ export type StopDecision =
   | { readonly _tag: 'Interrupted' }
   | { readonly _tag: 'ParkCleared' }
   | { readonly _tag: 'Idle' }
+
+export const StopDecision = stopDecision
 
 export type DriverApi = {
   readonly active: Effect.Effect<ReadonlySet<string>>
@@ -101,26 +106,26 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
               const admission = yield* inbox.admitRecovery(
                 runId,
                 Effect.gen(function* () {
-                  if (yield* coordinator.isActive(runId)) return { _tag: 'Skip' } as const
+                  if (yield* coordinator.isActive(runId)) return RecoveryAttempt.Skip()
 
-                  if (!(yield* store.isClaimed(runId))) return { _tag: 'Skip' } as const
+                  if (!(yield* store.isClaimed(runId))) return RecoveryAttempt.Skip()
                   const count = yield* store.resumeCount(runId)
 
                   if (count >= maxResumeAttempts) {
                     yield* store.release(runId)
 
-                    return { _tag: 'Exhausted' } as const
+                    return RecoveryAttempt.Exhausted()
                   }
 
                   yield* store.incrementResumeCount(runId)
 
-                  return { _tag: 'Resume' } as const
+                  return RecoveryAttempt.Resume()
                 }),
                 coordinator.wake(runId, 'input')
               )
 
-              if (admission._tag === 'Resumed') resumed.push(runId)
-              else if (admission._tag === 'Exhausted') exhausted.push(runId)
+              if (Predicate.isTagged(admission, 'Resumed')) resumed.push(runId)
+              else if (Predicate.isTagged(admission, 'Exhausted')) exhausted.push(runId)
             }
 
             return { resumed, exhausted }
@@ -136,7 +141,7 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
                 Effect.flatMap(ticket => {
                   if (ticket === undefined) return Effect.void
 
-                  if (ticket._tag === 'Stopping') {
+                  if (Predicate.isTagged(ticket, 'Stopping')) {
                     return ticket.awaitSettlement.pipe(Effect.andThen(Effect.suspend(continueRun)))
                   }
 
@@ -168,7 +173,9 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
                   .terminalStop(runId, 'user')
                   .pipe(
                     Effect.map(
-                      receipt => receipt._tag === 'Interrupted' || receipt._tag === 'LiveStopping'
+                      receipt =>
+                        Predicate.isTagged(receipt, 'Interrupted') ||
+                        Predicate.isTagged(receipt, 'LiveStopping')
                     )
                   ),
                 store
@@ -177,11 +184,11 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
               )
               .pipe(
                 Effect.map(result => {
-                  if (result.interrupted) return { _tag: 'Interrupted' } as const
+                  if (result.interrupted) return StopDecision.Interrupted()
 
-                  if (result.hadPark) return { _tag: 'ParkCleared' } as const
+                  if (result.hadPark) return StopDecision.ParkCleared()
 
-                  return { _tag: 'Idle' } as const
+                  return StopDecision.Idle()
                 })
               )
         })
@@ -212,7 +219,7 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
           drain: (runId, force, scope) =>
             inbox.beginDrain(runId, scope).pipe(
               Effect.flatMap(begun => {
-                if (begun._tag === 'Skip') return Effect.void
+                if (DrainBegin.$is('Skip')(begun)) return Effect.void
 
                 return Effect.suspend(() =>
                   hostDrain(runId, force, scope, {

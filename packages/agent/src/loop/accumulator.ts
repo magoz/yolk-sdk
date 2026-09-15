@@ -9,7 +9,7 @@ import {
   type AssistantPart
 } from '@yolk-sdk/agent/protocol'
 import type { LLMEvent } from './llm-event.ts'
-import { Predicate } from 'effect'
+import { Match, Predicate } from 'effect'
 
 export const collectText = (events: ReadonlyArray<LLMEvent>) =>
   events.reduce(
@@ -29,7 +29,7 @@ export const collectToolCalls = (events: ReadonlyArray<LLMEvent>) =>
 const appendTextPartMutable = (parts: Array<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
-  if (last?._tag === 'Text') {
+  if (Predicate.isTagged(last, 'Text')) {
     parts[parts.length - 1] = AssistantTextPart.make({
       content: appendTextToContent(last.content, text)
     })
@@ -43,7 +43,7 @@ const appendTextPartMutable = (parts: Array<AssistantPart>, text: string) => {
 const appendReasoningPartMutable = (parts: Array<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
-  if (last?._tag === 'Reasoning') {
+  if (Predicate.isTagged(last, 'Reasoning')) {
     parts[parts.length - 1] = AssistantReasoningPart.make({ text: `${last.text}${text}` })
   } else {
     parts.push(AssistantReasoningPart.make({ text }))
@@ -52,61 +52,49 @@ const appendReasoningPartMutable = (parts: Array<AssistantPart>, text: string) =
   return parts
 }
 
-const applyAssistantLlmEventMutable = (parts: Array<AssistantPart>, event: LLMEvent) => {
-  switch (event._tag) {
-    case 'TextDelta':
-      return appendTextPartMutable(parts, event.text)
-    case 'ReasoningDelta':
-      return appendReasoningPartMutable(parts, event.text)
-    case 'ToolCall':
-      parts.push(HostToolCallPart.make({ call: event.call }))
+const applyAssistantLlmEventMutable = (parts: Array<AssistantPart>, event: LLMEvent) =>
+  Match.value(event).pipe(
+    Match.tag('TextDelta', current => appendTextPartMutable(parts, current.text)),
+    Match.tag('ReasoningDelta', current => appendReasoningPartMutable(parts, current.text)),
+    Match.tag('ToolCall', current => {
+      parts.push(HostToolCallPart.make({ call: current.call }))
 
       return parts
-    case 'ProviderToolResult':
+    }),
+    Match.tag('ProviderToolResult', current => {
       parts.push(
-        ProviderToolCallPart.make({ call: event.call }),
-        ProviderToolResultPart.make({ toolCallId: event.call.id, result: event.result })
+        ProviderToolCallPart.make({ call: current.call }),
+        ProviderToolResultPart.make({ toolCallId: current.call.id, result: current.result })
       )
 
       return parts
-    case 'Done':
-    case 'ToolInputDelta':
-    case 'ToolInputStart':
-    case 'Usage':
-      return parts
-  }
-}
+    }),
+    Match.tag('Done', 'ToolInputDelta', 'ToolInputStart', 'Usage', () => parts),
+    Match.exhaustive
+  )
 
 /** Incremental assistant-part reducer. Shared with collect; not a public loop export. */
 export const applyAssistantLlmEvent = (
   parts: ReadonlyArray<AssistantPart>,
   event: LLMEvent
-): ReadonlyArray<AssistantPart> => {
-  switch (event._tag) {
-    case 'TextDelta':
-      return appendTextPart(parts, event.text)
-    case 'ReasoningDelta':
-      return appendReasoningPart(parts, event.text)
-    case 'ToolCall':
-      return [...parts, HostToolCallPart.make({ call: event.call })]
-    case 'ProviderToolResult':
-      return [
-        ...parts,
-        ProviderToolCallPart.make({ call: event.call }),
-        ProviderToolResultPart.make({ toolCallId: event.call.id, result: event.result })
-      ]
-    case 'Done':
-    case 'ToolInputDelta':
-    case 'ToolInputStart':
-    case 'Usage':
-      return parts
-  }
-}
+): ReadonlyArray<AssistantPart> =>
+  Match.value(event).pipe(
+    Match.tag('TextDelta', current => appendTextPart(parts, current.text)),
+    Match.tag('ReasoningDelta', current => appendReasoningPart(parts, current.text)),
+    Match.tag('ToolCall', current => [...parts, HostToolCallPart.make({ call: current.call })]),
+    Match.tag('ProviderToolResult', current => [
+      ...parts,
+      ProviderToolCallPart.make({ call: current.call }),
+      ProviderToolResultPart.make({ toolCallId: current.call.id, result: current.result })
+    ]),
+    Match.tag('Done', 'ToolInputDelta', 'ToolInputStart', 'Usage', () => parts),
+    Match.exhaustive
+  )
 
 const appendTextPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
-  return last?._tag === 'Text'
+  return Predicate.isTagged(last, 'Text')
     ? [
         ...parts.slice(0, -1),
         AssistantTextPart.make({ content: appendTextToContent(last.content, text) })
@@ -117,7 +105,7 @@ const appendTextPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
 const appendReasoningPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
-  return last?._tag === 'Reasoning'
+  return Predicate.isTagged(last, 'Reasoning')
     ? [...parts.slice(0, -1), AssistantReasoningPart.make({ text: `${last.text}${text}` })]
     : [...parts, AssistantReasoningPart.make({ text })]
 }

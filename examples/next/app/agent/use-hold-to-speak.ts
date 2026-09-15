@@ -30,6 +30,8 @@ type SpeechAudio = {
   readonly contentType: string
 }
 
+class HoldToSpeakError extends Error {}
+
 type SpeechRequestOutcome =
   | {
       readonly _tag: 'Success'
@@ -37,7 +39,7 @@ type SpeechRequestOutcome =
     }
   | {
       readonly _tag: 'Failure'
-      readonly error: unknown
+      readonly error: HoldToSpeakError
     }
 
 const SpeechRequestOutcome = Data.taggedEnum<SpeechRequestOutcome>()
@@ -48,7 +50,16 @@ type PlaybackCancel = {
 
 const minRecordingMs = 300
 
-class HoldToSpeakError extends Error {}
+const holdToSpeakFromRejection = (error: unknown, prefix?: string): HoldToSpeakError => {
+  if (error instanceof HoldToSpeakError && prefix === undefined) {
+    return error
+  }
+
+  const detail = error instanceof Error ? error.message : String(error)
+  const message = prefix === undefined ? detail : `${prefix}: ${detail}`
+
+  return new HoldToSpeakError(message, { cause: error })
+}
 
 const toRequestError = (message: string) => (error: HttpClientError.HttpClientError) =>
   new HoldToSpeakError(`${message}: ${error.message}`)
@@ -142,7 +153,7 @@ const speechRequestSuccess = (speech: SpeechAudio): SpeechRequestOutcome =>
   SpeechRequestOutcome.Success({ speech })
 
 const speechRequestFailure = (error: unknown): SpeechRequestOutcome =>
-  SpeechRequestOutcome.Failure({ error })
+  SpeechRequestOutcome.Failure({ error: holdToSpeakFromRejection(error) })
 
 const requestSpeechOutcome = (text: string): Promise<SpeechRequestOutcome> =>
   Effect.runPromise(requestSpeech(text)).then(speechRequestSuccess, speechRequestFailure)
@@ -156,9 +167,6 @@ const pickRecorderMimeType = () => {
 
   return candidates.find(candidate => MediaRecorder.isTypeSupported(candidate))
 }
-
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
 
 type ActiveRecording = {
   readonly recorder: MediaRecorder
@@ -284,7 +292,7 @@ export const useHoldToSpeak = ({
         element.onerror = () => settle(new HoldToSpeakError('Audio playback failed'))
 
         void element.play().catch((error: unknown) => {
-          settle(new HoldToSpeakError(`Audio playback failed: ${unknownToMessage(error)}`))
+          settle(holdToSpeakFromRejection(error, 'Audio playback failed'))
         })
       }),
     [stopCurrentAudio]
@@ -340,7 +348,7 @@ export const useHoldToSpeak = ({
         }
       } catch (error) {
         if (speechRunIdRef.current === runId && speechPumpRunIdRef.current === runId) {
-          callbacksRef.current.onError(unknownToMessage(error))
+          callbacksRef.current.onError(error instanceof Error ? error.message : String(error))
         }
       } finally {
         if (speechPumpRunIdRef.current === runId) {
@@ -439,7 +447,9 @@ export const useHoldToSpeak = ({
       .catch((error: unknown) => {
         pendingStartRef.current = null
         setStatus('idle')
-        callbacksRef.current.onError(`Microphone access failed: ${unknownToMessage(error)}`)
+        callbacksRef.current.onError(
+          holdToSpeakFromRejection(error, 'Microphone access failed').message
+        )
       })
   }, [resetSpeech, status])
 
@@ -481,7 +491,7 @@ export const useHoldToSpeak = ({
               onFailure: error =>
                 Effect.sync(() => {
                   setStatus('idle')
-                  callbacksRef.current.onError(unknownToMessage(error))
+                  callbacksRef.current.onError(error.message)
                 }),
               onSuccess: result =>
                 Effect.sync(() => {

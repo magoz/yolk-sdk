@@ -51,7 +51,24 @@ const makeHost = (body = '{"value":[{"id":"message-1","subject":"Car offer"}]}',
   return { layer, requests }
 }
 
-const execute = (name: string, params: Record<string, unknown>, host = makeHost()) =>
+type OutlookReadToolName = 'outlook.search_messages' | 'outlook.list_messages'
+
+const names: ReadonlyArray<OutlookReadToolName> = [
+  'outlook.search_messages',
+  'outlook.list_messages'
+]
+
+type OutlookReadExecuteParams = {
+  readonly query?: string | null
+  readonly mailbox?: string | null | Readonly<Record<string, never>>
+  readonly folderId?: string | boolean | null
+  readonly nextLink?: string | number | null
+  readonly top?: number | string | null
+  readonly filter?: string | null
+  readonly orderBy?: string | null
+}
+
+const execute = (name: OutlookReadToolName, params: OutlookReadExecuteParams, host = makeHost()) =>
   Effect.gen(function* () {
     const tools = yield* resolveTools(
       [makeConnectorToolModule(MicrosoftConnector, { integration, layer: host.layer })],
@@ -62,8 +79,6 @@ const execute = (name: string, params: Record<string, unknown>, host = makeHost(
 
     return { result, requests: host.requests }
   })
-
-const names = ['outlook.search_messages', 'outlook.list_messages']
 
 describe('Outlook read input compatibility', () => {
   it.effect('registers provider-facing object schemas', () =>

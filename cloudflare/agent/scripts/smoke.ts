@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises'
-import { Clock, Config, Data, Deferred, Effect, Option, Ref } from 'effect'
+import { Clock, Config, Data, Deferred, Effect, Match, Option, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import * as Socket from 'effect/unstable/socket/Socket'
+import { AgentWebSocketServerMessage } from '@yolk-sdk/agent/protocol'
 
 const statePath = '.alchemy/state/YolkAgentWorker/dev_magoz/Api.json'
 
@@ -29,23 +30,13 @@ const AlchemyStateSchema = Schema.Struct({
   })
 })
 
-const SmokeEventSchema = Schema.Struct({
-  _tag: Schema.String,
-  text: Schema.optional(Schema.String),
-  message: Schema.optional(Schema.Unknown)
-})
-
-type SmokeEvent = Schema.Schema.Type<typeof SmokeEventSchema>
+type SmokeEvent = typeof AgentWebSocketServerMessage.Type
 
 const decodeAlchemyState = Schema.decodeUnknownEffect(Schema.fromJsonString(AlchemyStateSchema))
 
-const decodeSmokeEventJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SmokeEventSchema))
-
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
-const eventMessage = (event: SmokeEvent) =>
-  typeof event.message === 'string' ? event.message : 'AgentError'
+const decodeServerMessage = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(AgentWebSocketServerMessage)
+)
 
 const readStateFile = Effect.tryPromise({
   try: () => readFile(statePath, 'utf8'),
@@ -69,7 +60,7 @@ const readDeployedUrl = Effect.gen(function* () {
     Effect.mapError(
       error =>
         new SmokeConfigError({
-          message: `Missing attr.url in ${statePath}: ${unknownToMessage(error)}`,
+          message: `Missing attr.url in ${statePath}: ${error.message}`,
           cause: error
         })
     )
@@ -77,12 +68,13 @@ const readDeployedUrl = Effect.gen(function* () {
 
   return state.attr.url
 }).pipe(
-  Effect.mapError(
-    error =>
+  Effect.catchTag('ConfigError', error =>
+    Effect.fail(
       new SmokeConfigError({
-        message: `Could not read Cloudflare agent URL: ${unknownToMessage(error)}`,
+        message: `Could not read Cloudflare agent URL: ${error.message}`,
         cause: error
       })
+    )
   )
 )
 
@@ -97,27 +89,21 @@ const websocketUrl = (url: string, sessionId: string): Effect.Effect<string, Smo
     },
     catch: error =>
       new SmokeConfigError({
-        message: `Invalid Cloudflare agent URL: ${url}`,
+        message: 'Invalid Cloudflare agent URL',
         cause: error
       })
   })
 
-const decodeSmokeEvent = (data: MessageEvent['data']) => {
-  if (typeof data !== 'string') {
-    return Effect.succeed<SmokeEvent>({ _tag: 'UnknownBinary' })
-  }
-
-  return decodeSmokeEventJson(data).pipe(
-    Effect.catch(error =>
-      Effect.fail(
+const decodeSmokeEvent = (data: string) =>
+  decodeServerMessage(data).pipe(
+    Effect.mapError(
+      error =>
         new SmokeProtocolError({
-          message: `Could not decode smoke event: ${unknownToMessage(error)}`,
+          message: `Could not decode smoke event: ${error.message}`,
           cause: error
         })
-      )
     )
   )
-}
 
 const smokeWebSocket = (
   url: string
@@ -148,42 +134,46 @@ const smokeWebSocket = (
             const decoded = yield* decodeSmokeEvent(data)
             const events = yield* Ref.updateAndGet(eventsRef, existing => [...existing, decoded])
 
-            if (decoded._tag === 'LLMTextDelta' && decoded.text !== undefined) {
-              yield* Ref.update(collectedTextRef, text => `${text}${decoded.text}`)
-            }
+            yield* Match.value(decoded).pipe(
+              Match.tag('LLMTextDelta', current =>
+                Ref.update(collectedTextRef, text => `${text}${current.text}`)
+              ),
+              Match.tag('AgentError', current =>
+                Effect.gen(function* () {
+                  yield* failDone(current.message)
+                  yield* write(new Socket.CloseEvent(1000))
+                })
+              ),
+              Match.tag('AgentEnd', () =>
+                Effect.gen(function* () {
+                  const collectedText = yield* Ref.get(collectedTextRef)
 
-            if (decoded._tag === 'AgentError') {
-              yield* failDone(eventMessage(decoded))
-              yield* write(new Socket.CloseEvent(1000))
+                  if (collectedText !== expectedText) {
+                    yield* failDone(`Unexpected text: ${collectedText}`)
+                    yield* write(new Socket.CloseEvent(1000))
 
-              return
-            }
+                    return
+                  }
 
-            if (decoded._tag === 'AgentEnd') {
-              const collectedText = yield* Ref.get(collectedTextRef)
-
-              if (collectedText !== expectedText) {
-                yield* failDone(`Unexpected text: ${collectedText}`)
-                yield* write(new Socket.CloseEvent(1000))
-
-                return
-              }
-
-              yield* Deferred.succeed(done, events)
-              yield* write(new Socket.CloseEvent(1000))
-            }
+                  yield* Deferred.succeed(done, events)
+                  yield* write(new Socket.CloseEvent(1000))
+                })
+              ),
+              Match.orElse(() => Effect.void)
+            )
           })
 
         const runSocket = socket
           .runString(handleMessage, { onOpen: Effect.ignore(write(input)) })
           .pipe(
             Effect.flatMap(() => Deferred.await(done)),
-            Effect.mapError(
-              error =>
+            Effect.catchTag('SocketError', error =>
+              Effect.fail(
                 new SmokeProtocolError({
-                  message: `WebSocket failed before AgentEnd: ${unknownToMessage(error)}`,
+                  message: `WebSocket failed before AgentEnd: ${error.message}`,
                   cause: error
                 })
+              )
             )
           )
 
@@ -215,7 +205,7 @@ const checkHealth = (url: string): Effect.Effect<void, SmokeHttpError, HttpClien
       Effect.mapError(
         error =>
           new SmokeHttpError({
-            message: `Health request failed: ${unknownToMessage(error)}`,
+            message: `Health request failed: ${error.message}`,
             cause: error
           })
       )
@@ -231,7 +221,7 @@ const checkHealth = (url: string): Effect.Effect<void, SmokeHttpError, HttpClien
       Effect.mapError(
         error =>
           new SmokeHttpError({
-            message: `Could not read health response: ${unknownToMessage(error)}`,
+            message: `Could not read health response: ${error.message}`,
             cause: error
           })
       )

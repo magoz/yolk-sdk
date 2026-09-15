@@ -2,6 +2,7 @@ import {
   Deferred,
   Duration,
   Effect,
+  Layer,
   Predicate,
   Queue,
   Stream,
@@ -15,7 +16,7 @@ import {
   VoiceSessionOpening,
   type VoiceEvent
 } from '../protocol.ts'
-import type { VoiceTransportApi } from '../transport.ts'
+import { VoiceTransport, type VoiceTransportApi } from '../transport.ts'
 
 // Minimal structural WebRTC types. Real DOM objects satisfy these shapes, and
 // tests can provide plain fakes without jsdom WebRTC support.
@@ -52,7 +53,7 @@ export type WebRtcSessionDescriptionLike = {
 export type WebRtcPeerConnectionLike = {
   readonly connectionState: string
   createDataChannel(label: string): WebRtcDataChannelLike
-  addTrack(track: WebRtcTrackLike, stream: WebRtcMediaStreamLike): unknown
+  addTrack(track: WebRtcTrackLike, stream: WebRtcMediaStreamLike): void
   createOffer(): Promise<WebRtcSessionDescriptionLike>
   setLocalDescription(description: WebRtcSessionDescriptionLike): Promise<void>
   setRemoteDescription(description: {
@@ -333,3 +334,8 @@ export const makeWebRtcVoiceTransport = (
       events: Stream.fromQueue(queue)
     }
   })
+
+export const webRtcVoiceTransportLayer = (
+  options: WebRtcVoiceTransportOptions
+): Layer.Layer<VoiceTransport, VoiceSessionError> =>
+  Layer.effect(VoiceTransport, makeWebRtcVoiceTransport(options))

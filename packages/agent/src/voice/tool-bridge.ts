@@ -30,8 +30,7 @@ export class VoiceToolBridgeError extends Schema.TaggedErrorClass<VoiceToolBridg
   }
 ) {}
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const unknownToMessage = (error: Schema.SchemaError) => String(error)
 
 const parseToolArguments = (raw: string) =>
   Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
@@ -43,15 +42,10 @@ const parseToolArguments = (raw: string) =>
     )
   )
 
-const stringifyToolOutput = (value: unknown) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
-    Effect.mapError(
-      error =>
-        new VoiceToolBridgeError({
-          message: `Could not serialize tool output: ${unknownToMessage(error)}`
-        })
-    )
-  )
+const toolOutputSerializeError = (error: Schema.SchemaError) =>
+  new VoiceToolBridgeError({
+    message: `Could not serialize tool output: ${unknownToMessage(error)}`
+  })
 
 const truncateVoiceToolResult = (value: string) => {
   if (value.length <= maxVoiceToolResultCharacters) {
@@ -64,11 +58,17 @@ const truncateVoiceToolResult = (value: string) => {
 const contentToSerializable = (content: Content): Content =>
   Predicate.isString(content) ? truncateVoiceToolResult(content) : content
 
+const stringifyToolSuccessOutput = (content: Content) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({
+    result: contentToSerializable(content)
+  }).pipe(Effect.mapError(toolOutputSerializeError))
+
 const makeVoiceToolExecutionResult = (toolCallId: string, output: string) =>
   VoiceToolExecutionResult.make({ toolCallId, output })
 
 const makeToolErrorResult = (toolCallId: string, error: ToolError | VoiceToolBridgeError) =>
-  stringifyToolOutput({ error: error.message }).pipe(
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({ error: error.message }).pipe(
+    Effect.mapError(toolOutputSerializeError),
     Effect.catchTag('VoiceToolBridgeError', () => Effect.succeed('{"error":"Tool failed"}')),
     Effect.map(output => makeVoiceToolExecutionResult(toolCallId, output))
   )
@@ -88,7 +88,7 @@ export const executeVoiceToolCall = (input: VoiceToolCallRequest) =>
       )
     ).pipe(Effect.provideService(VoiceToolDispatch, true))
 
-    const output = yield* stringifyToolOutput({ result: contentToSerializable(result.content) })
+    const output = yield* stringifyToolSuccessOutput(result.content)
 
     return makeVoiceToolExecutionResult(input.callId, output)
   }).pipe(

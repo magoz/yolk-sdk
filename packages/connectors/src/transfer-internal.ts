@@ -11,8 +11,11 @@ import type { ConnectorIntegration } from './integration.ts'
 export const failTransfer = (code: ConnectorFileTransferError['code']) =>
   Effect.fail(new ConnectorFileTransferError({ code }))
 
+const isUint8ArrayView = (value: ArrayBufferView) =>
+  Object.prototype.toString.call(value) === '[object Uint8Array]'
+
 export const isBytes = (value: unknown): value is Uint8Array =>
-  ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]'
+  ArrayBuffer.isView(value) && isUint8ArrayView(value)
 
 export const ByteLimit = Schema.Int.check(
   Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
@@ -62,11 +65,18 @@ export const singleHeader = (headers: Readonly<Record<string, string>>, name: st
   return entries.length === 1 ? entries[0]?.[1] : undefined
 }
 
-export const headerSafeJson = (value: unknown) =>
-  JSON.stringify(value).replace(
+const isJson = Schema.is(Schema.Json)
+
+export const headerSafeJson = (value: Schema.Json) => {
+  if (!isJson(value)) {
+    throw new TypeError('Header JSON requires a finite JSON value')
+  }
+
+  return JSON.stringify(value).replace(
     /[\u007f-\uffff]/g,
     c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
   )
+}
 
 export const decodeMetadata = <A>(
   schema: Schema.Schema<A> & { readonly DecodingServices: never },
@@ -164,7 +174,7 @@ export const validateUpload = (
   budget: ConnectorFileTransferBudget,
   providerLimit: number
 ) => {
-  if (!isBytes(bytes)) return failTransfer('invalid_input')
+  if (!(ArrayBuffer.isView(bytes) && isUint8ArrayView(bytes))) return failTransfer('invalid_input')
 
   if (bytes.byteLength > providerLimit) return failTransfer('upload_session_required')
 

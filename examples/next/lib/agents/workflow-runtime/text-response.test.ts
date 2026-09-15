@@ -55,6 +55,8 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
       expect(subagentExecuteSource).not.toContain('modules: toolModules')
       expect(subagentExecuteSource).toContain(':subagent:${call.id}')
       expect(subagentExecuteSource).not.toContain(':task:${call.id}')
+      expect(subagentExecuteSource).toContain('RuntimeRequest.Transcript({')
+      expect(subagentExecuteSource).not.toContain("_tag: 'Transcript'")
       expect(childTools.tools.map(tool => tool.name)).not.toContain('question')
     })
   )

@@ -1,5 +1,9 @@
 import { describe, expect, it } from '@effect/vitest'
-import { replaceLoneSurrogatesDeep } from '@yolk-sdk/agent/protocol'
+import {
+  replaceLoneSurrogatesDeep,
+  type inferTextDocumentMimeType,
+  type textDocumentMimeTypeFromFilename
+} from '@yolk-sdk/agent/protocol'
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
@@ -8,6 +12,23 @@ const replaceLoneSurrogatesDeepReturnsUnknown: Equal<
   ReturnType<typeof replaceLoneSurrogatesDeep>,
   unknown
 > = true
+
+describe('text document MIME inference', () => {
+  it('keeps public helper return types as string or undefined', () => {
+    const filenameReturnType: Equal<
+      ReturnType<typeof textDocumentMimeTypeFromFilename>,
+      string | undefined
+    > = true
+
+    const inferredReturnType: Equal<
+      ReturnType<typeof inferTextDocumentMimeType>,
+      string | undefined
+    > = true
+
+    expect(filenameReturnType).toBe(true)
+    expect(inferredReturnType).toBe(true)
+  })
+})
 
 describe('replaceLoneSurrogatesDeep object-predicate5', () => {
   it('keeps the public return type unknown', () => {

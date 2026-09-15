@@ -1,4 +1,4 @@
-import { Duration, Effect, Match, Predicate, Queue, Ref, type Scope } from 'effect'
+import { Context, Duration, Effect, Layer, Match, Predicate, Queue, Ref, type Scope } from 'effect'
 import {
   initialVoiceEventSequencerState,
   sequenceVoiceEvent,
@@ -29,6 +29,13 @@ export type VoiceEventOutboxApi = {
   readonly offer: (event: VoiceEvent) => Effect.Effect<void>
   /** Wake the flusher now (best-effort; delivery is at-least-once). */
   readonly flushNow: Effect.Effect<void>
+}
+
+export class VoiceEventOutbox extends Context.Service<VoiceEventOutbox, VoiceEventOutboxApi>()(
+  '@yolk-sdk/agent/voice/VoiceEventOutbox'
+) {
+  static layer = (options: VoiceEventOutboxOptions): Layer.Layer<VoiceEventOutbox> =>
+    Layer.effect(this, makeVoiceEventOutbox(options))
 }
 
 const defaultFlushIntervalMs = 500

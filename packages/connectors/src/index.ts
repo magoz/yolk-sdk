@@ -53,6 +53,8 @@ export type { ConnectorHttpClientApi } from './http.ts'
 
 export { ConnectorIntegration, IntegrationConfig, makeIntegration } from './integration.ts'
 
+export { PortableMetadata } from './portable-metadata.ts'
+
 export { ActionResult, ProviderFailure } from './result.ts'
 
 export type { ActionResult as ActionResultType } from './result.ts'

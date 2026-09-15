@@ -26,7 +26,7 @@ const paramsSchema = Schema.Struct({
 
 const params = { execution: 'business', arguments: 42, background: false, nested: { value: 'yes' } }
 
-const request = (execution: string, args: unknown = params) =>
+const request = (execution: string, args: Schema.Json = params) =>
   ToolCall.make({
     id: 'call-1',
     name: 'work',
@@ -64,6 +64,45 @@ const expectFailureCause = (
   if (Result.isFailure(result)) {
     expect(result.failure.cause).toBe(cause)
   }
+}
+
+const UnsupportedSchemaNode = Schema.Record(Schema.String, Schema.Json)
+
+type UnsupportedSchemaNode = typeof UnsupportedSchemaNode.Type
+
+const isUnsupportedSchemaNode = Schema.is(UnsupportedSchemaNode)
+
+const positions = (node: UnsupportedSchemaNode): ReadonlyArray<UnsupportedSchemaNode> => {
+  if (!isUnsupportedSchemaNode(node)) {
+    throw new TypeError('JSON fixture requires a finite JSON object')
+  }
+
+  return [
+    node,
+    { properties: { value: node } },
+    { $defs: { Value: node } },
+    { definitions: { Value: node } },
+    { items: node },
+    { items: [node] },
+    { prefixItems: [node] },
+    { allOf: [node] },
+    { anyOf: [node] },
+    { oneOf: [node] },
+    { additionalProperties: node },
+    { patternProperties: { '^x': node } },
+    { dependentSchemas: { value: node } },
+    { dependencies: { value: node } },
+    { not: node },
+    { if: node },
+    { then: node },
+    { else: node },
+    { contains: node },
+    { propertyNames: node },
+    { contentSchema: node },
+    { unevaluatedProperties: node },
+    { unevaluatedItems: node },
+    { additionalItems: node }
+  ]
 }
 
 describe('native background tools', () => {
@@ -323,7 +362,7 @@ describe('native background tools', () => {
       Effect.gen(function* () {
         let effects = 0
 
-        const unsupportedNodes = [
+        const unsupportedNodes: ReadonlyArray<UnsupportedSchemaNode> = [
           ...[
             '#/properties/value',
             '#/properties/execution',
@@ -341,33 +380,6 @@ describe('native background tools', () => {
           { $dynamicRef: '#anchor' },
           { $recursiveRef: '#' },
           { $recursiveAnchor: true }
-        ]
-
-        const positions = (node: Readonly<Record<string, unknown>>) => [
-          node,
-          { properties: { value: node } },
-          { $defs: { Value: node } },
-          { definitions: { Value: node } },
-          { items: node },
-          { items: [node] },
-          { prefixItems: [node] },
-          { allOf: [node] },
-          { anyOf: [node] },
-          { oneOf: [node] },
-          { additionalProperties: node },
-          { patternProperties: { '^x': node } },
-          { dependentSchemas: { value: node } },
-          { dependencies: { value: node } },
-          { not: node },
-          { if: node },
-          { then: node },
-          { else: node },
-          { contains: node },
-          { propertyNames: node },
-          { contentSchema: node },
-          { unevaluatedProperties: node },
-          { unevaluatedItems: node },
-          { additionalItems: node }
         ]
 
         for (const node of unsupportedNodes) {
@@ -412,6 +424,240 @@ describe('native background tools', () => {
         }
 
         expect(effects).toBe(0)
+      })
+  )
+
+  it('keeps positions node identity, raw literals, and 24 keyword placements', () => {
+    const node = { $ref: '#/properties/value' }
+    const placed = positions(node)
+
+    expect(isUnsupportedSchemaNode(node)).toBe(true)
+    expect(placed).toHaveLength(24)
+    expect(placed[0]).toBe(node)
+    expect(placed).toEqual([
+      node,
+      { properties: { value: node } },
+      { $defs: { Value: node } },
+      { definitions: { Value: node } },
+      { items: node },
+      { items: [node] },
+      { prefixItems: [node] },
+      { allOf: [node] },
+      { anyOf: [node] },
+      { oneOf: [node] },
+      { additionalProperties: node },
+      { patternProperties: { '^x': node } },
+      { dependentSchemas: { value: node } },
+      { dependencies: { value: node } },
+      { not: node },
+      { if: node },
+      { then: node },
+      { else: node },
+      { contains: node },
+      { propertyNames: node },
+      { contentSchema: node },
+      { unevaluatedProperties: node },
+      { unevaluatedItems: node },
+      { additionalItems: node }
+    ])
+    expect(placed.map(position => Object.keys(position))).toEqual([
+      ['$ref'],
+      ['properties'],
+      ['$defs'],
+      ['definitions'],
+      ['items'],
+      ['items'],
+      ['prefixItems'],
+      ['allOf'],
+      ['anyOf'],
+      ['oneOf'],
+      ['additionalProperties'],
+      ['patternProperties'],
+      ['dependentSchemas'],
+      ['dependencies'],
+      ['not'],
+      ['if'],
+      ['then'],
+      ['else'],
+      ['contains'],
+      ['propertyNames'],
+      ['contentSchema'],
+      ['unevaluatedProperties'],
+      ['unevaluatedItems'],
+      ['additionalItems']
+    ])
+
+    const isJsonArray = Schema.is(Schema.Array(Schema.Json))
+
+    const nestedNode = (position: UnsupportedSchemaNode) => {
+      if (Object.is(position, node)) return node
+
+      const value = Object.values(position)[0]
+
+      if (Object.is(value, node)) return value
+
+      if (isJsonArray(value)) return value[0]
+
+      if (isUnsupportedSchemaNode(value)) {
+        return Object.values(value)[0]
+      }
+
+      return value
+    }
+
+    expect(placed.every(position => Object.is(nestedNode(position), node))).toBe(true)
+  })
+
+  it('rejects root and nested nonfinite values at the positions fixture boundary', () => {
+    expect(Schema.is(Schema.Json)(null)).toBe(true)
+    expect(isUnsupportedSchemaNode(null)).toBe(false)
+    expect(isUnsupportedSchemaNode([{ $ref: '#' }])).toBe(false)
+    expect(isUnsupportedSchemaNode({ $ref: Infinity })).toBe(false)
+    expect(isUnsupportedSchemaNode({ $ref: Number.NaN })).toBe(false)
+    expect(isUnsupportedSchemaNode({ nested: { n: Infinity } })).toBe(false)
+    expect(isUnsupportedSchemaNode({ nested: { n: Number.NaN } })).toBe(false)
+    expect(() => positions({ $ref: Infinity })).toThrow(
+      new TypeError('JSON fixture requires a finite JSON object')
+    )
+    expect(() => positions({ nested: { n: Infinity } })).toThrow(
+      new TypeError('JSON fixture requires a finite JSON object')
+    )
+  })
+
+  it('rejects nonfinite and exotic parameter documents at ToolDef construction, before resolve', () => {
+    const decoded = Schema.decodeUnknownResult(ToolDef)({
+      name: 'work',
+      description: '',
+      parameters: { type: 'object', n: Infinity },
+      background: true
+    })
+
+    expect(Result.isFailure(decoded)).toBe(true)
+    expect(
+      Schema.decodeUnknownResult(ToolDef)({
+        name: 'work',
+        description: '',
+        parameters: { type: 'object', default: new Date('2020-01-01T00:00:00.000Z') }
+      })._tag
+    ).toBe('Failure')
+  })
+
+  it.effect(
+    'wraps boolean true/false as arguments schemas without executing or rewriting to {}',
+    () =>
+      Effect.gen(function* () {
+        let effects = 0
+
+        for (const parameters of [true, false]) {
+          const tool: ToolRegistration<unknown> = {
+            def: ToolDef.make({
+              name: 'work',
+              description: '',
+              parameters,
+              background: true
+            }),
+            access: 'write',
+            validate: () =>
+              Effect.sync(() => {
+                effects++
+              }),
+            execute: ({ call }) => {
+              effects++
+
+              return inline(call)
+            }
+          }
+
+          const host = {
+            accept: () => {
+              effects++
+
+              return Effect.succeed(receipt)
+            }
+          }
+
+          const activated = yield* resolve(tool, host)
+          const plain = yield* resolve(tool)
+          const envelope = activated.tools[0]?.parameters
+
+          expect(plain.tools[0]?.parameters).toBe(parameters)
+          expect(activated.tools[0]?.execution).toBe('background-v1')
+          expect(envelope).toMatchObject({
+            type: 'object',
+            required: ['execution', 'arguments'],
+            additionalProperties: false,
+            properties: {
+              execution: { type: 'string', enum: ['foreground', 'background'] }
+            }
+          })
+          expect(
+            Predicate.isObjectOrArray(envelope) &&
+              !Array.isArray(envelope) &&
+              Predicate.isObjectOrArray(envelope.properties) &&
+              !Array.isArray(envelope.properties)
+              ? envelope.properties.arguments
+              : undefined
+          ).toBe(parameters)
+        }
+
+        expect(effects).toBe(0)
+      })
+  )
+
+  it.effect(
+    'activates nested boolean schemas and preserves illegal $ref documents until activation',
+    () =>
+      Effect.gen(function* () {
+        const booleanNested = {
+          type: 'object',
+          properties: { flag: true },
+          additionalProperties: false
+        }
+
+        const illegalRef = { type: 'object', $ref: '#/properties/value' }
+
+        const booleanTool: ToolRegistration<unknown> = {
+          def: ToolDef.make({
+            name: 'work',
+            description: '',
+            parameters: booleanNested,
+            background: true
+          }),
+          access: 'write',
+          validate: () => Effect.void,
+          execute: ({ call }) => inline(call)
+        }
+
+        const refTool: ToolRegistration<unknown> = {
+          def: ToolDef.make({
+            name: 'work',
+            description: '',
+            parameters: illegalRef,
+            background: true
+          }),
+          access: 'write',
+          validate: () => Effect.void,
+          execute: ({ call }) => inline(call)
+        }
+
+        const host = { accept: () => Effect.succeed(receipt) }
+        const activated = yield* resolve(booleanTool, host)
+        const plainRef = yield* resolve(refTool)
+
+        expect(activated.tools[0]?.execution).toBe('background-v1')
+        expect(activated.tools[0]?.parameters).toMatchObject({
+          properties: {
+            arguments: {
+              properties: { flag: true },
+              additionalProperties: false
+            }
+          }
+        })
+        expect(plainRef.tools[0]?.parameters).toBe(illegalRef)
+        expectFailureCause(
+          yield* resolve(refTool, host).pipe(Effect.result),
+          'background_unsupported_schema'
+        )
       })
   )
 
@@ -529,7 +775,7 @@ it.effect(
       let effects = 0
 
       for (const custom of [false, true]) {
-        const messages: unknown[] = []
+        const messages: Schema.SchemaError[] = []
 
         const toolInput = {
           name: 'work',
@@ -548,7 +794,7 @@ it.effect(
           custom
             ? {
                 ...toolInput,
-                invalidParamsMessage: (error: unknown) => {
+                invalidParamsMessage: (error: Schema.SchemaError) => {
                   messages.push(error)
 
                   return 'Please fix business input'
@@ -593,6 +839,13 @@ it.effect(
         if (custom) {
           expect(expected.content).toBe('Please fix business input')
           expect(messages).toHaveLength(3)
+
+          for (const error of messages) {
+            expect(Schema.isSchemaError(error)).toBe(true)
+            expect(String(error)).toBe(`SchemaError(${error.message})`)
+          }
+        } else {
+          expect(expected.content).toContain('Invalid work arguments: SchemaError(')
         }
       }
 

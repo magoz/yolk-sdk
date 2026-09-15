@@ -60,8 +60,8 @@ const response = (
   bodyComplete = true
 ): ConnectorBinaryHttpResponse => ({ bytes, status, headers, bodyComplete })
 
-const download = (metadata: unknown = file, bytes = original) =>
-  response(bytes, 200, { 'Dropbox-API-Result': JSON.stringify(metadata) })
+const download = (resultHeader = JSON.stringify(file), bytes = original) =>
+  response(bytes, 200, { 'Dropbox-API-Result': resultHeader })
 
 const conflict = (summary: string) =>
   response(new TextEncoder().encode(JSON.stringify({ error_summary: summary, s: 'SECRET' })), 409)
@@ -149,7 +149,11 @@ describe('host-only Dropbox download', () => {
         expect(candidate?.type).toBe('file')
 
         if (candidate === undefined || candidate.type !== 'file') return
-        const h = host([download({ ...file, sharing_info: { secret: 'RAW-SECRET' } })])
+
+        const h = host([
+          download(JSON.stringify({ ...file, sharing_info: { secret: 'RAW-SECRET' } }))
+        ])
+
         const result = yield* h.run({ path: candidate.id })
         expect(result.bytes).toBe(original)
         expect(result.byteLength).toBe(original.byteLength)
@@ -208,11 +212,11 @@ describe('host-only Dropbox download', () => {
         expect(result.source.id).toBe(file.id)
       }
 
-      const wrongId = host([download({ ...file, id: 'id:other' })])
+      const wrongId = host([download(JSON.stringify({ ...file, id: 'id:other' }))])
       expect(yield* wrongId.run({ path: file.id }).pipe(Effect.flip)).toMatchObject({
         code: 'invalid_metadata'
       })
-      const wrongRev = host([download({ ...file, rev: 'fedcba9876543' })])
+      const wrongRev = host([download(JSON.stringify({ ...file, rev: 'fedcba9876543' }))])
       expect(yield* wrongRev.run({ path: `rev:${file.rev}` }).pipe(Effect.flip)).toMatchObject({
         code: 'invalid_metadata'
       })
@@ -236,7 +240,13 @@ describe('host-only Dropbox download', () => {
     Effect.gen(function* () {
       const h = host([
         download(
-          { ...file, size: 0, path_lower: null, path_display: null, content_hash: undefined },
+          JSON.stringify({
+            ...file,
+            size: 0,
+            path_lower: null,
+            path_display: null,
+            content_hash: undefined
+          }),
           new Uint8Array()
         )
       ])
@@ -318,7 +328,7 @@ describe('host-only Dropbox download', () => {
 
   it.effect('checks actual returned bytes, error-body bounds, and metadata size agreement', () =>
     Effect.gen(function* () {
-      const oversized = host([download({ ...file, size: 33 }, new Uint8Array(33))])
+      const oversized = host([download(JSON.stringify({ ...file, size: 33 }), new Uint8Array(33))])
       expect(yield* oversized.run().pipe(Effect.flip)).toMatchObject({
         code: 'response_too_large'
       })
@@ -326,7 +336,7 @@ describe('host-only Dropbox download', () => {
       expect(yield* errorBody.run().pipe(Effect.flip)).toMatchObject({
         code: 'response_too_large'
       })
-      const truncated = host([download({ ...file, size: 20 })])
+      const truncated = host([download(JSON.stringify({ ...file, size: 20 }))])
       expect(yield* truncated.run().pipe(Effect.flip)).toMatchObject({ code: 'partial_content' })
 
       const incomplete = host([
@@ -364,7 +374,7 @@ describe('host-only Dropbox download', () => {
         expect(JSON.stringify(error)).not.toContain('SECRET')
       }
 
-      const notDownloadable = host([download({ ...file, is_downloadable: false })])
+      const notDownloadable = host([download(JSON.stringify({ ...file, is_downloadable: false }))])
       expect(yield* notDownloadable.run().pipe(Effect.flip)).toMatchObject({
         code: 'not_downloadable'
       })

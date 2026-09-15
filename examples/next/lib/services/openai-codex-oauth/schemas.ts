@@ -1,5 +1,22 @@
 import * as Schema from 'effect/Schema'
 
+// Separate partial claims keep extraction best-effort and precedence-driven.
+export const OpenAiCodexAccountIdClaimSchema = Schema.Struct({
+  chatgpt_account_id: Schema.String
+})
+
+export const OpenAiCodexAuthClaimSchema = Schema.Struct({
+  'https://api.openai.com/auth': OpenAiCodexAccountIdClaimSchema
+})
+
+export const OpenAiCodexOrganizationsClaimSchema = Schema.Struct({
+  organizations: Schema.Array(Schema.Unknown)
+})
+
+export const OpenAiCodexOrganizationIdClaimSchema = Schema.Struct({
+  id: Schema.String
+})
+
 export const OpenAiCodexOAuthTokenSchema = Schema.Struct({
   type: Schema.Literal('oauth'),
   refresh: Schema.String,

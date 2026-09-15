@@ -1,11 +1,11 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk-sdk/agent/loop'
+import type { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   makeTool,
   modelVisibleToolError,
-  ModelVisibleToolError,
+  type ModelVisibleToolError,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
@@ -154,14 +154,7 @@ export type KnowledgeToolHandlers = {
 const isKnowledgeToolEnabled = (context: AgentToolContext) =>
   Effect.succeed(context.surface === 'text' || context.surface === 'voice')
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
-const makeToolError = (message: string, cause: ToolError['cause']) =>
-  new ToolError({ tool: knowledgeSearchToolName, message, cause })
-
-const makeNamedToolError = (tool: string, message: string, cause: ToolError['cause']) =>
-  new ToolError({ tool, message, cause })
+const schemaErrorMessage = (error: Schema.SchemaError) => error.message
 
 const makeModelVisibleError = (tool: string, message: string) =>
   modelVisibleToolError({
@@ -476,7 +469,8 @@ const searchTool = (
     parameters: KnowledgeSearchParams,
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
-    invalidParamsMessage: error => `Invalid knowledge search arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid knowledge search arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeParams(params)
@@ -505,13 +499,7 @@ const searchTool = (
             queries: items.map(item => structuredResult(item.query, item.results))
           }
         })
-      }).pipe(
-        Effect.mapError(error =>
-          error instanceof ToolError || error instanceof ModelVisibleToolError
-            ? error
-            : makeToolError(`Knowledge search failed: ${unknownToMessage(error)}`, 'execution')
-        )
-      )
+      })
   })
 
 const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['tools'][number] =>
@@ -523,7 +511,7 @@ const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['too
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
     invalidParamsMessage: error =>
-      `Invalid knowledge listing arguments: ${unknownToMessage(error)}`,
+      `Invalid knowledge listing arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeListParams(params)
@@ -534,17 +522,7 @@ const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['too
           content: formatDocumentSummaries(documents),
           structuredContent: structuredDocumentSummaries(documents)
         })
-      }).pipe(
-        Effect.mapError(error =>
-          error instanceof ToolError || error instanceof ModelVisibleToolError
-            ? error
-            : makeNamedToolError(
-                knowledgeListToolName,
-                `Knowledge listing failed: ${unknownToMessage(error)}`,
-                'execution'
-              )
-        )
-      )
+      })
   })
 
 const contextTool = (
@@ -558,7 +536,7 @@ const contextTool = (
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
     invalidParamsMessage: error =>
-      `Invalid knowledge context arguments: ${unknownToMessage(error)}`,
+      `Invalid knowledge context arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeContextParams(params)
@@ -569,17 +547,7 @@ const contextTool = (
           content: formatContextWindow(window),
           structuredContent: { context: structuredContextWindow(window) }
         })
-      }).pipe(
-        Effect.mapError(error =>
-          error instanceof ToolError || error instanceof ModelVisibleToolError
-            ? error
-            : makeNamedToolError(
-                knowledgeContextToolName,
-                `Knowledge context read failed: ${unknownToMessage(error)}`,
-                'execution'
-              )
-        )
-      )
+      })
   })
 
 const knowledgeTools = (handlers: KnowledgeToolHandlers): ToolModule<AgentToolContext>['tools'] => [
@@ -589,10 +557,5 @@ const knowledgeTools = (handlers: KnowledgeToolHandlers): ToolModule<AgentToolCo
 ]
 
 export const makeKnowledgeToolModule = (
-  searchOrHandlers: KnowledgeSearchHandler | KnowledgeToolHandlers
-): ToolModule<AgentToolContext> => {
-  const handlers =
-    typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
-
-  return { id: 'knowledge', tools: knowledgeTools(handlers) }
-}
+  handlers: KnowledgeToolHandlers
+): ToolModule<AgentToolContext> => ({ id: 'knowledge', tools: knowledgeTools(handlers) })

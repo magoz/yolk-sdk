@@ -887,11 +887,7 @@ describe('collectAgentEvents', () => {
       const events = await eventsPromise
 
       expect(socket.sent).toEqual([
-        JSON.stringify({
-          message: { _tag: 'User', content: 'hello' },
-          expectedRevision: 7,
-          _tag: 'UserInput'
-        })
+        '{"message":{"_tag":"User","content":"hello"},"expectedRevision":7,"_tag":"UserInput"}'
       ])
       expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
       expect(socket.closeCalls).toEqual([{ code: 1000, reason: 'done' }])

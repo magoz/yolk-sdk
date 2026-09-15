@@ -30,7 +30,7 @@ import {
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
-import { runRuntime, runtimeErrorToAgentError } from '@yolk-sdk/agent/runtime'
+import { runRuntime, runtimeErrorToAgentError, RuntimeRequest } from '@yolk-sdk/agent/runtime'
 import { defaultAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import {
   agentTextCapabilities,
@@ -71,7 +71,7 @@ import { getPinnedKnowledgeContext } from '@/lib/core/knowledge/get-pinned-knowl
 import { Db } from '@/lib/services/db/live-layer'
 import { KnowledgeLayer } from '@/lib/services/knowledge/live-layer'
 
-type AgentTextRuntimeConfig = {
+export type AgentTextRuntimeConfig = {
   readonly model: string
   readonly reasoningEffort: AgentReasoningEffort
   readonly systemPrompt: string
@@ -79,14 +79,22 @@ type AgentTextRuntimeConfig = {
   readonly capabilities: AgentModelCapabilities
 }
 
-type AgentTextRuntimeLayer = Layer.Layer<
+export type AgentTextRuntimeLayer = Layer.Layer<
   ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
 >
 
-type AgentTextRuntime = {
+export type AgentTextRuntime = {
   readonly input: AgentRouteRequest
   readonly config: AgentTextRuntimeConfig
   readonly layer: AgentTextRuntimeLayer
+}
+
+export type AgentTextRuntimeOptions = {
+  readonly childType?: string
+  readonly executeSubagent?: (
+    input: SubagentExecutionInput<AgentToolContext>
+  ) => Effect.Effect<ToolResult, ToolError>
+  readonly modules?: ReadonlyArray<ToolModule<AgentToolContext>>
 }
 
 const agentTextSubagents: ReadonlyArray<SubagentDefinition> = [
@@ -176,7 +184,7 @@ export const recoverSubagentToolFailure = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   input: SubagentFailureRecoveryInput
 ) => {
-  const recover = (error: unknown) =>
+  const recover = (error: E) =>
     Clock.currentTimeMillis.pipe(
       Effect.map(endedAtMs =>
         makeSubagentFailureToolResult({
@@ -430,13 +438,7 @@ export const makeAgentTextRuntime = (
   input: AgentRouteRequest,
   userId: string,
   route: '/agent/next' | '/agent/workflow',
-  options: {
-    readonly childType?: string
-    readonly executeSubagent?: (
-      input: SubagentExecutionInput<AgentToolContext>
-    ) => Effect.Effect<ToolResult, ToolError>
-    readonly modules?: ReadonlyArray<ToolModule<AgentToolContext>>
-  } = {}
+  options: AgentTextRuntimeOptions = {}
 ) =>
   Effect.gen(function* () {
     const baseConfig = yield* getAgentTextConfig()
@@ -503,11 +505,10 @@ export const makeAgentTextRuntime = (
 
                 const events = yield* collectSubagentEvents(
                   runRuntime(
-                    {
-                      _tag: 'Transcript',
+                    RuntimeRequest.Transcript({
                       sessionId: `${input.sessionId}:subagent:${call.id}`,
                       messages: [UserMessage.make({ content: params.prompt })]
-                    },
+                    }),
                     {
                       systemPrompt: subagentPrompt({
                         subagentType: params.subagent_type,

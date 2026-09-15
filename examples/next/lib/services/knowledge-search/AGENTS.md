@@ -22,6 +22,13 @@ App-owned concrete adapters for the domain-free knowledge search contracts.
 - `storageObject` owns raw source refs/content.
 - `knowledgeDocument` owns search lifecycle and status.
 - Text ingestion passes `storageObjectId` through package metadata so `DrizzleSearchIndexStoreLayer` can bind rows.
+- Reconstruct package sources with `knowledgeSourceFromStorageRow` in `storage-source.ts` (used by `DrizzleSearchIndexStoreLayer`). The row type is `Pick` of the actual Drizzle `storageObject` select, not a shadow Schema enum.
+- **File identity is opaque `storageObject.id`.** Current ingest (`createFileStorageObject`) does not write `r2Key` and passes `KnowledgeFileSource.make({ ref: object.id, ... })`. Null `r2Key` is valid. A legacy `r2Key` must not replace id. Do not fabricate a URL from id, and do not treat R2 keys as File refs.
+- **Url identity is the stored `url` column.** Missing/empty url fails as `SearchIndexStoreError`. Never substitute storage id or `r2Key` for a missing URL.
+- Opaque locators (`id`, url) are not trimmed. Surrounding whitespace fails rather than mutating identity.
+- Optional File `name` / `mediaType` and Text `label` come from filename/mediaType display metadata: use an absent optional value when the column is null or blank (after trim for those display strings only); constructor inputs may contain `undefined` keys. Do not pass empty strings.
+- Invalid rows fail the store Effect (`getDocument` / search). Matching rows are not dropped.
+- This adapter policy is app-owned. Package `KnowledgeFileSource.ref` remains an opaque string; hosts still must not invent locators to satisfy `.make`.
 
 ## Store adapter
 
@@ -35,5 +42,6 @@ App-owned concrete adapters for the domain-free knowledge search contracts.
 
 ## Tests
 
-- `live-layer.test.ts` covers set/doc/chunk lifecycle, vector search, keyword search, context expansion, delete cleanup.
+- Always-on `live-layer.test.ts` reconstruction cases cover File identity (including null and legacy `r2Key`), URL validation, and optional display metadata without a database.
+- Its DB suite covers set/doc/chunk lifecycle, vector search, keyword search, context expansion, delete cleanup.
 - DB adapter tests run when `.env.test` provides `DATABASE_URL`; otherwise they skip.

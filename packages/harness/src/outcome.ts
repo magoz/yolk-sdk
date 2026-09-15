@@ -1,5 +1,9 @@
-import { type Data, Effect, Match, Predicate, Stream } from 'effect'
-import { StepOutcome as stepOutcome } from './outcome-constructors-internal.ts'
+import { Effect, Match, Predicate, Stream, type Data } from 'effect'
+import {
+  HitlMatch as hitlMatch,
+  OverflowCompactionResult as overflowCompactionResult,
+  StepOutcome as stepOutcome
+} from './outcome-constructors-internal.ts'
 import {
   addAgentUsage,
   zeroAgentUsage,
@@ -29,13 +33,10 @@ import {
 } from '@yolk-sdk/agent/compaction'
 
 export type OverflowCompactionResult =
-  | {
-      readonly _tag: 'Compacted'
-      readonly messages: ReadonlyArray<AgentMessage>
-    }
-  | {
-      readonly _tag: 'Skipped'
-    }
+  | { readonly _tag: 'Compacted'; readonly messages: ReadonlyArray<AgentMessage> }
+  | { readonly _tag: 'Skipped' }
+
+export const OverflowCompactionResult = overflowCompactionResult
 
 export type StepOutcome = Data.TaggedEnum<{
   Completed: {
@@ -68,6 +69,8 @@ export type StepOutcome = Data.TaggedEnum<{
   }
 }>
 
+export const StepOutcome = stepOutcome
+
 export type CompletedTurn = Extract<StepOutcome, { readonly _tag: 'Completed' }>
 
 export type ModelTurnOutcome = Exclude<StepOutcome, { readonly _tag: 'AwaitingInput' }>
@@ -78,7 +81,7 @@ export type ToolBatchOutcome = Extract<
 >
 
 const completedOutcome = (result: ModelTurnResult): CompletedTurn =>
-  stepOutcome.Completed({
+  StepOutcome.Completed({
     needsContinuation: result.stopReason === 'tool_use',
     assistantMessage: result.assistantMessage,
     toolCalls: result.toolCalls,
@@ -158,7 +161,7 @@ const classifyModelTurnFailure = <E2, R2>(input: {
         Match.value(result).pipe(
           Match.tag('Compacted', current =>
             Effect.succeed(
-              stepOutcome.Compacted({
+              StepOutcome.Compacted({
                 messages: current.messages,
                 overflowCompactionAttempt: input.overflowCompactionAttempt + 1
               })
@@ -171,12 +174,12 @@ const classifyModelTurnFailure = <E2, R2>(input: {
   }
 
   if (isMissingDone(input.error) && !input.outputStarted) {
-    return Effect.succeed(stepOutcome.RecoverFull({ error: input.error }))
+    return Effect.succeed(StepOutcome.RecoverFull({ error: input.error }))
   }
 
   if (isMissingDone(input.error) && input.outputStarted) {
     return Effect.succeed(
-      stepOutcome.Continue({
+      StepOutcome.Continue({
         error: input.error,
         ...modelTurnResult(input.collected)
       })
@@ -185,15 +188,15 @@ const classifyModelTurnFailure = <E2, R2>(input: {
 
   if (isRetryableLlm(input.error) && !input.outputStarted) {
     if (input.error.cause === 'invalid_response') {
-      return Effect.succeed(stepOutcome.RecoverFull({ error: input.error }))
+      return Effect.succeed(StepOutcome.RecoverFull({ error: input.error }))
     }
 
-    return Effect.succeed(stepOutcome.Retry({ error: input.error }))
+    return Effect.succeed(StepOutcome.Retry({ error: input.error }))
   }
 
   if (isRetryableLlm(input.error) && input.outputStarted) {
     return Effect.succeed(
-      stepOutcome.Continue({
+      StepOutcome.Continue({
         error: input.error,
         ...modelTurnResult(input.collected)
       })
@@ -295,7 +298,7 @@ export const attemptToolBatch = <E2 = never, R2 = never>(
       if (result.requests.length === 0) {
         const needsContinuation = result.toolCalls.length > 0
 
-        return stepOutcome.Completed({
+        return StepOutcome.Completed({
           needsContinuation,
           assistantMessage: undefined,
           toolCalls: result.toolCalls,
@@ -304,7 +307,7 @@ export const attemptToolBatch = <E2 = never, R2 = never>(
         })
       }
 
-      return stepOutcome.AwaitingInput({ requests: result.requests, usage: result.usage })
+      return StepOutcome.AwaitingInput({ requests: result.requests, usage: result.usage })
     })
   )
 }
@@ -313,22 +316,26 @@ export type HitlMatch =
   | { readonly _tag: 'Match'; readonly requestId: string }
   | { readonly _tag: 'Mismatch' }
 
-const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) => {
-  switch (response._tag) {
-    case 'ToolApprovalResponse':
-      return (
-        request._tag === 'ToolApprovalRequest' &&
-        response.requestId === request.requestId &&
-        response.toolCallId === request.toolCallId
-      )
-    case 'QuestionResponse':
-      return (
-        request._tag === 'QuestionRequest' &&
-        response.requestId === request.requestId &&
-        response.toolCallId === request.toolCallId
-      )
-  }
-}
+export const HitlMatch = hitlMatch
+
+const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) =>
+  Match.value(response).pipe(
+    Match.tag(
+      'ToolApprovalResponse',
+      current =>
+        Predicate.isTagged(request, 'ToolApprovalRequest') &&
+        current.requestId === request.requestId &&
+        current.toolCallId === request.toolCallId
+    ),
+    Match.tag(
+      'QuestionResponse',
+      current =>
+        Predicate.isTagged(request, 'QuestionRequest') &&
+        current.requestId === request.requestId &&
+        current.toolCallId === request.toolCallId
+    ),
+    Match.exhaustive
+  )
 
 export const matchHitlResponse = (
   pending: ReadonlyArray<HitlRequest>,
@@ -337,18 +344,20 @@ export const matchHitlResponse = (
   const matched = pending.find(request => hitlResponseMatchesRequest(response, request))
 
   return matched === undefined
-    ? { _tag: 'Mismatch' }
-    : { _tag: 'Match', requestId: matched.requestId }
+    ? HitlMatch.Mismatch()
+    : HitlMatch.Match({ requestId: matched.requestId })
 }
 
 export const resumeHitlIfMatched = <A, E, R>(input: {
   readonly pending: ReadonlyArray<HitlRequest>
   readonly response: HitlResponse
   readonly resume: (requestId: string) => Effect.Effect<A, E, R>
-}): Effect.Effect<A | { readonly _tag: 'Mismatch' }, E, R> => {
+}): Effect.Effect<A | Extract<HitlMatch, { readonly _tag: 'Mismatch' }>, E, R> => {
   const matched = matchHitlResponse(input.pending, input.response)
 
-  if (matched._tag === 'Mismatch') return Effect.succeed(matched)
-
-  return input.resume(matched.requestId)
+  return Match.value(matched).pipe(
+    Match.tag('Mismatch', current => Effect.succeed(current)),
+    Match.tag('Match', current => input.resume(current.requestId)),
+    Match.exhaustive
+  )
 }

@@ -1,5 +1,6 @@
 import { Chunk, Effect, Layer, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
+import * as SchemaIssue from 'effect/SchemaIssue'
 import { describe, expect, it } from '@effect/vitest'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
@@ -14,8 +15,11 @@ import {
   CredentialResolver,
   defineAction,
   defineConnector,
+  ConnectorIntegration,
+  CredentialBinding,
   makeCredentialBinding,
   makeIntegration,
+  PortableMetadata,
   ProviderFailure
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
@@ -342,7 +346,7 @@ type JsonRequestCase = {
   readonly slotId: string
   readonly credentialKind?: 'api_key' | 'oauth'
   readonly input: unknown
-  readonly config?: Readonly<Record<string, unknown>>
+  readonly config?: { readonly chatId: string }
   readonly expected: {
     readonly method: string
     readonly url: string
@@ -578,6 +582,7 @@ describe('@yolk-sdk/connectors', () => {
     ])
 
     expect(root.defineConnector).toBeDefined()
+    expect(root.PortableMetadata).toBe(PortableMetadata)
     expect(agent.makeConnectorToolModule).toBeDefined()
     expect(afloat.AfloatConnector).toBeDefined()
     expect(dropbox.DropboxConnector).toBeDefined()
@@ -591,6 +596,256 @@ describe('@yolk-sdk/connectors', () => {
     expect(telegram.TelegramConnector).toBeDefined()
     expect(todoist.TodoistConnector).toBeDefined()
   })
+
+  it.effect('admits JSON-portable integration and binding metadata and rejects non-JSON', () =>
+    Effect.gen(function* () {
+      const decodeMetadata = Schema.decodeUnknownEffect(PortableMetadata)
+      const decodeIntegration = Schema.decodeUnknownEffect(ConnectorIntegration)
+
+      const parsed: unknown = JSON.parse(
+        '{"label":"prod","enabled":false,"count":0,"note":null,"tags":["a"],"nested":{"ok":true},"__proto__":{"keep":true},"constructor":null}'
+      )
+
+      const metadata = yield* decodeMetadata(parsed)
+
+      const expectedFields = {
+        label: 'prod',
+        enabled: false,
+        count: 0,
+        note: null,
+        tags: ['a'],
+        nested: { ok: true }
+      }
+
+      expect(metadata).not.toBe(parsed)
+      expect(Object.getPrototypeOf(metadata)).toBe(null)
+      expect(metadata).toMatchObject(expectedFields)
+      expect(Object.hasOwn(metadata, '__proto__')).toBe(true)
+      expect(Object.getOwnPropertyDescriptor(metadata, '__proto__')?.value).toEqual({
+        keep: true
+      })
+      expect(Object.hasOwn(metadata, 'constructor')).toBe(true)
+      expect(Object.getOwnPropertyDescriptor(metadata, 'constructor')?.value).toBe(null)
+
+      const decodedIntegration = yield* decodeIntegration({
+        connectorId: 'test',
+        config: {},
+        credentialBindings: [],
+        metadata: parsed
+      })
+
+      expect(decodedIntegration.metadata).toMatchObject(expectedFields)
+      expect(
+        Object.getOwnPropertyDescriptor(decodedIntegration.metadata ?? {}, '__proto__')?.value
+      ).toEqual({ keep: true })
+
+      const leaf = { ok: true }
+      const dag = { a: leaf, b: leaf, tags: [1, false, null] }
+      const dagSnapshot = yield* decodeMetadata(dag)
+      expect(dagSnapshot.a).toBe(dagSnapshot.b)
+      expect(dagSnapshot.a).not.toBe(leaf)
+      expect(dagSnapshot.tags).toEqual([1, false, null])
+      expect(dagSnapshot.tags).not.toBe(dag.tags)
+
+      const omitted = makeIntegration({ connectorId: 'test' })
+      expect(Object.hasOwn(omitted, 'metadata')).toBe(false)
+
+      const madeIntegration = ConnectorIntegration.make({
+        connectorId: 'test',
+        config: { chatId: '1', extra: Number.POSITIVE_INFINITY },
+        credentialBindings: [
+          CredentialBinding.make({
+            slotId: 'slot',
+            credentialRef: 'host-ref',
+            metadata
+          })
+        ],
+        metadata
+      })
+
+      const integration = makeIntegration({
+        connectorId: 'test',
+        config: { chatId: '1', extra: Number.POSITIVE_INFINITY },
+        metadata,
+        credentialBindings: [
+          makeCredentialBinding({
+            slotId: 'slot',
+            credentialRef: 'host-ref',
+            metadata
+          })
+        ]
+      })
+
+      expect(madeIntegration.config.extra).toBe(Number.POSITIVE_INFINITY)
+      expect(integration.config.extra).toBe(Number.POSITIVE_INFINITY)
+      expect(Object.hasOwn(integration, 'metadata')).toBe(true)
+      expect(integration.metadata).not.toBe(metadata)
+      expect(integration.metadata).toMatchObject(expectedFields)
+      expect(
+        Object.getOwnPropertyDescriptor(integration.metadata ?? {}, '__proto__')?.value
+      ).toEqual({ keep: true })
+      expect(integration.credentialBindings[0]?.credentialRef).toBe('host-ref')
+      expect(integration.credentialBindings[0]?.metadata).toMatchObject(expectedFields)
+      expect(Object.hasOwn(integration.credentialBindings[0] ?? {}, 'metadata')).toBe(true)
+
+      const omittedBinding = makeCredentialBinding({
+        slotId: 'slot',
+        credentialRef: 'host-ref'
+      })
+
+      expect(Object.hasOwn(omittedBinding, 'metadata')).toBe(false)
+
+      const underlying = { n: Number.POSITIVE_INFINITY, fn: () => 'secret' }
+
+      const cause = new ConnectorError({
+        cause: 'validation_failed',
+        message: 'host cause',
+        underlying
+      })
+
+      expect(cause.underlying).toBe(underlying)
+
+      class Box {
+        ok = true
+      }
+
+      let getterCalls = 0
+      const accessorPayload = {}
+      Object.defineProperty(accessorPayload, 'secret', {
+        enumerable: true,
+        get: () => {
+          getterCalls += 1
+
+          return 'x'
+        }
+      })
+
+      const overflow: unknown = JSON.parse('{"n":1e999}')
+      const cyclic = { ok: true }
+
+      Object.assign(cyclic, { self: cyclic })
+
+      const inherited = { own: 'yes' }
+
+      Object.setPrototypeOf(inherited, { leaked: 'nope' })
+
+      const sparse = { tags: ['first', 'second'] }
+
+      delete sparse.tags[0]
+      const nestedDate = { when: new Date('2020-01-01T00:00:00.000Z') }
+      const nestedMap = { bag: new Map() }
+      const nestedClass = { box: new Box() }
+
+      const rejected: Array<unknown> = [
+        overflow,
+        cyclic,
+        inherited,
+        null,
+        [1],
+        new Date('2020-01-01T00:00:00.000Z'),
+        new Map(),
+        new Box(),
+        { a: undefined },
+        { fn: () => 1 },
+        { nested: { n: Number.POSITIVE_INFINITY } },
+        nestedDate,
+        nestedMap,
+        nestedClass,
+        sparse,
+        accessorPayload
+      ]
+
+      expect(Schema.is(PortableMetadata)({})).toBe(true)
+      expect(Schema.is(PortableMetadata)(parsed)).toBe(true)
+
+      for (const value of rejected) {
+        expect(Schema.is(PortableMetadata)(value)).toBe(false)
+        const result = yield* decodeMetadata(value).pipe(Effect.result)
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Schema.isSchemaError(result.failure)).toBe(true)
+          expect(result.failure.message).toContain('Expected a plain JSON metadata object')
+        }
+      }
+
+      expect(getterCalls).toBe(0)
+
+      for (const metadataValue of [null, nestedDate, nestedMap, nestedClass, accessorPayload]) {
+        const result = yield* decodeIntegration({
+          connectorId: 'test',
+          config: {},
+          credentialBindings: [],
+          metadata: metadataValue
+        }).pipe(Effect.result)
+
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(Schema.isSchemaError(result.failure)).toBe(true)
+        }
+      }
+
+      expect(getterCalls).toBe(0)
+
+      const invalidConstructors = [
+        () =>
+          ConnectorIntegration.make({
+            connectorId: 'test',
+            config: {},
+            credentialBindings: [],
+            metadata: { n: Number.POSITIVE_INFINITY }
+          }),
+        () =>
+          makeIntegration({
+            connectorId: 'test',
+            metadata: { n: Number.POSITIVE_INFINITY }
+          }),
+        () =>
+          CredentialBinding.make({
+            slotId: 'slot',
+            credentialRef: 'host-ref',
+            metadata: { n: Number.POSITIVE_INFINITY }
+          }),
+        () =>
+          makeCredentialBinding({
+            slotId: 'slot',
+            credentialRef: 'host-ref',
+            metadata: { n: Number.POSITIVE_INFINITY }
+          }),
+        () =>
+          ConnectorIntegration.make({
+            connectorId: 'test',
+            config: {},
+            credentialBindings: [],
+            metadata: accessorPayload
+          }),
+        () =>
+          makeCredentialBinding({
+            slotId: 'slot',
+            credentialRef: 'host-ref',
+            metadata: accessorPayload
+          })
+      ]
+
+      for (const construct of invalidConstructors) {
+        let rejected = false
+
+        try {
+          construct()
+        } catch (error) {
+          if (!(error instanceof Error)) throw error
+
+          expect(SchemaIssue.isIssue(error.cause)).toBe(true)
+          rejected = true
+        }
+
+        expect(rejected).toBe(true)
+      }
+
+      expect(getterCalls).toBe(0)
+    })
+  )
 
   it('exposes provider action definitions', () => {
     expect(GoogleConnector.actions.map(action => action.id)).toEqual([
@@ -3088,6 +3343,71 @@ describe('@yolk-sdk/connectors', () => {
       if (Predicate.isTagged(thread, 'Success')) {
         const output = yield* Schema.decodeUnknownEffect(GmailThreadOutput)(thread.value)
         expect(output.messages[0]?.attachments).toEqual(expected)
+      }
+    })
+  )
+
+  it.effect('rejects Gmail MIME payloads when a raw JSON number overflows finite JSON', () =>
+    Effect.gen(function* () {
+      // Raw HTTP JSON 1e999 parses to Infinity. Schema.Json requires finite numbers,
+      // so the whole payload is rejected. Do not JSON.stringify(Infinity) (null).
+      const overflowMessageWire =
+        '{"id":"message_1","payload":{"mimeType":"multipart/mixed","parts":[' +
+        '{"filename":"ok.pdf","mimeType":"application/pdf",' +
+        '"body":{"size":12,"attachmentId":"attachment_ok"}},' +
+        '{"filename":"overflow.pdf","mimeType":"application/pdf",' +
+        '"body":{"size":1e999,"attachmentId":"attachment_overflow"}}]}}'
+
+      const overflowThreadWire = `{"id":"thread_1","messages":[${overflowMessageWire}]}`
+
+      const listed = yield* gmailListAttachmentsAction
+        .execute({
+          integration: googleIntegration,
+          input: { messageId: 'message_1' }
+        })
+        .pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              GoogleCredentialResolverTest,
+              makeConnectorHttpClientTest([], [jsonHttpResponse(overflowMessageWire)])
+            )
+          ),
+          Effect.result
+        )
+
+      const thread = yield* gmailGetThreadAction
+        .execute({
+          integration: googleIntegration,
+          input: { threadId: 'thread_1', format: 'full' }
+        })
+        .pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              GoogleCredentialResolverTest,
+              makeConnectorHttpClientTest([], [jsonHttpResponse(overflowThreadWire)])
+            )
+          ),
+          Effect.result
+        )
+
+      expect(Result.isFailure(listed)).toBe(true)
+
+      if (Result.isFailure(listed)) {
+        expect(Predicate.isTagged(listed.failure, 'ConnectorError')).toBe(true)
+        expect(listed.failure).toMatchObject({
+          cause: 'validation_failed',
+          message: 'Invalid response shape'
+        })
+      }
+
+      expect(Result.isFailure(thread)).toBe(true)
+
+      if (Result.isFailure(thread)) {
+        expect(Predicate.isTagged(thread.failure, 'ConnectorError')).toBe(true)
+        expect(thread.failure).toMatchObject({
+          cause: 'validation_failed',
+          message: 'Invalid response shape'
+        })
       }
     })
   )

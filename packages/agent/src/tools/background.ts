@@ -10,7 +10,9 @@ import {
   ToolCall,
   ToolDef,
   decodeBackgroundToolInput,
+  isToolJsonSchemaObject,
   makeBackgroundToolAcceptedResult,
+  type ToolJsonSchema,
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
 
@@ -29,8 +31,8 @@ export type BackgroundToolHost<Context> = {
   }) => Effect.Effect<BackgroundToolAccepted, ToolError>
 }
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  value !== null && Predicate.isObjectOrArray(value) && !Array.isArray(value)
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
+  Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
 // Only traverse JSON Schema positions. Keywords in defaults/examples/const/enum are business data.
 const schemaMaps = new Set([
@@ -71,8 +73,8 @@ const unsupportedResourceKeywords = new Set([
 /** Narrow relocation contract, not a reference compiler: only document-root $defs pointers
  * survive hoisting. Resource boundaries and other reference forms must fail activation.
  */
-export const unsupportedBackgroundSchema = (schema: unknown): string | undefined => {
-  if (!isRecord(schema)) return undefined
+export const unsupportedBackgroundSchema = (schema: Schema.Json): string | undefined => {
+  if (!isJsonObject(schema)) return undefined
 
   for (const [key, value] of Object.entries(schema)) {
     if (unsupportedResourceKeywords.has(key)) return key
@@ -83,7 +85,7 @@ export const unsupportedBackgroundSchema = (schema: unknown): string | undefined
 
     const children =
       schemaMaps.has(key) || key === 'dependencies'
-        ? isRecord(value)
+        ? isJsonObject(value)
           ? Object.values(value)
           : []
         : schemaArrays.has(key) || (key === 'items' && Array.isArray(value))
@@ -108,8 +110,14 @@ export const unsupportedBackgroundSchema = (schema: unknown): string | undefined
  * original parameters nest under `arguments`; document-root `$defs` remain at the root.
  */
 export const backgroundToolDef = (def: ToolDef): ToolDef => {
-  const parameters = isRecord(def.parameters) ? def.parameters : {}
-  const { $defs, ...argumentsSchema } = parameters
+  let argumentsSchema: ToolJsonSchema = def.parameters
+  let $defs: Schema.Json | undefined
+
+  if (isToolJsonSchemaObject(def.parameters)) {
+    const { $defs: definitions, ...rest } = def.parameters
+    argumentsSchema = rest
+    $defs = definitions
+  }
 
   return ToolDef.make({
     ...def,
@@ -119,11 +127,11 @@ export const backgroundToolDef = (def: ToolDef): ToolDef => {
         type: 'object'
         properties: {
           execution: { type: 'string'; enum: ['foreground', 'background'] }
-          arguments: typeof argumentsSchema
+          arguments: ToolJsonSchema
         }
         required: ['execution', 'arguments']
         additionalProperties: false
-        $defs?: unknown
+        $defs?: Schema.Json
       }
 
       const fields: BackgroundToolParametersFields = {

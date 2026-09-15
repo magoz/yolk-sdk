@@ -1,6 +1,7 @@
-import { Cause, Deferred, Effect, Fiber, Ref, Scheduler } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Predicate, Ref, Result, Scheduler } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { makeCoordinator } from '../src/coordinator.ts'
+import { StopReceipt } from '../src/outcome-constructors-internal.ts'
 
 const makeRequestHoldScheduler = () => {
   const base = new Scheduler.MixedScheduler('async')
@@ -275,7 +276,7 @@ describe('makeCoordinator', () => {
         const captured = yield* coordinator.captureRun('a')
         expect(captured._tag).toBe('Stopping')
 
-        if (captured._tag !== 'Stopping') return
+        if (!Predicate.isTagged(captured, 'Stopping')) return
         const waiter = yield* captured.awaitSettlement.pipe(Effect.forkChild)
         yield* Deferred.succeed(release, undefined)
         yield* Fiber.join(waiter)
@@ -481,12 +482,13 @@ describe('makeCoordinator', () => {
         const exit = yield* coordinator.run('r').pipe(Effect.exit)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected started construction defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         expect(yield* coordinator.isActive('r')).toBe(false)
@@ -626,7 +628,7 @@ describe('coordinator interruption request', () => {
             expect(fiber.pollUnsafe()).toBeUndefined()
             expect(yield* Deferred.isDone(release)).toBe(false)
             hold.releaseHeld()
-            expect(yield* Fiber.join(fiber)).toEqual({ _tag: 'Interrupted' })
+            expect(yield* Fiber.join(fiber)).toEqual(StopReceipt.Interrupted())
           }
 
           expect(yield* Deferred.isDone(release)).toBe(false)
@@ -679,7 +681,7 @@ describe('coordinator interruption request', () => {
           expect(hold.held.length).toBeGreaterThan(0)
           expect(stopFiber.pollUnsafe()).toBeUndefined()
           hold.releaseHeld()
-          expect(yield* Fiber.join(stopFiber)).toEqual({ _tag: 'Interrupted' })
+          expect(yield* Fiber.join(stopFiber)).toEqual(StopReceipt.Interrupted())
           expect(yield* Deferred.isDone(startHold)).toBe(false)
           expect(yield* Ref.get(drained)).toBe(0)
           expect(yield* coordinator.isActive('a')).toBe(true)
@@ -730,7 +732,7 @@ describe('coordinator interruption request', () => {
           expect(hold.held.length).toBeGreaterThan(0)
           expect(stopFiber.pollUnsafe()).toBeUndefined()
           hold.releaseHeld()
-          expect(yield* Fiber.join(stopFiber)).toEqual({ _tag: 'Interrupted' })
+          expect(yield* Fiber.join(stopFiber)).toEqual(StopReceipt.Interrupted())
           yield* Deferred.await(cleanupEntered)
           expect(yield* Deferred.isDone(cleanupHold)).toBe(false)
           expect(yield* coordinator.isActive('a')).toBe(true)

@@ -31,12 +31,13 @@ import {
   reduceAgentChatState
 } from '../../src/react/chat-core.ts'
 import { Predicate } from 'effect'
+import { AgentChatAction } from '../../src/react/chat-actions.ts'
 import { AgentChatPart, ChatToolState } from '../../src/react/chat-messages.ts'
 
 describe('agent chat core', () => {
   it('submits user messages through the headless reducer', () => {
     const message = UserMessage.make({ content: 'hello' })
-    const state = reduceAgentChatState(initialAgentChatState, { _tag: 'Submit', message })
+    const state = reduceAgentChatState(initialAgentChatState, AgentChatAction.Submit({ message }))
 
     expect(state.status).toBe('running')
     expect(state.chatMessages.map(chatMessage => chatMessage.role)).toEqual(['user'])
@@ -65,12 +66,12 @@ describe('agent chat core', () => {
       provider
     })
 
-    const retrying = reduceAgentChatState(initialAgentChatState, {
-      _tag: 'Event',
-      event: retry
-    })
+    const retrying = reduceAgentChatState(
+      initialAgentChatState,
+      AgentChatAction.Event({ event: retry })
+    )
 
-    const failed = reduceAgentChatState(retrying, { _tag: 'Event', event: error })
+    const failed = reduceAgentChatState(retrying, AgentChatAction.Event({ event: error }))
 
     expect(retrying.retryInfo).toBe(retry)
     expect(failed).toMatchObject({
@@ -82,17 +83,17 @@ describe('agent chat core', () => {
   })
 
   it('detects streaming reasoning summaries', () => {
-    const state = reduceAgentChatState(initialAgentChatState, {
-      _tag: 'Event',
-      event: LLMReasoningDelta.make({ text: 'Need a tool.' })
-    })
+    const state = reduceAgentChatState(
+      initialAgentChatState,
+      AgentChatAction.Event({ event: LLMReasoningDelta.make({ text: 'Need a tool.' }) })
+    )
 
     expect(hasAgentChatReasoningSummary(state)).toBe(true)
   })
 
   it('applies text stream events directly to chat parts', () => {
     const state = [LLMTextDelta.make({ text: 'hel' }), LLMTextDelta.make({ text: 'lo' })].reduce(
-      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
+      (current, event) => reduceAgentChatState(current, AgentChatAction.Event({ event })),
       initialAgentChatState
     )
 
@@ -119,7 +120,7 @@ describe('agent chat core', () => {
       LLMTextDelta.make({ eventId: 'workflow:1:0', text: 'hel' }),
       LLMTextDelta.make({ eventId: 'workflow:1:1', text: 'lo' })
     ].reduce(
-      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
+      (current, event) => reduceAgentChatState(current, AgentChatAction.Event({ event })),
       initialAgentChatState
     )
 
@@ -243,7 +244,7 @@ describe('agent chat core', () => {
       LLMTextDelta.make({ text: 'hel' }),
       LLMTextDelta.make({ text: 'lo' })
     ].reduce(
-      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
+      (current, event) => reduceAgentChatState(current, AgentChatAction.Event({ event })),
       initialAgentChatState
     )
 
@@ -287,7 +288,7 @@ describe('agent chat core', () => {
         })
       })
     ].reduce(
-      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
+      (current, event) => reduceAgentChatState(current, AgentChatAction.Event({ event })),
       initialAgentChatState
     )
 
@@ -315,7 +316,8 @@ describe('agent chat core', () => {
       ToolExecutionStarted.make({ call }),
       ToolExecutionCompleted.make({ call, result })
     ].reduce(
-      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event, nowMs: 123 }),
+      (current, event) =>
+        reduceAgentChatState(current, AgentChatAction.Event({ event, nowMs: 123 })),
       initialAgentChatState
     )
 
@@ -355,15 +357,15 @@ describe('agent chat core', () => {
       answers: [QuestionAnswer.make({ questionId: 'choice', customAnswer: 'A' })]
     })
 
-    const waiting = reduceAgentChatState(initialAgentChatState, {
-      _tag: 'Event',
-      event: QuestionRequested.make({ request })
-    })
+    const waiting = reduceAgentChatState(
+      initialAgentChatState,
+      AgentChatAction.Event({ event: QuestionRequested.make({ request }) })
+    )
 
-    const submitted = reduceAgentChatState(waiting, {
-      _tag: 'SubmitHitlResponse',
-      response
-    })
+    const submitted = reduceAgentChatState(
+      waiting,
+      AgentChatAction.SubmitHitlResponse({ response })
+    )
 
     expect(submitted.status).toBe('running')
     expect(submitted.chatMessages[0]?.parts[0]).toEqual(

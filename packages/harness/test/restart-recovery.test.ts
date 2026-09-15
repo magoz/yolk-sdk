@@ -1,4 +1,16 @@
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Ref, Scheduler } from 'effect'
+import {
+  Cause,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Predicate,
+  Ref,
+  Result,
+  Scheduler
+} from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   QuestionAnswer,
@@ -22,7 +34,12 @@ import {
 import { makeDurableObjectDriverLayer } from '../src/driver/durable-object.ts'
 import { makeInMemoryDriverLayer, makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
 import { Inbox, makeInMemoryInboxLayer } from '../src/inbox.ts'
-import { attemptToolBatch, matchHitlResponse, resumeHitlIfMatched } from '../src/outcome.ts'
+import {
+  attemptToolBatch,
+  HitlMatch,
+  matchHitlResponse,
+  resumeHitlIfMatched
+} from '../src/outcome.ts'
 import {
   makeInMemoryRunStoreLayer,
   makeSnapshotRunStoreLayer,
@@ -36,7 +53,7 @@ type LayerE<L> = L extends Layer.Layer<infer _A, infer E, infer _R> ? E : never
 
 type LayerR<L> = L extends Layer.Layer<infer _A, infer _E, infer R> ? R : never
 
-const configuredMax: { readonly maxResumeAttempts?: number } = {}
+const configuredMax: DriverLayerOptions = {}
 
 const maybeMax: number | undefined = undefined
 
@@ -281,13 +298,17 @@ const snapshotLayer = (
 
 class CompoundFailureId extends Context.Service<CompoundFailureId, string>()('CompoundFailureId') {}
 
-const annotatedDie = (defect: unknown, id: string) =>
+type CompoundDieDefect = {
+  readonly phase: string
+}
+
+const annotatedDie = (defect: CompoundDieDefect, id: string) =>
   Cause.annotate(Cause.die(defect), Context.make(CompoundFailureId, id))
 
 const annotatedInterrupt = (fiberId: number, id: string) =>
   Cause.annotate(Cause.interrupt(fiberId), Context.make(CompoundFailureId, id))
 
-const expectAnnotatedDie = <E>(cause: Cause.Cause<E>, defect: unknown, id: string) => {
+const expectAnnotatedDie = <E>(cause: Cause.Cause<E>, defect: CompoundDieDefect, id: string) => {
   const found = cause.reasons.filter(Cause.isDieReason).find(reason => reason.defect === defect)
   expect(found).toBeDefined()
 
@@ -385,14 +406,14 @@ describe('restart recovery', () => {
 
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected InvalidMaxResumeAttempts layer failure')
         }
 
         const found = Cause.findError(exit.cause)
         expect(found._tag).toBe('Success')
 
-        if (found._tag !== 'Success') {
+        if (!Result.isSuccess(found)) {
           throw new Error('expected tagged InvalidMaxResumeAttempts')
         }
 
@@ -970,12 +991,13 @@ describe('restart recovery', () => {
         const exit = yield* driver.resumeSuspended.pipe(Effect.exit)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected increment save defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         expect(yield* store.isClaimed('run_1')).toBe(true)
@@ -1017,12 +1039,13 @@ describe('restart recovery', () => {
         const exit = yield* driver.resumeSuspended.pipe(Effect.exit)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected exhaustion release save defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         expect(yield* store.isClaimed('run_1')).toBe(true)
@@ -1051,12 +1074,13 @@ describe('restart recovery', () => {
         yield* driver.awaitIdle('run_1')
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected claim save defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         expect(yield* store.isClaimed('run_1')).toBe(true)
@@ -1108,12 +1132,13 @@ describe('restart recovery', () => {
         const exit = yield* Fiber.await(waiter)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected never-acquired claim defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         yield* driver.awaitIdle('run_1')
@@ -1150,12 +1175,13 @@ describe('restart recovery', () => {
         const exit = yield* driver.run('run_1').pipe(Effect.exit)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected final-release save defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         expect(yield* store.isClaimed('run_1')).toBe(true)
@@ -1701,12 +1727,13 @@ describe('restart recovery', () => {
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected claim save defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         yield* driver.awaitIdle('r')
@@ -1764,12 +1791,13 @@ describe('restart recovery', () => {
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected claim save defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         yield* driver.awaitIdle('r')
@@ -1956,12 +1984,13 @@ describe('restart recovery', () => {
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected never-acquired claim defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         yield* driver.awaitIdle('run_1')
@@ -2036,12 +2065,13 @@ describe('restart recovery', () => {
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected original claim defect')
         }
 
-        expect(Cause.findDefect(exit.cause)).toMatchObject({
-          _tag: 'Success',
+        const result = Cause.findDefect(exit.cause)
+        expect(Result.isSuccess(result)).toBe(true)
+        expect(result).toMatchObject({
           success: failure
         })
         yield* Deferred.await(successorStarted)
@@ -2122,7 +2152,7 @@ describe('restart recovery', () => {
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected combined claim and release defects')
         }
 
@@ -2186,7 +2216,7 @@ describe('restart recovery', () => {
         const exit = yield* Fiber.await(running)
         expect(exit._tag).toBe('Failure')
 
-        if (exit._tag !== 'Failure') {
+        if (!Exit.isFailure(exit)) {
           throw new Error('expected combined host and release causes')
         }
 
@@ -2299,7 +2329,7 @@ describe('host-owned waiting checkpoint restoration', () => {
                 { calls, tools, hitlResponses },
                 {
                   onEvent: event => {
-                    if (event._tag !== 'ToolExecutionCompleted') return Effect.void
+                    if (!Predicate.isTagged(event, 'ToolExecutionCompleted')) return Effect.void
 
                     return Ref.update(completions, current => [
                       ...current,
@@ -2315,7 +2345,7 @@ describe('host-owned waiting checkpoint restoration', () => {
 
               expect(outcome._tag).toBe('Completed')
 
-              if (outcome._tag !== 'Completed') {
+              if (!Predicate.isTagged(outcome, 'Completed')) {
                 throw new Error(`unexpected ready outcome: ${outcome._tag}`)
               }
 
@@ -2339,7 +2369,7 @@ describe('host-owned waiting checkpoint restoration', () => {
 
             expect(outcome._tag).toBe('AwaitingInput')
 
-            if (outcome._tag !== 'AwaitingInput') {
+            if (!Predicate.isTagged(outcome, 'AwaitingInput')) {
               throw new Error(`unexpected park outcome: ${outcome._tag}`)
             }
 
@@ -2351,7 +2381,7 @@ describe('host-owned waiting checkpoint restoration', () => {
 
             expect(parked._tag).toBe('Parked')
 
-            if (parked._tag !== 'Parked') {
+            if (!Predicate.isTagged(parked, 'Parked')) {
               throw new Error(`unexpected pause decision: ${parked._tag}`)
             }
 
@@ -2385,14 +2415,14 @@ describe('host-owned waiting checkpoint restoration', () => {
             throw new Error('expected host checkpoint after first park')
           }
 
-          const approval = checkpoint.requests.find(
-            request => request._tag === 'ToolApprovalRequest'
+          const approval = checkpoint.requests.find(request =>
+            Predicate.isTagged(request, 'ToolApprovalRequest')
           )
 
           expect(approval?._tag).toBe('ToolApprovalRequest')
 
-          if (approval?._tag !== 'ToolApprovalRequest') {
-            throw new Error(`unexpected request tag: ${approval?._tag}`)
+          if (!Predicate.isTagged(approval, 'ToolApprovalRequest')) {
+            throw new Error('expected ToolApprovalRequest after first park')
           }
 
           const approvalResponse = ToolApprovalResponse.make({
@@ -2460,26 +2490,35 @@ describe('host-owned waiting checkpoint restoration', () => {
         }
 
         expect(yield* Ref.get(executed)).toEqual([])
-        const approval = checkpoint.requests.find(request => request._tag === 'ToolApprovalRequest')
-        const question = checkpoint.requests.find(request => request._tag === 'QuestionRequest')
+
+        const approval = checkpoint.requests.find(request =>
+          Predicate.isTagged(request, 'ToolApprovalRequest')
+        )
+
+        const question = checkpoint.requests.find(request =>
+          Predicate.isTagged(request, 'QuestionRequest')
+        )
+
         expect(approval?._tag).toBe('ToolApprovalRequest')
         expect(question?._tag).toBe('QuestionRequest')
 
-        if (approval?._tag !== 'ToolApprovalRequest' || question?._tag !== 'QuestionRequest') {
+        if (
+          !Predicate.isTagged(approval, 'ToolApprovalRequest') ||
+          !Predicate.isTagged(question, 'QuestionRequest')
+        ) {
           throw new Error('expected sibling approval and question requests')
         }
 
         const persisted = checkpoint.payloads.get('item_a')
         expect(persisted?._tag).toBe('ToolApprovalResponse')
 
-        if (persisted?._tag !== 'ToolApprovalResponse') {
+        if (!Predicate.isTagged(persisted, 'ToolApprovalResponse')) {
           throw new Error(`unexpected persisted payload: ${persisted?._tag}`)
         }
 
-        expect(matchHitlResponse(checkpoint.requests, persisted)).toEqual({
-          _tag: 'Match',
-          requestId: approval.requestId
-        })
+        expect(matchHitlResponse(checkpoint.requests, persisted)).toEqual(
+          HitlMatch.Match({ requestId: approval.requestId })
+        )
 
         const replayed = yield* resumeHitlIfMatched({
           pending: checkpoint.requests,
@@ -2504,9 +2543,9 @@ describe('host-owned waiting checkpoint restoration', () => {
           source: 'user'
         })
 
-        expect(matchHitlResponse(checkpoint.requests, mismatchedResponse)).toEqual({
-          _tag: 'Mismatch'
-        })
+        expect(matchHitlResponse(checkpoint.requests, mismatchedResponse)).toEqual(
+          HitlMatch.Mismatch()
+        )
 
         const mismatch = yield* resumeHitlIfMatched({
           pending: checkpoint.requests,
@@ -2519,7 +2558,7 @@ describe('host-owned waiting checkpoint restoration', () => {
             })
         })
 
-        expect(mismatch._tag).toBe('Mismatch')
+        expect(mismatch).toEqual(HitlMatch.Mismatch())
         yield* driver.awaitIdle('run_1')
         expect(yield* Ref.get(executed)).toEqual([])
 

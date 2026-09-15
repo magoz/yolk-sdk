@@ -270,17 +270,7 @@ export const downloadOneDriveItem = (
           credentials: 'omit'
         })
         .pipe(
-          Effect.mapError(
-            error =>
-              new OneDriveDownloadError({
-                code:
-                  error.code === 'response_too_large'
-                    ? 'response_too_large'
-                    : error.code === 'network_policy_rejected'
-                      ? 'network_policy_rejected'
-                      : 'transport_failed'
-              })
-          ),
+          Effect.mapError(error => new OneDriveDownloadError({ code: error.code })),
           Effect.tap(response => checkBody(response, maxBytes, limits.maxErrorBodyBytes))
         )
 

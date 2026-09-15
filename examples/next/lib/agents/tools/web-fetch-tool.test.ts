@@ -92,6 +92,28 @@ describe('web_fetch tool', () => {
     })
   )
 
+  it.effect('keeps SchemaError wrapper on invalid web fetch arguments', () =>
+    Effect.gen(function* () {
+      const { deps, requested } = makeDependencies([])
+
+      const result = yield* executeWebFetchTool(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'web_fetch',
+          params: { url: false }
+        }),
+        deps
+      )
+
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        isError: true
+      })
+      expect(result.content).toContain('Invalid web fetch arguments: SchemaError(')
+      expect(requested).toEqual([])
+    })
+  )
+
   it.effect('blocks private hosts before requesting', () =>
     Effect.gen(function* () {
       const { deps, requested } = makeDependencies([])

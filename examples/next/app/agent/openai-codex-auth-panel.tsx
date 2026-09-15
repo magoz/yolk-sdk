@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { toast } from 'sonner'
+import { Match, Predicate } from 'effect'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { checkOpenAiCodexDeviceFlowAction } from '@/lib/core/agent/check-openai-codex-device-flow-action'
@@ -49,22 +50,21 @@ export function OpenAiCodexAuthPanel({ initialConnected }: OpenAiCodexAuthPanelP
         userCode: flow.userCode
       })
 
-      if (result._tag === 'Pending') {
-        return
-      }
-
-      stopPolling()
-
-      if (result._tag === 'Success') {
-        setConnected(true)
-        setDeviceFlow(null)
-        toast.success('OpenAI Codex connected')
-
-        return
-      }
-
-      setDeviceFlow(null)
-      toast.error(result.message)
+      Match.value(result).pipe(
+        Match.tag('Pending', () => undefined),
+        Match.tag('Success', () => {
+          stopPolling()
+          setConnected(true)
+          setDeviceFlow(null)
+          toast.success('OpenAI Codex connected')
+        }),
+        Match.tag('Failed', 'Error', failed => {
+          stopPolling()
+          setDeviceFlow(null)
+          toast.error(failed.message)
+        }),
+        Match.exhaustive
+      )
     }, intervalMs)
   }
 
@@ -72,7 +72,7 @@ export function OpenAiCodexAuthPanel({ initialConnected }: OpenAiCodexAuthPanelP
     startTransition(async () => {
       const result = await startOpenAiCodexDeviceFlowAction()
 
-      if (result._tag === 'Error') {
+      if (Predicate.isTagged(result, 'Error')) {
         toast.error(result.message)
 
         return
@@ -100,7 +100,7 @@ export function OpenAiCodexAuthPanel({ initialConnected }: OpenAiCodexAuthPanelP
     startTransition(async () => {
       const result = await deleteOpenAiCodexTokenAction()
 
-      if (result._tag === 'Error') {
+      if (Predicate.isTagged(result, 'Error')) {
         toast.error(result.message)
 
         return

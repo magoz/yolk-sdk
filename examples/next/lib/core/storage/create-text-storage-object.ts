@@ -1,4 +1,5 @@
 import { Effect } from 'effect'
+import { KnowledgeTextSource } from '@yolk-sdk/knowledge/documents'
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 import { PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
@@ -50,7 +51,9 @@ export const createTextStorageObject = (input: {
       documentId: object.id,
       maxTokens: collection.chunkMaxTokens,
       source: {
-        source: { _tag: 'Text', label: object.filename ?? undefined },
+        source: KnowledgeTextSource.make({
+          label: object.filename ?? undefined
+        }),
         content: trimmedContent,
         mediaType: 'text/plain',
         metadata: { storageObjectId: object.id, title: object.filename ?? undefined }

@@ -11,11 +11,7 @@ const rootDirectory = resolve(scriptDirectory, '..')
 
 const outputPath = resolve(scriptDirectory, '../cloudflare/agent/src/generated/skillset.ts')
 
-const portableLocation = (location: string | undefined) => {
-  if (location === undefined) {
-    return undefined
-  }
-
+const portableLocation = (location: string) => {
   const relativeLocation = relative(rootDirectory, location)
 
   return relativeLocation.startsWith('..') ? location : relativeLocation
@@ -25,16 +21,18 @@ const manifestFromMergedSkillset = (skillset: MergedSkillset): SkillsetManifest 
   version: 1,
   skills: skillset.skills.map(skill => ({
     ...skill,
-    ...(portableLocation(skill.location) === undefined
-      ? {}
-      : { location: portableLocation(skill.location) })
+    location: portableLocation(skill.location)
   })),
-  commands: skillset.commands.map(command => ({
-    ...command,
-    ...(portableLocation(command.location) === undefined
-      ? {}
-      : { location: portableLocation(command.location) })
-  }))
+  commands: skillset.commands.map(command => {
+    if (command.location === undefined) {
+      return { ...command }
+    }
+
+    return {
+      ...command,
+      location: portableLocation(command.location)
+    }
+  })
 })
 
 const encodeManifestJson = (manifest: SkillsetManifest) => JSON.stringify(manifest, undefined, 2)

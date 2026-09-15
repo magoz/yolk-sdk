@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber, Layer, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
   ConnectorBinaryWriteHttpClient,
   ConnectorBinaryHttpError,
@@ -22,6 +23,7 @@ import {
   R2ObjectClient
 } from '@yolk-sdk/connectors/r2-storage'
 import type { R2ObjectCondition } from '@yolk-sdk/connectors/r2-storage'
+import { headerSafeJson } from '../src/transfer-internal.ts'
 
 const budget = { maxBytes: 10, maxMetadataBytes: 1000, maxErrorBodyBytes: 32 }
 
@@ -36,12 +38,18 @@ const integration = (connectorId: string, config = {}) =>
     ]
   })
 
-const response = (metadata: unknown, status = 200): ConnectorBinaryHttpResponse => ({
-  status,
-  headers: {},
-  bytes: new TextEncoder().encode(JSON.stringify(metadata)),
-  bodyComplete: true
-})
+const isJson = Schema.is(Schema.Json)
+
+const response = (metadata: Schema.Json, status = 200): ConnectorBinaryHttpResponse => {
+  if (!isJson(metadata)) throw new TypeError('JSON fixture requires a finite JSON value')
+
+  return {
+    status,
+    headers: {},
+    bytes: new TextEncoder().encode(JSON.stringify(metadata)),
+    bodyComplete: true
+  }
+}
 
 const dropbox = { id: 'id:file', name: 'x.bin', rev: 'abcdef123', size: 3 }
 
@@ -80,6 +88,52 @@ const host = (r = response(dropbox)) => {
 }
 
 describe('host-only binary writes', () => {
+  it('rejects non-finite header JSON without converting it to null', () => {
+    for (const value of [Infinity, { n: Infinity }]) {
+      expect(() => headerSafeJson(value)).toThrow(TypeError)
+      expect(() => headerSafeJson(value)).toThrow('Header JSON requires a finite JSON value')
+    }
+  })
+
+  it('keeps header JSON own keys, falsy values and ASCII code-unit escapes', () => {
+    expect(headerSafeJson(null)).toBe('null')
+    expect(headerSafeJson(false)).toBe('false')
+    expect(headerSafeJson(0)).toBe('0')
+    expect(
+      headerSafeJson({
+        ['__proto__']: { keep: true },
+        constructor: null,
+        zero: 0,
+        enabled: false,
+        text: 'é😀\u007f\n"\\'
+      })
+    ).toBe(
+      '{"__proto__":{"keep":true},"constructor":null,"zero":0,"enabled":false,"text":"\\u00e9\\ud83d\\ude00\\u007f\\n\\"\\\\"}'
+    )
+  })
+
+  it.effect('Dropbox create escapes astral header paths without changing byte identity', () =>
+    Effect.gen(function* () {
+      const h = host()
+
+      yield* createDropboxFile(integration('dropbox'), { path: '/😀.bin', bytes }, budget).pipe(
+        Effect.provide(h.layer)
+      )
+
+      expect(h.requests[0]?.headers['dropbox-api-arg']).toBe(
+        '{"path":"/\\ud83d\\ude00.bin","mode":"add","autorename":false,"strict_conflict":true}'
+      )
+      expect(h.requests[0]?.bytes).toBe(bytes)
+      expect(h.requests).toHaveLength(1)
+      expect(h.scopes).toEqual([['files.content.write']])
+    })
+  )
+
+  it('rejects non-finite JSON fixture metadata before stringify', () => {
+    expect(() => response(Infinity)).toThrow('JSON fixture requires a finite JSON value')
+    expect(() => response({ n: Infinity })).toThrow('JSON fixture requires a finite JSON value')
+  })
+
   it.effect('Dropbox create is strict add with untouched bytes and ASCII JSON', () =>
     Effect.gen(function* () {
       const h = host()

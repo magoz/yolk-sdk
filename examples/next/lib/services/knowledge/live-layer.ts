@@ -1,5 +1,6 @@
 import { S3Service } from '@effect-aws/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
+import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import { Config, Context, DateTime, Effect, Layer, Option, Predicate, Redacted } from 'effect'
 import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'
 import { KnowledgeStore } from '@yolk-sdk/knowledge/store'
@@ -98,9 +99,6 @@ const scopeUserId = (scope: KnowledgeScope) => scope.id
 
 const toDateTime = (date: Date) => DateTime.fromDateUnsafe(date)
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
 const propertyValue = (input: unknown, key: string) => {
   if (!Predicate.isObjectOrArray(input) || input === null) {
     return undefined
@@ -149,8 +147,7 @@ const storeError = (message: string, cause?: unknown) => new KnowledgeStoreError
 
 const fileError = (message: string, cause?: unknown) => new KnowledgeFileError({ message, cause })
 
-const mapStoreError = (error: unknown) =>
-  error instanceof KnowledgeStoreError ? error : storeError(unknownToMessage(error), error)
+const sqlStoreError = (error: EffectDrizzleQueryError) => storeError(error.message, error)
 
 export const knowledgeFileStorageKey = (input: {
   readonly documentId: string
@@ -275,7 +272,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           return rowToDocument({ document: created })
         }).pipe(
           Effect.withSpan('KnowledgeStore.createDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       updateDocument: input =>
@@ -300,14 +297,14 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           return rowToDocument({ document: updated })
         }).pipe(
           Effect.withSpan('KnowledgeStore.updateDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       getDocument: input =>
         getScopedDocument(input).pipe(
           Effect.map(document => rowToDocument({ document })),
           Effect.withSpan('KnowledgeStore.getDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       getDocumentBySlug: input =>
@@ -329,7 +326,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           return rowToDocument({ document: row })
         }).pipe(
           Effect.withSpan('KnowledgeStore.getDocumentBySlug'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       listDocuments: input =>
@@ -351,7 +348,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           return { documents: rows.map(document => rowToDocument({ document })) }
         }).pipe(
           Effect.withSpan('KnowledgeStore.listDocuments'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       listPinned: input =>
@@ -371,7 +368,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           return { documents: rows.map(document => rowToDocument({ document })) }
         }).pipe(
           Effect.withSpan('KnowledgeStore.listPinned'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       deleteDocument: input =>
@@ -386,7 +383,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             )
         }).pipe(
           Effect.withSpan('KnowledgeStore.deleteDocument'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         ),
 
       listFiles: input =>
@@ -401,7 +398,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           return rows.map(rowToFile)
         }).pipe(
           Effect.withSpan('KnowledgeStore.listFiles'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
+          Effect.catchTag('EffectDrizzleQueryError', error => Effect.fail(sqlStoreError(error)))
         )
     }
   })

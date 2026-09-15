@@ -397,6 +397,12 @@ describe('sandbox anti-slop regressions', () => {
     const server = new APIError<object>(new Response(null, { status: 500 }))
     const generic = new Error('boom')
 
+    const textBody = new APIError<string>(new Response(null, { status: 404 }), {
+      json: 'missing sandbox'
+    })
+
+    expect(isVercelMissingSandboxError(textBody)).toBe(true)
+    expect(textBody.json).toBe('missing sandbox')
     expect(isVercelMissingSandboxError(missing)).toBe(true)
     expect(isVercelMissingSandboxError(gone)).toBe(true)
     expect(isVercelMissingSandboxError(server)).toBe(false)

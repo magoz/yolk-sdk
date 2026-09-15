@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { Effect, Layer, Predicate, Stream } from 'effect'
+import { Effect, Layer, Predicate, Result, Stream, type LogLevel, type References } from 'effect'
 import { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors'
-import { getWorkflowMetadata } from 'workflow'
+import { getWorkflowMetadata, type sleep as workflowSleep } from 'workflow'
 import { WorkflowRunNotFoundError } from 'workflow/errors'
 import * as Schema from 'effect/Schema'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,7 +11,9 @@ import {
   ToolCall,
   ToolResult,
   UserMessage,
-  ToolApprovalPolicy
+  ToolApprovalPolicy,
+  ToolApprovalResponse,
+  type ToolResultMessage
 } from '@yolk-sdk/agent/protocol'
 import {
   ContextTransformer,
@@ -38,24 +40,58 @@ import {
 } from '@/lib/services/agent-workflow/registry'
 import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
+import { AppLayer } from '@/lib/layers'
+import { reportError } from '@/lib/services/telemetry/report-error'
+import { reportWarning } from '@/lib/services/telemetry/report-warning'
+import { admitTelemetryLogContext } from '@/lib/services/telemetry/telemetry-context'
 import type { makeAgentTextRuntime } from './text-response'
 import { agentWorkflowHitlHookToken, runAgentWorkflow } from './run-agent-workflow'
 import { readChildWorkflowStep } from './workflow-child-steps'
 
-const reports = vi.hoisted(() => vi.fn())
+type CapturedLogEntry = {
+  readonly message: unknown
+  readonly logLevel: LogLevel.LogLevel
+  readonly annotations: ReturnType<typeof References.CurrentLogAnnotations.defaultValue>
+}
+
+const capturedLogs = vi.hoisted(() => {
+  const entries: Array<CapturedLogEntry> = []
+
+  return {
+    entries,
+    record(entry: CapturedLogEntry) {
+      entries.push(entry)
+    },
+    clear() {
+      entries.length = 0
+    }
+  }
+})
+
+const reportedLogs = () =>
+  capturedLogs.entries.filter(
+    entry =>
+      entry.annotations.error_type !== undefined || entry.annotations.warning_type !== undefined
+  )
 
 // Exercise the real host entrypoints, loop, serializers, registry transitions and tool dispatch.
 // Only provider/runtime construction, persistence and the platform transport are behavioral fakes.
-vi.mock('@/lib/layers', async () => ({ AppLayer: (await import('effect')).Layer.empty }))
-
-vi.mock('@/lib/services/telemetry/report-error', async () => {
-  const { Effect } = await import('effect')
+// AppLayer is still a test Layer (no Auth/Db/OTel); it owns a capturing Effect Logger so
+// real reportError emission is observed without mocking the reporter.
+vi.mock('@/lib/layers', async () => {
+  const { Logger } = await import('effect')
+  const { CurrentLogAnnotations } = await import('effect/References')
 
   return {
-    reportError: (error: unknown, context?: Record<string, unknown>) =>
-      Effect.sync(() => {
-        reports(error, context)
+    AppLayer: Logger.layer([
+      Logger.make(options => {
+        capturedLogs.record({
+          message: options.message,
+          logLevel: options.logLevel,
+          annotations: { ...options.fiber.getRef(CurrentLogAnnotations) }
+        })
       })
+    ])
   }
 })
 
@@ -67,6 +103,22 @@ vi.mock('./text-response', () => ({
 vi.mock('workflow', async () => {
   const { testWorkflowModule } = await import('@yolk-sdk/vercel-workflows/testing')
 
+  const sleep: typeof workflowSleep = async duration => {
+    sleepDurations.push(duration)
+
+    // Test-harness runaway guard, not a claim about platform quotas.
+    if (autoSleep) {
+      if (advanceSleepClock && Predicate.isNumber(duration)) vi.setSystemTime(Date.now() + duration)
+
+      if (sleepDurations.length > 40) throw new Error('Unbounded observation')
+
+      return
+    }
+
+    sleeping.release()
+    await new Promise<void>(resolve => sleepers.push(resolve))
+  }
+
   return {
     ...testWorkflowModule,
     createHook: <T>(input: { token: string }) => {
@@ -75,22 +127,7 @@ vi.mock('workflow', async () => {
 
       return hook
     },
-    sleep: async (duration: unknown) => {
-      sleepDurations.push(duration)
-
-      // Test-harness runaway guard, not a claim about platform quotas.
-      if (autoSleep) {
-        if (advanceSleepClock && Predicate.isNumber(duration))
-          vi.setSystemTime(Date.now() + duration)
-
-        if (sleepDurations.length > 40) throw new Error('Unbounded observation')
-
-        return
-      }
-
-      sleeping.release()
-      await new Promise<void>(resolve => sleepers.push(resolve))
-    }
+    sleep
   }
 })
 
@@ -406,7 +443,7 @@ beforeEach(() => {
   failChild = false
   statusReads = 0
   preparationFailure = undefined
-  reports.mockClear()
+  capturedLogs.clear()
   background = true
   childModel = undefined
   gated = false
@@ -601,13 +638,15 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     expect((await events(parent)).some(event => Predicate.isTagged(event, 'SubagentStarted'))).toBe(
       false
     )
-    await world.sdk.resumeHook(agentWorkflowHitlHookToken({ runId: parent }), {
-      _tag: 'ToolApprovalResponse',
-      requestId: 'approval:gated',
-      toolCallId: 'gated',
-      decision: 'denied',
-      source: 'user'
-    })
+    await world.sdk.resumeHook(
+      agentWorkflowHitlHookToken({ runId: parent }),
+      ToolApprovalResponse.make({
+        requestId: 'approval:gated',
+        toolCallId: 'gated',
+        decision: 'denied',
+        source: 'user'
+      })
+    )
     await childEntered.promise
     await world.settled(parent)
     expect(
@@ -666,14 +705,21 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const parent = await launch()
     await world.settled(parent)
     expect(world.inspect(parent).status).toBe('completed')
-    expect(reports).toHaveBeenCalledExactlyOnceWith(
-      { _tag: 'WorkflowChildPreparationError', message: 'Child launch preparation failed' },
+    expect(reportedLogs()).toEqual([
       {
-        operation: 'agent.workflow.child.prepare',
-        runId: parent,
-        toolCallId: 'child-call',
-        cause_type: 'WorkflowRegistryError'
+        message: ['Child launch preparation failed'],
+        logLevel: 'Error',
+        annotations: {
+          error_type: 'WorkflowChildPreparationError',
+          operation: 'agent.workflow.child.prepare',
+          runId: parent,
+          toolCallId: 'child-call',
+          cause_type: 'WorkflowRegistryError'
+        }
       }
+    ])
+    expect(JSON.stringify(capturedLogs.entries)).not.toContain(
+      'Sensitive SQL parameters and credentials'
     )
     expect(
       (await events(parent)).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
@@ -692,7 +738,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const parent = await launch()
     await world.settled(parent)
     expect(world.inspect(parent).status).toBe('completed')
-    expect(reports).not.toHaveBeenCalled()
+    expect(reportedLogs()).toEqual([])
     expect(
       (await events(parent)).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
     ).toMatchObject({ result: { isError: true, content: 'Child launch preparation failed' } })
@@ -717,7 +763,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       }
     )
     expect(JSON.stringify(output)).not.toContain(childId(parent))
-    expect(reports).not.toHaveBeenCalled()
+    expect(reportedLogs()).toEqual([])
 
     const probe = world.start(
       async () =>
@@ -879,14 +925,17 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       expect(output.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
         usage: { input: { total: 0 }, output: { total: 0 } }
       })
-      expect(
-        requests.filter(request => request.systemPrompt === 'Parent').at(-1)?.messages
-      ).toContainEqual(
-        expect.objectContaining({
-          _tag: 'ToolResult',
-          toolCallId: callId,
-          content: expect.stringContaining(`tool_call_id=child-call parent_run_id=${parent}`)
-        })
+
+      const parentObservation = requests
+        .filter(request => request.systemPrompt === 'Parent')
+        .at(-1)
+        ?.messages.find(
+          (message): message is ToolResultMessage =>
+            Predicate.isTagged(message, 'ToolResult') && message.toolCallId === callId
+        )
+
+      expect(parentObservation?.content).toEqual(
+        expect.stringContaining(`tool_call_id=child-call parent_run_id=${parent}`)
       )
       expect(sleepDurations).toHaveLength(31)
       expect(sleepDurations.slice(0, 5)).toEqual([1000, 5000, 15000, 30000, 30000])
@@ -925,16 +974,19 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       )
     ).toBe(false)
     expect(world.inspect(id).status).toBe('completed')
-    expect(
-      requests.filter(request => request.systemPrompt === 'Child').at(-1)?.messages
-    ).toContainEqual(
-      expect.objectContaining({
-        _tag: 'ToolResult',
-        toolCallId: 'child-question',
-        isError: true,
-        content: 'Question tool is unavailable'
-      })
-    )
+
+    const childQuestionResult = requests
+      .filter(request => request.systemPrompt === 'Child')
+      .at(-1)
+      ?.messages.find(
+        message =>
+          Predicate.isTagged(message, 'ToolResult') && message.toolCallId === 'child-question'
+      )
+
+    expect(childQuestionResult).toMatchObject({
+      isError: true,
+      content: 'Question tool is unavailable'
+    })
     expect(childToolCalls).toBe(0)
   })
 
@@ -1208,5 +1260,163 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     expect(firstTurn.length).toBeGreaterThan(0)
     expect(secondTurn.length).toBeGreaterThan(0)
     expect(Math.max(...firstTurn)).toBeLessThan(Math.min(...secondTurn))
+  })
+})
+
+describe('telemetry context admission', () => {
+  beforeEach(() => {
+    capturedLogs.clear()
+  })
+
+  it('projects allowlisted fields and drops unknown, sensitive, symbol, and invalid values', async () => {
+    const secret = Symbol('secret')
+
+    const context = {
+      operation: 'agent.workflow.step',
+      status: 500,
+      runId: 'run_1',
+      toolCallId: 'call_1',
+      cause_type: 'WorkflowRegistryError',
+      entityId: 'entity_1',
+      userId: 'user_1',
+      retries: 3,
+      error_type: 'spoofed',
+      warning_type: 'spoofed',
+      password: 'hunter2',
+      token: 'abc',
+      prompt: 'SYSTEM PROMPT',
+      [secret]: 'symbol-leak',
+      statusCode: 500
+    }
+
+    await Effect.runPromise(
+      reportError(
+        new LLMError({
+          cause: 'provider_error',
+          retryable: false,
+          message: 'visible message token=caller-owned'
+        }),
+        context
+      ).pipe(Effect.provide(AppLayer))
+    )
+
+    expect(capturedLogs.entries).toEqual([
+      {
+        message: ['visible message token=caller-owned'],
+        logLevel: 'Error',
+        annotations: {
+          operation: 'agent.workflow.step',
+          status: 500,
+          runId: 'run_1',
+          toolCallId: 'call_1',
+          cause_type: 'WorkflowRegistryError',
+          entityId: 'entity_1',
+          userId: 'user_1',
+          retries: 3,
+          error_type: 'LLMError'
+        }
+      }
+    ])
+    expect(JSON.stringify(capturedLogs.entries)).not.toContain('spoofed')
+    expect(JSON.stringify(capturedLogs.entries)).not.toContain('hunter2')
+    expect(JSON.stringify(capturedLogs.entries)).not.toContain('SYSTEM PROMPT')
+    expect(JSON.stringify(capturedLogs.entries)).not.toContain('symbol-leak')
+    expect(JSON.stringify(capturedLogs.entries)).toContain('token=caller-owned')
+  })
+
+  it('keeps valid fields when some context values are nonfinite or mistyped', async () => {
+    const context = {
+      operation: 'agent.workflow.child.prepare',
+      status: Number.POSITIVE_INFINITY,
+      retries: Number.NaN,
+      runId: 12,
+      toolCallId: null,
+      cause_type: { tag: 'nested' }
+    }
+
+    const admitted = await Effect.runPromise(admitTelemetryLogContext(context))
+    expect(admitted).toEqual({ operation: 'agent.workflow.child.prepare' })
+
+    await Effect.runPromise(
+      reportError(
+        new LLMError({ cause: 'provider_error', retryable: false, message: 'still reported' }),
+        admitted
+      ).pipe(Effect.provide(AppLayer))
+    )
+
+    expect(capturedLogs.entries).toEqual([
+      {
+        message: ['still reported'],
+        logLevel: 'Error',
+        annotations: {
+          operation: 'agent.workflow.child.prepare',
+          error_type: 'LLMError'
+        }
+      }
+    ])
+  })
+
+  it('does not let invalid context mask the original tapError failure', async () => {
+    const decoded = Schema.decodeUnknownResult(Schema.String)(42)
+
+    if (Result.isSuccess(decoded)) throw new Error('Expected invalid string fixture')
+
+    const business = decoded.failure
+
+    expect(business).not.toBeInstanceOf(Error)
+
+    const exploding = {
+      get operation(): never {
+        throw new Error('context exploded')
+      },
+      password: 'hunter2'
+    }
+
+    const result = await Effect.runPromise(
+      Effect.fail(business).pipe(
+        Effect.tapError(error => reportError(error, exploding)),
+        Effect.catch(error => Effect.succeed(error)),
+        Effect.provide(AppLayer)
+      )
+    )
+
+    expect(result).toBe(business)
+    expect(capturedLogs.entries).toEqual([
+      {
+        message: [business.message],
+        logLevel: 'Error',
+        annotations: { error_type: 'SchemaError' }
+      }
+    ])
+    expect(JSON.stringify(capturedLogs.entries)).not.toContain('hunter2')
+    expect(JSON.stringify(capturedLogs.entries)).not.toContain('context exploded')
+  })
+
+  it('ignores non-object context and still logs the warning type', async () => {
+    expect(await Effect.runPromise(admitTelemetryLogContext(['operation', 'secret']))).toEqual({})
+    expect(await Effect.runPromise(admitTelemetryLogContext(null))).toEqual({})
+
+    const arrayWithContext = Object.assign([], { operation: 'not a context record' })
+
+    const functionWithContext = Object.assign(() => undefined, {
+      operation: 'not a context record'
+    })
+
+    expect(await Effect.runPromise(admitTelemetryLogContext(arrayWithContext))).toEqual({})
+    expect(await Effect.runPromise(admitTelemetryLogContext(functionWithContext))).toEqual({})
+
+    await Effect.runPromise(
+      reportWarning(
+        new LLMError({ cause: 'provider_error', retryable: false, message: 'fallback used' })
+      ).pipe(Effect.provide(AppLayer))
+    )
+
+    expect(capturedLogs.entries).toEqual([
+      {
+        message: ['fallback used'],
+        logLevel: 'Warn',
+        annotations: { warning_type: 'LLMError' }
+      }
+    ])
   })
 })

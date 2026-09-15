@@ -27,24 +27,26 @@ const invalidSchemaVariant = Schema.Literals([
 
 const invalidSchemaVariantArbitrary = Schema.toArbitrary(invalidSchemaVariant)
 
-const isJsonObject = (input: unknown): input is Readonly<Record<string, unknown>> =>
-  input !== null && Predicate.isObjectOrArray(input) && !Array.isArray(input)
+const isJsonObject = (input: Schema.Json | undefined): input is Schema.JsonObject =>
+  Predicate.isObjectOrArray(input) && !Array.isArray(input)
 
-const field = (input: unknown, key: string) =>
-  isJsonObject(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+const field = (input: Schema.Json | undefined, key: string) =>
+  isJsonObject(input) && Object.hasOwn(input, key) ? input[key] : undefined
 
-const objectEntries = (input: unknown): ReadonlyArray<readonly [string, unknown]> =>
+const objectEntries = (
+  input: Schema.Json | undefined
+): ReadonlyArray<readonly [string, Schema.Json]> =>
   isJsonObject(input) ? Object.entries(input) : []
 
-const schemaContainsTopLevelRef = (schema: unknown) => field(schema, '$ref') !== undefined
+const schemaContainsTopLevelRef = (schema: Schema.Json) => field(schema, '$ref') !== undefined
 
-const schemaContainsEmptyStructAnyOf = (schema: unknown) => {
+const schemaContainsEmptyStructAnyOf = (schema: Schema.Json) => {
   const anyOf = field(schema, 'anyOf')
 
   return Array.isArray(anyOf) && anyOf.some(item => field(item, 'type') === 'array')
 }
 
-const nestedDefinitions = (schema: unknown) => {
+const nestedDefinitions = (schema: Schema.Json) => {
   const definitions = field(schema, '$defs')
 
   return objectEntries(definitions)
@@ -156,21 +158,66 @@ const invalidParams = (variant: typeof invalidSchemaVariant.Type) => {
 }
 
 describe('tool schema property tests', () => {
-  it.prop(
+  it.effect(
+    'rejects non-JSON generated-schema annotations instead of dropping or coercing them',
+    () =>
+      Effect.gen(function* () {
+        const parameters = yield* Schema.decodeUnknownEffect(
+          Schema.Record(Schema.String, Schema.Json)
+        )(providerSafeTool('flatRequired').def.parameters)
+
+        const invalidDefaults = [undefined, () => 'not-json', Infinity]
+
+        for (const value of invalidDefaults) {
+          const result = yield* Schema.decodeUnknownEffect(Schema.Json)({
+            ...parameters,
+            default: value
+          }).pipe(Effect.result)
+
+          expect(result._tag).toBe('Failure')
+        }
+      })
+  )
+
+  it.effect('inspects own JSON keys without conflating missing, null, and falsy values', () =>
+    Effect.gen(function* () {
+      const parameters = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(
+        '{"__proto__":{"type":"string"},"constructor":null,"enabled":false,"count":0}'
+      )
+
+      expect(field(parameters, '__proto__')).toEqual({ type: 'string' })
+      expect(field(parameters, 'constructor')).toBeNull()
+      expect(field(parameters, 'enabled')).toBe(false)
+      expect(field(parameters, 'count')).toBe(0)
+      expect(field(parameters, 'toString')).toBeUndefined()
+      expect(field(parameters, 'missing')).toBeUndefined()
+      expect(objectEntries(parameters).map(([key]) => key)).toEqual([
+        '__proto__',
+        'constructor',
+        'enabled',
+        'count'
+      ])
+    })
+  )
+
+  it.effect.prop(
     'schema-derived tool parameters stay provider-safe',
     [schemaVariantArbitrary],
-    ([variant]) => {
-      const parameters = providerSafeTool(variant).def.parameters
+    ([variant]) =>
+      Effect.gen(function* () {
+        const parameters = yield* Schema.decodeUnknownEffect(Schema.Json)(
+          providerSafeTool(variant).def.parameters
+        )
 
-      expect(field(parameters, 'type')).toBe('object')
-      expect(schemaContainsTopLevelRef(parameters)).toBe(false)
-      expect(schemaContainsEmptyStructAnyOf(parameters)).toBe(false)
-      expect(() => JSON.stringify(parameters)).not.toThrow()
+        expect(field(parameters, 'type')).toBe('object')
+        expect(schemaContainsTopLevelRef(parameters)).toBe(false)
+        expect(schemaContainsEmptyStructAnyOf(parameters)).toBe(false)
+        expect(() => JSON.stringify(parameters)).not.toThrow()
 
-      for (const [, definition] of nestedDefinitions(parameters)) {
-        expect(schemaContainsTopLevelRef(definition)).toBe(false)
-      }
-    },
+        for (const [, definition] of nestedDefinitions(parameters)) {
+          expect(schemaContainsTopLevelRef(definition)).toBe(false)
+        }
+      }),
     propertyOptions
   )
 

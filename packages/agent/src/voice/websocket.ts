@@ -1,4 +1,4 @@
-import { Cause, Deferred, Duration, Effect, Queue, Stream, type Scope } from 'effect'
+import { Cause, Deferred, Duration, Effect, Layer, Queue, Stream, type Scope } from 'effect'
 import * as Socket from 'effect/unstable/socket/Socket'
 import {
   VoiceErrorEvent,
@@ -7,7 +7,7 @@ import {
   VoiceSessionOpening,
   type VoiceEvent
 } from './protocol.ts'
-import type { VoiceTransportApi } from './transport.ts'
+import { VoiceTransport, type VoiceTransportApi } from './transport.ts'
 
 export type WebSocketVoiceTransportOptions = {
   /** Provider or gateway WebSocket URL; hosts own auth/token query wiring. */
@@ -133,3 +133,8 @@ export const makeWebSocketVoiceTransport = (
       events: Stream.fromQueue(queue)
     }
   })
+
+export const webSocketVoiceTransportLayer = (
+  options: WebSocketVoiceTransportOptions
+): Layer.Layer<VoiceTransport, VoiceSessionError, Socket.WebSocketConstructor> =>
+  Layer.effect(VoiceTransport, makeWebSocketVoiceTransport(options))

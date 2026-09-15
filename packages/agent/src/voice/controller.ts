@@ -1,8 +1,10 @@
 import {
   Cause,
+  Context,
   Deferred,
   Effect,
   Fiber,
+  Layer,
   Match,
   Option,
   Predicate,
@@ -29,16 +31,16 @@ import {
   type VoiceToolCallOutcome,
   type VoiceToolCallsRequested
 } from './protocol.ts'
-import type { VoiceTransportApi } from './transport.ts'
+import { VoiceTransport, type VoiceTransportApi } from './transport.ts'
 
 /**
  * Client-side voice controller options. The controller never executes tools:
  * `executeToolCall` forwards each provider tool call to the host's
  * authenticated server endpoint and returns the server outcome. Approval
  * resume re-calls the same endpoint with the HITL `approval` response.
+ * The live transport is a yielded `VoiceTransport` requirement, not a value.
  */
 export type VoiceControllerOptions = {
-  readonly transport: VoiceTransportApi
   readonly codec: VoiceClientCodec
   readonly executeToolCall: (
     call: VoiceToolCall,
@@ -60,6 +62,15 @@ export type VoiceControllerApi = {
    * requests are no-ops so duplicate submissions stay safe.
    */
   readonly submitHitlResponse: (response: HitlResponse) => Effect.Effect<void>
+}
+
+export class VoiceController extends Context.Service<VoiceController, VoiceControllerApi>()(
+  '@yolk-sdk/agent/voice/VoiceController'
+) {
+  static layer = (
+    options: VoiceControllerOptions
+  ): Layer.Layer<VoiceController, never, VoiceTransport> =>
+    Layer.effect(this, makeVoiceController(options))
 }
 
 type PendingApproval = {
@@ -92,12 +103,14 @@ const sendAll = (
  *
  * The controller pumps transport events on a scoped background fiber so the
  * session end is observed even while a tool call awaits approval. Closing
- * the scope stops the pump and releases parked approvals.
+ * the scope stops the pump and releases parked approvals. Acquire with
+ * `VoiceTransport` in context (tests: `Effect.provideService`).
  */
 export const makeVoiceController = (
   options: VoiceControllerOptions
-): Effect.Effect<VoiceControllerApi, never, Scope.Scope> =>
+): Effect.Effect<VoiceControllerApi, never, Scope.Scope | VoiceTransport> =>
   Effect.gen(function* () {
+    const transport = yield* VoiceTransport
     const out = yield* Queue.unbounded<VoiceEvent, VoiceSessionError | Cause.Done>()
     const handledCallIds = yield* Ref.make<ReadonlySet<string>>(new Set())
     const pendingApprovals = yield* Ref.make<ReadonlyMap<string, PendingApproval>>(new Map())
@@ -116,7 +129,7 @@ export const makeVoiceController = (
       })
 
     const send = (payloads: Effect.Effect<ReadonlyArray<string>, VoiceSessionError>) =>
-      payloads.pipe(Effect.flatMap(encoded => sendAll(options.transport, encoded)))
+      payloads.pipe(Effect.flatMap(encoded => sendAll(transport, encoded)))
 
     const submitOutput = (callId: string, output: string) =>
       send(options.codec.encodeToolOutput(callId, output))
@@ -260,7 +273,7 @@ export const makeVoiceController = (
       })
 
     yield* Effect.forkScoped(
-      Stream.runForEach(options.transport.events, dispatch).pipe(
+      Stream.runForEach(transport.events, dispatch).pipe(
         Effect.matchCauseEffect({
           onFailure: cause => finishPump(Option.some(cause)),
           onSuccess: () => finishPump(Option.none())

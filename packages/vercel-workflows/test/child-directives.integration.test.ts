@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { getRun, resumeHook, start } from 'workflow/api'
 import { waitForHook, waitForSleep } from '@workflow/vitest'
+import { VercelAgentWorkflowRunResult } from '@yolk-sdk/vercel-workflows'
 import { isolatedParentFixture } from './fixtures/child-workflow-fixture.ts'
 
 const readChildId = async (readable: ReadableStream<string>) => {
@@ -51,16 +52,20 @@ describe('independent Workflow child directives', () => {
       await waitForHook(child, { token })
 
       if (failParent) await expect(parent.returnValue).rejects.toThrow()
-      else
-        await expect(parent.returnValue).resolves.toMatchObject({
-          _tag: 'Completed',
+      else {
+        const parentResult = await parent.returnValue
+        expect(VercelAgentWorkflowRunResult.$is('Completed')(parentResult)).toBe(true)
+        expect(parentResult).toMatchObject({
           state: { createdMessages: ['model-1', 'accepted', 'sibling-result', 'model-2'] }
         })
+      }
+
       expect(await child.status).toBe('running')
       // Only a model turn ran so far; parent finalization did not close/cancel the child.
       await resumeHook(token, 'go')
-      await expect(child.returnValue).resolves.toMatchObject({
-        _tag: 'Completed',
+      const childResult = await child.returnValue
+      expect(VercelAgentWorkflowRunResult.$is('Completed')(childResult)).toBe(true)
+      expect(childResult).toMatchObject({
         state: { createdMessages: ['model-1', 'child-tool-result', 'model-2'] }
       })
       expect(await collect(child.getReadable<string>())).toEqual([
@@ -87,11 +92,16 @@ describe('independent Workflow child directives', () => {
       await resumeHook(token, 'go')
 
       if (failChild) await expect(child.returnValue).rejects.toThrow()
-      else await expect(child.returnValue).resolves.toMatchObject({ _tag: 'Completed' })
+      else {
+        const childResult = await child.returnValue
+        expect(VercelAgentWorkflowRunResult.$is('Completed')(childResult)).toBe(true)
+      }
+
       expect(await child.status).toBe(failChild ? 'failed' : 'completed')
       await parent.wakeUp({ correlationIds: [sleeping] })
-      await expect(parent.returnValue).resolves.toMatchObject({
-        _tag: 'Completed',
+      const parentResult = await parent.returnValue
+      expect(VercelAgentWorkflowRunResult.$is('Completed')(parentResult)).toBe(true)
+      expect(parentResult).toMatchObject({
         state: {
           createdMessages: [
             'model-1',

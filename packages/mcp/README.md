@@ -4,6 +4,14 @@ MCP v2 (`2026-07-28`) client/server/protocol APIs, Effect/Yolk adapters, and leg
 
 The root export is intentionally empty. Import APIs from explicit subpaths.
 
+## Tool schema admission
+
+Yolk's `tools/list` adapter admits `inputSchema` as the object arm of
+`@yolk-sdk/agent/protocol`'s `ToolJsonSchema`. This is plain finite JSON-data representation admission,
+not JSON Schema meta-validation. Boolean roots fail in the typed `McpError` validation channel;
+omitted schemas still default to `{ type: 'object', additionalProperties: true }`.
+Tool arguments/results remain opaque until their execution/provider boundary.
+
 ## Install
 
 ```bash
@@ -27,6 +35,20 @@ Published package metadata requires Node.js 22+; `client/node` and `server/node`
 
 Use `core` for the official full MCP wire-schema surface. Use `protocol` only for Yolk adapters and
 legacy JSON-RPC helpers; it is not a replacement for the full-core APIs.
+
+Yolk JSON-RPC initialize and tools/call construction uses Schema owners on both
+`@yolk-sdk/mcp/client` and `@yolk-sdk/mcp/protocol` (same `protocol.ts`; no new export subpath):
+
+| Symbol                    | Role                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `InitializeClientInfo`    | `{ name, version }`                                                            |
+| `InitializeParams`        | `{ protocolVersion, capabilities, clientInfo }`                                |
+| `InitializedNotification` | `{ jsonrpc: '2.0', method: 'notifications/initialized' }` (no `id` / `params`) |
+| `ToolsCallParams`         | `{ name, arguments? }`                                                         |
+
+Prefer those Schema owners for new construction. Compatibility constructors
+`makeJsonRpcRequest`, `makeInitializeParams`, and `makeInitializedNotification` remain and build
+through the schemas. `makeJsonRpcRequest` still omits `params` when `undefined`.
 
 ## Imports
 
@@ -131,6 +153,10 @@ import { makeMcpToolServer, runStdioMcpServer } from '@yolk-sdk/mcp/server'
 ```
 
 `makeMcpToolServer` exposes approved Yolk tools. Its HTTP handler accepts both stateless v2 and legacy requests, validates browser origins against the endpoint hostname by default, and preserves MCP content and structured results. `runStdioMcpServer` remains the Effect-native minimal stdio adapter; use `serveStdio` for the full modern stdio surface.
+
+For legacy HTTP requests, an unreadable or already consumed body produces a JSON-RPC
+invalid-request error (`-32600`) rather than an Effect defect. Malformed JSON remains a parse error
+(`-32700`).
 
 ## Host responsibilities
 
