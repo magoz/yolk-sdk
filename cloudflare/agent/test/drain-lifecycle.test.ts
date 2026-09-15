@@ -868,7 +868,7 @@ describe('delayed Driver.run report', () => {
 
           yield* Deferred.succeed(reportHold, undefined)
           yield* Fiber.join(reconnecting)
-          expect(yield* Fiber.join(queued)).toEqual({ _tag: 'Stale' })
+          expect(yield* Fiber.join(queued)).toEqual(StartResult.Stale())
           expect(yield* Ref.get(queuedWorkStarted)).toBe(false)
           const ownerExit = yield* Fiber.await(running)
           expect(Exit.isFailure(ownerExit) && Cause.hasInterruptsOnly(ownerExit.cause)).toBe(true)

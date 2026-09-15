@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import { Effect } from 'effect'
+import type { KnowledgeMetadata } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { AppKnowledgeDocumentNotFoundError, AppSearchIndexStoreError } from './errors'
@@ -9,7 +10,7 @@ import { getKnowledgeDocument } from './get-knowledge-document'
 export type UpdateKnowledgeDocumentFields = {
   readonly title?: string | null
   readonly summary?: string | null
-  readonly metadata?: Record<string, unknown>
+  readonly metadata?: KnowledgeMetadata
 }
 
 export type UpdateKnowledgeDocumentInput = {

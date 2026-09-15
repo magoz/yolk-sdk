@@ -1,6 +1,7 @@
 import { Array as Arr, Effect } from 'effect'
 import { eq, sql } from 'drizzle-orm'
 import { KnowledgeChunker } from '@yolk-sdk/knowledge/chunking'
+import type { KnowledgeMetadata } from '@yolk-sdk/knowledge/documents'
 import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
@@ -10,7 +11,7 @@ export const indexKnowledgeDocument = (input: {
   readonly userId: string
   readonly documentId: string
   readonly content: string
-  readonly metadata?: Record<string, unknown>
+  readonly metadata?: KnowledgeMetadata
 }) =>
   Effect.gen(function* () {
     const db = yield* Db

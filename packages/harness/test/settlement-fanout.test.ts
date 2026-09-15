@@ -1,6 +1,7 @@
-import { Cause, Context, Data, Deferred, Effect, Exit, Fiber } from 'effect'
+import { Cause, Context, Data, Deferred, Effect, Exit, Fiber, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { makeCoordinator, type CapturedRun } from '../src/coordinator.ts'
+import { StopReceipt } from '../src/outcome-constructors-internal.ts'
 
 class DrainFail extends Data.TaggedError('DrainFail')<{
   readonly code: string
@@ -15,7 +16,7 @@ const dieDefect = { code: 'defect' }
 const expectEffect = <A, E = never, R = never>(_effect: Effect.Effect<A, E, R>) => undefined
 
 const requireJoined = <E>(captured: CapturedRun<E>) => {
-  if (captured._tag !== 'Joined') {
+  if (!Predicate.isTagged(captured, 'Joined')) {
     throw new Error(`Expected Joined captureRun, got ${captured._tag}`)
   }
 
@@ -231,7 +232,7 @@ describe('coordinator settlement fanout', () => {
             yield* Deferred.await(settling)
             expect(yield* coordinator.isActive('run_1')).toBe(true)
             expect(owner.pollUnsafe()).toBeUndefined()
-            expect(yield* coordinator.terminalStop('run_1', 'user')).toEqual({ _tag: 'Settling' })
+            expect(yield* coordinator.terminalStop('run_1', 'user')).toEqual(StopReceipt.Settling())
 
             const waiter1 = yield* coordinator
               .interrupt('run_1', 'user', { awaitSettlement: true })

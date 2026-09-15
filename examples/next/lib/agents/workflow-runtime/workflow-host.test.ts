@@ -8,12 +8,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AgentEvent,
   AgentUsage,
+  AssistantAgentMessage,
+  AssistantTextPart,
+  HostToolCallPart,
   ToolCall,
   ToolResult,
+  ToolResultMessage,
   UserMessage,
   ToolApprovalPolicy,
-  ToolApprovalResponse,
-  type ToolResultMessage
+  ToolApprovalResponse
 } from '@yolk-sdk/agent/protocol'
 import {
   ContextTransformer,
@@ -1080,16 +1083,19 @@ describe('actual Next Workflow host with fake external boundaries', () => {
 
     expect(inspection.status).toBe('completed')
     expect(inspection.streamClosed).toBe(true)
-    expect(result).toMatchObject({ _tag: 'ModelStepFailed', turn: 1 })
+    expect(Predicate.isTagged(result, 'ModelStepFailed')).toBe(true)
+    expect(result).toMatchObject({ turn: 1 })
     expect(requests).toHaveLength(1)
     expect(workflowStarts).toBe(0)
     expect(childToolCalls).toBe(0)
-    expect(output.some(event => event._tag === 'AgentEnd')).toBe(false)
-    expect(output.some(event => event._tag === 'ToolExecutionCompleted')).toBe(false)
-    expect(output.some(event => event._tag === 'AssistantMessage')).toBe(false)
-    expect(output.filter(event => event._tag === 'TurnStart')).toHaveLength(1)
-    expect(output.find(event => event._tag === 'LLMTextDelta')).toMatchObject({ text: 'partial' })
-    expect(output.find(event => event._tag === 'AgentError')).toMatchObject({
+    expect(output.some(event => Predicate.isTagged(event, 'AgentEnd'))).toBe(false)
+    expect(output.some(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))).toBe(false)
+    expect(output.some(event => Predicate.isTagged(event, 'AssistantMessage'))).toBe(false)
+    expect(output.filter(event => Predicate.isTagged(event, 'TurnStart'))).toHaveLength(1)
+    expect(output.find(event => Predicate.isTagged(event, 'LLMTextDelta'))).toMatchObject({
+      text: 'partial'
+    })
+    expect(output.find(event => Predicate.isTagged(event, 'AgentError'))).toMatchObject({
       code: 'invalid_response',
       retryable: false,
       message: 'Expected exactly one LLM done event, received 0'
@@ -1104,18 +1110,19 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const result = await world.sdk.getRun(parent).returnValue
 
     expect(world.inspect(parent).status).toBe('completed')
-    expect(result).toMatchObject({ _tag: 'ModelStepFailed', turn: 1 })
+    expect(Predicate.isTagged(result, 'ModelStepFailed')).toBe(true)
+    expect(result).toMatchObject({ turn: 1 })
     expect(requests).toHaveLength(1)
     expect(workflowStarts).toBe(0)
     expect(childToolCalls).toBe(0)
-    expect(output.find(event => event._tag === 'ToolInputEnd')).toMatchObject({
+    expect(output.find(event => Predicate.isTagged(event, 'ToolInputEnd'))).toMatchObject({
       call: { id: 'child-call', name: 'subagent' }
     })
-    expect(output.some(event => event._tag === 'ToolExecutionStarted')).toBe(false)
-    expect(output.some(event => event._tag === 'ToolExecutionCompleted')).toBe(false)
-    expect(output.some(event => event._tag === 'SubagentStarted')).toBe(false)
-    expect(output.some(event => event._tag === 'AgentEnd')).toBe(false)
-    expect(output.find(event => event._tag === 'AgentError')).toMatchObject({
+    expect(output.some(event => Predicate.isTagged(event, 'ToolExecutionStarted'))).toBe(false)
+    expect(output.some(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))).toBe(false)
+    expect(output.some(event => Predicate.isTagged(event, 'SubagentStarted'))).toBe(false)
+    expect(output.some(event => Predicate.isTagged(event, 'AgentEnd'))).toBe(false)
+    expect(output.find(event => Predicate.isTagged(event, 'AgentError'))).toMatchObject({
       code: 'invalid_response',
       retryable: false,
       message: 'Expected exactly one LLM done event, received 0'
@@ -1125,8 +1132,21 @@ describe('actual Next Workflow host with fake external boundaries', () => {
   it('preserves transcript, cumulative usage, and unique durable event ids on a successful tool turn', async () => {
     const firstUsage = AgentUsage.make({ input: { total: 3 }, output: { total: 1 } })
     const secondUsage = AgentUsage.make({ input: { total: 5 }, output: { total: 2 } })
+    const readCall = ToolCall.make({ id: 'read-call', name: 'read', params: {} })
+    const hostToolCallPart = HostToolCallPart.make({ call: readCall })
+    const toolTurnAssistant = AssistantAgentMessage.make({ parts: [hostToolCallPart] })
+
+    const readToolResult = ToolResultMessage.make({
+      toolCallId: 'read-call',
+      content: 'read result'
+    })
+
+    const finalAssistant = AssistantAgentMessage.make({
+      parts: [AssistantTextPart.make({ content: 'Parent done' })]
+    })
+
     parentStream = request => {
-      const results = request.messages.filter(message => message._tag === 'ToolResult')
+      const results = request.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
 
       return results.length === 0
         ? Stream.fromIterable([
@@ -1149,55 +1169,21 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const output = await events(parent)
     const result = await world.sdk.getRun(parent).returnValue
     const eventIds = output.map(event => event.eventId)
-    const end = output.find(event => event._tag === 'AgentEnd')
+    const end = output.find(event => Predicate.isTagged(event, 'AgentEnd'))
 
     expect(inspection.status).toBe('completed')
     expect(inspection.streamClosed).toBe(true)
+    expect(Predicate.isTagged(result, 'Completed')).toBe(true)
     expect(result).toMatchObject({
-      _tag: 'Completed',
       turns: 2,
       state: {
         messages: [
           UserMessage.make({ content: 'Parent private context' }),
-          expect.objectContaining({
-            _tag: 'Assistant',
-            parts: [
-              expect.objectContaining({
-                _tag: 'HostToolCall',
-                call: expect.objectContaining({ id: 'read-call', name: 'read' })
-              })
-            ]
-          }),
-          expect.objectContaining({
-            _tag: 'ToolResult',
-            toolCallId: 'read-call',
-            content: 'read result'
-          }),
-          expect.objectContaining({
-            _tag: 'Assistant',
-            parts: [expect.objectContaining({ _tag: 'Text', content: 'Parent done' })]
-          })
+          toolTurnAssistant,
+          readToolResult,
+          finalAssistant
         ],
-        createdMessages: [
-          expect.objectContaining({
-            _tag: 'Assistant',
-            parts: [
-              expect.objectContaining({
-                _tag: 'HostToolCall',
-                call: expect.objectContaining({ id: 'read-call', name: 'read' })
-              })
-            ]
-          }),
-          expect.objectContaining({
-            _tag: 'ToolResult',
-            toolCallId: 'read-call',
-            content: 'read result'
-          }),
-          expect.objectContaining({
-            _tag: 'Assistant',
-            parts: [expect.objectContaining({ _tag: 'Text', content: 'Parent done' })]
-          })
-        ],
+        createdMessages: [toolTurnAssistant, readToolResult, finalAssistant],
         usage: { input: { total: 8 }, output: { total: 3 } }
       }
     })
@@ -1206,51 +1192,47 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     expect(workflowStarts).toBe(0)
     expect(requests[1]?.messages).toEqual([
       UserMessage.make({ content: 'Parent private context' }),
-      expect.objectContaining({
-        _tag: 'Assistant',
-        parts: [
-          expect.objectContaining({
-            _tag: 'HostToolCall',
-            call: expect.objectContaining({ id: 'read-call', name: 'read' })
-          })
-        ]
-      }),
-      expect.objectContaining({
-        _tag: 'ToolResult',
-        toolCallId: 'read-call',
-        content: 'read result'
-      })
+      expect.objectContaining(toolTurnAssistant),
+      expect.objectContaining(readToolResult)
     ])
-    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
-      result: { toolCallId: 'read-call', content: 'read result' }
-    })
+    expect(output.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))).toMatchObject(
+      {
+        result: { toolCallId: 'read-call', content: 'read result' }
+      }
+    )
     expect(end).toMatchObject({
       turns: 2,
       usage: { input: { total: 8 }, output: { total: 3 } }
     })
     expect(end?.messages).toEqual([
-      expect.objectContaining({ _tag: 'Assistant' }),
-      expect.objectContaining({ _tag: 'ToolResult', toolCallId: 'read-call' }),
-      expect.objectContaining({
-        _tag: 'Assistant',
-        parts: [expect.objectContaining({ _tag: 'Text', content: 'Parent done' })]
-      })
+      expect.objectContaining(toolTurnAssistant),
+      expect.objectContaining(readToolResult),
+      expect.objectContaining(finalAssistant)
     ])
+    // Keep literal tag oracles independent of the expected-message constructors.
+    expect(end?.messages.map(message => message._tag)).toEqual([
+      'Assistant',
+      'ToolResult',
+      'Assistant'
+    ])
+    expect(
+      end?.messages.flatMap(message =>
+        Predicate.isTagged(message, 'Assistant') ? message.parts.map(part => part._tag) : []
+      )
+    ).toEqual(['HostToolCall', 'Text'])
     const tags = output.map(event => event._tag)
     expect(tags.indexOf('ToolInputEnd')).toBeGreaterThan(-1)
     expect(tags.indexOf('ToolExecutionCompleted')).toBeGreaterThan(tags.indexOf('ToolInputEnd'))
     expect(tags.lastIndexOf('LLMTextDelta')).toBeGreaterThan(tags.indexOf('ToolExecutionCompleted'))
     expect(tags.indexOf('AgentEnd')).toBeGreaterThan(tags.lastIndexOf('LLMTextDelta'))
-    expect(output.some(event => event._tag === 'AgentError')).toBe(false)
+    expect(output.some(event => Predicate.isTagged(event, 'AgentError'))).toBe(false)
     expect(
-      eventIds.every(
-        eventId => typeof eventId === 'string' && eventId.startsWith(`workflow:${parent}:`)
-      )
+      eventIds.every(eventId => eventId !== undefined && eventId.startsWith(`workflow:${parent}:`))
     ).toBe(true)
     expect(new Set(eventIds).size).toBe(eventIds.length)
 
     const sequenced = eventIds.flatMap(eventId => {
-      if (typeof eventId !== 'string') return []
+      if (eventId === undefined) return []
       const rest = eventId.slice(`workflow:${parent}:`.length)
       const [turn, sequence] = rest.split(':')
       const parsedTurn = Number(turn)
