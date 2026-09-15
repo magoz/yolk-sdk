@@ -1,5 +1,50 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.78
+
+### Minor Changes
+
+- 5ff44d6: Export canonical tagged constructors on existing subpaths: `PlainHitlResponse` and `RuntimeRequest` values, React chat ADTs, harness inbox/outcome/`StopDecision` companions, knowledge source/scope `.make`, and workflow `WorkflowStepResult` / `VercelAgentWorkflowRunResult`.
+
+  `Data.taggedEnum` values are plain objects with `_tag` last, not Equal/Hash classes. Prefer constructors over handwritten `{ _tag }` objects and omit absent optionals.
+
+- 5ff44d6: Upgrade the coordinated Effect runtime and platform dependencies to 4.0.0-rc.115. Hosts must use the matching Effect version.
+
+  Adopt rc.115 schema-order construction, including `_tag` first: JSON field values and optional presence remain unchanged, but serialized property order can change. Schema errors now use the rc.115 native Error/SchemaIssue representation. Preserve strict Calendar boundary validation, closed empty tool schemas, portable custom JSON Schema output, and explicit WebSocket close semantics.
+
+  Contributor property tests use native Effect arbitraries and Vitest 5. See the migration guide for API replacements and JSON Schema definition-name changes.
+
+- 5ff44d6: **Breaking type imports** (runtime and wire unchanged; no compatibility aliases):
+
+  - `LoopConfigShape` → `LoopConfigSettings` from `@yolk-sdk/agent/loop`
+  - `RunStoreShape` → `RunStoreApi` from `@yolk-sdk/harness/store`
+  - `InboxShape` → `InboxApi` from `@yolk-sdk/harness/inbox`
+  - `DriverShape` → `DriverApi` from `@yolk-sdk/harness/driver`
+
+  ```ts
+  import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
+  import type { RunStoreApi } from '@yolk-sdk/harness/store'
+  import type { InboxApi } from '@yolk-sdk/harness/inbox'
+  import type { DriverApi } from '@yolk-sdk/harness/driver'
+  ```
+
+### Patch Changes
+
+- 5ff44d6: Move service construction into owning static layer factories (`RunStore.inMemoryLayer`/`snapshotLayer`, `Inbox.layer`, `RunCoordinator.layer`, `Driver.layer`) with the public `make*` factories delegating; model step outcomes with `Data.taggedEnum` constructors.
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [00e4d60]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+- Updated dependencies [5ff44d6]
+  - @yolk-sdk/agent@0.1.0-canary.78
+
 ## 0.1.0-canary.77
 
 ### Minor Changes

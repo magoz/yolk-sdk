@@ -1,5 +1,96 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.78
+
+### Minor Changes
+
+- 5ff44d6: Export canonical tagged constructors on existing subpaths: `PlainHitlResponse` and `RuntimeRequest` values, React chat ADTs, harness inbox/outcome/`StopDecision` companions, knowledge source/scope `.make`, and workflow `WorkflowStepResult` / `VercelAgentWorkflowRunResult`.
+
+  `Data.taggedEnum` values are plain objects with `_tag` last, not Equal/Hash classes. Prefer constructors over handwritten `{ _tag }` objects and omit absent optionals.
+
+- 5ff44d6: Upgrade the coordinated Effect runtime and platform dependencies to 4.0.0-rc.115. Hosts must use the matching Effect version.
+
+  Adopt rc.115 schema-order construction, including `_tag` first: JSON field values and optional presence remain unchanged, but serialized property order can change. Schema errors now use the rc.115 native Error/SchemaIssue representation. Preserve strict Calendar boundary validation, closed empty tool schemas, portable custom JSON Schema output, and explicit WebSocket close semantics.
+
+  Contributor property tests use native Effect arbitraries and Vitest 5. See the migration guide for API replacements and JSON Schema definition-name changes.
+
+- 00e4d60: Add OpenCode Go API-key provider support for host-selected Chat Completions, Anthropic Messages, and OpenAI Responses protocols, with explicit output limits and native tool/reasoning handling.
+
+  Add best-effort Go subscription usage snapshots for rolling, weekly, and monthly allowance windows using the fixed API-key usage endpoint. Hosts retain credential, model, polling, and UI policy.
+
+  Share Anthropic lowering/parsing without applying Claude OAuth fingerprints to Go. Reject filtered Messages output and ignore frames after terminal completion. Sanitize Go provider errors while preserving classified metadata.
+
+- 5ff44d6: `WebRtcPeerConnectionLike.addTrack` on `@yolk-sdk/agent/voice/browser` is a void command (was unused `unknown`). Hosts and fakes must not read a sender. Real `RTCPeerConnection.addTrack` remains assignable. No export-map change.
+
+  Voice raw-argument JSON on `@yolk-sdk/agent/voice`: `protocolToolCallFromVoice` and `decideVoiceToolCall` admit finite JSON. Actual `null` / `false` / `0` still admit as those values. Raw text `1e999` uses the existing malformed fallbacks instead of publishing `Infinity` (projection params `'1e999'`; approval display `{ argumentsJson: '1e999' }`). Nested overflow takes the same fallbacks. Do not demonstrate with `JSON.stringify(Infinity)` (that is `null`). Execution schema validation and approval identifiers/gates are unchanged.
+
+  `@yolk-sdk/mcp/client` and `@yolk-sdk/mcp/protocol` export Schema owners `InitializeClientInfo`, `InitializeParams`, `InitializedNotification`, and `ToolsCallParams`. Prefer Schema owners for new construction. Compatibility `makeJsonRpcRequest`, `makeInitializeParams`, and `makeInitializedNotification` remain and omit `params` when `undefined`. No new export subpath.
+
+- 5ff44d6: **Breaking type imports** (runtime and wire unchanged; no compatibility aliases):
+
+  - `LoopConfigShape` → `LoopConfigSettings` from `@yolk-sdk/agent/loop`
+  - `RunStoreShape` → `RunStoreApi` from `@yolk-sdk/harness/store`
+  - `InboxShape` → `InboxApi` from `@yolk-sdk/harness/inbox`
+  - `DriverShape` → `DriverApi` from `@yolk-sdk/harness/driver`
+
+  ```ts
+  import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
+  import type { RunStoreApi } from '@yolk-sdk/harness/store'
+  import type { InboxApi } from '@yolk-sdk/harness/inbox'
+  import type { DriverApi } from '@yolk-sdk/harness/driver'
+  ```
+
+- 5ff44d6: Breaking: `OpenAiProviderConfig.extraBody` takes JSON-object input (`OpenAiRequestExtras`). Untyped runtime input is still snapshotted and validated at request lowering; layer creation stays Effect-lazy and does not walk extras or credentials.
+
+  Admission copies own data properties once (cycle-stack + DAG memo), then uses that snapshot. Surviving accessors, functions, `undefined`, nonfinite numbers, cycles, arrays-at-root, `null`, primitives, Date/Map, and class/custom-prototype objects fail non-retryable `LLMError` `provider_error` with a fixed `Invalid … extraBody JSON: expected a JSON object` message that does not echo values. Canonical keys `model`, `messages`, `stream`, `tools`, `parallel_tool_calls`, `max_completion_tokens`, and `max_tokens` — plus `reasoning` when `reasoningEffortFormat` is `'reasoning-object'` — are omitted by key without reading values. JSON `null`/`false`/`0`, own `__proto__`/`constructor` keys, dense arrays, and DAG aliases are kept. Identity is not preserved: extras on the request are a snapshot. Composed-body `Schema.Json` serialization after lone-surrogate rewrite remains the last finite-JSON defense. Vercel AI Gateway emits JSON `models` / `providerOptions` as `OpenAiRequestExtras`.
+
+  Migrate hosts: pass portable JSON objects only; do not rely on live getters, class instances, or serialize-time extraBody validation. See the agent README and migration guide for the new admission boundary.
+
+- 5ff44d6: `ToolDef.parameters` admits a JSON Schema **representation** at construction: boolean schema or plain JSON object (unknown annotation keywords allowed as JSON). This is not meta-schema validation and is not `Schema.Json` for tool call params, results, or HITL — those stay opaque.
+
+  Admission is identity-preserving (not a Record snapshot): enumerable data-only own string keys, including own `__proto__`/`constructor`, dense `Array.prototype` arrays, primitives, null-prototype objects, and DAG aliases. Accessors are rejected from property descriptors and are not invoked. Cycles, nonfinite numbers, functions, `undefined` values, Date/Map/class/custom prototypes, and sparse arrays fail before a tool runs. Effect/Result decoding reports `SchemaError`; synchronous `ToolDef.make` and `makeTool`'s generated-document admission throw the installed Effect constructor's `Error` shape with a `SchemaIssue` cause. Proxy traps on `ownKeys`/`getOwnPropertyDescriptor` are not claimed immune.
+
+  Background activation wraps boolean `true`/`false` parameter documents as `arguments` schemas (not `{}`). Unsupported `$ref`/resource keywords still fail only at activation.
+
+  MCP `tools/list` `inputSchema` admits the object arm at decode (`McpError` `validation`). Boolean MCP input schemas are rejected there. Omitted MCP input schemas still default to `{ type: 'object', additionalProperties: true }`.
+
+- 5ff44d6: Voice sessions are now an injectable Effect resource graph instead of a React-owned factory trio.
+
+  This is a breaking 0.x change: `makeVoiceController` no longer accepts a `transport` value and instead yields `VoiceTransport`. Hosts that already have an API value should `Effect.provideService(VoiceTransport, transport)` or pass `Layer.succeed(VoiceTransport, transport)` into `VoiceSession.layer`. `Layer.succeed` injects a caller-owned transport and does not allocate or finalize it.
+
+  - New `VoiceSession` (`@yolk-sdk/agent/voice`) composes one session from a supplied transport layer, `VoiceController`, and optional `eventLog`. Configured durable logging is session-owned: controller events are captured even without an external `events` consumer, and omitting `eventLog` never reads an ambient `VoiceEventOutbox`.
+  - `webRtcVoiceTransportLayer` and `webSocketVoiceTransportLayer` publish a connected transport as `VoiceTransport`. `VoiceController.layer` / `VoiceEventOutbox.layer` wrap the existing scoped factories.
+  - `useYolkVoice` still owns UI state, latest callbacks, HITL helpers, attempt cancellation, and audio-element identity. It no longer imports service constructors; each `start()` provides a fresh `VoiceSession.layer`.
+
+- 5ff44d6: Claude lowering requires `ToolDef.parameters` and `ToolCall.params` to decode as `Schema.Json`; non-JSON fails non-retryable `LLMError` `provider_error`. Lone-surrogate rewrite is re-decoded as JSON (failure, not skip). HTTP non-JSON errors still classify from status.
+
+  `useAgentChat` dispatches/returns the existing `AgentChatAction` and hook-result constructors (`Data.taggedEnum` plains, `_tag` last, not Equal/Hash classes). Prefer constructors and `$is`; omit absent optionals. `Schema.TaggedStruct.make` still validates duration plains.
+
+- 5ff44d6: OpenAI Chat Completions and Responses admit `ToolDef.parameters` and tool-call `params` as `Schema.Json` before transport. Non-JSON fails non-retryable `LLMError` `provider_error`. `ToolDef.parameters` admits a `ToolJsonSchema` representation at construction; tool-call params and results stay opaque. Public Codex `OpenAiCodexTool.parameters` remains `unknown`. Inbound HTTP JSON and Responses SSE JSON admit `Schema.Json`; non-object SSE JSON is ignored, malformed non-JSON event text fails `invalid_response`, and HTTP error bodies stay raw text.
+
+  `OpenAiProviderConfig.extraBody` now takes `OpenAiRequestExtras` JSON-object input, also used by Gateway. Request lowering snapshots surviving fields and discards canonical keys without reading their values. Surviving accessors and non-JSON values fail non-retryable `provider_error` with `Invalid … extraBody JSON: expected a JSON object`; getters are not invoked. Composed-body `Schema.Json` serialization after lone-surrogate rewriting remains the final finite-JSON defense.
+
+  Public Realtime `OpenAiRealtimeFunctionTool.parameters` and `openAiRealtimeToolParameters` now require `Schema.Json`. Non-JSON advertisement fails `VoiceToolBridgeError` (sync throw / Effect fail). Mapper defects stay defects. Union-root lowering merges own `__proto__` / `constructor` via `Map`.
+
+  Gmail `get_thread` / `list_attachments` MIME `payload` admits `Schema.Json` after JSON parse. Best-effort optional size omission and sibling preservation are unchanged. Raw HTTP `1e999` → `Infinity` rejects the whole payload (`ConnectorError` `validation_failed`). Public Gmail action classes and `gmail.get_attachment` are unchanged.
+
+### Patch Changes
+
+- 5ff44d6: Tighten `makeTool({ invalidParamsMessage })` on `@yolk-sdk/agent/tools` to
+  `(error: Schema.SchemaError) => string`. Default remains
+  `Invalid ${name} arguments: ${String(error)}`, including the `SchemaError(...)` wrapper.
+  In Effect rc.115, `SchemaError` extends native `Error`, but the wrapper remains part of this
+  tool-message contract; do not default to `.message`. Existing
+  `(error: unknown) => string` callbacks remain assignable. No new export subpath.
+
+  Tighten `commitThenWriteTerminalEvent({ writeCommitError })` on `@yolk-sdk/vercel-workflows` to
+  the existing `CommitError` generic from `commit`. Result `commitError` / `error` fields stay
+  `unknown`. Existing `(error: unknown) => …` callbacks remain assignable. No generic expansion.
+
+- 5ff44d6: Keep each Workflow tool-batch HITL response array independent from the loop's accumulator, preserving response order and element identity. Normalize custom React chat transport rejections through the existing transport error owner, retaining their underlying cause and recognizing aborts.
+
+  Return a JSON-RPC invalid-request response when a legacy MCP HTTP request body cannot be read. Precisely narrow missing-sandbox SDK errors to HTTP 404/410 without assuming an object-shaped error payload or discarding other API errors.
+
 ## 0.1.0-canary.77
 
 ### Minor Changes
@@ -289,6 +380,7 @@
 ### Patch Changes
 
 - Voice as a first-class agent modality in `@yolk-sdk/agent`:
+
   - `@yolk-sdk/agent/voice`: provider-neutral voice protocol, client controller, server tool handler with approval HITL, transcript projection, durable voice event ids, WebSocket transport, and one-shot TTS/STT service contracts (`VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest.instructions` for delivery-style steering).
   - `@yolk-sdk/agent/voice/browser`: Effect-native browser WebRTC voice transport with a fakeable runtime seam.
   - `@yolk-sdk/agent/voice/react`: headless `useYolkVoice` browser hook.
