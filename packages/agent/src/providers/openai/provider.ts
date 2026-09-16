@@ -906,11 +906,13 @@ const initialOpenAiChatStreamState: OpenAiChatStreamState = {
   usage: undefined
 }
 
-// Split on blank lines in any newline style. Only CRLF pairs normalize: a
-// chunk-ending lone CR stays pending so a split CRLF (or CR + multiline
-// continuation) cannot form a false event boundary before the rest arrives.
+// Split on blank lines in any newline style. Only CRLF pairs normalize, so a
+// chunk-ending lone CR stays pending and a split CRLF (or CR + multiline
+// continuation) cannot form a false event boundary. A \r\n surviving
+// normalization always spans two original breaks (a lone CR plus a collapsed
+// pair or lone LF), so recognizing it cannot re-split an atomic CRLF.
 const splitCompleteChatSseBlocks = (buffer: string) => {
-  const blocks = buffer.replace(/\r\n/g, '\n').split(/\n\n|\n\r|\r\r/)
+  const blocks = buffer.replace(/\r\n/g, '\n').split(/\n\n|\n\r|\r\r|\r\n/)
   const tail = blocks.at(-1) ?? ''
 
   return { completeBlocks: blocks.slice(0, -1), tail }
