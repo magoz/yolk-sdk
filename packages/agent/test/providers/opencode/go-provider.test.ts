@@ -35,13 +35,21 @@ const input: LLMRequest = {
   tools: []
 }
 
-const sse = (events: ReadonlyArray<unknown>) =>
-  new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''))
+const sse = (events: ReadonlyArray<unknown>, done = false) =>
+  new Response(
+    [
+      ...events.map(event => `data: ${JSON.stringify(event)}\n\n`),
+      ...(done ? ['data: [DONE]\n\n'] : [])
+    ].join('')
+  )
 
 const success = (protocol: OpenCodeGoProtocol) => {
   switch (protocol) {
     case 'chat-completions':
-      return Response.json({ choices: [{ message: { content: 'Hello' }, finish_reason: 'stop' }] })
+      return sse(
+        [{ choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] }],
+        true
+      )
     case 'messages':
       return sse([
         { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello' } },
@@ -202,7 +210,7 @@ describe('OpenCode Go', () => {
               }
             : {
                 authorization: 'Bearer go-key',
-                accept: protocol === 'responses' ? 'text/event-stream' : 'application/json'
+                accept: 'text/event-stream'
               })
         })
         const body = bodyOf(requests)
@@ -229,7 +237,8 @@ describe('OpenCode Go', () => {
                 { role: 'user', content: 'Hello' }
               ],
               max_tokens: 2048,
-              stream: false,
+              stream: true,
+              stream_options: { include_usage: true },
               reasoning_effort: 'high'
             })),
             Match.exhaustive
@@ -413,30 +422,36 @@ describe('OpenCode Go', () => {
     Effect.gen(function* () {
       const events = yield* run(
         'chat-completions',
-        Response.json({
-          choices: [
+        sse(
+          [
+            { choices: [{ delta: { reasoning_content: 'Search first.' } }] },
             {
-              finish_reason: 'tool_calls',
-              message: {
-                content: null,
-                reasoning_content: 'Search first.',
-                tool_calls: [
-                  {
-                    id: call.id,
-                    type: 'function',
-                    function: { name: tool.name, arguments: '{"query":"yolk"}' }
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: call.id,
+                        function: { name: tool.name, arguments: '{"query":"yolk"}' }
+                      }
+                    ]
                   }
-                ]
+                }
+              ]
+            },
+            {
+              choices: [{ delta: {}, finish_reason: 'tool_calls' }],
+              usage: {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                prompt_tokens_details: { cached_tokens: 2 },
+                completion_tokens_details: { reasoning_tokens: 3 }
               }
             }
           ],
-          usage: {
-            prompt_tokens: 10,
-            completion_tokens: 5,
-            prompt_tokens_details: { cached_tokens: 2 },
-            completion_tokens_details: { reasoning_tokens: 3 }
-          }
-        }),
+          true
+        ),
         []
       )
 

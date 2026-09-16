@@ -1,4 +1,4 @@
-import { Config, Context, Effect, Layer, Match, Option, Predicate, Redacted, Stream } from 'effect'
+import { Config, Context, Effect, Layer, Match, Option, Predicate, Redacted, Ref, Stream } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -213,6 +213,11 @@ export type OpenAiProviderConfig = {
   readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
   /** Preserve compatible models' reasoning_content output and assistant replay. */
   readonly reasoningContent?: boolean
+  /**
+   * Request incremental server-sent deltas instead of one JSON body. Hosts
+   * must only enable this against endpoints that serve chat SSE.
+   */
+  readonly streaming?: boolean
   /** Customizes safe error metadata for a branded OpenAI-compatible endpoint. */
   readonly providerIdentity?: OpenAiProviderIdentity
   readonly apiKey: Redacted.Redacted<string>
@@ -266,7 +271,10 @@ type OpenAiRequestBody = {
   readonly messages: ReadonlyArray<OpenAiMessage>
   readonly max_completion_tokens?: number
   readonly max_tokens?: number
-  readonly stream: false
+  readonly stream: boolean
+  readonly stream_options?: {
+    readonly include_usage: boolean
+  }
   readonly reasoning?: {
     readonly effort: AgentReasoningEffort
   }
@@ -281,6 +289,7 @@ type OpenAiRequestBodyConfig = {
   readonly extraBody?: unknown
   readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
   readonly reasoningContent?: boolean
+  readonly streaming?: boolean
   readonly providerName?: string
 }
 
@@ -291,6 +300,7 @@ type OpenAiRequestBodyConfigFields = {
   extraBody?: OpenAiRequestBodyConfig['extraBody']
   reasoningEffortFormat?: OpenAiRequestBodyConfig['reasoningEffortFormat']
   reasoningContent?: boolean
+  streaming?: boolean
 }
 
 const defaultOpenAiProviderIdentity: OpenAiProviderIdentity = {
@@ -348,6 +358,42 @@ class OpenAiChatCompletionResponse extends Schema.Class<OpenAiChatCompletionResp
 )({
   choices: Schema.Array(OpenAiChoiceResponse),
   usage: Schema.optional(OpenAiUsageResponse)
+}) {}
+
+class OpenAiChatDeltaFunction extends Schema.Class<OpenAiChatDeltaFunction>(
+  'OpenAiChatDeltaFunction'
+)({
+  name: Schema.optional(Schema.String),
+  arguments: Schema.optional(Schema.String)
+}) {}
+
+class OpenAiChatDeltaToolCall extends Schema.Class<OpenAiChatDeltaToolCall>(
+  'OpenAiChatDeltaToolCall'
+)({
+  index: Schema.optional(Schema.Number),
+  id: Schema.optional(Schema.String),
+  function: Schema.optional(OpenAiChatDeltaFunction)
+}) {}
+
+class OpenAiChatDelta extends Schema.Class<OpenAiChatDelta>('OpenAiChatDelta')({
+  content: Schema.optional(Schema.NullOr(Schema.String)),
+  reasoning_content: Schema.optional(Schema.Unknown),
+  tool_calls: Schema.optional(Schema.Array(OpenAiChatDeltaToolCall))
+}) {}
+
+class OpenAiChatStreamChoice extends Schema.Class<OpenAiChatStreamChoice>(
+  'OpenAiChatStreamChoice'
+)({
+  delta: Schema.optional(OpenAiChatDelta),
+  finish_reason: Schema.optional(Schema.NullOr(Schema.String)),
+  usage: Schema.optional(Schema.Unknown)
+}) {}
+
+class OpenAiChatStreamChunk extends Schema.Class<OpenAiChatStreamChunk>(
+  'OpenAiChatStreamChunk'
+)({
+  choices: Schema.optional(Schema.Array(OpenAiChatStreamChoice)),
+  usage: Schema.optional(Schema.Unknown)
 }) {}
 
 class OpenAiConfig extends Context.Service<OpenAiConfig, OpenAiProviderConfig>()(
@@ -719,14 +765,27 @@ export const toOpenAiRequestBody = (
         ? {}
         : yield* snapshotOpenAiRequestExtras(config.extraBody, config, providerName)
 
-    const bodyWithoutTools: OpenAiRequestBody = {
-      ...extraBody,
-      ...reasoning,
-      model: request.model,
-      messages,
-      ...completionTokenLimit,
-      stream: false
-    }
+    const streaming = config.streaming === true
+
+    // Usage only arrives on the stream when the endpoint is asked for it.
+    const bodyWithoutTools: OpenAiRequestBody = streaming
+      ? {
+          ...extraBody,
+          ...reasoning,
+          model: request.model,
+          messages,
+          ...completionTokenLimit,
+          stream: true,
+          stream_options: { include_usage: true }
+        }
+      : {
+          ...extraBody,
+          ...reasoning,
+          model: request.model,
+          messages,
+          ...completionTokenLimit,
+          stream: false
+        }
 
     const body: OpenAiRequestBody =
       request.tools.length === 0
@@ -820,6 +879,351 @@ const toAgentUsage = (usage: OpenAiUsageResponse) =>
     })
   })
 
+type OpenAiChatStreamToolCall = {
+  readonly index: number
+  readonly id: string | undefined
+  readonly name: string | undefined
+  readonly arguments: string
+}
+
+type OpenAiChatStreamState = {
+  readonly buffer: string
+  readonly toolCalls: ReadonlyArray<OpenAiChatStreamToolCall>
+  readonly finishReason: string | undefined
+  readonly hasTerminal: boolean
+  readonly usage: unknown
+}
+
+const initialOpenAiChatStreamState: OpenAiChatStreamState = {
+  buffer: '',
+  toolCalls: [],
+  finishReason: undefined,
+  hasTerminal: false,
+  usage: undefined
+}
+
+const normalizeChatStreamNewlines = (text: string) =>
+  text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+
+const splitCompleteChatSseBlocks = (buffer: string) => {
+  const blocks = buffer.split('\n\n')
+  const tail = blocks.at(-1) ?? ''
+
+  return { completeBlocks: blocks.slice(0, -1), tail }
+}
+
+const chatSseBlockData = (block: string) => {
+  const lines = block
+    .split('\n')
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trimStart())
+
+  return {
+    done: lines.some(line => line === '[DONE]'),
+    payloads: lines.filter(line => line.length > 0 && line !== '[DONE]')
+  }
+}
+
+const chatStreamError = (
+  providerIdentity: OpenAiProviderIdentity,
+  raw: string
+): Effect.Effect<never, LLMError> =>
+  Effect.gen(function* () {
+    const errorCode = yield* decodeOpenAiHttpErrorCode(raw)
+
+    const provider = classifyProviderFailure({
+      provider: providerIdentity.id,
+      body: raw,
+      providerCode: errorCode
+    })
+
+    return yield* Effect.fail(
+      new LLMError({
+        cause: 'provider_error',
+        message: `${providerIdentity.name} stream reported an error`,
+        retryable: false,
+        provider
+      })
+    )
+  })
+
+const mergeChatToolCallDelta = (
+  toolCalls: ReadonlyArray<OpenAiChatStreamToolCall>,
+  delta: typeof OpenAiChatDeltaToolCall.Type
+): ReadonlyArray<OpenAiChatStreamToolCall> => {
+  const index = delta.index ?? 0
+  const current = toolCalls.find(call => call.index === index)
+
+  const merged = {
+    index,
+    id: delta.id ?? current?.id,
+    name: delta.function?.name ?? current?.name,
+    arguments: `${current?.arguments ?? ''}${delta.function?.arguments ?? ''}`
+  }
+
+  return [...toolCalls.filter(call => call.index !== index), merged]
+}
+
+const decodeChatDeltaReasoning = (
+  providerIdentity: OpenAiProviderIdentity,
+  reasoning: unknown
+): Effect.Effect<string, LLMError> =>
+  Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(reasoning).pipe(
+    Effect.map(value => value ?? ''),
+    Effect.mapError(
+      schemaErrorToLlmError('invalid_response', `Invalid ${providerIdentity.name} reasoning content`)
+    )
+  )
+
+type OpenAiChatStreamStep = {
+  readonly state: OpenAiChatStreamState
+  readonly events: ReadonlyArray<LLMEvent>
+}
+
+const processChatStreamPayload = (
+  providerIdentity: OpenAiProviderIdentity,
+  reasoningContent: boolean,
+  state: OpenAiChatStreamState,
+  payload: string
+): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
+  Effect.gen(function* () {
+    const parsed = yield* Schema.decodeUnknownEffect(JsonFromJsonString)(payload).pipe(
+      Effect.mapError(
+        schemaErrorToLlmError(
+          'invalid_response',
+          `Could not parse ${providerIdentity.name} stream event JSON`
+        )
+      )
+    )
+
+    const envelope = isJsonRecord(parsed) ? jsonRecordField(parsed, 'error') : undefined
+
+    if (envelope !== undefined && isJsonRecord(envelope)) {
+      return yield* chatStreamError(providerIdentity, payload)
+    }
+
+    const chunk = yield* Schema.decodeUnknownEffect(OpenAiChatStreamChunk)(parsed).pipe(
+      Effect.mapError(
+        schemaErrorToLlmError('invalid_response', `Invalid ${providerIdentity.name} stream event`)
+      )
+    )
+
+    const events: Array<LLMEvent> = []
+    let toolCalls = state.toolCalls
+    let finishReason = state.finishReason
+    let usage = state.usage
+
+    for (const choice of chunk.choices ?? []) {
+      if (choice.delta?.content) {
+        events.push(LLMTextDelta.make({ text: choice.delta.content }))
+      }
+
+      if (reasoningContent && choice.delta?.reasoning_content != null) {
+        const reasoning = yield* decodeChatDeltaReasoning(
+          providerIdentity,
+          choice.delta.reasoning_content
+        )
+
+        if (reasoning.length > 0) events.push(LLMReasoningDelta.make({ text: reasoning }))
+      }
+
+      for (const call of choice.delta?.tool_calls ?? []) {
+        toolCalls = mergeChatToolCallDelta(toolCalls, call)
+      }
+
+      if (
+        choice.finish_reason !== undefined &&
+        choice.finish_reason !== null &&
+        finishReason === undefined
+      ) {
+        finishReason = choice.finish_reason
+      }
+
+      if (choice.usage !== undefined) usage = choice.usage
+    }
+
+    if (chunk.usage !== undefined) usage = chunk.usage
+
+    return {
+      state: {
+        ...state,
+        toolCalls,
+        finishReason,
+        hasTerminal: state.hasTerminal || finishReason !== undefined,
+        usage
+      },
+      events
+    }
+  })
+
+const processChatStreamBlock = (
+  providerIdentity: OpenAiProviderIdentity,
+  reasoningContent: boolean,
+  state: OpenAiChatStreamState,
+  block: string
+): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
+  Effect.gen(function* () {
+    const { done, payloads } = chatSseBlockData(block)
+    let current: OpenAiChatStreamState = done ? { ...state, hasTerminal: true } : state
+    const events: Array<LLMEvent> = []
+
+    for (const payload of payloads) {
+      const step = yield* processChatStreamPayload(providerIdentity, reasoningContent, current, payload)
+      current = step.state
+      events.push(...step.events)
+    }
+
+    return { state: current, events }
+  })
+
+const processChatStreamText = (
+  providerIdentity: OpenAiProviderIdentity,
+  reasoningContent: boolean,
+  state: OpenAiChatStreamState,
+  text: string
+): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
+  Effect.gen(function* () {
+    const split = splitCompleteChatSseBlocks(normalizeChatStreamNewlines(`${state.buffer}${text}`))
+    let current: OpenAiChatStreamState = { ...state, buffer: split.tail }
+    const events: Array<LLMEvent> = []
+
+    for (const block of split.completeBlocks) {
+      const step = yield* processChatStreamBlock(providerIdentity, reasoningContent, current, block)
+      current = step.state
+      events.push(...step.events)
+    }
+
+    return { state: current, events }
+  })
+
+const finalizeChatStreamState = (
+  providerIdentity: OpenAiProviderIdentity,
+  state: OpenAiChatStreamState
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.gen(function* () {
+    if (!state.hasTerminal) {
+      return yield* Effect.fail(
+        new LLMError({
+          cause: 'invalid_response',
+          message: `${providerIdentity.name} stream ended before a terminal chunk`,
+          retryable: false,
+          provider: providerErrorInfo({
+            provider: providerIdentity.id,
+            kind: 'invalid_response',
+            providerCode: 'incomplete_stream'
+          })
+        })
+      )
+    }
+
+    if (state.finishReason === 'length' || state.finishReason === 'content_filter') {
+      return yield* Effect.fail(
+        new LLMError({
+          cause: 'invalid_response',
+          message: `${providerIdentity.name} response stopped with ${state.finishReason}`,
+          retryable: false,
+          provider: providerErrorInfo({
+            provider: providerIdentity.id,
+            kind: 'invalid_response',
+            providerCode: state.finishReason
+          })
+        })
+      )
+    }
+
+    if (
+      state.finishReason !== undefined &&
+      state.finishReason !== 'stop' &&
+      state.finishReason !== 'tool_calls'
+    ) {
+      const provider = classifyProviderFailure({
+        provider: providerIdentity.id,
+        body: state.finishReason,
+        providerCode: state.finishReason
+      })
+
+      return yield* Effect.fail(
+        new LLMError({
+          cause: 'provider_error',
+          message: `${providerIdentity.name} stream stopped with ${state.finishReason}`,
+          retryable: false,
+          provider
+        })
+      )
+    }
+
+    const orderedCalls = [...state.toolCalls].sort((left, right) => left.index - right.index)
+
+    const toolCallEvents = yield* Effect.forEach(orderedCalls, call => {
+      const id = call.id
+      const name = call.name
+
+      if (id === undefined || name === undefined) {
+        return Effect.fail(
+          new LLMError({
+            cause: 'invalid_response',
+            message: `Invalid ${providerIdentity.name} streamed tool call`,
+            retryable: false
+          })
+        )
+      }
+
+      return parseToolArguments(call.arguments, providerIdentity.name).pipe(
+        Effect.map(params => LLMToolCall.make({ call: ToolCall.make({ id, name, params }) }))
+      )
+    })
+
+    const events: Array<LLMEvent> = [...toolCallEvents]
+
+    events.push(LLMDone.make({ stopReason: toolCallEvents.length > 0 ? 'tool_use' : 'stop' }))
+
+    if (state.usage !== undefined) {
+      const usage = yield* Schema.decodeUnknownEffect(OpenAiUsageResponse)(state.usage).pipe(
+        Effect.mapError(
+          schemaErrorToLlmError('invalid_response', `Invalid ${providerIdentity.name} stream usage`)
+        )
+      )
+
+      events.push(LLMUsage.make({ usage: toAgentUsage(usage) }))
+    }
+
+    return events
+  })
+
+const streamOpenAiChatResponse = (
+  providerIdentity: OpenAiProviderIdentity,
+  reasoningContent: boolean,
+  response: HttpClientResponse.HttpClientResponse
+): Stream.Stream<LLMEvent, LLMError> =>
+  Stream.unwrap(
+    Ref.make(initialOpenAiChatStreamState).pipe(
+      Effect.map(stateRef => {
+        const chunks = response.stream.pipe(
+          Stream.mapError(toHttpClientLlmError(providerIdentity, true)),
+          Stream.decodeText,
+          Stream.mapEffect(chunk =>
+            Effect.gen(function* () {
+              const state = yield* Ref.get(stateRef)
+              const step = yield* processChatStreamText(providerIdentity, reasoningContent, state, chunk)
+              yield* Ref.set(stateRef, step.state)
+
+              return step.events
+            })
+          ),
+          Stream.flatMap(events => Stream.fromIterable(events))
+        )
+
+        const finalEvents = Stream.fromEffect(
+          Ref.get(stateRef).pipe(
+            Effect.flatMap(state => finalizeChatStreamState(providerIdentity, state))
+          )
+        ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
+
+        return chunks.pipe(Stream.concat(finalEvents))
+      })
+    )
+  )
+
 const toHttpClientLlmError =
   (providerIdentity: OpenAiProviderIdentity, retryable: boolean) =>
   (error: HttpClientError.HttpClientError) =>
@@ -856,64 +1260,64 @@ const parseOpenAiResponseJson = (
     )
   })
 
-const sendOpenAiRequest = (
+const openAiRequestBodyFields = (
   config: OpenAiProviderConfig,
-  request: LLMRequest,
+  providerIdentity: OpenAiProviderIdentity
+): OpenAiRequestBodyConfigFields => {
+  const fields: OpenAiRequestBodyConfigFields = {
+    maxCompletionTokens: config.maxCompletionTokens,
+    providerName: providerIdentity.name
+  }
+
+  if (config.completionTokenField !== undefined) {
+    fields.completionTokenField = config.completionTokenField
+  }
+
+  if (config.extraBody !== undefined) {
+    fields.extraBody = config.extraBody
+  }
+
+  if (config.reasoningEffortFormat !== undefined) {
+    fields.reasoningEffortFormat = config.reasoningEffortFormat
+  }
+
+  if (config.reasoningContent !== undefined) {
+    fields.reasoningContent = config.reasoningContent
+  }
+
+  if (config.streaming !== undefined) {
+    fields.streaming = config.streaming
+  }
+
+  return fields
+}
+
+const serializeOpenAiRequestBody = (
+  body: OpenAiRequestBody,
+  providerName: string
+): Effect.Effect<string, LLMError> =>
+  // Replayed transcripts can carry lone surrogates; harden the lowered
+  // body so one bad historical string cannot poison every model call.
+  Schema.decodeUnknownEffect(Schema.Json)(replaceLoneSurrogatesDeep(body)).pipe(
+    Effect.mapError(
+      schemaErrorToLlmError('provider_error', `Could not serialize ${providerName} request`)
+    ),
+    Effect.flatMap(json => encodeJsonString(json, `Could not serialize ${providerName} request`))
+  )
+
+const postOpenAiRequest = (
+  config: OpenAiProviderConfig,
+  providerIdentity: OpenAiProviderIdentity,
+  serializedBody: string,
   client: HttpClient.HttpClient
-): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
-    const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
-
-    const body = yield* toOpenAiRequestBody(
-      request,
-      (() => {
-        const fields: OpenAiRequestBodyConfigFields = {
-          maxCompletionTokens: config.maxCompletionTokens,
-          providerName: providerIdentity.name
-        }
-
-        if (config.completionTokenField !== undefined) {
-          fields.completionTokenField = config.completionTokenField
-        }
-
-        if (config.extraBody !== undefined) {
-          fields.extraBody = config.extraBody
-        }
-
-        if (config.reasoningEffortFormat !== undefined) {
-          fields.reasoningEffortFormat = config.reasoningEffortFormat
-        }
-
-        if (config.reasoningContent !== undefined) {
-          fields.reasoningContent = config.reasoningContent
-        }
-
-        return fields
-      })()
-    )
-
-    // Replayed transcripts can carry lone surrogates; harden the lowered
-    // body so one bad historical string cannot poison every model call.
-    const serializedBody = yield* Schema.decodeUnknownEffect(Schema.Json)(
-      replaceLoneSurrogatesDeep(body)
-    ).pipe(
-      Effect.mapError(
-        schemaErrorToLlmError(
-          'provider_error',
-          `Could not serialize ${providerIdentity.name} request`
-        )
-      ),
-      Effect.flatMap(json =>
-        encodeJsonString(json, `Could not serialize ${providerIdentity.name} request`)
-      )
-    )
-
     const httpRequest = HttpClientRequest.post(
       config.chatCompletionsUrl ?? 'https://api.openai.com/v1/chat/completions'
     ).pipe(
       HttpClientRequest.setHeaders({
         ...config.extraHeaders,
-        accept: 'application/json',
+        accept: config.streaming === true ? 'text/event-stream' : 'application/json',
         authorization: `Bearer ${Redacted.value(config.apiKey)}`,
         'content-type': 'application/json'
       }),
@@ -956,6 +1360,29 @@ const sendOpenAiRequest = (
       )
     }
 
+    return response
+  })
+
+const sendOpenAiRequestBody = (
+  config: OpenAiProviderConfig,
+  request: LLMRequest,
+  providerIdentity: OpenAiProviderIdentity
+): Effect.Effect<string, LLMError> =>
+  Effect.gen(function* () {
+    const body = yield* toOpenAiRequestBody(request, openAiRequestBodyFields(config, providerIdentity))
+
+    return yield* serializeOpenAiRequestBody(body, providerIdentity.name)
+  })
+
+const sendOpenAiRequest = (
+  config: OpenAiProviderConfig,
+  request: LLMRequest,
+  client: HttpClient.HttpClient
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.gen(function* () {
+    const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
+    const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity)
+    const response = yield* postOpenAiRequest(config, providerIdentity, serializedBody, client)
     const json = yield* parseOpenAiResponseJson(response, providerIdentity.name)
 
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiChatCompletionResponse)(json).pipe(
@@ -987,6 +1414,32 @@ const sendOpenAiRequest = (
     Effect.withSpan(`${config.providerIdentity?.id ?? defaultOpenAiProviderIdentity.id}.stream`)
   )
 
+const streamOpenAiRequest = (
+  config: OpenAiProviderConfig,
+  request: LLMRequest,
+  client: HttpClient.HttpClient
+): Stream.Stream<LLMEvent, LLMError> =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
+      const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity)
+      const response = yield* postOpenAiRequest(config, providerIdentity, serializedBody, client)
+
+      return streamOpenAiChatResponse(providerIdentity, config.reasoningContent ?? false, response)
+    })
+  )
+
+const openAiProviderStream = (
+  config: OpenAiProviderConfig,
+  request: LLMRequest,
+  client: HttpClient.HttpClient
+): Stream.Stream<LLMEvent, LLMError> =>
+  config.streaming === true
+    ? streamOpenAiRequest(config, request, client)
+    : Stream.fromEffect(sendOpenAiRequest(config, request, client)).pipe(
+        Stream.flatMap(events => Stream.fromIterable(events))
+      )
+
 export const makeOpenAiProviderLayer = (config: OpenAiProviderConfig) =>
   Layer.effect(
     LLMProvider,
@@ -994,10 +1447,7 @@ export const makeOpenAiProviderLayer = (config: OpenAiProviderConfig) =>
       const client = yield* HttpClient.HttpClient
 
       return LLMProvider.of({
-        stream: request =>
-          Stream.fromEffect(sendOpenAiRequest(config, request, client)).pipe(
-            Stream.flatMap(events => Stream.fromIterable(events))
-          )
+        stream: request => openAiProviderStream(config, request, client)
       })
     })
   )
@@ -1009,10 +1459,7 @@ export const OpenAiProviderLayer = Layer.effect(
     const client = yield* HttpClient.HttpClient
 
     return LLMProvider.of({
-      stream: request =>
-        Stream.fromEffect(sendOpenAiRequest(config, request, client)).pipe(
-          Stream.flatMap(events => Stream.fromIterable(events))
-        )
+      stream: request => openAiProviderStream(config, request, client)
     })
   })
 ).pipe(Layer.provide(Layer.mergeAll(OpenAiConfigLayer, FetchHttpClient.layer)))

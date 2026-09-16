@@ -1,4 +1,5 @@
 import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
+import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -653,6 +654,202 @@ describe('OpenAI provider', () => {
       expect(
         Object.prototype.hasOwnProperty.call(unparsable.provider ?? {}, 'providerCode')
       ).toBe(false)
+    })
+  )
+})
+
+describe('OpenAI provider streaming', () => {
+  const sseStreamResponse = (lines: ReadonlyArray<string>) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+
+          for (const line of lines) controller.enqueue(encoder.encode(line))
+
+          controller.close()
+        }
+      }),
+      { status: 200, headers: { 'content-type': 'text/event-stream' } }
+    )
+
+  const chatSse = (payloads: ReadonlyArray<unknown>, done = true) =>
+    sseStreamResponse([
+      ...payloads.map(payload => `data: ${JSON.stringify(payload)}\n\n`),
+      ...(done ? ['data: [DONE]\n\n'] : [])
+    ])
+
+  const chatChunk = (delta: unknown, finishReason: string | null = null) => ({
+    choices: [{ delta, finish_reason: finishReason }]
+  })
+
+  const makeStreamingProviderLayer = (
+    httpClientLayer: Layer.Layer<HttpClient.HttpClient>,
+    reasoningContent = false
+  ) =>
+    makeOpenAiProviderLayer({
+      apiKey: Redacted.make('test-key'),
+      maxCompletionTokens: openAiTestMaxOutputTokens,
+      reasoningContent,
+      streaming: true
+    }).pipe(Layer.provide(httpClientLayer))
+
+  const collectStreamEvents = (response: Response, reasoningContent = false) =>
+    Effect.gen(function* () {
+      const provider = yield* LLMProvider
+
+      return yield* provider
+        .stream({
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: [],
+          model: 'gpt-test',
+          systemPrompt: 'Be brief.'
+        })
+        .pipe(Stream.runCollect)
+    }).pipe(Effect.provide(makeStreamingProviderLayer(makeHttpClientLayer(response, []), reasoningContent)))
+
+  it.effect('streams text deltas and usage to completion', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({ role: 'assistant' }),
+          chatChunk({ content: 'Hello' }),
+          chatChunk({ content: ' world' }),
+          {
+            choices: [{ delta: {}, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 10, completion_tokens: 5 }
+          }
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hello' },
+        { _tag: 'TextDelta', text: ' world' },
+        { _tag: 'Done', stopReason: 'stop' },
+        { _tag: 'Usage', usage: { input: { total: 10 }, output: { total: 5 } } }
+      ])
+    })
+  )
+
+  it.effect('streams reasoning deltas when reasoning content is enabled', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({ reasoning_content: 'Thinking' }),
+          chatChunk({ content: 'ok' }, 'stop')
+        ]),
+        true
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'ReasoningDelta', text: 'Thinking' },
+        { _tag: 'TextDelta', text: 'ok' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('accumulates split tool calls across chunks', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({ tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search' } }] }),
+          chatChunk({ tool_calls: [{ index: 0, function: { arguments: '{"q' } }] }),
+          chatChunk({ tool_calls: [{ index: 0, function: { arguments: 'uery":"x"}' } }] }),
+          chatChunk({}, 'tool_calls')
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        {
+          _tag: 'ToolCall',
+          call: { id: 'call_1', name: 'search', params: { query: 'x' } }
+        },
+        { _tag: 'Done', stopReason: 'tool_use' }
+      ])
+    })
+  )
+
+  it.effect('fails length finishes without completion', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(chatSse([chatChunk({ content: 'cut' }, 'length')])).pipe(
+        Effect.flip
+      )
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
+      expect(error.message).toContain('length')
+    })
+  )
+
+  it.effect('fails unterminated streams without emitting done', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([chatChunk({ content: 'dangling' })], false)
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: { provider: 'openai', kind: 'invalid_response', providerCode: 'incomplete_stream' }
+      })
+    })
+  )
+
+  it.effect('maps mid-stream error envelopes to coded provider errors', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({ content: 'partial' }),
+          { type: 'error', error: { code: 'upstream_error', message: 'private detail' } }
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'provider_error',
+        retryable: false,
+        provider: { provider: 'openai', providerCode: 'upstream_error' }
+      })
+      expect(error.message).not.toContain('private detail')
+    })
+  )
+
+  it.effect('requests deltas with usage options', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      const layer = makeStreamingProviderLayer(
+        makeHttpClientLayer(chatSse([chatChunk({ content: 'ok' }, 'stop')]), requests)
+      )
+
+      yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-test',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      const rawBody = requests[0]?.request.body
+
+      expect(rawBody?._tag).toBe('Uint8Array')
+
+      if (rawBody?._tag !== 'Uint8Array') {
+        expect.fail('Expected uint8 request body')
+      }
+
+      const body = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(
+        new TextDecoder().decode(rawBody.body)
+      )
+
+      expect(body).toMatchObject({ stream: true, stream_options: { include_usage: true } })
     })
   )
 })
