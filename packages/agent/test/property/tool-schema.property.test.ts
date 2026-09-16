@@ -12,7 +12,8 @@ const schemaVariant = Schema.Literals([
   'flatOptional',
   'nestedStruct',
   'arrayOfStruct',
-  'literalField'
+  'literalField',
+  'unionOfStructs'
 ])
 
 const schemaVariantArbitrary = Arbitrary.schema(schemaVariant)
@@ -23,7 +24,8 @@ const invalidSchemaVariant = Schema.Literals([
   'flatOptional',
   'nestedStruct',
   'arrayOfStruct',
-  'literalField'
+  'literalField',
+  'unionOfStructs'
 ])
 
 const invalidSchemaVariantArbitrary = Arbitrary.schema(invalidSchemaVariant)
@@ -120,6 +122,18 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) => {
         execute: ({ call }) =>
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
+    case 'unionOfStructs':
+      return makeTool({
+        name: 'schema_probe',
+        description: 'Probe schema output.',
+        parameters: Schema.Union([
+          Schema.Struct({ operation: Schema.Literal('upsert'), title: Schema.String }),
+          Schema.Struct({ operation: Schema.Literal('delete'), slug: Schema.String })
+        ]),
+        access: 'write',
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
   }
 }
 
@@ -138,6 +152,8 @@ const validParams = (variant: typeof schemaVariant.Type) => {
       return { items: [{ id: 'item_1' }] }
     case 'literalField':
       return { mode: 'read' }
+    case 'unionOfStructs':
+      return { operation: 'delete', slug: 'note' }
   }
 }
 
@@ -155,6 +171,8 @@ const invalidParams = (variant: typeof invalidSchemaVariant.Type) => {
       return { items: [{ id: 1 }] }
     case 'literalField':
       return { mode: 'delete' }
+    case 'unionOfStructs':
+      return { operation: 'upsert' }
   }
 }
 

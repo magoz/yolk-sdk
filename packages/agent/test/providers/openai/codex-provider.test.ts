@@ -1007,4 +1007,58 @@ describe('OpenAI Codex provider', () => {
       expect(error).toMatchObject({ cause: 'context_overflow', retryable: false })
     })
   )
+
+  it.effect('surfaces machine error codes on HTTP failures without leaking detail', () =>
+    Effect.gen(function* () {
+      const error = yield* collectCodexProviderEvents(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'invalid_request_error',
+              message: 'private upstream detail'
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'provider_error',
+        retryable: false,
+        provider: {
+          provider: 'openai_codex',
+          kind: 'unknown',
+          status: 400,
+          providerCode: 'invalid_request_error'
+        }
+      })
+      expect(error.message).not.toContain('private upstream detail')
+    })
+  )
+
+  it.effect('omits provider codes the envelope does not carry', () =>
+    Effect.gen(function* () {
+      const error = yield* collectCodexProviderEvents(
+        new Response(JSON.stringify({ error: { message: 'private upstream detail' } }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' }
+        })
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        provider: { provider: 'openai_codex', kind: 'unknown', status: 400 }
+      })
+
+      if (!Predicate.isTagged(error, 'LLMError')) {
+        expect.fail('expected LLMError for codeless envelope')
+      }
+
+      expect(
+        Object.prototype.hasOwnProperty.call(error.provider ?? {}, 'providerCode')
+      ).toBe(false)
+      expect(error.message).not.toContain('private upstream detail')
+    })
+  )
 })

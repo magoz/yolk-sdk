@@ -280,6 +280,18 @@ const decodeJsonString = (raw: string, message: string) =>
     Effect.mapError(schemaErrorToLlmError('invalid_response', message))
   )
 
+// Machine error codes are safe to surface in provider metadata. Free-text
+// upstream messages stay out of LLMError per provider sanitization policy.
+const decodeOpenAiHttpErrorCode = (raw: string): Effect.Effect<string | undefined> =>
+  Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
+    Effect.map(parsed => {
+      const error = jsonObjectFromField(parsed, 'error')
+
+      return stringField(error, 'code') ?? stringField(error, 'type')
+    }),
+    Effect.catch(() => Effect.succeed(undefined))
+  )
+
 const unsupportedContentError = (contentType: string, providerName: string) =>
   new LLMError({
     cause: 'provider_error',
@@ -1634,11 +1646,14 @@ const sendOpenAiResponsesRequest = (
         )
       )
 
+      const errorCode = yield* decodeOpenAiHttpErrorCode(errorText)
+
       const provider = classifyProviderFailure({
         provider: config.providerId,
         status: response.status,
         headers: response.headers,
-        body: errorText
+        body: errorText,
+        providerCode: errorCode
       })
 
       return yield* Effect.fail(

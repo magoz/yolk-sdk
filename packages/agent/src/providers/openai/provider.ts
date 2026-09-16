@@ -375,6 +375,35 @@ const OpenAiConfigLayer = Layer.effect(
 
 const JsonFromJsonString = Schema.fromJsonString(Schema.Json)
 
+const isJsonRecord = (value: Schema.Json | undefined): value is Schema.JsonObject =>
+  value !== undefined && Predicate.isObjectOrArray(value) && !Array.isArray(value)
+
+const jsonRecordField = (
+  value: Schema.JsonObject,
+  key: string
+): Schema.Json | undefined => (Object.hasOwn(value, key) ? value[key] : undefined)
+
+const jsonField = (value: Schema.Json | undefined, key: string): Schema.Json | undefined =>
+  isJsonRecord(value) ? jsonRecordField(value, key) : undefined
+
+const stringField = (value: Schema.Json | undefined, key: string) => {
+  const raw = jsonField(value, key)
+
+  return Predicate.isString(raw) ? raw : undefined
+}
+
+// Machine error codes are safe to surface in provider metadata. Free-text
+// upstream messages stay out of LLMError per provider sanitization policy.
+const decodeOpenAiHttpErrorCode = (raw: string): Effect.Effect<string | undefined> =>
+  Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
+    Effect.map(parsed => {
+      const error = jsonField(parsed, 'error')
+
+      return stringField(error, 'code') ?? stringField(error, 'type')
+    }),
+    Effect.catch(() => Effect.succeed(undefined))
+  )
+
 const schemaErrorMessage = (error: Schema.SchemaError) => error.message
 
 const schemaErrorToLlmError =
@@ -907,11 +936,14 @@ const sendOpenAiRequest = (
         )
       )
 
+      const errorCode = yield* decodeOpenAiHttpErrorCode(errorText)
+
       const provider = classifyProviderFailure({
         provider: providerIdentity.id,
         status: response.status,
         headers: response.headers,
-        body: errorText
+        body: errorText,
+        providerCode: errorCode
       })
 
       return yield* Effect.fail(

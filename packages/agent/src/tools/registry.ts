@@ -273,6 +273,73 @@ const emptyObjectJsonSchema: typeof ToolJsonSchemaObject.Type = {
   additionalProperties: false
 }
 
+// Strict OpenAI-compatible upstreams reject union roots without an explicit
+// object type. Stamp only typeless combinators whose members are all objects
+// (local $refs resolved): every other root keeps its prior shape, so
+// primitive, unknown, and already-typed schemas are untouched, and call
+// validation still decodes against the original Effect Schema.
+const isObjectCombinatorMember = (
+  member: Schema.Json | undefined,
+  definitions: typeof ToolJsonSchemaObject.Type
+): boolean => {
+  const schema = jsonObject(member)
+
+  if (schema === undefined) return false
+
+  const type = jsonField(schema, 'type')
+
+  if (type === 'object') return true
+
+  if (type !== undefined) return false
+
+  const ref = jsonField(schema, '$ref')
+
+  if (Predicate.isString(ref)) {
+    const name = localDefinitionName(ref)
+
+    if (name === undefined) return false
+
+    return isObjectCombinatorRoot(jsonField(definitions, name), definitions)
+  }
+
+  const nested = jsonField(schema, 'anyOf') ?? jsonField(schema, 'oneOf')
+
+  if (!Array.isArray(nested)) return false
+
+  return (
+    nested.length > 0 &&
+    nested.every((item: Schema.Json) => isObjectCombinatorMember(item, definitions))
+  )
+}
+
+const isObjectCombinatorRoot = (
+  schema: Schema.Json | undefined,
+  definitions: typeof ToolJsonSchemaObject.Type
+): boolean => {
+  const root = jsonObject(schema)
+
+  if (root === undefined || jsonField(root, 'type') !== undefined) return false
+
+  const combinators = jsonField(root, 'anyOf') ?? jsonField(root, 'oneOf')
+
+  if (!Array.isArray(combinators) || combinators.length === 0) return false
+
+  return combinators.every((member: Schema.Json) =>
+    isObjectCombinatorMember(member, definitions)
+  )
+}
+
+const stampObjectCombinatorRoot = (
+  schema: typeof ToolJsonSchema.Type,
+  definitions: typeof ToolJsonSchemaObject.Type
+): typeof ToolJsonSchema.Type => {
+  const root = jsonObject(schema)
+
+  if (root === undefined || !isObjectCombinatorRoot(root, definitions)) return schema
+
+  return { ...root, type: 'object' }
+}
+
 const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type => {
   const document = Schema.toJsonSchemaDocument(schema, { onExcessProperty: 'error' })
   const documentSchema = requireToolJsonSchema(document.schema)
@@ -300,14 +367,14 @@ const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
       : rootSchema
 
   if (Object.keys(remainingDefinitions).length === 0) {
-    return jsonSchema
+    return stampObjectCombinatorRoot(jsonSchema, definitions)
   }
 
   if (!isToolJsonSchemaObject(jsonSchema)) {
     return { allOf: [jsonSchema], $defs: remainingDefinitions }
   }
 
-  return { ...jsonSchema, $defs: remainingDefinitions }
+  return stampObjectCombinatorRoot({ ...jsonSchema, $defs: remainingDefinitions }, definitions)
 }
 
 // Distinguishes makeTool's model-visible schema failures from raw/host ToolErrors.
