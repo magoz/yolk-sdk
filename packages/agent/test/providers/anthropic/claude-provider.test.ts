@@ -289,6 +289,36 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('omits is_error for successful tool results without the flag', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody(
+        {
+          model: 'claude-sonnet-4-6',
+          systemPrompt: 'Use tools carefully.',
+          messages: [
+            UserMessage.make({ content: 'inspect' }),
+            AssistantAgentMessage.make({
+              parts: [
+                HostToolCallPart.make({
+                  call: ToolCall.make({ id: 'call-1', name: 'search', params: {} })
+                })
+              ]
+            }),
+            ToolResultMessage.make({ toolCallId: 'call-1', content: 'result' })
+          ],
+          tools: []
+        },
+        { maxTokens: 123 }
+      )
+
+      expect(body.model).toBe('claude-sonnet-4-6')
+      expect(body.messages[2]).toStrictEqual({
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'result' }]
+      })
+    })
+  )
+
   it.effect('lowers supported reasoning effort to Anthropic output config', () =>
     Effect.gen(function* () {
       const body = yield* toAnthropicClaudeRequestBody({

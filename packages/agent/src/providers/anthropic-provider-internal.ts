@@ -1158,17 +1158,34 @@ const toAnthropicMessage = (
       contentToAnthropicContent(
         prependMessageContextToContent(current.content, messageContextText(current))
       ).pipe(
-        Effect.map(content => ({
-          role: 'user' as const,
-          content: [
-            {
-              type: 'tool_result' as const,
-              tool_use_id: current.toolCallId,
-              content,
-              is_error: current.isError
+        Effect.map(content => {
+          // An absent flag must stay absent: serializing is_error as
+          // undefined fails request-body JSON validation downstream.
+          if (current.isError === undefined) {
+            return {
+              role: 'user' as const,
+              content: [
+                {
+                  type: 'tool_result' as const,
+                  tool_use_id: current.toolCallId,
+                  content
+                }
+              ]
             }
-          ]
-        }))
+          }
+
+          return {
+            role: 'user' as const,
+            content: [
+              {
+                type: 'tool_result' as const,
+                tool_use_id: current.toolCallId,
+                content,
+                is_error: current.isError
+              }
+            ]
+          }
+        })
       )
     ),
     Match.exhaustive
