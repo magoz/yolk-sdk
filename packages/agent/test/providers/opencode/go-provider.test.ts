@@ -380,7 +380,13 @@ describe('OpenCode Go', () => {
 
     it.effect(`${protocol}: rejects malformed response JSON`, () =>
       Effect.gen(function* () {
-        const error = yield* run(protocol, new Response('{broken'), []).pipe(Effect.flip)
+        const malformed =
+          protocol === 'chat-completions'
+            ? new Response('data: {broken\n\n')
+            : new Response('{broken')
+
+        const error = yield* run(protocol, malformed, []).pipe(Effect.flip)
+
         expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
       })
     )
@@ -389,7 +395,13 @@ describe('OpenCode Go', () => {
   it.effect('chat: validates reasoning only when the compatible extension is enabled', () =>
     Effect.gen(function* () {
       const json = { choices: [{ message: { content: 'Hello', reasoning_content: 123 } }] }
-      const error = yield* run('chat-completions', Response.json(json), []).pipe(Effect.flip)
+
+      const error = yield* run(
+        'chat-completions',
+        sse([{ choices: [{ delta: { content: 'Hello', reasoning_content: 123 } }] }]),
+        []
+      ).pipe(Effect.flip)
+
       expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
 
       const events = yield* Effect.gen(function* () {
@@ -726,9 +738,7 @@ describe('OpenCode Go', () => {
       for (const protocol of protocols) {
         const response = Match.value(protocol).pipe(
           Match.when('chat-completions', () =>
-            Response.json({
-              choices: [{ message: { content: 'partial' }, finish_reason: 'length' }]
-            })
+            sse([{ choices: [{ delta: { content: 'partial' }, finish_reason: 'length' }] }])
           ),
           Match.when('messages', () =>
             sse([

@@ -891,6 +891,9 @@ type OpenAiChatStreamState = {
   readonly toolCalls: ReadonlyArray<OpenAiChatStreamToolCall>
   readonly finishReason: string | undefined
   readonly hasTerminal: boolean
+  // Only [DONE] closes the stream: usage commonly arrives after the finish
+  // chunk, so a bare finish reason must not discard later payloads.
+  readonly streamClosed: boolean
   readonly usage: unknown
 }
 
@@ -899,6 +902,7 @@ const initialOpenAiChatStreamState: OpenAiChatStreamState = {
   toolCalls: [],
   finishReason: undefined,
   hasTerminal: false,
+  streamClosed: false,
   usage: undefined
 }
 
@@ -918,11 +922,24 @@ const chatSseBlockData = (block: string) => {
     .filter(line => line.startsWith('data:'))
     .map(line => line.slice(5).trimStart())
 
-  return {
-    done: lines.some(line => line === '[DONE]'),
-    payloads: lines.filter(line => line.length > 0 && line !== '[DONE]')
-  }
+  const done = lines.some(line => line === '[DONE]')
+
+  const data = lines
+    .filter(line => line.length > 0 && line !== '[DONE]')
+    .join('\n')
+    .trim()
+
+  return { done, payload: data.length > 0 ? data : undefined }
 }
+
+// Stream construction failures use fixed messages: schema diagnostics and
+// upstream values stay out of LLMError per provider sanitization policy.
+const invalidChatStreamEvent = (providerIdentity: OpenAiProviderIdentity) =>
+  new LLMError({
+    cause: 'invalid_response',
+    message: `Invalid ${providerIdentity.name} stream event`,
+    retryable: false
+  })
 
 const chatStreamError = (
   providerIdentity: OpenAiProviderIdentity,
@@ -939,9 +956,9 @@ const chatStreamError = (
 
     return yield* Effect.fail(
       new LLMError({
-        cause: 'provider_error',
+        cause: providerFailureCause(provider.kind),
         message: `${providerIdentity.name} stream reported an error`,
-        retryable: false,
+        retryable: providerFailureRetryable(provider.kind),
         provider
       })
     )
@@ -970,9 +987,7 @@ const decodeChatDeltaReasoning = (
 ): Effect.Effect<string, LLMError> =>
   Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(reasoning).pipe(
     Effect.map(value => value ?? ''),
-    Effect.mapError(
-      schemaErrorToLlmError('invalid_response', `Invalid ${providerIdentity.name} reasoning content`)
-    )
+    Effect.mapError(() => invalidChatStreamEvent(providerIdentity))
   )
 
 type OpenAiChatStreamStep = {
@@ -988,12 +1003,7 @@ const processChatStreamPayload = (
 ): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
   Effect.gen(function* () {
     const parsed = yield* Schema.decodeUnknownEffect(JsonFromJsonString)(payload).pipe(
-      Effect.mapError(
-        schemaErrorToLlmError(
-          'invalid_response',
-          `Could not parse ${providerIdentity.name} stream event JSON`
-        )
-      )
+      Effect.mapError(() => invalidChatStreamEvent(providerIdentity))
     )
 
     const envelope = isJsonRecord(parsed) ? jsonRecordField(parsed, 'error') : undefined
@@ -1003,9 +1013,7 @@ const processChatStreamPayload = (
     }
 
     const chunk = yield* Schema.decodeUnknownEffect(OpenAiChatStreamChunk)(parsed).pipe(
-      Effect.mapError(
-        schemaErrorToLlmError('invalid_response', `Invalid ${providerIdentity.name} stream event`)
-      )
+      Effect.mapError(() => invalidChatStreamEvent(providerIdentity))
     )
 
     const events: Array<LLMEvent> = []
@@ -1063,17 +1071,19 @@ const processChatStreamBlock = (
   block: string
 ): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
   Effect.gen(function* () {
-    const { done, payloads } = chatSseBlockData(block)
-    let current: OpenAiChatStreamState = done ? { ...state, hasTerminal: true } : state
-    const events: Array<LLMEvent> = []
+    // Frames after [DONE] are transport noise: ignore them so a malformed
+    // trailer cannot fail an otherwise completed turn.
+    if (state.streamClosed) return { state, events: [] }
 
-    for (const payload of payloads) {
-      const step = yield* processChatStreamPayload(providerIdentity, reasoningContent, current, payload)
-      current = step.state
-      events.push(...step.events)
-    }
+    const { done, payload } = chatSseBlockData(block)
 
-    return { state: current, events }
+    const current: OpenAiChatStreamState = done
+      ? { ...state, hasTerminal: true, streamClosed: true }
+      : state
+
+    if (payload === undefined) return { state: current, events: [] }
+
+    return yield* processChatStreamPayload(providerIdentity, reasoningContent, current, payload)
   })
 
 const processChatStreamText = (
@@ -1145,7 +1155,7 @@ const finalizeChatStreamState = (
       return yield* Effect.fail(
         new LLMError({
           cause: 'provider_error',
-          message: `${providerIdentity.name} stream stopped with ${state.finishReason}`,
+          message: `${providerIdentity.name} stream stopped with unrecognized finish reason`,
           retryable: false,
           provider
         })
@@ -1179,9 +1189,7 @@ const finalizeChatStreamState = (
 
     if (state.usage !== undefined) {
       const usage = yield* Schema.decodeUnknownEffect(OpenAiUsageResponse)(state.usage).pipe(
-        Effect.mapError(
-          schemaErrorToLlmError('invalid_response', `Invalid ${providerIdentity.name} stream usage`)
-        )
+        Effect.mapError(() => invalidChatStreamEvent(providerIdentity))
       )
 
       events.push(LLMUsage.make({ usage: toAgentUsage(usage) }))

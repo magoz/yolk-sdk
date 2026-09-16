@@ -679,6 +679,20 @@ describe('OpenAI provider streaming', () => {
       ...(done ? ['data: [DONE]\n\n'] : [])
     ])
 
+  const rawSseStream = (chunks: ReadonlyArray<string>) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+
+          for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+
+          controller.close()
+        }
+      }),
+      { status: 200, headers: { 'content-type': 'text/event-stream' } }
+    )
+
   const chatChunk = (delta: unknown, finishReason: string | null = null) => ({
     choices: [{ delta, finish_reason: finishReason }]
   })
@@ -813,6 +827,147 @@ describe('OpenAI provider streaming', () => {
         provider: { provider: 'openai', providerCode: 'upstream_error' }
       })
       expect(error.message).not.toContain('private detail')
+    })
+  )
+
+  it.effect('reassembles events split across transport chunks', () =>
+    Effect.gen(function* () {
+      const payload = JSON.stringify({ choices: [{ delta: { content: 'Hi' } }] })
+      const split = Math.floor(payload.length / 2)
+
+      const events = yield* collectStreamEvents(
+        rawSseStream([
+          `data: ${payload.slice(0, split)}`,
+          `${payload.slice(split)}\n\n`,
+          'data: {"choices": [{', '"delta": {"content": "!"}}]}\n\n',
+          'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\n',
+          'data: [DONE]\n\n'
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'TextDelta', text: '!' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('tolerates split CRLF across transport chunks', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        rawSseStream([
+          'data: {"choices": [{"delta": {"content": "Hi"}}]}\r',
+          '\n\n',
+          'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\n',
+          'data: [DONE]\n\n'
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('joins multiline data lines into one event', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        rawSseStream([
+          'data: {"choices":\ndata: [{"delta": {"content": "Hi"}, "finish_reason": "stop"}]}\n\n',
+          'data: [DONE]\n\n'
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('ignores frames after the terminal marker', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        rawSseStream([
+          'data: {"choices": [{"delta": {"content": "Hi"}, "finish_reason": "stop"}]}\n\n',
+          'data: [DONE]\n\n',
+          'data: {broken\n\n',
+          'data: {"choices": [{"delta": {"content": "LATE"}}]}\n\n'
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('fails tool calls without identities', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([
+          { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{}' } }] } }] },
+          { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
+      expect(error.message).toBe('Invalid OpenAI streamed tool call')
+    })
+  )
+
+  it.effect('fails filtered finishes without completion', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([{ choices: [{ delta: { content: 'cut' }, finish_reason: 'content_filter' }] }])
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: { provider: 'openai', kind: 'invalid_response', providerCode: 'content_filter' }
+      })
+    })
+  )
+
+  it.effect('fails unknown finishes without leaking the reason', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([{ choices: [{ delta: {}, finish_reason: 'bogus_reason' }] }])
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'provider_error',
+        retryable: false,
+        provider: { provider: 'openai', providerCode: 'bogus_reason' }
+      })
+      expect(error.message).toBe('OpenAI stream stopped with unrecognized finish reason')
+      expect(error.message).not.toContain('bogus_reason')
+    })
+  )
+
+  it.effect('classifies mid-stream rate limits as retryable', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({ content: 'partial' }),
+          { error: { code: 'rate_limit', message: 'slow down' } }
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'rate_limit',
+        retryable: true,
+        provider: { provider: 'openai', kind: 'rate_limit', providerCode: 'rate_limit' }
+      })
+      expect(error.message).not.toContain('slow down')
     })
   )
 
