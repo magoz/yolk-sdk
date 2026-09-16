@@ -166,6 +166,130 @@ describe('resolveTools', () => {
     })
   )
 
+  it.effect('derives an object root for union tool parameters without changing decoding', () =>
+    Effect.gen(function* () {
+      const tool = makeSchemaTool({
+        name: 'union_probe',
+        description: 'Probe union input.',
+        parameters: Schema.Union([
+          Schema.Struct({ operation: Schema.Literal('upsert'), title: Schema.String }),
+          Schema.Struct({ operation: Schema.Literal('delete'), slug: Schema.String })
+        ]),
+        access: 'write',
+        execute: ({ call, params }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: params.operation }))
+      })
+
+      // Strict OpenAI-compatible upstreams reject a typeless combinator root.
+      expect(tool.def.parameters).toMatchObject({
+        type: 'object',
+        anyOf: [expect.anything(), expect.anything()]
+      })
+
+      const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: 'union_probe',
+        params: { operation: 'delete', slug: 'note' }
+      })
+
+      expect(result.content).toBe('delete')
+    })
+  )
+
+  it.effect('leaves non-object combinator roots untouched', () =>
+    Effect.gen(function* () {
+      const snapshot = (parameters: typeof ToolJsonSchema.Type) =>
+        Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.Json))(parameters)
+
+      const numberTool = makeSchemaTool({
+        name: 'number_probe',
+        description: 'Probe number input.',
+        parameters: Schema.Number,
+        access: 'read',
+        execute: ({ call, params }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: `${params}` }))
+      })
+
+      const numberSnapshot = yield* snapshot(numberTool.def.parameters)
+
+      expect(Object.hasOwn(numberSnapshot, 'type')).toBe(false)
+      expect(numberSnapshot).toMatchObject({ anyOf: expect.any(Array) })
+
+      const unknownTool = makeSchemaTool({
+        name: 'unknown_probe',
+        description: 'Probe unknown input.',
+        parameters: Schema.Unknown,
+        access: 'read',
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+
+      expect(yield* snapshot(unknownTool.def.parameters)).toEqual({})
+
+      const toolSet = yield* resolveTools([makeModule([numberTool, unknownTool])], {
+        enabled: true
+      })
+
+      const result = yield* toolSet.execute({ id: 'call_1', name: 'number_probe', params: 5 })
+
+      expect(result.content).toBe('5')
+    })
+  )
+
+  it.effect('stamps recursive union roots after reference inlining', () =>
+    Effect.gen(function* () {
+      interface FilterBranch {
+        readonly op: 'branch'
+        readonly kids: ReadonlyArray<FilterLeaf | FilterBranch>
+      }
+
+      interface FilterLeaf {
+        readonly op: 'leaf'
+        readonly value: string
+      }
+
+      const FilterBranchSchema: Schema.Schema<FilterBranch> = Schema.Struct({
+        op: Schema.Literal('branch'),
+        kids: Schema.Array(
+          Schema.suspend((): Schema.Schema<FilterLeaf | FilterBranch> => FilterValueSchema)
+        )
+      })
+
+      const FilterValueSchema: Schema.Schema<FilterLeaf | FilterBranch> = Schema.Union([
+        Schema.Struct({ op: Schema.Literal('leaf'), value: Schema.String }),
+        FilterBranchSchema
+      ])
+
+      const tool = makeSchemaTool({
+        name: 'filter_probe',
+        description: 'Probe recursive input.',
+        parameters: FilterValueSchema,
+        access: 'read',
+        execute: ({ call, params }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: params.op }))
+      })
+
+      // The compiler emits recursive roots as a $ref the registry inlines;
+      // it currently inlines shared members too, so no $defs survive here.
+      expect(tool.def.parameters).toMatchObject({
+        type: 'object',
+        anyOf: [expect.anything(), expect.anything()]
+      })
+
+      const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: 'filter_probe',
+        params: { op: 'branch', kids: [{ op: 'leaf', value: 'x' }] }
+      })
+
+      expect(result.content).toBe('branch')
+    })
+  )
+
   it('rejects non-portable custom JSON Schema output with the synchronous constructor error owner', () => {
     // rc.115 drops invalid ordinary examples; a custom compiler hook can still
     // produce non-portable output. Exercise the constructor's own boundary.

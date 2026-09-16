@@ -1,4 +1,4 @@
-import { Effect, Layer, Redacted, Stream } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -572,6 +572,87 @@ describe('OpenAI provider', () => {
         }
       })
       expect(error.message).toBe('OpenAI returned 429')
+    })
+  )
+
+  it.effect('surfaces machine error codes without leaking upstream detail', () =>
+    Effect.gen(function* () {
+      const runFailure = (response: Response) =>
+        Effect.gen(function* () {
+          const provider = yield* LLMProvider
+
+          return yield* provider
+            .stream({
+              messages: [UserMessage.make({ content: 'hello' })],
+              tools: [],
+              model: 'gpt-test',
+              systemPrompt: 'Be brief.'
+            })
+            .pipe(Stream.runCollect)
+        }).pipe(
+          Effect.provide(makeProviderLayer(makeHttpClientLayer(response, []))),
+          Effect.flip
+        )
+
+      const coded = yield* runFailure(
+        Response.json(
+          {
+            error: {
+              code: 'invalid_request_error',
+              type: 'invalid_request_error',
+              message: 'private upstream detail'
+            }
+          },
+          { status: 400 }
+        )
+      )
+
+      expect(coded._tag).toBe('LLMError')
+      expect(coded).toMatchObject({
+        cause: 'provider_error',
+        retryable: false,
+        provider: {
+          provider: 'openai',
+          kind: 'unknown',
+          status: 400,
+          providerCode: 'invalid_request_error'
+        }
+      })
+      expect(coded.message).toBe('OpenAI returned 400')
+      expect(coded.message).not.toContain('private upstream detail')
+
+      const typeOnly = yield* runFailure(
+        Response.json(
+          { error: { type: 'upstream_type', message: 'private upstream detail' } },
+          { status: 400 }
+        )
+      )
+
+      expect(typeOnly._tag).toBe('LLMError')
+      expect(typeOnly).toMatchObject({
+        provider: {
+          provider: 'openai',
+          kind: 'unknown',
+          status: 400,
+          providerCode: 'upstream_type'
+        }
+      })
+      expect(typeOnly.message).not.toContain('private upstream detail')
+
+      const unparsable = yield* runFailure(new Response('<html>nope</html>', { status: 400 }))
+
+      expect(unparsable._tag).toBe('LLMError')
+      expect(unparsable).toMatchObject({
+        provider: { provider: 'openai', kind: 'unknown', status: 400 }
+      })
+
+      if (!Predicate.isTagged(unparsable, 'LLMError')) {
+        expect.fail('expected LLMError for unparsable error body')
+      }
+
+      expect(
+        Object.prototype.hasOwnProperty.call(unparsable.provider ?? {}, 'providerCode')
+      ).toBe(false)
     })
   )
 })
