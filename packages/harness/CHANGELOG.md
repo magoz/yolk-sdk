@@ -1,5 +1,14 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.80
+
+### Patch Changes
+
+- Updated dependencies [82c3cad]
+- Updated dependencies [df007e7]
+- Updated dependencies [b3acb64]
+  - @yolk-sdk/agent@0.1.0-canary.80
+
 ## 0.1.0-canary.79
 
 ### Minor Changes
@@ -43,10 +52,10 @@
   - `DriverShape` → `DriverApi` from `@yolk-sdk/harness/driver`
 
   ```ts
-  import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
-  import type { RunStoreApi } from '@yolk-sdk/harness/store'
-  import type { InboxApi } from '@yolk-sdk/harness/inbox'
-  import type { DriverApi } from '@yolk-sdk/harness/driver'
+  import type { LoopConfigSettings } from "@yolk-sdk/agent/loop";
+  import type { RunStoreApi } from "@yolk-sdk/harness/store";
+  import type { InboxApi } from "@yolk-sdk/harness/inbox";
+  import type { DriverApi } from "@yolk-sdk/harness/driver";
   ```
 
 ### Patch Changes

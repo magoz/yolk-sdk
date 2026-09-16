@@ -15,10 +15,13 @@
   },
   "changesets": [
     "afloat-connector",
+    "agent-anthropic-tool-result-is-error",
     "agent-codex-final-output",
     "agent-loop-composition",
     "agent-model-turn-collection",
+    "agent-openai-chat-streaming",
     "agent-steering",
+    "agent-tool-schema-object-root",
     "align-canary-install-docs",
     "anthropic-reasoning-effort",
     "background-tools-lockstep",

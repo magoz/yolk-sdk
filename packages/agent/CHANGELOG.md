@@ -1,5 +1,18 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.80
+
+### Patch Changes
+
+- 82c3cad: Omit `is_error` from Anthropic tool-result blocks when the tool result carries no flag, instead of serializing it as `undefined`, preventing request-body validation failures when replaying successful tool results without an error flag.
+- df007e7: Stream OpenAI-compatible chat completions as server-sent events when enabled.
+
+  The shared chat provider was request/response-only, so hosts saw whole turns at once. `OpenAiProviderConfig.streaming` now requests incremental `chat.completion.chunk` deltas (with `stream_options.include_usage`) and folds them into text/reasoning/tool-call events plus terminal and usage events, mirroring the Responses SSE terminal policy: unterminated streams fail `invalid_response` and never emit `Done`. OpenCode Go chat models opt in; the default JSON behavior is unchanged.
+
+- b3acb64: Declare an object root on provider-facing tool parameter schemas derived from Effect unions, and surface machine provider error codes on OpenAI-compatible HTTP failures.
+
+  `makeTool` now adds `type: "object"` to typeless unions of object schemas (unions compile to typeless `anyOf`), which strict OpenAI-compatible upstreams such as DeepSeek behind OpenCode Go require; call validation still runs against the original Effect Schema. The OpenAI Chat Completions and Responses HTTP error paths now extract the envelope `code`/`type` into `provider.providerCode` for kind classification and host diagnostics; free-text upstream messages stay out of `LLMError` per the existing sanitization policy.
+
 ## 0.1.0-canary.79
 
 ### Patch Changes
@@ -41,10 +54,10 @@
   - `DriverShape` → `DriverApi` from `@yolk-sdk/harness/driver`
 
   ```ts
-  import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
-  import type { RunStoreApi } from '@yolk-sdk/harness/store'
-  import type { InboxApi } from '@yolk-sdk/harness/inbox'
-  import type { DriverApi } from '@yolk-sdk/harness/driver'
+  import type { LoopConfigSettings } from "@yolk-sdk/agent/loop";
+  import type { RunStoreApi } from "@yolk-sdk/harness/store";
+  import type { InboxApi } from "@yolk-sdk/harness/inbox";
+  import type { DriverApi } from "@yolk-sdk/harness/driver";
   ```
 
 - 5ff44d6: Breaking: `OpenAiProviderConfig.extraBody` takes JSON-object input (`OpenAiRequestExtras`). Untyped runtime input is still snapshotted and validated at request lowering; layer creation stays Effect-lazy and does not walk extras or credentials.
