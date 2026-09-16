@@ -9,6 +9,7 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,
   AssistantAgentMessage,
+  AssistantTextPart,
   DocumentPart,
   HostToolCallPart,
   ImagePart,
@@ -143,6 +144,29 @@ const collectCodexProviderEvents = (response: Response) =>
   )
 
 describe('OpenAI Codex provider', () => {
+  for (const format of ['json', 'completion-only'] as const) {
+    it.effect(`${format}: retains flattened text before calls when Go ordering is disabled`, () =>
+      Effect.gen(function* () {
+        const output = [
+          { type: 'message', content: [{ type: 'output_text', text: 'Before.' }] },
+          codexFunctionCall('call-1', 'search'),
+          { type: 'message', content: [{ type: 'output_text', text: 'After.' }] }
+        ]
+
+        const response =
+          format === 'json'
+            ? responseFromText(JSON.stringify({ output }))
+            : responseFromSseEvents([completedCodexResponse(...output)])
+
+        const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+        expect(events.map(event => event._tag)).toEqual(['TextDelta', 'ToolCall', 'Done'])
+        expect(
+          events.flatMap(event => (Predicate.isTagged(event, 'TextDelta') ? [event.text] : []))
+        ).toEqual(['Before.After.'])
+      })
+    )
+  }
+
   it.effect('allows request lowering without a compatibility config object', () =>
     Effect.gen(function* () {
       const body = yield* lowerOpenAiCodexRequestBody({
@@ -233,6 +257,40 @@ describe('OpenAI Codex provider', () => {
         ],
         parallel_tool_calls: true
       })
+    })
+  )
+
+  it.effect('replays assistant text before host tools without a commentary phase', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'search' }),
+          AssistantAgentMessage.make({
+            parts: [
+              AssistantTextPart.make({ content: 'I will search now.' }),
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'search', params: { query: 'yolk' } })
+              })
+            ]
+          }),
+          ToolResultMessage.make({ toolCallId: 'call-1', content: 'result' })
+        ],
+        tools: []
+      })
+
+      expect(body.input).toEqual([
+        { role: 'user', content: 'search' },
+        { role: 'assistant', content: 'I will search now.' },
+        {
+          type: 'function_call',
+          call_id: 'call-1',
+          name: 'search',
+          arguments: '{"query":"yolk"}'
+        },
+        { type: 'function_call_output', call_id: 'call-1', output: 'result' }
+      ])
     })
   )
 

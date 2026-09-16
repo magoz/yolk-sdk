@@ -2,9 +2,14 @@ import { Effect, Layer, Predicate, Stream } from 'effect'
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AssistantAgentMessage,
+  AssistantTextPart,
+  HostToolCallPart,
   ImagePart,
   TextPart,
+  ToolCall,
   ToolDef,
+  ToolResultMessage,
   UserMessage,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
@@ -60,6 +65,29 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
 }
 
 describe('xAI Grok subscription provider', () => {
+  for (const format of ['json', 'completion-only'] as const) {
+    it.effect(`${format}: retains flattened text before calls when Go ordering is disabled`, () =>
+      Effect.gen(function* () {
+        const output = [
+          { type: 'message', content: [{ type: 'output_text', text: 'Before.' }] },
+          { type: 'function_call', call_id: 'call-1', name: 'search', arguments: '{}' },
+          { type: 'message', content: [{ type: 'output_text', text: 'After.' }] }
+        ]
+
+        const response =
+          format === 'json'
+            ? responseFromText(JSON.stringify({ output }))
+            : responseFromSseEvents([{ type: 'response.completed', response: { output } }])
+
+        const events = yield* streamXAiGrokResponse(response).pipe(Stream.runCollect)
+        expect(events.map(event => event._tag)).toEqual(['TextDelta', 'ToolCall', 'Done'])
+        expect(
+          events.flatMap(event => (Predicate.isTagged(event, 'TextDelta') ? [event.text] : []))
+        ).toEqual(['Before.After.'])
+      })
+    )
+  }
+
   it.effect('lowers Responses input with a host-owned output limit', () =>
     Effect.gen(function* () {
       const body = yield* toXAiGrokRequestBody(
@@ -113,6 +141,47 @@ describe('xAI Grok subscription provider', () => {
         ],
         parallel_tool_calls: true
       })
+    })
+  )
+
+  it.effect('replays assistant text before host tools without a commentary phase', () =>
+    Effect.gen(function* () {
+      const body = yield* toXAiGrokRequestBody(
+        {
+          model: 'grok-build',
+          systemPrompt: '',
+          messages: [
+            UserMessage.make({ content: 'search' }),
+            AssistantAgentMessage.make({
+              parts: [
+                AssistantTextPart.make({ content: 'I will search now.' }),
+                HostToolCallPart.make({
+                  call: ToolCall.make({
+                    id: 'call-1',
+                    name: 'search',
+                    params: { query: 'yolk' }
+                  })
+                })
+              ]
+            }),
+            ToolResultMessage.make({ toolCallId: 'call-1', content: 'result' })
+          ],
+          tools: []
+        },
+        { maxOutputTokens: 30_000 }
+      )
+
+      expect(body.input).toEqual([
+        { role: 'user', content: 'search' },
+        { role: 'assistant', content: 'I will search now.' },
+        {
+          type: 'function_call',
+          call_id: 'call-1',
+          name: 'search',
+          arguments: '{"query":"yolk"}'
+        },
+        { type: 'function_call_output', call_id: 'call-1', output: 'result' }
+      ])
     })
   )
 
