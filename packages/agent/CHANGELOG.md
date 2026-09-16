@@ -1,5 +1,12 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.79
+
+### Patch Changes
+
+- 3c243ee: Align all public SDK packages for the Go Responses replay fix and the branded-identity TypeScript migration. MCP and Vercel Workflows have no direct API or runtime changes in this release; they advance with the fixed SDK package group.
+- 2ab26c7: Tag OpenCode Go Responses assistant text that precedes host function calls as `phase: commentary` on replay. Preserve ordered text/call segments through streaming, JSON fallback, and completion-only responses; trailing and final-answer text omit phase. Codex and Grok shared Responses lowering stays untagged.
+
 ## 0.1.0-canary.78
 
 ### Minor Changes
