@@ -1,5 +1,14 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.79
+
+### Patch Changes
+
+- 3c243ee: Align all public SDK packages for the Go Responses replay fix and the branded-identity TypeScript migration. MCP and Vercel Workflows have no direct API or runtime changes in this release; they advance with the fixed SDK package group.
+- Updated dependencies [3c243ee]
+- Updated dependencies [2ab26c7]
+  - @yolk-sdk/agent@0.1.0-canary.79
+
 ## 0.1.0-canary.78
 
 ### Minor Changes
