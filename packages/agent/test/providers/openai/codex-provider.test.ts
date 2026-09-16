@@ -1055,9 +1055,7 @@ describe('OpenAI Codex provider', () => {
         expect.fail('expected LLMError for codeless envelope')
       }
 
-      expect(
-        Object.prototype.hasOwnProperty.call(error.provider ?? {}, 'providerCode')
-      ).toBe(false)
+      expect(Object.prototype.hasOwnProperty.call(error.provider ?? {}, 'providerCode')).toBe(false)
       expect(error.message).not.toContain('private upstream detail')
     })
   )

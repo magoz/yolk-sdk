@@ -77,11 +77,11 @@ Use `makeOpenCodeGoProviderLayer` from `@yolk-sdk/agent/providers/opencode/go-pr
 redacted API key, explicit `protocol`, and host-owned `maxOutputTokens`. See
 [Go configuration](./provider-setup#opencode-go).
 
-| Protocol           | Endpoint suffix     | Authentication | Transport                                 |
-| ------------------ | ------------------- | -------------- | ----------------------------------------- |
+| Protocol           | Endpoint suffix     | Authentication | Transport                                       |
+| ------------------ | ------------------- | -------------- | ----------------------------------------------- |
 | `chat-completions` | `/chat/completions` | Bearer API key | SSE (`streaming: true`), normalized into events |
-| `messages`         | `/messages`         | `x-api-key`    | SSE or JSON response                      |
-| `responses`        | `/responses`        | Bearer API key | SSE or JSON response                      |
+| `messages`         | `/messages`         | `x-api-key`    | SSE or JSON response                            |
+| `responses`        | `/responses`        | Bearer API key | SSE or JSON response                            |
 
 All endpoints default to `https://opencode.ai/zen/go/v1`. Choose the protocol advertised for the
 selected model in [OpenCode's Go catalog](https://opencode.ai/docs/go/#endpoints); model availability

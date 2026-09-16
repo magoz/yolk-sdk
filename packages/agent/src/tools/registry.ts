@@ -324,9 +324,7 @@ const isObjectCombinatorRoot = (
 
   if (!Array.isArray(combinators) || combinators.length === 0) return false
 
-  return combinators.every((member: Schema.Json) =>
-    isObjectCombinatorMember(member, definitions)
-  )
+  return combinators.every((member: Schema.Json) => isObjectCombinatorMember(member, definitions))
 }
 
 const stampObjectCombinatorRoot = (

@@ -590,10 +590,7 @@ describe('OpenAI provider', () => {
               systemPrompt: 'Be brief.'
             })
             .pipe(Stream.runCollect)
-        }).pipe(
-          Effect.provide(makeProviderLayer(makeHttpClientLayer(response, []))),
-          Effect.flip
-        )
+        }).pipe(Effect.provide(makeProviderLayer(makeHttpClientLayer(response, []))), Effect.flip)
 
       const coded = yield* runFailure(
         Response.json(
@@ -651,9 +648,9 @@ describe('OpenAI provider', () => {
         expect.fail('expected LLMError for unparsable error body')
       }
 
-      expect(
-        Object.prototype.hasOwnProperty.call(unparsable.provider ?? {}, 'providerCode')
-      ).toBe(false)
+      expect(Object.prototype.hasOwnProperty.call(unparsable.provider ?? {}, 'providerCode')).toBe(
+        false
+      )
     })
   )
 })
@@ -720,7 +717,11 @@ describe('OpenAI provider streaming', () => {
           systemPrompt: 'Be brief.'
         })
         .pipe(Stream.runCollect)
-    }).pipe(Effect.provide(makeStreamingProviderLayer(makeHttpClientLayer(response, []), reasoningContent)))
+    }).pipe(
+      Effect.provide(
+        makeStreamingProviderLayer(makeHttpClientLayer(response, []), reasoningContent)
+      )
+    )
 
   it.effect('streams text deltas and usage to completion', () =>
     Effect.gen(function* () {
@@ -786,9 +787,9 @@ describe('OpenAI provider streaming', () => {
 
   it.effect('fails length finishes without completion', () =>
     Effect.gen(function* () {
-      const error = yield* collectStreamEvents(chatSse([chatChunk({ content: 'cut' }, 'length')])).pipe(
-        Effect.flip
-      )
+      const error = yield* collectStreamEvents(
+        chatSse([chatChunk({ content: 'cut' }, 'length')])
+      ).pipe(Effect.flip)
 
       expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
@@ -806,7 +807,11 @@ describe('OpenAI provider streaming', () => {
       expect(error).toMatchObject({
         cause: 'invalid_response',
         retryable: false,
-        provider: { provider: 'openai', kind: 'invalid_response', providerCode: 'incomplete_stream' }
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          providerCode: 'incomplete_stream'
+        }
       })
     })
   )
@@ -839,7 +844,8 @@ describe('OpenAI provider streaming', () => {
         rawSseStream([
           `data: ${payload.slice(0, split)}`,
           `${payload.slice(split)}\n\n`,
-          'data: {"choices": [{', '"delta": {"content": "!"}}]}\n\n',
+          'data: {"choices": [{',
+          '"delta": {"content": "!"}}]}\n\n',
           'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\n',
           'data: [DONE]\n\n'
         ])
@@ -872,11 +878,9 @@ describe('OpenAI provider streaming', () => {
 
   it.effect('recognizes mixed-newline event boundaries', () =>
     Effect.gen(function* () {
-      const first =
-        'data: {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}'
+      const first = 'data: {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}'
 
-      const second =
-        'data: {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}'
+      const second = 'data: {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}'
 
       const events = yield* collectStreamEvents(
         rawSseStream([`${first}\n\r${second}\n\n`, 'data: [DONE]\n\n'])
@@ -892,11 +896,9 @@ describe('OpenAI provider streaming', () => {
 
   it.effect('recognizes CRLF-plus-CR event boundaries', () =>
     Effect.gen(function* () {
-      const first =
-        'data: {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}'
+      const first = 'data: {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}'
 
-      const second =
-        'data: {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}'
+      const second = 'data: {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}'
 
       const events = yield* collectStreamEvents(
         rawSseStream([`${first}\r\n\r${second}\n\n`, 'data: [DONE]\n\n'])
@@ -912,11 +914,9 @@ describe('OpenAI provider streaming', () => {
 
   it.effect('recognizes CR-plus-CRLF event boundaries', () =>
     Effect.gen(function* () {
-      const first =
-        'data: {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}'
+      const first = 'data: {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}'
 
-      const second =
-        'data: {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}'
+      const second = 'data: {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}'
 
       const events = yield* collectStreamEvents(
         rawSseStream([`${first}\r\r\n${second}\n\n`, 'data: [DONE]\n\n'])

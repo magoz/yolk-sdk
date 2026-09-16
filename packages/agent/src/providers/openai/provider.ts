@@ -1,4 +1,15 @@
-import { Config, Context, Effect, Layer, Match, Option, Predicate, Redacted, Ref, Stream } from 'effect'
+import {
+  Config,
+  Context,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Predicate,
+  Redacted,
+  Ref,
+  Stream
+} from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -381,17 +392,15 @@ class OpenAiChatDelta extends Schema.Class<OpenAiChatDelta>('OpenAiChatDelta')({
   tool_calls: Schema.optional(Schema.Array(OpenAiChatDeltaToolCall))
 }) {}
 
-class OpenAiChatStreamChoice extends Schema.Class<OpenAiChatStreamChoice>(
-  'OpenAiChatStreamChoice'
-)({
-  delta: Schema.optional(OpenAiChatDelta),
-  finish_reason: Schema.optional(Schema.NullOr(Schema.String)),
-  usage: Schema.optional(Schema.Unknown)
-}) {}
+class OpenAiChatStreamChoice extends Schema.Class<OpenAiChatStreamChoice>('OpenAiChatStreamChoice')(
+  {
+    delta: Schema.optional(OpenAiChatDelta),
+    finish_reason: Schema.optional(Schema.NullOr(Schema.String)),
+    usage: Schema.optional(Schema.Unknown)
+  }
+) {}
 
-class OpenAiChatStreamChunk extends Schema.Class<OpenAiChatStreamChunk>(
-  'OpenAiChatStreamChunk'
-)({
+class OpenAiChatStreamChunk extends Schema.Class<OpenAiChatStreamChunk>('OpenAiChatStreamChunk')({
   choices: Schema.optional(Schema.Array(OpenAiChatStreamChoice)),
   usage: Schema.optional(Schema.Unknown)
 }) {}
@@ -424,10 +433,8 @@ const JsonFromJsonString = Schema.fromJsonString(Schema.Json)
 const isJsonRecord = (value: Schema.Json | undefined): value is Schema.JsonObject =>
   value !== undefined && Predicate.isObjectOrArray(value) && !Array.isArray(value)
 
-const jsonRecordField = (
-  value: Schema.JsonObject,
-  key: string
-): Schema.Json | undefined => (Object.hasOwn(value, key) ? value[key] : undefined)
+const jsonRecordField = (value: Schema.JsonObject, key: string): Schema.Json | undefined =>
+  Object.hasOwn(value, key) ? value[key] : undefined
 
 const jsonField = (value: Schema.Json | undefined, key: string): Schema.Json | undefined =>
   isJsonRecord(value) ? jsonRecordField(value, key) : undefined
@@ -1214,7 +1221,14 @@ const streamOpenAiChatResponse = (
           Stream.mapEffect(chunk =>
             Effect.gen(function* () {
               const state = yield* Ref.get(stateRef)
-              const step = yield* processChatStreamText(providerIdentity, reasoningContent, state, chunk)
+
+              const step = yield* processChatStreamText(
+                providerIdentity,
+                reasoningContent,
+                state,
+                chunk
+              )
+
               yield* Ref.set(stateRef, step.state)
 
               return step.events
@@ -1379,7 +1393,10 @@ const sendOpenAiRequestBody = (
   providerIdentity: OpenAiProviderIdentity
 ): Effect.Effect<string, LLMError> =>
   Effect.gen(function* () {
-    const body = yield* toOpenAiRequestBody(request, openAiRequestBodyFields(config, providerIdentity))
+    const body = yield* toOpenAiRequestBody(
+      request,
+      openAiRequestBodyFields(config, providerIdentity)
+    )
 
     return yield* serializeOpenAiRequestBody(body, providerIdentity.name)
   })

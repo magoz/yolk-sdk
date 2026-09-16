@@ -30,7 +30,7 @@ Do not mix versions unless a release note explicitly says it is safe.
 These `@yolk-sdk/agent` behavior changes target the next matching canary. See [Go setup](./integrations/provider-setup#opencode-go) and [troubleshooting](./troubleshooting).
 
 - OpenAI Chat Completions transport stays one JSON body by default. `OpenAiProviderConfig.streaming:
-  true` requests incremental `chat.completion.chunk` SSE deltas with usage; unterminated streams
+true` requests incremental `chat.completion.chunk` SSE deltas with usage; unterminated streams
   fail `invalid_response` without `Done`. OpenCode Go chat always streams. Only enable streaming
   against endpoints that serve chat SSE.
 - Anthropic tool-result blocks omit `is_error` when the result carries no error flag, keeping

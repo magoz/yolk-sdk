@@ -46,10 +46,7 @@ const sse = (events: ReadonlyArray<unknown>, done = false) =>
 const success = (protocol: OpenCodeGoProtocol) => {
   switch (protocol) {
     case 'chat-completions':
-      return sse(
-        [{ choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] }],
-        true
-      )
+      return sse([{ choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] }], true)
     case 'messages':
       return sse([
         { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello' } },
