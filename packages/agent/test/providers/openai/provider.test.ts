@@ -870,6 +870,46 @@ describe('OpenAI provider streaming', () => {
     })
   )
 
+  it.effect('recognizes mixed-newline event boundaries', () =>
+    Effect.gen(function* () {
+      const first =
+        'data: {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}'
+
+      const second =
+        'data: {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}'
+
+      const events = yield* collectStreamEvents(
+        rawSseStream([`${first}\n\r${second}\n\n`, 'data: [DONE]\n\n'])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'A' },
+        { _tag: 'TextDelta', text: 'B' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('recognizes CRLF-plus-CR event boundaries', () =>
+    Effect.gen(function* () {
+      const first =
+        'data: {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}'
+
+      const second =
+        'data: {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}'
+
+      const events = yield* collectStreamEvents(
+        rawSseStream([`${first}\r\n\r${second}\n\n`, 'data: [DONE]\n\n'])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'A' },
+        { _tag: 'TextDelta', text: 'B' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
   it.effect('keeps usage arriving after the finish chunk', () =>
     Effect.gen(function* () {
       const events = yield* collectStreamEvents(
