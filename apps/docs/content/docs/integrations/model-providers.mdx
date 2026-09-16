@@ -79,7 +79,7 @@ redacted API key, explicit `protocol`, and host-owned `maxOutputTokens`. See
 
 | Protocol           | Endpoint suffix     | Authentication | Transport                                 |
 | ------------------ | ------------------- | -------------- | ----------------------------------------- |
-| `chat-completions` | `/chat/completions` | Bearer API key | Non-streamed JSON, normalized into events |
+| `chat-completions` | `/chat/completions` | Bearer API key | SSE (`streaming: true`), normalized into events |
 | `messages`         | `/messages`         | `x-api-key`    | SSE or JSON response                      |
 | `responses`        | `/responses`        | Bearer API key | SSE or JSON response                      |
 

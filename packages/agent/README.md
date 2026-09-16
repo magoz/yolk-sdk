@@ -221,8 +221,9 @@ const GoLayer = makeOpenCodeGoProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-The default base URL is `https://opencode.ai/zen/go/v1`. Chat uses non-streamed JSON and Bearer auth;
-Messages uses SSE and `x-api-key`; Responses uses SSE and Bearer auth. All normalize to `LLMEvent`s.
+The default base URL is `https://opencode.ai/zen/go/v1`. Chat streams SSE (the Go adapter sets
+`streaming: true`) with Bearer auth; Messages uses SSE and `x-api-key`; Responses uses SSE and Bearer
+auth. All normalize to `LLMEvent`s.
 Messages retains native tool names and system instructions, without Claude OAuth fingerprinting.
 Responses sends `max_output_tokens`, unlike Codex. Go requires a nonempty key and positive safe-integer
 limit at layer construction. `extraHeaders` cannot override required protocol headers, regardless of
@@ -295,7 +296,8 @@ and `ToolCall.params` as `Schema.Json`. Non-JSON values fail as non-retryable `L
 `ToolCall.params` stays opaque. Provider admission also catches post-construction forgeries.
 After lone-surrogate rewrite, the request
 body is decoded as JSON again and fails rather than skipping serialization. HTTP error bodies that
-are not JSON still classify from status.
+are not JSON still classify from status. Tool-result blocks omit `is_error` when the result carries
+no flag, so follow-up request bodies stay valid; an explicit boolean `isError` is still serialized.
 
 ### Tool parameter documents
 
@@ -307,7 +309,10 @@ plain/null-prototype objects, own `__proto__`/`constructor` keys and DAG aliases
 rejected unread; exotic prototypes, hidden/symbol keys, undefined, nonfinite values and cycles fail.
 No Proxy side-effect immunity or immutability is promised. Tool call parameters/results and HITL
 remain opaque. Background wrapping preserves boolean `true`/`false` as the arguments schema;
-reference/resource restrictions still apply at activation.
+reference/resource restrictions still apply at activation. `makeTool` may add root `type: "object"`
+to typeless `anyOf`/`oneOf` unions whose members are all object schemas, as required by strict
+OpenAI-compatible upstreams; primitives, unknown, and already-typed roots are unchanged, and call
+validation still uses the original Effect Schema.
 
 ### OpenAI Chat Completions, Responses, and extraBody
 
@@ -325,6 +330,12 @@ consumption (`invalid_response` on failure). Responses SSE event JSON admits `Sc
 non-object JSON events are ignored (not failed), while malformed non-JSON event text still fails
 `invalid_response`. First `response.completed` remains terminal. HTTP error bodies stay raw text for
 `classifyProviderFailure`.
+
+Chat Completions transport defaults to one JSON body. Set `OpenAiProviderConfig.streaming: true` to
+request incremental `chat.completion.chunk` SSE deltas with `stream_options.include_usage`, folded
+into text/reasoning/tool-call events plus terminal and usage events. Unterminated streams fail
+`invalid_response` and never emit `Done`. Hosts must only enable streaming against endpoints that
+serve chat SSE; OpenCode Go `chat-completions` always sets it.
 
 `OpenAiProviderConfig.extraBody` takes `OpenAiRequestExtras` (JSON-object input). Lowering
 projects enumerable own string fields into an independent portable-data snapshot. Canonical
@@ -362,6 +373,8 @@ policy and emits protocol-visible retry/error state:
 
 - `ProviderErrorInfo` carries safe provider id, failure kind, HTTP status, provider code, and
   optional `retryAfterMs`.
+- Chat Completions and Responses HTTP failures copy the envelope string `code` (falling back to
+  `type`) into `provider.providerCode`; free-text upstream bodies stay out of `LLMError`.
 - `AgentRetry.provider` exposes current retry metadata and chosen `delayMs`.
 - `AgentError.provider` preserves final terminal metadata.
 - `AgentErrorCode` includes `rate_limit`, `overloaded`, `context_overflow`, and generic

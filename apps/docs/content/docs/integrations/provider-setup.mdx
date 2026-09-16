@@ -88,8 +88,11 @@ Only offer efforts supported by your model. Chat emits and replays provider `rea
 
 Optional `extraHeaders` cannot replace required protocol headers, even with different casing.
 Override `baseUrl` only with a trusted proxy: it receives the API key. Messages and Responses require
-explicit stream completion; truncated responses do not count as success. Chat currently waits for a
-complete JSON response before emitting events. This adapter adds no model picker, catalog fetching,
+explicit stream completion; truncated responses do not count as success. Chat defaults to one JSON
+response before emitting events; set `streaming: true` on `OpenAiProviderConfig` to request
+incremental `chat.completion.chunk` SSE deltas with usage instead. Unterminated chat streams fail
+`invalid_response` without `Done`. OpenCode Go chat always streams. Only enable streaming against
+endpoints that serve chat SSE. This adapter adds no model picker, catalog fetching,
 credential persistence, or automatic subscription-allowance polling.
 
 Read allowance on your host's schedule (server-side fragment):

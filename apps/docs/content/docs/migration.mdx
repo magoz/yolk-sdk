@@ -25,6 +25,21 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: chat streaming, Anthropic tool results, union tool schemas
+
+These `@yolk-sdk/agent` behavior changes target the next matching canary. See [Go setup](./integrations/provider-setup#opencode-go) and [troubleshooting](./troubleshooting).
+
+- OpenAI Chat Completions transport stays one JSON body by default. `OpenAiProviderConfig.streaming:
+  true` requests incremental `chat.completion.chunk` SSE deltas with usage; unterminated streams
+  fail `invalid_response` without `Done`. OpenCode Go chat always streams. Only enable streaming
+  against endpoints that serve chat SSE.
+- Anthropic tool-result blocks omit `is_error` when the result carries no error flag, keeping
+  follow-up request bodies valid. Explicit boolean flags are still serialized.
+- `makeTool` may add root `type: "object"` to typeless object-only `anyOf`/`oneOf` unions for strict
+  OpenAI-compatible upstreams. Call validation still uses the original Effect Schema.
+- Chat Completions and Responses HTTP failures copy the envelope string `code` (falling back to
+  `type`) into `provider.providerCode`; raw upstream bodies stay out of typed failures.
+
 ### Next canary: selected branded identities and typed connector actions
 
 These source changes target a future matching canary. Identity wire representations stay strings,

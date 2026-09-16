@@ -465,7 +465,9 @@ Transport layers are `webSocketVoiceTransportLayer` (`voice`) and `webRtcVoiceTr
 
 `OpenAiProviderConfig.extraBody` is JSON-object input (`OpenAiRequestExtras` on the existing
 `providers/openai/provider` subpath). Lowering drops canonical fields unread and snapshots surviving
-portable data; invalid/accessor input fails before HTTP. See [the migration guide](../migration).
+portable data; invalid/accessor input fails before HTTP. Chat transport defaults to one JSON body;
+`streaming: true` opts into SSE deltas, and OpenCode Go chat always streams. See [the migration guide](../migration)
+and [Go configuration](../integrations/provider-setup#opencode-go).
 
 | Subpath                                                | Main exports                                                                                                                                               |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |

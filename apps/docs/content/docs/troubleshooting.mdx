@@ -61,6 +61,13 @@ requires integer `AI_GATEWAY_MAX_COMPLETION_TOKENS`. If you configure the layer 
 selected credential as `apiKey` to `makeVercelAiGatewayProviderLayer`; model ids must use Gateway's
 opaque `provider/model` form.
 
+### Diagnose provider failures with providerCode
+
+Chat Completions and Responses HTTP failures copy the envelope string `code` (falling back to
+`type`) into `LLMError.provider.providerCode`, alongside status and kind. Codes may be absent, and
+raw upstream bodies stay out of typed failures: diagnose from `providerCode`, status, and kind
+rather than logging raw response bodies.
+
 ### OAuth provider returns unauthorized
 
 Codex, Claude, and Grok provider layers need a fresh `OAuthAccessToken`. Your host owns token storage,
@@ -122,6 +129,11 @@ If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host mu
 ### Browser receives one big chunk
 
 Disable buffering at your platform/proxy and use streaming-friendly headers.
+
+Also confirm provider streaming configuration: generic OpenAI chat defaults to one JSON body, so a
+host expecting incremental events must set `streaming: true` against an endpoint that serves chat
+SSE. Unterminated chat streams fail `invalid_response` (`incomplete_stream`) without `Done`; treat
+them as failures, not quiet completion.
 
 For NDJSON routes, use `content-type: application/x-ndjson` and avoid middleware that buffers responses.
 

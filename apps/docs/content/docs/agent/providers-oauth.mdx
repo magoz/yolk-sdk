@@ -87,6 +87,10 @@ Compatible chat endpoints can opt into `OpenAiProviderConfig.reasoningEffortForm
 `reasoningContent: true` validates/emits `reasoning_content` and preserves it in assistant replay;
 by default this vendor extension is ignored. OpenCode Go enables the latter two options.
 
+Chat stays one JSON body by default; `streaming: true` requests SSE deltas (OpenCode Go chat always
+sets it). Only stream against endpoints that serve chat SSE. See the [API reference](../api-reference/agent#providers)
+and [Go setup](../integrations/provider-setup#opencode-go).
+
 `OpenAiProviderConfig.extraBody` takes JSON-object input. Lowering discards canonical request fields
 without reading their values and snapshots surviving enumerable own data. Accessors are rejected
 unread, not evaluated; nonfinite values, cycles and exotic objects fail with a fixed

@@ -35,7 +35,7 @@ export const weatherTool = makeTool({
 })
 ```
 
-`makeTool` uses your Effect Schema to validate model input and generate the JSON Schema exposed to the model.
+`makeTool` uses your Effect Schema to validate model input and generate the JSON Schema exposed to the model. The advertised document may add root `type: "object"` to typeless object-only `anyOf`/`oneOf` unions for strict upstreams; execution still validates against your original Schema.
 
 ## Resolve tools for a request
 
