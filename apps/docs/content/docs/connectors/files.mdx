@@ -139,6 +139,8 @@ original blob snapshots. See Google's [export formats](https://developers.google
 ### Fortnox and Notion
 
 Fortnox preview input is `{ documentNumber }`; archive input is `{ fileId }`.
+`documentNumber` uses `FortnoxDocumentNumber` from `@yolk-sdk/connectors/fortnox`: decode external
+strings with that schema, or use `.make` for trusted values. `fileId` remains a plain string.
 Preview uses `/3/invoices/{DocumentNumber}/preview`, **not `/print`**, and does not set `Sent` true.
 Archive retrieval uses `/3/archive/{id}` with IDs from discovery, not supplier external-URL
 connections. `fortnox.list_supplier_invoice_files` takes `{ givenNumber, page?, limit? }` and returns
