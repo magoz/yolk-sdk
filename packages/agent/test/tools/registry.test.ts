@@ -240,26 +240,24 @@ describe('resolveTools', () => {
 
   it.effect('stamps recursive union roots after reference inlining', () =>
     Effect.gen(function* () {
-      interface FilterBranch {
-        readonly op: 'branch'
-        readonly kids: ReadonlyArray<FilterLeaf | FilterBranch>
-      }
-
       interface FilterLeaf {
         readonly op: 'leaf'
         readonly value: string
       }
 
-      const FilterBranchSchema: Schema.Schema<FilterBranch> = Schema.Struct({
-        op: Schema.Literal('branch'),
-        kids: Schema.Array(
-          Schema.suspend((): Schema.Schema<FilterLeaf | FilterBranch> => FilterValueSchema)
-        )
-      })
+      interface FilterBranch {
+        readonly op: 'branch'
+        readonly kids: ReadonlyArray<FilterLeaf | FilterBranch>
+      }
 
-      const FilterValueSchema: Schema.Schema<FilterLeaf | FilterBranch> = Schema.Union([
+      const FilterValueSchema = Schema.Union([
         Schema.Struct({ op: Schema.Literal('leaf'), value: Schema.String }),
-        FilterBranchSchema
+        Schema.Struct({
+          op: Schema.Literal('branch'),
+          kids: Schema.Array(
+            Schema.suspend((): Schema.Codec<FilterLeaf | FilterBranch> => FilterValueSchema)
+          )
+        })
       ])
 
       const tool = makeSchemaTool({
