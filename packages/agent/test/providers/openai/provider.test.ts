@@ -853,6 +853,43 @@ describe('OpenAI provider streaming', () => {
     })
   )
 
+  it.effect('reassembles split CRLF before multiline continuations', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        rawSseStream([
+          'data: {"choices":\r',
+          '\ndata: [{"delta": {"content": "Hi"}, "finish_reason": "stop"}]}\r\n\r\n',
+          'data: [DONE]\n\n'
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('keeps usage arriving after the finish chunk', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        chatSse([
+          { choices: [{ delta: { content: 'Hi' }, finish_reason: 'stop' }] },
+          {
+            choices: [],
+            usage: { prompt_tokens: 4, completion_tokens: 2 }
+          }
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' },
+        { _tag: 'Usage', usage: { input: { total: 4 }, output: { total: 2 } } }
+      ])
+    })
+  )
+
   it.effect('tolerates split CRLF across transport chunks', () =>
     Effect.gen(function* () {
       const events = yield* collectStreamEvents(

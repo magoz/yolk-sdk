@@ -906,11 +906,12 @@ const initialOpenAiChatStreamState: OpenAiChatStreamState = {
   usage: undefined
 }
 
-const normalizeChatStreamNewlines = (text: string) =>
-  text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-
+// Split on blank lines without eagerly normalizing: a chunk-ending CR must
+// stay pending so a split CRLF (or CR + multiline continuation) cannot form
+// a false event boundary before the rest arrives. The pair is atomic: a
+// counted regex would backtrack and split a lone CRLF in two.
 const splitCompleteChatSseBlocks = (buffer: string) => {
-  const blocks = buffer.split('\n\n')
+  const blocks = buffer.split(/\r?\n\r?\n|\r\r/)
   const tail = blocks.at(-1) ?? ''
 
   return { completeBlocks: blocks.slice(0, -1), tail }
@@ -918,7 +919,7 @@ const splitCompleteChatSseBlocks = (buffer: string) => {
 
 const chatSseBlockData = (block: string) => {
   const lines = block
-    .split('\n')
+    .split(/\r\n|\n|\r/)
     .filter(line => line.startsWith('data:'))
     .map(line => line.slice(5).trimStart())
 
@@ -1093,7 +1094,7 @@ const processChatStreamText = (
   text: string
 ): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
   Effect.gen(function* () {
-    const split = splitCompleteChatSseBlocks(normalizeChatStreamNewlines(`${state.buffer}${text}`))
+    const split = splitCompleteChatSseBlocks(`${state.buffer}${text}`)
     let current: OpenAiChatStreamState = { ...state, buffer: split.tail }
     const events: Array<LLMEvent> = []
 
