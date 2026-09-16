@@ -73,6 +73,7 @@ const makeOpenCodeGoProtocolLayer = (
             completionTokenField: 'max_tokens',
             reasoningEffortFormat: 'reasoning-effort',
             reasoningContent: true,
+            streaming: true,
             providerIdentity: { id: identity.providerId, name: identity.providerName },
             extraHeaders
           })

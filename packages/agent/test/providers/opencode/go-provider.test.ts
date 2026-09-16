@@ -35,13 +35,21 @@ const input: LLMRequest = {
   tools: []
 }
 
-const sse = (events: ReadonlyArray<unknown>) =>
-  new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''))
+const sse = (events: ReadonlyArray<unknown>, done = false) =>
+  new Response(
+    [
+      ...events.map(event => `data: ${JSON.stringify(event)}\n\n`),
+      ...(done ? ['data: [DONE]\n\n'] : [])
+    ].join('')
+  )
 
 const success = (protocol: OpenCodeGoProtocol) => {
   switch (protocol) {
     case 'chat-completions':
-      return Response.json({ choices: [{ message: { content: 'Hello' }, finish_reason: 'stop' }] })
+      return sse(
+        [{ choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] }],
+        true
+      )
     case 'messages':
       return sse([
         { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello' } },
@@ -202,7 +210,7 @@ describe('OpenCode Go', () => {
               }
             : {
                 authorization: 'Bearer go-key',
-                accept: protocol === 'responses' ? 'text/event-stream' : 'application/json'
+                accept: 'text/event-stream'
               })
         })
         const body = bodyOf(requests)
@@ -229,7 +237,8 @@ describe('OpenCode Go', () => {
                 { role: 'user', content: 'Hello' }
               ],
               max_tokens: 2048,
-              stream: false,
+              stream: true,
+              stream_options: { include_usage: true },
               reasoning_effort: 'high'
             })),
             Match.exhaustive
@@ -371,7 +380,13 @@ describe('OpenCode Go', () => {
 
     it.effect(`${protocol}: rejects malformed response JSON`, () =>
       Effect.gen(function* () {
-        const error = yield* run(protocol, new Response('{broken'), []).pipe(Effect.flip)
+        const malformed =
+          protocol === 'chat-completions'
+            ? new Response('data: {broken\n\n')
+            : new Response('{broken')
+
+        const error = yield* run(protocol, malformed, []).pipe(Effect.flip)
+
         expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
       })
     )
@@ -380,7 +395,13 @@ describe('OpenCode Go', () => {
   it.effect('chat: validates reasoning only when the compatible extension is enabled', () =>
     Effect.gen(function* () {
       const json = { choices: [{ message: { content: 'Hello', reasoning_content: 123 } }] }
-      const error = yield* run('chat-completions', Response.json(json), []).pipe(Effect.flip)
+
+      const error = yield* run(
+        'chat-completions',
+        sse([{ choices: [{ delta: { content: 'Hello', reasoning_content: 123 } }] }]),
+        []
+      ).pipe(Effect.flip)
+
       expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
 
       const events = yield* Effect.gen(function* () {
@@ -413,30 +434,36 @@ describe('OpenCode Go', () => {
     Effect.gen(function* () {
       const events = yield* run(
         'chat-completions',
-        Response.json({
-          choices: [
+        sse(
+          [
+            { choices: [{ delta: { reasoning_content: 'Search first.' } }] },
             {
-              finish_reason: 'tool_calls',
-              message: {
-                content: null,
-                reasoning_content: 'Search first.',
-                tool_calls: [
-                  {
-                    id: call.id,
-                    type: 'function',
-                    function: { name: tool.name, arguments: '{"query":"yolk"}' }
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: call.id,
+                        function: { name: tool.name, arguments: '{"query":"yolk"}' }
+                      }
+                    ]
                   }
-                ]
+                }
+              ]
+            },
+            {
+              choices: [{ delta: {}, finish_reason: 'tool_calls' }],
+              usage: {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                prompt_tokens_details: { cached_tokens: 2 },
+                completion_tokens_details: { reasoning_tokens: 3 }
               }
             }
           ],
-          usage: {
-            prompt_tokens: 10,
-            completion_tokens: 5,
-            prompt_tokens_details: { cached_tokens: 2 },
-            completion_tokens_details: { reasoning_tokens: 3 }
-          }
-        }),
+          true
+        ),
         []
       )
 
@@ -711,9 +738,7 @@ describe('OpenCode Go', () => {
       for (const protocol of protocols) {
         const response = Match.value(protocol).pipe(
           Match.when('chat-completions', () =>
-            Response.json({
-              choices: [{ message: { content: 'partial' }, finish_reason: 'length' }]
-            })
+            sse([{ choices: [{ delta: { content: 'partial' }, finish_reason: 'length' }] }])
           ),
           Match.when('messages', () =>
             sse([
