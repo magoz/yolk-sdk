@@ -65,6 +65,29 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
 }
 
 describe('xAI Grok subscription provider', () => {
+  for (const format of ['json', 'completion-only'] as const) {
+    it.effect(`${format}: retains flattened text before calls when Go ordering is disabled`, () =>
+      Effect.gen(function* () {
+        const output = [
+          { type: 'message', content: [{ type: 'output_text', text: 'Before.' }] },
+          { type: 'function_call', call_id: 'call-1', name: 'search', arguments: '{}' },
+          { type: 'message', content: [{ type: 'output_text', text: 'After.' }] }
+        ]
+
+        const response =
+          format === 'json'
+            ? responseFromText(JSON.stringify({ output }))
+            : responseFromSseEvents([{ type: 'response.completed', response: { output } }])
+
+        const events = yield* streamXAiGrokResponse(response).pipe(Stream.runCollect)
+        expect(events.map(event => event._tag)).toEqual(['TextDelta', 'ToolCall', 'Done'])
+        expect(
+          events.flatMap(event => (Predicate.isTagged(event, 'TextDelta') ? [event.text] : []))
+        ).toEqual(['Before.After.'])
+      })
+    )
+  }
+
   it.effect('lowers Responses input with a host-owned output limit', () =>
     Effect.gen(function* () {
       const body = yield* toXAiGrokRequestBody(

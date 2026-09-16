@@ -811,7 +811,10 @@ describe('OpenCode Go', () => {
     | { readonly kind: 'call'; readonly call: ToolCall; readonly arguments: string }
     | { readonly kind: 'reasoning'; readonly text: string }
 
-  const mixedOrderSse = (segments: ReadonlyArray<ResponsesReplaySegment>) => {
+  const mixedOrderResponse = (
+    segments: ReadonlyArray<ResponsesReplaySegment>,
+    format: 'stream' | 'json' | 'completion-only' = 'stream'
+  ) => {
     const events: Array<unknown> = []
     const output: Array<unknown> = []
 
@@ -840,19 +843,28 @@ describe('OpenCode Go', () => {
       output.push(item)
     }
 
-    events.push({
-      type: 'response.completed',
-      response: { status: 'completed', output }
-    })
+    const response = {
+      status: 'completed',
+      output,
+      output_text: segments
+        .flatMap(segment => (segment.kind === 'text' ? [segment.text] : []))
+        .join('')
+    }
 
-    return sse(events)
+    const completed = { type: 'response.completed', response }
+
+    if (format === 'json') {
+      return Response.json(response)
+    }
+
+    return sse(format === 'completion-only' ? [completed] : [...events, completed])
   }
 
   const commentarySse = (
     text: string,
     calls: ReadonlyArray<{ readonly call: ToolCall; readonly arguments: string }>
   ) =>
-    mixedOrderSse([
+    mixedOrderResponse([
       { kind: 'text', text, phase: 'commentary' },
       ...calls.map(current => ({
         kind: 'call' as const,
@@ -1010,122 +1022,130 @@ describe('OpenCode Go', () => {
       })
   )
 
-  it.effect(
-    'responses: preserves text-call-text order and only tags pre-call text as commentary',
-    () =>
-      Effect.gen(function* () {
-        const result = yield* streamAccumulateReplay(
-          mixedOrderSse([
-            { kind: 'text', text: 'I will search now.', phase: 'commentary' },
-            { kind: 'call', call, arguments: '{"query":"yolk"}' },
-            { kind: 'text', text: 'Here is what I found.' }
-          ]),
-          { ...input, tools: [tool] },
-          events => replayAfterToolTurn(events, [{ call, content: 'Found it' }], [tool])
-        )
-
-        expect(result.assistant.parts).toMatchObject([
-          { _tag: 'Text', content: 'I will search now.' },
-          { _tag: 'HostToolCall', call },
-          { _tag: 'Text', content: 'Here is what I found.' }
-        ])
-        expect(result.body.input).toEqual([
-          { role: 'user', content: 'Hello' },
-          {
-            role: 'assistant',
-            content: 'I will search now.',
-            phase: 'commentary'
-          },
-          {
-            type: 'function_call',
-            call_id: call.id,
-            name: tool.name,
-            arguments: '{"query":"yolk"}'
-          },
-          { role: 'assistant', content: 'Here is what I found.' },
-          {
-            type: 'function_call_output',
-            call_id: call.id,
-            output: 'Found it'
-          }
-        ])
-        expect(JSON.stringify(result.body.input)).not.toContain('final_answer')
-      })
-  )
-
-  it.effect(
-    'responses: preserves interleaved calls and tags only text that precedes a later call',
-    () =>
-      Effect.gen(function* () {
-        const result = yield* streamAccumulateReplay(
-          mixedOrderSse([
-            { kind: 'text', text: 'I will search now.', phase: 'commentary' },
-            { kind: 'reasoning', text: 'Plan the lookups.' },
-            { kind: 'call', call, arguments: '{"query":"yolk"}' },
-            { kind: 'text', text: 'Next I will look it up.', phase: 'commentary' },
-            { kind: 'call', call: lookupCall, arguments: '{}' },
-            { kind: 'text', text: 'Here is the answer.' }
-          ]),
-          { ...input, tools: [tool, lookup] },
-          events =>
-            replayAfterToolTurn(
-              events,
+  for (const format of ['stream', 'json', 'completion-only'] as const) {
+    it.effect(
+      `responses ${format}: preserves text-call-text order and only tags pre-call text as commentary`,
+      () =>
+        Effect.gen(function* () {
+          const result = yield* streamAccumulateReplay(
+            mixedOrderResponse(
               [
-                { call, content: 'Found it' },
-                { call: lookupCall, content: 'Looked up' }
+                { kind: 'text', text: 'I will search now.', phase: 'commentary' },
+                { kind: 'call', call, arguments: '{"query":"yolk"}' },
+                { kind: 'text', text: 'Here is what I found.' }
               ],
-              [tool, lookup]
-            )
-        )
+              format
+            ),
+            { ...input, tools: [tool] },
+            events => replayAfterToolTurn(events, [{ call, content: 'Found it' }], [tool])
+          )
 
-        expect(result.assistant.parts).toMatchObject([
-          { _tag: 'Text', content: 'I will search now.' },
-          { _tag: 'Reasoning', text: 'Plan the lookups.' },
-          { _tag: 'HostToolCall', call },
-          { _tag: 'Text', content: 'Next I will look it up.' },
-          { _tag: 'HostToolCall', call: lookupCall },
-          { _tag: 'Text', content: 'Here is the answer.' }
-        ])
-        expect(result.body.input).toEqual([
-          { role: 'user', content: 'Hello' },
-          {
-            role: 'assistant',
-            content: 'I will search now.',
-            phase: 'commentary'
-          },
-          {
-            type: 'function_call',
-            call_id: call.id,
-            name: tool.name,
-            arguments: '{"query":"yolk"}'
-          },
-          {
-            role: 'assistant',
-            content: 'Next I will look it up.',
-            phase: 'commentary'
-          },
-          {
-            type: 'function_call',
-            call_id: lookupCall.id,
-            name: lookup.name,
-            arguments: '{}'
-          },
-          { role: 'assistant', content: 'Here is the answer.' },
-          {
-            type: 'function_call_output',
-            call_id: call.id,
-            output: 'Found it'
-          },
-          {
-            type: 'function_call_output',
-            call_id: lookupCall.id,
-            output: 'Looked up'
-          }
-        ])
-        expect(JSON.stringify(result.body.input)).not.toContain('Plan the lookups.')
-        expect(JSON.stringify(result.body.input)).not.toContain('final_answer')
-      })
-  )
+          expect(result.assistant.parts).toMatchObject([
+            { _tag: 'Text', content: 'I will search now.' },
+            { _tag: 'HostToolCall', call },
+            { _tag: 'Text', content: 'Here is what I found.' }
+          ])
+          expect(result.body.input).toEqual([
+            { role: 'user', content: 'Hello' },
+            {
+              role: 'assistant',
+              content: 'I will search now.',
+              phase: 'commentary'
+            },
+            {
+              type: 'function_call',
+              call_id: call.id,
+              name: tool.name,
+              arguments: '{"query":"yolk"}'
+            },
+            { role: 'assistant', content: 'Here is what I found.' },
+            {
+              type: 'function_call_output',
+              call_id: call.id,
+              output: 'Found it'
+            }
+          ])
+          expect(JSON.stringify(result.body.input)).not.toContain('final_answer')
+        })
+    )
+
+    it.effect(
+      `responses ${format}: preserves interleaved calls and tags only text that precedes a later call`,
+      () =>
+        Effect.gen(function* () {
+          const result = yield* streamAccumulateReplay(
+            mixedOrderResponse(
+              [
+                { kind: 'text', text: 'I will search now.', phase: 'commentary' },
+                { kind: 'reasoning', text: 'Plan the lookups.' },
+                { kind: 'call', call, arguments: '{"query":"yolk"}' },
+                { kind: 'text', text: 'Next I will look it up.', phase: 'commentary' },
+                { kind: 'call', call: lookupCall, arguments: '{}' },
+                { kind: 'text', text: 'Here is the answer.' }
+              ],
+              format
+            ),
+            { ...input, tools: [tool, lookup] },
+            events =>
+              replayAfterToolTurn(
+                events,
+                [
+                  { call, content: 'Found it' },
+                  { call: lookupCall, content: 'Looked up' }
+                ],
+                [tool, lookup]
+              )
+          )
+
+          expect(result.assistant.parts).toMatchObject([
+            { _tag: 'Text', content: 'I will search now.' },
+            { _tag: 'Reasoning', text: 'Plan the lookups.' },
+            { _tag: 'HostToolCall', call },
+            { _tag: 'Text', content: 'Next I will look it up.' },
+            { _tag: 'HostToolCall', call: lookupCall },
+            { _tag: 'Text', content: 'Here is the answer.' }
+          ])
+          expect(result.body.input).toEqual([
+            { role: 'user', content: 'Hello' },
+            {
+              role: 'assistant',
+              content: 'I will search now.',
+              phase: 'commentary'
+            },
+            {
+              type: 'function_call',
+              call_id: call.id,
+              name: tool.name,
+              arguments: '{"query":"yolk"}'
+            },
+            {
+              role: 'assistant',
+              content: 'Next I will look it up.',
+              phase: 'commentary'
+            },
+            {
+              type: 'function_call',
+              call_id: lookupCall.id,
+              name: lookup.name,
+              arguments: '{}'
+            },
+            { role: 'assistant', content: 'Here is the answer.' },
+            {
+              type: 'function_call_output',
+              call_id: call.id,
+              output: 'Found it'
+            },
+            {
+              type: 'function_call_output',
+              call_id: lookupCall.id,
+              output: 'Looked up'
+            }
+          ])
+          expect(JSON.stringify(result.body.input)).not.toContain('Plan the lookups.')
+          expect(JSON.stringify(result.body.input)).not.toContain('final_answer')
+        })
+    )
+  }
 
   it.effect('responses: replays tool-only assistant turns without fabricated text', () =>
     Effect.gen(function* () {

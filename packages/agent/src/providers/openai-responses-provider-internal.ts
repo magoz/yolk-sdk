@@ -91,8 +91,9 @@ export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
   /**
    * When true, assistant text that precedes host `function_call` items is tagged
    * `phase: commentary` without moving later text ahead of those calls. Final
-   * answers omit phase. Default false so Codex and Grok keep untagged assistant
-   * messages.
+   * answers omit phase. Also preserves output-item order in complete response
+   * parsing so replay can recover those boundaries. Default false so Codex and
+   * Grok keep flattened parsing and untagged assistant messages.
    */
   readonly commentaryPhaseBeforeToolCalls?: boolean
 }
@@ -734,6 +735,7 @@ type OpenAiResponsesProviderDescriptor = {
   readonly providerName: string
   readonly allowEofCompletion: boolean
   readonly requireJsonCompletion?: boolean
+  readonly preserveOutputOrder?: boolean
 }
 
 type OpenAiResponsesLlmErrorFields = {
@@ -882,13 +884,8 @@ const toAgentUsage = (usage: OpenAiResponsesUsageResponse): Effect.Effect<AgentU
   )
 }
 
-type ToLlmEventsOptions = {
-  readonly allowEmptyStop: boolean
-}
-
-const toLlmEvents = (
-  response: OpenAiResponsesResponse,
-  options: ToLlmEventsOptions
+const flattenedResponseContentEvents = (
+  response: OpenAiResponsesResponse
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const text = response.output_text ?? textFromOutputItems(response.output)
@@ -923,7 +920,46 @@ const toLlmEvents = (
       })
     )
 
-    if (textEvents.length === 0 && toolCallEvents.length === 0 && !options.allowEmptyStop) {
+    return [...reasoningEvents, ...textEvents, ...toolCallEvents]
+  })
+
+const orderedResponseContentEvents = (
+  response: OpenAiResponsesResponse
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.gen(function* () {
+    const events = (yield* Effect.forEach(response.output, eventsFromOutputItem)).flat()
+
+    // output_text is an aggregate, not an ordered segment. Only use it when
+    // output items contain no text; otherwise it destroys host-call boundaries.
+    if (
+      !events.some(event => Predicate.isTagged(event, 'TextDelta')) &&
+      response.output_text !== undefined &&
+      response.output_text.length > 0
+    ) {
+      return [LLMTextDelta.make({ text: response.output_text }), ...events]
+    }
+
+    return events
+  })
+
+type ToLlmEventsOptions = {
+  readonly allowEmptyStop: boolean
+  readonly preserveOutputOrder: boolean
+}
+
+const toLlmEvents = (
+  response: OpenAiResponsesResponse,
+  options: ToLlmEventsOptions
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.gen(function* () {
+    const contentEvents = yield* options.preserveOutputOrder
+      ? orderedResponseContentEvents(response)
+      : flattenedResponseContentEvents(response)
+
+    const hasText = contentEvents.some(event => Predicate.isTagged(event, 'TextDelta'))
+    const hasToolCalls = contentEvents.some(event => Predicate.isTagged(event, 'ToolCall'))
+
+    if (!hasText && !hasToolCalls && !options.allowEmptyStop) {
       return yield* Effect.fail(
         new LLMError({
           cause: 'invalid_response',
@@ -934,10 +970,8 @@ const toLlmEvents = (
     }
 
     const events: Array<LLMEvent> = [
-      ...reasoningEvents,
-      ...textEvents,
-      ...toolCallEvents,
-      LLMDone.make({ stopReason: toolCallEvents.length > 0 ? 'tool_use' : 'stop' })
+      ...contentEvents,
+      LLMDone.make({ stopReason: hasToolCalls ? 'tool_use' : 'stop' })
     ]
 
     if (response.usage !== undefined) {
@@ -970,7 +1004,10 @@ const parseOpenAiResponsesJsonResponse = (
       )
     )
 
-    return yield* toLlmEvents(parsed, { allowEmptyStop: false })
+    return yield* toLlmEvents(parsed, {
+      allowEmptyStop: false,
+      preserveOutputOrder: descriptor.preserveOutputOrder === true
+    })
   })
 
 type OpenAiResponsesBodyFormat = 'undecided' | 'sse' | 'json'
@@ -1126,12 +1163,13 @@ const responseWithoutReplayedToolCalls = (
 const finalResponseToEvents = (
   parsedFinal: OpenAiResponsesResponse,
   state: OpenAiResponsesSseState,
-  hasToolCalls: boolean
+  hasToolCalls: boolean,
+  preserveOutputOrder: boolean
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const finalEvents = yield* toLlmEvents(
       responseWithoutReplayedToolCalls(parsedFinal, state.toolCallIds),
-      { allowEmptyStop: state.hasTextDelta || hasToolCalls }
+      { allowEmptyStop: state.hasTextDelta || hasToolCalls, preserveOutputOrder }
     )
 
     const shouldDedupe = state.hasTextDelta || state.hasReasoningDelta || hasToolCalls
@@ -1266,7 +1304,13 @@ const processSseData = (
         )
       )
 
-      const events = yield* finalResponseToEvents(parsedFinal, state, hasToolCalls)
+      const events = yield* finalResponseToEvents(
+        parsedFinal,
+        state,
+        hasToolCalls,
+        descriptor.preserveOutputOrder === true
+      )
+
       const emittedText = events.some(event => Predicate.isTagged(event, 'TextDelta'))
       const emittedReasoning = events.some(event => Predicate.isTagged(event, 'ReasoningDelta'))
       const emittedToolCallIds = toolCallIdsFromEvents(events)
@@ -1619,7 +1663,8 @@ export const makeOpenAiResponsesProviderLayer = (config: OpenAiResponsesProvider
         providerId: config.providerId,
         providerName: config.providerName,
         allowEofCompletion: config.allowEofCompletion,
-        requireJsonCompletion: config.requireJsonCompletion ?? false
+        requireJsonCompletion: config.requireJsonCompletion ?? false,
+        preserveOutputOrder: config.commentaryPhaseBeforeToolCalls === true
       }
 
       return LLMProvider.of({

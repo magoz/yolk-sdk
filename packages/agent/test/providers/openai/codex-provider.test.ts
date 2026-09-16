@@ -144,6 +144,29 @@ const collectCodexProviderEvents = (response: Response) =>
   )
 
 describe('OpenAI Codex provider', () => {
+  for (const format of ['json', 'completion-only'] as const) {
+    it.effect(`${format}: retains flattened text before calls when Go ordering is disabled`, () =>
+      Effect.gen(function* () {
+        const output = [
+          { type: 'message', content: [{ type: 'output_text', text: 'Before.' }] },
+          codexFunctionCall('call-1', 'search'),
+          { type: 'message', content: [{ type: 'output_text', text: 'After.' }] }
+        ]
+
+        const response =
+          format === 'json'
+            ? responseFromText(JSON.stringify({ output }))
+            : responseFromSseEvents([completedCodexResponse(...output)])
+
+        const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+        expect(events.map(event => event._tag)).toEqual(['TextDelta', 'ToolCall', 'Done'])
+        expect(
+          events.flatMap(event => (Predicate.isTagged(event, 'TextDelta') ? [event.text] : []))
+        ).toEqual(['Before.After.'])
+      })
+    )
+  }
+
   it.effect('allows request lowering without a compatibility config object', () =>
     Effect.gen(function* () {
       const body = yield* lowerOpenAiCodexRequestBody({
