@@ -6,6 +6,7 @@ import {
   ApiKeyCredential,
   ConnectorBinaryHttpClient,
   ConnectorBinaryHttpError,
+  ConnectorError,
   ConnectorHttpClient,
   ConnectorHttpResponse,
   CredentialResolver,
@@ -176,8 +177,42 @@ describe('host-only mail bytes', () => {
         'https://graph.microsoft.com/v1.0/users/mail%40example.com/messages/m/attachments/a/$value'
       )
       expect(h.requests[1]?.headers.prefer).toBe('IdType="ImmutableId"')
-      expect(h.slots[0]?.scopes).toEqual(['https://graph.microsoft.com/Mail.Read.Shared'])
+      // Explicit delegated mailboxes resolve identity scope-free before the
+      // enforcing Shared slot.
+      expect(h.slots[0]?.scopes).toBeUndefined()
+      expect(h.slots[1]?.scopes).toEqual(['https://graph.microsoft.com/Mail.Read.Shared'])
     })
+  )
+  it.effect(
+    'Outlook classifies explicit-mailbox identity resolution failures as credential failures',
+    () =>
+      Effect.gen(function* () {
+        for (const cause of [
+          'credential_binding_missing',
+          'credential_missing',
+          'credential_invalid',
+          'transport_failed',
+          'validation_failed'
+        ] as const) {
+          const h = host([])
+
+          const error = yield* downloadOutlookAttachment(
+            integration('microsoft'),
+            { messageId: 'm', attachmentId: 'a', mailbox: 'owner@example.com' },
+            budget
+          ).pipe(
+            Effect.provideService(CredentialResolver, {
+              resolve: () => Effect.fail(new ConnectorError({ cause, message: 'SECRET' }))
+            }),
+            Effect.provide(h.layer),
+            Effect.flip
+          )
+
+          expect(error.code).toBe('credential_failed')
+          expect(h.requests).toHaveLength(0)
+          expect(JSON.stringify(error)).not.toContain('SECRET')
+        }
+      })
   )
   it.effect(
     'Outlook rejects item/reference types and application default mailbox pre-network',

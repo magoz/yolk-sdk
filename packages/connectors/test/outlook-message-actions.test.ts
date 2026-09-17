@@ -186,13 +186,13 @@ describe('Outlook message actions', () => {
           expect(result._tag).toBe('Success')
           expect(host.requests[0]?.url).toContain('/users/shared%40example.com/')
           expect(host.requests[0]?.url).toContain('/messages/a%2Fb')
-          expect(host.scopes).toEqual([
-            [
-              mode === 'delegated'
-                ? 'https://graph.microsoft.com/Mail.ReadWrite.Shared'
-                : 'https://graph.microsoft.com/Mail.ReadWrite'
-            ]
-          ])
+          // Delegated explicit mailboxes resolve identity through the scope-free
+          // binding slot before the enforcing operation slot selects Shared.
+          expect(host.scopes).toEqual(
+            mode === 'delegated'
+              ? [undefined, ['https://graph.microsoft.com/Mail.ReadWrite.Shared']]
+              : [['https://graph.microsoft.com/Mail.ReadWrite']]
+          )
         })
       )
     }

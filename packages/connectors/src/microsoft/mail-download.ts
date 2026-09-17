@@ -52,7 +52,11 @@ export const downloadOutlookAttachment = (
     const target = yield* decodeInput(Input, input)
 
     const slot = yield* outlookReadSlot(integration, target.mailbox).pipe(
-      Effect.catch(() => failTransfer('invalid_input'))
+      Effect.catch(error =>
+        error.cause === 'validation_failed' && error.slotId === undefined
+          ? failTransfer('invalid_input')
+          : Effect.fail(credentialFailure())
+      )
     )
 
     const token = yield* resolveMicrosoftAccessToken(integration, slot).pipe(
