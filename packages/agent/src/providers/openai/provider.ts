@@ -23,6 +23,7 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
+  ProviderStreamDiagnostics,
   attachmentSourceText,
   attachmentSourceUrl,
   assistantContent,
@@ -36,6 +37,7 @@ import {
   type AgentReasoningEffort,
   type Content,
   type ContentPart,
+  type ProviderStreamResponseFormat,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -902,6 +904,8 @@ type OpenAiChatStreamState = {
   // chunk, so a bare finish reason must not discard later payloads.
   readonly streamClosed: boolean
   readonly usage: unknown
+  readonly receivedBytes: number
+  readonly outputStarted: boolean
 }
 
 const initialOpenAiChatStreamState: OpenAiChatStreamState = {
@@ -910,7 +914,9 @@ const initialOpenAiChatStreamState: OpenAiChatStreamState = {
   finishReason: undefined,
   hasTerminal: false,
   streamClosed: false,
-  usage: undefined
+  usage: undefined,
+  receivedBytes: 0,
+  outputStarted: false
 }
 
 // Split on blank lines in any newline style. Only CRLF pairs normalize, so a
@@ -1067,7 +1073,8 @@ const processChatStreamPayload = (
         toolCalls,
         finishReason,
         hasTerminal: state.hasTerminal || finishReason !== undefined,
-        usage
+        usage,
+        outputStarted: state.outputStarted || events.length > 0
       },
       events
     }
@@ -1095,6 +1102,19 @@ const processChatStreamBlock = (
     return yield* processChatStreamPayload(providerIdentity, reasoningContent, current, payload)
   })
 
+const chatStreamDiagnostics = (
+  responseFormat: ProviderStreamResponseFormat,
+  state: OpenAiChatStreamState
+) =>
+  ProviderStreamDiagnostics.make({
+    protocol: 'chat-completions',
+    responseFormat,
+    receivedBytes: state.receivedBytes,
+    bufferedChars: state.buffer.length,
+    outputStarted: state.outputStarted,
+    terminalSeen: state.hasTerminal
+  })
+
 const processChatStreamText = (
   providerIdentity: OpenAiProviderIdentity,
   reasoningContent: boolean,
@@ -1117,6 +1137,7 @@ const processChatStreamText = (
 
 const finalizeChatStreamState = (
   providerIdentity: OpenAiProviderIdentity,
+  responseFormat: ProviderStreamResponseFormat,
   state: OpenAiChatStreamState
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
@@ -1129,7 +1150,8 @@ const finalizeChatStreamState = (
           provider: providerErrorInfo({
             provider: providerIdentity.id,
             kind: 'invalid_response',
-            providerCode: 'incomplete_stream'
+            providerCode: 'incomplete_stream',
+            stream: chatStreamDiagnostics(responseFormat, state)
           })
         })
       )
@@ -1207,9 +1229,58 @@ const finalizeChatStreamState = (
     return events
   })
 
+const chatStreamResponseFormat = (
+  contentType: string | undefined
+): ProviderStreamResponseFormat => {
+  if (contentType === undefined) return 'unknown'
+
+  const mediaType = contentType.split(';', 1)[0].trim().toLowerCase()
+
+  if (mediaType === 'text/event-stream') return 'sse'
+
+  if (mediaType === 'application/json' || mediaType.endsWith('+json')) return 'json'
+
+  return 'other'
+}
+
+const expectChatSseResponse = (
+  providerIdentity: OpenAiProviderIdentity,
+  response: HttpClientResponse.HttpClientResponse
+): Effect.Effect<ProviderStreamResponseFormat, LLMError> => {
+  const responseFormat = chatStreamResponseFormat(response.headers['content-type'])
+
+  // Accept missing Content-Type for compatibility with existing SSE endpoints.
+  if (responseFormat === 'sse' || responseFormat === 'unknown') {
+    return Effect.succeed(responseFormat)
+  }
+
+  return Effect.fail(
+    new LLMError({
+      cause: 'invalid_response',
+      message: `${providerIdentity.name} streaming response was not an SSE stream`,
+      retryable: false,
+      provider: providerErrorInfo({
+        provider: providerIdentity.id,
+        kind: 'invalid_response',
+        status: response.status,
+        providerCode: 'unexpected_content_type',
+        stream: ProviderStreamDiagnostics.make({
+          protocol: 'chat-completions',
+          responseFormat,
+          receivedBytes: 0,
+          bufferedChars: 0,
+          outputStarted: false,
+          terminalSeen: false
+        })
+      })
+    })
+  )
+}
+
 const streamOpenAiChatResponse = (
   providerIdentity: OpenAiProviderIdentity,
   reasoningContent: boolean,
+  responseFormat: ProviderStreamResponseFormat,
   response: HttpClientResponse.HttpClientResponse
 ): Stream.Stream<LLMEvent, LLMError> =>
   Stream.unwrap(
@@ -1217,6 +1288,12 @@ const streamOpenAiChatResponse = (
       Effect.map(stateRef => {
         const chunks = response.stream.pipe(
           Stream.mapError(toHttpClientLlmError(providerIdentity, true)),
+          Stream.tap(chunk =>
+            Ref.update(stateRef, state => ({
+              ...state,
+              receivedBytes: state.receivedBytes + chunk.byteLength
+            }))
+          ),
           Stream.decodeText,
           Stream.mapEffect(chunk =>
             Effect.gen(function* () {
@@ -1239,7 +1316,9 @@ const streamOpenAiChatResponse = (
 
         const finalEvents = Stream.fromEffect(
           Ref.get(stateRef).pipe(
-            Effect.flatMap(state => finalizeChatStreamState(providerIdentity, state))
+            Effect.flatMap(state =>
+              finalizeChatStreamState(providerIdentity, responseFormat, state)
+            )
           )
         ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
 
@@ -1451,8 +1530,14 @@ const streamOpenAiRequest = (
       const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
       const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity)
       const response = yield* postOpenAiRequest(config, providerIdentity, serializedBody, client)
+      const responseFormat = yield* expectChatSseResponse(providerIdentity, response)
 
-      return streamOpenAiChatResponse(providerIdentity, config.reasoningContent ?? false, response)
+      return streamOpenAiChatResponse(
+        providerIdentity,
+        config.reasoningContent ?? false,
+        responseFormat,
+        response
+      )
     })
   )
 

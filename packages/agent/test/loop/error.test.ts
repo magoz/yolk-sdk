@@ -1,4 +1,4 @@
-import { Effect, Predicate } from 'effect'
+import { Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -8,7 +8,7 @@ import {
   LLMError,
   ToolError
 } from '../../src/loop'
-import { ProviderErrorInfo } from '@yolk-sdk/agent/protocol'
+import { AgentError, ProviderErrorInfo, ProviderStreamDiagnostics } from '@yolk-sdk/agent/protocol'
 
 describe('agentLoopErrorToAgentError', () => {
   it('maps LLM errors directly to wire codes', () => {
@@ -147,6 +147,165 @@ describe('LLMError', () => {
         retryable: false
       })
       expect('responseIssue' in agentLoopErrorToAgentError(decoded)).toBe(false)
+    })
+  )
+
+  it.effect('round-trips provider stream diagnostics through LLMError and AgentError', () =>
+    Effect.gen(function* () {
+      const error = new LLMError({
+        cause: 'invalid_response',
+        message: 'stream ended before a terminal chunk',
+        retryable: false,
+        provider: ProviderErrorInfo.make({
+          provider: 'opencode_go',
+          kind: 'invalid_response',
+          providerCode: 'incomplete_stream',
+          stream: ProviderStreamDiagnostics.make({
+            protocol: 'chat-completions',
+            responseFormat: 'sse',
+            receivedBytes: 128,
+            bufferedChars: 0,
+            outputStarted: true,
+            terminalSeen: false
+          })
+        })
+      })
+
+      const encoded = yield* Schema.encodeUnknownEffect(LLMError)(error)
+      const decoded = yield* Schema.decodeUnknownEffect(LLMError)(encoded)
+
+      expect(Predicate.isTagged(decoded, 'LLMError')).toBe(true)
+      expect(decoded).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: {
+          provider: 'opencode_go',
+          providerCode: 'incomplete_stream',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'sse',
+            receivedBytes: 128,
+            bufferedChars: 0,
+            outputStarted: true,
+            terminalSeen: false
+          }
+        }
+      })
+
+      const agentError = agentLoopErrorToAgentError(decoded)
+
+      expect(agentError).toMatchObject({
+        code: 'invalid_response',
+        retryable: false,
+        provider: {
+          providerCode: 'incomplete_stream',
+          stream: { receivedBytes: 128, terminalSeen: false }
+        }
+      })
+
+      const encodedAgentError = yield* Schema.encodeUnknownEffect(AgentError)(agentError)
+
+      const decodedAgentError = yield* Schema.decodeUnknownEffect(AgentError)(encodedAgentError)
+
+      expect(decodedAgentError).toMatchObject({
+        code: 'invalid_response',
+        provider: { stream: { receivedBytes: 128, responseFormat: 'sse' } }
+      })
+    })
+  )
+
+  it.effect('decodes legacy provider errors without stream diagnostics unchanged', () =>
+    Effect.gen(function* () {
+      const decoded = yield* Schema.decodeUnknownEffect(LLMError)({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        message: 'truncated',
+        retryable: false,
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          providerCode: 'incomplete_stream'
+        }
+      })
+
+      expect(decoded.provider?.stream).toBeUndefined()
+      expect(Object.hasOwn(decoded.provider ?? {}, 'stream')).toBe(false)
+    })
+  )
+
+  it.effect('rejects invalid provider stream diagnostics', () =>
+    Effect.gen(function* () {
+      const base = {
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        message: 'truncated',
+        retryable: false,
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          providerCode: 'incomplete_stream'
+        }
+      }
+
+      const invalid = [
+        {
+          protocol: 'chat-completions',
+          responseFormat: 'xml',
+          receivedBytes: 1,
+          bufferedChars: 1,
+          outputStarted: false,
+          terminalSeen: false
+        },
+        {
+          protocol: 'smtp',
+          responseFormat: 'sse',
+          receivedBytes: 1,
+          bufferedChars: 1,
+          outputStarted: false,
+          terminalSeen: false
+        },
+        {
+          protocol: 'chat-completions',
+          responseFormat: 'sse',
+          receivedBytes: -1,
+          bufferedChars: 1,
+          outputStarted: false,
+          terminalSeen: false
+        },
+        {
+          protocol: 'chat-completions',
+          responseFormat: 'sse',
+          receivedBytes: 1.5,
+          bufferedChars: 1,
+          outputStarted: false,
+          terminalSeen: false
+        },
+        {
+          protocol: 'chat-completions',
+          responseFormat: 'sse',
+          receivedBytes: 1,
+          bufferedChars: -2,
+          outputStarted: false,
+          terminalSeen: false
+        },
+        {
+          protocol: 'chat-completions',
+          responseFormat: 'sse',
+          receivedBytes: 1,
+          bufferedChars: 1,
+          outputStarted: 'yes',
+          terminalSeen: false
+        }
+      ]
+
+      for (const stream of invalid) {
+        const decoded = Schema.decodeUnknownOption(LLMError)({
+          ...base,
+          provider: { ...base.provider, stream }
+        })
+
+        expect(Option.isNone(decoded)).toBe(true)
+      }
     })
   )
 

@@ -40,7 +40,8 @@ const sse = (events: ReadonlyArray<unknown>, done = false) =>
     [
       ...events.map(event => `data: ${JSON.stringify(event)}\n\n`),
       ...(done ? ['data: [DONE]\n\n'] : [])
-    ].join('')
+    ].join(''),
+    { headers: { 'content-type': 'text/event-stream' } }
   )
 
 const success = (protocol: OpenCodeGoProtocol) => {
@@ -685,6 +686,76 @@ describe('OpenCode Go', () => {
         const error = yield* run('messages', response, []).pipe(Effect.flip)
         expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
       }
+    })
+  )
+
+  it.effect('chat: preserves stream diagnostics through Go error sanitization', () =>
+    Effect.gen(function* () {
+      const secret = 'sentinel-secret-token'
+
+      const error = yield* run(
+        'chat-completions',
+        Response.json(
+          { choices: [{ message: { content: `echoes ${secret}` } }] },
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ),
+        []
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false,
+        message: 'OpenCode Go invalid_response',
+        provider: {
+          provider: openCodeGoProviderId,
+          kind: 'invalid_response',
+          status: 200,
+          providerCode: 'unexpected_content_type',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'json',
+            receivedBytes: 0,
+            bufferedChars: 0,
+            outputStarted: false,
+            terminalSeen: false
+          }
+        }
+      })
+      expect(error.message).not.toContain(secret)
+      expect(JSON.stringify(error)).not.toContain(secret)
+    })
+  )
+
+  it.effect('chat: preserves incomplete-stream diagnostics through Go sanitization', () =>
+    Effect.gen(function* () {
+      const frame = `data: ${JSON.stringify({ choices: [{ delta: { content: 'partial' } }] })}\n\n`
+      const expectedBytes = new TextEncoder().encode(frame).byteLength
+
+      const error = yield* run(
+        'chat-completions',
+        sse([{ choices: [{ delta: { content: 'partial' } }] }]),
+        []
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false,
+        provider: {
+          provider: openCodeGoProviderId,
+          kind: 'invalid_response',
+          providerCode: 'incomplete_stream',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'sse',
+            receivedBytes: expectedBytes,
+            bufferedChars: 0,
+            outputStarted: true,
+            terminalSeen: false
+          }
+        }
+      })
     })
   )
 

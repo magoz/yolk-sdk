@@ -58,12 +58,38 @@ export const ProviderFailureKind = Schema.Literals([
 
 export type ProviderFailureKind = typeof ProviderFailureKind.Type
 
+export const ProviderStreamProtocol = Schema.Literals(['chat-completions', 'messages', 'responses'])
+
+export type ProviderStreamProtocol = typeof ProviderStreamProtocol.Type
+
+/** `unknown` means no Content-Type header was present. */
+export const ProviderStreamResponseFormat = Schema.Literals(['sse', 'json', 'other', 'unknown'])
+
+export type ProviderStreamResponseFormat = typeof ProviderStreamResponseFormat.Type
+
+/** Stream failure metadata; never retain transcript content, raw headers, or body fragments. */
+export class ProviderStreamDiagnostics extends Schema.Class<ProviderStreamDiagnostics>(
+  'ProviderStreamDiagnostics'
+)({
+  protocol: ProviderStreamProtocol,
+  responseFormat: ProviderStreamResponseFormat,
+  /** Bytes received from HTTP body chunks before text decoding. */
+  receivedBytes: Schema.Natural,
+  /** Undelivered tail characters pending in the SSE buffer, in UTF-16 code units. */
+  bufferedChars: Schema.Natural,
+  /** Whether text or reasoning output was actually emitted to the consumer. */
+  outputStarted: Schema.Boolean,
+  /** Whether a terminal SSE frame ([DONE] or a processed finish reason) was seen. */
+  terminalSeen: Schema.Boolean
+}) {}
+
 export class ProviderErrorInfo extends Schema.Class<ProviderErrorInfo>('ProviderErrorInfo')({
   provider: NonEmptyTrimmedString,
   kind: ProviderFailureKind,
   status: Schema.optional(Schema.Number),
   providerCode: Schema.optional(Schema.String),
-  retryAfterMs: Schema.optional(Schema.Number)
+  retryAfterMs: Schema.optional(Schema.Number),
+  stream: Schema.optional(ProviderStreamDiagnostics)
 }) {}
 
 export class AgentStart extends Schema.TaggedClass<AgentStart>()('AgentStart', {

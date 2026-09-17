@@ -690,6 +690,52 @@ describe('OpenAI provider streaming', () => {
       { status: 200, headers: { 'content-type': 'text/event-stream' } }
     )
 
+  const rawSseStreamWithHeaders = (
+    chunks: ReadonlyArray<string>,
+    headers: Record<string, string>
+  ) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+
+          for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+
+          controller.close()
+        }
+      }),
+      { status: 200, headers }
+    )
+
+  const byteChunkResponse = (
+    byteChunks: ReadonlyArray<Uint8Array>,
+    headers: Record<string, string>
+  ) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const chunk of byteChunks) controller.enqueue(chunk)
+
+          controller.close()
+        }
+      }),
+      { status: 200, headers }
+    )
+
+  const headerlessSseStream = (chunks: ReadonlyArray<string>) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+
+          for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+
+          controller.close()
+        }
+      }),
+      { status: 200 }
+    )
+
   const chatChunk = (delta: unknown, finishReason: string | null = null) => ({
     choices: [{ delta, finish_reason: finishReason }]
   })
@@ -1102,6 +1148,320 @@ describe('OpenAI provider streaming', () => {
       )
 
       expect(body).toMatchObject({ stream: true, stream_options: { include_usage: true } })
+    })
+  )
+
+  it.effect('fails explicit JSON 2xx responses before consuming the body', () =>
+    Effect.gen(function* () {
+      const secret = 'sentinel-secret-token'
+
+      const response = Response.json(
+        { choices: [{ message: { content: `body echoes ${secret}` } }] },
+        {
+          status: 200,
+          headers: {
+            'content-type': `application/json; boundary=${secret}`,
+            'x-upstream-secret': secret
+          }
+        }
+      )
+
+      const error = yield* collectStreamEvents(response).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          status: 200,
+          providerCode: 'unexpected_content_type',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'json',
+            receivedBytes: 0,
+            bufferedChars: 0,
+            outputStarted: false,
+            terminalSeen: false
+          }
+        }
+      })
+      expect(error.message).not.toContain(secret)
+      expect(JSON.stringify(error)).not.toContain(secret)
+      expect(response.bodyUsed).toBe(false)
+    })
+  )
+
+  it.effect('fails explicit HTML 2xx responses as other content', () =>
+    Effect.gen(function* () {
+      const secret = 'sentinel-secret-token'
+
+      const error = yield* collectStreamEvents(
+        new Response(`<html>echoes ${secret}</html>`, {
+          status: 200,
+          headers: { 'content-type': 'text/html' }
+        })
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          status: 200,
+          providerCode: 'unexpected_content_type',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'other',
+            receivedBytes: 0,
+            bufferedChars: 0,
+            outputStarted: false,
+            terminalSeen: false
+          }
+        }
+      })
+      expect(error.message).not.toContain(secret)
+      expect(JSON.stringify(error)).not.toContain(secret)
+    })
+  )
+
+  it.effect('accepts mixed-case SSE content type with parameters', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        rawSseStreamWithHeaders(
+          [
+            'data: {"choices": [{"delta": {"content": "Hi"}, "finish_reason": "stop"}]}\n\n',
+            'data: [DONE]\n\n'
+          ],
+          { 'content-type': 'TEXT/EVENT-STREAM; charset=utf-8' }
+        )
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('keeps parsing valid SSE without a content type', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        headerlessSseStream([
+          'data: {"choices": [{"delta": {"content": "Hi"}, "finish_reason": "stop"}]}\n\n',
+          'data: [DONE]\n\n'
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('reports empty SSE streams with zero counters', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(sseStreamResponse([])).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          providerCode: 'incomplete_stream',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'sse',
+            receivedBytes: 0,
+            bufferedChars: 0,
+            outputStarted: false,
+            terminalSeen: false
+          }
+        }
+      })
+    })
+  )
+
+  it.effect('reports EOF without a terminal with byte and output counters', () =>
+    Effect.gen(function* () {
+      const chunks = [
+        'data: {"choices": [{"delta": {"content": "partial"}}]}\n\n',
+        'data: {"choices": [{"delta": {"content": " out"}}]}\n\n'
+      ]
+
+      const expectedBytes = chunks.reduce(
+        (total, chunk) => total + new TextEncoder().encode(chunk).byteLength,
+        0
+      )
+
+      const error = yield* collectStreamEvents(rawSseStream(chunks)).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          providerCode: 'incomplete_stream',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'sse',
+            receivedBytes: expectedBytes,
+            bufferedChars: 0,
+            outputStarted: true,
+            terminalSeen: false
+          }
+        }
+      })
+    })
+  )
+
+  it.effect('keeps unterminated terminal frames failing with buffered chars', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        rawSseStream([
+          'data: {"choices": [{"delta": {"content": "Hi"}}]}\n\n',
+          'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}'
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+
+      if (!Predicate.isTagged(error, 'LLMError')) expect.fail('Expected LLMError')
+
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: {
+          providerCode: 'incomplete_stream',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'sse',
+            outputStarted: true,
+            terminalSeen: false
+          }
+        }
+      })
+      expect(error.provider?.stream?.bufferedChars ?? 0).toBeGreaterThan(0)
+    })
+  )
+
+  it.effect('preserves byte counters across split CRLF and multi-byte UTF-8 chunks', () =>
+    Effect.gen(function* () {
+      const frames = [
+        'data: {"choices": [{"delta": {"content": "h\u00e9llo w\u00f6rld"}}]}\r\n\r\n',
+        'data: {"choices": [{"delta": {"content": " more"}}]}\r\n\r\n'
+      ].join('')
+
+      const bytes = new TextEncoder().encode(frames)
+
+      const error = yield* collectStreamEvents(
+        byteChunkResponse(
+          Array.from(bytes, byte => Uint8Array.of(byte)),
+          {
+            'content-type': 'text/event-stream'
+          }
+        )
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      // Split CRLF may leave a whitespace tail, so bufferedChars is intentionally omitted.
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        provider: {
+          providerCode: 'incomplete_stream',
+          stream: {
+            protocol: 'chat-completions',
+            responseFormat: 'sse',
+            receivedBytes: bytes.byteLength,
+            outputStarted: true,
+            terminalSeen: false
+          }
+        }
+      })
+    })
+  )
+
+  it.effect('completes a finish reason and DONE across split byte boundaries', () =>
+    Effect.gen(function* () {
+      const frames = [
+        'data: {"choices": [{"delta": {"content": "h\u00e9llo w\u00f6rld"}}]}\r\n\r\n',
+        'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\r\n\r\n',
+        'data: [DONE]\r\n\r\n'
+      ].join('')
+
+      const bytes = new TextEncoder().encode(frames)
+
+      const events = yield* collectStreamEvents(
+        byteChunkResponse(
+          Array.from(bytes, byte => Uint8Array.of(byte)),
+          {
+            'content-type': 'text/event-stream'
+          }
+        )
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'héllo wörld' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('completes on a processed finish reason without DONE', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        chatSse([chatChunk({ content: 'Hi' }, 'stop')], false)
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('completes on DONE without a finish reason', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(chatSse([chatChunk({ content: 'Hi' })], true))
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'Hi' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('keeps HTTP error classification unchanged for streaming requests', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        Response.json(
+          { error: { code: 'server_error', message: 'private-upstream-text' } },
+          {
+            status: 503
+          }
+        )
+      ).pipe(Effect.flip)
+
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'provider_error',
+        retryable: true,
+        provider: {
+          provider: 'openai',
+          kind: 'server_error',
+          status: 503,
+          providerCode: 'server_error'
+        }
+      })
+      expect(error.message).not.toContain('private-upstream-text')
     })
   )
 })
