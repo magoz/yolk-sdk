@@ -119,7 +119,9 @@ Microsoft Graph is their shared API and OAuth resource boundary. Workload action
 credential can therefore cover both workloads when consent includes their `Mail.*` and `Files.*`
 permissions.
 
-Outlook inputs use `/me` by default; set `mailbox` for Exchange Online shared/delegated access.
+Outlook inputs use `/me` by default; set `mailbox` for an explicit Exchange Online mailbox.
+Delegated calls use Shared scopes unless `mailbox` matches `OAuthCredential.accountId`
+case-insensitively, in the same Graph ID/principal-name form; see [Microsoft mailbox permissions](../integrations/connectors#microsoft).
 Application hosts use `mailboxAccessMode: 'application'`. OneDrive inputs use `/me/drive` by default;
 set `driveId` for an explicit drive, `oneDriveAccessMode: 'delegated_all'` for broader delegated
 permissions, or `oneDriveAccessMode: 'application'` for application tokens. Discovery and metadata

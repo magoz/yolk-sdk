@@ -371,8 +371,11 @@ and object-root identity are unchanged.
 Provider adapters classify safe failure metadata at the boundary. The loop owns bounded retry
 policy and emits protocol-visible retry/error state:
 
-- `ProviderErrorInfo` carries safe provider id, failure kind, HTTP status, provider code, and
-  optional `retryAfterMs`.
+- `ProviderErrorInfo` carries safe provider id, failure kind, HTTP status, provider code, optional
+  `retryAfterMs`, and optional `stream` diagnostics (`ProviderStreamDiagnostics`) on chat
+  `unexpected_content_type` / `incomplete_stream` failures. Diagnostics contain counters and
+  milestones, never transcript content, raw headers, or body fragments. See the
+  [stream diagnostics guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/troubleshooting.mdx#diagnose-chat-stream-failures-with-stream-diagnostics).
 - Chat Completions and Responses HTTP failures copy the envelope string `code` (falling back to
   `type`) into `provider.providerCode`; free-text upstream bodies stay out of `LLMError`.
 - `AgentRetry.provider` exposes current retry metadata and chosen `delayMs`.

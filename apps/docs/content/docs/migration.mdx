@@ -25,6 +25,18 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: chat-stream failure diagnostics
+
+OpenAI-compatible chat streaming now rejects a 2xx response with an explicit non-SSE content type
+before reading its body: `invalid_response` carries `providerCode: 'unexpected_content_type'`
+instead of waiting for an `incomplete_stream` failure. Missing content-type headers retain lenient
+SSE parsing. Update host error-code handling accordingly; both failures are non-retryable.
+
+`ProviderErrorInfo` also adds optional `stream: ProviderStreamDiagnostics`, preserved through
+`LLMError` and `AgentError`. Hosts persisting provider metadata through their own closed schemas
+should allow this field; it contains counters/milestones only, not transcript or raw response data.
+See [stream diagnostics](./troubleshooting#diagnose-chat-stream-failures-with-stream-diagnostics).
+
 ### Next canary: Outlook mailbox identity and reply-draft recovery
 
 These `@yolk-sdk/connectors` changes target the next matching canary; they are not in canary.80.
