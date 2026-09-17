@@ -166,7 +166,10 @@ Gmail validates canonical base64url pad bits, decoded byte count and `size`, inc
 Inline Gmail parts without `attachmentId` remain outside this focused helper. Outlook checks the
 file discriminator before fetching `/$value`; item MIME/reference attachments are rejected.
 Graph's attachment metadata size is not treated as exact raw-byte length. Existing shared-mailbox,
-application-mailbox and immutable-ID guards remain in effect.
+application-mailbox and immutable-ID guards remain in effect. In delegated mode, an explicit
+`mailbox` also triggers a scope-free `microsoft.oauth` identity lookup before the enforcing read slot;
+matching the connected identity keeps ordinary read scopes. Identity-resolution failures return
+`credential_failed`, not `invalid_input`. See [Microsoft mailbox permissions](../integrations/connectors#microsoft).
 
 `downloadEmailAttachment` takes `{ messageId, attachmentId, folder? }` and uses the incoming
 connection and username/password slot. Adapters can add optional `EmailClient.getAttachmentBytes`
