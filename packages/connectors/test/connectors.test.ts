@@ -2944,10 +2944,17 @@ describe('@yolk-sdk/connectors', () => {
       // failure names the draft so hosts edit it instead of creating another.
       expect(requests).toHaveLength(2)
       expect(result._tag).toBe('Failure')
-      // Provider status mapping still applies; the message carries the draft
-      // identity and recovery guidance.
+      // Partial writes must not look like retryable failures of creation.
       expect(result).toMatchObject({
-        error: { code: 'microsoft_unauthorized', status: 403 }
+        error: {
+          code: 'outlook_create_reply_draft_partial',
+          status: 403,
+          underlying: {
+            draftId: 'reply_draft_3',
+            retryable: false,
+            recovery: 'read_edit_existing_draft'
+          }
+        }
       })
 
       if (Predicate.isTagged(result, 'Failure')) {
@@ -3098,6 +3105,44 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
+  it.effect('does not trim identities differently from the explicit mailbox path', () =>
+    Effect.gen(function* () {
+      for (const identities of [
+        { accountId: 'owner@example.com', mailbox: ' owner@example.com' },
+        { accountId: ' owner@example.com', mailbox: 'owner@example.com' }
+      ]) {
+        const requests: ConnectorHttpRequest[] = []
+        const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+
+        const resolver = Layer.succeed(CredentialResolver, {
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+
+            return Effect.succeed(
+              OAuthCredential.make({
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: 4e12,
+                accountId: identities.accountId
+              })
+            )
+          }
+        })
+
+        const http = makeConnectorHttpClientTest(requests, [jsonHttpResponse('{"value":[]}')])
+        yield* outlookListMessagesAction
+          .execute({
+            integration: microsoftIntegration,
+            input: { mailbox: identities.mailbox }
+          })
+          .pipe(Effect.provide(Layer.mergeAll(resolver, http)))
+
+        expect(requestedScopes).toEqual([undefined, [microsoftGraphMailReadSharedScope]])
+        expect(requests.at(0)?.url).toContain(`/users/${encodeURIComponent(identities.mailbox)}/`)
+      }
+    })
+  )
+
   it.effect('keeps Shared scopes unless the credential identifies the mailbox', () =>
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
@@ -3203,8 +3248,7 @@ describe('@yolk-sdk/connectors', () => {
                 name: 'logo.png',
                 contentType: 'image/png',
                 size: 512,
-                isInline: true,
-                contentId: 'logo'
+                isInline: true
               }
             ]
           })
@@ -3227,13 +3271,13 @@ describe('@yolk-sdk/connectors', () => {
               contentType: 'image/png',
               size: 512,
               isInline: true,
-              contentId: 'logo',
               lastModifiedDateTime: null
             }
           ])
         })
       )
       expect(JSON.stringify(result)).not.toContain('contentBytes')
+      expect(JSON.stringify(result)).not.toContain('contentId')
     })
   )
 

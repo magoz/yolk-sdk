@@ -279,6 +279,12 @@ Graph rather than the retired `outlook.office.com/api` endpoint. Read actions ne
 draft actions need `Mail.ReadWrite`, and send actions need the separate `Mail.Send` permission.
 All action-scoped credential slots share the `microsoft.oauth` binding id.
 
+An explicit `mailbox` equal to `OAuthCredential.accountId` (case-insensitive, no whitespace trimming)
+keeps ordinary `Mail.*` scopes. If your own mailbox unexpectedly asks for Shared scopes, verify the
+host populated `accountId` with the same Graph user ID or `userPrincipalName` form as `mailbox`;
+missing identity, aliases, and ID-versus-principal-name mismatches do not qualify. Delegated
+explicit-mailbox actions resolve the scope-free identity slot before the enforcing operation slot.
+
 When `mailbox` targets another Exchange Online mailbox, delegated tokens need the corresponding
 `Mail.Read.Shared`, `Mail.ReadWrite.Shared`, or `Mail.Send.Shared` permission. Reads and writes need
 the relevant shared-folder or Full Access grant. Sending requires **Send As** or **Send on Behalf**;
@@ -292,7 +298,16 @@ policy.
 
 A successful send returns `{ accepted: true }` when Graph responds `202 Accepted`. This means Graph
 accepted the submission; it does not prove processing or delivery. Honor `retryAfterMs` when a
-provider failure maps a Graph `429` response.
+provider failure maps a Graph `429` response only after establishing that retrying the operation is
+safe. A retry delay is not a guarantee that the operation had no side effects.
+
+For `outlook.create_reply_draft`, a post-create HTTP failure uses
+`outlook_create_reply_draft_partial` and omits `retryAfterMs`, even for 429. Both these failures and
+post-create typed `ConnectorError`s include
+`underlying: { draftId, retryable: false, recovery: 'read_edit_existing_draft' }` once the draft ID
+is known. Read and edit that draft using the original `mailbox` instead of invoking creation again:
+a failed save response may follow a successful save. If the creation response was lost or no usable
+ID was returned, reconcile mailbox state before another creation. See [reply draft recovery](./integrations/connectors#reply-drafts-and-recovery).
 
 For OneDrive, delegated reads and writes use `Files.Read` or `Files.ReadWrite` by default, including
 an explicit `driveId` when those permissions cover the target. Set `oneDriveAccessMode` to

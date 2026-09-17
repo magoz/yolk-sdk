@@ -1,4 +1,4 @@
-import { Chunk, Effect, Match, SchemaTransformation } from 'effect'
+import { Chunk, Effect, Match, Predicate, SchemaTransformation } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { optionalStringConfig } from '../config.ts'
@@ -655,7 +655,8 @@ const requireMailboxForApplicationAccess = (
         })
       )
 
-const normalizeMailboxIdentity = (mailbox: string) => mailbox.trim().toLowerCase()
+// Preserve whitespace just like the /users path; only case is insignificant.
+const normalizeMailboxIdentity = (mailbox: string) => mailbox.toLowerCase()
 
 const isOwnMailboxCredential = (mailbox: string, credential: RuntimeCredential) =>
   Match.value(credential).pipe(
@@ -671,7 +672,22 @@ const isOwnMailboxCredential = (mailbox: string, credential: RuntimeCredential) 
     Match.orElse(() => false)
   )
 
-type OutlookPermissionKind = 'read' | 'write' | 'send'
+const outlookPermissionSlots = {
+  read: {
+    ordinary: MicrosoftOutlookReadOAuthCredentialSlot,
+    shared: MicrosoftOutlookSharedReadOAuthCredentialSlot
+  },
+  write: {
+    ordinary: MicrosoftOutlookWriteOAuthCredentialSlot,
+    shared: MicrosoftOutlookSharedWriteOAuthCredentialSlot
+  },
+  send: {
+    ordinary: MicrosoftOutlookSendOAuthCredentialSlot,
+    shared: MicrosoftOutlookSharedSendOAuthCredentialSlot
+  }
+}
+
+type OutlookPermissionKind = keyof typeof outlookPermissionSlots
 
 const outlookSlotFor = (
   kind: OutlookPermissionKind,
@@ -682,13 +698,9 @@ const outlookSlotFor = (
     const accessMode = yield* mailboxAccessMode(integration)
     yield* requireMailboxForApplicationAccess(integration, mailbox, accessMode)
 
-    if (mailbox === undefined || accessMode === 'application') {
-      if (kind === 'send') return MicrosoftOutlookSendOAuthCredentialSlot
+    const slots = outlookPermissionSlots[kind]
 
-      if (kind === 'write') return MicrosoftOutlookWriteOAuthCredentialSlot
-
-      return MicrosoftOutlookReadOAuthCredentialSlot
-    }
+    if (mailbox === undefined || accessMode === 'application') return slots.ordinary
 
     // Delegated access to an explicit mailbox is shared access unless the
     // credential identifies the mailbox as the connected user. Identity
@@ -706,19 +718,7 @@ const outlookSlotFor = (
       )
     )
 
-    if (isOwnMailboxCredential(mailbox, credential)) {
-      if (kind === 'send') return MicrosoftOutlookSendOAuthCredentialSlot
-
-      if (kind === 'write') return MicrosoftOutlookWriteOAuthCredentialSlot
-
-      return MicrosoftOutlookReadOAuthCredentialSlot
-    }
-
-    if (kind === 'send') return MicrosoftOutlookSharedSendOAuthCredentialSlot
-
-    if (kind === 'write') return MicrosoftOutlookSharedWriteOAuthCredentialSlot
-
-    return MicrosoftOutlookSharedReadOAuthCredentialSlot
+    return isOwnMailboxCredential(mailbox, credential) ? slots.ordinary : slots.shared
   })
 
 export const outlookReadSlot = (integration: ConnectorIntegration, mailbox: string | undefined) =>
@@ -1056,19 +1056,37 @@ const combineReplyHtml = (reply: string, generated: string) => {
   return `${reply}${generated}`
 }
 
+const outlookReplyDraftRecovery = (draftId: string) => ({
+  draftId,
+  retryable: false,
+  recovery: 'read_edit_existing_draft'
+})
+
+const outlookReplyDraftError = (
+  draftId: string,
+  integration: ConnectorIntegration,
+  error: ConnectorError
+) =>
+  new ConnectorError({
+    cause: error.cause,
+    message: `Microsoft Outlook reply draft ${draftId} was created, but its final content could not be confirmed. Read and edit that existing draft instead of creating another reply draft`,
+    connectorId: integration.connectorId,
+    actionId: 'outlook.create_reply_draft',
+    underlying: outlookReplyDraftRecovery(draftId)
+  })
+
 const outlookReplyDraftPartialFailure = (input: {
   readonly draftId: string
   readonly operation: string
   readonly status: number
-  readonly headers: Readonly<Record<string, string>>
-  readonly body: string
 }) =>
-  microsoftProviderFailure({
-    code: 'outlook_create_reply_draft_failed',
-    message: `Microsoft Outlook create reply draft preserved draft ${input.draftId} but ${input.operation} failed. Edit that existing draft instead of creating another reply draft`,
+  // Do not map this to a generic retryable provider code or expose retryAfterMs:
+  // retrying the whole action would create another draft.
+  ActionResult.failure({
+    code: 'outlook_create_reply_draft_partial',
+    message: `Microsoft Outlook create reply draft preserved draft ${input.draftId} but ${input.operation} failed. Read and edit that existing draft instead of creating another reply draft`,
     status: input.status,
-    headers: input.headers,
-    body: input.body
+    underlying: outlookReplyDraftRecovery(input.draftId)
   })
 
 export const outlookCreateReplyDraftAction = defineAction({
@@ -1107,15 +1125,22 @@ export const outlookCreateReplyDraftAction = defineAction({
         })
       }
 
-      // Retain identity even if another field in the successful response is malformed.
-      const identity = yield* decodeJsonResponse(
-        Schema.Struct({ id: Schema.String }),
-        createResponse
+      const created = yield* decodeJsonResponse(OutlookMessage, createResponse).pipe(
+        Effect.catch(error =>
+          Effect.gen(function* () {
+            // Only decode again on failure, retaining identity even when another
+            // field is malformed. A lost/invalid id still requires reconciliation.
+            const identity = yield* decodeJsonResponse(
+              Schema.Struct({ id: Schema.String }),
+              createResponse
+            )
+
+            return yield* Effect.fail(outlookReplyDraftError(identity.id, integration, error))
+          })
+        )
       )
 
       return yield* Effect.gen(function* () {
-        const created = yield* decodeJsonResponse(OutlookMessage, createResponse)
-
         if (created.isDraft === false) {
           return yield* Effect.fail(
             new ConnectorError({
@@ -1129,15 +1154,15 @@ export const outlookCreateReplyDraftAction = defineAction({
 
         // Reuse the generated body when it already matches the desired format;
         // otherwise read it back in the desired format instead of relabeling it.
-        let generatedContent: string | undefined = undefined
+        const generatedBody = yield* Effect.gen(function* () {
+          if (
+            created.body !== undefined &&
+            created.body !== null &&
+            created.body.contentType === desiredBodyType
+          ) {
+            return ActionResult.success(created.body.content)
+          }
 
-        if (
-          created.body !== undefined &&
-          created.body !== null &&
-          created.body.contentType === desiredBodyType
-        ) {
-          generatedContent = created.body.content
-        } else {
           const params = new URLSearchParams({ $select: outlookMessageSelect })
 
           const readResponse = yield* http.request(
@@ -1149,12 +1174,10 @@ export const outlookCreateReplyDraftAction = defineAction({
           )
 
           if (!isMicrosoftSuccessStatus(readResponse.status)) {
-            return yield* outlookReplyDraftPartialFailure({
+            return outlookReplyDraftPartialFailure({
               draftId: created.id,
               operation: 'reading the generated reply body',
-              status: readResponse.status,
-              headers: readResponse.headers,
-              body: readResponse.body
+              status: readResponse.status
             })
           }
 
@@ -1176,22 +1199,22 @@ export const outlookCreateReplyDraftAction = defineAction({
             fetched.body === null ||
             fetched.body.contentType !== desiredBodyType
           ) {
-            return yield* outlookReplyDraftPartialFailure({
+            return outlookReplyDraftPartialFailure({
               draftId: created.id,
               operation: 'reading the generated reply body in the requested format',
-              status: readResponse.status,
-              headers: readResponse.headers,
-              body: readResponse.body
+              status: readResponse.status
             })
           }
 
-          generatedContent = fetched.body.content
-        }
+          return ActionResult.success(fetched.body.content)
+        })
+
+        if (Predicate.isTagged(generatedBody, 'Failure')) return generatedBody
 
         const combined =
           desiredBodyType === 'html'
-            ? combineReplyHtml(input.body, generatedContent)
-            : combineReplyText(input.body, generatedContent)
+            ? combineReplyHtml(input.body, generatedBody.value)
+            : combineReplyText(input.body, generatedBody.value)
 
         const patchResponse = yield* http.request(
           ConnectorHttpRequest.make({
@@ -1208,29 +1231,17 @@ export const outlookCreateReplyDraftAction = defineAction({
         )
 
         if (!isMicrosoftSuccessStatus(patchResponse.status)) {
-          return yield* outlookReplyDraftPartialFailure({
+          return outlookReplyDraftPartialFailure({
             draftId: created.id,
             operation: 'saving the reply content',
-            status: patchResponse.status,
-            headers: patchResponse.headers,
-            body: patchResponse.body
+            status: patchResponse.status
           })
         }
 
         const output = yield* decodeJsonResponse(OutlookMessage, patchResponse)
 
         return ActionResult.success(output)
-      }).pipe(
-        Effect.mapError(
-          error =>
-            new ConnectorError({
-              cause: error.cause,
-              message: `Microsoft Outlook reply draft ${identity.id} was created, but its final content could not be confirmed. Read and edit that existing draft instead of creating another reply draft`,
-              connectorId: integration.connectorId,
-              actionId: 'outlook.create_reply_draft'
-            })
-        )
-      )
+      }).pipe(Effect.mapError(error => outlookReplyDraftError(created.id, integration, error)))
     })
 })
 

@@ -25,6 +25,26 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: Outlook mailbox identity and reply-draft recovery
+
+These `@yolk-sdk/connectors` changes target the next matching canary; they are not in canary.80.
+
+- Explicit delegated `mailbox` operations now resolve the scope-free `microsoft.oauth` identity slot,
+  then the enforcing operation slot. Hosts must support both resolutions. Set `OAuthCredential.accountId`
+  to the same Graph user ID or `userPrincipalName` form passed as `mailbox` to retain ordinary
+  `Mail.*` scopes; comparison ignores case only and does not resolve aliases. Other mailboxes still
+  require Shared scopes. Application-mode guards are unchanged.
+- `outlook.create_reply_draft` now **prepends** its `body` to Graph-generated quoted history instead
+  of replacing it. Pass only the new reply. This is a multi-step write; post-create HTTP failures
+  use `outlook_create_reply_draft_partial` with the HTTP `status` and no `retryAfterMs`. Both these
+  failures and post-create typed `ConnectorError`s expose
+  `underlying: { draftId, retryable: false, recovery: 'read_edit_existing_draft' }` when the ID is
+  known. Update retry handlers to read/edit the existing draft, never recreate it. Lost creation
+  responses still require mailbox reconciliation. See [reply draft recovery](./integrations/connectors#reply-drafts-and-recovery).
+- Attachment listing selects base properties only: fetch the individual file attachment for
+  `contentId`/`cid:` mapping. `lastModifiedDateTime` can now be `null` as well as absent or a string;
+  update consumers that assume a present value is always a string.
+
 ### Next canary: chat streaming, Anthropic tool results, union tool schemas
 
 These `@yolk-sdk/agent` behavior changes target the next matching canary. See [Go setup](./integrations/provider-setup#opencode-go) and [troubleshooting](./troubleshooting).

@@ -370,7 +370,11 @@ principal name to target an Exchange Online shared/delegated mailbox through `/u
 The connector then requests the matching Shared slot, unless the explicit `mailbox` matches the
 connected user identity (`OAuthCredential.accountId`, case-insensitive), which keeps the ordinary
 `Mail.*` slot on the same `/users/{mailbox}` path. The same `mailbox` must accompany an opaque
-`nextLink` so the resolver receives the appropriate mailbox consent hint.
+`nextLink` so the resolver receives the appropriate mailbox consent hint. Populate `accountId` with
+the same Graph user ID or `userPrincipalName` callers pass as `mailbox`; the comparison ignores case
+only, not whitespace, and does not resolve aliases or equate IDs with principal names. Explicit
+mailboxes in delegated mode resolve the scope-free `microsoft.oauth` identity slot first, then the
+selected operation slot. The identity lookup does not authorize the operation.
 
 For delegated reads and writes, the signed-in user needs the corresponding Exchange shared-folder
 or Full Access grant. Sending from another mailbox requires Exchange **Send As** or **Send on
@@ -403,6 +407,23 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.trash`              | move a message to Deleted Items                                |
 | `outlook.untrash`            | move a message from Deleted Items to inbox or another folder   |
 
+#### Reply drafts and recovery
+
+`outlook.create_reply_draft` creates a bodyless reply draft, then prepends the supplied text or HTML
+to Graph-generated quoted history and saves it. Supply only the new reply, not the original quote.
+Text replies preserve quote content, not its original HTML formatting.
+
+This is a multi-step write. Once a draft ID is known, post-create HTTP failures return
+`outlook_create_reply_draft_partial` with the HTTP `status` but no `retryAfterMs`, including for 429.
+A read-back without the requested body format uses the same partial-failure code: `status` is the
+last Graph response status and can be 2xx. Branch on the failure code/recovery metadata, not HTTP
+status alone. Both these failures and post-create typed `ConnectorError`s carry
+`underlying: { draftId, retryable: false, recovery: 'read_edit_existing_draft' }`. Inspect this
+metadata before applying any retry policy: read and edit the existing draft using the original
+`mailbox`, **never repeat the create action**. A failed response can follow a successful save.
+If creation's response is lost or lacks a usable ID, reconcile mailbox state before attempting
+another creation. The SDK neither retries creation nor deletes a partially completed draft.
+
 #### Optional Outlook read inputs
 
 `outlook.list_messages` and `outlook.search_messages` accept omitted, `null`, or blank optional
@@ -423,6 +444,8 @@ change when sent, which is a documented immutable-ID exception.
 `outlook.list_attachments` returns normalized metadata with `kind: 'file' | 'item' | 'reference' |
 'unknown'`; unlike `hasAttachments`, listing also discovers inline attachments. The list query
 selects base attachment properties only and accepts explicit null `lastModifiedDateTime` values.
+Do not expect `contentId` in list results; use `outlook.get_attachment` on the individual file
+attachment when you need `cid:` mapping.
 It accepts `top` and
 returns an opaque `nextLink`; pass that link back unchanged with the same `messageId` and `mailbox`.
 Use `outlook.get_attachment` with a returned file attachment ID. It requires a Graph file attachment
