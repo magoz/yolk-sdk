@@ -96,10 +96,12 @@ import {
   oneDriveGetItemAction,
   oneDriveListItemsAction,
   oneDriveSearchItemsAction,
+  outlookCreateDraftAction,
   outlookCreateReplyDraftAction,
   outlookGetAttachmentAction,
   outlookGetMessageAction,
   outlookListAttachmentsAction,
+  OutlookMessage,
   outlookListMessagesAction,
   outlookSearchMessagesAction,
   outlookSendDraftAction,
@@ -2201,13 +2203,17 @@ describe('@yolk-sdk/connectors', () => {
       expect(listRequest.headers?.prefer).toBe('IdType="ImmutableId"')
       expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadScope)
       expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadSharedScope)
-      expect(requestedScopes.at(1)).toContain(microsoftGraphMailReadSharedScope)
-      expect(requestedScopes.at(1)).not.toContain(microsoftGraphMailReadScope)
+      // Explicit delegated mailboxes resolve identity scope-free before the
+      // enforcing Shared slot; scope-free resolution never authorizes reads.
+      expect(requestedScopes.at(1)).toBeUndefined()
       expect(requestedScopes.at(2)).toContain(microsoftGraphMailReadSharedScope)
       expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailReadScope)
-      expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailReadWriteScope)
-      expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailSendScope)
-      expect(requestedScopes.at(3)).toContain(microsoftGraphMailReadScope)
+      expect(requestedScopes.at(3)).toBeUndefined()
+      expect(requestedScopes.at(4)).toContain(microsoftGraphMailReadSharedScope)
+      expect(requestedScopes.at(4)).not.toContain(microsoftGraphMailReadScope)
+      expect(requestedScopes.at(4)).not.toContain(microsoftGraphMailReadWriteScope)
+      expect(requestedScopes.at(4)).not.toContain(microsoftGraphMailSendScope)
+      expect(requestedScopes.at(5)).toContain(microsoftGraphMailReadScope)
     })
   )
 
@@ -2237,8 +2243,7 @@ describe('@yolk-sdk/connectors', () => {
                 name: 'logo.png',
                 contentType: 'image/png',
                 size: 512,
-                isInline: true,
-                contentId: 'company-logo'
+                isInline: true
               },
               {
                 '@odata.type': '#microsoft.graph.itemAttachment',
@@ -2317,8 +2322,7 @@ describe('@yolk-sdk/connectors', () => {
               name: 'logo.png',
               contentType: 'image/png',
               size: 512,
-              isInline: true,
-              contentId: 'company-logo'
+              isInline: true
             },
             {
               id: 'attached-message',
@@ -2344,13 +2348,17 @@ describe('@yolk-sdk/connectors', () => {
       expect(url.pathname).toBe(
         '/v1.0/users/shared%40example.com/messages/message%2Fid/attachments'
       )
+      // $select stays on base attachment properties: contentId belongs to the
+      // fileAttachment derived type and must not be selected across the
+      // polymorphic collection. Single-attachment reads still return it.
       expect(url.searchParams.get('$select')).toBe(
-        'id,name,contentType,size,isInline,contentId,lastModifiedDateTime'
+        'id,name,contentType,size,isInline,lastModifiedDateTime'
       )
       expect(url.searchParams.get('$top')).toBe('4')
       expect(requests.at(1)?.url).toBe(nextLink)
-      expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadSharedScope)
-      expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadScope)
+      expect(requestedScopes.at(0)).toBeUndefined()
+      expect(requestedScopes.at(1)).toContain(microsoftGraphMailReadSharedScope)
+      expect(requestedScopes.at(1)).not.toContain(microsoftGraphMailReadScope)
     })
   )
 
@@ -2653,16 +2661,48 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
-  it.effect('creates Outlook reply drafts and submits new and draft messages', () =>
+  it.effect('creates Outlook reply drafts preserving quoted history, then sends', () =>
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
       const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+
+      const generatedHtml =
+        '<html><body><div>On Jan 1, Alice wrote:</div><blockquote>Original quote</blockquote></body></html>'
+
+      const bodyOpen = '<body>'
+
+      const combinedHtml = `${generatedHtml.slice(0, generatedHtml.indexOf(bodyOpen) + bodyOpen.length)}<p>Thanks</p>${generatedHtml.slice(generatedHtml.indexOf(bodyOpen) + bodyOpen.length)}`
 
       const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
         ConnectorHttpResponse.make({
           status: 201,
           headers: { 'content-type': 'application/json' },
-          body: '{"id":"reply_draft_1","isDraft":true}'
+          body: JSON.stringify({
+            id: 'reply_draft_1',
+            conversationId: 'conv-1',
+            isDraft: true,
+            body: { contentType: 'html', content: generatedHtml }
+          })
+        }),
+        ConnectorHttpResponse.make({
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            id: 'reply_draft_1',
+            conversationId: 'conv-1',
+            isDraft: true,
+            body: { contentType: 'html', content: combinedHtml }
+          })
+        }),
+        ConnectorHttpResponse.make({
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            id: 'reply_draft_1',
+            conversationId: 'conv-1',
+            isDraft: true,
+            body: { contentType: 'html', content: combinedHtml }
+          })
         }),
         ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' }),
         ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' })
@@ -2699,6 +2739,15 @@ describe('@yolk-sdk/connectors', () => {
         })
         .pipe(Effect.provide(TestLayer))
 
+      // Read back the persisted draft like a host would: the combined content
+      // and the original conversation must survive the round trip.
+      const readBack = yield* outlookGetMessageAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'reply_draft_1', mailbox: 'shared@example.com' }
+        })
+        .pipe(Effect.provide(TestLayer))
+
       const sendResult = yield* outlookSendMailAction
         .execute({
           integration: microsoftIntegration,
@@ -2722,17 +2771,45 @@ describe('@yolk-sdk/connectors', () => {
 
       expect(replyResult._tag).toBe('Success')
       expect(replyResult).toMatchObject({ value: { id: 'reply_draft_1', isDraft: true } })
+      expect(readBack._tag).toBe('Success')
+      expect(readBack).toMatchObject({
+        value: { id: 'reply_draft_1', conversationId: 'conv-1', isDraft: true }
+      })
+
+      if (Predicate.isTagged(readBack, 'Success')) {
+        const persistedMessage = yield* Schema.decodeUnknownEffect(OutlookMessage)(readBack.value)
+        const persisted = persistedMessage.body
+
+        expect(persisted?.contentType).toBe('html')
+        expect(persisted?.content).toContain('<p>Thanks</p>')
+        expect(persisted?.content).toContain('Original quote')
+        // The reply is inserted inside the generated body element, never
+        // before the full HTML document.
+        expect(persisted?.content?.indexOf('<p>Thanks</p>') ?? -1).toBeGreaterThan(
+          persisted?.content?.indexOf('<body>') ?? -1
+        )
+      }
+
       expect(sendResult).toEqual(ActionResult.success({ accepted: true }))
       expect(sendDraftResult).toEqual(ActionResult.success({ accepted: true }))
+      // createReply ships no replacement body so Graph generates the quote.
       expect(requests.at(0)).toMatchObject({
         method: 'POST',
         url: 'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/source%2Fmessage/createReply',
-        headers: { prefer: 'IdType="ImmutableId"' },
-        body: JSON.stringify({
-          message: { body: { contentType: 'HTML', content: '<p>Thanks</p>' } }
-        })
+        headers: { prefer: 'IdType="ImmutableId"' }
       })
+      expect(requests.at(0)?.body).toBeUndefined()
+      expect(requests.at(0)?.headers).not.toHaveProperty('content-type')
       expect(requests.at(1)).toMatchObject({
+        method: 'PATCH',
+        url: 'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/reply_draft_1',
+        body: JSON.stringify({ body: { contentType: 'HTML', content: combinedHtml } })
+      })
+      expect(requests.at(2)).toMatchObject({ method: 'GET' })
+      expect(requests.at(2)?.url).toContain(
+        'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/reply_draft_1?'
+      )
+      expect(requests.at(3)).toMatchObject({
         method: 'POST',
         url: 'https://graph.microsoft.com/v1.0/users/shared%40example.com/sendMail',
         body: JSON.stringify({
@@ -2746,14 +2823,417 @@ describe('@yolk-sdk/connectors', () => {
           saveToSentItems: false
         })
       })
-      expect(requests.at(2)?.url).toBe(
+      expect(requests.at(4)?.url).toBe(
         'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/reply_draft_1/send'
       )
-      expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadWriteSharedScope)
-      expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadWriteScope)
-      expect(requestedScopes.at(1)).toContain(microsoftGraphMailSendSharedScope)
-      expect(requestedScopes.at(1)).not.toContain(microsoftGraphMailSendScope)
-      expect(requestedScopes.at(2)).toContain(microsoftGraphMailSendSharedScope)
+      expect(requestedScopes.at(0)).toBeUndefined()
+      expect(requestedScopes.at(1)).toContain(microsoftGraphMailReadWriteSharedScope)
+      expect(requestedScopes.at(1)).not.toContain(microsoftGraphMailReadWriteScope)
+      expect(requestedScopes.at(2)).toBeUndefined()
+      expect(requestedScopes.at(3)).toContain(microsoftGraphMailReadSharedScope)
+      expect(requestedScopes.at(4)).toBeUndefined()
+      expect(requestedScopes.at(5)).toContain(microsoftGraphMailSendSharedScope)
+      expect(requestedScopes.at(5)).not.toContain(microsoftGraphMailSendScope)
+      expect(requestedScopes.at(6)).toBeUndefined()
+      expect(requestedScopes.at(7)).toContain(microsoftGraphMailSendSharedScope)
+    })
+  )
+
+  it.effect('creates text reply drafts by reading back minimal generated bodies', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        // Minimal createReply response without a usable body forces a read-back.
+        jsonHttpResponse(
+          JSON.stringify({ id: 'reply_draft_2', conversationId: 'conv-2', isDraft: true })
+        ),
+        jsonHttpResponse(
+          JSON.stringify({
+            id: 'reply_draft_2',
+            conversationId: 'conv-2',
+            isDraft: true,
+            body: { contentType: 'text', content: 'On Jan 1, Alice wrote: Original quote' }
+          })
+        ),
+        jsonHttpResponse(
+          JSON.stringify({
+            id: 'reply_draft_2',
+            conversationId: 'conv-2',
+            isDraft: true,
+            body: {
+              contentType: 'text',
+              content: 'Thanks\n\nOn Jan 1, Alice wrote: Original quote'
+            }
+          })
+        )
+      ])
+
+      const TestLayer = Layer.mergeAll(MicrosoftCredentialResolverTest, ConnectorHttpClientTest)
+
+      const result = yield* outlookCreateReplyDraftAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'source', body: 'Thanks' }
+        })
+        .pipe(Effect.provide(TestLayer))
+
+      expect(result._tag).toBe('Success')
+      expect(result).toMatchObject({
+        value: {
+          id: 'reply_draft_2',
+          conversationId: 'conv-2',
+          body: {
+            contentType: 'text',
+            content: 'Thanks\n\nOn Jan 1, Alice wrote: Original quote'
+          }
+        }
+      })
+      expect(requests.at(0)).toMatchObject({
+        method: 'POST',
+        url: 'https://graph.microsoft.com/v1.0/me/messages/source/createReply'
+      })
+      expect(requests.at(0)?.body).toBeUndefined()
+      expect(requests.at(1)).toMatchObject({ method: 'GET' })
+      expect(requests.at(1)?.headers?.prefer).toBe(
+        'IdType="ImmutableId", outlook.body-content-type="text"'
+      )
+      expect(requests.at(2)).toMatchObject({
+        method: 'PATCH',
+        url: 'https://graph.microsoft.com/v1.0/me/messages/reply_draft_2',
+        body: JSON.stringify({
+          body: {
+            contentType: 'Text',
+            content: 'Thanks\n\nOn Jan 1, Alice wrote: Original quote'
+          }
+        })
+      })
+    })
+  )
+
+  it.effect('reports partial reply-draft failures with the created draft id', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            id: 'reply_draft_3',
+            conversationId: 'conv-3',
+            isDraft: true,
+            body: { contentType: 'text', content: 'Original quote' }
+          })
+        ),
+        ConnectorHttpResponse.make({
+          status: 403,
+          headers: {},
+          body: '{"error":{"message":"Denied"}}'
+        })
+      ])
+
+      const TestLayer = Layer.mergeAll(MicrosoftCredentialResolverTest, ConnectorHttpClientTest)
+
+      const result = yield* outlookCreateReplyDraftAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'source', body: 'Thanks' }
+        })
+        .pipe(Effect.provide(TestLayer))
+
+      // The draft exists server-side: no retry, no cleanup delete, and the
+      // failure names the draft so hosts edit it instead of creating another.
+      expect(requests).toHaveLength(2)
+      expect(result._tag).toBe('Failure')
+      // Provider status mapping still applies; the message carries the draft
+      // identity and recovery guidance.
+      expect(result).toMatchObject({
+        error: { code: 'microsoft_unauthorized', status: 403 }
+      })
+
+      if (Predicate.isTagged(result, 'Failure')) {
+        expect(result.error.message).toContain('reply_draft_3')
+        expect(result.error.message).toContain('existing draft')
+      }
+    })
+  )
+
+  it.effect('uses ordinary mail scopes when the explicit mailbox is the connected user', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const accountId = 'owner@example.com'
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"value":[]}'),
+        jsonHttpResponse('{"id":"draft_1","isDraft":true}'),
+        ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' }),
+        jsonHttpResponse('{"value":[]}'),
+        jsonHttpResponse('{"id":"message_1"}')
+      ])
+
+      // Enforcing fake: the scope-free identity call always succeeds, every
+      // operation call must be covered by the granted scopes.
+      const granted = [
+        microsoftGraphMailReadScope,
+        microsoftGraphMailReadWriteScope,
+        microsoftGraphMailSendScope
+      ]
+
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            const required = request.slot.requiredScopes
+
+            if (required !== undefined && !required.every(scope => granted.includes(scope))) {
+              return Effect.fail(
+                new ConnectorError({
+                  cause: 'credential_invalid',
+                  message: 'Test credential lacks the required Microsoft scopes',
+                  connectorId: 'microsoft',
+                  slotId: request.slot.id
+                })
+              )
+            }
+
+            return Effect.succeed(
+              OAuthCredential.make({
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000,
+                accountId
+              })
+            )
+          }
+        })
+      )
+
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      yield* outlookListMessagesAction
+        .execute({ integration: microsoftIntegration, input: { mailbox: accountId } })
+        .pipe(Effect.provide(TestLayer))
+      yield* outlookCreateDraftAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { mailbox: accountId, to: ['a@example.com'], subject: 'Hi', body: 'Body' }
+        })
+        .pipe(Effect.provide(TestLayer))
+      yield* outlookSendMailAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { mailbox: accountId, to: ['a@example.com'], subject: 'Hi', body: 'Body' }
+        })
+        .pipe(Effect.provide(TestLayer))
+      yield* outlookListAttachmentsAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'm', mailbox: accountId }
+        })
+        .pipe(Effect.provide(TestLayer))
+      yield* outlookGetMessageAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'm', mailbox: accountId }
+        })
+        .pipe(Effect.provide(TestLayer))
+
+      // Ordinary slots address the explicit /users path for the connected user.
+      for (const request of requests) {
+        expect(request.url).toContain('/v1.0/users/owner%40example.com/')
+      }
+
+      expect(requestedScopes).toEqual([
+        undefined,
+        [microsoftGraphMailReadScope],
+        undefined,
+        [microsoftGraphMailReadWriteScope],
+        undefined,
+        [microsoftGraphMailSendScope],
+        undefined,
+        [microsoftGraphMailReadScope],
+        undefined,
+        [microsoftGraphMailReadScope]
+      ])
+    })
+  )
+
+  it.effect('matches the connected mailbox case-insensitively', () =>
+    Effect.gen(function* () {
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [jsonHttpResponse('{"value":[]}')]
+      )
+
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+
+            return Effect.succeed(
+              OAuthCredential.make({
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000,
+                accountId: 'Owner@Example.com'
+              })
+            )
+          }
+        })
+      )
+
+      const result = yield* outlookSearchMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { query: 'invoice', mailbox: 'owner@example.com' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result._tag).toBe('Success')
+      expect(requestedScopes).toEqual([undefined, [microsoftGraphMailReadScope]])
+    })
+  )
+
+  it.effect('keeps Shared scopes unless the credential identifies the mailbox', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"value":[]}')
+      ])
+
+      // Ordinary-only grant: shared mailboxes must fail closed because the
+      // scope-free identity call never authorizes the operation itself.
+      const ordinaryOnly = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            const required = request.slot.requiredScopes
+
+            if (
+              required !== undefined &&
+              !required.every(scope => scope === microsoftGraphMailReadScope)
+            ) {
+              return Effect.fail(
+                new ConnectorError({
+                  cause: 'credential_invalid',
+                  message: 'Test credential lacks the required Microsoft scopes',
+                  connectorId: 'microsoft',
+                  slotId: request.slot.id
+                })
+              )
+            }
+
+            return Effect.succeed(
+              OAuthCredential.make({
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+
+      const denied = yield* outlookListMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { mailbox: 'shared@example.com' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(ordinaryOnly, ConnectorHttpClientTest)), Effect.result)
+
+      expect(Result.isFailure(denied)).toBe(true)
+
+      if (Result.isFailure(denied)) {
+        expect(Predicate.isTagged(denied.failure, 'ConnectorError')).toBe(true)
+        expect(denied.failure).toMatchObject({ cause: 'credential_invalid' })
+      }
+
+      expect(requests).toEqual([])
+      expect(requestedScopes).toEqual([undefined, [microsoftGraphMailReadSharedScope]])
+
+      // Bearer credentials carry no account identity, so explicit mailboxes
+      // stay Shared even when the grant covers them.
+      const bearerScopes: Array<ReadonlyArray<string> | undefined> = []
+
+      const bearerLayer = Layer.mergeAll(
+        Layer.succeed(
+          CredentialResolver,
+          CredentialResolver.of({
+            resolve: request => {
+              bearerScopes.push(request.slot.requiredScopes)
+
+              return Effect.succeed(BearerTokenCredential.make({ token: 'bearer_token' }))
+            }
+          })
+        ),
+        ConnectorHttpClientTest
+      )
+
+      const bearerResult = yield* outlookListMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { mailbox: 'shared@example.com' }
+        })
+        .pipe(Effect.provide(bearerLayer))
+
+      expect(bearerResult._tag).toBe('Success')
+      expect(bearerScopes).toEqual([undefined, [microsoftGraphMailReadSharedScope]])
+    })
+  )
+
+  it.effect('lists attachments with null lastModifiedDateTime without binary content', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            value: [
+              {
+                '@odata.type': '#microsoft.graph.fileAttachment',
+                id: 'inline-1',
+                lastModifiedDateTime: null,
+                name: 'logo.png',
+                contentType: 'image/png',
+                size: 512,
+                isInline: true,
+                contentId: 'logo'
+              }
+            ]
+          })
+        )
+      ])
+
+      const result = yield* outlookListAttachmentsAction
+        .execute({ integration: microsoftIntegration, input: { messageId: 'message_1' } })
+        .pipe(
+          Effect.provide(Layer.mergeAll(MicrosoftCredentialResolverTest, ConnectorHttpClientTest))
+        )
+
+      expect(result).toEqual(
+        ActionResult.success({
+          attachments: Chunk.fromIterable([
+            {
+              id: 'inline-1',
+              kind: 'file',
+              name: 'logo.png',
+              contentType: 'image/png',
+              size: 512,
+              isInline: true,
+              contentId: 'logo',
+              lastModifiedDateTime: null
+            }
+          ])
+        })
+      )
+      expect(JSON.stringify(result)).not.toContain('contentBytes')
     })
   )
 

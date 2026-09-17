@@ -536,9 +536,11 @@ permissions. Use `MicrosoftCombinedOAuthCredentialSlot` only when broad consent 
 
 Outlook inputs default to the signed-in mailbox (`/me`). Set `mailbox` to a user ID or user principal
 name to target an Exchange Online shared/delegated mailbox through `/users/{mailbox}`. Signed-in
-mailbox actions request `Mail.Read`, `Mail.ReadWrite`, or `Mail.Send`; explicit mailbox targets
-request the corresponding `Mail.Read.Shared`, `Mail.ReadWrite.Shared`, or `Mail.Send.Shared`
-delegated permission.
+mailbox actions request `Mail.Read`, `Mail.ReadWrite`, or `Mail.Send`. An explicit mailbox that
+case-insensitively matches `OAuthCredential.accountId` uses those same ordinary slots; other explicit
+targets request `Mail.Read.Shared`, `Mail.ReadWrite.Shared`, or `Mail.Send.Shared`. Hosts resolve the
+scope-free identity slot first, then enforce the selected operation slot. Missing identity and bearer
+credentials do not qualify for the own-mailbox exception.
 
 The signed-in user still needs the relevant Exchange folder/full-access grant. Sending from another
 mailbox also requires Exchange **Send As** or **Send on Behalf** rights; targeting that mailbox's
@@ -558,6 +560,11 @@ Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged. R
 an explicit mailbox continuation and `folderId` for a folder continuation. The connector only
 accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message`
 requests a text body; read and draft-returning actions request immutable IDs.
+
+`outlook.create_reply_draft` creates a bodyless reply draft, then prepends the supplied text or HTML
+to Graph's generated quoted history and saves it. This is a multi-step write: once a draft ID is
+known, read/save failures retain that ID with reconciliation guidance. Read and edit the existing
+draft rather than retrying creation; a failed response can follow a successful save.
 
 Use `outlook.list_attachments` with a message ID to return an Effect `Chunk` of metadata for file,
 item, reference, and inline attachments. It accepts `top` and returns an opaque `nextLink`; pass that link back unchanged
@@ -580,7 +587,8 @@ size policy, durable storage, and content scanning.
 
 All three return the provider's updated `OutlookMessage` and request immutable IDs. Use the returned
 `id` for subsequent calls. They use `Mail.ReadWrite` for the signed-in mailbox/application mode and
-`Mail.ReadWrite.Shared` for explicit delegated mailboxes, with the same application mailbox guard
+`Mail.ReadWrite.Shared` for other explicit delegated mailboxes, with the same own-mailbox identity
+exception and application mailbox guard
 as draft writes. Read-state and restore actions declare `write`; trash declares `destructive`.
 
 Sending returns `{ accepted: true }` for Graph's `202 Accepted`; that confirms submission, not

@@ -367,8 +367,10 @@ All OAuth slots use the shared `microsoft.oauth` binding id:
 
 Inputs default to the signed-in mailbox through `/me`. Set optional `mailbox` to a user ID or user
 principal name to target an Exchange Online shared/delegated mailbox through `/users/{mailbox}`.
-The connector then requests the matching Shared slot. The same `mailbox` must accompany an opaque
-`nextLink` so the resolver receives the shared-mailbox consent hint.
+The connector then requests the matching Shared slot, unless the explicit `mailbox` matches the
+connected user identity (`OAuthCredential.accountId`, case-insensitive), which keeps the ordinary
+`Mail.*` slot on the same `/users/{mailbox}` path. The same `mailbox` must accompany an opaque
+`nextLink` so the resolver receives the appropriate mailbox consent hint.
 
 For delegated reads and writes, the signed-in user needs the corresponding Exchange shared-folder
 or Full Access grant. Sending from another mailbox requires Exchange **Send As** or **Send on
@@ -386,20 +388,20 @@ required `Mail.*` and `Files.*` grants.
 
 ### Outlook actions
 
-| Action id                    | What it does                                                 |
-| ---------------------------- | ------------------------------------------------------------ |
-| `outlook.list_messages`      | list mailbox or folder messages with opaque Graph paging     |
-| `outlook.search_messages`    | search messages with Microsoft Graph mail `$search` syntax   |
-| `outlook.get_message`        | fetch one message with a text body                           |
-| `outlook.list_attachments`   | list attachment metadata, including inline attachments       |
-| `outlook.get_attachment`     | fetch one file attachment with base64 content                |
-| `outlook.create_draft`       | create a new message draft                                   |
-| `outlook.create_reply_draft` | create a reply draft for an existing message                 |
-| `outlook.send_mail`          | submit a new message for sending                             |
-| `outlook.send_draft`         | submit an existing draft for sending                         |
-| `outlook.set_read`           | mark a message read or unread                                |
-| `outlook.trash`              | move a message to Deleted Items                              |
-| `outlook.untrash`            | move a message from Deleted Items to inbox or another folder |
+| Action id                    | What it does                                                   |
+| ---------------------------- | -------------------------------------------------------------- |
+| `outlook.list_messages`      | list mailbox or folder messages with opaque Graph paging       |
+| `outlook.search_messages`    | search messages with Microsoft Graph mail `$search` syntax     |
+| `outlook.get_message`        | fetch one message with a text body                             |
+| `outlook.list_attachments`   | list attachment metadata, including inline attachments         |
+| `outlook.get_attachment`     | fetch one file attachment with base64 content                  |
+| `outlook.create_draft`       | create a new message draft                                     |
+| `outlook.create_reply_draft` | create a reply draft preserving Graph-generated quoted history |
+| `outlook.send_mail`          | submit a new message for sending                               |
+| `outlook.send_draft`         | submit an existing draft for sending                           |
+| `outlook.set_read`           | mark a message read or unread                                  |
+| `outlook.trash`              | move a message to Deleted Items                                |
+| `outlook.untrash`            | move a message from Deleted Items to inbox or another folder   |
 
 #### Optional Outlook read inputs
 
@@ -419,7 +421,9 @@ use Graph immutable IDs; `outlook.get_message` requests text for the full body. 
 change when sent, which is a documented immutable-ID exception.
 
 `outlook.list_attachments` returns normalized metadata with `kind: 'file' | 'item' | 'reference' |
-'unknown'`; unlike `hasAttachments`, listing also discovers inline attachments. It accepts `top` and
+'unknown'`; unlike `hasAttachments`, listing also discovers inline attachments. The list query
+selects base attachment properties only and accepts explicit null `lastModifiedDateTime` values.
+It accepts `top` and
 returns an opaque `nextLink`; pass that link back unchanged with the same `messageId` and `mailbox`.
 Use `outlook.get_attachment` with a returned file attachment ID. It requires a Graph file attachment
 with valid base64 `contentBytes` and returns required `contentBase64`. Item and reference attachments
@@ -436,8 +440,9 @@ or the specified folder ID/well-known name. It neither infers the original folde
 permanently deleted messages.
 
 All three return the updated `OutlookMessage` and request immutable IDs. Use the returned `id`
-for subsequent operations. Permission hints are `Mail.ReadWrite` for the signed-in mailbox and
-application mode, or `Mail.ReadWrite.Shared` for explicit delegated mailboxes. Application mode
+for subsequent operations. Permission hints are `Mail.ReadWrite` for the signed-in mailbox,
+matching connected-user mailboxes, and application mode, or `Mail.ReadWrite.Shared` for other
+explicit delegated mailboxes. Application mode
 still requires `mailbox`; hosts own consent and Exchange grants. Read-state and restore actions
 have `write` access; trash has `destructive` access.
 
