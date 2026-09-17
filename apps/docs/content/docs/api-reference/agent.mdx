@@ -16,26 +16,26 @@ exotic prototypes, hidden/symbol keys, nonfinite values and cycles, and permits 
 null-prototype objects and DAG aliases. This is representation admission, not meta-schema validation;
 provider compatibility and tool execution validation are separate. Params/results/HITL remain opaque.
 
-| Export                                                                                                                    | Purpose                        |
-| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `UserMessage`, `AssistantAgentMessage`, `ToolResultMessage`                                                               | transcript messages            |
-| `AgentEvent`                                                                                                              | stream event union             |
-| `UserMessageEvent`, `AssistantMessageEvent`                                                                               | replay-safe transcript events  |
-| `ToolDef`, `ToolCall`, `ToolResult`                                                                                       | tool protocol                  |
-| `BackgroundToolAccepted`, `BackgroundToolInput`, `decodeBackgroundToolInput`, `makeBackgroundToolAcceptedResult`          | background tool acceptance     |
-| `ToolExecutionAccepted`                                                                                                   | background admission event     |
-| `ToolApprovalRequest`, `ToolApprovalResponse`                                                                             | approval HITL                  |
-| `QuestionRequest`, `QuestionResponse`                                                                                     | question HITL                  |
-| `plainHitlResponse`, `hitlResponseEvent`, `questionResponseStructuredContent`                                             | durable/client HITL helpers    |
-| `isTerminalAgentEvent`                                                                                                    | terminal event guard           |
-| `assistantContent`, `contentText`, `contentParts`                                                                         | content helpers                |
-| `ImagePart`, `DocumentPart`, `AudioPart`, `TextPart`                                                                      | multimodal content parts       |
-| `urlAttachmentSource`, `inlineBase64AttachmentSource`, `refAttachmentSource`                                              | attachment source helpers      |
-| `AgentModelCapabilities`, `textOnlyModelCapabilities`, `textImageModelCapabilities`, `textImageDocumentModelCapabilities` | model input capability helpers |
-| `ProviderErrorInfo`, `ProviderFailureKind`                                                                                | safe provider error metadata   |
-| `AgentUsage`, `addAgentUsage`, `zeroAgentUsage`                                                                           | usage accounting helpers       |
-| `CompactionStart`, `CompactionEnd`                                                                                        | compaction lifecycle events    |
-| `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls`                                 | transcript invariant helpers   |
+| Export                                                                                                                    | Purpose                                                         |
+| ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `UserMessage`, `AssistantAgentMessage`, `ToolResultMessage`                                                               | transcript messages                                             |
+| `AgentEvent`                                                                                                              | stream event union                                              |
+| `UserMessageEvent`, `AssistantMessageEvent`                                                                               | replay-safe transcript events                                   |
+| `ToolDef`, `ToolCall`, `ToolResult`                                                                                       | tool protocol                                                   |
+| `BackgroundToolAccepted`, `BackgroundToolInput`, `decodeBackgroundToolInput`, `makeBackgroundToolAcceptedResult`          | background tool acceptance                                      |
+| `ToolExecutionAccepted`                                                                                                   | background admission event                                      |
+| `ToolApprovalRequest`, `ToolApprovalResponse`                                                                             | approval HITL                                                   |
+| `QuestionRequest`, `QuestionResponse`                                                                                     | question HITL                                                   |
+| `plainHitlResponse`, `hitlResponseEvent`, `questionResponseStructuredContent`                                             | durable/client HITL helpers                                     |
+| `isTerminalAgentEvent`                                                                                                    | terminal event guard                                            |
+| `assistantContent`, `contentText`, `contentParts`                                                                         | content helpers                                                 |
+| `ImagePart`, `DocumentPart`, `AudioPart`, `TextPart`                                                                      | multimodal content parts                                        |
+| `urlAttachmentSource`, `inlineBase64AttachmentSource`, `refAttachmentSource`                                              | attachment source helpers                                       |
+| `AgentModelCapabilities`, `textOnlyModelCapabilities`, `textImageModelCapabilities`, `textImageDocumentModelCapabilities` | model input capability helpers                                  |
+| `ProviderErrorInfo`, `ProviderFailureKind`, `ProviderStreamDiagnostics`                                                   | safe provider error metadata, incl. optional stream diagnostics |
+| `AgentUsage`, `addAgentUsage`, `zeroAgentUsage`                                                                           | usage accounting helpers                                        |
+| `CompactionStart`, `CompactionEnd`                                                                                        | compaction lifecycle events                                     |
+| `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls`                                 | transcript invariant helpers                                    |
 
 Attachment resolution helpers from `@yolk-sdk/agent/protocol`:
 

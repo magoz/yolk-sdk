@@ -68,6 +68,30 @@ Chat Completions and Responses HTTP failures copy the envelope string `code` (fa
 raw upstream bodies stay out of typed failures: diagnose from `providerCode`, status, and kind
 rather than logging raw response bodies.
 
+### Diagnose chat stream failures with stream diagnostics
+
+OpenAI-compatible chat streaming expects server-sent events. When a 2xx response declares an
+explicit non-SSE `Content-Type` (JSON or HTML), the provider fails before consuming the body with
+`invalid_response` and `providerCode: 'unexpected_content_type'` (non-retryable, safe numeric status
+attached). A missing `Content-Type` keeps the existing lenient SSE parsing.
+
+Two chat failure codes carry optional `provider.stream` diagnostics
+(`ProviderStreamDiagnostics`) that survive provider sanitization and wire serialization:
+
+| Field            | Meaning                                                                         |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `protocol`       | Negotiated provider wire protocol (`chat-completions`, `messages`, `responses`) |
+| `responseFormat` | Coarse declared content type (`sse`, `json`, `other`, `unknown` for no header)  |
+| `receivedBytes`  | Bytes received from HTTP body chunks before text decoding                       |
+| `bufferedChars`  | Undelivered SSE tail characters, counted in UTF-16 code units                   |
+| `outputStarted`  | Whether text or reasoning output was actually emitted to the consumer           |
+| `terminalSeen`   | Whether a terminal frame (`[DONE]` or a processed finish reason) was observed   |
+
+Diagnostics carry counters and milestones only: no transcript bytes, raw header values, or body
+fragments are retained. Streams that end without a terminal frame fail `incomplete_stream`
+(non-retryable) even when output already started, and the SDK never synthesizes success or a
+retry for a missing terminal.
+
 ### OAuth provider returns unauthorized
 
 Codex, Claude, and Grok provider layers need a fresh `OAuthAccessToken`. Your host owns token storage,

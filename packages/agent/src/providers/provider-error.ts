@@ -1,7 +1,8 @@
 import {
   ProviderErrorInfo,
   type AgentErrorCode,
-  type ProviderFailureKind
+  type ProviderFailureKind,
+  type ProviderStreamDiagnostics
 } from '@yolk-sdk/agent/protocol'
 
 type HeaderMap = Readonly<Record<string, string>>
@@ -22,6 +23,7 @@ type ProviderErrorInfoInput = {
   readonly status?: number
   readonly providerCode?: string
   readonly retryAfterMs?: number
+  readonly stream?: ProviderStreamDiagnostics
 }
 
 export type ProviderLlmErrorCause = Extract<
@@ -203,6 +205,7 @@ type ProviderErrorInfoFields = {
   status?: ProviderErrorInfoInput['status']
   providerCode?: ProviderErrorInfoInput['providerCode']
   retryAfterMs?: ProviderErrorInfoInput['retryAfterMs']
+  stream?: ProviderErrorInfoInput['stream']
 }
 
 export const providerErrorInfo = (input: ProviderErrorInfoInput) =>
@@ -223,6 +226,10 @@ export const providerErrorInfo = (input: ProviderErrorInfoInput) =>
 
       if (input.retryAfterMs !== undefined) {
         fields.retryAfterMs = input.retryAfterMs
+      }
+
+      if (input.stream !== undefined) {
+        fields.stream = input.stream
       }
 
       return fields
