@@ -904,8 +904,6 @@ type OpenAiChatStreamState = {
   // chunk, so a bare finish reason must not discard later payloads.
   readonly streamClosed: boolean
   readonly usage: unknown
-  // Safe diagnostics counters only: bytes are counted from HTTP chunks before
-  // text decoding, and outputStarted records actually emitted text/reasoning.
   readonly receivedBytes: number
   readonly outputStarted: boolean
 }
@@ -1104,8 +1102,6 @@ const processChatStreamBlock = (
     return yield* processChatStreamPayload(providerIdentity, reasoningContent, current, payload)
   })
 
-// Aggregate safe stream diagnostics from the folded state. Only counters and
-// milestones are retained: no transcript bytes, raw headers, or body fragments.
 const chatStreamDiagnostics = (
   responseFormat: ProviderStreamResponseFormat,
   state: OpenAiChatStreamState
@@ -1233,9 +1229,6 @@ const finalizeChatStreamState = (
     return events
   })
 
-// Classify an explicitly declared Content-Type into a coarse response format.
-// Only the media type is inspected; the raw header value and parameters are
-// never surfaced in errors or diagnostics.
 const chatStreamResponseFormat = (
   contentType: string | undefined
 ): ProviderStreamResponseFormat => {
@@ -1250,15 +1243,13 @@ const chatStreamResponseFormat = (
   return 'other'
 }
 
-// A 2xx streaming response must be SSE-compatible before its body is consumed:
-// a mismatched body (JSON, HTML) is classified, never decoded or echoed. An
-// absent Content-Type keeps the historical lenient SSE parsing.
 const expectChatSseResponse = (
   providerIdentity: OpenAiProviderIdentity,
   response: HttpClientResponse.HttpClientResponse
 ): Effect.Effect<ProviderStreamResponseFormat, LLMError> => {
   const responseFormat = chatStreamResponseFormat(response.headers['content-type'])
 
+  // Accept missing Content-Type for compatibility with existing SSE endpoints.
   if (responseFormat === 'sse' || responseFormat === 'unknown') {
     return Effect.succeed(responseFormat)
   }
@@ -1297,8 +1288,6 @@ const streamOpenAiChatResponse = (
       Effect.map(stateRef => {
         const chunks = response.stream.pipe(
           Stream.mapError(toHttpClientLlmError(providerIdentity, true)),
-          // Count body bytes before text decoding so diagnostics describe the
-          // wire stream, not decoded characters.
           Stream.tap(chunk =>
             Ref.update(stateRef, state => ({
               ...state,

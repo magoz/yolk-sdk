@@ -1372,9 +1372,7 @@ describe('OpenAI provider streaming', () => {
       ).pipe(Effect.flip)
 
       expect(error._tag).toBe('LLMError')
-      // Split CRLF pairs may leave a harmless whitespace tail in the parser
-      // buffer, so only the transport byte count (plus output milestones)
-      // is asserted exactly here.
+      // Split CRLF may leave a whitespace tail, so bufferedChars is intentionally omitted.
       expect(error).toMatchObject({
         cause: 'invalid_response',
         provider: {

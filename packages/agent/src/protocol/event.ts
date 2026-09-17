@@ -58,24 +58,16 @@ export const ProviderFailureKind = Schema.Literals([
 
 export type ProviderFailureKind = typeof ProviderFailureKind.Type
 
-/** Provider wire protocol a streaming response was negotiated over. */
 export const ProviderStreamProtocol = Schema.Literals(['chat-completions', 'messages', 'responses'])
 
 export type ProviderStreamProtocol = typeof ProviderStreamProtocol.Type
 
-/**
- * Coarse classification of a streaming response's declared content type.
- * `unknown` means no Content-Type header was present.
- */
+/** `unknown` means no Content-Type header was present. */
 export const ProviderStreamResponseFormat = Schema.Literals(['sse', 'json', 'other', 'unknown'])
 
 export type ProviderStreamResponseFormat = typeof ProviderStreamResponseFormat.Type
 
-/**
- * Safe counters and milestones for a provider stream that failed to yield a
- * normal completion. Counts are whole-stream aggregates only: no transcript
- * bytes, raw headers, or body fragments are retained.
- */
+/** Stream failure metadata; never retain transcript content, raw headers, or body fragments. */
 export class ProviderStreamDiagnostics extends Schema.Class<ProviderStreamDiagnostics>(
   'ProviderStreamDiagnostics'
 )({
