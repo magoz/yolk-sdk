@@ -3,6 +3,8 @@ import * as Schema from 'effect/Schema'
 import {
   contentText,
   type AgentRetry,
+  type InputRequest,
+  type InputResponse,
   type QuestionRequest,
   type QuestionResponse,
   type ToolApprovalRequest,
@@ -63,6 +65,17 @@ export type ToolRunState =
       readonly _tag: 'QuestionCancelled'
       readonly response: QuestionResponse
       readonly request?: QuestionRequest
+    } & ToolRunNoTiming)
+  | ({ readonly _tag: 'InputRequested'; readonly request: InputRequest } & ToolRunNoTiming)
+  | ({
+      readonly _tag: 'InputSubmitted'
+      readonly response: InputResponse
+      readonly request?: InputRequest
+    } & ToolRunNoTiming)
+  | ({
+      readonly _tag: 'InputCancelled'
+      readonly response: InputResponse
+      readonly request?: InputRequest
     } & ToolRunNoTiming)
   | ({ readonly _tag: 'Accepted'; readonly result: ToolResult } & ToolRunTerminalTiming)
   | ({ readonly _tag: 'Completed'; readonly result: ToolResult } & ToolRunTerminalTiming)
@@ -227,6 +240,26 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
 
   if (Predicate.isTagged(state, 'QuestionRequested')) {
     return ToolRunState.QuestionRequested({ ...noTiming(), request: state.request })
+  }
+
+  if (Predicate.isTagged(state, 'InputRequested')) {
+    return ToolRunState.InputRequested({ ...noTiming(), request: state.request })
+  }
+
+  if (Predicate.isTagged(state, 'InputSubmitted')) {
+    return ToolRunState.InputSubmitted({
+      ...noTiming(),
+      response: state.response,
+      request: state.request
+    })
+  }
+
+  if (Predicate.isTagged(state, 'InputCancelled')) {
+    return ToolRunState.InputCancelled({
+      ...noTiming(),
+      response: state.response,
+      request: state.request
+    })
   }
 
   if (Predicate.isTagged(state, 'QuestionAnswered')) {

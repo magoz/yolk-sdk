@@ -4,6 +4,8 @@ import {
   type AgentMessage,
   type AgentRetry,
   type HitlRequest,
+  type InputRequest,
+  type InputResponse,
   type QuestionRequest,
   type QuestionResponse,
   type ToolCall,
@@ -40,6 +42,17 @@ export type AgentToolRun =
       readonly _tag: 'QuestionCancelled'
       readonly response: QuestionResponse
       readonly request?: QuestionRequest
+    }
+  | { readonly _tag: 'InputRequested'; readonly request: InputRequest }
+  | {
+      readonly _tag: 'InputSubmitted'
+      readonly response: InputResponse
+      readonly request?: InputRequest
+    }
+  | {
+      readonly _tag: 'InputCancelled'
+      readonly response: InputResponse
+      readonly request?: InputRequest
     }
   | { readonly _tag: 'Executing'; readonly call: ToolCall; readonly startedAtMs: number }
   | {
@@ -131,6 +144,8 @@ const toolRunId = (run: AgentToolRun) =>
     Match.tag('Denied', current => current.toolCallId),
     Match.tag('QuestionRequested', current => current.request.toolCallId),
     Match.tag('QuestionAnswered', 'QuestionCancelled', current => current.response.toolCallId),
+    Match.tag('InputRequested', current => current.request.toolCallId),
+    Match.tag('InputSubmitted', 'InputCancelled', current => current.response.toolCallId),
     Match.tag(
       'InputReady',
       'ApprovalRequested',
@@ -151,6 +166,8 @@ export const isActiveToolRun = (run: AgentToolRun) =>
   !Predicate.isTagged(run, 'Denied') &&
   !Predicate.isTagged(run, 'QuestionAnswered') &&
   !Predicate.isTagged(run, 'QuestionCancelled') &&
+  !Predicate.isTagged(run, 'InputSubmitted') &&
+  !Predicate.isTagged(run, 'InputCancelled') &&
   !Predicate.isTagged(run, 'ProviderCompleted')
 
 export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
@@ -172,6 +189,7 @@ export const toolRunsFromHitlRequests = (
           request: current
         })
       ),
+      Match.tag('InputRequest', current => AgentToolRun.InputRequested({ request: current })),
       Match.exhaustive
     )
   )
@@ -235,6 +253,9 @@ const questionRequestForToolCall = (
       Match.tag(
         'InputStreaming',
         'InputReady',
+        'InputRequested',
+        'InputSubmitted',
+        'InputCancelled',
         'ApprovalRequested',
         'Denied',
         'Executing',
@@ -247,6 +268,55 @@ const questionRequestForToolCall = (
       Match.exhaustive
     )
   })[0]
+
+const inputRequestForToolCall = (
+  runs: ReadonlyArray<AgentToolRun>,
+  toolCallId: string
+): InputRequest | undefined =>
+  runs.flatMap(run => {
+    if (toolRunId(run) !== toolCallId) {
+      return []
+    }
+
+    return Match.value(run).pipe(
+      Match.tag('InputRequested', current => [current.request]),
+      Match.tag('InputSubmitted', 'InputCancelled', current =>
+        current.request === undefined ? [] : [current.request]
+      ),
+      Match.tag(
+        'InputStreaming',
+        'InputReady',
+        'ApprovalRequested',
+        'Denied',
+        'Executing',
+        'Accepted',
+        'Completed',
+        'Errored',
+        'ProviderCompleted',
+        'QuestionRequested',
+        'QuestionAnswered',
+        'QuestionCancelled',
+        () => []
+      ),
+      Match.exhaustive
+    )
+  })[0]
+
+const inputSubmittedRun = (
+  response: InputResponse,
+  request: InputRequest | undefined
+): AgentToolRun =>
+  request === undefined
+    ? AgentToolRun.InputSubmitted({ response })
+    : AgentToolRun.InputSubmitted({ response, request })
+
+const inputCancelledRun = (
+  response: InputResponse,
+  request: InputRequest | undefined
+): AgentToolRun =>
+  request === undefined
+    ? AgentToolRun.InputCancelled({ response })
+    : AgentToolRun.InputCancelled({ response, request })
 
 const questionAnsweredRun = (
   response: QuestionResponse,
@@ -307,6 +377,7 @@ const activeEventToolCallId = (event: AgentEvent): string | undefined =>
       current => current.call.id
     ),
     Match.tag('QuestionRequested', current => current.request.toolCallId),
+    Match.tag('InputRequested', current => current.request.toolCallId),
     Match.orElse(() => undefined)
   )
 
@@ -401,6 +472,13 @@ const applyAgentEventUnchecked = (
           state.toolRuns,
           AgentToolRun.QuestionRequested({ request: current.request })
         )
+      })),
+      Match.tag('InputRequested', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRun.InputRequested({ request: current.request })
+        )
       }))
     )
     .pipe(
@@ -421,6 +499,26 @@ const applyAgentEventUnchecked = (
           questionCancelledRun(
             current.response,
             questionRequestForToolCall(state.toolRuns, current.response.toolCallId)
+          )
+        )
+      })),
+      Match.tag('InputSubmitted', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          inputSubmittedRun(
+            current.response,
+            inputRequestForToolCall(state.toolRuns, current.response.toolCallId)
+          )
+        )
+      })),
+      Match.tag('InputCancelled', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          inputCancelledRun(
+            current.response,
+            inputRequestForToolCall(state.toolRuns, current.response.toolCallId)
           )
         )
       })),

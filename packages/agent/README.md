@@ -26,7 +26,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/runtime`                              | Transcript or append-backed runtime orchestration              |
 | `@yolk-sdk/agent/client`                               | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
 | `@yolk-sdk/agent/compaction`                           | Host-owned compaction budgets, checkpoints, formatting, retry  |
-| `@yolk-sdk/agent/tools`                                | Tool registry, `makeTool`, subagent/question contracts         |
+| `@yolk-sdk/agent/tools`                                | Tool registry, typed inputs, subagent/question contracts       |
 | `@yolk-sdk/agent/react`                                | Headless React chat hook, reducer, selectors, and render model |
 | `@yolk-sdk/agent/oauth`                                | Provider-neutral OAuth token and broker contracts              |
 | `@yolk-sdk/agent/providers/openai`                     | OpenAI/Codex OAuth and broker helpers                          |
@@ -110,7 +110,7 @@ import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/test
 ## Headless React chat
 
 `useAgentChat` exposes protocol messages, render-oriented chat messages, run/error/waiting state,
-and actions for submit, stop, edit, regenerate, delete, tool approval, and question responses. The
+and actions for submit, stop, edit, regenerate, delete, tool approval, question, and typed input responses. The
 package supplies no components, styling, auth, or route ownership, and React remains an optional
 peer used only by React subpaths.
 
@@ -631,9 +631,11 @@ HITL is protocol-level, not UI-level:
   `streamToolApprovalResponseEventStream`.
 - Denials become model-visible `ToolResult` messages with `isError = true`.
 - Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels. The loop intercepts questions only when the tool is enabled in `tools`; omitted questions return an unavailable result without HITL or executor dispatch, even if a provider emits one.
-- Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON. `PlainHitlResponse` is a `Data.taggedEnum` value (`QuestionResponse` / `ToolApprovalResponse`); the helpers omit absent optionals then call those constructors (`_tag` last, plain objects, not Schema classes).
+- Use `makeInputTool({ name, description, response, renderer })` for custom typed input. Apps own the response Effect schema and renderer; the SDK carries JSON data only. Pass `resolveTools(...).inputs` alongside `tools` to loop/runtime configs. The original `callParameters` and `response` schemas validate server-side, including refinements; display JSON Schema is not the validator. Invalid calls fail before prompting; invalid submissions remain pending for correction. The first valid submission or cancellation settles the request and cannot be overwritten by stale responses.
+- Resume custom inputs with `submitInputResponse`, `streamInputResponseEventStream`, or WebSocket `InputResponseInput`. Echo request/call IDs; do not reconstruct them. Input collection is not authorization: a draft composer never grants permission to send. Input tools cannot carry approval/background policy or execute directly.
+- Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON. `PlainHitlResponse` is a `Data.taggedEnum` value (`QuestionResponse` / `ToolApprovalResponse` / `InputResponse`); the helpers omit absent optionals then call those constructors (`_tag` last, plain objects, not Schema classes).
 - Use `toolRunsFromHitlRequests` to hydrate paused UI state from `AgentAwaitingInput.requests`.
-- Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive.
+- Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive. Typed input stays pending until server acceptance so rejected or interrupted submissions cannot become replayable tool results.
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
 
 HTTP client helpers treat `AgentEnd`, `AgentError`, and `AgentAwaitingInput` as logical stream
@@ -701,7 +703,7 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
   JSON-compatible `VoiceToolCallOutcome` envelope, applies `ToolDef.approval` policy, and never runs
   approval-gated tools without a matching approved response.
 - Approval-gated calls pause with `AwaitingInput`; approvals/denials resume through
-  `submitHitlResponse`. Voice `question` is deferred in v1.
+  `submitHitlResponse`. Voice questions and custom typed inputs are unsupported in v1.
 - `projectVoiceEvent` turns voice events into protocol messages with no dangling host tool
   calls. Assistant drafts are keyed per provider output item (falling back to response id), so
   back-to-back responses, multi-item responses, and duplicate final transcript event families

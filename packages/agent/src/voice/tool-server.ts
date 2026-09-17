@@ -28,6 +28,12 @@ export const VoiceToolCallDecision = Data.taggedEnum<VoiceToolCallDecision>()
 /** Matches the loop's deterministic approval request id convention. */
 export const voiceApprovalRequestId = (callId: string) => `approval:${callId}`
 
+/** Voice sessions stay approvals-only: generic typed input tools have no voice renderer or
+ * resume path and must never execute server-side through the voice bridge.
+ */
+export const voiceInputUnsupportedMessage =
+  'Input tools are not supported in voice sessions. Do not retry them here.'
+
 const decodeArgumentsOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 const argumentsForApprovalDisplay = (argumentsJson: string): Schema.Json =>
@@ -49,6 +55,11 @@ export const decideVoiceToolCall = (
   // Voice cannot bind activated approvals or represent background acceptance yet.
   if (def?.execution === 'background-v1') {
     return VoiceToolCallDecision.Deny({ reason: backgroundVoiceUnsupportedMessage })
+  }
+
+  // Voice HITL is approvals-only; generic input tools (and their responses) are rejected.
+  if (def?.input !== undefined) {
+    return VoiceToolCallDecision.Deny({ reason: voiceInputUnsupportedMessage })
   }
 
   if (def?.approval?.mode !== 'manual') {

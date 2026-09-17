@@ -157,10 +157,11 @@ export const reduceAgentChatState = (
       errorInfo: null,
       retryInfo: null,
       seenEventIds: [],
-      chatMessages: applyAgentEventToChatMessages(
-        state.chatMessages,
-        hitlResponseEvent(current.response)
-      )
+      // User data is not a validated tool result until the server accepts it. Keep the
+      // form mounted while submitting and never replay an optimistic invalid payload.
+      chatMessages: Predicate.isTagged(current.response, 'InputResponse')
+        ? state.chatMessages
+        : applyAgentEventToChatMessages(state.chatMessages, hitlResponseEvent(current.response))
     })),
     Match.tag('DeleteTurn', current =>
       Match.value(deleteChatTurn(state.chatMessages, current.messageId)).pipe(
@@ -311,6 +312,9 @@ export const reduceAgentChatState = (
           'QuestionAnswered',
           'QuestionCancelled',
           'QuestionRequested',
+          'InputRequested',
+          'InputSubmitted',
+          'InputCancelled',
           'SubagentCompleted',
           'SubagentStarted',
           'ToolApprovalDenied',
@@ -373,6 +377,8 @@ export const isActiveChatToolPart = (part: AgentChatPart) =>
   !Predicate.isTagged(part.state, 'ProviderCompleted') &&
   !Predicate.isTagged(part.state, 'QuestionAnswered') &&
   !Predicate.isTagged(part.state, 'QuestionCancelled') &&
+  !Predicate.isTagged(part.state, 'InputSubmitted') &&
+  !Predicate.isTagged(part.state, 'InputCancelled') &&
   !Predicate.isTagged(part.state, 'Errored') &&
   !Predicate.isTagged(part.state, 'Denied')
 

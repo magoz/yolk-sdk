@@ -4,6 +4,7 @@ import {
   assistantContent,
   attachmentSourceBase64,
   contentParts,
+  type InputToolHandler,
   AgentMessage,
   AgentReasoningEffort,
   HitlResponse,
@@ -225,6 +226,7 @@ export type AgentRouteConfig = {
   readonly systemPrompt: string
   readonly reasoningEffort?: AgentReasoningEffortType
   readonly tools: ReadonlyArray<ToolDef>
+  readonly inputs?: Readonly<Record<string, InputToolHandler>>
   readonly capabilities?: AgentModelCapabilities
 }
 
@@ -282,6 +284,7 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
       {
         systemPrompt: config.systemPrompt,
         tools: config.tools,
+        inputs: config.inputs,
         hitlResponses: input.hitlResponses,
         reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
         capabilities: config.capabilities,

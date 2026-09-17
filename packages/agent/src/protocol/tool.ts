@@ -211,6 +211,18 @@ export class ToolCall extends Schema.Class<ToolCall>('ToolCall')({
   params: Schema.Unknown
 }) {}
 
+/** Serializable input descriptor for generalized typed input tools. Display metadata only:
+ * user payloads are JSON-only and validated server-side against the registration's original
+ * Effect Schema, never against this lowered hint. Renderer components remain app-owned;
+ * `kind` is an opaque stable renderer key chosen at registration time.
+ */
+export class InputDescriptor extends Schema.Class<InputDescriptor>('InputDescriptor')({
+  kind: NonEmptyTrimmedString,
+  title: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  schema: Schema.optional(ToolJsonSchema)
+}) {}
+
 export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   name: NonEmptyTrimmedString,
   description: Schema.String,
@@ -218,7 +230,9 @@ export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   parameters: ToolJsonSchema,
   approval: Schema.optional(ToolApprovalPolicy),
   background: Schema.optional(Schema.Boolean),
-  execution: Schema.optional(Schema.Literal('background-v1'))
+  execution: Schema.optional(Schema.Literal('background-v1')),
+  /** Present only on generalized typed input tools. Never combined with approval/background. */
+  input: Schema.optional(InputDescriptor)
 }) {}
 
 export const BackgroundToolExecution = Schema.Literals(['foreground', 'background'])
@@ -372,6 +386,27 @@ export class QuestionResponse extends Schema.TaggedClass<QuestionResponse>()('Qu
   reason: Schema.optional(Schema.String)
 }) {}
 
+export const InputResponseOutcome = Schema.Literals(['submitted', 'cancelled'])
+
+export type InputResponseOutcome = typeof InputResponseOutcome.Type
+
+export class InputRequest extends Schema.TaggedClass<InputRequest>()('InputRequest', {
+  requestId: NonEmptyTrimmedString,
+  toolCallId: NonEmptyTrimmedString,
+  call: ToolCall,
+  input: InputDescriptor
+}) {}
+
+export class InputResponse extends Schema.TaggedClass<InputResponse>()('InputResponse', {
+  requestId: NonEmptyTrimmedString,
+  toolCallId: NonEmptyTrimmedString,
+  outcome: InputResponseOutcome,
+  source: HitlResponseSource,
+  /** JSON-only user payload. Validated server-side against the original Effect Schema. */
+  data: Schema.optional(Schema.Json),
+  reason: Schema.optional(Schema.String)
+}) {}
+
 export type PlainHitlResponse = Data.TaggedEnum<{
   QuestionResponse: {
     readonly requestId: string
@@ -388,9 +423,19 @@ export type PlainHitlResponse = Data.TaggedEnum<{
     readonly source: HitlResponseSource
     readonly reason?: string
   }
+  InputResponse: {
+    readonly requestId: string
+    readonly toolCallId: string
+    readonly outcome: InputResponseOutcome
+    readonly source: HitlResponseSource
+    readonly data?: Schema.Json
+    readonly reason?: string
+  }
 }>
 
 export const PlainHitlResponse = Data.taggedEnum<PlainHitlResponse>()
+
+export type PlainInputResponse = Extract<PlainHitlResponse, { readonly _tag: 'InputResponse' }>
 
 export type PlainQuestionResponse = Extract<
   PlainHitlResponse,
@@ -485,12 +530,89 @@ export const plainToolApprovalResponse = (
   return PlainHitlResponse.ToolApprovalResponse(fields)
 }
 
+export const plainInputResponse = (response: InputResponse): PlainInputResponse => {
+  type PlainInputResponseFields = {
+    requestId: PlainInputResponse['requestId']
+    toolCallId: PlainInputResponse['toolCallId']
+    outcome: PlainInputResponse['outcome']
+    source: PlainInputResponse['source']
+    data?: PlainInputResponse['data']
+    reason?: PlainInputResponse['reason']
+  }
+
+  const fields: PlainInputResponseFields = {
+    requestId: response.requestId,
+    toolCallId: response.toolCallId,
+    outcome: response.outcome,
+    source: response.source
+  }
+
+  if (response.data !== undefined) {
+    fields.data = response.data
+  }
+
+  if (response.reason !== undefined) {
+    fields.reason = response.reason
+  }
+
+  return PlainHitlResponse.InputResponse(fields)
+}
+
 export const plainHitlResponse = (response: HitlResponse): PlainHitlResponse =>
   Match.value(response).pipe(
     Match.tag('QuestionResponse', current => plainQuestionResponse(current)),
     Match.tag('ToolApprovalResponse', current => plainToolApprovalResponse(current)),
+    Match.tag('InputResponse', current => plainInputResponse(current)),
     Match.exhaustive
   )
+
+export type InputResponseStructuredContent = {
+  readonly type: 'input_response'
+  readonly name: string
+  readonly outcome: InputResponseOutcome
+  readonly data?: Schema.Json
+  readonly reason?: string
+  readonly source: HitlResponseSource
+}
+
+export const inputResponseStructuredContent = (
+  response: InputResponse,
+  name: string
+): InputResponseStructuredContent => {
+  type InputResponseStructuredContentFields = {
+    type: 'input_response'
+    name: InputResponseStructuredContent['name']
+    outcome: InputResponseStructuredContent['outcome']
+    data?: InputResponseStructuredContent['data']
+    reason?: InputResponseStructuredContent['reason']
+  }
+
+  const fields: InputResponseStructuredContentFields = {
+    type: 'input_response',
+    name,
+    outcome: response.outcome
+  }
+
+  if (response.data !== undefined) {
+    fields.data = response.data
+  }
+
+  if (response.reason !== undefined) {
+    fields.reason = response.reason
+  }
+
+  return { ...fields, source: response.source }
+}
+
+export const formatInputResponseContent = (response: InputResponse, name: string) => {
+  if (response.outcome === 'cancelled') {
+    return `Input cancelled: ${response.reason ?? 'Input cancelled'}`
+  }
+
+  const data = response.data === undefined ? 'no data' : JSON.stringify(response.data)
+
+  return `User has provided input for "${name}": ${data}. Continue with the user's input in mind.`
+}
 
 export const questionResponseStructuredContent = (
   response: QuestionResponse
@@ -559,13 +681,39 @@ export const formatQuestionResponseContent = (
   return `User has answered your ${label}: ${formatted}. Continue with the user's answers in mind.`
 }
 
-export const HitlRequest = Schema.Union([ToolApprovalRequest, QuestionRequest])
+export const HitlRequest = Schema.Union([ToolApprovalRequest, QuestionRequest, InputRequest])
 
 export type HitlRequest = typeof HitlRequest.Type
 
-export const HitlResponse = Schema.Union([ToolApprovalResponse, QuestionResponse])
+export const HitlResponse = Schema.Union([ToolApprovalResponse, QuestionResponse, InputResponse])
 
 export type HitlResponse = typeof HitlResponse.Type
+
+/** Stable request/call correlation for generalized input tools. Binds tool name and call id;
+ * hosts must echo the opaque id and never rebuild it. Distinct from `question:<callId>` ids.
+ */
+export const inputRequestId = (call: ToolCall) => `input:${call.name}:${call.id}`
+
+/** Server-side validator for one input tool's JSON user payload. Decodes with the
+ * registration's original Effect Schema; JSON Schema lowering is display-only.
+ */
+export type InputResponseValidator = (data: unknown) => Effect.Effect<unknown, Schema.SchemaError>
+
+/** Narrow loop seam for generalized input tools. Validators are provided separately from
+ * the serializable ToolDef (see ResolvedToolSet.inputs); hosts pass them explicitly to
+ * prepareToolBatch/runToolBatch/run/RuntimeConfig.
+ */
+export type InputContentFormatter = (input: {
+  readonly name: string
+  readonly data: Schema.Json
+}) => string
+
+export type InputToolHandler = {
+  /** Validate model-supplied context before opening a request or accepting a response. */
+  readonly validateCall: InputResponseValidator
+  readonly validateResponse: InputResponseValidator
+  readonly formatContent: InputContentFormatter
+}
 
 // Canonical loop-owned names. Public compatibility exports remain on /tools.
 export const questionToolName = 'question'

@@ -7,10 +7,10 @@ Yolk models HITL in protocol, not UI. That means the same loop can pause in Next
 
 ## How it works
 
-1. The model calls a tool requiring approval, or calls the built-in question tool.
+1. The model calls a tool requiring approval, calls the built-in question tool, or calls a generalized typed input tool.
 2. The loop emits `AgentAwaitingInput` with pending requests.
-3. Your UI renders approval/question controls.
-4. Your app resumes with typed `HitlResponse` values.
+3. Your UI renders approval/question/input controls (inputs render by `InputRequest.input.kind`).
+4. Your app resumes with typed `HitlResponse` values (`ToolApprovalResponse`, `QuestionResponse`, `InputResponse`).
 
 ## What the host owns
 
@@ -30,6 +30,9 @@ For stateless routes, include `hitlResponses` in the next `runRuntime` config. F
 - `AgentAwaitingInput` from `@yolk-sdk/agent/protocol`
 - `ToolApprovalRequest` from `@yolk-sdk/agent/protocol`
 - `QuestionRequest` from `@yolk-sdk/agent/protocol`
+- `InputRequest` from `@yolk-sdk/agent/protocol`
+- `InputResponse` from `@yolk-sdk/agent/protocol`
 - `plainHitlResponse` from `@yolk-sdk/agent/protocol`
 - `questionResponseStructuredContent` from `@yolk-sdk/agent/protocol`
+- `inputResponseStructuredContent` from `@yolk-sdk/agent/protocol`
 - `toolRunsFromHitlRequests` from `@yolk-sdk/agent/client`

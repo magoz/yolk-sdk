@@ -111,6 +111,31 @@ const encodeToolCall = Schema.encodeUnknownEffect(ToolCall)
 
 const encodeHitlRequest = Schema.encodeUnknownEffect(HitlRequest)
 
+/** Admission at the durable hook boundary; stale responses must not enter the batch history. */
+export const matchesWorkflowHitlResponse = (
+  requests: ReadonlyArray<unknown>,
+  response: unknown
+): boolean => {
+  const decodedRequests = Schema.decodeUnknownResult(Schema.Array(HitlRequest))(requests)
+  const decodedResponse = Schema.decodeUnknownResult(HitlResponse)(response)
+
+  if (Result.isFailure(decodedRequests) || Result.isFailure(decodedResponse)) return false
+
+  const current = decodedResponse.success
+
+  return decodedRequests.success.some(
+    request =>
+      request.requestId === current.requestId &&
+      request.toolCallId === current.toolCallId &&
+      ((Predicate.isTagged(request, 'InputRequest') &&
+        Predicate.isTagged(current, 'InputResponse')) ||
+        (Predicate.isTagged(request, 'QuestionRequest') &&
+          Predicate.isTagged(current, 'QuestionResponse')) ||
+        (Predicate.isTagged(request, 'ToolApprovalRequest') &&
+          Predicate.isTagged(current, 'ToolApprovalResponse')))
+  )
+}
+
 const encodeUsage = Schema.encodeUnknownEffect(AgentUsage)
 
 const decodeHitlResponses = (responses: ReadonlyArray<unknown> | undefined) =>
@@ -333,6 +358,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const prepared = yield* prepareToolBatch({
         calls,
         tools: runtime.config.tools,
+        inputs: runtime.config.inputs,
         responses: hitlResponses
       })
 
@@ -359,6 +385,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const toolStream = runToolBatch({
         calls,
         tools: runtime.config.tools,
+        inputs: runtime.config.inputs,
         hitlResponses,
         model: runtime.config.model,
         createdMessages,

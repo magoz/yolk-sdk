@@ -79,6 +79,38 @@ The SDK owns generic event and response shape. Hosts own UI, auth, request match
 
 Use the built-in question tool when the model needs a user choice. Use approval policy when a normal tool call needs permission before execution.
 
+## Collect typed input
+
+Use `makeInputTool` when the model needs structured user data (such as a draft or form). Questions remain the built-in option/free-text UI; custom inputs use app-owned renderers. Input tools share the HITL lifecycle: the loop pauses with `AgentAwaitingInput`, your UI renders by kind, and you resume with a typed `InputResponse`.
+
+```ts
+import { Schema } from 'effect'
+import { makeInputTool } from '@yolk-sdk/agent/tools'
+
+const DraftResponse = Schema.Struct({
+  to: Schema.String,
+  subject: Schema.String,
+  body: Schema.String
+})
+
+export const draftTool = makeInputTool({
+  name: 'compose_draft',
+  description: 'Collect an email draft from the user.',
+  response: DraftResponse,
+  renderer: 'draft-composer',
+  title: 'Compose draft'
+})
+```
+
+Rules:
+
+- `response` is the server Effect Schema that validates user payloads; the `ToolDef` carries only display metadata (`kind`, `title?`, `description?`, display-only JSON Schema hint). Never validate against the lowered hint.
+- Input tools never take approval/background options and never execute through direct dispatch; they complete only through HITL resume with JSON-only (`Schema.Json`) payloads.
+- Resolve with `resolveTools`, then pass `toolSet.inputs` explicitly into `run`/`runToolBatch`/`prepareToolBatch`/`runRuntime` configs. Without them, input tools fail closed as model-visible `unavailable` errors.
+- Render pending input from `InputRequested` by `input.kind` through host-owned components; submit via `streamInputResponseEventStream`, the `InputResponseInput` WebSocket message, `AppendHitlResponse`, or React `submitInputResponse`. Echo `requestId`/`toolCallId` opaquely.
+- `callParameters` validates model-supplied context before opening the request (defaults to no arguments). Invalid user payloads re-pend the same request for correction. The first valid submission or cancellation settles it; stale/duplicate responses cannot replace it. React keeps the form pending until server acceptance, including after transport failures.
+- Voice sessions deny input tools; omit them from subagents and other hosts without nested HITL resume.
+
 ## Let the model choose background execution
 
 Any `makeTool` registration may opt into background execution with `background: true`. The flag is

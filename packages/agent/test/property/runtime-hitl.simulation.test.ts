@@ -3,6 +3,7 @@ import { Effect, Layer, Match, Option, Predicate, Result, Schema, Stream } from 
 import { describe, expect, it } from '@effect/vitest'
 import {
   HitlResponseSource,
+  InputResponse,
   type HitlResponse,
   type HitlRequest,
   QuestionResponse,
@@ -421,6 +422,13 @@ const responseMatchesPendingRequest = (response: HitlResponse, request: HitlRequ
         current.requestId === request.requestId &&
         current.toolCallId === request.toolCallId
     ),
+    Match.tag(
+      'InputResponse',
+      current =>
+        Predicate.isTagged(request, 'InputRequest') &&
+        current.requestId === request.requestId &&
+        current.toolCallId === request.toolCallId
+    ),
     Match.exhaustive
   )
 
@@ -443,6 +451,15 @@ const responseForPendingRequest = (
         toolCallId: current.toolCallId,
         outcome: command.outcome,
         source: command.source
+      })
+    ),
+    Match.tag('InputRequest', current =>
+      InputResponse.make({
+        requestId: current.requestId,
+        toolCallId: current.toolCallId,
+        outcome: 'submitted',
+        source: command.source,
+        data: 'simulated'
       })
     ),
     Match.exhaustive

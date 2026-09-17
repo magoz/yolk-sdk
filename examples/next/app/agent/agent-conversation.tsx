@@ -26,9 +26,11 @@ import {
 import { Match, Option, Predicate } from 'effect'
 import { subagentMetadata } from './subagent-metadata'
 import {
+  InputResponse,
   QuestionAnswer,
   QuestionResponse,
   ToolApprovalResponse,
+  type InputRequest,
   attachmentSourceDataUrl,
   contentParts,
   contentText,
@@ -37,6 +39,7 @@ import {
   type QuestionPrompt,
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
+import { draftComposerInputKind } from '@/lib/agents/tools/draft-composer-tool'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -147,6 +150,9 @@ const toolStateLabel = (state: ToolRunState) =>
       QuestionRequested: () => 'question',
       QuestionAnswered: () => 'answered',
       QuestionCancelled: () => 'cancelled',
+      InputRequested: () => 'input',
+      InputSubmitted: () => 'submitted',
+      InputCancelled: () => 'cancelled',
       Running: () => 'running',
       Called: () => 'called',
       Accepted: () => 'accepted (background)',
@@ -166,11 +172,14 @@ const toolStateHasError = (state: ToolRunState) =>
       Denied: () => true,
       Errored: () => true,
       QuestionCancelled: () => true,
+      InputCancelled: () => true,
       ApprovalRequested: () => false,
       Called: () => false,
       InputStreaming: () => false,
       QuestionAnswered: () => false,
       QuestionRequested: () => false,
+      InputRequested: () => false,
+      InputSubmitted: () => false,
       Running: () => false
     })
   )
@@ -219,11 +228,17 @@ const toolStateContent = (state: ToolRunState) =>
       QuestionAnswered: current =>
         questionAnswerPreview(current.response, current.request?.questions ?? []),
       QuestionCancelled: current => current.response.reason ?? 'cancelled',
+      InputSubmitted: current =>
+        current.response.data === undefined
+          ? 'submitted'
+          : contentPreview(JSON.stringify(current.response.data)),
+      InputCancelled: current => current.response.reason ?? 'cancelled',
       Errored: current => current.message,
       ApprovalRequested: () => undefined,
       Called: () => undefined,
       InputStreaming: () => undefined,
       QuestionRequested: () => undefined,
+      InputRequested: () => undefined,
       Running: () => undefined
     })
   )
@@ -248,6 +263,9 @@ const resultStructuredContent = (state: ToolRunState) =>
       QuestionAnswered: () => undefined,
       QuestionCancelled: () => undefined,
       QuestionRequested: () => undefined,
+      InputRequested: () => undefined,
+      InputSubmitted: () => undefined,
+      InputCancelled: () => undefined,
       Running: () => undefined
     })
   )
@@ -524,13 +542,195 @@ function QuestionControls({
   )
 }
 
+type InputRendererProps = {
+  readonly request: InputRequest
+  readonly disabled: boolean
+  readonly onResponse: (response: InputResponse) => void
+}
+
+const draftComposerFieldClass =
+  'w-full rounded-xl border border-foreground/10 bg-background/70 px-3 py-2 text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
+function DraftComposerControls({ request, disabled, onResponse }: InputRendererProps) {
+  const [to, setTo] = useState('')
+  const [subject, setSubject] = useState('')
+  const [body, setBody] = useState('')
+
+  const canSubmit = to.trim().length > 0 && subject.trim().length > 0 && body.trim().length > 0
+
+  const fieldPrefix = `${request.requestId}-draft`
+
+  const handleSubmit = useCallback(() => {
+    if (!canSubmit) {
+      return
+    }
+
+    onResponse(
+      InputResponse.make({
+        requestId: request.requestId,
+        toolCallId: request.toolCallId,
+        outcome: 'submitted',
+        source: 'user',
+        data: { to: to.trim(), subject: subject.trim(), body: body.trim() }
+      })
+    )
+  }, [body, canSubmit, onResponse, request.requestId, request.toolCallId, subject, to])
+
+  const handleCancel = useCallback(() => {
+    onResponse(
+      InputResponse.make({
+        requestId: request.requestId,
+        toolCallId: request.toolCallId,
+        outcome: 'cancelled',
+        source: 'user',
+        reason: 'Cancelled by user'
+      })
+    )
+  }, [onResponse, request.requestId, request.toolCallId])
+
+  return (
+    <div className="space-y-4 border-t border-amber-500/15 px-3.5 py-3">
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-foreground">
+          {request.input.title ?? 'Compose draft'}
+        </legend>
+        {request.input.description === undefined ? null : (
+          <p className="text-xs leading-5 text-muted-foreground">{request.input.description}</p>
+        )}
+        <div className="space-y-2">
+          <label className="block text-sm text-foreground">
+            <span className="mb-1 block font-medium">To</span>
+            <input
+              type="text"
+              id={`${fieldPrefix}-to`}
+              value={to}
+              disabled={disabled}
+              onChange={event => setTo(event.currentTarget.value)}
+              className={`${draftComposerFieldClass} min-h-11`}
+              placeholder="recipient@example.com"
+              autoComplete="email"
+            />
+          </label>
+          <label className="block text-sm text-foreground">
+            <span className="mb-1 block font-medium">Subject</span>
+            <input
+              type="text"
+              id={`${fieldPrefix}-subject`}
+              value={subject}
+              disabled={disabled}
+              onChange={event => setSubject(event.currentTarget.value)}
+              className={`${draftComposerFieldClass} min-h-11`}
+              placeholder="Draft subject"
+            />
+          </label>
+          <label className="block text-sm text-foreground">
+            <span className="mb-1 block font-medium">Body</span>
+            <textarea
+              id={`${fieldPrefix}-body`}
+              value={body}
+              disabled={disabled}
+              onChange={event => setBody(event.currentTarget.value)}
+              className={`${draftComposerFieldClass} min-h-24 resize-none`}
+              placeholder="Write the draft…"
+            />
+          </label>
+        </div>
+        <p aria-live="polite" className="text-[11px] leading-5 text-muted-foreground">
+          Nothing is sent. If the server needs corrections, this form stays open.
+        </p>
+      </fieldset>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          className="min-h-11"
+          disabled={disabled || !canSubmit}
+          onClick={handleSubmit}
+        >
+          Submit draft
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-11"
+          disabled={disabled}
+          onClick={handleCancel}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function UnknownInputControls({ request, disabled, onResponse }: InputRendererProps) {
+  const handleCancel = useCallback(() => {
+    onResponse(
+      InputResponse.make({
+        requestId: request.requestId,
+        toolCallId: request.toolCallId,
+        outcome: 'cancelled',
+        source: 'user',
+        reason: `No renderer for input kind "${request.input.kind}"`
+      })
+    )
+  }, [onResponse, request.input.kind, request.requestId, request.toolCallId])
+
+  return (
+    <div
+      className="space-y-2 border-t border-amber-500/15 px-3.5 py-3"
+      role="group"
+      aria-label={request.input.title ?? 'Unsupported input'}
+    >
+      <div className="text-xs leading-5 text-muted-foreground">
+        This input type ({request.input.kind}) is not supported here. Cancel to continue without
+        providing input.
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-11"
+          disabled={disabled}
+          onClick={handleCancel}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** App-owned renderer registration by stable input `kind`. Unknown kinds fall back
+ * to an explicit unsupported notice with cancel; input requests are never dropped. */
+function InputControls({
+  state,
+  disabled,
+  onResponse
+}: {
+  readonly state: Extract<ToolRunState, { readonly _tag: 'InputRequested' }>
+  readonly disabled: boolean
+  readonly onResponse: (response: InputResponse) => void
+}) {
+  const request = state.request
+
+  if (request.input.kind === draftComposerInputKind) {
+    return <DraftComposerControls request={request} disabled={disabled} onResponse={onResponse} />
+  }
+
+  return <UnknownInputControls request={request} disabled={disabled} onResponse={onResponse} />
+}
+
 function ToolRunCard({
   id,
   call,
   state,
   hitlDisabled,
   onToolApprovalResponse,
-  onQuestionResponse
+  onQuestionResponse,
+  onInputResponse
 }: {
   readonly id: string
   readonly call: ToolCall
@@ -538,6 +738,7 @@ function ToolRunCard({
   readonly hitlDisabled: boolean
   readonly onToolApprovalResponse: (response: ToolApprovalResponse) => void
   readonly onQuestionResponse: (response: QuestionResponse) => void
+  readonly onInputResponse: (response: InputResponse) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const isRunning = Predicate.isTagged(state, 'Running')
@@ -661,6 +862,13 @@ function ToolRunCard({
                 state={requested}
                 disabled={hitlDisabled}
                 onResponse={onQuestionResponse}
+              />
+            )),
+            Match.tag('InputRequested', requested => (
+              <InputControls
+                state={requested}
+                disabled={hitlDisabled}
+                onResponse={onInputResponse}
               />
             )),
             Match.orElse(() => null)
@@ -1068,7 +1276,8 @@ function AgentChatItemView({
   onEditUserMessage,
   onRegenerateFrom,
   onToolApprovalResponse,
-  onQuestionResponse
+  onQuestionResponse,
+  onInputResponse
 }: {
   readonly item: AgentChatItem
   readonly showInlineTools: boolean
@@ -1080,6 +1289,7 @@ function AgentChatItemView({
   readonly onRegenerateFrom: (messageId: string) => void
   readonly onToolApprovalResponse: (response: ToolApprovalResponse) => void
   readonly onQuestionResponse: (response: QuestionResponse) => void
+  readonly onInputResponse: (response: InputResponse) => void
 }) {
   return Match.value(item).pipe(
     Match.withReturnType<ReactNode>(),
@@ -1116,6 +1326,7 @@ function AgentChatItemView({
             hitlDisabled={hitlDisabled}
             onToolApprovalResponse={onToolApprovalResponse}
             onQuestionResponse={onQuestionResponse}
+            onInputResponse={onInputResponse}
           />
         ) : null,
       ToolResult: current =>
@@ -1150,6 +1361,7 @@ type AgentConversationProps = {
   readonly onRegenerateFrom: (messageId: string) => void
   readonly onToolApprovalResponse: (response: ToolApprovalResponse) => void
   readonly onQuestionResponse: (response: QuestionResponse) => void
+  readonly onInputResponse: (response: InputResponse) => void
 }
 
 export function AgentConversation({
@@ -1162,7 +1374,8 @@ export function AgentConversation({
   onEditUserMessage,
   onRegenerateFrom,
   onToolApprovalResponse,
-  onQuestionResponse
+  onQuestionResponse,
+  onInputResponse
 }: AgentConversationProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -1224,6 +1437,7 @@ export function AgentConversation({
             onRegenerateFrom={onRegenerateFrom}
             onToolApprovalResponse={onToolApprovalResponse}
             onQuestionResponse={onQuestionResponse}
+            onInputResponse={onInputResponse}
           />
         ))}
         <div ref={bottomRef} />

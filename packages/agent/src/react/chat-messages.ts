@@ -7,6 +7,8 @@ import {
   HostToolCallPart,
   ProviderToolCallPart,
   ProviderToolResultPart,
+  type InputRequest,
+  type InputResponse,
   type QuestionRequest,
   type QuestionResponse,
   type ToolApprovalRequest,
@@ -17,7 +19,9 @@ import {
   UserMessage,
   appendTextToContent,
   contentParts,
+  formatInputResponseContent,
   formatQuestionResponseContent,
+  inputResponseStructuredContent,
   isContentEmpty,
   questionResponseStructuredContent,
   type AgentEvent,
@@ -46,6 +50,17 @@ export type ChatToolState =
       readonly _tag: 'QuestionCancelled'
       readonly response: QuestionResponse
       readonly request?: QuestionRequest
+    }
+  | { readonly _tag: 'InputRequested'; readonly request: InputRequest }
+  | {
+      readonly _tag: 'InputSubmitted'
+      readonly response: InputResponse
+      readonly request?: InputRequest
+    }
+  | {
+      readonly _tag: 'InputCancelled'
+      readonly response: InputResponse
+      readonly request?: InputRequest
     }
   | { readonly _tag: 'Running'; readonly startedAtMs: number }
   | {
@@ -221,6 +236,10 @@ const toolRunNameEntry = (run: AgentToolRun): ReadonlyArray<readonly [string, st
     Match.tag('QuestionRequested', current => [
       [current.request.call.id, current.request.call.name]
     ]),
+    Match.tag('InputRequested', current => [[current.request.call.id, current.request.call.name]]),
+    Match.tag('InputSubmitted', 'InputCancelled', current =>
+      current.request === undefined ? [] : [[current.request.call.id, current.request.call.name]]
+    ),
     Match.tag(
       'InputReady',
       'ApprovalRequested',
@@ -315,6 +334,12 @@ const toolRunEntry = (run: AgentToolRun): readonly [string, AgentToolRun] =>
       'QuestionCancelled',
       current => [current.response.toolCallId, current] as const
     ),
+    Match.tag('InputRequested', current => [current.request.toolCallId, current] as const),
+    Match.tag(
+      'InputSubmitted',
+      'InputCancelled',
+      current => [current.response.toolCallId, current] as const
+    ),
     Match.tag(
       'InputReady',
       'ApprovalRequested',
@@ -339,8 +364,33 @@ const questionRequestFromToolState = (state: ChatToolState): QuestionRequest | u
     Match.tag(
       'Called',
       'InputStreaming',
+      'InputRequested',
+      'InputSubmitted',
+      'InputCancelled',
       'ApprovalRequested',
       'Denied',
+      'Running',
+      'Accepted',
+      'Completed',
+      'Errored',
+      'ProviderCompleted',
+      () => undefined
+    ),
+    Match.exhaustive
+  )
+
+const inputRequestFromToolState = (state: ChatToolState): InputRequest | undefined =>
+  Match.value(state).pipe(
+    Match.tag('InputRequested', current => current.request),
+    Match.tag('InputSubmitted', 'InputCancelled', current => current.request),
+    Match.tag(
+      'Called',
+      'InputStreaming',
+      'ApprovalRequested',
+      'Denied',
+      'QuestionRequested',
+      'QuestionAnswered',
+      'QuestionCancelled',
       'Running',
       'Accepted',
       'Completed',
@@ -360,6 +410,17 @@ const preserveQuestionRequest = (
   request: QuestionRequest | undefined,
   state: QuestionTerminalState
 ): QuestionTerminalState =>
+  state.request !== undefined || request === undefined ? state : { ...state, request }
+
+type InputTerminalState = Extract<
+  ChatToolState,
+  { readonly _tag: 'InputSubmitted' | 'InputCancelled' }
+>
+
+const preserveInputRequest = (
+  request: InputRequest | undefined,
+  state: InputTerminalState
+): InputTerminalState =>
   state.request !== undefined || request === undefined ? state : { ...state, request }
 
 const toolStateFor = (
@@ -387,6 +448,24 @@ const toolStateFor = (
 
   if (Predicate.isTagged(run, 'Denied')) {
     return ChatToolState.Denied({ reason: run.reason })
+  }
+
+  if (Predicate.isTagged(run, 'InputRequested')) {
+    return ChatToolState.InputRequested({ request: run.request })
+  }
+
+  if (Predicate.isTagged(run, 'InputSubmitted')) {
+    return preserveInputRequest(
+      run.request,
+      ChatToolState.InputSubmitted({ response: run.response })
+    )
+  }
+
+  if (Predicate.isTagged(run, 'InputCancelled')) {
+    return preserveInputRequest(
+      run.request,
+      ChatToolState.InputCancelled({ response: run.response })
+    )
   }
 
   if (Predicate.isTagged(run, 'QuestionRequested')) {
@@ -532,6 +611,7 @@ const isOpenToolState = (state: ChatToolState) =>
   Predicate.isTagged(state, 'InputStreaming') ||
   Predicate.isTagged(state, 'ApprovalRequested') ||
   Predicate.isTagged(state, 'QuestionRequested') ||
+  Predicate.isTagged(state, 'InputRequested') ||
   Predicate.isTagged(state, 'Running')
 
 const hasOpenToolCall = (message: AgentChatMessage) =>
@@ -779,6 +859,10 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
     Predicate.isTagged(next, 'QuestionCancelled')
   ) {
     return preserveQuestionRequest(questionRequestFromToolState(existing), next)
+  }
+
+  if (Predicate.isTagged(next, 'InputSubmitted') || Predicate.isTagged(next, 'InputCancelled')) {
+    return preserveInputRequest(inputRequestFromToolState(existing), next)
   }
 
   if (Predicate.isTagged(next, 'Denied') || Predicate.isTagged(next, 'ProviderCompleted')) {
@@ -1269,6 +1353,45 @@ export const applyAgentEventToChatMessages = (
           ChatToolState.QuestionRequested({ request: current.request })
         )
       ),
+      Match.tag('InputRequested', current =>
+        upsertToolCallPart(
+          messages,
+          current.request.call,
+          ChatToolState.InputRequested({ request: current.request })
+        )
+      ),
+      Match.tag('InputSubmitted', current =>
+        messages.map(message => ({
+          ...message,
+          parts: message.parts.map(part =>
+            Predicate.isTagged(part, 'ToolCall') && part.call.id === current.response.toolCallId
+              ? {
+                  ...part,
+                  state: preserveInputRequest(
+                    inputRequestFromToolState(part.state),
+                    ChatToolState.InputSubmitted({ response: current.response })
+                  )
+                }
+              : part
+          )
+        }))
+      ),
+      Match.tag('InputCancelled', current =>
+        messages.map(message => ({
+          ...message,
+          parts: message.parts.map(part =>
+            Predicate.isTagged(part, 'ToolCall') && part.call.id === current.response.toolCallId
+              ? {
+                  ...part,
+                  state: preserveInputRequest(
+                    inputRequestFromToolState(part.state),
+                    ChatToolState.InputCancelled({ response: current.response })
+                  )
+                }
+              : part
+          )
+        }))
+      ),
       Match.tag('QuestionAnswered', current =>
         messages.map(message => ({
           ...message,
@@ -1332,8 +1455,28 @@ export const applyAgentEventToChatMessages = (
         )
       ),
       Match.tag('AgentError', current => markChatError(messages, current.message)),
-      Match.tag('AgentEnd', 'AgentAwaitingInput', current =>
+      Match.tag('AgentEnd', current =>
         appendRunMessagesIfEmpty(finalizeStreamingParts(messages), current.messages)
+      ),
+      Match.tag('AgentAwaitingInput', current =>
+        current.requests.reduce(
+          (pending, request) =>
+            upsertToolCallPart(
+              pending,
+              request.call,
+              Match.value(request).pipe(
+                Match.tag('ToolApprovalRequest', request =>
+                  ChatToolState.ApprovalRequested({ request })
+                ),
+                Match.tag('QuestionRequest', request =>
+                  ChatToolState.QuestionRequested({ request })
+                ),
+                Match.tag('InputRequest', request => ChatToolState.InputRequested({ request })),
+                Match.exhaustive
+              )
+            ),
+          appendRunMessagesIfEmpty(finalizeStreamingParts(messages), current.messages)
+        )
       ),
       Match.tag(
         'AgentRetry',
@@ -1597,6 +1740,23 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
               content: formatQuestionResponseContent(response, current.state.request?.questions),
               isError: response.outcome === 'cancelled' ? true : undefined,
               structuredContent: questionResponseStructuredContent(response)
+            })
+          ]
+        }
+
+        if (
+          Predicate.isTagged(current.state, 'InputSubmitted') ||
+          Predicate.isTagged(current.state, 'InputCancelled')
+        ) {
+          const response = current.state.response
+          const name = current.state.request?.call.name ?? response.toolCallId
+
+          return [
+            ToolResultMessage.make({
+              toolCallId: response.toolCallId,
+              content: formatInputResponseContent(response, name),
+              isError: response.outcome === 'cancelled' ? true : undefined,
+              structuredContent: inputResponseStructuredContent(response, name)
             })
           ]
         }

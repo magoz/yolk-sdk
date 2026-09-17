@@ -23,6 +23,11 @@ import {
   ToolInputEnd,
   ToolInputDelta,
   ToolInputStart,
+  InputRequest,
+  InputRequested,
+  inputRequestId,
+  formatInputResponseContent,
+  inputResponseStructuredContent,
   QuestionRequested,
   ProviderToolResult,
   QuestionRequest,
@@ -40,6 +45,7 @@ import {
   type AgentReasoningEffort,
   type HitlRequest,
   type HitlResponse,
+  type InputToolHandler,
   type QuestionPrompt,
   type QuestionResponse,
   type ToolApprovalResponse,
@@ -76,6 +82,8 @@ export type RunConfig = {
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
   readonly hitlResponses?: ReadonlyArray<HitlResponse>
+  /** Server-side input validators by tool name (from ResolvedToolSet.inputs). */
+  readonly inputs?: Readonly<Record<string, InputToolHandler>>
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -89,6 +97,8 @@ export type ToolBatchConfig = {
   readonly calls: ReadonlyArray<ToolCall>
   readonly tools?: ReadonlyArray<ToolDef>
   readonly hitlResponses?: ReadonlyArray<HitlResponse>
+  /** Server-side input validators by tool name (from ResolvedToolSet.inputs). */
+  readonly inputs?: Readonly<Record<string, InputToolHandler>>
   readonly model?: string
   readonly createdMessages?: ReadonlyArray<AgentMessage>
   readonly turn?: number
@@ -775,38 +785,182 @@ const prepareApprovalCall = (
   })
 }
 
-const prepareToolCall = (input: {
+// The first valid response settles the request. Invalid attempts remain in durable logs
+// but cannot mask a correction; later duplicates cannot overwrite a submission/cancellation.
+const inputResponseFor = (
+  responses: ReadonlyArray<HitlResponse>,
+  call: ToolCall,
+  handler: InputToolHandler
+) =>
+  Effect.gen(function* () {
+    for (const response of responses) {
+      if (
+        !Predicate.isTagged(response, 'InputResponse') ||
+        response.toolCallId !== call.id ||
+        response.requestId !== inputRequestId(call)
+      )
+        continue
+
+      if (response.outcome === 'cancelled') return response
+
+      if (response.data === undefined) continue
+
+      const validated = yield* handler.validateResponse(response.data).pipe(Effect.result)
+
+      if (Predicate.isTagged(validated, 'Success')) return response
+    }
+
+    return undefined
+  })
+
+const unavailableInputToolResult = (call: ToolCall) =>
+  ToolResult.make({
+    toolCallId: call.id,
+    content: `Input "${call.name}" is unavailable`,
+    isError: true
+  })
+
+const prepareInputCall = (input: {
   readonly tools: ReadonlyArray<ToolDef>
   readonly responses: ReadonlyArray<HitlResponse>
+  readonly handlers: Readonly<Record<string, InputToolHandler>>
   readonly call: ToolCall
   readonly index: number
 }): Effect.Effect<PreparedToolCall> =>
-  input.call.name === questionToolName
-    ? input.tools.some(tool => tool.name === questionToolName)
-      ? prepareQuestionCall(input.call, input.index, input.responses)
-      : Effect.succeed(
-          PreparedToolCall.Result({
-            index: input.index,
-            call: input.call,
-            events: [],
-            result: ToolResult.make({
-              toolCallId: input.call.id,
-              content: 'Question tool is unavailable',
-              isError: true
+  Effect.gen(function* () {
+    const def = toolDefFor(input.tools, input.call)
+
+    const handler = Object.hasOwn(input.handlers, input.call.name)
+      ? input.handlers[input.call.name]
+      : undefined
+
+    const descriptor = def?.input
+
+    // Input never grants authorization or runs detached: policy-bearing or handler-less
+    // registrations fail closed without prompting, launching, or dispatching the executor.
+    if (
+      def === undefined ||
+      descriptor === undefined ||
+      def.approval !== undefined ||
+      def.background === true ||
+      def.execution !== undefined ||
+      handler === undefined
+    ) {
+      return PreparedToolCall.Result({
+        index: input.index,
+        call: input.call,
+        events: [],
+        result: unavailableInputToolResult(input.call)
+      })
+    }
+
+    const validCall = yield* handler.validateCall(input.call.params).pipe(Effect.result)
+
+    if (Predicate.isTagged(validCall, 'Failure')) {
+      return PreparedToolCall.Result({
+        index: input.index,
+        call: input.call,
+        events: [],
+        result: ToolResult.make({
+          toolCallId: input.call.id,
+          content: `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+          isError: true
+        })
+      })
+    }
+
+    const pending = () => {
+      const request = InputRequest.make({
+        requestId: inputRequestId(input.call),
+        toolCallId: input.call.id,
+        call: input.call,
+        input: descriptor
+      })
+
+      return PreparedToolCall.Pending({
+        request,
+        events: [InputRequested.make({ request })]
+      })
+    }
+
+    const response = yield* inputResponseFor(input.responses, input.call, handler)
+
+    if (response === undefined) {
+      return pending()
+    }
+
+    if (response.outcome === 'cancelled') {
+      return PreparedToolCall.Result({
+        index: input.index,
+        call: input.call,
+        result: ToolResult.make({
+          toolCallId: input.call.id,
+          content: formatInputResponseContent(response, input.call.name),
+          isError: true,
+          structuredContent: inputResponseStructuredContent(response, input.call.name)
+        }),
+        events: [hitlResponseEvent(response)]
+      })
+    }
+
+    if (response.data === undefined) return pending()
+
+    return PreparedToolCall.Result({
+      index: input.index,
+      call: input.call,
+      result: ToolResult.make({
+        toolCallId: input.call.id,
+        content: handler.formatContent({ name: input.call.name, data: response.data }),
+        structuredContent: inputResponseStructuredContent(response, input.call.name)
+      }),
+      events: [hitlResponseEvent(response)]
+    })
+  })
+
+const prepareToolCall = (input: {
+  readonly tools: ReadonlyArray<ToolDef>
+  readonly responses: ReadonlyArray<HitlResponse>
+  readonly handlers: Readonly<Record<string, InputToolHandler>>
+  readonly call: ToolCall
+  readonly index: number
+}): Effect.Effect<PreparedToolCall> =>
+  toolDefFor(input.tools, input.call)?.input !== undefined
+    ? prepareInputCall({
+        tools: input.tools,
+        responses: input.responses,
+        handlers: input.handlers,
+        call: input.call,
+        index: input.index
+      })
+    : input.call.name === questionToolName
+      ? input.tools.some(tool => tool.name === questionToolName)
+        ? prepareQuestionCall(input.call, input.index, input.responses)
+        : Effect.succeed(
+            PreparedToolCall.Result({
+              index: input.index,
+              call: input.call,
+              events: [],
+              result: ToolResult.make({
+                toolCallId: input.call.id,
+                content: 'Question tool is unavailable',
+                isError: true
+              })
             })
-          })
-        )
-    : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
+          )
+      : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
 
 /** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution. */
 export const prepareToolBatch = (input: {
   readonly tools: ReadonlyArray<ToolDef>
   readonly responses: ReadonlyArray<HitlResponse>
   readonly calls: ReadonlyArray<ToolCall>
+  readonly inputs?: Readonly<Record<string, InputToolHandler>>
 }): Effect.Effect<PreparedToolBatch> =>
   Effect.gen(function* () {
+    const handlers = input.inputs ?? {}
+
     const prepared = yield* Effect.forEach(input.calls, (call, index) =>
-      prepareToolCall({ tools: input.tools, responses: input.responses, call, index })
+      prepareToolCall({ tools: input.tools, responses: input.responses, handlers, call, index })
     )
 
     return {
@@ -996,7 +1150,8 @@ const makeAfterLlmStream = (
       const prepared = yield* prepareToolBatch({
         tools: input.config.tools,
         responses: input.config.hitlResponses ?? [],
-        calls: completion.toolCalls
+        calls: completion.toolCalls,
+        inputs: input.config.inputs
       })
 
       if (prepared.resultMessages.length > 0) {
@@ -1222,7 +1377,8 @@ const makePendingToolResumeStream = (
       const prepared = yield* prepareToolBatch({
         tools: input.config.tools,
         responses: input.config.hitlResponses ?? [],
-        calls: pendingCalls
+        calls: pendingCalls,
+        inputs: input.config.inputs
       })
 
       if (prepared.resultMessages.length > 0) {
@@ -1353,7 +1509,8 @@ export const runToolBatch = (
       const prepared = yield* prepareToolBatch({
         tools: config.tools ?? [],
         responses: config.hitlResponses ?? [],
-        calls: config.calls
+        calls: config.calls,
+        inputs: config.inputs
       })
 
       const hasPendingRequests = prepared.pendingRequests.length > 0

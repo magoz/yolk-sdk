@@ -54,6 +54,15 @@ export async function runAgentWorkflowToolBatchStep(
   return await runtime.runAgentWorkflowToolBatchStep(...args)
 }
 
+export async function matchesWorkflowHitlResponseStep(
+  ...args: Parameters<StepRuntime['matchesWorkflowHitlResponse']>
+): Promise<boolean> {
+  'use step'
+  const runtime = await import('./agent-workflow-steps')
+
+  return runtime.matchesWorkflowHitlResponse(...args)
+}
+
 export async function closeAgentWorkflowStream(
   ...args: Parameters<StepRuntime['closeAgentWorkflowStream']>
 ): ReturnType<StepRuntime['closeAgentWorkflowStream']> {
@@ -263,9 +272,12 @@ export async function runAgentWorkflow(input: AgentWorkflowInput) {
     closeStream: closeAgentWorkflowStream,
     writeError: writeWorkflowErrorStep,
     awaitInput: async awaitingInput => {
-      using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+      for (;;) {
+        using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+        const response = await hook
 
-      return await hook
+        if (await matchesWorkflowHitlResponseStep(awaitingInput.requests, response)) return response
+      }
     }
   })
 }
