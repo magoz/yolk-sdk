@@ -1,5 +1,18 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.81
+
+### Patch Changes
+
+- 0cb0ec8: Fix Microsoft Outlook mailbox scope selection, reply-draft history preservation, and attachment listing compatibility.
+
+  - Delegated access to an explicit `mailbox` now selects ordinary `Mail.Read` / `Mail.ReadWrite` / `Mail.Send` slots when the mailbox case-insensitively equals the resolved `OAuthCredential.accountId` (still addressed at `/users/{mailbox}`); Bearer credentials, missing account identity, or any mismatch keep `Mail.*.Shared` slots, and application-mode guards are unchanged. Explicit-mailbox delegated actions resolve identity through the scope-free `microsoft.oauth` binding slot before the enforcing operation slot.
+  - `outlook.create_reply_draft` no longer posts a replacement `message.body`. It creates the reply draft without a body so Graph generates the quoted history, then PATCHes the draft with the supplied reply prepended (inside the generated HTML body element for HTML, newline-joined for text). If saving or reading back the generated body fails after creation, it retains sanitized `underlying: { draftId, retryable: false, recovery: 'read_edit_existing_draft' }` when the id is known, including typed transport/decode errors. Post-create HTTP failures use `outlook_create_reply_draft_partial` with the HTTP status but no `retryAfterMs`; read/edit the existing draft, never retry creation or delete it.
+  - `outlook.list_attachments` selects only base attachment properties (`contentId` is a `fileAttachment`-derived property and is no longer selected across the polymorphic collection) and tolerates explicit null `lastModifiedDateTime` values in list and single-attachment responses.
+
+- Updated dependencies [9f85933]
+  - @yolk-sdk/agent@0.1.0-canary.81
+
 ## 0.1.0-canary.80
 
 ### Patch Changes
