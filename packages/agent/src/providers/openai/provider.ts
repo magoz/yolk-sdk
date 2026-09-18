@@ -339,6 +339,8 @@ class OpenAiToolCallResponse extends Schema.Class<OpenAiToolCallResponse>('OpenA
 class OpenAiMessageResponse extends Schema.Class<OpenAiMessageResponse>('OpenAiMessageResponse')({
   content: Schema.NullOr(Schema.String),
   reasoning_content: Schema.optional(Schema.Unknown),
+  // See OpenAiChatDelta: normalized `reasoning` alias for thinking output.
+  reasoning: Schema.optional(Schema.Unknown),
   tool_calls: Schema.optional(Schema.Array(OpenAiToolCallResponse))
 }) {}
 
@@ -391,6 +393,9 @@ class OpenAiChatDeltaToolCall extends Schema.Class<OpenAiChatDeltaToolCall>(
 class OpenAiChatDelta extends Schema.Class<OpenAiChatDelta>('OpenAiChatDelta')({
   content: Schema.optional(Schema.NullOr(Schema.String)),
   reasoning_content: Schema.optional(Schema.Unknown),
+  // Some OpenAI-compatible hosts (e.g. Vercel AI Gateway normalizing
+  // DeepSeek output) stream thinking under `reasoning` instead.
+  reasoning: Schema.optional(Schema.Unknown),
   tool_calls: Schema.optional(Schema.Array(OpenAiChatDeltaToolCall))
 }) {}
 
@@ -836,7 +841,7 @@ const toLlmEvents = (
 
     const reasoning = reasoningContent
       ? ((yield* Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(
-          choice.message.reasoning_content ?? null
+          choice.message.reasoning_content ?? choice.message.reasoning ?? null
         ).pipe(
           Effect.mapError(
             schemaErrorToLlmError(
@@ -1041,10 +1046,13 @@ const processChatStreamPayload = (
         events.push(LLMTextDelta.make({ text: choice.delta.content }))
       }
 
-      if (reasoningContent && choice.delta?.reasoning_content != null) {
+      if (
+        reasoningContent &&
+        (choice.delta?.reasoning_content != null || choice.delta?.reasoning != null)
+      ) {
         const reasoning = yield* decodeChatDeltaReasoning(
           providerIdentity,
-          choice.delta.reasoning_content
+          choice.delta.reasoning_content ?? choice.delta.reasoning ?? null
         )
 
         if (reasoning.length > 0) events.push(LLMReasoningDelta.make({ text: reasoning }))
