@@ -25,6 +25,19 @@ export type VercelAiGatewayProviderConfig = {
   readonly extraHeaders?: Readonly<Record<string, string>>
   /** Override only with a trusted proxy because the bearer credential is sent to this URL. */
   readonly chatCompletionsUrl?: string
+  /**
+   * Forwarded to the OpenAI-compatible transport: true streams SSE deltas,
+   * otherwise the provider resolves a single JSON completion. Defaults to
+   * false to preserve existing non-streaming consumers.
+   */
+  readonly streaming?: boolean
+  /**
+   * Preserve compatible models' reasoning_content output and assistant
+   * replay. When true, streamed reasoning deltas surface as reasoning
+   * events (and replay into later requests, which spends input tokens).
+   * Defaults to false; reasoning output is otherwise dropped.
+   */
+  readonly reasoningContent?: boolean
 }
 
 const vercelAiGatewayProviderIdentity = {
@@ -69,6 +82,8 @@ type VercelAiGatewayOpenAiLayerFields = {
   providerIdentity: typeof vercelAiGatewayProviderIdentity
   extraBody: OpenAiRequestExtras
   extraHeaders?: VercelAiGatewayProviderConfig['extraHeaders']
+  streaming?: VercelAiGatewayProviderConfig['streaming']
+  reasoningContent?: VercelAiGatewayProviderConfig['reasoningContent']
 }
 
 export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProviderConfig) =>
@@ -86,6 +101,14 @@ export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProvider
 
       if (config.extraHeaders !== undefined) {
         fields.extraHeaders = config.extraHeaders
+      }
+
+      if (config.streaming !== undefined) {
+        fields.streaming = config.streaming
+      }
+
+      if (config.reasoningContent !== undefined) {
+        fields.reasoningContent = config.reasoningContent
       }
 
       return fields
