@@ -84,7 +84,7 @@ error bodies stay raw text for classification.
 
 Compatible chat endpoints can opt into `OpenAiProviderConfig.reasoningEffortFormat`:
 `reasoning-object` sends `{ reasoning: { effort } }`, and `reasoning-effort` sends `reasoning_effort`.
-`reasoningContent: true` validates/emits `reasoning_content` and preserves it in assistant replay;
+`reasoningContent: true` validates/emits `reasoning_content` (or the normalized `reasoning` thinking field, preferring `reasoning_content` when both are present) and preserves it in assistant replay;
 by default this vendor extension is ignored. OpenCode Go enables the latter two options.
 
 Chat stays one JSON body by default; `streaming: true` requests SSE deltas (OpenCode Go chat always

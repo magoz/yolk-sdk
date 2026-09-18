@@ -89,7 +89,7 @@ configuration should load the key with `Config.Redacted` inside `Effect.gen`.
 Responses. Request `reasoningEffort` becomes `reasoning_effort` for chat, `output_config.effort` for
 Messages (omitting `minimal`), or Responses `reasoning.effort`. Responses also sends
 `summary: 'auto'` when effort is present; configure `reasoningSummary` to select another summary mode.
-Only offer efforts supported by your model. Chat emits and replays provider `reasoning_content`.
+Only offer efforts supported by your model. Chat emits and replays provider `reasoning_content` (and host-normalized `reasoning`).
 
 Optional `extraHeaders` cannot replace required protocol headers, even with different casing.
 Override `baseUrl` only with a trusted proxy: it receives the API key. Messages and Responses require

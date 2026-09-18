@@ -62,7 +62,7 @@ const ProviderLayer = makeVercelAiGatewayProviderLayer({
 
 The adapter uses `https://ai-gateway.vercel.sh/v1/chat/completions` and defaults to a single JSON
 completion. Set factory option `streaming: true` for SSE deltas. Independently set
-`reasoningContent: true` to preserve compatible models' `reasoning_content` output and assistant
+`reasoningContent: true` to preserve compatible models' `reasoning_content` output (and the normalized `reasoning` thinking field some gateways emit, with `reasoning_content` taking precedence) and assistant
 replay; streamed reasoning then surfaces as reasoning events, and replay spends input tokens.
 Both options default to false. It lowers `maxCompletionTokens` to Gateway `max_tokens`. A run-level
 `reasoningEffort` becomes `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking: { type: 'enabled' | 'disabled' }` toggle merged into the request body). The host must

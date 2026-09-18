@@ -2,4 +2,4 @@
 '@yolk-sdk/agent': patch
 ---
 
-Parse the normalized `reasoning` thinking field in OpenAI-compatible chat completions (streaming deltas and single-shot messages), preferring `reasoning_content` when both are present. Hosts that normalize provider thinking output (e.g. Vercel AI Gateway) now surface reasoning events instead of dropping them.
+Preserve normalized `reasoning` thinking output from OpenAI-compatible hosts such as Vercel AI Gateway in streaming and single-shot chat completions when `reasoningContent` is enabled. Prefer `reasoning_content` when both are present, so reasoning surfaces as events instead of being dropped.
