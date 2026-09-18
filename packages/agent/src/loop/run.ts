@@ -1177,6 +1177,7 @@ const makeAfterLlmStream = (
         return Stream.fromIterable([
           ...turnEndEvents,
           ...prepared.events,
+          ...prepared.resultEvents,
           ...prepared.pendingEvents,
           TurnEnd.make({ turn: input.turn, reason: completion.stopReason }),
           AgentAwaitingInput.make({
@@ -1227,6 +1228,7 @@ const makeAfterLlmStream = (
 
       return Stream.fromIterable(turnEndEvents).pipe(
         Stream.concat(Stream.fromIterable(prepared.events)),
+        Stream.concat(Stream.fromIterable(prepared.resultEvents)),
         Stream.concat(toolExecutionStream),
         Stream.concat(nextTurnStream)
       )
@@ -1403,6 +1405,7 @@ const makePendingToolResumeStream = (
 
         return Stream.fromIterable([
           ...prepared.events,
+          ...prepared.resultEvents,
           ...prepared.pendingEvents,
           AgentAwaitingInput.make({
             requests: pendingRequests,
@@ -1442,6 +1445,7 @@ const makePendingToolResumeStream = (
       )
 
       return Stream.fromIterable(prepared.events).pipe(
+        Stream.concat(Stream.fromIterable(prepared.resultEvents)),
         Stream.concat(toolExecutionStream),
         Stream.concat(nextTurnStream)
       )
