@@ -813,10 +813,7 @@ describe('OpenAI provider streaming', () => {
   it.effect('streams normalized reasoning deltas from compatible hosts', () =>
     Effect.gen(function* () {
       const events = yield* collectStreamEvents(
-        chatSse([
-          chatChunk({ reasoning: 'Considering' }),
-          chatChunk({ content: 'ok' }, 'stop')
-        ]),
+        chatSse([chatChunk({ reasoning: 'Considering' }), chatChunk({ content: 'ok' }, 'stop')]),
         true
       )
 
@@ -831,9 +828,7 @@ describe('OpenAI provider streaming', () => {
   it.effect('prefers reasoning_content over normalized reasoning in one delta', () =>
     Effect.gen(function* () {
       const events = yield* collectStreamEvents(
-        chatSse([
-          chatChunk({ reasoning_content: 'Canonical', reasoning: 'Normalized' }, 'stop')
-        ]),
+        chatSse([chatChunk({ reasoning_content: 'Canonical', reasoning: 'Normalized' }, 'stop')]),
         true
       )
 
@@ -846,10 +841,7 @@ describe('OpenAI provider streaming', () => {
   it.effect('drops normalized reasoning deltas when reasoning content is disabled', () =>
     Effect.gen(function* () {
       const events = yield* collectStreamEvents(
-        chatSse([
-          chatChunk({ reasoning: 'Silent' }),
-          chatChunk({ content: 'ok' }, 'stop')
-        ])
+        chatSse([chatChunk({ reasoning: 'Silent' }), chatChunk({ content: 'ok' }, 'stop')])
       )
 
       expect(Array.from(events)).toMatchObject([
@@ -859,42 +851,65 @@ describe('OpenAI provider streaming', () => {
     })
   )
 
-  it.effect('resolves normalized reasoning in single-shot completions', () =>
+  const collectSingleShotEvents = (message: unknown, reasoningContent: boolean) =>
     Effect.gen(function* () {
-      const events = yield* Effect.gen(function* () {
-        const provider = yield* LLMProvider
+      const provider = yield* LLMProvider
 
-        return yield* provider
-          .stream({
-            messages: [UserMessage.make({ content: 'hello' })],
-            tools: [],
-            model: 'gpt-test',
-            systemPrompt: 'Be brief.'
-          })
-          .pipe(Stream.runCollect)
-      }).pipe(
-        Effect.provide(
-          makeOpenAiProviderLayer({
-            apiKey: Redacted.make('test-key'),
-            maxCompletionTokens: openAiTestMaxOutputTokens,
-            reasoningContent: true
-          }).pipe(
-            Layer.provide(
-              makeHttpClientLayer(
-                new Response(
-                  JSON.stringify({
-                    choices: [{ message: { reasoning: 'Considered', content: 'ok' } }]
-                  })
-                ),
-                []
-              )
-            )
+      return yield* provider
+        .stream({
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: [],
+          model: 'gpt-test',
+          systemPrompt: 'Be brief.'
+        })
+        .pipe(Stream.runCollect)
+    }).pipe(
+      Effect.provide(
+        makeOpenAiProviderLayer({
+          apiKey: Redacted.make('test-key'),
+          maxCompletionTokens: openAiTestMaxOutputTokens,
+          reasoningContent
+        }).pipe(
+          Layer.provide(
+            makeHttpClientLayer(new Response(JSON.stringify({ choices: [{ message }] })), [])
           )
         )
+      )
+    )
+
+  it.effect('resolves normalized reasoning in single-shot completions', () =>
+    Effect.gen(function* () {
+      const events = yield* collectSingleShotEvents(
+        { reasoning: 'Considered', content: 'ok' },
+        true
       )
 
       expect(Array.from(events)).toMatchObject([
         { _tag: 'ReasoningDelta', text: 'Considered' },
+        { _tag: 'TextDelta', text: 'ok' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    })
+  )
+
+  it.effect('prefers canonical reasoning in single-shot completions', () =>
+    Effect.gen(function* () {
+      const events = yield* collectSingleShotEvents(
+        { reasoning_content: 'Canonical', reasoning: 'Normalized', content: 'ok' },
+        true
+      )
+
+      expect(
+        Array.from(events).filter(event => Predicate.isTagged(event, 'ReasoningDelta'))
+      ).toMatchObject([{ _tag: 'ReasoningDelta', text: 'Canonical' }])
+    })
+  )
+
+  it.effect('drops normalized reasoning in single-shot completions when disabled', () =>
+    Effect.gen(function* () {
+      const events = yield* collectSingleShotEvents({ reasoning: 'Silent', content: 'ok' }, false)
+
+      expect(Array.from(events)).toMatchObject([
         { _tag: 'TextDelta', text: 'ok' },
         { _tag: 'Done', stopReason: 'stop' }
       ])
