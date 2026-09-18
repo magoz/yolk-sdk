@@ -1,5 +1,23 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.82
+
+### Patch Changes
+
+- 79a074a: Add schema-backed typed input interactions through the existing HITL lifecycle. `makeInputTool`
+  keeps original call/response validators server-side while serializable descriptors identify app-owned
+  renderers. Hosts pass resolved input handlers to loop/runtime configs; input requests support submit,
+  cancel, validation correction, and first-valid-response replay without authorizing actions.
+
+  Preserve question compatibility, add HTTP/WebSocket and headless React input submission/projection,
+  and match input responses in harness outcomes. Input tools reject approval/background policy and
+  direct execution; voice remains approvals-only. React waits for server acceptance before creating
+  replayable results, including across failed submissions and pending-state hydration.
+
+- Updated dependencies [16fa58c]
+- Updated dependencies [79a074a]
+  - @yolk-sdk/agent@0.1.0-canary.82
+
 ## 0.1.0-canary.81
 
 ### Patch Changes
@@ -60,10 +78,10 @@
   - `DriverShape` → `DriverApi` from `@yolk-sdk/harness/driver`
 
   ```ts
-  import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
-  import type { RunStoreApi } from '@yolk-sdk/harness/store'
-  import type { InboxApi } from '@yolk-sdk/harness/inbox'
-  import type { DriverApi } from '@yolk-sdk/harness/driver'
+  import type { LoopConfigSettings } from "@yolk-sdk/agent/loop";
+  import type { RunStoreApi } from "@yolk-sdk/harness/store";
+  import type { InboxApi } from "@yolk-sdk/harness/inbox";
+  import type { DriverApi } from "@yolk-sdk/harness/driver";
   ```
 
 ### Patch Changes
