@@ -1,5 +1,13 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.84
+
+### Patch Changes
+
+- Advance unchanged public packages in lockstep with the agent's normalized reasoning parsing fix for OpenAI-compatible chat completions. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [a627921]
+  - @yolk-sdk/agent@0.1.0-canary.84
+
 ## 0.1.0-canary.83
 
 ### Patch Changes
