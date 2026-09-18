@@ -55,7 +55,7 @@ options default to false; replayed reasoning spends input tokens. These are expl
 not env-backed switches.
 
 The factory sends `maxCompletionTokens` as Gateway `max_tokens`. Run-level `reasoningEffort` is
-forwarded as `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking` toggle merged into the request body). The host must restrict its
+forwarded as `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking: { type: 'enabled' | 'disabled' }` toggle merged into the request body). The host must restrict its
 choices to efforts supported by the selected model. The env-backed `VercelAiGatewayProviderLayer`
 reads `AI_GATEWAY_API_KEY`, falls back to
 `VERCEL_OIDC_TOKEN`, and requires `AI_GATEWAY_MAX_COMPLETION_TOKENS`. The factory also accepts

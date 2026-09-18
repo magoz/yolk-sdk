@@ -65,7 +65,7 @@ completion. Set factory option `streaming: true` for SSE deltas. Independently s
 `reasoningContent: true` to preserve compatible models' `reasoning_content` output and assistant
 replay; streamed reasoning then surfaces as reasoning events, and replay spends input tokens.
 Both options default to false. It lowers `maxCompletionTokens` to Gateway `max_tokens`. A run-level
-`reasoningEffort` becomes `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking` toggle merged into the request body). The host must
+`reasoningEffort` becomes `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking: { type: 'enabled' | 'disabled' }` toggle merged into the request body). The host must
 offer only effort values supported by its selected model. Pass model ids such as `provider/model`;
 query Vercel's model catalog instead of hard-coding an SDK model union. `VercelAiGatewayProviderLayer` tries
 `AI_GATEWAY_API_KEY`, then `VERCEL_OIDC_TOKEN`, and also reads integer
