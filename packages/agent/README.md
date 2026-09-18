@@ -262,8 +262,7 @@ Gateway API key or Vercel OIDC token as `apiKey`; `maxCompletionTokens` is sent 
 `VERCEL_OIDC_TOKEN`, and requires integer
 `AI_GATEWAY_MAX_COMPLETION_TOKENS`. Model ids are opaque `provider/model` strings. Hosts may set
 `fallbackModels`, provider `routing`, and optional `http-referer` / `x-title` attribution headers.
-A request `reasoningEffort` is sent as Gateway `{ reasoning: { effort } }` for any opaque model id;
-hosts remain responsible for offering only efforts supported by the selected model. Required
+A request `reasoningEffort` is sent as Gateway `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking` toggle merged into the request body). Hosts remain responsible for offering only efforts supported by the selected model. Required
 authorization and JSON headers cannot be replaced through `extraHeaders`. Only override
 `chatCompletionsUrl` with a trusted proxy because it receives the bearer credential.
 
