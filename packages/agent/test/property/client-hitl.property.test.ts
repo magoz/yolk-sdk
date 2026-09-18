@@ -6,6 +6,11 @@ import {
   AgentStart,
   AssistantAgentMessage,
   AssistantTextPart,
+  InputCancelled,
+  InputRequest,
+  InputRequested,
+  InputResponse,
+  InputSubmitted,
   LLMReasoningDelta,
   LLMTextDelta,
   QuestionAnswer,
@@ -25,6 +30,7 @@ import {
   ToolExecutionStarted,
   ToolResult,
   UserMessage,
+  inputRequestId,
   zeroAgentUsage,
   type AgentEvent
 } from '@yolk-sdk/agent/protocol'
@@ -39,7 +45,13 @@ import {
 import { AgentToolRun } from '../../src/client/state.ts'
 import { propertyOptions } from './property-options'
 
-const terminalKind = Schema.Literals(['approvalDenied', 'questionAnswered', 'questionCancelled'])
+const terminalKind = Schema.Literals([
+  'approvalDenied',
+  'questionAnswered',
+  'questionCancelled',
+  'inputSubmitted',
+  'inputCancelled'
+])
 
 const terminalKindArbitrary = Arbitrary.schema(terminalKind)
 
@@ -51,6 +63,9 @@ const clientEventKind = Schema.Literals([
   'questionRequested',
   'questionAnswered',
   'questionCancelled',
+  'inputRequested',
+  'inputSubmitted',
+  'inputCancelled',
   'toolStarted',
   'toolCompleted',
   'toolErrored',
@@ -108,6 +123,29 @@ const cancelledResponse = QuestionResponse.make({
   reason: 'skip'
 })
 
+const inputRequest = InputRequest.make({
+  requestId: inputRequestId(call),
+  toolCallId: call.id,
+  call,
+  input: { kind: 'text-field' }
+})
+
+const inputSubmittedResponse = InputResponse.make({
+  requestId: inputRequest.requestId,
+  toolCallId: call.id,
+  outcome: 'submitted',
+  source: 'user',
+  data: 'ok'
+})
+
+const inputCancelledResponse = InputResponse.make({
+  requestId: inputRequest.requestId,
+  toolCallId: call.id,
+  outcome: 'cancelled',
+  source: 'user',
+  reason: 'skip'
+})
+
 const terminalEvent = (kind: typeof terminalKind.Type) => {
   switch (kind) {
     case 'approvalDenied':
@@ -116,6 +154,10 @@ const terminalEvent = (kind: typeof terminalKind.Type) => {
       return QuestionAnswered.make({ response: answeredResponse })
     case 'questionCancelled':
       return QuestionCancelled.make({ response: cancelledResponse })
+    case 'inputSubmitted':
+      return InputSubmitted.make({ response: inputSubmittedResponse })
+    case 'inputCancelled':
+      return InputCancelled.make({ response: inputCancelledResponse })
   }
 }
 
@@ -149,6 +191,12 @@ const clientEvent = (kind: typeof clientEventKind.Type, index: number): AgentEve
       return QuestionAnswered.make({ eventId: `event_${index}`, response: answeredResponse })
     case 'questionCancelled':
       return QuestionCancelled.make({ eventId: `event_${index}`, response: cancelledResponse })
+    case 'inputRequested':
+      return InputRequested.make({ eventId: `event_${index}`, request: inputRequest })
+    case 'inputSubmitted':
+      return InputSubmitted.make({ eventId: `event_${index}`, response: inputSubmittedResponse })
+    case 'inputCancelled':
+      return InputCancelled.make({ eventId: `event_${index}`, response: inputCancelledResponse })
     case 'toolStarted':
       return ToolExecutionStarted.make({ eventId: `event_${index}`, call })
     case 'toolCompleted':
@@ -182,6 +230,8 @@ const toolRunIds = (runs: ReturnType<typeof reduceAgentEvents>['toolRuns']) =>
       Match.tag('Denied', current => current.toolCallId),
       Match.tag('QuestionRequested', current => current.request.toolCallId),
       Match.tag('QuestionAnswered', 'QuestionCancelled', current => current.response.toolCallId),
+      Match.tag('InputRequested', current => current.request.toolCallId),
+      Match.tag('InputSubmitted', 'InputCancelled', current => current.response.toolCallId),
       Match.tag(
         'InputReady',
         'ApprovalRequested',
@@ -247,6 +297,41 @@ const cancelledResponseFor = (target: typeof clientEventTarget.Type) => {
   })
 }
 
+const inputRequestFor = (target: typeof clientEventTarget.Type) => {
+  const targetCall = callForTarget(target)
+
+  return InputRequest.make({
+    requestId: inputRequestId(targetCall),
+    toolCallId: targetCall.id,
+    call: targetCall,
+    input: { kind: 'text-field' }
+  })
+}
+
+const inputSubmittedResponseFor = (target: typeof clientEventTarget.Type) => {
+  const request = inputRequestFor(target)
+
+  return InputResponse.make({
+    requestId: request.requestId,
+    toolCallId: request.toolCallId,
+    outcome: 'submitted',
+    source: 'user',
+    data: 'ok'
+  })
+}
+
+const inputCancelledResponseFor = (target: typeof clientEventTarget.Type) => {
+  const request = inputRequestFor(target)
+
+  return InputResponse.make({
+    requestId: request.requestId,
+    toolCallId: request.toolCallId,
+    outcome: 'cancelled',
+    source: 'user',
+    reason: 'skip'
+  })
+}
+
 const toolResultFor = (target: typeof clientEventTarget.Type) =>
   ToolResult.make({ toolCallId: callForTarget(target).id, content: 'ok' })
 
@@ -276,6 +361,12 @@ const multiClientEvent = (
       return QuestionAnswered.make({ eventId, response: answeredResponseFor(command.target) })
     case 'questionCancelled':
       return QuestionCancelled.make({ eventId, response: cancelledResponseFor(command.target) })
+    case 'inputRequested':
+      return InputRequested.make({ eventId, request: inputRequestFor(command.target) })
+    case 'inputSubmitted':
+      return InputSubmitted.make({ eventId, response: inputSubmittedResponseFor(command.target) })
+    case 'inputCancelled':
+      return InputCancelled.make({ eventId, response: inputCancelledResponseFor(command.target) })
     case 'toolStarted':
       return ToolExecutionStarted.make({ eventId, call: targetCall })
     case 'toolCompleted':
@@ -330,6 +421,8 @@ describe('client HITL property tests', () => {
           Match.when('approvalDenied', () => 'Denied'),
           Match.when('questionAnswered', () => 'QuestionAnswered'),
           Match.when('questionCancelled', () => 'QuestionCancelled'),
+          Match.when('inputSubmitted', () => 'InputSubmitted'),
+          Match.when('inputCancelled', () => 'InputCancelled'),
           Match.exhaustive
         )
       )

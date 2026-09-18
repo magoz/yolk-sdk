@@ -86,6 +86,7 @@ const capturingRuntimeFactoryLayer = Layer.succeed(AgentTextRuntimeFactory, {
         reasoningEffort: request.reasoningEffort ?? 'low',
         systemPrompt: 'test',
         tools: [],
+        inputs: {},
         capabilities: agentTextCapabilities
       },
       layer: Layer.mergeAll(

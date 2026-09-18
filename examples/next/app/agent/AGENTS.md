@@ -12,7 +12,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - Workflow runtime records `x-workflow-run-id` in Activity, can replay the durable stream by run id, and stop requests cancel the Workflow run.
 - Workflow resume is for interrupted/aborted active runs only; keep resume disabled after `done` to avoid replaying completed stream chunks into duplicate UI messages.
 - Workflow resume counts as text-busy UI state: disable submit/actions/model controls and route Stop through the resume abort controller.
-- Workflow HITL approve/question controls submit through the active run id; do not start a new Workflow run when `hitlResponses` are present.
+- Workflow HITL approval/question/input controls submit through the active run id; do not start a new Workflow run when `hitlResponses` are present.
 - Workflow stop is optimistic in the UI: it aborts the browser stream and calls `cancelAgentRun({ endpoint })` (`DELETE /api/agent/workflow/:runId`), but Vercel may not preempt an already-running model step immediately.
 - Cloudflare session ids must be URL-safe before building `/connect/:sessionId`; avoid raw `:` in browser WS paths.
 - `@yolk-sdk/agent/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
@@ -36,6 +36,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` across lifecycle events.
 - Only terminal tool rows show elapsed duration; called/input/approval/question states remain status labels.
 - Question tool rows show original prompt/options from tool input and selected answer from HITL response; assistant recaps are normal model text, not the source of truth.
+- Typed input tool rows render through an app-owned renderer registry keyed by `InputRequest.input.kind` (`agent-conversation.tsx` `InputControls`). The `draft-composer` renderer collects to/subject/body with accessible labelled fields, submit/cancel, and a server re-pend note (invalid payloads keep the same request pending with no validation detail in events). Unknown kinds render an explicit unsupported notice with cancel; never silently drop an input request. Submit/cancel go through `useAgentChat().submitInputResponse`, reusing the waiting-gated HITL path.
 - Subagent tool rows should show subagent type/status/timing from structured result metadata; do not infer subagent state from text content. `subagent-metadata.ts` projects each own data field independently so malformed siblings do not hide valid labels; do not read inherited/accessor fields.
 - Tool-origin error results (`ToolResult.isError`) render as failed tool output; `ToolExecutionError` is a lifecycle event, not necessarily a terminal transport error.
 - Render standalone `ToolResult` only for orphan results.

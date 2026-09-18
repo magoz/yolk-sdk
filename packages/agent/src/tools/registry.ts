@@ -8,6 +8,7 @@ import {
   ToolDef,
   ToolJsonSchema,
   ToolJsonSchemaObject,
+  type InputToolHandler,
   type ToolApprovalPolicy,
   type ToolCall,
   type ToolResult
@@ -33,7 +34,9 @@ export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
       'background_validation_required',
       'background_definition_already_active',
       'background_unsupported_tool',
-      'background_unsupported_schema'
+      'background_unsupported_schema',
+      'input_unsupported_policy',
+      'input_validation_required'
     ])
   }
 ) {}
@@ -131,6 +134,12 @@ export type ToolRegistration<Context> = {
   readonly background?: boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
+  /** Present only on schema-backed input registrations; owns user-payload validation. */
+  readonly input?: InputToolHandler
+}
+
+export type ResolvedInputTool = InputToolHandler & {
+  readonly def: ToolDef
 }
 
 type ToolParamsSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
@@ -171,6 +180,10 @@ export type ResolvedToolSet = {
   readonly tools: ReadonlyArray<ToolDef>
   readonly metadata: ReadonlyArray<ToolMetadata>
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>
+  /** Server-side input validators by tool name. Hosts pass these explicitly to loop configs.
+   * Direct execute never completes input tools; they resolve only through HITL resume.
+   */
+  readonly inputs: Readonly<Record<string, ResolvedInputTool>>
 }
 
 const enabled = <Context>(tool: ToolRegistration<Context>, context: Context) =>
@@ -375,6 +388,12 @@ const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
   return stampObjectCombinatorRoot({ ...jsonSchema, $defs: remainingDefinitions }, definitions)
 }
 
+/** JSON Schema lowering of an Effect Schema for model guidance and display hints.
+ * Guidance only: execution validation always decodes against the original Effect Schema.
+ */
+export const toolJsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
+  jsonSchemaFromSchema(schema)
+
 // Distinguishes makeTool's model-visible schema failures from raw/host ToolErrors.
 class InvalidToolParamsError extends ToolError {}
 
@@ -527,6 +546,34 @@ export const resolveTools = <Context>(
         )
       }
 
+      // Generalized input tools pause for user data and never grant authorization or run
+      // detached execution; they also require a schema-backed registration (fail closed).
+      if (tool.def.input !== undefined) {
+        if (
+          activated(tool) ||
+          tool.background === true ||
+          tool.def.background === true ||
+          tool.approval !== undefined ||
+          tool.def.approval !== undefined
+        ) {
+          return yield* Effect.fail(
+            new ToolRegistryError({
+              cause: 'input_unsupported_policy',
+              message: `Input tool ${tool.def.name} cannot use approval or background execution; input never grants authorization.`
+            })
+          )
+        }
+
+        if (tool.input === undefined) {
+          return yield* Effect.fail(
+            new ToolRegistryError({
+              cause: 'input_validation_required',
+              message: `Input tool requires a schema-backed registration: ${tool.def.name}`
+            })
+          )
+        }
+      }
+
       const unsupportedSchema = activated(tool)
         ? unsupportedBackgroundSchema(tool.def.parameters)
         : undefined
@@ -560,12 +607,30 @@ export const resolveTools = <Context>(
       access: item.tool.access
     }))
 
+    const inputs: Record<string, ResolvedInputTool> = Object.fromEntries(
+      resolved.flatMap(({ tool }) =>
+        tool.def.input !== undefined && tool.input !== undefined
+          ? [[tool.def.name, { def: tool.def, ...tool.input }]]
+          : []
+      )
+    )
+
     const execute = (call: ToolCall) =>
       Option.match(
         Arr.findFirst(resolved, item => item.tool.def.name === call.name),
         {
           onNone: () => Effect.fail(missingToolError(call.name)),
           onSome: match => {
+            if (match.tool.def.input !== undefined) {
+              return Effect.fail(
+                new ToolError({
+                  tool: call.name,
+                  cause: 'unavailable',
+                  message: `Input tool "${call.name}" requires user input and cannot execute directly.`
+                })
+              )
+            }
+
             const host = options.backgroundHost
             const validate = match.tool.validate
 
@@ -599,7 +664,7 @@ export const resolveTools = <Context>(
         }
       )
 
-    return { tools, metadata, execute }
+    return { tools, metadata, execute, inputs }
   })
 
 export const makeToolExecutorLayer = (toolSet: ResolvedToolSet) =>

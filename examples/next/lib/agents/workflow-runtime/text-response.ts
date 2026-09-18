@@ -26,6 +26,7 @@ import {
   type AgentEvent,
   type AgentModelCapabilities,
   type AgentReasoningEffort,
+  type InputToolHandler,
   type ToolDef,
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
@@ -76,8 +77,19 @@ export type AgentTextRuntimeConfig = {
   readonly reasoningEffort: AgentReasoningEffort
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
+  readonly inputs: Readonly<Record<string, InputToolHandler>>
   readonly capabilities: AgentModelCapabilities
 }
+
+/** Subagents and child workflows lack nested HITL resume: strip generalized
+ * typed input tools even if a registration forgets its own `isEnabled` gate. */
+export const withoutInputTools = (
+  modules: ReadonlyArray<ToolModule<AgentToolContext>>
+): ReadonlyArray<ToolModule<AgentToolContext>> =>
+  modules.map(module => ({
+    ...module,
+    tools: module.tools.filter(tool => tool.def.input === undefined)
+  }))
 
 export type AgentTextRuntimeLayer = Layer.Layer<
   ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
@@ -492,7 +504,7 @@ export const makeAgentTextRuntime = (
             return yield* recoverSubagentToolFailure(
               Effect.gen(function* () {
                 const subagentToolSet = yield* resolveAgentToolSet({
-                  modules: subagentToolModules,
+                  modules: withoutInputTools(subagentToolModules),
                   context: {
                     ...context,
                     sessionId: `${context.sessionId ?? input.sessionId}:subagent:${call.id}`,
@@ -512,6 +524,7 @@ export const makeAgentTextRuntime = (
                         baseSystemPrompt
                       }),
                       tools: subagentToolSet.tools,
+                      inputs: subagentToolSet.inputs,
                       reasoningEffort,
                       capabilities: agentTextCapabilities,
                       model
@@ -565,12 +578,14 @@ export const makeAgentTextRuntime = (
       modules:
         options.childType === undefined
           ? toolModules
-          : toolModules.map(module => ({
-              ...module,
-              tools: module.tools.filter(
-                tool => (tool.approval ?? tool.def.approval)?.mode !== 'manual'
-              )
-            })),
+          : withoutInputTools(
+              toolModules.map(module => ({
+                ...module,
+                tools: module.tools.filter(
+                  tool => (tool.approval ?? tool.def.approval)?.mode !== 'manual'
+                )
+              }))
+            ),
       context: {
         surface: 'text',
         subagent: options.childType !== undefined,
@@ -593,7 +608,10 @@ export const makeAgentTextRuntime = (
       tools:
         options.childType === undefined
           ? toolSet.tools
-          : toolSet.tools.filter(tool => tool.approval?.mode !== 'manual'),
+          : toolSet.tools.filter(
+              tool => tool.approval?.mode !== 'manual' && tool.input === undefined
+            ),
+      inputs: toolSet.inputs,
       capabilities: agentTextCapabilities
     }
 

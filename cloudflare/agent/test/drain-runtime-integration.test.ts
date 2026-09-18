@@ -41,6 +41,9 @@ import {
 } from '@yolk-sdk/agent/runtime'
 import {
   AgentMessage,
+  AgentWebSocketClientMessage,
+  InputResponse,
+  InputResponseInput,
   AssistantAgentMessage,
   AssistantTextPart,
   HostToolCallPart,
@@ -55,6 +58,7 @@ import {
   type AgentEvent,
   type HitlRequest
 } from '@yolk-sdk/agent/protocol'
+import { makeInputToolModule, resolveTools } from '@yolk-sdk/agent/tools'
 import { Driver, type DriverApi } from '@yolk-sdk/harness/driver'
 import { makeDurableObjectDriverLayer } from '@yolk-sdk/harness/driver/durable-object'
 import { RunStore, type DurableRunStoreSnapshot } from '@yolk-sdk/harness/store'
@@ -345,6 +349,101 @@ const releaseHolds = (
   )
 
 describe('Cloudflare drain-runtime composition', () => {
+  it.effect(
+    'resumes typed WS input from reconstructed storage and rejects completed duplicates',
+    () =>
+      Effect.gen(function* () {
+        const stores = yield* makeCloningStores()
+        const requests = yield* Ref.make<ReadonlyArray<LLMRequest>>([])
+        const executedTools = yield* Ref.make<ReadonlyArray<ToolCall>>([])
+        const call = ToolCall.make({ id: 'draft-call', name: 'draft', params: {} })
+
+        const scripts = yield* Ref.make<ReadonlyArray<ScriptedTurn>>([
+          () => Stream.fromIterable(Reply.toolCall(call).events),
+          () => Stream.fromIterable(Reply.text('draft collected').events)
+        ])
+
+        const toolSet = yield* resolveTools(
+          [
+            makeInputToolModule({
+              name: 'draft',
+              description: 'Collect a draft.',
+              response: Schema.Struct({ body: Schema.NonEmptyString })
+            })
+          ],
+          {}
+        )
+
+        const config = { ...runtimeConfig, tools: toolSet.tools, inputs: toolSet.inputs }
+
+        const runtime = () =>
+          makeRuntimeLayer({ eventStorage: stores.events, requests, executedTools, scripts })
+
+        const paused = yield* runRuntime(
+          RuntimeRequest.AppendInput({
+            sessionId,
+            runId: 'input-start',
+            input: UserMessage.make({ content: 'draft' })
+          }),
+          config
+        ).pipe(Stream.runCollect, Effect.provide(runtime()))
+
+        expect(paused.some(event => Predicate.isTagged(event, 'InputRequested'))).toBe(true)
+        const log = yield* loadRuntimeEventLogOrEmpty(sessionId, stores.events)
+        const request = waitingApprovalRequest(log)
+        expect(request._tag).toBe('InputRequest')
+
+        const wire = yield* Schema.encodeEffect(Schema.fromJsonString(InputResponseInput))(
+          InputResponseInput.make({
+            expectedRevision: log.revision,
+            response: InputResponse.make({
+              requestId: request.requestId,
+              toolCallId: call.id,
+              outcome: 'submitted',
+              source: 'user',
+              data: { body: 'Hello' }
+            })
+          })
+        )
+
+        const input = yield* Schema.decodeUnknownEffect(
+          Schema.fromJsonString(AgentWebSocketClientMessage)
+        )(wire)
+
+        if (!Predicate.isTagged(input, 'InputResponseInput'))
+          throw new Error('Expected typed input packet')
+
+        const resumed = yield* runRuntime(
+          RuntimeRequest.AppendHitlResponse({
+            sessionId,
+            runId: 'input-resume',
+            response: input.response,
+            expectedRevision: input.expectedRevision
+          }),
+          config
+        ).pipe(Stream.runCollect, Effect.provide(runtime()))
+
+        expect(resumed.some(event => Predicate.isTagged(event, 'AgentEnd'))).toBe(true)
+        expect(yield* Ref.get(executedTools)).toEqual([])
+        const replayed = yield* loadRuntimeEventLogOrEmpty(sessionId, stores.events)
+        expect(requireToolResult(replayRuntimeSessionEvents(replayed.events))).toMatchObject({
+          structuredContent: { type: 'input_response', data: { body: 'Hello' } }
+        })
+
+        const duplicate = yield* runRuntime(
+          RuntimeRequest.AppendHitlResponse({
+            sessionId,
+            runId: 'duplicate',
+            response: input.response
+          }),
+          config
+        ).pipe(Stream.runCollect, Effect.flip, Effect.provide(runtime()))
+
+        expect(duplicate).toBeInstanceOf(SessionConflictError)
+        expect(yield* Ref.get(requests)).toHaveLength(2)
+      })
+  )
+
   it.effect(
     'interrupts a live runtime, settles the Driver claim, finalizes on reconnect, then accepts new input',
     () =>

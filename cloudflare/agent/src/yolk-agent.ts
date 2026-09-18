@@ -528,6 +528,7 @@ export default class YolkAgent extends Cloudflare.DurableObject<YolkAgent>()(
           model,
           systemPrompt: systemPromptWithSkills(skillset),
           tools: toolSet.tools,
+          inputs: toolSet.inputs,
           reasoningEffort: input.reasoningEffort
         }).pipe(
           Stream.runForEach(event => sendEvent(socket, event)),

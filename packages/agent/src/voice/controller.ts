@@ -287,6 +287,7 @@ export const makeVoiceController = (
       )
 
     const submitHitlResponse = (response: HitlResponse): Effect.Effect<void> => {
+      // Voice HITL is approvals-only: question and generic input responses are ignored.
       if (!Predicate.isTagged(response, 'ToolApprovalResponse')) {
         return Effect.void
       }

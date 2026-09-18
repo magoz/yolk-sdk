@@ -205,6 +205,7 @@ describe('web_search tool', () => {
 
       expect(textTools.tools.map(tool => tool.name)).toEqual([
         'question',
+        'compose_draft',
         'web_fetch',
         'web_search',
         'just_bash'

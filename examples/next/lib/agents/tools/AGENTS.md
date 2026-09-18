@@ -4,19 +4,20 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 
 ## Tool Matrix
 
-| Tool/module                                                               | Text | Voice | Cloudflare                             | Notes                                                                          |
-| ------------------------------------------------------------------------- | ---- | ----- | -------------------------------------- | ------------------------------------------------------------------------------ |
-| `question`                                                                | yes  | no    | yes                                    | top-level package HITL question tool; omitted from subagents                   |
-| `web_fetch`                                                               | yes  | yes   | yes                                    | public URL fetch only                                                          |
-| `web_search`                                                              | yes  | yes   | yes                                    | Exa/Parallel MCP endpoints                                                     |
-| `skill`                                                                   | yes  | no    | bootstrap-injected; generated fallback | project skill command/runtime tool                                             |
-| `manage_skills`                                                           | yes  | no    | no                                     | authenticated user skill creation/list/update                                  |
-| `just_bash`                                                               | yes  | no    | yes                                    | just-bash virtual FS; network on; no host FS                                   |
-| `list_knowledge_documents` / `search_knowledge` / `get_knowledge_context` | yes  | yes   | no                                     | authenticated user knowledge discovery, search, and chunk-window traversal     |
-| `search_storage` / `list_storage_sources` / `get_storage_source`          | yes  | yes   | no                                     | authenticated user storage search and source reads                             |
-| `telegram_send_message`                                                   | yes  | yes   | no                                     | optional Telegram connector tool; requires user config; available to subagents |
-| remote MCP                                                                | yes  | no    | via bootstrap                          | namespaced `<server>_<tool>`                                                   |
-| `subagent`                                                                | yes  | no    | no                                     | top-level child-agent delegation; no recursive delegation in v1                |
+| Tool/module                                                               | Text | Voice | Cloudflare                             | Notes                                                                                               |
+| ------------------------------------------------------------------------- | ---- | ----- | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `question`                                                                | yes  | no    | yes                                    | top-level package HITL question tool; omitted from subagents                                        |
+| `compose_draft` (`draft-composer`)                                        | yes  | no    | yes                                    | app-owned typed input (to/subject/body, collect-only, never sends); omitted from subagents/children |
+| `web_fetch`                                                               | yes  | yes   | yes                                    | public URL fetch only                                                                               |
+| `web_search`                                                              | yes  | yes   | yes                                    | Exa/Parallel MCP endpoints                                                                          |
+| `skill`                                                                   | yes  | no    | bootstrap-injected; generated fallback | project skill command/runtime tool                                                                  |
+| `manage_skills`                                                           | yes  | no    | no                                     | authenticated user skill creation/list/update                                                       |
+| `just_bash`                                                               | yes  | no    | yes                                    | just-bash virtual FS; network on; no host FS                                                        |
+| `list_knowledge_documents` / `search_knowledge` / `get_knowledge_context` | yes  | yes   | no                                     | authenticated user knowledge discovery, search, and chunk-window traversal                          |
+| `search_storage` / `list_storage_sources` / `get_storage_source`          | yes  | yes   | no                                     | authenticated user storage search and source reads                                                  |
+| `telegram_send_message`                                                   | yes  | yes   | no                                     | optional Telegram connector tool; requires user config; available to subagents                      |
+| remote MCP                                                                | yes  | no    | via bootstrap                          | namespaced `<server>_<tool>`                                                                        |
+| `subagent`                                                                | yes  | no    | no                                     | top-level child-agent delegation; no recursive delegation in v1                                     |
 
 ## Rules
 
@@ -32,7 +33,8 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Storage tools are Next/Workflow/voice only; they use app knowledge search/DB adapters from route runtime wiring, not Cloudflare bootstrap.
 - Knowledge tools are Next/Workflow/voice only; use `list_knowledge_documents` to discover files/documents, then `search_knowledge`, then `get_knowledge_context` to expand/continue nearby chunks.
 - `manage_skills` is Next/Workflow-only; it uses app DB skill adapters from route runtime wiring, not Cloudflare bootstrap; UI refreshes slash commands after completed runs.
-- Text subagent execution also receives `sessionId`; subagent runs set `subagent: true` and intentionally omit `question` and `subagent` because the host does not support nested HITL resume or recursive delegation.
+- Text subagent execution also receives `sessionId`; subagent runs set `subagent: true` and intentionally omit `question`, generalized typed input tools, and `subagent` because the host does not support nested HITL resume or recursive delegation. `withoutInputTools` in `workflow-runtime/text-response.ts` strips input registrations even if one forgets its own `isEnabled` gate; child workflows additionally filter `def.input`.
+- Generalized input validators come from `ResolvedToolSet.inputs` and must be threaded explicitly: `AgentRouteConfig.inputs` → `runRuntime`, `AgentTextRuntimeConfig.inputs` → Workflow model/tool steps (`prepareToolBatch`/`runToolBatch`) and Cloudflare `runRuntime`. Voice toolsets never include input registrations; the package voice layer denies them before approval matching.
 - Resolve caller-provided modules through `resolveAgentToolSet`; do not hide tools in globals.
 - Keep tool result content model-visible and protocol-shaped.
 

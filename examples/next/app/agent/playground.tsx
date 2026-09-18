@@ -8,6 +8,7 @@ import {
   addAgentUsage,
   zeroAgentUsage,
   type AgentEvent,
+  type InputResponse,
   type QuestionResponse,
   type ToolApprovalResponse
 } from '@yolk-sdk/agent/protocol'
@@ -642,6 +643,7 @@ export function AgentPlayground({
     submitMessage,
     submitToolApprovalResponse,
     submitQuestionResponse,
+    submitInputResponse,
     deleteTurn,
     regenerateFrom,
     editUserMessage,
@@ -1076,6 +1078,25 @@ export function AgentPlayground({
     [hitlActionsDisabled, recordActivity, submitQuestionResponse]
   )
 
+  const handleInputResponse = useCallback(
+    (response: InputResponse) => {
+      if (hitlActionsDisabled) {
+        return
+      }
+
+      const result = submitInputResponse(response)
+
+      if (Predicate.isTagged(result, 'Submitted')) {
+        recordActivity({
+          title: response.outcome === 'submitted' ? 'Input submitted' : 'Input cancelled',
+          detail: response.toolCallId,
+          tone: response.outcome === 'submitted' ? 'success' : 'neutral'
+        })
+      }
+    },
+    [hitlActionsDisabled, recordActivity, submitInputResponse]
+  )
+
   const handleAttachmentsChange = useCallback(
     (files: ReadonlyArray<File>) => {
       if (files.length === 0) {
@@ -1242,6 +1263,7 @@ export function AgentPlayground({
             onRegenerateFrom={handleRegenerateFrom}
             onToolApprovalResponse={handleToolApprovalResponse}
             onQuestionResponse={handleQuestionResponse}
+            onInputResponse={handleInputResponse}
           />
 
           <AgentComposer

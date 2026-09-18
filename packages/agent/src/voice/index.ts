@@ -82,6 +82,7 @@ export {
   decideVoiceToolCall,
   handleVoiceToolCall,
   voiceApprovalRequestId,
+  voiceInputUnsupportedMessage,
   voiceToolDenialOutput,
   type VoiceToolCallDecision
 } from './tool-server.ts'

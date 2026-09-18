@@ -25,6 +25,7 @@ import * as Schema from 'effect/Schema'
 import {
   AgentEvent,
   AgentWebSocketServerMessage,
+  InputResponseInput,
   QuestionResponseInput,
   ToolApprovalResponseInput,
   UserInput,
@@ -37,6 +38,7 @@ import type {
   AgentWebSocketClientMessage,
   AgentWebSocketServerMessage as AgentWebSocketServerMessageType,
   HitlResponse,
+  InputResponse,
   QuestionResponse,
   ToolApprovalResponse,
   UserMessage
@@ -115,6 +117,10 @@ export type SubmitToolApprovalResponseRequest = StreamAgentEventsRequest & {
 
 export type SubmitQuestionResponseRequest = StreamAgentEventsRequest & {
   readonly response: QuestionResponse
+}
+
+export type SubmitInputResponseRequest = StreamAgentEventsRequest & {
+  readonly response: InputResponse
 }
 
 export type AgentHttpResponseInfo = {
@@ -492,22 +498,35 @@ const makeClientInputJson = (
       )
     }
 
-    return yield* encodeJsonString(
-      Predicate.isTagged(hitlResponse, 'ToolApprovalResponse')
-        ? ToolApprovalResponseInput.make({
-            response: hitlResponse,
-            expectedRevision,
-            model: request.model,
-            reasoningEffort: request.reasoningEffort
-          })
-        : QuestionResponseInput.make({
-            response: hitlResponse,
-            expectedRevision,
-            model: request.model,
-            reasoningEffort: request.reasoningEffort
-          }),
-      'Could not serialize WebSocket HITL response'
+    const clientInput: AgentWebSocketClientMessage = Match.value(hitlResponse).pipe(
+      Match.tag('ToolApprovalResponse', approval =>
+        ToolApprovalResponseInput.make({
+          response: approval,
+          expectedRevision,
+          model: request.model,
+          reasoningEffort: request.reasoningEffort
+        })
+      ),
+      Match.tag('QuestionResponse', answer =>
+        QuestionResponseInput.make({
+          response: answer,
+          expectedRevision,
+          model: request.model,
+          reasoningEffort: request.reasoningEffort
+        })
+      ),
+      Match.tag('InputResponse', answer =>
+        InputResponseInput.make({
+          response: answer,
+          expectedRevision,
+          model: request.model,
+          reasoningEffort: request.reasoningEffort
+        })
+      ),
+      Match.exhaustive
     )
+
+    return yield* encodeJsonString(clientInput, 'Could not serialize WebSocket HITL response')
   })
 
 const responseErrorMessage = (response: HttpClientResponse.HttpClientResponse) =>
@@ -821,6 +840,9 @@ export const streamToolApprovalResponseEventStream = (request: SubmitToolApprova
   streamAgentEventStream({ ...request, hitlResponses: [request.response] })
 
 export const streamQuestionResponseEventStream = (request: SubmitQuestionResponseRequest) =>
+  streamAgentEventStream({ ...request, hitlResponses: [request.response] })
+
+export const streamInputResponseEventStream = (request: SubmitInputResponseRequest) =>
   streamAgentEventStream({ ...request, hitlResponses: [request.response] })
 
 type AgentEventChunkResult = {

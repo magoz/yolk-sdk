@@ -17,7 +17,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - `makeWebSocketVoiceTransport` needs a host `Socket.WebSocketConstructor` layer.
 - `voice/browser` is the only WebRTC-using area; it accesses browser globals lazily at transport creation, never at import time, and exposes a `WebRtcVoiceRuntime` seam for fakes. Client attachment/WebSocket helpers also use browser APIs as described above.
 - Voice tools execute server-side only: the client `makeVoiceController` forwards provider tool calls to a host endpoint (`VoiceSessionToolCallRequest` in, `VoiceToolCallOutcome` out); `handleVoiceToolCall` applies `ToolDef.approval` policy before the executor and never runs approval-gated tools without a matching approved response.
-- Voice HITL supports tool approval only in v1; the package `question` tool is intentionally deferred for voice sessions and `submitHitlResponse` ignores question responses.
+- Voice HITL supports tool approval only in v1; `question` and generalized input tools are denied, and `submitHitlResponse` ignores both response types.
 - If a voice session ends while awaiting approval, the approval stays pending host-side and the event stream completes; durable resume is host/session-log policy.
 - One-shot speech contracts live in voice: `VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest`, and `speechResultToAudioPart`. `VoiceSpeechRequest.instructions` is delivery-style steering only (tone, pacing), not model-visible content instructions.
 - `providers/openai/speech` is host/server integration: it requires runtime `FormData`/`Blob`, an
@@ -32,6 +32,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - `@yolk-sdk/agent/tools` owns the domain-free `question` HITL tool contract; loop intercepts enabled questions before executor dispatch. If omitted from `tools`, even provider-emitted/replayed questions return unavailable results without HITL or executor dispatch.
 - `@yolk-sdk/agent/tools` exposes `makeTool` for Effect-Schema-backed registrations; avoid hand-written JSON Schema when validation schema can be the source of truth.
 - `ModelVisibleToolError` is for recoverable, model-visible tool failures; `makeTool` returns `ToolResult.isError` with structured `{ type, tool, reason, message, details? }` content.
+- `makeInputTool` owns original call/response schema validation; hosts pass `ResolvedToolSet.inputs` into loop/runtime configs alongside serializable `ToolDef.input` metadata. Inputs collect JSON data, never authorize actions or directly execute. Missing handlers and approval/background combinations fail closed. Keep the first valid submission/cancellation on replay while allowing corrections after invalid attempts.
 - Tool approval is host-enforced policy on normal tools, not a model-callable permission tool; v1 approvals are per-call, no persistent allow-always rules.
 - Use `EmptyToolParams` for no-arg `makeTool` tools instead of `Schema.Struct({})` when author intent is no parameters.
 - v1 subagents may use normal tools but must not receive the `subagent` tool recursively unless a future explicit capability enables it.
@@ -78,8 +79,9 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - OpenAI Codex streaming preserves every sibling function call and deduplicates `response.completed` replays by call id before parsing replayed arguments; a malformed replay of an already-emitted call must not invalidate unseen sibling calls.
 - Tool executor `ToolError`s are model-visible failed tool results, not stream failures; every host tool call must have a matching `ToolResultMessage` before the next provider request.
 - Use `validateNoDanglingHostToolCalls` before provider lowering and `repairDanglingHostToolCalls` only for persisted/replayed transcripts that already have gaps.
-- HITL semantics live in `patterns/AGENT_HITL.md`: approvals/questions pause with `AgentAwaitingInput`; responses resume through `hitlResponses`/typed client inputs.
+- HITL semantics live in `patterns/AGENT_HITL.md`: approvals/questions/typed inputs pause with `AgentAwaitingInput`; responses resume through `hitlResponses`/typed client inputs.
 - Question resume content must be model-visible text with selected answer labels plus structured answers; never replay only `answered`.
+- React input submission stays pending until server acceptance: never synthesize replayable input results optimistically. Replay `AgentAwaitingInput.requests` into pending tool states, including when no separate request event was observed.
 - Use SDK HITL helpers for durable apps: `plainHitlResponse`, `questionResponseStructuredContent`, `hitlResponseEvent`, and `toolRunsFromHitlRequests`.
 - Client HTTP transport treats `AgentEnd`/`AgentError`/`AgentAwaitingInput` as logical end, but only pre-terminal consumer cancellation should abort the body.
 - HTTP callback producers forward failed exits to their output queues with the original Cause. Typed-only catches strand consumers when host callbacks or cleanup defect; preserve defects rather than wrapping them as recoverable transport errors.

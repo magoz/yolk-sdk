@@ -3,6 +3,8 @@ import { Match, Predicate } from 'effect'
 import { AssistantAgentMessage, AgentMessage, UserMessage } from './message.ts'
 import {
   HitlRequest,
+  InputRequest,
+  InputResponse,
   QuestionAnswer,
   QuestionRequest,
   QuestionResponse,
@@ -245,6 +247,21 @@ export class QuestionCancelled extends Schema.TaggedClass<QuestionCancelled>()(
   }
 ) {}
 
+export class InputRequested extends Schema.TaggedClass<InputRequested>()('InputRequested', {
+  ...EventIdentity,
+  request: InputRequest
+}) {}
+
+export class InputSubmitted extends Schema.TaggedClass<InputSubmitted>()('InputSubmitted', {
+  ...EventIdentity,
+  response: InputResponse
+}) {}
+
+export class InputCancelled extends Schema.TaggedClass<InputCancelled>()('InputCancelled', {
+  ...EventIdentity,
+  response: InputResponse
+}) {}
+
 export class LLMStreamEnd extends Schema.TaggedClass<LLMStreamEnd>()('LLMStreamEnd', {
   ...EventIdentity,
   turn: Schema.Number
@@ -360,6 +377,37 @@ const questionAnswerValue = (answer: QuestionAnswer) =>
     })()
   )
 
+type InputResponseCopyFields = {
+  requestId: InputResponse['requestId']
+  toolCallId: InputResponse['toolCallId']
+  outcome: InputResponse['outcome']
+  source: InputResponse['source']
+  data?: InputResponse['data']
+  reason?: InputResponse['reason']
+}
+
+const inputResponseValue = (response: InputResponse) =>
+  InputResponse.make(
+    (() => {
+      const fields: InputResponseCopyFields = {
+        requestId: response.requestId,
+        toolCallId: response.toolCallId,
+        outcome: response.outcome,
+        source: response.source
+      }
+
+      if (response.data !== undefined) {
+        fields.data = response.data
+      }
+
+      if (response.reason !== undefined) {
+        fields.reason = response.reason
+      }
+
+      return fields
+    })()
+  )
+
 type QuestionResponseCopyFields = {
   requestId: QuestionResponse['requestId']
   toolCallId: QuestionResponse['toolCallId']
@@ -437,6 +485,13 @@ export const hitlResponseEvent = (response: HitlResponse): AgentEvent =>
             response: responseValue
           })
     }),
+    Match.tag('InputResponse', current => {
+      const responseValue = inputResponseValue(current)
+
+      return current.outcome === 'submitted'
+        ? InputSubmitted.make({ response: responseValue })
+        : InputCancelled.make({ response: responseValue })
+    }),
     Match.exhaustive
   )
 
@@ -466,6 +521,9 @@ export const AgentEvent = Schema.Union([
   QuestionRequested,
   QuestionAnswered,
   QuestionCancelled,
+  InputRequested,
+  InputSubmitted,
+  InputCancelled,
   ToolExecutionStarted,
   ToolExecutionAccepted,
   ToolExecutionCompleted,

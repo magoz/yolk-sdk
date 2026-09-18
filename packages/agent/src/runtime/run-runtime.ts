@@ -6,6 +6,7 @@ import type {
   AgentReasoningEffort,
   HitlResponse,
   HitlRequest,
+  InputToolHandler,
   ToolDef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -39,6 +40,8 @@ export type RuntimeConfig = {
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
   readonly hitlResponses?: ReadonlyArray<HitlResponse>
+  /** Server-side input validators by tool name (from ResolvedToolSet.inputs). */
+  readonly inputs?: Readonly<Record<string, InputToolHandler>>
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -90,6 +93,7 @@ const runtimeRunConfig = (config: RuntimeConfig, messages: ReadonlyArray<AgentMe
   systemPrompt: config.systemPrompt,
   tools: config.tools,
   hitlResponses: config.hitlResponses,
+  inputs: config.inputs,
   reasoningEffort: config.reasoningEffort,
   capabilities: config.capabilities,
   model: config.model
@@ -159,6 +163,13 @@ const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest
       'QuestionResponse',
       answer =>
         Predicate.isTagged(request, 'QuestionRequest') &&
+        answer.requestId === request.requestId &&
+        answer.toolCallId === request.toolCallId
+    ),
+    Match.tag(
+      'InputResponse',
+      answer =>
+        Predicate.isTagged(request, 'InputRequest') &&
         answer.requestId === request.requestId &&
         answer.toolCallId === request.toolCallId
     ),

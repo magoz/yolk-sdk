@@ -11,12 +11,15 @@ import {
   AssistantAgentMessage,
   AssistantTextPart,
   HostToolCallPart,
+  InputResponse,
   ToolCall,
   ToolResult,
   ToolResultMessage,
   UserMessage,
   ToolApprovalPolicy,
-  ToolApprovalResponse
+  ToolApprovalResponse,
+  type InputToolHandler,
+  type HitlResponse
 } from '@yolk-sdk/agent/protocol'
 import {
   ContextTransformer,
@@ -30,7 +33,7 @@ import {
   ToolExecutor,
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
-import { makeSubagentToolRegistration, makeTool } from '@yolk-sdk/agent/tools'
+import { makeInputTool, makeSubagentToolRegistration, makeTool } from '@yolk-sdk/agent/tools'
 import { TestWorkflowWorld } from '@yolk-sdk/vercel-workflows/testing'
 import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import { agentTextCapabilities } from '@/lib/agents/text-agent-config'
@@ -227,6 +230,10 @@ let statusReads = 0
 
 let preparationFailure: WorkflowRegistryError | WorkflowRunForbidden | undefined
 
+let parentInputCall = false
+
+let siblingInputCall = false
+
 let background = true
 
 let childModel: string | undefined
@@ -336,6 +343,14 @@ const provider = (child: boolean) =>
           : finished('Follow-up done')
       }
 
+      if (parentInputCall && results.length === 0)
+        return reply([
+          ToolCall.make({ id: 'nick-call', name: 'nickname', params: {} }),
+          ...(siblingInputCall
+            ? [ToolCall.make({ id: 'nick-sibling', name: 'nickname', params: {} })]
+            : [])
+        ])
+
       if (results.length === 0)
         return reply([
           childCall(),
@@ -391,9 +406,23 @@ const runtimeFactory: typeof makeAgentTextRuntime = (request, userId, _route, op
       Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'written' }))
   })
 
+  const nickname = makeInputTool({
+    name: 'nickname',
+    description: 'Collect a nickname.',
+    response: Schema.String.pipe(Schema.check(Schema.isNonEmpty())),
+    renderer: 'nickname-field',
+    title: 'Nickname'
+  })
+
   const tools = child
     ? [read]
-    : [tool, read, approval, ...(options.modules ?? []).flatMap(module => module.tools)]
+    : [tool, read, approval, nickname, ...(options.modules ?? []).flatMap(module => module.tools)]
+
+  const inputs: Readonly<Record<string, InputToolHandler>> = Object.fromEntries(
+    tools.flatMap(registration =>
+      registration.input === undefined ? [] : [[registration.def.name, registration.input]]
+    )
+  )
 
   return Effect.succeed({
     input: request,
@@ -402,6 +431,7 @@ const runtimeFactory: typeof makeAgentTextRuntime = (request, userId, _route, op
       reasoningEffort: 'high',
       systemPrompt: child ? 'Child' : 'Parent',
       tools: tools.map(tool => tool.def),
+      inputs,
       capabilities: agentTextCapabilities
     },
     layer: Layer.mergeAll(
@@ -454,6 +484,8 @@ beforeEach(() => {
   statusReads = 0
   preparationFailure = undefined
   capturedLogs.clear()
+  parentInputCall = false
+  siblingInputCall = false
   background = true
   childModel = undefined
   gated = false
@@ -677,6 +709,102 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     childGate.release()
     await world.settled(childId(parent))
   })
+
+  it('pauses for typed input and resumes with the submitted value', async () => {
+    parentInputCall = true
+    const parent = await launch()
+    await hitlEntered.promise
+    const paused = await events(parent)
+    expect(paused.some(event => Predicate.isTagged(event, 'InputRequested'))).toBe(true)
+    expect(paused.some(event => Predicate.isTagged(event, 'AgentAwaitingInput'))).toBe(true)
+    await world.sdk.resumeHook(
+      agentWorkflowHitlHookToken({ runId: parent }),
+      InputResponse.make({
+        requestId: 'input:nickname:nick-call',
+        toolCallId: 'nick-call',
+        outcome: 'submitted',
+        source: 'user',
+        data: 'Ada'
+      })
+    )
+    await world.settled(parent)
+    const after = await events(parent)
+    expect(
+      after.find(
+        event =>
+          Predicate.isTagged(event, 'ToolExecutionCompleted') &&
+          event.result.toolCallId === 'nick-call'
+      )
+    ).toMatchObject({
+      result: { structuredContent: { type: 'input_response', name: 'nickname' } }
+    })
+    expect(after.find(event => Predicate.isTagged(event, 'AgentEnd'))).toBeDefined()
+    expect(world.inspect(parent).status).toBe('completed')
+  })
+
+  it.each(['submitted', 'cancelled'] as const)(
+    'preserves a sibling %s while rejecting stale hook responses and accepting corrections',
+    async outcome => {
+      parentInputCall = true
+      siblingInputCall = true
+      const parent = await launch()
+      await hitlEntered.promise
+
+      const response = (id: string, data: string) =>
+        InputResponse.make({
+          requestId: `input:nickname:${id}`,
+          toolCallId: id,
+          outcome: 'submitted',
+          source: 'user',
+          data
+        })
+
+      const resumeAndAwait = async (value: HitlResponse) => {
+        hitlEntered = latch()
+        await world.sdk.resumeHook(agentWorkflowHitlHookToken({ runId: parent }), value)
+        await hitlEntered.promise
+      }
+
+      await resumeAndAwait(response('nick-call', ''))
+      await resumeAndAwait(
+        InputResponse.make({
+          requestId: 'input:nickname:nick-call',
+          toolCallId: 'nick-call',
+          outcome,
+          source: 'user',
+          data: 'Ada'
+        })
+      )
+      const beforeStale = await events(parent)
+      expect(
+        beforeStale.filter(event => Predicate.isTagged(event, 'AgentAwaitingInput')).at(-1)
+      ).toMatchObject({ requests: [{ toolCallId: 'nick-sibling' }] })
+      await resumeAndAwait(response('nick-call', 'Overwrite'))
+      // Stale/duplicate submissions are discarded by hook admission, not added to batch history.
+      expect(await events(parent)).toEqual(beforeStale)
+      await resumeAndAwait(response('nick-sibling', ''))
+      await world.sdk.resumeHook(
+        agentWorkflowHitlHookToken({ runId: parent }),
+        response('nick-sibling', 'Grace')
+      )
+      await world.settled(parent)
+      expect(world.inspect(parent).status).toBe('completed')
+
+      const results = requests
+        .at(-1)
+        ?.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
+
+      expect(results).toHaveLength(2)
+      expect(results?.[0]).toMatchObject({
+        toolCallId: 'nick-call',
+        structuredContent: { outcome, data: 'Ada' }
+      })
+      expect(results?.[1]).toMatchObject({
+        toolCallId: 'nick-sibling',
+        structuredContent: { outcome: 'submitted', data: 'Grace' }
+      })
+    }
+  )
 
   it('keeps a lost reservation response recoverably uncertain without releasing the logical slot', async () => {
     loseReservationResponse = true

@@ -12,8 +12,13 @@ export {
   ModelVisibleToolErrorStructuredContentSchema,
   resolveTools,
   ToolAccess,
-  ToolRegistryError
+  ToolRegistryError,
+  toolJsonSchemaFromSchema
 } from './registry.ts'
+
+export { makeInputTool, makeInputToolDef, makeInputToolModule } from './input.ts'
+
+export type { MakeInputToolOptions, InputToolModule } from './input.ts'
 
 export {
   makeQuestionToolDef,
@@ -38,6 +43,7 @@ export {
 } from './subagent.ts'
 
 export type {
+  ResolvedInputTool,
   ResolvedToolSet,
   SchemaToolExecutionInput,
   ModelVisibleToolErrorInput,
