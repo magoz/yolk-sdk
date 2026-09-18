@@ -60,8 +60,11 @@ const ProviderLayer = makeVercelAiGatewayProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-The adapter uses `https://ai-gateway.vercel.sh/v1/chat/completions`, sends non-streamed JSON Chat
-Completions requests, and lowers `maxCompletionTokens` to Gateway `max_tokens`. A run-level
+The adapter uses `https://ai-gateway.vercel.sh/v1/chat/completions` and defaults to a single JSON
+completion. Set factory option `streaming: true` for SSE deltas. Independently set
+`reasoningContent: true` to preserve compatible models' `reasoning_content` output and assistant
+replay; streamed reasoning then surfaces as reasoning events, and replay spends input tokens.
+Both options default to false. It lowers `maxCompletionTokens` to Gateway `max_tokens`. A run-level
 `reasoningEffort` becomes `{ reasoning: { effort } }` for every opaque Gateway model id. The host must
 offer only effort values supported by its selected model. Pass model ids such as `provider/model`;
 query Vercel's model catalog instead of hard-coding an SDK model union. `VercelAiGatewayProviderLayer` tries

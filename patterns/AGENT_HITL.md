@@ -33,7 +33,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 - Question `structuredContent` must be plain JSON-serializable; use `questionResponseStructuredContent`/`plainHitlResponse` at persistence and workflow boundaries.
 - Preserve unchosen options in `ToolCall.params`/UI input; model-visible question results should emphasize chosen answers.
 - HITL responses are control inputs (`ToolApprovalResponseInput`, `QuestionResponseInput`, `InputResponseInput`, `hitlResponses`), not user/assistant text.
-- Submitted HITL responses can be mapped to optimistic UI/protocol events with `hitlResponseEvent`.
+- Submitted approval/question responses can be mapped to optimistic UI/protocol events with `hitlResponseEvent`. Typed input acceptance must come from the server; never project unvalidated input as an accepted result.
 - Replay stays provider-neutral through normal assistant tool calls and tool result messages.
 - Same-turn sibling tools may yield multiple pending requests; submit responses one at a time unless a runtime adds batching later.
 - Voice sessions support tool approvals only in v1; the `question` tool and generalized input tools are deferred for voice and voice `submitHitlResponse` ignores both response kinds.

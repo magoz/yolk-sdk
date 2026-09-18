@@ -51,8 +51,21 @@ payloads or enforce provider capabilities. See [private attachment integration](
 for fresh signing inside retries.
 
 `PlainHitlResponse` is also a constructor value on `@yolk-sdk/agent/protocol`:
-`PlainHitlResponse.QuestionResponse` and `.ToolApprovalResponse` construct plain encoded payloads.
+`PlainHitlResponse.QuestionResponse`, `.ToolApprovalResponse`, and `.InputResponse` construct plain encoded payloads.
 Use `plainHitlResponse` to project existing protocol class instances while omitting absent optionals.
+
+Typed-input protocol exports:
+
+| Export                                                                               | Purpose                                                                |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `InputDescriptor`, `InputRequest`, `InputResponse`, `InputResponseOutcome`           | Display metadata, correlated request, and submitted/cancelled response |
+| `InputRequested`, `InputSubmitted`, `InputCancelled`                                 | Input lifecycle events                                                 |
+| `InputResponseInput`                                                                 | Typed client control input                                             |
+| `plainInputResponse`, `inputResponseStructuredContent`, `formatInputResponseContent` | Serialization and result-content helpers                               |
+| `InputToolHandler`, `InputResponseValidator`, `InputContentFormatter`                | Server-side validation and formatting contracts                        |
+
+Input descriptors carry display hints only; original server schemas own validation. Input collection
+never authorizes an action. See [Collect typed input](../agent/tools-hitl#collect-typed-input).
 
 ## Loop
 
@@ -88,8 +101,11 @@ import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
 
 ### Whole-batch preflight
 
-`prepareToolBatch({ tools, responses, calls })` returns `Effect.Effect<PreparedToolBatch>` without
-executing tools. Inputs are readonly arrays of `ToolDef`, `HitlResponse`, and `ToolCall`.
+`prepareToolBatch({ tools, inputs, responses, calls })` returns `Effect.Effect<PreparedToolBatch>`
+without executing tools. `tools`, `responses`, and `calls` are readonly arrays of `ToolDef`,
+`HitlResponse`, and `ToolCall`. Pass `inputs: toolSet.inputs` from `resolveTools` when using typed
+input tools; definitions alone fail closed as unavailable. Forward the same handlers into
+`LoopConfig` and `RuntimeConfig` when using `run`, `runToolBatch`, or `runRuntime`.
 
 | `PreparedToolBatch` field          | Purpose                                                                               |
 | ---------------------------------- | ------------------------------------------------------------------------------------- |
@@ -155,6 +171,12 @@ Its variants are `Transcript`, `AppendInput`, and `AppendHitlResponse`.
 | `SubagentModelDefinition`            | model id and model-visible selection guidance             |
 | `SubagentReasoningEffortDefinition`  | reasoning effort and model-visible selection guidance     |
 | `modelVisibleToolError`              | recoverable error visible to model                        |
+
+Typed-input helpers: `makeInputTool` keeps original call/response validators server-side;
+`makeInputToolModule` packages the registration as a module. `makeInputToolDef` creates only a
+serializable advertisement, not a handler or executor. `ResolvedToolSet.inputs` carries the resolved
+handlers alongside `tools` and `execute`; pass it explicitly to loop/runtime configs. Input tools
+reject approval/background policy and direct execution.
 
 Subagent/question helpers: `makeSubagentToolModule`, `makeSubagentToolDef`, `makeSubagentToolResult`, `subagentToolName`, `makeQuestionToolDef`, `questionToolName`.
 
@@ -333,6 +355,11 @@ registrations remain unchanged. See [Background subagents](../agent/tools-hitl#b
 | `documentPartFromTextFile`, `textFromBlob`                                                                                             | browser file/blob helpers returning `Effect`   |
 | `AgentTransportError`                                                                                                                  | transport and decoding failure                 |
 
+`streamInputResponseEventStream` submits a `SubmitInputResponseRequest` over HTTP. Clients build
+it via `SubmitInputResponseRequest` from `@yolk-sdk/agent/client`. `InputResponseInput` also travels
+through the Cloudflare WebSocket transport and durable HITL
+helpers. Hosts own auth, pending-request matching, and server validation.
+
 ## React
 
 `@yolk-sdk/agent/react`
@@ -348,6 +375,11 @@ registrations remain unchanged. See [Background subagents](../agent/tools-hitl#b
 | `getActiveChatToolParts`, `getCompletedChatToolParts`, `getAgentChatLiveActivityCount`                                                | chat projection selectors                     |
 | `deleteChatTurn`, `editChatUserMessage`, `regenerateChatMessagesFrom`                                                                 | chat editing helpers                          |
 | `AgentChatSessionEvent`, `UserMessageSubmitted`, `ProtocolMessageAppended`, `MessagesRegenerated`, `TurnDeleted`, `UserMessageEdited` | chat session event helpers                    |
+
+`useAgentChat().submitInputResponse(response)` submits typed input. `ChatToolState` and
+`ToolRunState` include `InputRequested`, `InputSubmitted`, and `InputCancelled`; render pending requests using host-owned forms keyed by
+`InputRequest.input.kind`. Keep it pending until server acceptance. Invalid submissions re-pend
+the same request and may be corrected; never synthesize replayable input results optimistically.
 
 Tagged model constructors are also exported from `@yolk-sdk/agent/react`:
 
@@ -468,6 +500,10 @@ Transport layers are `webSocketVoiceTransportLayer` (`voice`) and `webRtcVoiceTr
 portable data; invalid/accessor input fails before HTTP. Chat transport defaults to one JSON body;
 `streaming: true` opts into SSE deltas, and OpenCode Go chat always streams. See [the migration guide](../migration)
 and [Go configuration](../integrations/provider-setup#opencode-go).
+
+`VercelAiGatewayProviderConfig` also accepts factory options `streaming` and `reasoningContent`,
+both false by default. Enable `streaming` for SSE deltas; enable `reasoningContent` independently to
+preserve compatible models' reasoning output and assistant replay, which spends input tokens.
 
 | Subpath                                                | Main exports                                                                                                                                               |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |

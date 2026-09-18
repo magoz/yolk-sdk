@@ -25,6 +25,30 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.82: typed inputs and Gateway streaming
+
+When upgrading from canary.81:
+
+- Prefer `resolveTools` over hand-built toolsets. `ResolvedToolSet` now requires `inputs`; custom
+  toolsets without typed input tools must supply an empty record (`inputs: {}`). Pass the resolved handlers as
+  `inputs: toolSet.inputs` to loop/runtime configuration and `prepareToolBatch`; serializable
+  definitions alone return unavailable instead of prompting.
+- Update exhaustive protocol/client/React consumers for input requests, submitted/cancelled
+  responses, lifecycle events, `InputResponseInput`, and `InputRequested`/`InputSubmitted`/`InputCancelled` tool states. Extend any
+  host-owned closed persistence/wire schemas before storing or transporting these variants.
+- Keep typed input pending until server acceptance. Invalid response data re-pends the same request
+  for correction; transport failure is not an accepted result. Existing question behavior remains
+  compatible. Input collection is not approval, and voice still supports approvals only.
+- Full `run` streams now emit synthetic `ToolExecutionCompleted` events for rejected calls and
+  resolved HITL, including while siblings remain pending. These do not execute tools; custom event
+  consumers should preserve server results without completing the same call twice.
+- Gateway keeps JSON completions by default. Factory `streaming: true` enables SSE deltas;
+  `reasoningContent: true` independently preserves compatible reasoning output and assistant replay
+  (spending input tokens). Neither option is enabled automatically.
+
+See [typed input wiring](./agent/tools-hitl#collect-typed-input) and
+[Gateway setup](./integrations/provider-setup#vercel-ai-gateway).
+
 ### Next canary: chat-stream failure diagnostics
 
 OpenAI-compatible chat streaming now rejects a 2xx response with an explicit non-SSE content type

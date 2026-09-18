@@ -49,6 +49,11 @@ const GatewayLayer = makeVercelAiGatewayProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
+The factory defaults to one JSON completion. Add `streaming: true` for SSE deltas and, independently,
+`reasoningContent: true` to retain compatible models' reasoning output and assistant replay. Both
+options default to false; replayed reasoning spends input tokens. These are explicit factory options,
+not env-backed switches.
+
 The factory sends `maxCompletionTokens` as Gateway `max_tokens`. Run-level `reasoningEffort` is
 forwarded as `{ reasoning: { effort } }` for every opaque Gateway model id; the host must restrict its
 choices to efforts supported by the selected model. The env-backed `VercelAiGatewayProviderLayer`

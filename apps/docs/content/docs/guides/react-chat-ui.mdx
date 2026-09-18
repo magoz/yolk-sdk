@@ -68,14 +68,19 @@ export function AgentChat() {
 
 ## HITL controls
 
-When `chat.isWaiting` is true, render approval/question controls from tool run items and resume with:
+When `chat.isWaiting` is true, render approval/question/input controls from tool run items. These
+are alternative fragments; use the method matching the pending request:
 
 ```ts
-chat.submitToolApprovalResponse(response)
-chat.submitQuestionResponse(response)
+chat.submitToolApprovalResponse(approvalResponse)
+chat.submitQuestionResponse(questionResponse)
+chat.submitInputResponse(inputResponse)
 ```
 
-Build `response` values from `@yolk-sdk/agent/protocol` after matching the pending request id in your UI state.
+Build response values from `@yolk-sdk/agent/protocol` after matching the pending request id in your UI
+state. Render typed inputs by `InputRequest.input.kind` using host-owned forms, and keep them pending
+until server acceptance rather than creating optimistic results. See
+[Collect typed input](../agent/tools-hitl#collect-typed-input) for handler wiring and correction.
 
 ## Durable streams
 
@@ -86,5 +91,5 @@ Use `useAgentChat` for normal browser chats. For replayed durable event logs, us
 - Disable submit while running or awaiting HITL.
 - Keep stop local: it aborts the current browser stream. Server-side cancellation is a separate route.
 - Show retry state from `chat.state.retryInfo`.
-- Keep approval/question controls accessible and auditable.
+- Keep approval/question/input controls accessible and auditable.
 - Never render raw provider error bodies.

@@ -253,7 +253,10 @@ the adapter preserves the provider's timestamp. Missing/invalid percentages are 
 as zero. Treat snapshots as best-effort; hosts own polling, stale-data policy, persistence, and UI.
 The fetcher blocks redirects and sanitizes failures using the shared subscription-usage error types.
 
-Vercel AI Gateway uses its OpenAI-compatible JSON Chat Completions endpoint. Pass either an AI
+Vercel AI Gateway uses its OpenAI-compatible Chat Completions endpoint, with a single JSON
+completion by default. Set factory option `streaming: true` for SSE deltas and independently set
+`reasoningContent: true` to preserve compatible models' `reasoning_content` output and assistant
+replay. Both default to false; replayed reasoning spends input tokens. Pass either an AI
 Gateway API key or Vercel OIDC token as `apiKey`; `maxCompletionTokens` is sent as Gateway
 `max_tokens`. The env-backed `VercelAiGatewayProviderLayer` tries `AI_GATEWAY_API_KEY` first, then
 `VERCEL_OIDC_TOKEN`, and requires integer

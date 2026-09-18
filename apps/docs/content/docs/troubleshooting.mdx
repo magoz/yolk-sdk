@@ -144,6 +144,21 @@ The model called a tool name not present in the resolved tool set. Resolve tools
 
 `makeTool` validates model input with Effect Schema. Return model-visible validation errors for recoverable cases. Keep thrown `ToolError`s safe and non-secret.
 
+### Typed input is unavailable or stays pending
+
+Pass `toolSet.inputs` from `resolveTools` alongside `toolSet.tools` into loop/runtime configuration
+and `prepareToolBatch`. Display-only `ToolDef.input` metadata cannot validate a response; omitted
+handlers produce unavailable results without prompting or executing.
+
+Use `makeInputTool` to retain original call/response validators. `input_validation_required` means
+an input registration lacks required validation; `input_unsupported_policy` means it combines input
+with unsupported approval/background policy. Inputs collect data, not action authorization.
+
+Invalid response data re-pends the same request without validation details in events. Keep the
+form open, correct the payload, and resubmit with the same opaque request/call ids. Do not project
+an optimistic accepted result; only the first valid submission or cancellation settles the request.
+See [Collect typed input](./agent/tools-hitl#collect-typed-input).
+
 ### Approval pauses forever
 
 If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host must persist pending request ids and resume with matching HITL responses.
@@ -154,10 +169,12 @@ If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host mu
 
 Disable buffering at your platform/proxy and use streaming-friendly headers.
 
-Also confirm provider streaming configuration: generic OpenAI chat defaults to one JSON body, so a
+Also confirm provider streaming configuration: generic OpenAI chat and Vercel AI Gateway default to one JSON body, so a
 host expecting incremental events must set `streaming: true` against an endpoint that serves chat
 SSE. Unterminated chat streams fail `invalid_response` (`incomplete_stream`) without `Done`; treat
-them as failures, not quiet completion.
+them as failures, not quiet completion. Gateway's independent `reasoningContent: true` option
+preserves compatible reasoning output and assistant replay; enabling streaming alone does not
+retain reasoning. Replayed reasoning spends input tokens.
 
 For NDJSON routes, use `content-type: application/x-ndjson` and avoid middleware that buffers responses.
 

@@ -1,6 +1,6 @@
 ---
 title: Add human-in-the-loop
-description: Pause an agent for approvals or questions and resume with typed responses.
+description: Pause an agent for approvals, questions, or typed inputs and resume with validated responses.
 ---
 
 Yolk models HITL in protocol, not UI. That means the same loop can pause in Next.js, Workers, WebSockets, or Vercel Workflows.
@@ -23,7 +23,12 @@ Yolk models HITL in protocol, not UI. That means the same loop can pause in Next
 
 ## Runtime modes
 
-For stateless routes, include `hitlResponses` in the next `runRuntime` config. For durable sessions, use `_tag: 'AppendHitlResponse'` so the response is appended to the session event log.
+For stateless routes, pass `toolSet.inputs` into the server's loop/runtime configuration and
+include `hitlResponses` in the next `runRuntime` config. For durable sessions, use `_tag: 'AppendHitlResponse'` so the response is appended to the session event log.
+
+For schema-backed forms, follow [Collect typed input](../agent/tools-hitl#collect-typed-input).
+Pass `toolSet.inputs` alongside `toolSet.tools` into loop/runtime configuration; serializable tool
+definitions alone cannot validate responses. Keep input forms pending until server acceptance.
 
 ## Related APIs
 
