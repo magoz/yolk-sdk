@@ -142,6 +142,29 @@ describe('Vercel AI Gateway provider', () => {
     })
   )
 
+  it.effect('sends DeepSeek-style effort and thinking toggle when configured', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      yield* runProvider(
+        new Response(JSON.stringify({ choices: [{ message: { content: 'thoughtful' } }] })),
+        requests,
+        {
+          ...defaultGatewayConfig,
+          reasoningEffortFormat: 'reasoning-effort',
+          thinking: { type: 'enabled' }
+        },
+        { model: 'deepseek/deepseek-v4.1-flash', reasoningEffort: 'high' }
+      )
+
+      expect(readCapturedBody(requests)).toMatchObject({
+        model: 'deepseek/deepseek-v4.1-flash',
+        reasoning_effort: 'high',
+        thinking: { type: 'enabled' }
+      })
+      expect(readCapturedBody(requests)).not.toHaveProperty('reasoning')
+    })
+  )
+
   it.effect('forwards reasoning effort for any opaque Gateway model id', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []

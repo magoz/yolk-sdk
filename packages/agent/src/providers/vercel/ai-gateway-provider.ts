@@ -38,6 +38,17 @@ export type VercelAiGatewayProviderConfig = {
    * Defaults to false; reasoning output is otherwise dropped.
    */
   readonly reasoningContent?: boolean
+  /**
+   * Override the reasoning-effort wire format. Defaults to the Anthropic
+   * `reasoning` object; DeepSeek-style hosts expect the literal
+   * `reasoning_effort` field instead.
+   */
+  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
+  /**
+   * DeepSeek-style thinking toggle, merged into the request body (e.g.
+   * `{ type: 'enabled' }`). Omitted unless a host documents it.
+   */
+  readonly thinking?: { readonly type: 'enabled' | 'disabled' }
 }
 
 const vercelAiGatewayProviderIdentity = {
@@ -47,6 +58,10 @@ const vercelAiGatewayProviderIdentity = {
 
 const gatewayExtraBody = (config: VercelAiGatewayProviderConfig): OpenAiRequestExtras => {
   const extras: { [key: string]: Schema.Json } = {}
+
+  if (config.thinking !== undefined) {
+    extras.thinking = { type: config.thinking.type }
+  }
 
   if (config.fallbackModels !== undefined) {
     extras.models = [...config.fallbackModels]
@@ -77,7 +92,7 @@ type VercelAiGatewayOpenAiLayerFields = {
   apiKey: VercelAiGatewayProviderConfig['apiKey']
   maxCompletionTokens: number
   completionTokenField: 'max_tokens'
-  reasoningEffortFormat: 'reasoning-object'
+  reasoningEffortFormat: 'reasoning-object' | 'reasoning-effort'
   chatCompletionsUrl: string
   providerIdentity: typeof vercelAiGatewayProviderIdentity
   extraBody: OpenAiRequestExtras
@@ -93,7 +108,7 @@ export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProvider
         apiKey: config.apiKey,
         maxCompletionTokens: config.maxCompletionTokens,
         completionTokenField: 'max_tokens',
-        reasoningEffortFormat: 'reasoning-object',
+        reasoningEffortFormat: config.reasoningEffortFormat ?? 'reasoning-object',
         chatCompletionsUrl: config.chatCompletionsUrl ?? vercelAiGatewayChatCompletionsUrl,
         providerIdentity: vercelAiGatewayProviderIdentity,
         extraBody: gatewayExtraBody(config)
