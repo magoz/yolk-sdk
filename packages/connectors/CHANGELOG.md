@@ -1,5 +1,13 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.83
+
+### Patch Changes
+
+- Advance unchanged public packages in lockstep with the agent's Vercel AI Gateway DeepSeek thinking-parameter fix. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [245e0b0]
+  - @yolk-sdk/agent@0.1.0-canary.83
+
 ## 0.1.0-canary.82
 
 ### Patch Changes
