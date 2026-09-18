@@ -1,7 +1,7 @@
 import { Effect, Layer, Redacted, Schema, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { LLMDone, LLMProvider, LLMTextDelta, LLMToolCall, LLMUsage } from '@yolk-sdk/agent/loop'
+import { LLMDone, LLMProvider, LLMReasoningDelta, LLMTextDelta, LLMToolCall, LLMUsage } from '@yolk-sdk/agent/loop'
 import {
   ToolCall,
   ToolResult,
@@ -270,6 +270,58 @@ describe('Vercel AI Gateway provider', () => {
           'content-type': 'application/json'
         }
       })
+    })
+  )
+
+  it.effect('streams SSE deltas when streaming is enabled', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      const delta = (content: string) =>
+        `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`
+
+      const events = yield* runProvider(
+        new Response(`${delta('Hello ')}${delta('streaming')}data: [DONE]\n\n`, {
+          headers: { 'content-type': 'text/event-stream' }
+        }),
+        requests,
+        { ...defaultGatewayConfig, streaming: true }
+      )
+
+      expect(requests[0]?.request.headers).toMatchObject({
+        accept: 'text/event-stream'
+      })
+      expect(readCapturedBody(requests)).toMatchObject({ stream: true })
+      expect(Array.from(events)).toMatchObject([
+        LLMTextDelta.make({ text: 'Hello ' }),
+        LLMTextDelta.make({ text: 'streaming' }),
+        LLMDone.make({ stopReason: 'stop' })
+      ])
+    })
+  )
+
+  it.effect('surfaces reasoning deltas when reasoning content is enabled', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      const reasoningDelta = (reasoning_content: string) =>
+        `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content } }] })}\n\n`
+
+      const events = yield* runProvider(
+        new Response(
+          `${reasoningDelta('Considering options')}${reasoningDelta(' carefully')}data: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } }
+        ),
+        requests,
+        { ...defaultGatewayConfig, streaming: true, reasoningContent: true }
+      )
+
+      expect(readCapturedBody(requests)).toMatchObject({ stream: true })
+      expect(Array.from(events)).toMatchObject([
+        LLMReasoningDelta.make({ text: 'Considering options' }),
+        LLMReasoningDelta.make({ text: ' carefully' }),
+        LLMDone.make({ stopReason: 'stop' })
+      ])
     })
   )
 
