@@ -14,6 +14,7 @@
     "@yolk-sdk/harness": "0.1.0-canary.76"
   },
   "changesets": [
+    "action-backed-interactions",
     "afloat-connector",
     "agent-anthropic-tool-result-is-error",
     "agent-codex-final-output",
@@ -42,6 +43,7 @@
     "canary-83-lockstep",
     "canary-84-lockstep",
     "canary-85-lockstep",
+    "canary-86-lockstep",
     "canonical-tagged-models-530",
     "clear-claude-limits",
     "clear-gmail-threads",
@@ -91,6 +93,7 @@
     "harness-canary-lockstep",
     "harness-contracts",
     "harness-inbox-hitl",
+    "harness-interaction-matching",
     "harness-owner-layers",
     "harness-pr49-lifecycle",
     "harness-request-ack",
