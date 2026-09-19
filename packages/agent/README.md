@@ -26,7 +26,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/runtime`                              | Transcript or append-backed runtime orchestration              |
 | `@yolk-sdk/agent/client`                               | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
 | `@yolk-sdk/agent/compaction`                           | Host-owned compaction budgets, checkpoints, formatting, retry  |
-| `@yolk-sdk/agent/tools`                                | Tool registry, typed inputs, subagent/question contracts       |
+| `@yolk-sdk/agent/tools`                                | Tool registry, typed inputs, interactions, subagents/questions |
 | `@yolk-sdk/agent/react`                                | Headless React chat hook, reducer, selectors, and render model |
 | `@yolk-sdk/agent/oauth`                                | Provider-neutral OAuth token and broker contracts              |
 | `@yolk-sdk/agent/providers/openai`                     | OpenAI/Codex OAuth and broker helpers                          |
@@ -82,6 +82,7 @@ import {
   makeWindowCompactionTransformer
 } from '@yolk-sdk/agent/compaction'
 import {
+  makeInteractionTool,
   makeNonRecursiveSubagentToolModule,
   makeSubagentToolResult,
   modelVisibleToolError,
@@ -635,9 +636,11 @@ HITL is protocol-level, not UI-level:
 - Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels. The loop intercepts questions only when the tool is enabled in `tools`; omitted questions return an unavailable result without HITL or executor dispatch, even if a provider emits one.
 - Use `makeInputTool({ name, description, response, renderer })` for custom typed input. Apps own the response Effect schema and renderer; the SDK carries JSON data only. Pass `resolveTools(...).inputs` alongside `tools` to loop/runtime configs. The original `callParameters` and `response` schemas validate server-side, including refinements; display JSON Schema is not the validator. Invalid calls fail before prompting; invalid submissions remain pending for correction. The first valid submission or cancellation settles the request and cannot be overwritten by stale responses.
 - Resume custom inputs with `submitInputResponse`, `streamInputResponseEventStream`, or WebSocket `InputResponseInput`. Echo request/call IDs; do not reconstruct them. Input collection is not authorization: a draft composer never grants permission to send. Input tools cannot carry approval/background policy or execute directly.
-- Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON. `PlainHitlResponse` is a `Data.taggedEnum` value (`QuestionResponse` / `ToolApprovalResponse` / `InputResponse`); the helpers omit absent optionals then call those constructors (`_tag` last, plain objects, not Schema classes).
+- Use `makeInteractionTool` when a person must edit proposed values and authorize one server-defined action. Unlike data-only inputs, interactions execute the selected action on the exact validated values before the next model turn. Hosts own renderers, authentication, scoped immutable receipt storage, and atomic acceptance; browser responses alone never authorize execution. Pass `interactionHost` to `resolveTools`, then both `toolSet.interactions` and `toolSet.interactionHost` to loop/runtime configs. Durable hosts load `loadInteractionReceipts` before passing `interactionReceipts` to `prepareToolBatch`.
+- Submit interactions with `submitInteractionResponse`, `streamInteractionResponseEventStream`, or WebSocket `InteractionResponseInput`; the host must authenticate and atomically accept the response server-side before SDK resume. Submission is not completion; only real server results settle the UI. An `unknown` outcome needs host reconciliation, never automatic action retry. Voice/realtime and background activation are unsupported. See [action-backed interactions](https://github.com/magoz/yolk-sdk/blob/main/packages/agent/src/tools/README.md#action-backed-interactions) for registration and host-boundary details.
+- Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON. `PlainHitlResponse` is a `Data.taggedEnum` value (`QuestionResponse` / `ToolApprovalResponse` / `InputResponse` / `InteractionResponse`); the helpers omit absent optionals then call those constructors (`_tag` last, plain objects, not Schema classes).
 - Use `toolRunsFromHitlRequests` to hydrate paused UI state from `AgentAwaitingInput.requests`.
-- Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive. Typed input stays pending until server acceptance so rejected or interrupted submissions cannot become replayable tool results.
+- Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive. Typed input and interaction submissions stay pending until server acceptance; accepted interactions stay active until the actual outcome. Never synthesize an interaction result from local submission or acceptance.
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
 
 HTTP client helpers treat `AgentEnd`, `AgentError`, and `AgentAwaitingInput` as logical stream

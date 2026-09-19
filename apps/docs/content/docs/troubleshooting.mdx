@@ -159,6 +159,21 @@ form open, correct the payload, and resubmit with the same opaque request/call i
 an optimistic accepted result; only the first valid submission or cancellation settles the request.
 See [Collect typed input](./agent/tools-hitl#collect-typed-input).
 
+### Action-backed interaction is unavailable or reappears
+
+Pass `interactionHost` to `resolveTools`, then both `toolSet.interactions` and
+`toolSet.interactionHost` to loop/runtime configuration. Configuring only the executor does not let
+the loop load accepted receipts. Durable preflight must call `loadInteractionReceipts` and pass
+fresh `interactionReceipts` to `prepareToolBatch`; missing host wiring never grants execution.
+
+The host must authenticate and atomically accept the response before SDK resume. Keep invalid
+submissions editable; local submission and `InteractionSubmitted` are not completion. Voice/realtime
+and background activation do not support these tools.
+
+An `unknown` outcome means the action may have happened. Reconcile using the authoritative receipt
+and provider state; never automatically retry the action or overwrite its settled receipt.
+See [Authorize one action](./agent/tools-hitl#authorize-one-action).
+
 ### Approval pauses forever
 
 If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host must persist pending request ids and resume with matching HITL responses.

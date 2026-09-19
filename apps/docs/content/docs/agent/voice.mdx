@@ -105,7 +105,7 @@ Do not demonstrate this with `JSON.stringify(Infinity)` (that is `null`). Nested
 
 ## Approvals in voice
 
-Approval-gated calls pause: the controller emits `AwaitingInput`, the hook exposes `pendingApprovals`, and `approveTool`/`denyTool` resume through your tool endpoint. If the session ends while waiting, the approval stays pending host-side; reconnect replays context and applies the stored response. The package `question` tool is deferred for voice sessions in v1.
+Approval-gated calls pause: the controller emits `AwaitingInput`, the hook exposes `pendingApprovals`, and `approveTool`/`denyTool` resume through your tool endpoint. If the session ends while waiting, the approval stays pending host-side; reconnect replays context and applies the stored response. Voice HITL supports approval only in v1. Question HITL is unsupported; exclude question tools from voice toolsets. Typed-input and action-backed interaction tools are denied before execution; exclude them rather than retrying them here. Use the normal text-agent HITL flow for these tools, optionally with [one-shot speech and transcription](#one-shot-speech-and-transcription) around that flow.
 
 ## Durable transcripts
 
