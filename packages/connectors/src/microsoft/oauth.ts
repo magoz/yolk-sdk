@@ -25,6 +25,12 @@ export const microsoftGraphMailReadWriteSharedScope =
 
 export const microsoftGraphMailSendSharedScope = 'https://graph.microsoft.com/Mail.Send.Shared'
 
+export const microsoftGraphMailboxSettingsReadScope =
+  'https://graph.microsoft.com/MailboxSettings.Read'
+
+export const microsoftGraphMailboxSettingsReadWriteScope =
+  'https://graph.microsoft.com/MailboxSettings.ReadWrite'
+
 export const microsoftGraphFilesReadScope = 'https://graph.microsoft.com/Files.Read'
 
 export const microsoftGraphFilesReadAllScope = 'https://graph.microsoft.com/Files.Read.All'
@@ -47,6 +53,14 @@ export const microsoftOutlookSharedWriteScopes = Object.freeze([
 ])
 
 export const microsoftOutlookSharedSendScopes = Object.freeze([microsoftGraphMailSendSharedScope])
+
+export const microsoftOutlookCategoryReadScopes = Object.freeze([
+  microsoftGraphMailboxSettingsReadScope
+])
+
+export const microsoftOutlookCategoryWriteScopes = Object.freeze([
+  microsoftGraphMailboxSettingsReadWriteScope
+])
 
 export const microsoftOneDriveReadScopes = Object.freeze([microsoftGraphFilesReadScope])
 
@@ -95,6 +109,22 @@ export const MicrosoftOutlookSharedSendOAuthCredentialSlot = CredentialSlot.make
   id: microsoftOAuthSlotId,
   kind: 'oauth',
   requiredScopes: [...microsoftOutlookSharedSendScopes]
+})
+
+// Master-category lifecycle consent is opt-in: listing needs MailboxSettings.Read
+// while create/delete need MailboxSettings.ReadWrite (delegated, personal, and
+// application alike). There are no `.Shared` mailbox-settings scopes, and the
+// existing combined slot is intentionally not widened with these permissions.
+export const MicrosoftOutlookCategoryReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftOutlookCategoryReadScopes]
+})
+
+export const MicrosoftOutlookCategoryWriteOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftOutlookCategoryWriteScopes]
 })
 
 export const MicrosoftOneDriveReadOAuthCredentialSlot = CredentialSlot.make({

@@ -101,7 +101,7 @@ import {
   outlookGetAttachmentAction,
   outlookGetMessageAction,
   outlookListAttachmentsAction,
-  OutlookMessage,
+  OutlookMessageWithHeaders,
   outlookListMessagesAction,
   outlookSearchMessagesAction,
   outlookSendDraftAction,
@@ -864,7 +864,12 @@ describe('@yolk-sdk/connectors', () => {
       'gmail.draft_update',
       'gmail.get_thread',
       'gmail.list_labels',
+      'gmail.create_label',
+      'gmail.get_label',
+      'gmail.update_label',
+      'gmail.delete_label',
       'gmail.modify_labels',
+      'gmail.set_starred',
       'gmail.trash',
       'gmail.untrash',
       'gmail.draft_delete',
@@ -921,8 +926,17 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.send_mail',
       'outlook.send_draft',
       'outlook.set_read',
+      'outlook.set_flag',
       'outlook.trash',
       'outlook.untrash',
+      'outlook.move_message',
+      'outlook.list_categories',
+      'outlook.create_category',
+      'outlook.get_category',
+      'outlook.update_category',
+      'outlook.delete_category',
+      'outlook.set_categories',
+      'outlook.modify_categories',
       'onedrive.list_items',
       'onedrive.search_items',
       'onedrive.get_item',
@@ -937,14 +951,26 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.create_draft',
       'outlook.create_reply_draft',
       'outlook.set_read',
+      'outlook.set_flag',
       'outlook.untrash',
+      'outlook.move_message',
+      'outlook.create_category',
+      'outlook.update_category',
+      'outlook.set_categories',
+      'outlook.modify_categories',
       'onedrive.create_folder'
     ])
     expect(
       MicrosoftConnector.actions
         .filter(action => action.access === 'destructive')
         .map(action => action.id)
-    ).toEqual(['outlook.send_mail', 'outlook.send_draft', 'outlook.trash', 'onedrive.delete_item'])
+    ).toEqual([
+      'outlook.send_mail',
+      'outlook.send_draft',
+      'outlook.trash',
+      'outlook.delete_category',
+      'onedrive.delete_item'
+    ])
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
       'notion.search',
       'notion.get_page',
@@ -2701,7 +2727,8 @@ describe('@yolk-sdk/connectors', () => {
             id: 'reply_draft_1',
             conversationId: 'conv-1',
             isDraft: true,
-            body: { contentType: 'html', content: combinedHtml }
+            body: { contentType: 'html', content: combinedHtml },
+            internetMessageHeaders: [{ name: 'Message-ID', value: '<reply-draft-1@example.com>' }]
           })
         }),
         ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' }),
@@ -2777,7 +2804,10 @@ describe('@yolk-sdk/connectors', () => {
       })
 
       if (Predicate.isTagged(readBack, 'Success')) {
-        const persistedMessage = yield* Schema.decodeUnknownEffect(OutlookMessage)(readBack.value)
+        const persistedMessage = yield* Schema.decodeUnknownEffect(OutlookMessageWithHeaders)(
+          readBack.value
+        )
+
         const persisted = persistedMessage.body
 
         expect(persisted?.contentType).toBe('html')
@@ -2975,7 +3005,7 @@ describe('@yolk-sdk/connectors', () => {
         jsonHttpResponse('{"id":"draft_1","isDraft":true}'),
         ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' }),
         jsonHttpResponse('{"value":[]}'),
-        jsonHttpResponse('{"id":"message_1"}')
+        jsonHttpResponse('{"id":"message_1","internetMessageHeaders":[]}')
       ])
 
       // Enforcing fake: the scope-free identity call always succeeds, every

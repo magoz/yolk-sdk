@@ -56,6 +56,14 @@ export { ConnectorIntegration, IntegrationConfig, makeIntegration } from './inte
 
 export { PortableMetadata } from './portable-metadata.ts'
 
+export { parseUnsubscribeMethods } from './unsubscribe.ts'
+
+export type {
+  UnsubscribeHttpMethod,
+  UnsubscribeMailtoMethod,
+  UnsubscribeMethods
+} from './unsubscribe.ts'
+
 export { ActionResult, ProviderFailure } from './result.ts'
 
 export type { ActionResult as ActionResultType } from './result.ts'

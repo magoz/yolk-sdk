@@ -14,22 +14,22 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                | Purpose                                                                                                   |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types    |
-| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                         |
-| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                               |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update |
-| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email port       |
-| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                          |
-| `@yolk-sdk/connectors/fortnox`         | Read-only company, customer, invoice, supplier, and supplier-invoice file listing with OAuth              |
-| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                       |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                                  |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                          |
-| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot                     |
-| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                         |
-| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                        |
-| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label/comment actions and API token slot constants                                   |
+| Subpath                                | Purpose                                                                                                    |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types     |
+| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                          |
+| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update  |
+| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port |
+| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                           |
+| `@yolk-sdk/connectors/fortnox`         | Read-only company, customer, invoice, supplier, and supplier-invoice file listing with OAuth               |
+| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                        |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                                   |
+| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                           |
+| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot                      |
+| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                          |
+| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                         |
+| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label/comment actions and API token slot constants                                    |
 
 ## Imports
 
@@ -206,7 +206,8 @@ Both slots require `UsernamePasswordCredential`; provider-specific OAuth remains
 the Google and Microsoft connectors.
 
 The common action set is `email.list_messages`, `email.get_message`, `email.get_attachment`,
-`email.create_draft`, `email.send_message`, `email.set_read`, `email.trash`, and `email.untrash`.
+`email.create_draft`, `email.send_message`, `email.set_read`, `email.trash`, `email.untrash`,
+`email.modify_labels`, and `email.move`.
 Draft creation requires IMAP and uses the incoming
 credential. An optional
 `folder` selects the target mailbox; when omitted, the host adapter discovers a mailbox advertised
@@ -218,7 +219,12 @@ must encode both UIDVALIDITY and UID rather than exposing a bare UID. The host a
 and performs `APPEND` with the `\Draft` flag.
 
 Message list/get outputs expose normalized addresses, text/HTML bodies, and attachment metadata,
-never raw MIME. When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
+never raw MIME. `email.get_message` additionally requires `headers` name/value pairs (including
+`List-Unsubscribe` when the mail carries it); hosts fetch them via IMAP `BODY.PEEK[HEADER]` or
+POP3 `TOP` without marking the message read. Successful host output is schema-validated, so a
+missing `headers` array fails. List summaries carry no headers. The package root exports the pure
+`parseUnsubscribeMethods` helper for `List-Unsubscribe` discovery; see the unsubscribe recipe in
+the catalog. When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
 `email.get_attachment`. The host returns decoded file bytes—not MIME transfer-encoded text—as
 base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `EmailClient`
 implementations may omit the optional `getAttachment` method; invoking the action then fails with a
@@ -235,17 +241,21 @@ protocol, folder, and ordering, and may fail after mailbox changes. Send success
 `{ accepted: true }`, which means the SMTP server accepted submission, not that the message was
 delivered.
 
-### Read state and trash (IMAP only)
+### Read state, trash, and move (IMAP only)
 
-| Action           | Input                                        | Host method           | Access        |
-| ---------------- | -------------------------------------------- | --------------------- | ------------- |
-| `email.set_read` | `{ messageId, isRead, folder? }`             | `EmailClient.setRead` | `write`       |
-| `email.trash`    | `{ messageId, folder?, trashFolder? }`       | `EmailClient.trash`   | `destructive` |
-| `email.untrash`  | `{ messageId, folder?, destinationFolder? }` | `EmailClient.untrash` | `write`       |
+| Action                | Input                                               | Host method                | Access        |
+| --------------------- | --------------------------------------------------- | -------------------------- | ------------- |
+| `email.set_read`      | `{ messageId, isRead, folder? }`                    | `EmailClient.setRead`      | `write`       |
+| `email.set_flag`      | `{ messageId, isFlagged, folder? }`                 | `EmailClient.setFlag`      | `write`       |
+| `email.trash`         | `{ messageId, folder?, trashFolder? }`              | `EmailClient.trash`        | `destructive` |
+| `email.untrash`       | `{ messageId, folder?, destinationFolder? }`        | `EmailClient.untrash`      | `write`       |
+| `email.modify_labels` | `{ messageId, folder?, addLabels?, removeLabels? }` | `EmailClient.modifyLabels` | `write`       |
+| `email.move`          | `{ messageId, folder?, destinationFolder }`         | `EmailClient.move`         | `write`       |
 
-Set `isRead: true` to mark read, or `false` to mark unread. These actions use the incoming
+Set `isRead: true` to mark read, or `false` to mark unread. Set `isFlagged: true` to star for
+follow-up via `\Flagged`, or `false` to unstar. These actions use the incoming
 credential and require IMAP; POP3 is rejected before credential resolution or adapter calls.
-SMTP is submission-only. The three host methods are optional for compatibility: old adapters
+SMTP is submission-only. These host methods are optional for compatibility: old adapters
 continue working, but calling an unsupported action fails with a typed validation error.
 Successful host output is schema-validated; provider failures pass through unchanged.
 
@@ -267,6 +277,40 @@ If a safe move is unavailable, return a failure. Trash/untrash return `EmailMove
 **new** opaque identifier there. UIDPLUS mappings must encode destination UIDVALIDITY and UID.
 If no reliable mapping is available, omit `messageId` and re-list the destination; never reuse a
 stale source UID. Hosts own safe retry/reconciliation after partially completed moves.
+
+`email.move` takes `{ messageId, folder?, destinationFolder }` with a required destination and
+returns `EmailMoveMessageOutput` with the destination folder and the new message ID when the host
+can map it. Like the other mutations it requires IMAP, defaults `folder` to `INBOX`, rejects an
+identical source/destination before dispatch, and fails with a typed validation error when the
+optional `EmailClient.move` method is missing. Hosts move with UID `MOVE` (RFC 6851) when the
+server advertises it, otherwise `COPY` plus flagging `\Deleted` and expunging only the moved UID;
+they preserve flags and keywords, never blanket-expunge, and own partial-move reconciliation.
+Destination UIDs differ from source UIDs, so callers must use the returned ID for subsequent
+operations or re-list the destination. Hosts that resolve agent-declared access should treat moves
+into `\Trash`-advertised mailboxes as destructive, matching `email.trash`.
+
+### Labels (IMAP keywords only)
+
+`email.modify_labels` takes `{ messageId, folder?, addLabels?, removeLabels? }` (at least one
+of the two label lists) and returns `{ messageId, labels }` with the resulting keyword set as an Effect `Chunk`.
+Hosts return `Chunk.fromIterable(keywords)`; message list/get discovery uses optional arrays.
+Like the other mutations it uses the incoming credential, requires IMAP, defaults `folder` to
+`INBOX`, and fails with a typed validation error when the optional `EmailClient.modifyLabels`
+method is missing. POP3 and SMTP cannot persist labels: POP3 is rejected before credential
+resolution, and SMTP is submission-only.
+
+Labels are IMAP keywords only, never system flags. The connector schema-validates every
+`addLabels`/`removeLabels` entry as an RFC 3501 `atom` (ASCII printable except `(`, `)`, `{`,
+space, CTLs, `%`, `*`, `"`, `\`, `]`), so `\Seen` and other backslash flags, whitespace,
+control characters, and atom specials fail before dispatch. Message list/get outputs may carry
+an optional `labels` array for host discovery.
+
+There is no standalone create/delete label catalog in IMAP: keywords implicitly exist through
+message assignment, so hosts assign them directly and remove usage by removing a keyword from
+messages. Hosts implement `modifyLabels` with UID-addressed `STORE` (`+FLAGS.SILENT` for
+additions, `-FLAGS.SILENT` for removals), preserving all other keywords and system flags rather
+than overwriting the whole flags list. Hosts check `PERMANENTFLAGS` first and return a failure
+for unsupported keywords; a keyword listed in both inputs is removed.
 
 ## Google connector
 
@@ -303,6 +347,18 @@ Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Ho
 Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, `GoogleCalendarEventsOAuthCredentialSlot`, `GoogleDriveMetadataReadonlyOAuthCredentialSlot`, and `GoogleDriveFileOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains all Google connector scopes for broad-consent hosts.
 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
+
+Gmail labels use `gmail.list_labels`, `gmail.create_label`, `gmail.get_label`,
+`gmail.update_label`, `gmail.delete_label`, and `gmail.modify_labels`, plus `gmail.set_starred`
+for starring via the `STARRED` system label. Label reads use the
+existing `gmail.readonly` slot; label lifecycle mutations and message label changes reuse the
+existing `gmail.modify` slot, so no broader consent is needed. Create and update accept `name`
+plus optional `messageListVisibility` (`show` | `hide`) and `labelListVisibility` (`labelShow` |
+`labelShowIfUnread` | `labelHide`); update renames through `PATCH` and requires at least one
+field. Delete answers `204` with an empty body and returns a typed `{ id, deleted: true }`
+result without JSON decoding. Label ids are encoded once and dot-only ids are rejected to avoid
+URL normalization. Labels with `type: 'system'` (such as `INBOX`) cannot be renamed or deleted;
+the provider rejects those mutations.
 
 Gmail discovery omits invalid optional attachment sizes; present sizes are nonnegative integers.
 Best-effort malformed **optional** sizes (`-1`, `1.5`, `null`, `"12"`, missing) still omit size and
@@ -561,7 +617,9 @@ explicit non-blank `mailbox`. This applies to direct connector calls and generat
 Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged. Repeat `mailbox` for
 an explicit mailbox continuation and `folderId` for a folder continuation. The connector only
 accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message`
-requests a text body; read and draft-returning actions request immutable IDs.
+requests a text body plus required `internetMessageHeaders` (name/value pairs: `List-Unsubscribe`,
+`References`, and authentication results when the message carries them); list, draft, and mutation
+actions return the base `OutlookMessage` without headers. Read and draft-returning actions request immutable IDs.
 
 `outlook.create_reply_draft` creates a bodyless reply draft, then prepends the supplied text or HTML
 to Graph's generated quoted history and saves it. This is a multi-step write: once a draft ID is
@@ -588,21 +646,70 @@ as list metadata and are rejected by this action. Both actions use the existing 
 permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
 size policy, durable storage, and content scanning.
 
-### Outlook read state and trash
+### Outlook read state, flags, and trash
 
 - `outlook.set_read` takes `{ messageId, isRead, mailbox? }`: `true` marks read, `false` marks
   unread using Graph `PATCH` on the message.
+- `outlook.set_flag` takes `{ messageId, isFlagged, mailbox? }`: `true` flags for follow-up,
+  `false` clears the flag, using Graph `PATCH` `flagStatus`.
 - `outlook.trash` takes `{ messageId, mailbox? }` and moves the message to `deleteditems` using
   Graph `/move`; it never performs permanent deletion.
 - `outlook.untrash` takes `{ messageId, mailbox?, destinationFolderId? }` and moves from Deleted
   Items to `inbox` by default, or the supplied destination folder ID/well-known name. It does not
   recover permanently deleted messages or infer the original folder.
+- `outlook.move_message` takes `{ messageId, mailbox?, destinationFolderId }` with a required
+  destination folder ID/well-known name and moves the message there using Graph `/move`. The source
+  folder is not an input, so the connector performs no same-folder check; Graph decides the outcome.
+  A `deleteditems` destination performs the same Graph call as `outlook.trash`: hosts that gate on
+  declared access should override `move_message` to `destructive` for well-known destructive
+  destinations.
 
-All three return the provider's updated `OutlookMessage` and request immutable IDs. Use the returned
+All four return the provider's updated `OutlookMessage` and request immutable IDs. Use the returned
 `id` for subsequent calls. They use `Mail.ReadWrite` for the signed-in mailbox/application mode and
 `Mail.ReadWrite.Shared` for other explicit delegated mailboxes, with the same own-mailbox identity
 exception and application mailbox guard
-as draft writes. Read-state and restore actions declare `write`; trash declares `destructive`.
+as draft writes. Read-state, restore, and move actions declare `write`; trash declares `destructive`.
+
+### Outlook categories
+
+- `outlook.list_categories` takes `{ mailbox?, top?, nextLink? }` and returns typed
+  `{ categories, nextLink? }` from Graph `/outlook/masterCategories`; `categories` is an Effect
+  `Chunk`. It requires
+  `MailboxSettings.Read` consent.
+- `outlook.create_category` takes `{ mailbox?, displayName, color? }` where `color` is
+  `none` or `preset0` through `preset24`. It requires `MailboxSettings.ReadWrite` consent.
+  `displayName` is immutable after creation: there is no category rename action because Graph
+  does not support renaming categories, only color updates.
+- `outlook.delete_category` takes `{ mailbox?, categoryId }` and answers Graph `204` with
+  an empty body, returning typed `{ id, deleted: true }` without JSON decoding. It requires
+  `MailboxSettings.ReadWrite` consent. Existing message assignments keep their category
+  `displayName` strings.
+- `outlook.get_category` takes `{ mailbox?, categoryId }` and returns the typed category. It
+  requires `MailboxSettings.Read` consent.
+- `outlook.update_category` takes `{ mailbox?, categoryId, color }` and PATCHes only the color
+  (`displayName` stays immutable). It requires `MailboxSettings.ReadWrite` consent.
+- `outlook.set_categories` takes `{ messageId, mailbox?, categories }` and replaces the
+  message's category `displayName` strings with Graph `PATCH`; an empty array clears all
+  categories. It reuses the `Mail.ReadWrite` / `Mail.ReadWrite.Shared` message permission
+  selection, own-mailbox identity exception, immutable IDs, and application mailbox guard.
+- `outlook.modify_categories` takes `{ messageId, mailbox?, addCategories?, removeCategories? }`
+  (at least one of the two) and merges through GET-then-PATCH: removals win over additions and
+  the resulting names are deduped by exact case-sensitive match. Both requests use `Mail.ReadWrite` (or its Shared variant),
+  without requiring separate read consent. The GET requires a valid `categories` array and never defaults
+  omitted or malformed data to `[]`, so a failed or invalid read sends no PATCH. This
+  read/modify/write is non-atomic: hosts must serialize competing updates. There are no
+  retries or implied compare-and-swap.
+
+Message category assignment uses `displayName` strings, not master category IDs, and never
+creates or deletes master categories automatically. Master-category lifecycle consent is
+opt-in through the `MicrosoftOutlookCategoryReadOAuthCredentialSlot` and
+`MicrosoftOutlookCategoryWriteOAuthCredentialSlot` action slots; the existing combined slot is
+not widened. There are no `.Shared` mailbox-settings scopes, so delegated access to another
+mailbox's settings keeps the ordinary category slot and remains subject to Graph
+authorization. Application mode still requires an explicit `mailbox` for category operations.
+List continuations must repeat the same mailbox; only global Graph v1.0 links for the selected
+master-category collection are accepted. Create declares `write`; delete declares `destructive`;
+set/modify declare `write`.
 
 Sending returns `{ accepted: true }` for Graph's `202 Accepted`; that confirms submission, not
 processing or delivery.
@@ -845,12 +952,12 @@ orchestration only.
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                                  |
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete; host-only download plus create/update |
-| `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/trash/restore                                    |
+| `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/trash/restore/labels                             |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                                   |
 | `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, supplier invoices, and supplier-invoice files    |
-| `@yolk-sdk/connectors/google`          | Gmail mail actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions               |
+| `@yolk-sdk/connectors/google`          | Gmail mail and label actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions     |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                       |
-| `@yolk-sdk/connectors/microsoft`       | Outlook mail plus OneDrive metadata, search, folder-create, and recycle-bin actions                                |
+| `@yolk-sdk/connectors/microsoft`       | Outlook mail and category actions plus OneDrive metadata, search, folder-create, and recycle-bin actions           |
 | `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                       |
 | `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url` plus host-only `R2ObjectClient` get/create/update                                          |
 | `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                                       |

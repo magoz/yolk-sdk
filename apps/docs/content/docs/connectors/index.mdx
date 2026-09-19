@@ -64,7 +64,8 @@ const destructiveGoogleActions = new Set([
   'drive.trash_file',
   'drive.delete_file',
   'gmail.trash',
-  'gmail.draft_delete'
+  'gmail.draft_delete',
+  'gmail.delete_label'
 ])
 
 const writingGoogleActions = new Set([
@@ -72,6 +73,8 @@ const writingGoogleActions = new Set([
   'calendar.update_event',
   'drive.create_folder',
   'gmail.modify_labels',
+  'gmail.create_label',
+  'gmail.update_label',
   'gmail.untrash',
   'gmail.draft_compose',
   'gmail.draft_update',
@@ -120,7 +123,7 @@ credential can therefore cover both workloads when consent includes their `Mail.
 permissions.
 
 Outlook inputs use `/me` by default; set `mailbox` for an explicit Exchange Online mailbox.
-Delegated calls use Shared scopes unless `mailbox` matches `OAuthCredential.accountId`
+Delegated message calls use Shared scopes unless `mailbox` matches `OAuthCredential.accountId`
 case-insensitively, in the same Graph ID/principal-name form; see [Microsoft mailbox permissions](../integrations/connectors#microsoft).
 Application hosts use `mailboxAccessMode: 'application'`. OneDrive inputs use `/me/drive` by default;
 set `driveId` for an explicit drive, `oneDriveAccessMode: 'delegated_all'` for broader delegated
@@ -147,12 +150,36 @@ which is limited to files created by or explicitly opened/shared with the app. T
 refresh, consent policy, Google Picker integration, restricted-scope compliance, and binary file
 transfer.
 
-Outlook and generic IMAP email support `set_read` (with boolean `isRead`), `trash`, and `untrash`
-actions in their respective `outlook.*` and `email.*` namespaces. Outlook calls Graph directly;
+Outlook and generic IMAP email support `set_read` (with boolean `isRead`), `set_flag` (with
+boolean `isFlagged`), `trash`, and `untrash`
+actions in their respective `outlook.*` and `email.*` namespaces, plus `outlook.move_message` for
+Graph folder moves. Outlook calls Graph directly;
 generic email requires optional host `EmailClient.setRead`, `trash`, and `untrash` methods.
+Generic email additionally supports `email.move` to any folder through optional
+`EmailClient.move` host support; the destination folder is required and the returned message ID
+uses destination UIDVALIDITY/UID when the host can map it.
 POP3/SMTP do not support these mailbox-state actions. Restore defaults to the inbox rather than
 remembering the original folder. See the [Connectors catalog](../integrations/connectors) for
 inputs, permissions, and safe IMAP adapter requirements.
+
+## Manage email labels
+
+Gmail supports label create/get/update/delete through `gmail.create_label`, `gmail.get_label`,
+`gmail.update_label`, and `gmail.delete_label`, alongside existing list and message assignment
+via `gmail.modify_labels`. Mutations reuse `gmail.modify` consent.
+
+Outlook exposes `outlook.list_categories`, `outlook.create_category`, and
+`outlook.delete_category` with opt-in `MailboxSettings.Read` / `MailboxSettings.ReadWrite`
+consent. Message assignment uses category **names**, not IDs: `outlook.set_categories` replaces
+all names (`[]` clears), while `outlook.modify_categories` merges additions/removals through a
+non-atomic read followed by PATCH. Both use ordinary/shared message write permissions.
+
+Generic email exposes `email.modify_labels` through optional `EmailClient.modifyLabels` host
+support. Labels are IMAP keywords, not system flags; hosts preserve unrelated flags and check
+server keyword support. `email.set_flag` stars through optional `EmailClient.setFlag` host support,
+and Gmail stars through `gmail.set_starred` with the `STARRED` system label. IMAP has no standalone
+label catalog, and POP3/SMTP cannot persist labels.
+See the [Connectors catalog](../integrations/connectors) for inputs and host contracts.
 
 ## Transfer files
 

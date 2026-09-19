@@ -12,7 +12,7 @@ import {
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import {
-  OutlookMessage,
+  OutlookMessageWithHeaders,
   outlookCreateReplyDraftAction,
   outlookGetMessageAction
 } from '@yolk-sdk/connectors/microsoft'
@@ -65,6 +65,11 @@ describe('reply draft persistence and recovery', () => {
           body: { contentType, content: saved }
         })
 
+        const messageWithHeaders = () => ({
+          ...message(),
+          internetMessageHeaders: [{ name: 'Message-ID', value: '<reply-draft@example.com>' }]
+        })
+
         const http = Layer.succeed(ConnectorHttpClient, {
           request: request =>
             Effect.gen(function* () {
@@ -97,8 +102,9 @@ describe('reply draft persistence and recovery', () => {
 
               expect(request.method).toBe('GET')
               expect(request.url).toContain('/messages/reply-draft?')
+              expect(request.url).toContain('internetMessageHeaders')
 
-              return jsonResponse(message())
+              return jsonResponse(messageWithHeaders())
             })
         })
 
@@ -124,9 +130,9 @@ describe('reply draft persistence and recovery', () => {
 
         if (!Predicate.isTagged(read, 'Success')) return
 
-        const messageRead = yield* Schema.decodeUnknownEffect(Schema.toType(OutlookMessage))(
-          read.value
-        )
+        const messageRead = yield* Schema.decodeUnknownEffect(
+          Schema.toType(OutlookMessageWithHeaders)
+        )(read.value)
 
         expect(messageRead.conversationId).toBe('original-conversation')
         expect(messageRead.body?.content).toContain(reply)
@@ -163,6 +169,7 @@ describe('reply draft persistence and recovery', () => {
             expect(request.headers?.prefer).toBe(
               'IdType="ImmutableId", outlook.body-content-type="text"'
             )
+            expect(request.url).not.toContain('internetMessageHeaders')
 
             return Effect.succeed(
               jsonResponse({

@@ -121,6 +121,13 @@ export type EmailAttachmentBase64 = typeof EmailAttachmentBase64.Type
 
 const EmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
 
+const EmailHeaderName = Schema.Trimmed.check(Schema.isNonEmpty())
+
+export class EmailMessageHeader extends Schema.Class<EmailMessageHeader>('EmailMessageHeader')({
+  name: EmailHeaderName,
+  value: Schema.String
+}) {}
+
 export class EmailAttachmentContent extends Schema.Class<EmailAttachmentContent>(
   'EmailAttachmentContent'
 )({
@@ -133,6 +140,22 @@ export class EmailAttachmentContent extends Schema.Class<EmailAttachmentContent>
   contentBase64: EmailAttachmentBase64
 }) {}
 
+/**
+ * IMAP keyword used as a portable email label (RFC 3501 `atom`).
+ *
+ * Keywords are ASCII printable characters except `atom-specials` (`(`, `)`, `{`, space,
+ * CTLs, `%`, `*`, `"`, `\`, `]`). The pattern therefore also rejects IMAP system flags
+ * such as `\Seen`, which always start with a backslash, plus any whitespace, control,
+ * non-ASCII, or empty value. Surrounding whitespace is rejected rather than trimmed so
+ * malformed keywords never silently become valid ones.
+ */
+export const EmailImapKeyword = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isPattern(/^[!#$&'+,\-\/.0-9:;<=>?@A-Z\[^_`a-z|}~]+$/)
+)
+
+export type EmailImapKeyword = typeof EmailImapKeyword.Type
+
 export class EmailMessageSummary extends Schema.Class<EmailMessageSummary>('EmailMessageSummary')({
   id: Schema.String,
   subject: Schema.optional(Schema.String),
@@ -141,7 +164,8 @@ export class EmailMessageSummary extends Schema.Class<EmailMessageSummary>('Emai
   sentAt: Schema.optional(Schema.String),
   receivedAt: Schema.optional(Schema.String),
   snippet: Schema.optional(Schema.String),
-  hasAttachments: Schema.Boolean
+  hasAttachments: Schema.Boolean,
+  labels: Schema.optional(Schema.Array(EmailImapKeyword))
 }) {}
 
 export class EmailMessage extends Schema.Class<EmailMessage>('EmailMessage')({
@@ -156,7 +180,9 @@ export class EmailMessage extends Schema.Class<EmailMessage>('EmailMessage')({
   sentAt: Schema.optional(Schema.String),
   receivedAt: Schema.optional(Schema.String),
   body: EmailBody,
-  attachments: Schema.Array(EmailAttachmentMetadata)
+  attachments: Schema.Array(EmailAttachmentMetadata),
+  labels: Schema.optional(Schema.Array(EmailImapKeyword)),
+  headers: Schema.Array(EmailMessageHeader)
 }) {}
 
 const EmailPageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_000 }))
@@ -264,6 +290,94 @@ export class EmailUntrashRequest extends Schema.Class<EmailUntrashRequest>('Emai
   messageId: EmailNonEmptyMessageId,
   folder: Schema.optional(EmailFolderName),
   destinationFolder: EmailFolderName
+}) {}
+
+export class EmailMoveInput extends Schema.Class<EmailMoveInput>('EmailMoveInput')({
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  destinationFolder: EmailFolderName
+}) {}
+
+const moveRequiresDifferentFolder = Schema.makeFilter<{
+  readonly folder?: string
+  readonly destinationFolder: string
+}>(input =>
+  (input.folder ?? 'INBOX') === input.destinationFolder
+    ? {
+        path: ['destinationFolder'],
+        issue: 'move requires destinationFolder to differ from folder'
+      }
+    : undefined
+)
+
+const EmailMoveActionInput = EmailMoveInput.check(moveRequiresDifferentFolder)
+
+export class EmailMoveRequest extends Schema.Class<EmailMoveRequest>('EmailMoveRequest')({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageId: EmailNonEmptyMessageId,
+  folder: EmailFolderName,
+  destinationFolder: EmailFolderName
+}) {}
+
+export class EmailSetFlagInput extends Schema.Class<EmailSetFlagInput>('EmailSetFlagInput')({
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  isFlagged: Schema.Boolean
+}) {}
+
+export class EmailSetFlagOutput extends Schema.Class<EmailSetFlagOutput>('EmailSetFlagOutput')({
+  messageId: EmailNonEmptyMessageId,
+  isFlagged: Schema.Boolean
+}) {}
+
+export class EmailSetFlagRequest extends Schema.Class<EmailSetFlagRequest>('EmailSetFlagRequest')({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageId: EmailNonEmptyMessageId,
+  folder: EmailFolderName,
+  isFlagged: Schema.Boolean
+}) {}
+
+export class EmailModifyLabelsInput extends Schema.Class<EmailModifyLabelsInput>(
+  'EmailModifyLabelsInput'
+)({
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  addLabels: Schema.optional(Schema.Array(EmailImapKeyword)),
+  removeLabels: Schema.optional(Schema.Array(EmailImapKeyword))
+}) {}
+
+const modifyLabelsRequiresField = Schema.makeFilter<{
+  readonly addLabels?: ReadonlyArray<string>
+  readonly removeLabels?: ReadonlyArray<string>
+}>(input =>
+  input.addLabels === undefined && input.removeLabels === undefined
+    ? {
+        path: ['addLabels'],
+        issue: 'modify requires addLabels or removeLabels'
+      }
+    : undefined
+)
+
+const EmailModifyLabelsActionInput = EmailModifyLabelsInput.check(modifyLabelsRequiresField)
+
+export class EmailModifyLabelsOutput extends Schema.Class<EmailModifyLabelsOutput>(
+  'EmailModifyLabelsOutput'
+)({
+  messageId: EmailNonEmptyMessageId,
+  labels: Schema.Chunk(EmailImapKeyword)
+}) {}
+
+export class EmailModifyLabelsRequest extends Schema.Class<EmailModifyLabelsRequest>(
+  'EmailModifyLabelsRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageId: EmailNonEmptyMessageId,
+  folder: EmailFolderName,
+  addLabels: Schema.optional(Schema.Array(EmailImapKeyword)),
+  removeLabels: Schema.optional(Schema.Array(EmailImapKeyword))
 }) {}
 
 export class EmailComposeMessage extends Schema.Class<EmailComposeMessage>('EmailComposeMessage')({
@@ -375,6 +489,11 @@ export type EmailClientApi = {
   readonly listMessages: (
     input: EmailListMessagesRequest
   ) => Effect.Effect<ActionResult<EmailListMessagesOutput>, ConnectorError>
+  /**
+   * Hosts MUST return the RFC 5322 message headers as `headers`: IMAP via `BODY.PEEK[HEADER]`,
+   * POP3 via `TOP`. Return an empty array only when the server response contains no headers;
+   * never omit headers to save a fetch.
+   */
   readonly getMessage: (
     input: EmailGetMessageRequest
   ) => Effect.Effect<ActionResult<EmailGetMessageOutput>, ConnectorError>
@@ -384,12 +503,51 @@ export type EmailClientApi = {
   readonly setRead?: (
     input: EmailSetReadRequest
   ) => Effect.Effect<ActionResult<EmailSetReadOutput>, ConnectorError>
+  /**
+   * Optional host-only IMAP flag mutation. Hosts resolve the UID from the opaque
+   * `messageId` (which encodes UIDVALIDITY and UID) in `folder`, then set or clear the
+   * `\Flagged` system flag with UID-addressed `STORE` (`+FLAGS.SILENT` to flag,
+   * `-FLAGS.SILENT` to unflag), preserving every other flag and keyword. Hosts check
+   * `PERMANENTFLAGS` first and return an `ActionResult.failure` when the server does not
+   * support the flag.
+   */
+  readonly setFlag?: (
+    input: EmailSetFlagRequest
+  ) => Effect.Effect<ActionResult<EmailSetFlagOutput>, ConnectorError>
   readonly trash?: (
     input: EmailTrashRequest
   ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
   readonly untrash?: (
     input: EmailUntrashRequest
   ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
+  /**
+   * Optional host-only IMAP message relocation. Hosts resolve the UID from the opaque
+   * `messageId` (which encodes UIDVALIDITY and UID) in `folder`, then move it to
+   * `destinationFolder` with UID-addressed `MOVE` (RFC 6851) when the server advertises it,
+   * otherwise `COPY` plus flagging `\Deleted` and expunging only the moved UID. Hosts preserve
+   * flags and keywords, never blanket-expunge, reject identical source/destination folders
+   * with a failure, and own partial-move reconciliation. Moved IDs
+   * must use destination UIDVALIDITY/UID when known; omit `messageId` and re-list the
+   * destination when no reliable mapping is available, never reusing a stale source UID.
+   */
+  readonly move?: (
+    input: EmailMoveRequest
+  ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
+  /**
+   * Optional host-only IMAP keyword-label mutation. Hosts resolve the UID from the opaque
+   * `messageId` (which encodes UIDVALIDITY and UID) in `folder`, then apply keyword changes
+   * with UID-addressed `STORE` using `+FLAGS.SILENT` for `addLabels` and `-FLAGS.SILENT`
+   * for `removeLabels`, preserving every other keyword and system flag (never overwrite the
+   * whole flags list). Hosts check `PERMANENTFLAGS` first and return an `ActionResult.failure`
+   * for unsupported keywords; removals win when a keyword appears in both lists. Keywords
+   * implicitly exist through message assignment, so there is no label-catalog lifecycle:
+   * removing a keyword from all messages removes its usage. Returns the schema-validated
+   * `messageId` plus the resulting keyword set as an Effect `Chunk` (for example via
+   * `Chunk.fromIterable`), matching other `Chunk` domain outputs in this package.
+   */
+  readonly modifyLabels?: (
+    input: EmailModifyLabelsRequest
+  ) => Effect.Effect<ActionResult<EmailModifyLabelsOutput>, ConnectorError>
   readonly createDraft: (
     input: EmailCreateDraftRequest
   ) => Effect.Effect<ActionResult<EmailCreateDraftOutput>, ConnectorError>
@@ -622,7 +780,8 @@ export const emailListMessagesAction = defineAction({
 
 export const emailGetMessageAction = defineAction({
   id: 'email.get_message',
-  description: 'Get one normalized message from a configured IMAP or POP3 account.',
+  description:
+    'Get one normalized message with required headers from a configured IMAP or POP3 account.',
   access: 'read',
   inputSchema: EmailGetMessageInput,
   outputSchema: EmailGetMessageOutput,
@@ -634,7 +793,7 @@ export const emailGetMessageAction = defineAction({
       const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
       const client = yield* EmailClient
 
-      return yield* client.getMessage(
+      const result = yield* client.getMessage(
         EmailGetMessageRequest.make({
           connection,
           credential,
@@ -642,6 +801,16 @@ export const emailGetMessageAction = defineAction({
           folder: input.folder
         })
       )
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const output = yield* Schema.decodeUnknownEffect(EmailGetMessageOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid getMessage output', error)
+        )
+      )
+
+      return ActionResult.success(output)
     })
 })
 
@@ -788,6 +957,48 @@ export const emailSetReadAction = defineAction({
     })
 })
 
+export const emailSetFlagAction = defineAction({
+  id: 'email.set_flag',
+  description:
+    'Flag (isFlagged: true) or unflag (isFlagged: false) an IMAP message for follow-up. Folder defaults to INBOX; requires host setFlag support.',
+  access: 'write',
+  inputSchema: EmailSetFlagInput,
+  outputSchema: EmailSetFlagOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const { connection, credential, client } = yield* emailMutationContext(
+        integration,
+        'Changing flag state'
+      )
+
+      if (client.setFlag === undefined) {
+        return yield* Effect.fail(
+          validationError(integration, 'EmailClient does not support setFlag')
+        )
+      }
+
+      const result = yield* client.setFlag(
+        EmailSetFlagRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          isFlagged: input.isFlagged
+        })
+      )
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const output = yield* Schema.decodeUnknownEffect(EmailSetFlagOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid setFlag output', error)
+        )
+      )
+
+      return ActionResult.success(output)
+    })
+})
+
 export const emailTrashAction = defineAction({
   id: 'email.trash',
   description:
@@ -866,6 +1077,86 @@ export const emailUntrashAction = defineAction({
     })
 })
 
+export const emailModifyLabelsAction = defineAction({
+  id: 'email.modify_labels',
+  description:
+    'Add or remove IMAP keyword labels on a message. Folder defaults to INBOX; requires host modifyLabels support. Keywords only, never system flags.',
+  access: 'write',
+  inputSchema: EmailModifyLabelsActionInput,
+  outputSchema: EmailModifyLabelsOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const { connection, credential, client } = yield* emailMutationContext(
+        integration,
+        'Modifying labels'
+      )
+
+      if (client.modifyLabels === undefined) {
+        return yield* Effect.fail(
+          validationError(integration, 'EmailClient does not support modifyLabels')
+        )
+      }
+
+      const result = yield* client.modifyLabels(
+        EmailModifyLabelsRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          addLabels: input.addLabels,
+          removeLabels: input.removeLabels
+        })
+      )
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const output = yield* Schema.decodeUnknownEffect(EmailModifyLabelsOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid modifyLabels output', error)
+        )
+      )
+
+      return ActionResult.success(output)
+    })
+})
+
+export const emailMoveAction = defineAction({
+  id: 'email.move',
+  description:
+    'Move an IMAP message to destinationFolder, never delete it. Source folder defaults to INBOX and must differ from the destination; requires host move support. Returns the destination folder and the new message ID when known.',
+  access: 'write',
+  inputSchema: EmailMoveActionInput,
+  outputSchema: EmailMoveMessageOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const { connection, credential, client } = yield* emailMutationContext(integration, 'Move')
+
+      if (client.move === undefined) {
+        return yield* Effect.fail(validationError(integration, 'EmailClient does not support move'))
+      }
+
+      const result = yield* client.move(
+        EmailMoveRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          destinationFolder: input.destinationFolder
+        })
+      )
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const output = yield* Schema.decodeUnknownEffect(EmailMoveMessageOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid move output', error)
+        )
+      )
+
+      return ActionResult.success(output)
+    })
+})
+
 export const emailActions = [
   emailListMessagesAction,
   emailGetMessageAction,
@@ -873,8 +1164,11 @@ export const emailActions = [
   emailCreateDraftAction,
   emailSendMessageAction,
   emailSetReadAction,
+  emailSetFlagAction,
   emailTrashAction,
-  emailUntrashAction
+  emailUntrashAction,
+  emailModifyLabelsAction,
+  emailMoveAction
 ]
 
 export const EmailConnector = defineConnector({
