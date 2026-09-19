@@ -157,7 +157,9 @@ IDs. Restore targets Deleted Items as its source and defaults the destination to
 File attachment retrieval requires Graph's file
 discriminator and valid base64 content, then exposes it as required `contentBase64`; item and
 reference attachments are available only as list metadata.
-`OutlookListAttachmentsOutput.attachments` decodes to an Effect `Chunk`. Category exports are
+`OutlookListAttachmentsOutput.attachments` decodes to an Effect `Chunk`. `outlookMoveMessageAction`
+with `OutlookMoveMessageInput` moves a message to a required `destinationFolderId` via Graph
+`/move`. Category exports are
 `OutlookCategory`, `OutlookCategoryColor`, `OutlookListCategoriesInput/Output`,
 `OutlookCreateCategoryInput`, `OutlookDeleteCategoryInput/Output`, `OutlookSetCategoriesInput`,
 `OutlookModifyCategoriesInput`, plus `MicrosoftOutlookCategoryRead/WriteOAuthCredentialSlot` opt-in

@@ -645,12 +645,18 @@ size policy, durable storage, and content scanning.
 - `outlook.untrash` takes `{ messageId, mailbox?, destinationFolderId? }` and moves from Deleted
   Items to `inbox` by default, or the supplied destination folder ID/well-known name. It does not
   recover permanently deleted messages or infer the original folder.
+- `outlook.move_message` takes `{ messageId, mailbox?, destinationFolderId }` with a required
+  destination folder ID/well-known name and moves the message there using Graph `/move`. The source
+  folder is not an input, so the connector performs no same-folder check; Graph decides the outcome.
+  A `deleteditems` destination performs the same Graph call as `outlook.trash`: hosts that gate on
+  declared access should override `move_message` to `destructive` for well-known destructive
+  destinations.
 
-All three return the provider's updated `OutlookMessage` and request immutable IDs. Use the returned
+All four return the provider's updated `OutlookMessage` and request immutable IDs. Use the returned
 `id` for subsequent calls. They use `Mail.ReadWrite` for the signed-in mailbox/application mode and
 `Mail.ReadWrite.Shared` for other explicit delegated mailboxes, with the same own-mailbox identity
 exception and application mailbox guard
-as draft writes. Read-state and restore actions declare `write`; trash declares `destructive`.
+as draft writes. Read-state, restore, and move actions declare `write`; trash declares `destructive`.
 
 ### Outlook categories
 

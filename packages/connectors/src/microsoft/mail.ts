@@ -1333,7 +1333,13 @@ const outlookMutateMessage = (input: {
   readonly integration: ConnectorIntegration
   readonly mailbox: string | undefined
   readonly messageId: string
-  readonly operation: 'set_read' | 'set_categories' | 'modify_categories' | 'trash' | 'untrash'
+  readonly operation:
+    | 'set_read'
+    | 'set_categories'
+    | 'modify_categories'
+    | 'trash'
+    | 'untrash'
+    | 'move_message'
   readonly body:
     | { readonly isRead: boolean }
     | { readonly categories: ReadonlyArray<string> }
@@ -1348,7 +1354,11 @@ const outlookMutateMessage = (input: {
     const collection =
       input.operation === 'untrash' ? `${mailboxPath}/mailFolders/deleteditems` : mailboxPath
 
-    const isMove = input.operation === 'trash' || input.operation === 'untrash'
+    const isMove =
+      input.operation === 'trash' ||
+      input.operation === 'untrash' ||
+      input.operation === 'move_message'
+
     const suffix = isMove ? '/move' : ''
 
     const response = yield* http.request(
@@ -1421,6 +1431,31 @@ export const outlookUntrashAction = defineAction({
       messageId: input.messageId,
       operation: 'untrash',
       body: { destinationId: input.destinationFolderId ?? 'inbox' }
+    })
+})
+
+export class OutlookMoveMessageInput extends Schema.Class<OutlookMoveMessageInput>(
+  'OutlookMoveMessageInput'
+)({
+  messageId: OutlookNonEmptyString,
+  mailbox: Schema.optional(OutlookNonEmptyString),
+  destinationFolderId: OutlookNonEmptyString
+}) {}
+
+export const outlookMoveMessageAction = defineAction({
+  id: 'outlook.move_message',
+  description:
+    'Move an Outlook message to destinationFolderId (folder ID or well-known name). The source folder is not an input, so the connector performs no same-folder check; Graph decides the outcome. Returns the provider message: use the returned id for subsequent operations.',
+  access: 'write',
+  inputSchema: OutlookMoveMessageInput,
+  outputSchema: OutlookMessage,
+  execute: ({ integration, input }) =>
+    outlookMutateMessage({
+      integration,
+      mailbox: input.mailbox,
+      messageId: input.messageId,
+      operation: 'move_message',
+      body: { destinationId: input.destinationFolderId }
     })
 })
 
@@ -1857,6 +1892,7 @@ export const outlookMailActions = [
   outlookSetReadAction,
   outlookTrashAction,
   outlookUntrashAction,
+  outlookMoveMessageAction,
   outlookListCategoriesAction,
   outlookCreateCategoryAction,
   outlookDeleteCategoryAction,

@@ -443,6 +443,7 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.set_read`           | mark a message read or unread                                  |
 | `outlook.trash`              | move a message to Deleted Items                                |
 | `outlook.untrash`            | move a message from Deleted Items to inbox or another folder   |
+| `outlook.move_message`       | move a message to any folder                                   |
 | `outlook.list_categories`    | list master categories                                         |
 | `outlook.create_category`    | create a master category                                       |
 | `outlook.delete_category`    | delete a master category                                       |
@@ -521,20 +522,24 @@ with valid base64 `contentBytes` and returns required `contentBase64`. Item and 
 remain available only as list metadata and are rejected by this action. Hosts own base64 decoding, size limits,
 durable storage, and content scanning.
 
-#### Read state and trash
+#### Read state, trash, and move
 
 `outlook.set_read` accepts `{ messageId, isRead, mailbox? }`: `true` marks read and `false` marks
 unread via Graph `PATCH`. `outlook.trash` accepts `{ messageId, mailbox? }` and calls Graph `/move`
 with destination `deleteditems`, never permanent deletion. `outlook.untrash` accepts
 `{ messageId, mailbox?, destinationFolderId? }` and moves from Deleted Items to `inbox` by default,
 or the specified folder ID/well-known name. It neither infers the original folder nor recovers
-permanently deleted messages.
+permanently deleted messages. `outlook.move_message` accepts
+`{ messageId, mailbox?, destinationFolderId }` with a required destination and moves the message
+there. The source folder is not an input, so the connector performs no same-folder check; Graph
+decides the outcome. A `deleteditems` destination matches `outlook.trash`: hosts gating on access
+should override accordingly.
 
-All three return the updated `OutlookMessage` and request immutable IDs. Use the returned `id`
+All four return the updated `OutlookMessage` and request immutable IDs. Use the returned `id`
 for subsequent operations. Permission hints are `Mail.ReadWrite` for the signed-in mailbox,
 matching connected-user mailboxes, and application mode, or `Mail.ReadWrite.Shared` for other
 explicit delegated mailboxes. Application mode
-still requires `mailbox`; hosts own consent and Exchange grants. Read-state and restore actions
+still requires `mailbox`; hosts own consent and Exchange grants. Read-state, restore, and move actions
 have `write` access; trash has `destructive` access.
 
 Send actions return `{ accepted: true }` for Graph's `202 Accepted`. Acceptance confirms submission,

@@ -151,7 +151,8 @@ refresh, consent policy, Google Picker integration, restricted-scope compliance,
 transfer.
 
 Outlook and generic IMAP email support `set_read` (with boolean `isRead`), `trash`, and `untrash`
-actions in their respective `outlook.*` and `email.*` namespaces. Outlook calls Graph directly;
+actions in their respective `outlook.*` and `email.*` namespaces, plus `outlook.move_message` for
+Graph folder moves. Outlook calls Graph directly;
 generic email requires optional host `EmailClient.setRead`, `trash`, and `untrash` methods.
 Generic email additionally supports `email.move` to any folder through optional
 `EmailClient.move` host support; the destination folder is required and the returned message ID

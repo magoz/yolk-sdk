@@ -46,6 +46,8 @@ export {
   OutlookMessage,
   OutlookMessageBody,
   OutlookMessageIdInput,
+  outlookMoveMessageAction,
+  OutlookMoveMessageInput,
   outlookModifyCategoriesAction,
   OutlookModifyCategoriesInput,
   OutlookRecipient,
