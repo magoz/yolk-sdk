@@ -47,6 +47,10 @@ export {
 
 export {
   gmailActions,
+  gmailCreateLabelAction,
+  GmailCreateLabelInput,
+  gmailDeleteLabelAction,
+  GmailDeleteLabelOutput,
   gmailDraftComposeAction,
   GmailDraftComposeInput,
   gmailDraftDeleteAction,
@@ -62,8 +66,14 @@ export {
   GmailGetAttachmentOutput,
   gmailGetMessageAction,
   GmailGetMessageInput,
+  gmailGetLabelAction,
   gmailGetThreadAction,
   GmailGetThreadInput,
+  GmailLabel,
+  GmailLabelIdInput,
+  GmailLabelListVisibility,
+  GmailLabelMessageListVisibility,
+  GmailLabelType,
   GmailListAttachmentsInput,
   GmailListAttachmentsOutput,
   gmailListAttachmentsAction,
@@ -88,6 +98,8 @@ export {
   GmailSendAs,
   gmailTrashAction,
   gmailUntrashAction,
+  gmailUpdateLabelAction,
+  GmailUpdateLabelInput,
   googleGmailApiBaseUrl
 } from './gmail.ts'
 

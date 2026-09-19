@@ -147,6 +147,7 @@ package does not bundle those libraries.
 | `email.set_read`       | mark an IMAP message read or unread            | `write`       |
 | `email.trash`          | move an IMAP message to trash                  | `destructive` |
 | `email.untrash`        | move an IMAP message out of trash              | `write`       |
+| `email.modify_labels`  | add/remove IMAP keyword labels                 | `write`       |
 
 Incoming actions require `incomingHost` and use `EmailIncomingCredentialSlot`. They default to
 `incomingProtocol: 'imap'`, `incomingSecurity: 'tls'`, and port `993`; POP3 with TLS defaults to
@@ -170,6 +171,17 @@ parsing, base64 encoding, size limits, durable storage, and content scanning. IM
 the message read when supported. POP3 has no standard partial-part retrieval, so adapters may fetch
 the whole stable UIDL-addressed message before extracting the part. POP3 rejects `folder`; omit it
 for attachment retrieval.
+
+`email.modify_labels` takes `{ messageId, folder?, addLabels?, removeLabels? }` with at least
+one label list. It requires IMAP and optional `EmailClient.modifyLabels` host support; missing
+support produces a typed validation error without breaking existing adapters. The incoming
+credential is used and `folder` defaults to `INBOX`. Labels must be ASCII IMAP keyword atoms,
+not system flags such as `\Seen`; spaces, control characters and IMAP atom specials are rejected.
+Hosts check `PERMANENTFLAGS` and apply UID `STORE` additions/removals while preserving unrelated
+keywords and system flags. Removals win on overlap. Hosts return `{ messageId, labels }` with
+`labels` as an Effect `Chunk`; list/get messages may expose optional `labels` arrays. There is no
+standalone IMAP label catalog: assignment creates keyword usage, removal clears usage. POP3 and
+SMTP cannot persist labels. Hosts own partial-write reconciliation; the SDK has no socket adapter.
 
 `email.create_draft` requires IMAP, accepts drafts without recipients, and uses the incoming
 credential. Optional `folder` selects the mailbox. When omitted, the host adapter discovers a
@@ -247,6 +259,10 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 | `gmail.list_drafts`      | list drafts                    |
 | `gmail.get_thread`       | fetch normalized thread        |
 | `gmail.list_labels`      | list labels                    |
+| `gmail.create_label`     | create a user label            |
+| `gmail.get_label`        | get label details              |
+| `gmail.update_label`     | rename/update label visibility |
+| `gmail.delete_label`     | delete a user label            |
 | `gmail.modify_labels`    | add/remove labels              |
 | `gmail.trash`            | move a message to trash        |
 | `gmail.untrash`          | restore a trashed message      |
@@ -259,7 +275,15 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 | `gmail.list_send_as`     | list send-as aliases           |
 | `gmail.list_accounts`    | list accessible Gmail accounts |
 
-#### Fetch a normalized Gmail thread
+#Label creation takes `{ name, messageListVisibility?, labelListVisibility? }`. Get/delete take
+`{ id }`; update takes `{ id, name?, messageListVisibility?, labelListVisibility? }` with at
+least one changed field. Visibility values are `show | hide` and
+`labelShow | labelShowIfUnread | labelHide`, respectively. Reads use `gmail.readonly`; lifecycle
+mutations and message assignment reuse `gmail.modify`. System labels cannot be renamed or deleted.
+Delete returns `{ id, deleted: true }`; it deletes the label, not messages. Assign/remove labels
+with `gmail.modify_labels` and `{ messageId, addLabelIds?, removeLabelIds? }`.
+
+### Fetch a normalized Gmail thread
 
 `gmail.get_thread` requires `{ threadId, format }`, where `format` is `full`, `metadata`, or
 `minimal`. Use `full` when decoded message bodies are required.
@@ -350,24 +374,26 @@ Online APIs, or legacy OneDrive APIs.
 
 All OAuth slots use the shared `microsoft.oauth` binding id:
 
-| Slot                                             | Permission hint         |
-| ------------------------------------------------ | ----------------------- |
-| `MicrosoftOutlookReadOAuthCredentialSlot`        | `Mail.Read`             |
-| `MicrosoftOutlookWriteOAuthCredentialSlot`       | `Mail.ReadWrite`        |
-| `MicrosoftOutlookSendOAuthCredentialSlot`        | `Mail.Send`             |
-| `MicrosoftOutlookSharedReadOAuthCredentialSlot`  | `Mail.Read.Shared`      |
-| `MicrosoftOutlookSharedWriteOAuthCredentialSlot` | `Mail.ReadWrite.Shared` |
-| `MicrosoftOutlookSharedSendOAuthCredentialSlot`  | `Mail.Send.Shared`      |
-| `MicrosoftOneDriveReadOAuthCredentialSlot`       | `Files.Read`            |
-| `MicrosoftOneDriveWriteOAuthCredentialSlot`      | `Files.ReadWrite`       |
-| `MicrosoftOneDriveReadAllOAuthCredentialSlot`    | `Files.Read.All`        |
-| `MicrosoftOneDriveWriteAllOAuthCredentialSlot`   | `Files.ReadWrite.All`   |
-| `MicrosoftCombinedOAuthCredentialSlot`           | all connector scopes    |
-| `MicrosoftOAuthCredentialSlot`                   | none declared           |
+| Slot                                               | Permission hint                                    |
+| -------------------------------------------------- | -------------------------------------------------- |
+| `MicrosoftOutlookReadOAuthCredentialSlot`          | `Mail.Read`                                        |
+| `MicrosoftOutlookWriteOAuthCredentialSlot`         | `Mail.ReadWrite`                                   |
+| `MicrosoftOutlookSendOAuthCredentialSlot`          | `Mail.Send`                                        |
+| `MicrosoftOutlookSharedReadOAuthCredentialSlot`    | `Mail.Read.Shared`                                 |
+| `MicrosoftOutlookSharedWriteOAuthCredentialSlot`   | `Mail.ReadWrite.Shared`                            |
+| `MicrosoftOutlookSharedSendOAuthCredentialSlot`    | `Mail.Send.Shared`                                 |
+| `MicrosoftOneDriveReadOAuthCredentialSlot`         | `Files.Read`                                       |
+| `MicrosoftOneDriveWriteOAuthCredentialSlot`        | `Files.ReadWrite`                                  |
+| `MicrosoftOneDriveReadAllOAuthCredentialSlot`      | `Files.Read.All`                                   |
+| `MicrosoftOneDriveWriteAllOAuthCredentialSlot`     | `Files.ReadWrite.All`                              |
+| `MicrosoftOutlookCategoryReadOAuthCredentialSlot`  | `MailboxSettings.Read`                             |
+| `MicrosoftOutlookCategoryWriteOAuthCredentialSlot` | `MailboxSettings.ReadWrite`                        |
+| `MicrosoftCombinedOAuthCredentialSlot`             | mail and file scopes, excluding category lifecycle |
+| `MicrosoftOAuthCredentialSlot`                     | none declared                                      |
 
 Inputs default to the signed-in mailbox through `/me`. Set optional `mailbox` to a user ID or user
 principal name to target an Exchange Online shared/delegated mailbox through `/users/{mailbox}`.
-The connector then requests the matching Shared slot, unless the explicit `mailbox` matches the
+For message actions, the connector then requests the matching Shared slot, unless the explicit `mailbox` matches the
 connected user identity (`OAuthCredential.accountId`, case-insensitive), which keeps the ordinary
 `Mail.*` slot on the same `/users/{mailbox}` path. The same `mailbox` must accompany an opaque
 `nextLink` so the resolver receives the appropriate mailbox consent hint. Populate `accountId` with
@@ -406,6 +432,36 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.set_read`           | mark a message read or unread                                  |
 | `outlook.trash`              | move a message to Deleted Items                                |
 | `outlook.untrash`            | move a message from Deleted Items to inbox or another folder   |
+| `outlook.list_categories`    | list master categories                                         |
+| `outlook.create_category`    | create a master category                                       |
+| `outlook.delete_category`    | delete a master category                                       |
+| `outlook.set_categories`     | replace or clear message category names                        |
+| `outlook.modify_categories`  | add/remove message category names                              |
+
+#### Categories
+
+List takes `{ mailbox?, top?, nextLink? }` and returns `{ categories, nextLink? }`, with an Effect
+`Chunk` of categories (`id`, `displayName`, optional `color`). Create takes
+`{ mailbox?, displayName, color? }`, where color is `none` or `preset0` through `preset24`.
+Delete takes `{ mailbox?, categoryId }` and returns `{ id, deleted: true }` without decoding
+Graph's empty 204 body. The name is immutable; deleting a master category does not remove its
+name from existing message assignments.
+
+Master-category list and mutations require opt-in `MailboxSettings.Read` and
+`MailboxSettings.ReadWrite`, respectively, sharing `microsoft.oauth`. These are not in the
+existing combined slot. There are no `.Shared` mailbox-settings scopes; delegated access to
+another mailbox's settings remains subject to Graph authorization. Application mode requires an
+explicit `mailbox`. List accepts the same null/blank placeholders as message lists; replay
+`nextLink` unchanged with the same mailbox. Only that Graph v1.0 category collection is accepted.
+
+Assign names, **not category IDs**, using `outlook.set_categories` with
+`{ messageId, mailbox?, categories }`; `[]` clears all names. `outlook.modify_categories` takes
+`{ messageId, mailbox?, addCategories?, removeCategories? }` with at least one list. It reads
+current categories, merges names (deduped, removals win), and PATCHes the result. Invalid/failed
+reads never trigger a PATCH. Both calls use `Mail.ReadWrite` or `Mail.ReadWrite.Shared` and
+preserve the existing own-mailbox/application guards and immutable-ID headers. Neither action
+creates master categories automatically. The merge is **non-atomic**: hosts must serialize
+competing updates, and the SDK makes no retry or compare-and-swap guarantee.
 
 #### Reply drafts and recovery
 

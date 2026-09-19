@@ -117,6 +117,87 @@ export class GmailModifyLabelsInput extends Schema.Class<GmailModifyLabelsInput>
   removeLabelIds: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
+const GmailLabelName = Schema.Trimmed.check(Schema.isNonEmpty())
+
+// URL parsers normalize even percent-encoded dot segments. Reject rather than change identity.
+const GmailLabelId = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f]+$/)
+)
+
+export const GmailLabelMessageListVisibility = Schema.Literals(['show', 'hide'])
+
+export type GmailLabelMessageListVisibility = typeof GmailLabelMessageListVisibility.Type
+
+export const GmailLabelListVisibility = Schema.Literals([
+  'labelShow',
+  'labelShowIfUnread',
+  'labelHide'
+])
+
+export type GmailLabelListVisibility = typeof GmailLabelListVisibility.Type
+
+export const GmailLabelType = Schema.Literals(['system', 'user'])
+
+export type GmailLabelType = typeof GmailLabelType.Type
+
+export class GmailLabel extends Schema.Class<GmailLabel>('GmailLabel')({
+  id: Schema.String,
+  name: Schema.String,
+  messageListVisibility: Schema.optional(GmailLabelMessageListVisibility),
+  labelListVisibility: Schema.optional(GmailLabelListVisibility),
+  type: Schema.optional(GmailLabelType),
+  messagesTotal: Schema.optional(Schema.Number),
+  messagesUnread: Schema.optional(Schema.Number),
+  threadsTotal: Schema.optional(Schema.Number),
+  threadsUnread: Schema.optional(Schema.Number)
+}) {}
+
+export class GmailCreateLabelInput extends Schema.Class<GmailCreateLabelInput>(
+  'GmailCreateLabelInput'
+)({
+  name: GmailLabelName,
+  messageListVisibility: Schema.optional(GmailLabelMessageListVisibility),
+  labelListVisibility: Schema.optional(GmailLabelListVisibility)
+}) {}
+
+export class GmailLabelIdInput extends Schema.Class<GmailLabelIdInput>('GmailLabelIdInput')({
+  id: GmailLabelId
+}) {}
+
+export class GmailUpdateLabelInput extends Schema.Class<GmailUpdateLabelInput>(
+  'GmailUpdateLabelInput'
+)({
+  id: GmailLabelId,
+  name: Schema.optional(GmailLabelName),
+  messageListVisibility: Schema.optional(GmailLabelMessageListVisibility),
+  labelListVisibility: Schema.optional(GmailLabelListVisibility)
+}) {}
+
+const updateLabelRequiresField = Schema.makeFilter<{
+  readonly name?: string
+  readonly messageListVisibility?: string
+  readonly labelListVisibility?: string
+}>(input =>
+  input.name === undefined &&
+  input.messageListVisibility === undefined &&
+  input.labelListVisibility === undefined
+    ? {
+        path: ['name'],
+        issue: 'update requires name, messageListVisibility, or labelListVisibility'
+      }
+    : undefined
+)
+
+const GmailUpdateLabelActionInput = GmailUpdateLabelInput.check(updateLabelRequiresField)
+
+export class GmailDeleteLabelOutput extends Schema.Class<GmailDeleteLabelOutput>(
+  'GmailDeleteLabelOutput'
+)({
+  id: Schema.String,
+  deleted: Schema.Literal(true)
+}) {}
+
 export const GmailMessagePayloadHeader = Schema.Struct({
   name: Schema.String,
   value: Schema.String
@@ -583,7 +664,7 @@ const gmailProviderFailure = (code: string, message: string, status: number, bod
 
 const gmailRequest = (input: {
   readonly token: string
-  readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  readonly method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   readonly path: string
   readonly body?: unknown
 }) => {
@@ -1028,9 +1109,172 @@ export const gmailListLabelsAction = defineAction({
     )
 })
 
+export const gmailCreateLabelAction = defineAction({
+  id: 'gmail.create_label',
+  description: 'Create a Gmail user label.',
+  access: 'write',
+  inputSchema: GmailCreateLabelInput,
+  outputSchema: GmailLabel,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailModifyOAuthCredentialSlot
+      )
+
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        gmailRequest({
+          token,
+          method: 'POST',
+          path: '/users/me/labels',
+          body: {
+            name: input.name,
+            messageListVisibility: input.messageListVisibility,
+            labelListVisibility: input.labelListVisibility
+          }
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return yield* gmailProviderFailure(
+          'gmail_create_label_failed',
+          'Gmail create label failed',
+          response.status,
+          response.body
+        )
+      }
+
+      const output = yield* decodeJsonResponse(GmailLabel, response)
+
+      return ActionResult.success(output)
+    })
+})
+
+export const gmailGetLabelAction = defineAction({
+  id: 'gmail.get_label',
+  description: 'Get a Gmail label by id.',
+  access: 'read',
+  inputSchema: GmailLabelIdInput,
+  outputSchema: GmailLabel,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailReadonlyOAuthCredentialSlot
+      )
+
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        gmailRequest({
+          token,
+          method: 'GET',
+          path: `/users/me/labels/${encodeURIComponent(input.id)}`
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return yield* gmailProviderFailure(
+          'gmail_get_label_failed',
+          'Gmail get label failed',
+          response.status,
+          response.body
+        )
+      }
+
+      const output = yield* decodeJsonResponse(GmailLabel, response)
+
+      return ActionResult.success(output)
+    })
+})
+
+export const gmailUpdateLabelAction = defineAction({
+  id: 'gmail.update_label',
+  description:
+    'Rename a Gmail user label or update its visibility. System labels cannot be renamed.',
+  access: 'write',
+  inputSchema: GmailUpdateLabelActionInput,
+  outputSchema: GmailLabel,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailModifyOAuthCredentialSlot
+      )
+
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        gmailRequest({
+          token,
+          method: 'PATCH',
+          path: `/users/me/labels/${encodeURIComponent(input.id)}`,
+          body: {
+            name: input.name,
+            messageListVisibility: input.messageListVisibility,
+            labelListVisibility: input.labelListVisibility
+          }
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return yield* gmailProviderFailure(
+          'gmail_update_label_failed',
+          'Gmail update label failed',
+          response.status,
+          response.body
+        )
+      }
+
+      const output = yield* decodeJsonResponse(GmailLabel, response)
+
+      return ActionResult.success(output)
+    })
+})
+
+export const gmailDeleteLabelAction = defineAction({
+  id: 'gmail.delete_label',
+  description: 'Delete a Gmail user label. System labels cannot be deleted.',
+  access: 'destructive',
+  inputSchema: GmailLabelIdInput,
+  outputSchema: GmailDeleteLabelOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailModifyOAuthCredentialSlot
+      )
+
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        gmailRequest({
+          token,
+          method: 'DELETE',
+          path: `/users/me/labels/${encodeURIComponent(input.id)}`
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return yield* gmailProviderFailure(
+          'gmail_delete_label_failed',
+          'Gmail delete label failed',
+          response.status,
+          response.body
+        )
+      }
+
+      // Gmail answers label deletes with 204 and an empty body: no JSON to decode.
+      return ActionResult.success(GmailDeleteLabelOutput.make({ id: input.id, deleted: true }))
+    })
+})
+
 export const gmailModifyLabelsAction = defineAction({
   id: 'gmail.modify_labels',
   description: 'Add or remove labels on a Gmail message.',
+  access: 'write',
   inputSchema: GmailModifyLabelsInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
@@ -1449,6 +1693,10 @@ export const gmailActions = [
   gmailDraftUpdateAction,
   gmailGetThreadAction,
   gmailListLabelsAction,
+  gmailCreateLabelAction,
+  gmailGetLabelAction,
+  gmailUpdateLabelAction,
+  gmailDeleteLabelAction,
   gmailModifyLabelsAction,
   gmailTrashAction,
   gmailUntrashAction,

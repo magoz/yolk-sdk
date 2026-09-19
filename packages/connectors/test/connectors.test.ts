@@ -864,6 +864,10 @@ describe('@yolk-sdk/connectors', () => {
       'gmail.draft_update',
       'gmail.get_thread',
       'gmail.list_labels',
+      'gmail.create_label',
+      'gmail.get_label',
+      'gmail.update_label',
+      'gmail.delete_label',
       'gmail.modify_labels',
       'gmail.trash',
       'gmail.untrash',
@@ -923,6 +927,11 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.set_read',
       'outlook.trash',
       'outlook.untrash',
+      'outlook.list_categories',
+      'outlook.create_category',
+      'outlook.delete_category',
+      'outlook.set_categories',
+      'outlook.modify_categories',
       'onedrive.list_items',
       'onedrive.search_items',
       'onedrive.get_item',
@@ -938,13 +947,22 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.create_reply_draft',
       'outlook.set_read',
       'outlook.untrash',
+      'outlook.create_category',
+      'outlook.set_categories',
+      'outlook.modify_categories',
       'onedrive.create_folder'
     ])
     expect(
       MicrosoftConnector.actions
         .filter(action => action.access === 'destructive')
         .map(action => action.id)
-    ).toEqual(['outlook.send_mail', 'outlook.send_draft', 'outlook.trash', 'onedrive.delete_item'])
+    ).toEqual([
+      'outlook.send_mail',
+      'outlook.send_draft',
+      'outlook.trash',
+      'outlook.delete_category',
+      'onedrive.delete_item'
+    ])
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
       'notion.search',
       'notion.get_page',

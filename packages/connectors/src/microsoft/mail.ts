@@ -12,6 +12,8 @@ import {
   microsoftAuthorizationHeaders,
   microsoftConnectorId,
   MicrosoftOAuthCredentialSlot,
+  MicrosoftOutlookCategoryReadOAuthCredentialSlot,
+  MicrosoftOutlookCategoryWriteOAuthCredentialSlot,
   MicrosoftOutlookReadOAuthCredentialSlot,
   MicrosoftOutlookSendOAuthCredentialSlot,
   MicrosoftOutlookSharedReadOAuthCredentialSlot,
@@ -551,7 +553,8 @@ const invalidNextLink = (
   actionId: string,
   collection:
     | 'mailbox folder collection'
-    | 'message attachment collection' = 'mailbox folder collection'
+    | 'message attachment collection'
+    | 'master category collection' = 'mailbox folder collection'
 ) =>
   new ConnectorError({
     cause: 'validation_failed',
@@ -1330,8 +1333,11 @@ const outlookMutateMessage = (input: {
   readonly integration: ConnectorIntegration
   readonly mailbox: string | undefined
   readonly messageId: string
-  readonly operation: 'set_read' | 'trash' | 'untrash'
-  readonly body: { readonly isRead: boolean } | { readonly destinationId: string }
+  readonly operation: 'set_read' | 'set_categories' | 'modify_categories' | 'trash' | 'untrash'
+  readonly body:
+    | { readonly isRead: boolean }
+    | { readonly categories: ReadonlyArray<string> }
+    | { readonly destinationId: string }
 }) =>
   Effect.gen(function* () {
     const slot = yield* outlookWriteSlot(input.integration, input.mailbox)
@@ -1342,11 +1348,12 @@ const outlookMutateMessage = (input: {
     const collection =
       input.operation === 'untrash' ? `${mailboxPath}/mailFolders/deleteditems` : mailboxPath
 
-    const suffix = input.operation === 'set_read' ? '' : '/move'
+    const isMove = input.operation === 'trash' || input.operation === 'untrash'
+    const suffix = isMove ? '/move' : ''
 
     const response = yield* http.request(
       ConnectorHttpRequest.make({
-        method: input.operation === 'set_read' ? 'PATCH' : 'POST',
+        method: isMove ? 'POST' : 'PATCH',
         url: `${microsoftGraphApiBaseUrl}${collection}/messages/${encodeURIComponent(input.messageId)}${suffix}`,
         headers: outlookDraftWriteHeaders(token),
         body: JSON.stringify(input.body)
@@ -1417,6 +1424,426 @@ export const outlookUntrashAction = defineAction({
     })
 })
 
+export const OutlookCategoryColor = Schema.Literals([
+  'none',
+  'preset0',
+  'preset1',
+  'preset2',
+  'preset3',
+  'preset4',
+  'preset5',
+  'preset6',
+  'preset7',
+  'preset8',
+  'preset9',
+  'preset10',
+  'preset11',
+  'preset12',
+  'preset13',
+  'preset14',
+  'preset15',
+  'preset16',
+  'preset17',
+  'preset18',
+  'preset19',
+  'preset20',
+  'preset21',
+  'preset22',
+  'preset23',
+  'preset24'
+])
+
+export type OutlookCategoryColor = typeof OutlookCategoryColor.Type
+
+export class OutlookCategory extends Schema.Class<OutlookCategory>('OutlookCategory')({
+  id: Schema.String,
+  displayName: Schema.String,
+  color: Schema.optional(OutlookCategoryColor)
+}) {}
+
+export class OutlookListCategoriesInput extends Schema.Class<OutlookListCategoriesInput>(
+  'OutlookListCategoriesInput'
+)({
+  mailbox: OptionalOutlookReadString.annotate({
+    description: 'Mailbox address or ID. Omit or use null for the connected user.'
+  }),
+  top: OptionalOutlookPageSize,
+  nextLink: OptionalOutlookReadString.annotate({
+    description:
+      'Omit or use null for the first page. For another page, copy nextLink from the previous result unchanged and keep the same mailbox. Do not invent a URL.'
+  })
+}) {}
+
+export class OutlookListCategoriesOutput extends Schema.Class<OutlookListCategoriesOutput>(
+  'OutlookListCategoriesOutput'
+)({
+  categories: Schema.Chunk(OutlookCategory),
+  nextLink: Schema.optional(Schema.String)
+}) {}
+
+const OutlookCategoriesApiOutput = Schema.Struct({
+  value: Schema.Array(OutlookCategory),
+  '@odata.nextLink': Schema.optional(Schema.String)
+})
+
+// Dot-only path segments are normalized by URL parsers even when encoded.
+const OutlookCategoryPathId = OutlookNonEmptyString.check(
+  Schema.isPattern(/^(?!\.+$)[^\u0000-\u001f\u007f]+$/)
+)
+
+export class OutlookCreateCategoryInput extends Schema.Class<OutlookCreateCategoryInput>(
+  'OutlookCreateCategoryInput'
+)({
+  mailbox: Schema.optional(OutlookCategoryPathId),
+  displayName: OutlookNonEmptyString,
+  color: Schema.optional(OutlookCategoryColor)
+}) {}
+
+export class OutlookDeleteCategoryInput extends Schema.Class<OutlookDeleteCategoryInput>(
+  'OutlookDeleteCategoryInput'
+)({
+  mailbox: Schema.optional(OutlookCategoryPathId),
+  categoryId: OutlookCategoryPathId
+}) {}
+
+export class OutlookDeleteCategoryOutput extends Schema.Class<OutlookDeleteCategoryOutput>(
+  'OutlookDeleteCategoryOutput'
+)({
+  id: Schema.String,
+  deleted: Schema.Literal(true)
+}) {}
+
+const OutlookCategoryName = Schema.Trimmed.check(Schema.isNonEmpty())
+
+export class OutlookSetCategoriesInput extends Schema.Class<OutlookSetCategoriesInput>(
+  'OutlookSetCategoriesInput'
+)({
+  messageId: OutlookCategoryPathId,
+  mailbox: Schema.optional(OutlookCategoryPathId),
+  categories: Schema.Array(OutlookCategoryName)
+}) {}
+
+export class OutlookModifyCategoriesInput extends Schema.Class<OutlookModifyCategoriesInput>(
+  'OutlookModifyCategoriesInput'
+)({
+  messageId: OutlookCategoryPathId,
+  mailbox: Schema.optional(OutlookCategoryPathId),
+  addCategories: Schema.optional(Schema.Array(OutlookCategoryName)),
+  removeCategories: Schema.optional(Schema.Array(OutlookCategoryName))
+}) {}
+
+const modifyCategoriesRequiresField = Schema.makeFilter<{
+  readonly addCategories?: ReadonlyArray<string>
+  readonly removeCategories?: ReadonlyArray<string>
+}>(input =>
+  input.addCategories === undefined && input.removeCategories === undefined
+    ? {
+        path: ['addCategories'],
+        issue: 'modify requires addCategories or removeCategories'
+      }
+    : undefined
+)
+
+const OutlookModifyCategoriesActionInput = OutlookModifyCategoriesInput.check(
+  modifyCategoriesRequiresField
+)
+
+type OutlookListCategoriesOutputFields = {
+  readonly categories: Chunk.Chunk<OutlookCategory>
+  nextLink?: string
+}
+
+const outlookMasterCategoriesPath = (mailbox: string | undefined) =>
+  `${outlookMailboxPath(mailbox)}/outlook/masterCategories`
+
+const requireMicrosoftCategoryNextLink = (
+  nextLink: string,
+  actionId: string,
+  mailbox: string | undefined
+) => {
+  if (!URL.canParse(nextLink)) {
+    return Effect.fail(invalidNextLink(actionId, 'master category collection'))
+  }
+
+  const parsed = new URL(nextLink)
+  const selectedCategoriesPath = `/v1.0${outlookMasterCategoriesPath(mailbox)}`
+
+  const isGraphV1Url =
+    parsed.protocol === 'https:' &&
+    parsed.hostname === 'graph.microsoft.com' &&
+    parsed.port === '' &&
+    parsed.username === '' &&
+    parsed.password === '' &&
+    parsed.hash === ''
+
+  return isGraphV1Url && parsed.pathname === selectedCategoriesPath
+    ? Effect.succeed(nextLink)
+    : Effect.fail(invalidNextLink(actionId, 'master category collection'))
+}
+
+// Master-category lifecycle uses MailboxSettings consent, not Mail.*. There are
+// no `.Shared` mailbox-settings scopes, so delegated access to another mailbox's
+// settings keeps the ordinary category slot and remains subject to Graph
+// authorization; only the application-mode mailbox guard still applies.
+const outlookCategorySlotFor = (
+  kind: 'read' | 'write',
+  integration: ConnectorIntegration,
+  mailbox: string | undefined
+) =>
+  Effect.gen(function* () {
+    const accessMode = yield* mailboxAccessMode(integration)
+    yield* requireMailboxForApplicationAccess(integration, mailbox, accessMode)
+
+    if (mailbox !== undefined) {
+      yield* Schema.decodeUnknownEffect(OutlookCategoryPathId)(mailbox).pipe(
+        Effect.mapError(
+          error =>
+            new ConnectorError({
+              cause: 'validation_failed',
+              message: 'Invalid category mailbox identifier',
+              connectorId: integration.connectorId,
+              underlying: error
+            })
+        )
+      )
+    }
+
+    return kind === 'read'
+      ? MicrosoftOutlookCategoryReadOAuthCredentialSlot
+      : MicrosoftOutlookCategoryWriteOAuthCredentialSlot
+  })
+
+export const outlookListCategoriesAction = defineAction({
+  id: 'outlook.list_categories',
+  description:
+    'List Outlook master categories for a mailbox. Requires MailboxSettings.Read consent.',
+  access: 'read',
+  inputSchema: OutlookListCategoriesInput,
+  outputSchema: OutlookListCategoriesOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookCategorySlotFor('read', integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      const url = yield* (() => {
+        if (input.nextLink !== undefined) {
+          return requireMicrosoftCategoryNextLink(
+            input.nextLink,
+            'outlook.list_categories',
+            input.mailbox
+          )
+        }
+
+        const params = new URLSearchParams()
+
+        if (input.top !== undefined) params.set('$top', String(input.top))
+
+        const query = params.toString()
+
+        return Effect.succeed(
+          `${microsoftGraphApiBaseUrl}${outlookMasterCategoriesPath(input.mailbox)}${query === '' ? '' : `?${query}`}`
+        )
+      })()
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'GET',
+          url,
+          headers: outlookReadHeaders(token, false)
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'outlook_list_categories_failed',
+          message: 'Microsoft Outlook list categories failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      const output = yield* decodeJsonResponse(OutlookCategoriesApiOutput, response)
+
+      return ActionResult.success(
+        OutlookListCategoriesOutput.make(
+          (() => {
+            const fields: OutlookListCategoriesOutputFields = {
+              categories: Chunk.fromIterable(output.value)
+            }
+
+            if (output['@odata.nextLink'] !== undefined) {
+              fields.nextLink = output['@odata.nextLink']
+            }
+
+            return fields
+          })()
+        )
+      )
+    })
+})
+
+export const outlookCreateCategoryAction = defineAction({
+  id: 'outlook.create_category',
+  description:
+    'Create an Outlook master category. Requires MailboxSettings.ReadWrite consent. The displayName is immutable after creation: there is no rename API.',
+  access: 'write',
+  inputSchema: OutlookCreateCategoryInput,
+  outputSchema: OutlookCategory,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookCategorySlotFor('write', integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'POST',
+          url: `${microsoftGraphApiBaseUrl}${outlookMasterCategoriesPath(input.mailbox)}`,
+          headers: outlookDraftWriteHeaders(token),
+          body: JSON.stringify(
+            input.color === undefined
+              ? { displayName: input.displayName }
+              : { displayName: input.displayName, color: input.color }
+          )
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'outlook_create_category_failed',
+          message: 'Microsoft Outlook create category failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      const output = yield* decodeJsonResponse(OutlookCategory, response)
+
+      return ActionResult.success(output)
+    })
+})
+
+export const outlookDeleteCategoryAction = defineAction({
+  id: 'outlook.delete_category',
+  description:
+    'Delete an Outlook master category. Requires MailboxSettings.ReadWrite consent. Existing message category assignments keep their displayName strings.',
+  access: 'destructive',
+  inputSchema: OutlookDeleteCategoryInput,
+  outputSchema: OutlookDeleteCategoryOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookCategorySlotFor('write', integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'DELETE',
+          url: `${microsoftGraphApiBaseUrl}${outlookMasterCategoriesPath(input.mailbox)}/${encodeURIComponent(input.categoryId)}`,
+          headers: microsoftAuthorizationHeaders(token)
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'outlook_delete_category_failed',
+          message: 'Microsoft Outlook delete category failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      // Graph answers master-category deletes with 204 and an empty body: no JSON to decode.
+      return ActionResult.success(
+        OutlookDeleteCategoryOutput.make({ id: input.categoryId, deleted: true })
+      )
+    })
+})
+
+export const outlookSetCategoriesAction = defineAction({
+  id: 'outlook.set_categories',
+  description:
+    'Replace the category displayName strings on an Outlook message. An empty categories array clears all categories. Assignment never creates or deletes master categories.',
+  access: 'write',
+  inputSchema: OutlookSetCategoriesInput,
+  outputSchema: OutlookMessage,
+  execute: ({ integration, input }) =>
+    outlookMutateMessage({
+      integration,
+      mailbox: input.mailbox,
+      messageId: input.messageId,
+      operation: 'set_categories',
+      body: { categories: [...input.categories] }
+    })
+})
+
+const OutlookMessageCategoriesApi = Schema.Struct({
+  id: Schema.String,
+  categories: Schema.Array(Schema.String)
+})
+
+export const outlookModifyCategoriesAction = defineAction({
+  id: 'outlook.modify_categories',
+  description:
+    'Add or remove category displayName strings on an Outlook message. Reads current categories, then PATCHes the merge (remove wins, deduped). This read/modify/write is non-atomic: hosts must serialize competing updates. No retries or implied compare-and-swap. Assignment never creates or deletes master categories.',
+  access: 'write',
+  inputSchema: OutlookModifyCategoriesActionInput,
+  outputSchema: OutlookMessage,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      // Mail.ReadWrite also authorizes this read; do not require separate read consent.
+      const readSlot = yield* outlookWriteSlot(integration, input.mailbox)
+      const readToken = yield* resolveMicrosoftAccessToken(integration, readSlot)
+      const http = yield* ConnectorHttpClient
+      const mailboxPath = outlookMailboxPath(input.mailbox)
+      const params = new URLSearchParams({ $select: 'id,categories' })
+
+      const readResponse = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'GET',
+          url: `${microsoftGraphApiBaseUrl}${mailboxPath}/messages/${encodeURIComponent(input.messageId)}?${params.toString()}`,
+          headers: outlookReadHeaders(readToken, false)
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(readResponse.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'outlook_modify_categories_failed',
+          message: 'Microsoft Outlook modify categories failed',
+          status: readResponse.status,
+          headers: readResponse.headers,
+          body: readResponse.body
+        })
+      }
+
+      // Require a valid categories array: omitted or malformed data must fail
+      // instead of silently defaulting to [] and erasing existing categories.
+      const current = yield* decodeJsonResponse(OutlookMessageCategoriesApi, readResponse)
+
+      const removals = new Set(input.removeCategories ?? [])
+      const merged = [...new Set(current.categories)].filter(category => !removals.has(category))
+      const seen = new Set(merged)
+
+      for (const category of input.addCategories ?? []) {
+        if (removals.has(category) || seen.has(category)) continue
+        seen.add(category)
+        merged.push(category)
+      }
+
+      return yield* outlookMutateMessage({
+        integration,
+        mailbox: input.mailbox,
+        messageId: input.messageId,
+        operation: 'modify_categories',
+        body: { categories: merged }
+      })
+    })
+})
+
 export const outlookMailActions = [
   outlookListMessagesAction,
   outlookSearchMessagesAction,
@@ -1429,5 +1856,10 @@ export const outlookMailActions = [
   outlookSendDraftAction,
   outlookSetReadAction,
   outlookTrashAction,
-  outlookUntrashAction
+  outlookUntrashAction,
+  outlookListCategoriesAction,
+  outlookCreateCategoryAction,
+  outlookDeleteCategoryAction,
+  outlookSetCategoriesAction,
+  outlookModifyCategoriesAction
 ]
