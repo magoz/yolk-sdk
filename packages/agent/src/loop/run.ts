@@ -28,6 +28,10 @@ import {
   inputRequestId,
   formatInputResponseContent,
   inputResponseStructuredContent,
+  InteractionRequest,
+  InteractionRequested,
+  interactionRequestId,
+  InteractionResponse,
   QuestionRequested,
   ProviderToolResult,
   QuestionRequest,
@@ -46,6 +50,10 @@ import {
   type HitlRequest,
   type HitlResponse,
   type InputToolHandler,
+  type InteractionRef,
+  type InteractionPreflight,
+  type InteractionReceipt,
+  type InteractionHost,
   type QuestionPrompt,
   type QuestionResponse,
   type ToolApprovalResponse,
@@ -60,14 +68,14 @@ import {
   type AgentModelCapabilities,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
-import { questionToolName, subagentToolName } from '../protocol/tool.ts'
+import { questionToolName, subagentToolName, validInteractionReceipt } from '../protocol/tool.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
   LLMError,
   type AgentLoopError,
   type LLMProviderError,
-  type ToolError
+  ToolError
 } from './error.ts'
 import type { LLMEvent } from './llm-event.ts'
 import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
@@ -84,6 +92,11 @@ export type RunConfig = {
   readonly hitlResponses?: ReadonlyArray<HitlResponse>
   /** Server-side input validators by tool name (from ResolvedToolSet.inputs). */
   readonly inputs?: Readonly<Record<string, InputToolHandler>>
+  /** Server-side interaction preflight by tool name (from ResolvedToolSet.interactions).
+   * Without them, interaction tools fail closed without prompting or dispatching.
+   */
+  readonly interactions?: Readonly<Record<string, InteractionPreflight>>
+  readonly interactionHost?: InteractionHost
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -99,6 +112,9 @@ export type ToolBatchConfig = {
   readonly hitlResponses?: ReadonlyArray<HitlResponse>
   /** Server-side input validators by tool name (from ResolvedToolSet.inputs). */
   readonly inputs?: Readonly<Record<string, InputToolHandler>>
+  /** Server-side interaction preflight by tool name (from ResolvedToolSet.interactions). */
+  readonly interactions?: Readonly<Record<string, InteractionPreflight>>
+  readonly interactionHost?: InteractionHost
   readonly model?: string
   readonly createdMessages?: ReadonlyArray<AgentMessage>
   readonly turn?: number
@@ -369,7 +385,10 @@ type TurnStreamInput = {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMProviderError>
   }
   readonly executor: {
-    readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>
+    readonly execute: (
+      call: ToolCall,
+      options?: { readonly interaction?: InteractionRef }
+    ) => Effect.Effect<ToolResult, ToolError>
   }
   readonly currentMessages: ReadonlyArray<AgentMessage>
   readonly createdMessages: Ref.Ref<ReadonlyArray<AgentMessage>>
@@ -481,7 +500,8 @@ const withProviderRetries = (
 const makeToolExecutionStream = (
   executor: TurnStreamInput['executor'],
   call: ToolCall,
-  model: string
+  model: string,
+  interaction?: InteractionRef
 ): Stream.Stream<AgentEvent, AgentLoopError> =>
   Stream.unwrap(
     Effect.gen(function* () {
@@ -496,7 +516,7 @@ const makeToolExecutionStream = (
       return Stream.fromIterable(startEvents).pipe(
         Stream.concat(
           Stream.fromEffect(
-            executor.execute(call).pipe(
+            executor.execute(call, interaction === undefined ? undefined : { interaction }).pipe(
               Effect.flatMap(result =>
                 Clock.currentTimeMillis.pipe(
                   Effect.map(endedAtMs =>
@@ -549,6 +569,8 @@ type PreparedToolCall = Data.TaggedEnum<{
     readonly index: number
     readonly call: ToolCall
     readonly events: ReadonlyArray<AgentEvent>
+    /** Validated interaction dispatch binding. Absent for ordinary tools. */
+    readonly interaction?: InteractionRef
   }
   Result: {
     readonly index: number
@@ -571,6 +593,11 @@ export type PreparedToolBatch = {
   readonly events: ReadonlyArray<AgentEvent>
   readonly pendingRequests: ReadonlyArray<HitlRequest>
   readonly pendingEvents: ReadonlyArray<AgentEvent>
+  /** Validated interaction dispatch bindings by tool-call id. The executor
+   * re-validates and admits each binding through the host receipt port;
+   * bindings alone grant nothing.
+   */
+  readonly interactionBindings: ReadonlyMap<string, InteractionRef>
 }
 
 type NonEmptyHitlRequests = readonly [HitlRequest, ...Array<HitlRequest>]
@@ -917,14 +944,163 @@ const prepareInputCall = (input: {
     })
   })
 
+const unavailableInteractionToolResult = (call: ToolCall) =>
+  ToolResult.make({
+    toolCallId: call.id,
+    content: `Interaction "${call.name}" is unavailable`,
+    isError: true
+  })
+
+/** Load scoped authoritative snapshots BEFORE preparation. Durable hosts must call
+ * this at each preflight boundary and pass the result as interactionReceipts. Reads
+ * do not accept/claim/settle. A storage error fails the batch closed. */
+export const loadInteractionReceipts = (
+  calls: ReadonlyArray<ToolCall>,
+  host: InteractionHost | undefined
+): Effect.Effect<ReadonlyMap<string, InteractionReceipt>, ToolError> =>
+  host === undefined
+    ? Effect.succeed(new Map())
+    : Effect.forEach(calls, call =>
+        host.read(interactionRequestId(call)).pipe(
+          Effect.map(receipt => [call.id, receipt] as const),
+          Effect.mapError(
+            error =>
+              new ToolError({ tool: call.name, cause: 'unavailable', message: error.message })
+          )
+        )
+      ).pipe(
+        Effect.map(
+          entries =>
+            new Map(
+              entries.flatMap(([id, receipt]) =>
+                receipt === undefined ? [] : [[id, receipt] as const]
+              )
+            )
+        )
+      )
+
+const prepareInteractionCall = (input: {
+  readonly tools: ReadonlyArray<ToolDef>
+  readonly preflights: Readonly<Record<string, InteractionPreflight>>
+  readonly receipts: ReadonlyMap<string, InteractionReceipt>
+  readonly call: ToolCall
+  readonly index: number
+}): Effect.Effect<PreparedToolCall> =>
+  Effect.gen(function* () {
+    const def = toolDefFor(input.tools, input.call)
+
+    const preflight = Object.hasOwn(input.preflights, input.call.name)
+      ? input.preflights[input.call.name]
+      : undefined
+
+    const stored = input.receipts.get(input.call.id)
+
+    const unavailable = () =>
+      PreparedToolCall.Result({
+        index: input.index,
+        call: input.call,
+        events: [],
+        result: unavailableInteractionToolResult(input.call)
+      })
+
+    if (stored !== undefined && !validInteractionReceipt(stored, input.call)) return unavailable()
+
+    // Historical observations survive removed/disabled tools, actions and changed schemas.
+    // Dispatch still goes through decorators with an explicit ref; the executor re-reads.
+    if (stored !== undefined && (stored.status === 'settled' || stored.status === 'started')) {
+      const response = InteractionResponse.make({
+        requestId: stored.slot,
+        toolCallId: stored.call.id,
+        outcome: stored.outcome,
+        source: 'user',
+        actionId: stored.actionId,
+        data: stored.data,
+        reason: stored.reason
+      })
+
+      if (stored.outcome === 'cancelled' && stored.result !== undefined) {
+        return PreparedToolCall.Result({
+          index: input.index,
+          call: input.call,
+          events: [hitlResponseEvent(response)],
+          result: stored.result
+        })
+      }
+
+      return PreparedToolCall.Execute({
+        index: input.index,
+        call: input.call,
+        events: [hitlResponseEvent(response)],
+        interaction: { slot: stored.slot, submissionId: stored.submissionId }
+      })
+    }
+
+    const descriptor = def?.interaction
+
+    if (
+      def === undefined ||
+      descriptor === undefined ||
+      def.approval !== undefined ||
+      def.background === true ||
+      def.execution !== undefined ||
+      def.input !== undefined ||
+      preflight === undefined
+    ) {
+      return unavailable()
+    }
+
+    const validCall = yield* preflight.validateCall(input.call.params).pipe(Effect.result)
+
+    if (Predicate.isTagged(validCall, 'Failure'))
+      return PreparedToolCall.Result({
+        index: input.index,
+        call: input.call,
+        events: [],
+        result: ToolResult.make({
+          toolCallId: input.call.id,
+          content: `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+          isError: true
+        })
+      })
+
+    const request = InteractionRequest.make({
+      requestId: interactionRequestId(input.call),
+      toolCallId: input.call.id,
+      call: input.call,
+      interaction: descriptor
+    })
+
+    if (stored === undefined)
+      return PreparedToolCall.Pending({ request, events: [InteractionRequested.make({ request })] })
+
+    // Browser responses and transcript data never manufacture an accepted record.
+    const response = InteractionResponse.make({
+      requestId: stored.slot,
+      toolCallId: stored.call.id,
+      outcome: stored.outcome,
+      source: 'user',
+      actionId: stored.actionId,
+      data: stored.data
+    })
+
+    return PreparedToolCall.Execute({
+      index: input.index,
+      call: input.call,
+      events: [hitlResponseEvent(response)],
+      interaction: { slot: stored.slot, submissionId: stored.submissionId }
+    })
+  })
+
 const prepareToolCall = (input: {
   readonly tools: ReadonlyArray<ToolDef>
   readonly responses: ReadonlyArray<HitlResponse>
   readonly handlers: Readonly<Record<string, InputToolHandler>>
+  readonly preflights: Readonly<Record<string, InteractionPreflight>>
+  readonly receipts: ReadonlyMap<string, InteractionReceipt>
   readonly call: ToolCall
   readonly index: number
 }): Effect.Effect<PreparedToolCall> =>
-  toolDefFor(input.tools, input.call)?.input !== undefined
+  !input.receipts.has(input.call.id) && toolDefFor(input.tools, input.call)?.input !== undefined
     ? prepareInputCall({
         tools: input.tools,
         responses: input.responses,
@@ -932,22 +1108,31 @@ const prepareToolCall = (input: {
         call: input.call,
         index: input.index
       })
-    : input.call.name === questionToolName
-      ? input.tools.some(tool => tool.name === questionToolName)
-        ? prepareQuestionCall(input.call, input.index, input.responses)
-        : Effect.succeed(
-            PreparedToolCall.Result({
-              index: input.index,
-              call: input.call,
-              events: [],
-              result: ToolResult.make({
-                toolCallId: input.call.id,
-                content: 'Question tool is unavailable',
-                isError: true
+    : input.receipts.has(input.call.id) ||
+        toolDefFor(input.tools, input.call)?.interaction !== undefined
+      ? prepareInteractionCall({
+          tools: input.tools,
+          receipts: input.receipts,
+          preflights: input.preflights,
+          call: input.call,
+          index: input.index
+        })
+      : input.call.name === questionToolName
+        ? input.tools.some(tool => tool.name === questionToolName)
+          ? prepareQuestionCall(input.call, input.index, input.responses)
+          : Effect.succeed(
+              PreparedToolCall.Result({
+                index: input.index,
+                call: input.call,
+                events: [],
+                result: ToolResult.make({
+                  toolCallId: input.call.id,
+                  content: 'Question tool is unavailable',
+                  isError: true
+                })
               })
-            })
-          )
-      : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
+            )
+        : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
 
 /** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution. */
 export const prepareToolBatch = (input: {
@@ -955,17 +1140,35 @@ export const prepareToolBatch = (input: {
   readonly responses: ReadonlyArray<HitlResponse>
   readonly calls: ReadonlyArray<ToolCall>
   readonly inputs?: Readonly<Record<string, InputToolHandler>>
+  readonly interactions?: Readonly<Record<string, InteractionPreflight>>
+  readonly interactionReceipts?: ReadonlyMap<string, InteractionReceipt>
 }): Effect.Effect<PreparedToolBatch> =>
   Effect.gen(function* () {
     const handlers = input.inputs ?? {}
+    const preflights = input.interactions ?? {}
 
     const prepared = yield* Effect.forEach(input.calls, (call, index) =>
-      prepareToolCall({ tools: input.tools, responses: input.responses, handlers, call, index })
+      prepareToolCall({
+        tools: input.tools,
+        responses: input.responses,
+        handlers,
+        preflights,
+        receipts: input.interactionReceipts ?? new Map(),
+        call,
+        index
+      })
     )
 
     return {
       callsToExecute: prepared.flatMap(item =>
         Predicate.isTagged(item, 'Execute') ? [{ index: item.index, call: item.call }] : []
+      ),
+      interactionBindings: new Map(
+        prepared.flatMap(item =>
+          Predicate.isTagged(item, 'Execute') && item.interaction !== undefined
+            ? [[item.call.id, item.interaction] as const]
+            : []
+        )
       ),
       resultMessages: prepared.flatMap(item =>
         Predicate.isTagged(item, 'Result')
@@ -1026,10 +1229,16 @@ const parallelToolExecutionStream = (input: {
   readonly loopConfig: LoopConfigSettings
   readonly model: string
   readonly results: Ref.Ref<ReadonlyArray<IndexedToolResultMessage>>
+  readonly interactions?: ReadonlyMap<string, InteractionRef>
 }) =>
   Stream.mergeAll(
     input.calls.map(({ call, index }) =>
-      makeToolExecutionStream(input.executor, call, input.model).pipe(
+      makeToolExecutionStream(
+        input.executor,
+        call,
+        input.model,
+        input.interactions?.get(call.id)
+      ).pipe(
         Stream.tap(event => {
           if (
             !Predicate.isTagged(event, 'ToolExecutionCompleted') &&
@@ -1151,7 +1360,12 @@ const makeAfterLlmStream = (
         tools: input.config.tools,
         responses: input.config.hitlResponses ?? [],
         calls: completion.toolCalls,
-        inputs: input.config.inputs
+        inputs: input.config.inputs,
+        interactions: input.config.interactions,
+        interactionReceipts: yield* loadInteractionReceipts(
+          completion.toolCalls,
+          input.config.interactionHost
+        )
       })
 
       if (prepared.resultMessages.length > 0) {
@@ -1194,7 +1408,8 @@ const makeAfterLlmStream = (
         executor: input.executor,
         loopConfig: input.loopConfig,
         model: input.config.model,
-        results: toolResultMessages
+        results: toolResultMessages,
+        interactions: prepared.interactionBindings
       })
 
       const nextTurnStream = Stream.unwrap(
@@ -1370,7 +1585,11 @@ const makePendingToolResumeStream = (
     Effect.gen(function* () {
       const pendingCalls = pendingHostToolCalls(input.currentMessages)
 
-      if (pendingCalls.length === 0 || (input.config.hitlResponses ?? []).length === 0) {
+      if (
+        pendingCalls.length === 0 ||
+        ((input.config.hitlResponses ?? []).length === 0 &&
+          input.config.interactionHost === undefined)
+      ) {
         return makeTurnStream(input)
       }
 
@@ -1380,7 +1599,12 @@ const makePendingToolResumeStream = (
         tools: input.config.tools,
         responses: input.config.hitlResponses ?? [],
         calls: pendingCalls,
-        inputs: input.config.inputs
+        inputs: input.config.inputs,
+        interactions: input.config.interactions,
+        interactionReceipts: yield* loadInteractionReceipts(
+          pendingCalls,
+          input.config.interactionHost
+        )
       })
 
       if (prepared.resultMessages.length > 0) {
@@ -1421,7 +1645,8 @@ const makePendingToolResumeStream = (
         executor: input.executor,
         loopConfig: input.loopConfig,
         model: input.config.model,
-        results: toolResultMessages
+        results: toolResultMessages,
+        interactions: prepared.interactionBindings
       })
 
       const nextTurnStream = Stream.unwrap(
@@ -1514,7 +1739,9 @@ export const runToolBatch = (
         tools: config.tools ?? [],
         responses: config.hitlResponses ?? [],
         calls: config.calls,
-        inputs: config.inputs
+        inputs: config.inputs,
+        interactions: config.interactions,
+        interactionReceipts: yield* loadInteractionReceipts(config.calls, config.interactionHost)
       })
 
       const hasPendingRequests = prepared.pendingRequests.length > 0
@@ -1545,7 +1772,8 @@ export const runToolBatch = (
             executor,
             loopConfig,
             model: config.model ?? '',
-            results: toolResultMessages
+            results: toolResultMessages,
+            interactions: prepared.interactionBindings
           })
         )
       )

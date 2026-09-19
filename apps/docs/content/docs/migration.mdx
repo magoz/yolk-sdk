@@ -25,6 +25,19 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Action-backed interaction opt-in
+
+`makeInteractionTool` introduces distinct interaction request, response, event and client-input
+variants. Update exhaustive HITL consumers before advertising these tools; never downgrade
+`InteractionResponse` to data-only input or synthesize a result from `InteractionSubmitted`.
+`makeInputTool`, questions and ordinary approvals retain their existing behavior.
+
+Opt-in hosts must authenticate and atomically accept immutable submissions, provide the scoped
+`InteractionHost`, load receipt snapshots before durable preflight, and forward the optional
+`ToolExecutionOptions.interaction` reference through executor decorators. Raw HITL responses or
+client transcript replay are not execution authority. No live example app opts in implicitly.
+See [Authorize one action](./agent/tools-hitl#authorize-one-action).
+
 ### Canary.82: typed inputs and Gateway streaming
 
 When upgrading from canary.81:

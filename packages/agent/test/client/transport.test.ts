@@ -13,6 +13,8 @@ import {
   AgentError,
   AgentStart,
   LLMTextDelta,
+  InteractionResponse,
+  InteractionResponseInput,
   SessionSnapshot,
   ToolApprovalRequest,
   ToolApprovalResponse,
@@ -34,6 +36,7 @@ import {
   streamAgentRunHitlResponseEventStream,
   streamAgentRunEventStream,
   streamAgentEventStream,
+  streamInteractionResponseEventStream,
   streamCloudflareAgentEventStream
 } from '../../src/client'
 
@@ -887,6 +890,85 @@ describe('collectAgentEvents', () => {
     }
 
     expect(cancelled).toBe(false)
+  })
+
+  it('preserves submitted and cancelled interaction responses over HTTP and WebSocket', async () => {
+    const responses = [
+      InteractionResponse.make({
+        requestId: 'interaction:document:call_1',
+        toolCallId: 'call_1',
+        outcome: 'submitted',
+        source: 'user',
+        actionId: 'publish',
+        data: { title: 'Edited', flag: false }
+      }),
+      InteractionResponse.make({
+        requestId: 'interaction:document:call_1',
+        toolCallId: 'call_1',
+        outcome: 'cancelled',
+        source: 'user'
+      })
+    ]
+
+    const terminal = AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })
+    const messages = appendAgentMessage([], UserMessage.make({ content: 'Review document' }))
+    const originalWebSocket = globalThis.WebSocket
+
+    Object.defineProperty(globalThis, 'WebSocket', { value: FakeWebSocket, configurable: true })
+
+    try {
+      for (const response of responses) {
+        const requests: Array<CapturedRequest> = []
+
+        const events = await collectEventStream(
+          streamInteractionResponseEventStream({
+            sessionId: 'session_1',
+            messages,
+            response,
+            httpClientLayer: makeHttpClientLayer(new Response(encodeEvents([terminal])), requests)
+          })
+        )
+
+        expect(events).toEqual([terminal])
+        expect(readCapturedBody(requests)).toBe(
+          JSON.stringify({
+            sessionId: 'session_1',
+            messages,
+            hitlResponses: [response]
+          })
+        )
+
+        FakeWebSocket.instances = []
+
+        const websocketEvents = collectEventStream(
+          streamCloudflareAgentEventStream({
+            webSocketUrl: 'wss://worker.example/connect/session_1',
+            messages,
+            hitlResponses: [response]
+          })
+        )
+
+        const socket = await waitForSocket()
+        socket.emitMessage(SessionSnapshot.make({ revision: 7, messages: [] }))
+        await waitForSent(socket)
+        socket.emitMessage(terminal)
+
+        expect(await websocketEvents).toEqual([terminal])
+        expect(socket.sent).toEqual([
+          JSON.stringify(
+            InteractionResponseInput.make({
+              response,
+              expectedRevision: 7
+            })
+          )
+        ])
+      }
+    } finally {
+      Object.defineProperty(globalThis, 'WebSocket', {
+        value: originalWebSocket,
+        configurable: true
+      })
+    }
   })
 
   it('streams Cloudflare WebSocket events after sending user input with snapshot revision', async () => {

@@ -7,6 +7,8 @@ import type {
   HitlResponse,
   HitlRequest,
   InputToolHandler,
+  InteractionPreflight,
+  InteractionHost,
   ToolDef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -42,6 +44,9 @@ export type RuntimeConfig = {
   readonly hitlResponses?: ReadonlyArray<HitlResponse>
   /** Server-side input validators by tool name (from ResolvedToolSet.inputs). */
   readonly inputs?: Readonly<Record<string, InputToolHandler>>
+  /** Server-side interaction preflight by tool name (from ResolvedToolSet.interactions). */
+  readonly interactions?: Readonly<Record<string, InteractionPreflight>>
+  readonly interactionHost?: InteractionHost
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -94,6 +99,8 @@ const runtimeRunConfig = (config: RuntimeConfig, messages: ReadonlyArray<AgentMe
   tools: config.tools,
   hitlResponses: config.hitlResponses,
   inputs: config.inputs,
+  interactions: config.interactions,
+  interactionHost: config.interactionHost,
   reasoningEffort: config.reasoningEffort,
   capabilities: config.capabilities,
   model: config.model
@@ -170,6 +177,13 @@ const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest
       'InputResponse',
       answer =>
         Predicate.isTagged(request, 'InputRequest') &&
+        answer.requestId === request.requestId &&
+        answer.toolCallId === request.toolCallId
+    ),
+    Match.tag(
+      'InteractionResponse',
+      answer =>
+        Predicate.isTagged(request, 'InteractionRequest') &&
         answer.requestId === request.requestId &&
         answer.toolCallId === request.toolCallId
     ),

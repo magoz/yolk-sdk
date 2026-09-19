@@ -1,7 +1,7 @@
 import { Data, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
-import { Content } from './content.ts'
+import { Content, TextPart } from './content.ts'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
@@ -223,6 +223,34 @@ export class InputDescriptor extends Schema.Class<InputDescriptor>('InputDescrip
   schema: Schema.optional(ToolJsonSchema)
 }) {}
 
+/** One server-defined action offered by an interaction. Display information only:
+ * never credentials, callbacks, or executable permissions.
+ */
+export class InteractionActionDescriptor extends Schema.Class<InteractionActionDescriptor>(
+  'InteractionActionDescriptor'
+)({
+  id: NonEmptyTrimmedString,
+  label: NonEmptyTrimmedString,
+  description: Schema.optional(Schema.String)
+}) {}
+
+/** Serializable interaction descriptor for action-backed interaction tools.
+ * Display metadata only: submitted values are JSON-only and validated server-side
+ * against the registration's original Effect Schemas, never against this lowered hint.
+ * Renderer components remain app-owned; `kind` is an opaque stable renderer key
+ * chosen at registration time. Action ids, labels, validators, and handlers are
+ * server-defined; only ids and display labels travel to the client.
+ */
+export class InteractionDescriptor extends Schema.Class<InteractionDescriptor>(
+  'InteractionDescriptor'
+)({
+  kind: NonEmptyTrimmedString,
+  title: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  schema: Schema.optional(ToolJsonSchema),
+  actions: Schema.NonEmptyArray(InteractionActionDescriptor)
+}) {}
+
 export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   name: NonEmptyTrimmedString,
   description: Schema.String,
@@ -232,7 +260,9 @@ export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   background: Schema.optional(Schema.Boolean),
   execution: Schema.optional(Schema.Literal('background-v1')),
   /** Present only on generalized typed input tools. Never combined with approval/background. */
-  input: Schema.optional(InputDescriptor)
+  input: Schema.optional(InputDescriptor),
+  /** Present only on action-backed interaction tools. Never combined with approval/background/input. */
+  interaction: Schema.optional(InteractionDescriptor)
 }) {}
 
 export const BackgroundToolExecution = Schema.Literals(['foreground', 'background'])
@@ -407,6 +437,44 @@ export class InputResponse extends Schema.TaggedClass<InputResponse>()('InputRes
   reason: Schema.optional(Schema.String)
 }) {}
 
+export const InteractionResponseOutcome = Schema.Literals(['submitted', 'cancelled'])
+
+export type InteractionResponseOutcome = typeof InteractionResponseOutcome.Type
+
+/** Distinct request for an action-backed interaction. Never overload `InputRequest`:
+ * old clients must not downgrade an interaction to data-only completion.
+ * Execution scope and pending-generation identity come from the host, never the model.
+ */
+export class InteractionRequest extends Schema.TaggedClass<InteractionRequest>()(
+  'InteractionRequest',
+  {
+    requestId: NonEmptyTrimmedString,
+    toolCallId: NonEmptyTrimmedString,
+    call: ToolCall,
+    interaction: InteractionDescriptor
+  }
+) {}
+
+/** Distinct response for an action-backed interaction. A submission selects one
+ * server-defined action with final edited values; cancellation selects nothing
+ * and executes no business handler. A raw `submitted` response is only a candidate,
+ * never authenticated acceptance or business success.
+ */
+export class InteractionResponse extends Schema.TaggedClass<InteractionResponse>()(
+  'InteractionResponse',
+  {
+    requestId: NonEmptyTrimmedString,
+    toolCallId: NonEmptyTrimmedString,
+    outcome: InteractionResponseOutcome,
+    source: HitlResponseSource,
+    /** Selected server-defined action. Absent on cancellation; never inferred. */
+    actionId: Schema.optional(NonEmptyTrimmedString),
+    /** JSON-only final values. Validated server-side against the original Effect Schema. */
+    data: Schema.optional(Schema.Json),
+    reason: Schema.optional(Schema.String)
+  }
+) {}
+
 export type PlainHitlResponse = Data.TaggedEnum<{
   QuestionResponse: {
     readonly requestId: string
@@ -431,11 +499,25 @@ export type PlainHitlResponse = Data.TaggedEnum<{
     readonly data?: Schema.Json
     readonly reason?: string
   }
+  InteractionResponse: {
+    readonly requestId: string
+    readonly toolCallId: string
+    readonly outcome: InteractionResponseOutcome
+    readonly source: HitlResponseSource
+    readonly actionId?: string
+    readonly data?: Schema.Json
+    readonly reason?: string
+  }
 }>
 
 export const PlainHitlResponse = Data.taggedEnum<PlainHitlResponse>()
 
 export type PlainInputResponse = Extract<PlainHitlResponse, { readonly _tag: 'InputResponse' }>
+
+export type PlainInteractionResponse = Extract<
+  PlainHitlResponse,
+  { readonly _tag: 'InteractionResponse' }
+>
 
 export type PlainQuestionResponse = Extract<
   PlainHitlResponse,
@@ -558,11 +640,47 @@ export const plainInputResponse = (response: InputResponse): PlainInputResponse 
   return PlainHitlResponse.InputResponse(fields)
 }
 
+export const plainInteractionResponse = (
+  response: InteractionResponse
+): PlainInteractionResponse => {
+  type PlainInteractionResponseFields = {
+    requestId: PlainInteractionResponse['requestId']
+    toolCallId: PlainInteractionResponse['toolCallId']
+    outcome: PlainInteractionResponse['outcome']
+    source: PlainInteractionResponse['source']
+    actionId?: PlainInteractionResponse['actionId']
+    data?: PlainInteractionResponse['data']
+    reason?: PlainInteractionResponse['reason']
+  }
+
+  const fields: PlainInteractionResponseFields = {
+    requestId: response.requestId,
+    toolCallId: response.toolCallId,
+    outcome: response.outcome,
+    source: response.source
+  }
+
+  if (response.actionId !== undefined) {
+    fields.actionId = response.actionId
+  }
+
+  if (response.data !== undefined) {
+    fields.data = response.data
+  }
+
+  if (response.reason !== undefined) {
+    fields.reason = response.reason
+  }
+
+  return PlainHitlResponse.InteractionResponse(fields)
+}
+
 export const plainHitlResponse = (response: HitlResponse): PlainHitlResponse =>
   Match.value(response).pipe(
     Match.tag('QuestionResponse', current => plainQuestionResponse(current)),
     Match.tag('ToolApprovalResponse', current => plainToolApprovalResponse(current)),
     Match.tag('InputResponse', current => plainInputResponse(current)),
+    Match.tag('InteractionResponse', current => plainInteractionResponse(current)),
     Match.exhaustive
   )
 
@@ -681,11 +799,21 @@ export const formatQuestionResponseContent = (
   return `User has answered your ${label}: ${formatted}. Continue with the user's answers in mind.`
 }
 
-export const HitlRequest = Schema.Union([ToolApprovalRequest, QuestionRequest, InputRequest])
+export const HitlRequest = Schema.Union([
+  ToolApprovalRequest,
+  QuestionRequest,
+  InputRequest,
+  InteractionRequest
+])
 
 export type HitlRequest = typeof HitlRequest.Type
 
-export const HitlResponse = Schema.Union([ToolApprovalResponse, QuestionResponse, InputResponse])
+export const HitlResponse = Schema.Union([
+  ToolApprovalResponse,
+  QuestionResponse,
+  InputResponse,
+  InteractionResponse
+])
 
 export type HitlResponse = typeof HitlResponse.Type
 
@@ -713,6 +841,496 @@ export type InputToolHandler = {
   readonly validateCall: InputResponseValidator
   readonly validateResponse: InputResponseValidator
   readonly formatContent: InputContentFormatter
+}
+
+/** Stable request/call correlation for action-backed interactions. Binds tool name and
+ * call id; hosts must echo the opaque id and never rebuild it. Distinct from
+ * `input:<name>:<callId>`, `question:<callId>`, and `approval:<callId>` ids.
+ */
+export const interactionRequestId = (call: ToolCall) => `interaction:${call.name}:${call.id}`
+
+/** Server-side validator for one interaction tool's JSON values. Decodes with the
+ * registration's original Effect Schema; JSON Schema lowering is display-only.
+ */
+export type InteractionResponseValidator = (
+  data: unknown
+) => Effect.Effect<unknown, Schema.SchemaError | InteractionValidationError>
+
+export class InteractionValidationError extends Schema.TaggedError<InteractionValidationError>()(
+  'InteractionValidationError',
+  { message: Schema.String }
+) {}
+
+/** Narrow loop preflight seam for action-backed interactions. Validators and the
+ * server-defined action list are provided separately from the serializable ToolDef
+ * (see ResolvedToolSet.interactions); hosts pass them explicitly to
+ * prepareToolBatch/runToolBatch/run/RuntimeConfig. Preflight never claims,
+ * settles, or invokes an action.
+ */
+export type InteractionPreflight = {
+  /** Validate model-supplied context before opening a request or accepting a response. */
+  readonly validateCall: InteractionResponseValidator
+  readonly validateResponse: InteractionResponseValidator
+  /** Server-defined action ids. Membership is checked; labels stay display-only. */
+  readonly actionIds: ReadonlyArray<string>
+  /** Bound fresh host policy. Admission invokes this before accepting; not authentication. */
+  readonly validateAction: (input: {
+    readonly actionId: string
+    readonly data: Schema.Json
+    readonly call: ToolCall
+  }) => Effect.Effect<void, InteractionValidationError | Schema.SchemaError>
+}
+
+/** Host-allocated opaque identity. Neither field authenticates consent. The host adapter
+ * is already scoped to the active session/run/pending generation before any lookup. */
+export type InteractionRef = {
+  readonly slot: string
+  readonly submissionId: string
+}
+
+export const InteractionReceiptStatus = Schema.Literals(['accepted', 'started', 'settled'])
+
+export type InteractionReceiptStatus = typeof InteractionReceiptStatus.Type
+
+/** Authoritative host-owned record of an accepted submission and its observed
+ * outcome. One pending interaction has one immutable acceptance slot; identical
+ * retries reuse it, changed values or actions conflict after acceptance.
+ */
+export class InteractionReceipt extends Schema.Class<InteractionReceipt>('InteractionReceipt')({
+  slot: NonEmptyTrimmedString,
+  submissionId: NonEmptyTrimmedString,
+  outcome: InteractionResponseOutcome,
+  actionId: Schema.optional(NonEmptyTrimmedString),
+  data: Schema.optional(Schema.Json),
+  reason: Schema.optional(Schema.String),
+  call: ToolCall,
+  status: InteractionReceiptStatus,
+  /** Present once the action outcome is observed. Replay returns it verbatim. */
+  result: Schema.optional(ToolResult)
+}) {}
+
+export type InteractionClaim = Data.TaggedEnum<{
+  Owned: { readonly token: string; readonly receipt: InteractionReceipt }
+  Existing: { readonly receipt: InteractionReceipt }
+}>
+
+export const InteractionClaim = Data.taggedEnum<InteractionClaim>()
+
+export const InteractionBusinessOutcome = Schema.Literals(['completed', 'failed', 'unknown'])
+
+export type InteractionBusinessOutcome = typeof InteractionBusinessOutcome.Type
+
+/** Observed business outcome. `unknown` is a truthful terminal observation: it
+ * establishes neither success nor failure and must never auto-retry.
+ */
+export type InteractionOutcome = {
+  readonly status: InteractionBusinessOutcome
+  readonly result: ToolResult
+}
+
+export class InteractionHostError extends Schema.TaggedError<InteractionHostError>()(
+  'InteractionHostError',
+  {
+    message: Schema.String,
+    cause: Schema.Literals(['conflict', 'storage', 'denied', 'not_found'])
+  }
+) {}
+
+/** Callbacks over host storage, scoped to the active session/run/generation, not
+ * a global lookup by model-supplied call ID. The host authenticates, validates using
+ * validateInteractionSubmission, checks ownership/policy, then atomically ACCEPTS
+ * in its own transaction BEFORE SDK resume. Invalid attempts consume nothing.
+ * claim only advances an existing accepted record to started with a fencing token.
+ * All actions and cancellation compete for ONE immutable slot. Started records never
+ * permit takeover, even after a crash. read must return independent immutable snapshots.
+ * settle is token-fenced, idempotent and never overwrites a settled observation. */
+export type InteractionHost = {
+  readonly read: (
+    slot: string
+  ) => Effect.Effect<InteractionReceipt | undefined, InteractionHostError>
+  readonly claim: (ref: InteractionRef) => Effect.Effect<InteractionClaim, InteractionHostError>
+  readonly settle: (
+    token: string,
+    outcome: InteractionOutcome
+  ) => Effect.Effect<InteractionOutcome, InteractionHostError>
+}
+
+export type InteractionCandidate = Data.TaggedEnum<{
+  Submitted: {
+    readonly slot: string
+    readonly actionId: string
+    readonly data: Schema.Json
+  }
+  Cancelled: { readonly slot: string }
+}>
+
+export const InteractionCandidate = Data.taggedEnum<InteractionCandidate>()
+
+export class InteractionAdmissionError extends Schema.TaggedError<InteractionAdmissionError>()(
+  'InteractionAdmissionError',
+  {
+    message: Schema.String,
+    cause: Schema.Literals([
+      'request_mismatch',
+      'invalid_response',
+      'invalid_call',
+      'missing_action',
+      'unknown_action',
+      'cancelled_with_payload',
+      'missing_data',
+      'invalid_data',
+      'action_rejected'
+    ])
+  }
+) {}
+
+const isInteractionJsonObject = (
+  value: Schema.Json
+): value is { readonly [key: string]: Schema.Json } => Predicate.isObject(value)
+
+const canonicalInteractionJson = (value: Schema.Json): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalInteractionJson).join(',')}]`
+
+  if (isInteractionJsonObject(value)) {
+    const encoded = Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalInteractionJson(value[key])}`)
+
+    return `{${encoded.join(',')}}`
+  }
+
+  return JSON.stringify(value)
+}
+
+/** Exact JSON value equality, independent of object key ordering. Reject non-JSON
+ * values rather than using JSON.stringify's lossy omission/coercion behavior. */
+export const interactionJsonEquals = (left: unknown, right: unknown): boolean =>
+  isPortableJson(left, new Set(), new Set()) &&
+  isPortableJson(right, new Set(), new Set()) &&
+  canonicalInteractionJson(left) === canonicalInteractionJson(right)
+
+/** Check full immutable binding, not only receipt identity. Status may advance. */
+export const sameInteractionBinding = (left: InteractionReceipt, right: InteractionReceipt) =>
+  left.slot === right.slot &&
+  left.submissionId === right.submissionId &&
+  left.outcome === right.outcome &&
+  left.actionId === right.actionId &&
+  left.reason === right.reason &&
+  (left.data === undefined
+    ? right.data === undefined
+    : interactionJsonEquals(left.data, right.data)) &&
+  sameInteractionCall(left.call, right.call)
+
+export const sameInteractionCall = (left: ToolCall, right: ToolCall) =>
+  left.id === right.id &&
+  left.name === right.name &&
+  interactionJsonEquals(left.params, right.params)
+
+/** Runtime checking also protects JavaScript adapters and malformed concurrent reads.
+ * Stored results must identify the exact accepted operation. */
+export const validInteractionReceipt = (
+  receipt: InteractionReceipt,
+  call: ToolCall,
+  ref?: InteractionRef
+): boolean => {
+  if (
+    !Schema.is(Schema.Struct(InteractionReceipt.fields))(receipt) ||
+    receipt.slot !== interactionRequestId(call) ||
+    !sameInteractionCall(receipt.call, call) ||
+    (ref !== undefined && (receipt.slot !== ref.slot || receipt.submissionId !== ref.submissionId))
+  )
+    return false
+
+  if (receipt.outcome === 'cancelled') {
+    const content = receipt.result?.structuredContent
+
+    return (
+      receipt.actionId === undefined &&
+      receipt.data === undefined &&
+      receipt.status === 'settled' &&
+      receipt.result?.toolCallId === call.id &&
+      receipt.result.isError === true &&
+      Schema.is(Schema.Record(Schema.String, Schema.Unknown))(content) &&
+      content.type === 'interaction_outcome' &&
+      content.outcome === 'cancelled' &&
+      content.slot === receipt.slot &&
+      content.requestId === receipt.slot &&
+      content.submissionId === receipt.submissionId
+    )
+  }
+
+  if (receipt.actionId === undefined || receipt.data === undefined) return false
+
+  if (receipt.status !== 'settled') return receipt.result === undefined
+  const result = receipt.result
+
+  if (result === undefined || result.toolCallId !== call.id) return false
+  const content = result.structuredContent
+
+  return (
+    Schema.is(Schema.Record(Schema.String, Schema.Unknown))(content) &&
+    content.type === 'interaction_outcome' &&
+    content.slot === receipt.slot &&
+    content.requestId === receipt.slot &&
+    content.submissionId === receipt.submissionId &&
+    content.actionId === receipt.actionId &&
+    (content.outcome === 'completed'
+      ? result.isError !== true
+      : (content.outcome === 'failed' || content.outcome === 'unknown') && result.isError === true)
+  )
+}
+
+/** Side-effect-free admission check for one interaction response against its
+ * authoritative pending request. Checks exact correlation, the original call
+ * and response schemas (excess fields rejected, absent data distinct from
+ * valid `null`/`false`/`0`), and the selected server action. Its output is a
+ * validated candidate, **not authenticated consent**: the host still checks
+ * caller auth, pending ownership, scope, and policy, then atomically accepts
+ * the first valid submission. An invalid attempt consumes nothing.
+ */
+export const validateInteractionSubmission = (input: {
+  readonly request: InteractionRequest
+  readonly response: InteractionResponse
+  readonly validateCall: InteractionResponseValidator
+  readonly validateResponse: InteractionResponseValidator
+  readonly actionIds: ReadonlyArray<string> | ReadonlySet<string>
+  readonly validateAction: InteractionPreflight['validateAction']
+}): Effect.Effect<InteractionCandidate, InteractionAdmissionError> =>
+  Effect.gen(function* () {
+    // Runtime decoding protects JavaScript callers too; nominal TypeScript types are
+    // not admission. Keep shape checks distinct from original business schema checks.
+    yield* Schema.decodeUnknownEffect(InteractionResponse, { onExcessProperty: 'error' })(
+      input.response
+    ).pipe(
+      Effect.mapError(
+        error =>
+          new InteractionAdmissionError({ cause: 'invalid_response', message: error.message })
+      )
+    )
+
+    const mismatch = (message: string): InteractionAdmissionError =>
+      new InteractionAdmissionError({ message, cause: 'request_mismatch' })
+
+    if (
+      input.response.requestId !== input.request.requestId ||
+      input.response.toolCallId !== input.request.toolCallId ||
+      input.response.toolCallId !== input.request.call.id
+    ) {
+      return yield* Effect.fail(
+        mismatch(`Interaction response does not match pending request ${input.request.requestId}`)
+      )
+    }
+
+    if (input.response.outcome === 'cancelled') {
+      if (input.response.actionId !== undefined || input.response.data !== undefined) {
+        return yield* Effect.fail(
+          new InteractionAdmissionError({
+            message: 'Interaction cancellation must not select an action or carry data',
+            cause: 'cancelled_with_payload'
+          })
+        )
+      }
+
+      return InteractionCandidate.Cancelled({ slot: input.request.requestId })
+    }
+
+    yield* input.validateCall(input.request.call.params).pipe(
+      Effect.asVoid,
+      Effect.mapError(
+        error =>
+          new InteractionAdmissionError({
+            message: `Invalid interaction call: ${error.message}`,
+            cause: 'invalid_call'
+          })
+      )
+    )
+
+    const actionId = input.response.actionId
+
+    if (actionId === undefined) {
+      return yield* Effect.fail(
+        new InteractionAdmissionError({
+          message: 'Interaction submission requires a server-defined action',
+          cause: 'missing_action'
+        })
+      )
+    }
+
+    const known = (
+      Array.isArray(input.actionIds) ? input.actionIds : [...input.actionIds]
+    ).includes(actionId)
+
+    if (!known) {
+      return yield* Effect.fail(
+        new InteractionAdmissionError({
+          message: `Unknown interaction action: ${actionId}`,
+          cause: 'unknown_action'
+        })
+      )
+    }
+
+    // Absent data (`undefined`) differs from valid `null`, `false`, and `0`.
+    if (input.response.data === undefined) {
+      return yield* Effect.fail(
+        new InteractionAdmissionError({
+          message: 'Interaction submission requires data',
+          cause: 'missing_data'
+        })
+      )
+    }
+
+    const data = input.response.data
+
+    yield* input.validateResponse(data).pipe(
+      Effect.mapError(
+        error =>
+          new InteractionAdmissionError({
+            message: `Invalid interaction data: ${error.message}`,
+            cause: 'invalid_data'
+          })
+      )
+    )
+
+    yield* input.validateAction({ actionId, data, call: input.request.call }).pipe(
+      Effect.mapError(
+        error =>
+          new InteractionAdmissionError({
+            message: error.message,
+            cause: 'action_rejected'
+          })
+      )
+    )
+
+    return InteractionCandidate.Submitted({
+      slot: input.request.requestId,
+      actionId,
+      data
+    })
+  })
+
+export type InteractionResponseStructuredContent = {
+  readonly type: 'interaction_response'
+  readonly name: string
+  readonly outcome: InteractionResponseOutcome
+  readonly actionId?: string
+  readonly data?: Schema.Json
+  readonly reason?: string
+  readonly source: HitlResponseSource
+}
+
+export const interactionResponseStructuredContent = (
+  response: InteractionResponse,
+  name: string
+): InteractionResponseStructuredContent => {
+  type InteractionResponseStructuredContentFields = {
+    type: 'interaction_response'
+    name: InteractionResponseStructuredContent['name']
+    outcome: InteractionResponseStructuredContent['outcome']
+    actionId?: InteractionResponseStructuredContent['actionId']
+    data?: InteractionResponseStructuredContent['data']
+    reason?: InteractionResponseStructuredContent['reason']
+  }
+
+  const fields: InteractionResponseStructuredContentFields = {
+    type: 'interaction_response',
+    name,
+    outcome: response.outcome
+  }
+
+  if (response.actionId !== undefined) {
+    fields.actionId = response.actionId
+  }
+
+  if (response.data !== undefined) {
+    fields.data = response.data
+  }
+
+  if (response.reason !== undefined) {
+    fields.reason = response.reason
+  }
+
+  return { ...fields, source: response.source }
+}
+
+/** Model-visible text for a cancelled interaction. Submitted interactions never
+ * synthesize a tool result: only an actual server execution result settles
+ * the tool call, so no submitted formatter is provided.
+ */
+export const formatInteractionResponseContent = (response: InteractionResponse, name: string) =>
+  `Interaction cancelled: ${response.reason ?? `Interaction ${name} cancelled`}`
+
+export const interactionUnknownOutcomeNotice =
+  'Outcome unknown: the action may have taken effect. Do not retry it automatically; reconcile out of band before proposing it again.'
+
+/** Server execution result for one accepted interaction. Carries interaction
+ * identity, the selected action, the receipt reference, and the explicit
+ * business outcome. `unknown` is a truthful terminal observation with
+ * `isError: true`; it never claims business success or failure and never
+ * auto-retries. Only `failed` when the host establishes the action did not
+ * take effect.
+ */
+export const makeInteractionToolResult = (input: {
+  readonly toolCallId: string
+  readonly requestId: string
+  readonly slot: string
+  readonly submissionId: string
+  readonly actionId: string
+  readonly outcome: InteractionBusinessOutcome
+  readonly content: Content
+  readonly structuredContent?: unknown
+}): ToolResult => {
+  const baseStructured = {
+    type: 'interaction_outcome' as const,
+    requestId: input.requestId,
+    slot: input.slot,
+    submissionId: input.submissionId,
+    actionId: input.actionId,
+    outcome: input.outcome
+  }
+
+  if (input.outcome === 'completed') {
+    return input.structuredContent === undefined
+      ? ToolResult.make({
+          toolCallId: input.toolCallId,
+          content: input.content,
+          structuredContent: baseStructured
+        })
+      : ToolResult.make({
+          toolCallId: input.toolCallId,
+          content: input.content,
+          structuredContent: { ...baseStructured, result: input.structuredContent }
+        })
+  }
+
+  if (input.outcome === 'failed') {
+    return input.structuredContent === undefined
+      ? makeErrorToolResult({
+          toolCallId: input.toolCallId,
+          content: input.content,
+          structuredContent: baseStructured
+        })
+      : makeErrorToolResult({
+          toolCallId: input.toolCallId,
+          content: input.content,
+          structuredContent: { ...baseStructured, result: input.structuredContent }
+        })
+  }
+
+  const content = Predicate.isString(input.content)
+    ? `${input.content}\n\n${interactionUnknownOutcomeNotice}`
+    : [...input.content, TextPart.make({ text: interactionUnknownOutcomeNotice })]
+
+  return input.structuredContent === undefined
+    ? makeErrorToolResult({
+        toolCallId: input.toolCallId,
+        content,
+        structuredContent: baseStructured
+      })
+    : makeErrorToolResult({
+        toolCallId: input.toolCallId,
+        content,
+        structuredContent: { ...baseStructured, result: input.structuredContent }
+      })
 }
 
 // Canonical loop-owned names. Public compatibility exports remain on /tools.

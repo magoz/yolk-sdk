@@ -2,7 +2,12 @@ import * as Schema from 'effect/Schema'
 import { AgentEvent } from './event.ts'
 import { AgentMessage, UserMessage } from './message.ts'
 import { AgentReasoningEffort } from './reasoning.ts'
-import { InputResponse, QuestionResponse, ToolApprovalResponse } from './tool.ts'
+import {
+  InputResponse,
+  InteractionResponse,
+  QuestionResponse,
+  ToolApprovalResponse
+} from './tool.ts'
 
 export class SessionSnapshot extends Schema.TaggedClass<SessionSnapshot>()('SessionSnapshot', {
   revision: Schema.Number,
@@ -46,11 +51,22 @@ export class InputResponseInput extends Schema.TaggedClass<InputResponseInput>()
   }
 ) {}
 
+export class InteractionResponseInput extends Schema.TaggedClass<InteractionResponseInput>()(
+  'InteractionResponseInput',
+  {
+    response: InteractionResponse,
+    expectedRevision: Schema.optional(Schema.Number),
+    model: Schema.optional(Schema.String),
+    reasoningEffort: Schema.optional(AgentReasoningEffort)
+  }
+) {}
+
 export const AgentWebSocketClientMessage = Schema.Union([
   UserInput,
   ToolApprovalResponseInput,
   QuestionResponseInput,
-  InputResponseInput
+  InputResponseInput,
+  InteractionResponseInput
 ])
 
 export type AgentWebSocketClientMessage = typeof AgentWebSocketClientMessage.Type

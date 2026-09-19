@@ -232,6 +232,12 @@ const toolRunIds = (runs: ReturnType<typeof reduceAgentEvents>['toolRuns']) =>
       Match.tag('QuestionAnswered', 'QuestionCancelled', current => current.response.toolCallId),
       Match.tag('InputRequested', current => current.request.toolCallId),
       Match.tag('InputSubmitted', 'InputCancelled', current => current.response.toolCallId),
+      Match.tag('InteractionRequested', current => current.request.toolCallId),
+      Match.tag(
+        'InteractionSubmitted',
+        'InteractionCancelled',
+        current => current.response.toolCallId
+      ),
       Match.tag(
         'InputReady',
         'ApprovalRequested',

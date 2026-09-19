@@ -129,6 +129,8 @@ export const matchesWorkflowHitlResponse = (
       request.toolCallId === current.toolCallId &&
       ((Predicate.isTagged(request, 'InputRequest') &&
         Predicate.isTagged(current, 'InputResponse')) ||
+        (Predicate.isTagged(request, 'InteractionRequest') &&
+          Predicate.isTagged(current, 'InteractionResponse')) ||
         (Predicate.isTagged(request, 'QuestionRequest') &&
           Predicate.isTagged(current, 'QuestionResponse')) ||
         (Predicate.isTagged(request, 'ToolApprovalRequest') &&
@@ -397,7 +399,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const store = yield* AgentWorkflowStore
       yield* toolStream.pipe(
         Stream.provideService(ToolExecutor, {
-          execute: call =>
+          execute: (call, options) =>
             assertChildAdmission(context, workflowRunId).pipe(
               Effect.provideService(AgentWorkflowStore, store),
               Effect.mapError(
@@ -408,11 +410,28 @@ export async function runAgentWorkflowToolBatchStep(input: {
                     message: 'Workflow execution is stopped or unavailable'
                   })
               ),
-              Effect.flatMap(() =>
-                suppliedResult === undefined
-                  ? executor.execute(call)
+              Effect.flatMap(() => {
+                // Interaction results settle only through the host receipt port;
+                // a supplied replay must never stand in for an admitted execution.
+                if (
+                  suppliedResult !== undefined &&
+                  runtime.config.tools.some(
+                    tool => tool.name === call.name && tool.interaction !== undefined
+                  )
+                ) {
+                  return Effect.fail(
+                    new ToolError({
+                      tool: call.name,
+                      cause: 'denied',
+                      message: `Interaction tool "${call.name}" cannot replay a supplied result.`
+                    })
+                  )
+                }
+
+                return suppliedResult === undefined
+                  ? executor.execute(call, options)
                   : Effect.succeed(suppliedResult)
-              )
+              })
             )
         }),
         Stream.filter(

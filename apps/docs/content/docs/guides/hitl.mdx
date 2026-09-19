@@ -1,16 +1,16 @@
 ---
 title: Add human-in-the-loop
-description: Pause an agent for approvals, questions, or typed inputs and resume with validated responses.
+description: Pause for approvals, questions, typed inputs, or action-backed interactions.
 ---
 
 Yolk models HITL in protocol, not UI. That means the same loop can pause in Next.js, Workers, WebSockets, or Vercel Workflows.
 
 ## How it works
 
-1. The model calls a tool requiring approval, calls the built-in question tool, or calls a generalized typed input tool.
+1. The model calls a tool requiring approval, the built-in question tool, a typed input tool, or an action-backed interaction.
 2. The loop emits `AgentAwaitingInput` with pending requests.
-3. Your UI renders approval/question/input controls (inputs render by `InputRequest.input.kind`).
-4. Your app resumes with typed `HitlResponse` values (`ToolApprovalResponse`, `QuestionResponse`, `InputResponse`).
+3. Your UI renders the matching controls. Input forms use `InputRequest.input.kind`; action-backed editors use `InteractionRequest.interaction.kind`.
+4. Your app validates and resumes with typed `HitlResponse` values. `InteractionResponse` requires an additional host-owned atomic acceptance step before resume; raw responses never authorize actions.
 
 ## What the host owns
 
@@ -30,6 +30,22 @@ For schema-backed forms, follow [Collect typed input](../agent/tools-hitl#collec
 Pass `toolSet.inputs` alongside `toolSet.tools` into loop/runtime configuration; serializable tool
 definitions alone cannot validate responses. Keep input forms pending until server acceptance.
 
+## Execute a reviewed action
+
+Use `makeInteractionTool`, not `makeInputTool`, when the user edits values and chooses a
+server-defined action that should execute without another model turn or approval. Follow
+[Authorize one action](../agent/tools-hitl#authorize-one-action) for the complete host contract.
+
+Authenticate and validate before atomically accepting one immutable submission/cancellation.
+Resolve with the scoped `interactionHost`, and pass both `toolSet.interactions` and
+`toolSet.interactionHost` to loop/runtime config. Durable preflight first calls
+`loadInteractionReceipts` and passes the snapshots to `prepareToolBatch`. All pending siblings
+still fence dispatch. `AppendHitlResponse` only logs a response; it is not acceptance authority.
+
+Keep submission pending until server acceptance, and acceptance active until a real outcome.
+An unknown outcome is not definite failure or permission to retry. Hosts own reconciliation.
+Voice and background execution do not support action-backed interactions.
+
 ## Related APIs
 
 - `AgentAwaitingInput` from `@yolk-sdk/agent/protocol`
@@ -37,6 +53,10 @@ definitions alone cannot validate responses. Keep input forms pending until serv
 - `QuestionRequest` from `@yolk-sdk/agent/protocol`
 - `InputRequest` from `@yolk-sdk/agent/protocol`
 - `InputResponse` from `@yolk-sdk/agent/protocol`
+- `InteractionRequest`, `InteractionResponse`, `InteractionHost` from `@yolk-sdk/agent/protocol`
+- `validateInteractionSubmission` from `@yolk-sdk/agent/protocol`
+- `makeInteractionTool` from `@yolk-sdk/agent/tools`
+- `loadInteractionReceipts` from `@yolk-sdk/agent/loop`
 - `plainHitlResponse` from `@yolk-sdk/agent/protocol`
 - `questionResponseStructuredContent` from `@yolk-sdk/agent/protocol`
 - `inputResponseStructuredContent` from `@yolk-sdk/agent/protocol`
