@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.86
+
+### Patch Changes
+
+- c8d74d8: Advance unchanged public packages in lockstep with action-backed interactions in the agent and harness packages. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.85
 
 ### Patch Changes

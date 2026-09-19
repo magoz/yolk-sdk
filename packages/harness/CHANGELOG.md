@@ -1,5 +1,13 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.86
+
+### Patch Changes
+
+- c8d74d8: Match action-backed interaction responses to their original request and tool-call IDs when resuming a paused run through the harness HITL helpers. Hosts still own authentication and immutable acceptance before executing the selected action.
+- Updated dependencies [275d402]
+  - @yolk-sdk/agent@0.1.0-canary.86
+
 ## 0.1.0-canary.85
 
 ### Patch Changes
