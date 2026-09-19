@@ -241,12 +241,14 @@ delivered.
 | Action                | Input                                               | Host method                | Access        |
 | --------------------- | --------------------------------------------------- | -------------------------- | ------------- |
 | `email.set_read`      | `{ messageId, isRead, folder? }`                    | `EmailClient.setRead`      | `write`       |
+| `email.set_flag`      | `{ messageId, isFlagged, folder? }`                 | `EmailClient.setFlag`      | `write`       |
 | `email.trash`         | `{ messageId, folder?, trashFolder? }`              | `EmailClient.trash`        | `destructive` |
 | `email.untrash`       | `{ messageId, folder?, destinationFolder? }`        | `EmailClient.untrash`      | `write`       |
 | `email.modify_labels` | `{ messageId, folder?, addLabels?, removeLabels? }` | `EmailClient.modifyLabels` | `write`       |
 | `email.move`          | `{ messageId, folder?, destinationFolder }`         | `EmailClient.move`         | `write`       |
 
-Set `isRead: true` to mark read, or `false` to mark unread. These actions use the incoming
+Set `isRead: true` to mark read, or `false` to mark unread. Set `isFlagged: true` to star for
+follow-up via `\Flagged`, or `false` to unstar. These actions use the incoming
 credential and require IMAP; POP3 is rejected before credential resolution or adapter calls.
 SMTP is submission-only. These host methods are optional for compatibility: old adapters
 continue working, but calling an unsupported action fails with a typed validation error.
@@ -342,7 +344,8 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
 Gmail labels use `gmail.list_labels`, `gmail.create_label`, `gmail.get_label`,
-`gmail.update_label`, `gmail.delete_label`, and `gmail.modify_labels`. Label reads use the
+`gmail.update_label`, `gmail.delete_label`, and `gmail.modify_labels`, plus `gmail.set_starred`
+for starring via the `STARRED` system label. Label reads use the
 existing `gmail.readonly` slot; label lifecycle mutations and message label changes reuse the
 existing `gmail.modify` slot, so no broader consent is needed. Create and update accept `name`
 plus optional `messageListVisibility` (`show` | `hide`) and `labelListVisibility` (`labelShow` |
@@ -636,10 +639,12 @@ as list metadata and are rejected by this action. Both actions use the existing 
 permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
 size policy, durable storage, and content scanning.
 
-### Outlook read state and trash
+### Outlook read state, flags, and trash
 
 - `outlook.set_read` takes `{ messageId, isRead, mailbox? }`: `true` marks read, `false` marks
   unread using Graph `PATCH` on the message.
+- `outlook.set_flag` takes `{ messageId, isFlagged, mailbox? }`: `true` flags for follow-up,
+  `false` clears the flag, using Graph `PATCH` `flagStatus`.
 - `outlook.trash` takes `{ messageId, mailbox? }` and moves the message to `deleteditems` using
   Graph `/move`; it never performs permanent deletion.
 - `outlook.untrash` takes `{ messageId, mailbox?, destinationFolderId? }` and moves from Deleted
@@ -666,12 +671,16 @@ as draft writes. Read-state, restore, and move actions declare `write`; trash de
   `MailboxSettings.Read` consent.
 - `outlook.create_category` takes `{ mailbox?, displayName, color? }` where `color` is
   `none` or `preset0` through `preset24`. It requires `MailboxSettings.ReadWrite` consent.
-  `displayName` is immutable after creation. This connector does not expose category get or
-  color-update actions; Graph does not support renaming categories.
+  `displayName` is immutable after creation: there is no category rename action because Graph
+  does not support renaming categories, only color updates.
 - `outlook.delete_category` takes `{ mailbox?, categoryId }` and answers Graph `204` with
   an empty body, returning typed `{ id, deleted: true }` without JSON decoding. It requires
   `MailboxSettings.ReadWrite` consent. Existing message assignments keep their category
   `displayName` strings.
+- `outlook.get_category` takes `{ mailbox?, categoryId }` and returns the typed category. It
+  requires `MailboxSettings.Read` consent.
+- `outlook.update_category` takes `{ mailbox?, categoryId, color }` and PATCHes only the color
+  (`displayName` stays immutable). It requires `MailboxSettings.ReadWrite` consent.
 - `outlook.set_categories` takes `{ messageId, mailbox?, categories }` and replaces the
   message's category `displayName` strings with Graph `PATCH`; an empty array clears all
   categories. It reuses the `Mail.ReadWrite` / `Mail.ReadWrite.Shared` message permission

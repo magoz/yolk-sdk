@@ -150,7 +150,8 @@ which is limited to files created by or explicitly opened/shared with the app. T
 refresh, consent policy, Google Picker integration, restricted-scope compliance, and binary file
 transfer.
 
-Outlook and generic IMAP email support `set_read` (with boolean `isRead`), `trash`, and `untrash`
+Outlook and generic IMAP email support `set_read` (with boolean `isRead`), `set_flag` (with
+boolean `isFlagged`), `trash`, and `untrash`
 actions in their respective `outlook.*` and `email.*` namespaces, plus `outlook.move_message` for
 Graph folder moves. Outlook calls Graph directly;
 generic email requires optional host `EmailClient.setRead`, `trash`, and `untrash` methods.
@@ -175,7 +176,9 @@ non-atomic read followed by PATCH. Both use ordinary/shared message write permis
 
 Generic email exposes `email.modify_labels` through optional `EmailClient.modifyLabels` host
 support. Labels are IMAP keywords, not system flags; hosts preserve unrelated flags and check
-server keyword support. IMAP has no standalone label catalog, and POP3/SMTP cannot persist labels.
+server keyword support. `email.set_flag` stars through optional `EmailClient.setFlag` host support,
+and Gmail stars through `gmail.set_starred` with the `STARRED` system label. IMAP has no standalone
+label catalog, and POP3/SMTP cannot persist labels.
 See the [Connectors catalog](../integrations/connectors) for inputs and host contracts.
 
 ## Transfer files

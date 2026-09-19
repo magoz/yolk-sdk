@@ -138,7 +138,9 @@ with `EmailSetReadInput`, `EmailTrashInput`, `EmailUntrashInput`, matching `*Req
 `untrash` methods receive IMAP connections and incoming credentials. Successful output is validated;
 POP3 is rejected. Move output includes the destination folder and an optional new message ID.
 See the [catalog](../integrations/connectors#mark-readunread-and-move-tofrom-trash) for adapter safety
-and trash-discovery requirements. Label mutations export `emailModifyLabelsAction` with
+and trash-discovery requirements. Flag mutations export `emailSetFlagAction` with `EmailSetFlagInput`, `EmailSetFlagRequest`,
+`EmailSetFlagOutput`, and optional `EmailClient.setFlag` host support for the `\Flagged` system flag.
+Label mutations export `emailModifyLabelsAction` with
 `EmailModifyLabelsInput`, `EmailModifyLabelsRequest`, `EmailModifyLabelsOutput` (an Effect `Chunk`
 of `EmailImapKeyword` atoms), and optional `EmailClient.modifyLabels` host support. Relocation
 exports `emailMoveAction` with `EmailMoveInput`, `EmailMoveRequest`, and optional
@@ -159,10 +161,11 @@ discriminator and valid base64 content, then exposes it as required `contentBase
 reference attachments are available only as list metadata.
 `OutlookListAttachmentsOutput.attachments` decodes to an Effect `Chunk`. `outlookMoveMessageAction`
 with `OutlookMoveMessageInput` moves a message to a required `destinationFolderId` via Graph
-`/move`. Category exports are
+`/move`; `outlookSetFlagAction` with `OutlookSetFlagInput` PATCHes follow-up `flagStatus`. Category exports are
 `OutlookCategory`, `OutlookCategoryColor`, `OutlookListCategoriesInput/Output`,
 `OutlookCreateCategoryInput`, `OutlookDeleteCategoryInput/Output`, `OutlookSetCategoriesInput`,
-`OutlookModifyCategoriesInput`, plus `MicrosoftOutlookCategoryRead/WriteOAuthCredentialSlot` opt-in
+`OutlookModifyCategoriesInput`, `OutlookGetCategoryInput`, `OutlookUpdateCategoryInput`, plus
+`MicrosoftOutlookCategoryRead/WriteOAuthCredentialSlot` opt-in
 slots (excluded from the combined slot). OAuth exports include generic,
 signed-in-mailbox, shared-mailbox, and combined
 slots that share `microsoft.oauth`. Action inputs use `/me` by default and accept optional `mailbox`
@@ -252,7 +255,8 @@ fails with `ConnectorError { cause: 'validation_failed' }`.
 Gmail label contracts are `GmailLabel` (with `GmailLabelMessageListVisibility`,
 `GmailLabelListVisibility`, and `GmailLabelType`), `GmailCreateLabelInput`, `GmailLabelIdInput`,
 `GmailUpdateLabelInput` (PATCH rename, at least one updatable field), and `GmailDeleteLabelOutput`
-(`{ id, deleted: true }` without decoding the empty 204 body). Label mutations reuse the existing
+(`{ id, deleted: true }` without decoding the empty 204 body). `gmailSetStarredAction` with
+`GmailSetStarredInput` stars through the `STARRED` system label. Label mutations reuse the existing
 `gmail.modify` slot; reads use the readonly slot.
 
 See [Connectors catalog](../integrations/connectors) for action ids.

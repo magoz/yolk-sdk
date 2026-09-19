@@ -96,6 +96,8 @@ export {
   GmailSearchInput,
   GmailSearchOutput,
   GmailSendAs,
+  gmailSetStarredAction,
+  GmailSetStarredInput,
   gmailTrashAction,
   gmailUntrashAction,
   gmailUpdateLabelAction,

@@ -189,6 +189,7 @@ describe('generic email connector', () => {
       'email.create_draft',
       'email.send_message',
       'email.set_read',
+      'email.set_flag',
       'email.trash',
       'email.untrash',
       'email.modify_labels',

@@ -145,6 +145,7 @@ package does not bundle those libraries.
 | `email.create_draft`   | append a message draft to an IMAP mailbox      | `write`       |
 | `email.send_message`   | submit a normalized message to the SMTP server | `destructive` |
 | `email.set_read`       | mark an IMAP message read or unread            | `write`       |
+| `email.set_flag`       | flag/unflag an IMAP message for follow-up      | `write`       |
 | `email.trash`          | move an IMAP message to trash                  | `destructive` |
 | `email.untrash`        | move an IMAP message out of trash              | `write`       |
 | `email.move`           | move an IMAP message to any folder             | `write`       |
@@ -217,6 +218,9 @@ typed validation error. All successful mutation outputs are schema-validated.
 - `email.set_read`: `{ messageId, isRead, folder? }`. Set `isRead` to `true` for read or `false`
   for unread. The connector defaults `folder` to `INBOX`. Hosts add/remove only the `\Seen` flag
   using UID `STORE`, preserving all other flags, and return `{ messageId, isRead }` after success.
+- `email.set_flag`: `{ messageId, isFlagged, folder? }`. Set `isFlagged` to `true` to star for
+  follow-up or `false` to unstar. Hosts add/remove only the `\Flagged` flag using UID `STORE`,
+  preserving all other flags, check `PERMANENTFLAGS` first, and return `{ messageId, isFlagged }`.
 - `email.trash`: `{ messageId, folder?, trashFolder? }`. Source `folder` defaults to `INBOX`.
   Hosts use `trashFolder` or discover a `\Trash` SPECIAL-USE mailbox with a host-configured fallback.
 - `email.untrash`: `{ messageId, folder?, destinationFolder? }`. Here `folder` is the source
@@ -275,6 +279,7 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 | `gmail.update_label`     | rename/update label visibility |
 | `gmail.delete_label`     | delete a user label            |
 | `gmail.modify_labels`    | add/remove labels              |
+| `gmail.set_starred`      | star/unstar a message          |
 | `gmail.trash`            | move a message to trash        |
 | `gmail.untrash`          | restore a trashed message      |
 | `gmail.draft_compose`    | create a draft                 |
@@ -292,7 +297,8 @@ least one changed field. Visibility values are `show | hide` and
 `labelShow | labelShowIfUnread | labelHide`, respectively. Reads use `gmail.readonly`; lifecycle
 mutations and message assignment reuse `gmail.modify`. System labels cannot be renamed or deleted.
 Delete returns `{ id, deleted: true }`; it deletes the label, not messages. Assign/remove labels
-with `gmail.modify_labels` and `{ messageId, addLabelIds?, removeLabelIds? }`.
+with `gmail.modify_labels` and `{ messageId, addLabelIds?, removeLabelIds? }`. Star/unstar with
+`gmail.set_starred` and `{ messageId, isStarred }`, which assigns the `STARRED` system label.
 
 ### Fetch a normalized Gmail thread
 
@@ -441,12 +447,15 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.send_mail`          | submit a new message for sending                               |
 | `outlook.send_draft`         | submit an existing draft for sending                           |
 | `outlook.set_read`           | mark a message read or unread                                  |
+| `outlook.set_flag`           | flag/unflag a message for follow-up                            |
 | `outlook.trash`              | move a message to Deleted Items                                |
 | `outlook.untrash`            | move a message from Deleted Items to inbox or another folder   |
 | `outlook.move_message`       | move a message to any folder                                   |
 | `outlook.list_categories`    | list master categories                                         |
 | `outlook.create_category`    | create a master category                                       |
 | `outlook.delete_category`    | delete a master category                                       |
+| `outlook.get_category`       | get one master category                                        |
+| `outlook.update_category`    | update a master category color                                 |
 | `outlook.set_categories`     | replace or clear message category names                        |
 | `outlook.modify_categories`  | add/remove message category names                              |
 
@@ -457,7 +466,9 @@ List takes `{ mailbox?, top?, nextLink? }` and returns `{ categories, nextLink? 
 `{ mailbox?, displayName, color? }`, where color is `none` or `preset0` through `preset24`.
 Delete takes `{ mailbox?, categoryId }` and returns `{ id, deleted: true }` without decoding
 Graph's empty 204 body. The name is immutable; deleting a master category does not remove its
-name from existing message assignments.
+name from existing message assignments. `outlook.get_category` takes `{ mailbox?, categoryId }`
+and returns the typed category. `outlook.update_category` takes `{ mailbox?, categoryId, color }`
+and PATCHes only the color.
 
 Master-category list and mutations require opt-in `MailboxSettings.Read` and
 `MailboxSettings.ReadWrite`, respectively, sharing `microsoft.oauth`. These are not in the
@@ -522,10 +533,11 @@ with valid base64 `contentBytes` and returns required `contentBase64`. Item and 
 remain available only as list metadata and are rejected by this action. Hosts own base64 decoding, size limits,
 durable storage, and content scanning.
 
-#### Read state, trash, and move
+#### Read state, flags, trash, and move
 
 `outlook.set_read` accepts `{ messageId, isRead, mailbox? }`: `true` marks read and `false` marks
-unread via Graph `PATCH`. `outlook.trash` accepts `{ messageId, mailbox? }` and calls Graph `/move`
+unread via Graph `PATCH`. `outlook.set_flag` accepts `{ messageId, isFlagged, mailbox? }` and
+PATCHes `flag.flagStatus` to `flagged` or `notFlagged` for follow-up. `outlook.trash` accepts `{ messageId, mailbox? }` and calls Graph `/move`
 with destination `deleteditems`, never permanent deletion. `outlook.untrash` accepts
 `{ messageId, mailbox?, destinationFolderId? }` and moves from Deleted Items to `inbox` by default,
 or the specified folder ID/well-known name. It neither infers the original folder nor recovers

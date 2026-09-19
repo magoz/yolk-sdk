@@ -312,6 +312,25 @@ export class EmailMoveRequest extends Schema.Class<EmailMoveRequest>('EmailMoveR
   destinationFolder: EmailFolderName
 }) {}
 
+export class EmailSetFlagInput extends Schema.Class<EmailSetFlagInput>('EmailSetFlagInput')({
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  isFlagged: Schema.Boolean
+}) {}
+
+export class EmailSetFlagOutput extends Schema.Class<EmailSetFlagOutput>('EmailSetFlagOutput')({
+  messageId: EmailNonEmptyMessageId,
+  isFlagged: Schema.Boolean
+}) {}
+
+export class EmailSetFlagRequest extends Schema.Class<EmailSetFlagRequest>('EmailSetFlagRequest')({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageId: EmailNonEmptyMessageId,
+  folder: EmailFolderName,
+  isFlagged: Schema.Boolean
+}) {}
+
 export class EmailModifyLabelsInput extends Schema.Class<EmailModifyLabelsInput>(
   'EmailModifyLabelsInput'
 )({
@@ -471,6 +490,17 @@ export type EmailClientApi = {
   readonly setRead?: (
     input: EmailSetReadRequest
   ) => Effect.Effect<ActionResult<EmailSetReadOutput>, ConnectorError>
+  /**
+   * Optional host-only IMAP flag mutation. Hosts resolve the UID from the opaque
+   * `messageId` (which encodes UIDVALIDITY and UID) in `folder`, then set or clear the
+   * `\Flagged` system flag with UID-addressed `STORE` (`+FLAGS.SILENT` to flag,
+   * `-FLAGS.SILENT` to unflag), preserving every other flag and keyword. Hosts check
+   * `PERMANENTFLAGS` first and return an `ActionResult.failure` when the server does not
+   * support the flag.
+   */
+  readonly setFlag?: (
+    input: EmailSetFlagRequest
+  ) => Effect.Effect<ActionResult<EmailSetFlagOutput>, ConnectorError>
   readonly trash?: (
     input: EmailTrashRequest
   ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
@@ -903,6 +933,48 @@ export const emailSetReadAction = defineAction({
     })
 })
 
+export const emailSetFlagAction = defineAction({
+  id: 'email.set_flag',
+  description:
+    'Flag (isFlagged: true) or unflag (isFlagged: false) an IMAP message for follow-up. Folder defaults to INBOX; requires host setFlag support.',
+  access: 'write',
+  inputSchema: EmailSetFlagInput,
+  outputSchema: EmailSetFlagOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const { connection, credential, client } = yield* emailMutationContext(
+        integration,
+        'Changing flag state'
+      )
+
+      if (client.setFlag === undefined) {
+        return yield* Effect.fail(
+          validationError(integration, 'EmailClient does not support setFlag')
+        )
+      }
+
+      const result = yield* client.setFlag(
+        EmailSetFlagRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          isFlagged: input.isFlagged
+        })
+      )
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const output = yield* Schema.decodeUnknownEffect(EmailSetFlagOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid setFlag output', error)
+        )
+      )
+
+      return ActionResult.success(output)
+    })
+})
+
 export const emailTrashAction = defineAction({
   id: 'email.trash',
   description:
@@ -1068,6 +1140,7 @@ export const emailActions = [
   emailCreateDraftAction,
   emailSendMessageAction,
   emailSetReadAction,
+  emailSetFlagAction,
   emailTrashAction,
   emailUntrashAction,
   emailModifyLabelsAction,

@@ -117,6 +117,13 @@ export class GmailModifyLabelsInput extends Schema.Class<GmailModifyLabelsInput>
   removeLabelIds: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
+export class GmailSetStarredInput extends Schema.Class<GmailSetStarredInput>(
+  'GmailSetStarredInput'
+)({
+  messageId: Schema.String,
+  isStarred: Schema.Boolean
+}) {}
+
 const GmailLabelName = Schema.Trimmed.check(Schema.isNonEmpty())
 
 // URL parsers normalize even percent-encoded dot segments. Reject rather than change identity.
@@ -1293,6 +1300,29 @@ export const gmailModifyLabelsAction = defineAction({
     )
 })
 
+export const gmailSetStarredAction = defineAction({
+  id: 'gmail.set_starred',
+  description:
+    'Star (isStarred: true) or unstar (isStarred: false) a Gmail message via the STARRED system label.',
+  access: 'write',
+  inputSchema: GmailSetStarredInput,
+  outputSchema: GmailUnknownOutput,
+  execute: ({ integration, input }) =>
+    runGmailJsonAction(
+      integration,
+      token =>
+        gmailRequest({
+          token,
+          method: 'POST',
+          path: `/users/me/messages/${encodeURIComponent(input.messageId)}/modify`,
+          body: input.isStarred ? { addLabelIds: ['STARRED'] } : { removeLabelIds: ['STARRED'] }
+        }),
+      'gmail_set_starred_failed',
+      'Gmail set starred failed',
+      GoogleGmailModifyOAuthCredentialSlot
+    )
+})
+
 export const gmailTrashAction = defineAction({
   id: 'gmail.trash',
   description: 'Move a Gmail message to trash.',
@@ -1698,6 +1728,7 @@ export const gmailActions = [
   gmailUpdateLabelAction,
   gmailDeleteLabelAction,
   gmailModifyLabelsAction,
+  gmailSetStarredAction,
   gmailTrashAction,
   gmailUntrashAction,
   gmailDraftDeleteAction,

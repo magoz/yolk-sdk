@@ -1335,6 +1335,7 @@ const outlookMutateMessage = (input: {
   readonly messageId: string
   readonly operation:
     | 'set_read'
+    | 'set_flag'
     | 'set_categories'
     | 'modify_categories'
     | 'trash'
@@ -1342,6 +1343,7 @@ const outlookMutateMessage = (input: {
     | 'move_message'
   readonly body:
     | { readonly isRead: boolean }
+    | { readonly flag: { readonly flagStatus: 'flagged' | 'notFlagged' } }
     | { readonly categories: ReadonlyArray<string> }
     | { readonly destinationId: string }
 }) =>
@@ -1456,6 +1458,29 @@ export const outlookMoveMessageAction = defineAction({
       messageId: input.messageId,
       operation: 'move_message',
       body: { destinationId: input.destinationFolderId }
+    })
+})
+
+export class OutlookSetFlagInput extends Schema.Class<OutlookSetFlagInput>('OutlookSetFlagInput')({
+  messageId: OutlookNonEmptyString,
+  mailbox: Schema.optional(OutlookNonEmptyString),
+  isFlagged: Schema.Boolean
+}) {}
+
+export const outlookSetFlagAction = defineAction({
+  id: 'outlook.set_flag',
+  description:
+    'Flag (isFlagged: true) or unflag (isFlagged: false) an Outlook message for follow-up via Graph PATCH flagStatus.',
+  access: 'write',
+  inputSchema: OutlookSetFlagInput,
+  outputSchema: OutlookMessage,
+  execute: ({ integration, input }) =>
+    outlookMutateMessage({
+      integration,
+      mailbox: input.mailbox,
+      messageId: input.messageId,
+      operation: 'set_flag',
+      body: { flag: { flagStatus: input.isFlagged ? 'flagged' : 'notFlagged' } }
     })
 })
 
@@ -1799,6 +1824,95 @@ export const outlookDeleteCategoryAction = defineAction({
     })
 })
 
+export class OutlookGetCategoryInput extends Schema.Class<OutlookGetCategoryInput>(
+  'OutlookGetCategoryInput'
+)({
+  mailbox: Schema.optional(OutlookCategoryPathId),
+  categoryId: OutlookCategoryPathId
+}) {}
+
+export const outlookGetCategoryAction = defineAction({
+  id: 'outlook.get_category',
+  description: 'Get one Outlook master category by ID. Requires MailboxSettings.Read consent.',
+  access: 'read',
+  inputSchema: OutlookGetCategoryInput,
+  outputSchema: OutlookCategory,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookCategorySlotFor('read', integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'GET',
+          url: `${microsoftGraphApiBaseUrl}${outlookMasterCategoriesPath(input.mailbox)}/${encodeURIComponent(input.categoryId)}`,
+          headers: outlookReadHeaders(token, false)
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'outlook_get_category_failed',
+          message: 'Microsoft Outlook get category failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      const output = yield* decodeJsonResponse(OutlookCategory, response)
+
+      return ActionResult.success(output)
+    })
+})
+
+export class OutlookUpdateCategoryInput extends Schema.Class<OutlookUpdateCategoryInput>(
+  'OutlookUpdateCategoryInput'
+)({
+  mailbox: Schema.optional(OutlookCategoryPathId),
+  categoryId: OutlookCategoryPathId,
+  color: OutlookCategoryColor
+}) {}
+
+export const outlookUpdateCategoryAction = defineAction({
+  id: 'outlook.update_category',
+  description:
+    'Update an Outlook master category color. Requires MailboxSettings.ReadWrite consent. Only color is writable: displayName is immutable after creation.',
+  access: 'write',
+  inputSchema: OutlookUpdateCategoryInput,
+  outputSchema: OutlookCategory,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookCategorySlotFor('write', integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'PATCH',
+          url: `${microsoftGraphApiBaseUrl}${outlookMasterCategoriesPath(input.mailbox)}/${encodeURIComponent(input.categoryId)}`,
+          headers: outlookDraftWriteHeaders(token),
+          body: JSON.stringify({ color: input.color })
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'outlook_update_category_failed',
+          message: 'Microsoft Outlook update category failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      const output = yield* decodeJsonResponse(OutlookCategory, response)
+
+      return ActionResult.success(output)
+    })
+})
+
 export const outlookSetCategoriesAction = defineAction({
   id: 'outlook.set_categories',
   description:
@@ -1890,11 +2004,14 @@ export const outlookMailActions = [
   outlookSendMailAction,
   outlookSendDraftAction,
   outlookSetReadAction,
+  outlookSetFlagAction,
   outlookTrashAction,
   outlookUntrashAction,
   outlookMoveMessageAction,
   outlookListCategoriesAction,
   outlookCreateCategoryAction,
+  outlookGetCategoryAction,
+  outlookUpdateCategoryAction,
   outlookDeleteCategoryAction,
   outlookSetCategoriesAction,
   outlookModifyCategoriesAction
