@@ -219,7 +219,10 @@ must encode both UIDVALIDITY and UID rather than exposing a bare UID. The host a
 and performs `APPEND` with the `\Draft` flag.
 
 Message list/get outputs expose normalized addresses, text/HTML bodies, and attachment metadata,
-never raw MIME. When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
+never raw MIME. `email.get_message` additionally requires `headers` name/value pairs (including
+`List-Unsubscribe` when the mail carries it); hosts fetch them via IMAP `BODY.PEEK[HEADER]` or
+POP3 `TOP` without marking the message read. Successful host output is schema-validated, so a
+missing `headers` array fails. List summaries carry no headers. When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
 `email.get_attachment`. The host returns decoded file bytes—not MIME transfer-encoded text—as
 base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `EmailClient`
 implementations may omit the optional `getAttachment` method; invoking the action then fails with a
@@ -612,7 +615,9 @@ explicit non-blank `mailbox`. This applies to direct connector calls and generat
 Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged. Repeat `mailbox` for
 an explicit mailbox continuation and `folderId` for a folder continuation. The connector only
 accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message`
-requests a text body; read and draft-returning actions request immutable IDs.
+requests a text body plus required `internetMessageHeaders` (name/value pairs: `List-Unsubscribe`,
+`References`, and authentication results when the message carries them); list, draft, and mutation
+actions return the base `OutlookMessage` without headers. Read and draft-returning actions request immutable IDs.
 
 `outlook.create_reply_draft` creates a bodyless reply draft, then prepends the supplied text or HTML
 to Graph's generated quoted history and saves it. This is a multi-step write: once a draft ID is

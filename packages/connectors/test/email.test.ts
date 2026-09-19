@@ -31,6 +31,7 @@ import {
   emailSendMessageAction,
   type EmailCreateDraftRequest,
   type EmailGetAttachmentOutput,
+  type EmailGetMessageOutput,
   type EmailGetAttachmentRequest,
   type EmailGetMessageRequest,
   type EmailListMessagesOutput,
@@ -51,7 +52,11 @@ const message = {
   bcc: [],
   replyTo: [],
   body: { text: 'Hello' },
-  attachments: []
+  attachments: [],
+  headers: [
+    { name: 'Subject', value: 'Hello' },
+    { name: 'List-Unsubscribe', value: '<https://example.com/unsubscribe>' }
+  ]
 }
 
 type EmailRequests = {
@@ -74,6 +79,7 @@ const makeEmailClientLayer = (input?: {
   readonly requests?: EmailRequests
   readonly listResult?: ActionResultType<EmailListMessagesOutput>
   readonly attachmentResult?: ActionResultType<EmailGetAttachmentOutput>
+  readonly getResult?: ActionResultType<EmailGetMessageOutput>
 }) => {
   const requests = input?.requests ?? makeRequests()
 
@@ -102,7 +108,7 @@ const makeEmailClientLayer = (input?: {
         Effect.sync(() => {
           requests.get.push(request)
 
-          return ActionResult.success({ message })
+          return input?.getResult ?? ActionResult.success({ message })
         }),
       getAttachment: request =>
         Effect.sync(() => {
@@ -151,6 +157,7 @@ const makeHostLayer = (input?: {
   readonly refs?: Array<string>
   readonly listResult?: ActionResultType<EmailListMessagesOutput>
   readonly attachmentResult?: ActionResultType<EmailGetAttachmentOutput>
+  readonly getResult?: ActionResultType<EmailGetMessageOutput>
 }) => {
   const refs = input?.refs ?? []
 
@@ -272,6 +279,58 @@ describe('generic email connector', () => {
         expect(result.failure.underlying).toBeInstanceOf(Error)
         expect(Schema.isSchemaError(result.failure.underlying)).toBe(true)
       }
+    })
+  })
+
+  it.effect('rejects headerless host get output through the public action', () => {
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+
+    // Headerless message from an untyped host payload.
+    const getResult = ActionResult.success(
+      JSON.parse(
+        '{"message":{"id":"message-1","from":[{"address":"sender@example.com"}],"to":[{"address":"alice@example.com"}],"cc":[],"bcc":[],"replyTo":[],"body":{"text":"Hello"},"attachments":[]}}'
+      )
+    )
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.get_message',
+        input: { messageId: 'message-1' }
+      }).pipe(Effect.provide(makeHostLayer({ getResult })), Effect.result)
+
+      expect(Result.isFailure(result)).toBe(true)
+
+      if (Result.isFailure(result)) {
+        expect(Predicate.isTagged(result.failure, 'ConnectorError')).toBe(true)
+        expect(result.failure).toMatchObject({ cause: 'validation_failed' })
+        expect(result.failure.underlying).toBeInstanceOf(Error)
+        expect(Schema.isSchemaError(result.failure.underlying)).toBe(true)
+      }
+    })
+  })
+
+  it.effect('passes host get failures through untouched', () => {
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+
+    const getResult = ActionResult.failure({ code: 'not_found', message: 'Missing UID' })
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.get_message',
+        input: { messageId: 'message-1' }
+      }).pipe(Effect.provide(makeHostLayer({ getResult })))
+
+      expect(result).toEqual(getResult)
     })
   })
 

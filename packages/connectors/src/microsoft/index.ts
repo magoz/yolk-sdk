@@ -50,6 +50,8 @@ export {
   OutlookMessage,
   OutlookMessageBody,
   OutlookMessageIdInput,
+  OutlookMessageWithHeaders,
+  OutlookInternetMessageHeader,
   outlookMoveMessageAction,
   OutlookMoveMessageInput,
   outlookModifyCategoriesAction,

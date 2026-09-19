@@ -121,6 +121,13 @@ export type EmailAttachmentBase64 = typeof EmailAttachmentBase64.Type
 
 const EmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
 
+const EmailHeaderName = Schema.Trimmed.check(Schema.isNonEmpty())
+
+export class EmailMessageHeader extends Schema.Class<EmailMessageHeader>('EmailMessageHeader')({
+  name: EmailHeaderName,
+  value: Schema.String
+}) {}
+
 export class EmailAttachmentContent extends Schema.Class<EmailAttachmentContent>(
   'EmailAttachmentContent'
 )({
@@ -174,7 +181,8 @@ export class EmailMessage extends Schema.Class<EmailMessage>('EmailMessage')({
   receivedAt: Schema.optional(Schema.String),
   body: EmailBody,
   attachments: Schema.Array(EmailAttachmentMetadata),
-  labels: Schema.optional(Schema.Array(EmailImapKeyword))
+  labels: Schema.optional(Schema.Array(EmailImapKeyword)),
+  headers: Schema.Array(EmailMessageHeader)
 }) {}
 
 const EmailPageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_000 }))
@@ -481,6 +489,11 @@ export type EmailClientApi = {
   readonly listMessages: (
     input: EmailListMessagesRequest
   ) => Effect.Effect<ActionResult<EmailListMessagesOutput>, ConnectorError>
+  /**
+   * Hosts MUST return the RFC 5322 message headers as `headers`: IMAP via `BODY.PEEK[HEADER]`,
+   * POP3 via `TOP`. Return an empty array only when the server response contains no headers;
+   * never omit headers to save a fetch.
+   */
   readonly getMessage: (
     input: EmailGetMessageRequest
   ) => Effect.Effect<ActionResult<EmailGetMessageOutput>, ConnectorError>
@@ -767,7 +780,8 @@ export const emailListMessagesAction = defineAction({
 
 export const emailGetMessageAction = defineAction({
   id: 'email.get_message',
-  description: 'Get one normalized message from a configured IMAP or POP3 account.',
+  description:
+    'Get one normalized message with required headers from a configured IMAP or POP3 account.',
   access: 'read',
   inputSchema: EmailGetMessageInput,
   outputSchema: EmailGetMessageOutput,
@@ -779,7 +793,7 @@ export const emailGetMessageAction = defineAction({
       const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
       const client = yield* EmailClient
 
-      return yield* client.getMessage(
+      const result = yield* client.getMessage(
         EmailGetMessageRequest.make({
           connection,
           credential,
@@ -787,6 +801,16 @@ export const emailGetMessageAction = defineAction({
           folder: input.folder
         })
       )
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const output = yield* Schema.decodeUnknownEffect(EmailGetMessageOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid getMessage output', error)
+        )
+      )
+
+      return ActionResult.success(output)
     })
 })
 

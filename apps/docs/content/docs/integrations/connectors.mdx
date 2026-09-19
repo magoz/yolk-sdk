@@ -200,6 +200,12 @@ The port owns MIME generation and `APPEND` with the `\Draft` flag. Output is
 return `APPENDUID`. When present, it is opaque; UIDPLUS adapters must encode both UIDVALIDITY and UID,
 never a bare UID. POP3 rejects draft creation.
 
+`email.get_message` returns required `headers` name/value pairs alongside the normalized body,
+including `List-Unsubscribe` when the mail carries it. Hosts fetch them via IMAP
+`BODY.PEEK[HEADER]` or POP3 `TOP` without marking the message read; an empty array is valid only
+when the server response contains no headers. Successful host output is schema-validated, so a
+missing `headers` array fails. List summaries carry no headers.
+
 List message `id` values are opaque adapter identifiers that callers pass unchanged to
 `email.get_message`. POP3 adapters must use UIDL or another stable mapping rather than transient
 sequence numbers. An omitted IMAP `folder` means `INBOX`; POP3 uses its single mailbox. Adapters
@@ -439,7 +445,7 @@ required `Mail.*` and `Files.*` grants.
 | ---------------------------- | -------------------------------------------------------------- |
 | `outlook.list_messages`      | list mailbox or folder messages with opaque Graph paging       |
 | `outlook.search_messages`    | search messages with Microsoft Graph mail `$search` syntax     |
-| `outlook.get_message`        | fetch one message with a text body                             |
+| `outlook.get_message`        | fetch one message with text body and headers                   |
 | `outlook.list_attachments`   | list attachment metadata, including inline attachments         |
 | `outlook.get_attachment`     | fetch one file attachment with base64 content                  |
 | `outlook.create_draft`       | create a new message draft                                     |
@@ -518,7 +524,9 @@ List and search outputs expose Graph's complete `@odata.nextLink` as `nextLink`.
 unchanged; repeat `mailbox` for explicit-mailbox continuations and `folderId` for folder
 continuations. The connector accepts only global Graph v1.0 links for the selected mailbox and
 folder collection. Read and draft-returning requests
-use Graph immutable IDs; `outlook.get_message` requests text for the full body. A draft ID can still
+use Graph immutable IDs; `outlook.get_message` requests text for the full body plus required
+`internetMessageHeaders` (name/value pairs: `List-Unsubscribe`, `References`, and authentication
+results when the message carries them). List, draft, and mutation responses return the base message without headers. A draft ID can still
 change when sent, which is a documented immutable-ID exception.
 
 `outlook.list_attachments` returns normalized metadata with `kind: 'file' | 'item' | 'reference' |

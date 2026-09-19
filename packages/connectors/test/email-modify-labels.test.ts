@@ -459,12 +459,14 @@ describe('generic email modify labels', () => {
         bcc: [],
         replyTo: [],
         body: { text: 'Hello' },
-        attachments: []
+        attachments: [],
+        headers: [{ name: 'Subject', value: 'Hello' }]
       })
 
       expect(summaryWithLabels.labels).toEqual(['Work', '$Forwarded'])
       expect(summaryWithoutLabels.labels).toBeUndefined()
       expect(messageWithoutLabels.labels).toBeUndefined()
+      expect(messageWithoutLabels.headers).toEqual([{ name: 'Subject', value: 'Hello' }])
 
       const invalidLabels = yield* Schema.decodeUnknownEffect(EmailMessageSummary)({
         id: 'message-1',

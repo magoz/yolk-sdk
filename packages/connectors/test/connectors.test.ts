@@ -101,7 +101,7 @@ import {
   outlookGetAttachmentAction,
   outlookGetMessageAction,
   outlookListAttachmentsAction,
-  OutlookMessage,
+  OutlookMessageWithHeaders,
   outlookListMessagesAction,
   outlookSearchMessagesAction,
   outlookSendDraftAction,
@@ -2727,7 +2727,8 @@ describe('@yolk-sdk/connectors', () => {
             id: 'reply_draft_1',
             conversationId: 'conv-1',
             isDraft: true,
-            body: { contentType: 'html', content: combinedHtml }
+            body: { contentType: 'html', content: combinedHtml },
+            internetMessageHeaders: [{ name: 'Message-ID', value: '<reply-draft-1@example.com>' }]
           })
         }),
         ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' }),
@@ -2803,7 +2804,10 @@ describe('@yolk-sdk/connectors', () => {
       })
 
       if (Predicate.isTagged(readBack, 'Success')) {
-        const persistedMessage = yield* Schema.decodeUnknownEffect(OutlookMessage)(readBack.value)
+        const persistedMessage = yield* Schema.decodeUnknownEffect(OutlookMessageWithHeaders)(
+          readBack.value
+        )
+
         const persisted = persistedMessage.body
 
         expect(persisted?.contentType).toBe('html')
@@ -3001,7 +3005,7 @@ describe('@yolk-sdk/connectors', () => {
         jsonHttpResponse('{"id":"draft_1","isDraft":true}'),
         ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' }),
         jsonHttpResponse('{"value":[]}'),
-        jsonHttpResponse('{"id":"message_1"}')
+        jsonHttpResponse('{"id":"message_1","internetMessageHeaders":[]}')
       ])
 
       // Enforcing fake: the scope-free identity call always succeeds, every

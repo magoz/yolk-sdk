@@ -123,7 +123,8 @@ Generic email's principal contracts are `EmailIncomingConnection`, `EmailImapCon
 `EmailSmtpConnection`, `EmailAddress`, `EmailBody`, `EmailAttachmentMetadata`,
 `EmailAttachmentBase64`, `EmailAttachmentContent`, `EmailMessageSummary`, `EmailMessage`,
 `EmailListMessagesInput`, `EmailListMessagesOutput`, `EmailGetMessageInput`, `EmailGetMessageOutput`,
-`EmailGetAttachmentInput`, `EmailGetAttachmentRequest`, `EmailGetAttachmentOutput`,
+`EmailGetAttachmentInput`, `EmailGetAttachmentRequest`, `EmailGetAttachmentOutput`, `EmailMessageHeader`
+(required `headers` on `EmailMessage` from `email.get_message`; hosts fetch via `BODY.PEEK[HEADER]`),
 `EmailComposeMessage`, `EmailFolderName`, `EmailDraftId`, `EmailCreateDraftInput`,
 `EmailCreateDraftOutput`, `EmailSendMessageInput`, and `EmailSendMessageOutput`. `EmailClient` receives
 typed list/get/get-attachment/IMAP-draft/SMTP-send requests plus a runtime
@@ -147,7 +148,9 @@ exports `emailMoveAction` with `EmailMoveInput`, `EmailMoveRequest`, and optiona
 `EmailClient.move` host support, returning `EmailMoveMessageOutput` with destination
 UIDVALIDITY/UID mapping when known.
 
-Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageIdInput`,
+Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageWithHeaders`
+(required `internetMessageHeaders` on `outlook.get_message` only; list/draft/mutation responses
+stay on the base message), `OutlookInternetMessageHeader`, `OutlookMessageIdInput`,
 `OutlookListMessagesInput`, `OutlookSearchMessagesInput`, `OutlookListMessagesOutput`,
 `OutlookAttachmentKind`, `OutlookAttachmentMetadata`, `OutlookAttachment`,
 `OutlookListAttachmentsInput`, `OutlookListAttachmentsOutput`, `OutlookGetAttachmentInput`,

@@ -64,6 +64,8 @@ const outlookMessageSelect = [
   'sender'
 ].join(',')
 
+const outlookGetMessageSelect = [outlookMessageSelect, 'internetMessageHeaders'].join(',')
+
 const outlookAttachmentSelect = [
   'id',
   'name',
@@ -85,6 +87,15 @@ export class OutlookRecipient extends Schema.Class<OutlookRecipient>('OutlookRec
 export class OutlookMessageBody extends Schema.Class<OutlookMessageBody>('OutlookMessageBody')({
   contentType: Schema.Literals(['text', 'html']),
   content: Schema.String
+}) {}
+
+const OutlookHeaderName = Schema.Trimmed.check(Schema.isNonEmpty())
+
+export class OutlookInternetMessageHeader extends Schema.Class<OutlookInternetMessageHeader>(
+  'OutlookInternetMessageHeader'
+)({
+  name: OutlookHeaderName,
+  value: Schema.String
 }) {}
 
 export class OutlookMessage extends Schema.Class<OutlookMessage>('OutlookMessage')({
@@ -109,6 +120,12 @@ export class OutlookMessage extends Schema.Class<OutlookMessage>('OutlookMessage
   parentFolderId: Schema.optional(Schema.String),
   categories: Schema.optional(Schema.Array(Schema.String)),
   webLink: Schema.optional(Schema.String)
+}) {}
+
+export class OutlookMessageWithHeaders extends OutlookMessage.extend<OutlookMessageWithHeaders>(
+  'OutlookMessageWithHeaders'
+)({
+  internetMessageHeaders: Schema.Array(OutlookInternetMessageHeader)
 }) {}
 
 // Models use null/blank placeholders for absent read options. Normalize at
@@ -864,15 +881,16 @@ export const outlookSearchMessagesAction = defineAction({
 
 export const outlookGetMessageAction = defineAction({
   id: 'outlook.get_message',
-  description: 'Get one Microsoft Outlook message with its body normalized to text.',
+  description:
+    'Get one Microsoft Outlook message with its body normalized to text and required internet headers (List-Unsubscribe, References, and authentication results when the message carries them).',
   inputSchema: OutlookMessageIdInput,
-  outputSchema: OutlookMessage,
+  outputSchema: OutlookMessageWithHeaders,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const slot = yield* outlookReadSlot(integration, input.mailbox)
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
-      const params = new URLSearchParams({ $select: outlookMessageSelect })
+      const params = new URLSearchParams({ $select: outlookGetMessageSelect })
 
       const response = yield* http.request(
         ConnectorHttpRequest.make({
@@ -892,7 +910,7 @@ export const outlookGetMessageAction = defineAction({
         })
       }
 
-      const output = yield* decodeJsonResponse(OutlookMessage, response)
+      const output = yield* decodeJsonResponse(OutlookMessageWithHeaders, response)
 
       return ActionResult.success(output)
     })
