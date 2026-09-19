@@ -148,6 +148,10 @@ exports `emailMoveAction` with `EmailMoveInput`, `EmailMoveRequest`, and optiona
 `EmailClient.move` host support, returning `EmailMoveMessageOutput` with destination
 UIDVALIDITY/UID mapping when known.
 
+The package root also exports the pure `parseUnsubscribeMethods` helper (RFC 2369/8058
+`List-Unsubscribe` parser returning `UnsubscribeMethods` with mailto/http methods; execution stays
+host-owned). See [Unsubscribe from mailing lists and report spam](../integrations/connectors#unsubscribe-from-mailing-lists-and-report-spam).
+
 Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageWithHeaders`
 (required `internetMessageHeaders` on `outlook.get_message` only; list/draft/mutation responses
 stay on the base message), `OutlookInternetMessageHeader`, `OutlookMessageIdInput`,

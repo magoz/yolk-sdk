@@ -222,7 +222,9 @@ Message list/get outputs expose normalized addresses, text/HTML bodies, and atta
 never raw MIME. `email.get_message` additionally requires `headers` name/value pairs (including
 `List-Unsubscribe` when the mail carries it); hosts fetch them via IMAP `BODY.PEEK[HEADER]` or
 POP3 `TOP` without marking the message read. Successful host output is schema-validated, so a
-missing `headers` array fails. List summaries carry no headers. When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
+missing `headers` array fails. List summaries carry no headers. The package root exports the pure
+`parseUnsubscribeMethods` helper for `List-Unsubscribe` discovery; see the unsubscribe recipe in
+the catalog. When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
 `email.get_attachment`. The host returns decoded file bytes—not MIME transfer-encoded text—as
 base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `EmailClient`
 implementations may omit the optional `getAttachment` method; invoking the action then fails with a

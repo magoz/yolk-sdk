@@ -493,6 +493,29 @@ preserve the existing own-mailbox/application guards and immutable-ID headers. N
 creates master categories automatically. The merge is **non-atomic**: hosts must serialize
 competing updates, and the SDK makes no retry or compare-and-swap guarantee.
 
+#### Unsubscribe from mailing lists and report spam
+
+No provider exposes unsubscribe as an API; use the required message headers instead. Read headers
+with `gmail.get_message` (`full` or `metadata` format via `payload.headers`; `gmail.get_thread`
+returns only its fixed selected-header allowlist, never `List-Unsubscribe`), `outlook.get_message`,
+or `email.get_message`, then
+call the pure `parseUnsubscribeMethods(headers)` helper from `@yolk-sdk/connectors` (no IO) to get
+`mailto` address methods and HTTP methods with a `oneClick` flag from
+`List-Unsubscribe-Post`. Executing a method stays host-owned: send `mailto:` removals through
+`outlook.send_mail` or `email.send_message` (reusing the URI `subject` when present; Gmail has no
+send action, so compose a `gmail.draft_compose` for host review), and perform HTTP methods with a
+host network call — plain GET, or POST with `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+for one-click endpoints. Verify authentication results (DKIM covering the list headers) before
+automatic one-click POSTs and apply the same public-network policy as other host fetches. Never
+route publisher URLs through the provider `ConnectorHttpClient`
+port; that port is for provider APIs under host transport policy.
+
+Report spam with existing actions and no new code: add the `SPAM` label through
+`gmail.modify_labels`, move to the `junkemail` well-known folder through
+`outlook.move_message`, or move to the server's Junk mailbox through `email.move` with an
+explicit destination folder (there is no `\Junk` special-use discovery; use the server's advertised
+name such as `Junk` or `Spam`).
+
 #### Reply drafts and recovery
 
 `outlook.create_reply_draft` creates a bodyless reply draft, then prepends the supplied text or HTML
