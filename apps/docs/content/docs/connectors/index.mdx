@@ -153,6 +153,9 @@ transfer.
 Outlook and generic IMAP email support `set_read` (with boolean `isRead`), `trash`, and `untrash`
 actions in their respective `outlook.*` and `email.*` namespaces. Outlook calls Graph directly;
 generic email requires optional host `EmailClient.setRead`, `trash`, and `untrash` methods.
+Generic email additionally supports `email.move` to any folder through optional
+`EmailClient.move` host support; the destination folder is required and the returned message ID
+uses destination UIDVALIDITY/UID when the host can map it.
 POP3/SMTP do not support these mailbox-state actions. Restore defaults to the inbox rather than
 remembering the original folder. See the [Connectors catalog](../integrations/connectors) for
 inputs, permissions, and safe IMAP adapter requirements.

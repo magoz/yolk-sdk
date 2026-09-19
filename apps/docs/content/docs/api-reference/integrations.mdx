@@ -140,7 +140,10 @@ POP3 is rejected. Move output includes the destination folder and an optional ne
 See the [catalog](../integrations/connectors#mark-readunread-and-move-tofrom-trash) for adapter safety
 and trash-discovery requirements. Label mutations export `emailModifyLabelsAction` with
 `EmailModifyLabelsInput`, `EmailModifyLabelsRequest`, `EmailModifyLabelsOutput` (an Effect `Chunk`
-of `EmailImapKeyword` atoms), and optional `EmailClient.modifyLabels` host support.
+of `EmailImapKeyword` atoms), and optional `EmailClient.modifyLabels` host support. Relocation
+exports `emailMoveAction` with `EmailMoveInput`, `EmailMoveRequest`, and optional
+`EmailClient.move` host support, returning `EmailMoveMessageOutput` with destination
+UIDVALIDITY/UID mapping when known.
 
 Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageIdInput`,
 `OutlookListMessagesInput`, `OutlookSearchMessagesInput`, `OutlookListMessagesOutput`,

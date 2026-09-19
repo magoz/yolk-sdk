@@ -207,7 +207,7 @@ the Google and Microsoft connectors.
 
 The common action set is `email.list_messages`, `email.get_message`, `email.get_attachment`,
 `email.create_draft`, `email.send_message`, `email.set_read`, `email.trash`, `email.untrash`,
-and `email.modify_labels`.
+`email.modify_labels`, and `email.move`.
 Draft creation requires IMAP and uses the incoming
 credential. An optional
 `folder` selects the target mailbox; when omitted, the host adapter discovers a mailbox advertised
@@ -236,7 +236,7 @@ protocol, folder, and ordering, and may fail after mailbox changes. Send success
 `{ accepted: true }`, which means the SMTP server accepted submission, not that the message was
 delivered.
 
-### Read state and trash (IMAP only)
+### Read state, trash, and move (IMAP only)
 
 | Action                | Input                                               | Host method                | Access        |
 | --------------------- | --------------------------------------------------- | -------------------------- | ------------- |
@@ -244,6 +244,7 @@ delivered.
 | `email.trash`         | `{ messageId, folder?, trashFolder? }`              | `EmailClient.trash`        | `destructive` |
 | `email.untrash`       | `{ messageId, folder?, destinationFolder? }`        | `EmailClient.untrash`      | `write`       |
 | `email.modify_labels` | `{ messageId, folder?, addLabels?, removeLabels? }` | `EmailClient.modifyLabels` | `write`       |
+| `email.move`          | `{ messageId, folder?, destinationFolder }`         | `EmailClient.move`         | `write`       |
 
 Set `isRead: true` to mark read, or `false` to mark unread. These actions use the incoming
 credential and require IMAP; POP3 is rejected before credential resolution or adapter calls.
@@ -269,6 +270,17 @@ If a safe move is unavailable, return a failure. Trash/untrash return `EmailMove
 **new** opaque identifier there. UIDPLUS mappings must encode destination UIDVALIDITY and UID.
 If no reliable mapping is available, omit `messageId` and re-list the destination; never reuse a
 stale source UID. Hosts own safe retry/reconciliation after partially completed moves.
+
+`email.move` takes `{ messageId, folder?, destinationFolder }` with a required destination and
+returns `EmailMoveMessageOutput` with the destination folder and the new message ID when the host
+can map it. Like the other mutations it requires IMAP, defaults `folder` to `INBOX`, rejects an
+identical source/destination before dispatch, and fails with a typed validation error when the
+optional `EmailClient.move` method is missing. Hosts move with UID `MOVE` (RFC 6851) when the
+server advertises it, otherwise `COPY` plus flagging `\Deleted` and expunging only the moved UID;
+they preserve flags and keywords, never blanket-expunge, and own partial-move reconciliation.
+Destination UIDs differ from source UIDs, so callers must use the returned ID for subsequent
+operations or re-list the destination. Hosts that resolve agent-declared access should treat moves
+into `\Trash`-advertised mailboxes as destructive, matching `email.trash`.
 
 ### Labels (IMAP keywords only)
 

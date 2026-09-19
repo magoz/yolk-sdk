@@ -284,6 +284,34 @@ export class EmailUntrashRequest extends Schema.Class<EmailUntrashRequest>('Emai
   destinationFolder: EmailFolderName
 }) {}
 
+export class EmailMoveInput extends Schema.Class<EmailMoveInput>('EmailMoveInput')({
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  destinationFolder: EmailFolderName
+}) {}
+
+const moveRequiresDifferentFolder = Schema.makeFilter<{
+  readonly folder?: string
+  readonly destinationFolder: string
+}>(input =>
+  (input.folder ?? 'INBOX') === input.destinationFolder
+    ? {
+        path: ['destinationFolder'],
+        issue: 'move requires destinationFolder to differ from folder'
+      }
+    : undefined
+)
+
+const EmailMoveActionInput = EmailMoveInput.check(moveRequiresDifferentFolder)
+
+export class EmailMoveRequest extends Schema.Class<EmailMoveRequest>('EmailMoveRequest')({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageId: EmailNonEmptyMessageId,
+  folder: EmailFolderName,
+  destinationFolder: EmailFolderName
+}) {}
+
 export class EmailModifyLabelsInput extends Schema.Class<EmailModifyLabelsInput>(
   'EmailModifyLabelsInput'
 )({
@@ -448,6 +476,19 @@ export type EmailClientApi = {
   ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
   readonly untrash?: (
     input: EmailUntrashRequest
+  ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
+  /**
+   * Optional host-only IMAP message relocation. Hosts resolve the UID from the opaque
+   * `messageId` (which encodes UIDVALIDITY and UID) in `folder`, then move it to
+   * `destinationFolder` with UID-addressed `MOVE` (RFC 6851) when the server advertises it,
+   * otherwise `COPY` plus flagging `\Deleted` and expunging only the moved UID. Hosts preserve
+   * flags and keywords, never blanket-expunge, reject identical source/destination folders
+   * with a failure, and own partial-move reconciliation. Moved IDs
+   * must use destination UIDVALIDITY/UID when known; omit `messageId` and re-list the
+   * destination when no reliable mapping is available, never reusing a stale source UID.
+   */
+  readonly move?: (
+    input: EmailMoveRequest
   ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
   /**
    * Optional host-only IMAP keyword-label mutation. Hosts resolve the UID from the opaque
@@ -983,6 +1024,43 @@ export const emailModifyLabelsAction = defineAction({
     })
 })
 
+export const emailMoveAction = defineAction({
+  id: 'email.move',
+  description:
+    'Move an IMAP message to destinationFolder, never delete it. Source folder defaults to INBOX and must differ from the destination; requires host move support. Returns the destination folder and the new message ID when known.',
+  access: 'write',
+  inputSchema: EmailMoveActionInput,
+  outputSchema: EmailMoveMessageOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const { connection, credential, client } = yield* emailMutationContext(integration, 'Move')
+
+      if (client.move === undefined) {
+        return yield* Effect.fail(validationError(integration, 'EmailClient does not support move'))
+      }
+
+      const result = yield* client.move(
+        EmailMoveRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          destinationFolder: input.destinationFolder
+        })
+      )
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const output = yield* Schema.decodeUnknownEffect(EmailMoveMessageOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid move output', error)
+        )
+      )
+
+      return ActionResult.success(output)
+    })
+})
+
 export const emailActions = [
   emailListMessagesAction,
   emailGetMessageAction,
@@ -992,7 +1070,8 @@ export const emailActions = [
   emailSetReadAction,
   emailTrashAction,
   emailUntrashAction,
-  emailModifyLabelsAction
+  emailModifyLabelsAction,
+  emailMoveAction
 ]
 
 export const EmailConnector = defineConnector({

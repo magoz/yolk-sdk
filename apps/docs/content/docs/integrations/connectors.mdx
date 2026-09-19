@@ -147,6 +147,7 @@ package does not bundle those libraries.
 | `email.set_read`       | mark an IMAP message read or unread            | `write`       |
 | `email.trash`          | move an IMAP message to trash                  | `destructive` |
 | `email.untrash`        | move an IMAP message out of trash              | `write`       |
+| `email.move`           | move an IMAP message to any folder             | `write`       |
 | `email.modify_labels`  | add/remove IMAP keyword labels                 | `write`       |
 
 Incoming actions require `incomingHost` and use `EmailIncomingCredentialSlot`. They default to
@@ -183,6 +184,13 @@ keywords and system flags. Removals win on overlap. Hosts return `{ messageId, l
 standalone IMAP label catalog: assignment creates keyword usage, removal clears usage. POP3 and
 SMTP cannot persist labels. Hosts own partial-write reconciliation; the SDK has no socket adapter.
 
+`email.move` takes `{ messageId, folder?, destinationFolder }` with a required destination folder
+and returns the destination plus the new message ID when the host can map it. Source `folder`
+defaults to `INBOX`. It requires IMAP and optional `EmailClient.move` host support; hosts use UID
+`MOVE` when advertised, otherwise `COPY` plus `\Deleted` with a UID-scoped expunge, preserving flags
+and owning partial-move reconciliation. Identical source/destination folders are rejected before
+dispatch. Destination UIDs differ from source UIDs: use the returned ID or re-list the destination.
+
 `email.create_draft` requires IMAP, accepts drafts without recipients, and uses the incoming
 credential. Optional `folder` selects the mailbox. When omitted, the host adapter discovers a
 mailbox advertised with `\Drafts` by the IMAP SPECIAL-USE extension and may fall back to `Drafts`.
@@ -203,7 +211,7 @@ delivery.
 
 These actions require IMAP and the incoming credential. POP3 is rejected before adapter calls;
 SMTP cannot manage mailbox state. Hosts opt in through optional `EmailClient.setRead`, `trash`,
-and `untrash` methods. Existing adapters remain compatible; invoking a missing method returns a
+`untrash`, and `move` methods. Existing adapters remain compatible; invoking a missing method returns a
 typed validation error. All successful mutation outputs are schema-validated.
 
 - `email.set_read`: `{ messageId, isRead, folder? }`. Set `isRead` to `true` for read or `false`
@@ -214,6 +222,9 @@ typed validation error. All successful mutation outputs are schema-validated.
 - `email.untrash`: `{ messageId, folder?, destinationFolder? }`. Here `folder` is the source
   trash mailbox; if omitted, hosts discover it. `destinationFolder` defaults to `INBOX`, **not**
   the original folder. Supply an explicit destination to restore elsewhere.
+- `email.move`: `{ messageId, folder?, destinationFolder }` with a required destination folder.
+  Source `folder` defaults to `INBOX`; identical source/destination folders are rejected before
+  dispatch. Returns the destination and the new message ID when the host can map it.
 
 Hosts perform UID `MOVE` or a safe per-message copy/delete fallback. Never use blanket `EXPUNGE`,
 permanent deletion, or merely set `\Deleted` as a substitute for a trash move. Return a failure
