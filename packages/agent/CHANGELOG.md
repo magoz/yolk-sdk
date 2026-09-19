@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.85
+
+### Patch Changes
+
+- 979db9e: Advance unchanged public packages in lockstep with the generic-email label, flag, move, and header additions. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.84
 
 ### Patch Changes
@@ -92,10 +98,10 @@
   - `DriverShape` → `DriverApi` from `@yolk-sdk/harness/driver`
 
   ```ts
-  import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
-  import type { RunStoreApi } from '@yolk-sdk/harness/store'
-  import type { InboxApi } from '@yolk-sdk/harness/inbox'
-  import type { DriverApi } from '@yolk-sdk/harness/driver'
+  import type { LoopConfigSettings } from "@yolk-sdk/agent/loop";
+  import type { RunStoreApi } from "@yolk-sdk/harness/store";
+  import type { InboxApi } from "@yolk-sdk/harness/inbox";
+  import type { DriverApi } from "@yolk-sdk/harness/driver";
   ```
 
 - 5ff44d6: Breaking: `OpenAiProviderConfig.extraBody` takes JSON-object input (`OpenAiRequestExtras`). Untyped runtime input is still snapshotted and validated at request lowering; layer creation stays Effect-lazy and does not walk extras or credentials.

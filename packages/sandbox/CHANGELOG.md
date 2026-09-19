@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.85
+
+### Patch Changes
+
+- 979db9e: Advance unchanged public packages in lockstep with the generic-email label, flag, move, and header additions. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [979db9e]
+  - @yolk-sdk/agent@0.1.0-canary.85
+
 ## 0.1.0-canary.84
 
 ### Patch Changes
