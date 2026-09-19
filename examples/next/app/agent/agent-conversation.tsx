@@ -153,6 +153,9 @@ const toolStateLabel = (state: ToolRunState) =>
       InputRequested: () => 'input',
       InputSubmitted: () => 'submitted',
       InputCancelled: () => 'cancelled',
+      InteractionRequested: () => 'interaction',
+      InteractionSubmitted: () => 'submitted',
+      InteractionCancelled: () => 'cancelled',
       Running: () => 'running',
       Called: () => 'called',
       Accepted: () => 'accepted (background)',
@@ -173,6 +176,7 @@ const toolStateHasError = (state: ToolRunState) =>
       Errored: () => true,
       QuestionCancelled: () => true,
       InputCancelled: () => true,
+      InteractionCancelled: () => true,
       ApprovalRequested: () => false,
       Called: () => false,
       InputStreaming: () => false,
@@ -180,6 +184,8 @@ const toolStateHasError = (state: ToolRunState) =>
       QuestionRequested: () => false,
       InputRequested: () => false,
       InputSubmitted: () => false,
+      InteractionRequested: () => false,
+      InteractionSubmitted: () => false,
       Running: () => false
     })
   )
@@ -233,6 +239,9 @@ const toolStateContent = (state: ToolRunState) =>
           ? 'submitted'
           : contentPreview(JSON.stringify(current.response.data)),
       InputCancelled: current => current.response.reason ?? 'cancelled',
+      InteractionRequested: () => undefined,
+      InteractionSubmitted: current => current.response.actionId ?? 'submitted',
+      InteractionCancelled: current => current.response.reason ?? 'cancelled',
       Errored: current => current.message,
       ApprovalRequested: () => undefined,
       Called: () => undefined,
@@ -266,6 +275,9 @@ const resultStructuredContent = (state: ToolRunState) =>
       InputRequested: () => undefined,
       InputSubmitted: () => undefined,
       InputCancelled: () => undefined,
+      InteractionRequested: () => undefined,
+      InteractionSubmitted: () => undefined,
+      InteractionCancelled: () => undefined,
       Running: () => undefined
     })
   )

@@ -5,6 +5,8 @@ import {
   HitlRequest,
   InputRequest,
   InputResponse,
+  InteractionRequest,
+  InteractionResponse,
   QuestionAnswer,
   QuestionRequest,
   QuestionResponse,
@@ -262,6 +264,34 @@ export class InputCancelled extends Schema.TaggedClass<InputCancelled>()('InputC
   response: InputResponse
 }) {}
 
+export class InteractionRequested extends Schema.TaggedClass<InteractionRequested>()(
+  'InteractionRequested',
+  {
+    ...EventIdentity,
+    request: InteractionRequest
+  }
+) {}
+
+/** Admission marker: the person submitted an action with final values. Not terminal
+ * success and never a synthetic tool result; only a server execution result
+ * settles the tool call.
+ */
+export class InteractionSubmitted extends Schema.TaggedClass<InteractionSubmitted>()(
+  'InteractionSubmitted',
+  {
+    ...EventIdentity,
+    response: InteractionResponse
+  }
+) {}
+
+export class InteractionCancelled extends Schema.TaggedClass<InteractionCancelled>()(
+  'InteractionCancelled',
+  {
+    ...EventIdentity,
+    response: InteractionResponse
+  }
+) {}
+
 export class LLMStreamEnd extends Schema.TaggedClass<LLMStreamEnd>()('LLMStreamEnd', {
   ...EventIdentity,
   turn: Schema.Number
@@ -465,6 +495,42 @@ const toolApprovalResponseValue = (response: ToolApprovalResponse) =>
     })()
   )
 
+type InteractionResponseCopyFields = {
+  requestId: InteractionResponse['requestId']
+  toolCallId: InteractionResponse['toolCallId']
+  outcome: InteractionResponse['outcome']
+  source: InteractionResponse['source']
+  actionId?: InteractionResponse['actionId']
+  data?: InteractionResponse['data']
+  reason?: InteractionResponse['reason']
+}
+
+const interactionResponseValue = (response: InteractionResponse) =>
+  InteractionResponse.make(
+    (() => {
+      const fields: InteractionResponseCopyFields = {
+        requestId: response.requestId,
+        toolCallId: response.toolCallId,
+        outcome: response.outcome,
+        source: response.source
+      }
+
+      if (response.actionId !== undefined) {
+        fields.actionId = response.actionId
+      }
+
+      if (response.data !== undefined) {
+        fields.data = response.data
+      }
+
+      if (response.reason !== undefined) {
+        fields.reason = response.reason
+      }
+
+      return fields
+    })()
+  )
+
 export const hitlResponseEvent = (response: HitlResponse): AgentEvent =>
   Match.value(response).pipe(
     Match.tag('QuestionResponse', current => {
@@ -491,6 +557,13 @@ export const hitlResponseEvent = (response: HitlResponse): AgentEvent =>
       return current.outcome === 'submitted'
         ? InputSubmitted.make({ response: responseValue })
         : InputCancelled.make({ response: responseValue })
+    }),
+    Match.tag('InteractionResponse', current => {
+      const responseValue = interactionResponseValue(current)
+
+      return current.outcome === 'submitted'
+        ? InteractionSubmitted.make({ response: responseValue })
+        : InteractionCancelled.make({ response: responseValue })
     }),
     Match.exhaustive
   )
@@ -524,6 +597,9 @@ export const AgentEvent = Schema.Union([
   InputRequested,
   InputSubmitted,
   InputCancelled,
+  InteractionRequested,
+  InteractionSubmitted,
+  InteractionCancelled,
   ToolExecutionStarted,
   ToolExecutionAccepted,
   ToolExecutionCompleted,

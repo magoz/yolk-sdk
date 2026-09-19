@@ -66,3 +66,47 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 - Runtime: append pending state, replay responses, durable resume.
 - React: waiting status, submit helpers, projection/replay.
 - App adapters: route/WS/Workflow resume and toolset inclusion.
+
+## Action-backed interactions: authenticated host wiring
+
+`makeInteractionTool` is distinct from data-only inputs. Registration callbacks infer the original
+response/proposal schema types; v1 rejects normalization, defaults or transforms that change exact
+JSON consent. A side-effect-free action validator may fail with `InteractionValidationError`.
+
+1. Resolve tools with a fresh host context and an `InteractionHost` scoped to the active
+   session/run/pending generation. Never implement the port as global lookup by a model call ID.
+2. Authenticate the browser caller; load the authoritative pending request and check ownership,
+   active scope and policy. Call `validateInteractionSubmission({ request, response,
+...toolSet.interactions[name] })` before acceptance. The resolved `validateAction` runs bound
+   policy here; validation itself is not authentication. Invalid attempts consume nothing.
+3. In the host transaction, accept the first valid submission/cancellation in ONE slot across
+   all actions. Allocate an opaque unique submission ID and store the exact original call,
+   selected action/data (or cancellation) immutably. Identical retries reuse it; changed bindings
+   conflict. Cancellation rejects action/data and needs no current valid form/proposal. Store a
+   settled cancellation result with `interaction_outcome` identity and `outcome: 'cancelled'`.
+4. Only then append/resume. Pass `interactions` **and** `interactionHost` into `run`,
+   `runToolBatch`, or `RuntimeConfig`. Raw `hitlResponses`, `source: 'user'`, client transcripts,
+   and nominal types grant no authority. `AppendHitlResponse` is transport/logging, not acceptance.
+5. Durable hosts call `loadInteractionReceipts(calls, host)` before each `prepareToolBatch` and
+   pass the map as `interactionReceipts`. Preparation only validates/plans. All pending siblings
+   fence every executor call. Forward `{ interaction: ref }` through every executor decorator.
+6. `claim(ref)` atomically advances an already accepted record to started and returns a fencing
+   token with the same immutable receipt. It never manufactures acceptance. Concurrent losers
+   observe the existing record. Abandoned started records cannot be taken over or resent.
+7. `settle(token, outcome)` validates identity, is idempotent and never overwrites a settled
+   observation. Settlement acknowledgement loss seals uncertainty; a retry can replay a stored
+   completed outcome, but never executes again. Host callbacks must cooperate with interruption;
+   SDK finalization bounds its settlement attempt to five seconds.
+
+Historical settled observations replay before current schemas/actions (including removed or
+disabled tools); no current handler means no NEW dispatch. Only explicit returned `failed` means
+known no effect. Escaped typed errors, including timeouts/`ModelVisibleToolError`, are unknown.
+Defects/interruption preserve their Cause while attempting durable uncertainty. Unknown results
+carry identity, `isError: true` and a no-auto-retry warning in string or rich content. Reconciliation,
+external-provider idempotency, and warning/blocking separately consented duplicates remain host-owned.
+
+`InteractionSubmitted` means accepted, not completed: keep it active until a server tool result.
+Never optimistically emit it from local submit or reconstruct a result from transcript acceptance.
+Voice/realtime, background activation, and hosts without authenticated receipt storage remain
+unsupported. Generic fake-effect reference and adversarial tests: `packages/agent/test/tools/interaction-host.ts`,
+`interaction.test.ts`, and `test/loop/interaction-tools.test.ts`. No live app opt-in is included.

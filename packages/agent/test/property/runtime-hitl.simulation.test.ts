@@ -4,6 +4,7 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   HitlResponseSource,
   InputResponse,
+  InteractionResponse,
   type HitlResponse,
   type HitlRequest,
   QuestionResponse,
@@ -429,6 +430,13 @@ const responseMatchesPendingRequest = (response: HitlResponse, request: HitlRequ
         current.requestId === request.requestId &&
         current.toolCallId === request.toolCallId
     ),
+    Match.tag(
+      'InteractionResponse',
+      current =>
+        Predicate.isTagged(request, 'InteractionRequest') &&
+        current.requestId === request.requestId &&
+        current.toolCallId === request.toolCallId
+    ),
     Match.exhaustive
   )
 
@@ -460,6 +468,15 @@ const responseForPendingRequest = (
         outcome: 'submitted',
         source: command.source,
         data: 'simulated'
+      })
+    ),
+    Match.tag('InteractionRequest', current =>
+      InteractionResponse.make({
+        requestId: current.requestId,
+        toolCallId: current.toolCallId,
+        outcome: 'cancelled',
+        source: command.source,
+        reason: 'simulated'
       })
     ),
     Match.exhaustive

@@ -18,6 +18,7 @@ import {
   type Content,
   type HitlResponse,
   type InputResponse,
+  type InteractionResponse,
   type QuestionResponse,
   type ToolApprovalResponse
 } from '@yolk-sdk/agent/protocol'
@@ -408,6 +409,11 @@ export function useAgentChat({
     [submitHitlResponse]
   )
 
+  const submitInteractionResponse = useCallback(
+    (response: InteractionResponse): AgentChatHitlResponseResult => submitHitlResponse(response),
+    [submitHitlResponse]
+  )
+
   const stop = useCallback(() => {
     const controller = abortControllerRef.current
     const fiber = fiberRef.current
@@ -454,6 +460,7 @@ export function useAgentChat({
     submitToolApprovalResponse,
     submitQuestionResponse,
     submitInputResponse,
+    submitInteractionResponse,
     deleteTurn,
     regenerateFrom,
     editUserMessage,

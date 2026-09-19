@@ -23,6 +23,45 @@ Generic host tool registration and resolution.
 - No provider SDKs.
 - Tool access/approval is metadata; host apps enforce product policy.
 
+## Action-backed interactions
+
+`makeInteractionTool` registers a general-purpose interaction: the model proposes values,
+a person edits them and authorizes one server-defined action (Publish, Archive, Send, ...).
+`makeInputTool` stays data-only. Registration carries original Effect schemas for
+`callParameters`/`response`, an app renderer key, explicit `access`, and named actions with
+labels plus optional side-effect-free `validate` and `execute` callbacks. The serializable
+`ToolDef` holds display metadata only.
+
+Selected actions run behind `ToolExecutor.execute(call, { interaction: ref })`, using only the
+immutable receipt returned by a scoped `InteractionHost`. Host authentication, ownership/session/
+run/generation checks, policy validation and atomic acceptance happen **before** SDK resume.
+`claim(ref)` only advances an existing accepted record to started; it cannot create acceptance.
+All actions and cancellation share one slot. Host-allocated submission IDs are opaque, unique
+identities, not authentication or payload-derived provider idempotency guarantees.
+
+Pass `interactionHost` to `resolveTools`, then pass both `toolSet.interactions` and
+`toolSet.interactionHost` into `run`/`runToolBatch`/runtime configs. For durable preflight, load
+`loadInteractionReceipts(calls, host)` first and pass its result as `interactionReceipts` to
+`prepareToolBatch`. Repeated preparation has no reads, claims, settlement or business effects;
+all pending siblings fence execution. Historical receipts replay before current schemas/actions,
+even if the current tool was removed; missing handlers never authorize new execution.
+
+Server admission calls `validateInteractionSubmission({ request, response, ...resolvedInteraction })`
+with the authoritative pending request and freshly resolved context. This includes the bound
+`validateAction`. Validation is not authentication. Use `InteractionValidationError` for expected
+business rejection. V1 decodes original schemas and rejects transformations/defaults that change
+exact JSON values, including nested changes. Cancellation requires no valid form and bypasses
+proposal validation, but needs authoritative acceptance in the same immutable slot.
+
+Outcomes are `completed`, explicit `failed` (known no effect), or terminal `unknown` (`isError: true`,
+never auto-retried). Escaped action errors, including `ModelVisibleToolError`, are **unknown** after
+dispatch. Defects/interruption preserve their Cause while a bounded finalizer attempts to persist
+uncertainty. A lost settlement acknowledgement never licenses another action. `InteractionSubmitted`
+remains active until the actual server result; local submissions never synthesize acceptance.
+Voice, background activation, and host-less execution fail closed. See
+`patterns/AGENT_HITL.md` for host wiring and `test/tools/interaction-host.ts` for the fake-effect
+reference (acceptance is separate from claim; no product or provider integration).
+
 ## Recoverable tool failures
 
 Use `modelVisibleToolError(...)` for expected failures the model can recover from: validation,

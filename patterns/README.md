@@ -17,6 +17,10 @@ Architecture and convention patterns for the SDK workspace.
 | [AI_TOOL_SCHEMAS.md](./AI_TOOL_SCHEMAS.md) | Provider-compatible tool parameter JSON Schema rules                |
 | [MCP_TRANSPORTS.md](./MCP_TRANSPORTS.md)   | MCP JSON-RPC, stdio, HTTP, and Effect platform transport boundaries |
 
+Accepted decision: [Action-backed interactions](../docs/adr/0001-action-backed-interactions.md).
+See [interaction terminology](../CONTEXT.md) for the distinction between input, acceptance,
+and execution outcomes.
+
 ## Packages
 
 | Pattern                                              | Purpose                                                     |

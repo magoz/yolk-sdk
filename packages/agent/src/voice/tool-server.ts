@@ -34,6 +34,12 @@ export const voiceApprovalRequestId = (callId: string) => `approval:${callId}`
 export const voiceInputUnsupportedMessage =
   'Input tools are not supported in voice sessions. Do not retry them here.'
 
+/** Action-backed interactions have no voice renderer, admission, or receipt
+ * storage and must never execute server-side through the voice bridge.
+ */
+export const voiceInteractionUnsupportedMessage =
+  'Interaction tools are not supported in voice sessions. Do not retry them here.'
+
 const decodeArgumentsOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 const argumentsForApprovalDisplay = (argumentsJson: string): Schema.Json =>
@@ -60,6 +66,12 @@ export const decideVoiceToolCall = (
   // Voice HITL is approvals-only; generic input tools (and their responses) are rejected.
   if (def?.input !== undefined) {
     return VoiceToolCallDecision.Deny({ reason: voiceInputUnsupportedMessage })
+  }
+
+  // Action-backed interactions require an accepted interaction reference admitted
+  // through a host receipt port; voice has neither admission nor receipt storage.
+  if (def?.interaction !== undefined) {
+    return VoiceToolCallDecision.Deny({ reason: voiceInteractionUnsupportedMessage })
   }
 
   if (def?.approval?.mode !== 'manual') {

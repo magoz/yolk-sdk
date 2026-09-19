@@ -6,6 +6,8 @@ import {
   type HitlRequest,
   type InputRequest,
   type InputResponse,
+  type InteractionRequest,
+  type InteractionResponse,
   type QuestionRequest,
   type QuestionResponse,
   type ToolCall,
@@ -54,7 +56,24 @@ export type AgentToolRun =
       readonly response: InputResponse
       readonly request?: InputRequest
     }
-  | { readonly _tag: 'Executing'; readonly call: ToolCall; readonly startedAtMs: number }
+  | { readonly _tag: 'InteractionRequested'; readonly request: InteractionRequest }
+  | {
+      readonly _tag: 'InteractionSubmitted'
+      readonly response: InteractionResponse
+      readonly request?: InteractionRequest
+    }
+  | {
+      readonly _tag: 'InteractionCancelled'
+      readonly response: InteractionResponse
+      readonly request?: InteractionRequest
+    }
+  | {
+      readonly _tag: 'Executing'
+      readonly call: ToolCall
+      readonly startedAtMs: number
+      /** Preserve witnessed interaction acceptance across transport interruptions. */
+      readonly interaction?: true
+    }
   | {
       readonly _tag: 'Completed'
       readonly call: ToolCall
@@ -146,6 +165,12 @@ const toolRunId = (run: AgentToolRun) =>
     Match.tag('QuestionAnswered', 'QuestionCancelled', current => current.response.toolCallId),
     Match.tag('InputRequested', current => current.request.toolCallId),
     Match.tag('InputSubmitted', 'InputCancelled', current => current.response.toolCallId),
+    Match.tag('InteractionRequested', current => current.request.toolCallId),
+    Match.tag(
+      'InteractionSubmitted',
+      'InteractionCancelled',
+      current => current.response.toolCallId
+    ),
     Match.tag(
       'InputReady',
       'ApprovalRequested',
@@ -168,14 +193,21 @@ export const isActiveToolRun = (run: AgentToolRun) =>
   !Predicate.isTagged(run, 'QuestionCancelled') &&
   !Predicate.isTagged(run, 'InputSubmitted') &&
   !Predicate.isTagged(run, 'InputCancelled') &&
+  !Predicate.isTagged(run, 'InteractionCancelled') &&
   !Predicate.isTagged(run, 'ProviderCompleted')
 
 export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
   runs.filter(run => Predicate.isTagged(run, 'Completed'))
 
-// Retention is not completion: an acknowledgement remains replay-fenced between turns.
+// Retention is not completion: transport interruption cannot revoke witnessed acceptance.
 const retainedSettledToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
-  runs.filter(run => Predicate.isTagged(run, 'Completed') || Predicate.isTagged(run, 'Accepted'))
+  runs.filter(
+    run =>
+      Predicate.isTagged(run, 'Completed') ||
+      Predicate.isTagged(run, 'Accepted') ||
+      Predicate.isTagged(run, 'InteractionSubmitted') ||
+      (Predicate.isTagged(run, 'Executing') && run.interaction === true)
+  )
 
 export const toolRunsFromHitlRequests = (
   requests: ReadonlyArray<HitlRequest>
@@ -190,6 +222,9 @@ export const toolRunsFromHitlRequests = (
         })
       ),
       Match.tag('InputRequest', current => AgentToolRun.InputRequested({ request: current })),
+      Match.tag('InteractionRequest', current =>
+        AgentToolRun.InteractionRequested({ request: current })
+      ),
       Match.exhaustive
     )
   )
@@ -256,6 +291,9 @@ const questionRequestForToolCall = (
         'InputRequested',
         'InputSubmitted',
         'InputCancelled',
+        'InteractionRequested',
+        'InteractionSubmitted',
+        'InteractionCancelled',
         'ApprovalRequested',
         'Denied',
         'Executing',
@@ -286,6 +324,9 @@ const inputRequestForToolCall = (
       Match.tag(
         'InputStreaming',
         'InputReady',
+        'InteractionRequested',
+        'InteractionSubmitted',
+        'InteractionCancelled',
         'ApprovalRequested',
         'Denied',
         'Executing',
@@ -334,6 +375,58 @@ const questionCancelledRun = (
     ? AgentToolRun.QuestionCancelled({ response })
     : AgentToolRun.QuestionCancelled({ response, request })
 
+const interactionSubmittedRun = (
+  response: InteractionResponse,
+  request: InteractionRequest | undefined
+): AgentToolRun =>
+  request === undefined
+    ? AgentToolRun.InteractionSubmitted({ response })
+    : AgentToolRun.InteractionSubmitted({ response, request })
+
+const interactionCancelledRun = (
+  response: InteractionResponse,
+  request: InteractionRequest | undefined
+): AgentToolRun =>
+  request === undefined
+    ? AgentToolRun.InteractionCancelled({ response })
+    : AgentToolRun.InteractionCancelled({ response, request })
+
+const interactionRequestForToolCall = (
+  runs: ReadonlyArray<AgentToolRun>,
+  toolCallId: string
+): InteractionRequest | undefined =>
+  runs.flatMap(run => {
+    if (toolRunId(run) !== toolCallId) {
+      return []
+    }
+
+    return Match.value(run).pipe(
+      Match.tag('InteractionRequested', current => [current.request]),
+      Match.tag('InteractionSubmitted', 'InteractionCancelled', current =>
+        current.request === undefined ? [] : [current.request]
+      ),
+      Match.tag(
+        'InputStreaming',
+        'InputReady',
+        'InputRequested',
+        'InputSubmitted',
+        'InputCancelled',
+        'ApprovalRequested',
+        'Denied',
+        'Executing',
+        'Accepted',
+        'Completed',
+        'Errored',
+        'ProviderCompleted',
+        'QuestionRequested',
+        'QuestionAnswered',
+        'QuestionCancelled',
+        () => []
+      ),
+      Match.exhaustive
+    )
+  })[0]
+
 export const appendAgentMessage = (
   messages: ReadonlyArray<AgentMessage>,
   message: AgentMessage
@@ -378,6 +471,7 @@ const activeEventToolCallId = (event: AgentEvent): string | undefined =>
     ),
     Match.tag('QuestionRequested', current => current.request.toolCallId),
     Match.tag('InputRequested', current => current.request.toolCallId),
+    Match.tag('InteractionRequested', current => current.request.toolCallId),
     Match.orElse(() => undefined)
   )
 
@@ -479,6 +573,13 @@ const applyAgentEventUnchecked = (
           state.toolRuns,
           AgentToolRun.InputRequested({ request: current.request })
         )
+      })),
+      Match.tag('InteractionRequested', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRun.InteractionRequested({ request: current.request })
+        )
       }))
     )
     .pipe(
@@ -522,13 +623,42 @@ const applyAgentEventUnchecked = (
           )
         )
       })),
-      Match.tag('ToolExecutionStarted', current => ({
+      Match.tag('InteractionSubmitted', current => ({
         ...state,
         toolRuns: replaceToolRun(
           state.toolRuns,
-          AgentToolRun.Executing({ call: current.call, startedAtMs: nowMs })
+          interactionSubmittedRun(
+            current.response,
+            interactionRequestForToolCall(state.toolRuns, current.response.toolCallId)
+          )
         )
       })),
+      Match.tag('InteractionCancelled', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          interactionCancelledRun(
+            current.response,
+            interactionRequestForToolCall(state.toolRuns, current.response.toolCallId)
+          )
+        )
+      })),
+      Match.tag('ToolExecutionStarted', current => {
+        const prior = state.toolRuns.find(run => toolRunId(run) === current.call.id)
+        const executing = AgentToolRun.Executing({ call: current.call, startedAtMs: nowMs })
+
+        const isInteraction =
+          Predicate.isTagged(prior, 'InteractionSubmitted') ||
+          (Predicate.isTagged(prior, 'Executing') && prior.interaction === true)
+
+        return {
+          ...state,
+          toolRuns: replaceToolRun(
+            state.toolRuns,
+            isInteraction ? { ...executing, interaction: true } : executing
+          )
+        }
+      }),
       Match.tag('ToolExecutionAccepted', 'ToolExecutionCompleted', current => {
         const endedAtMs = nowMs
         const startedAtMs = startedAtMsFor(state.toolRuns, current.call.id) ?? endedAtMs

@@ -5,6 +5,8 @@ import {
   type AgentRetry,
   type InputRequest,
   type InputResponse,
+  type InteractionRequest,
+  type InteractionResponse,
   type QuestionRequest,
   type QuestionResponse,
   type ToolApprovalRequest,
@@ -68,6 +70,10 @@ export type ToolRunState =
     } & ToolRunNoTiming)
   | ({ readonly _tag: 'InputRequested'; readonly request: InputRequest } & ToolRunNoTiming)
   | ({
+      readonly _tag: 'InteractionRequested'
+      readonly request: InteractionRequest
+    } & ToolRunNoTiming)
+  | ({
       readonly _tag: 'InputSubmitted'
       readonly response: InputResponse
       readonly request?: InputRequest
@@ -76,6 +82,16 @@ export type ToolRunState =
       readonly _tag: 'InputCancelled'
       readonly response: InputResponse
       readonly request?: InputRequest
+    } & ToolRunNoTiming)
+  | ({
+      readonly _tag: 'InteractionSubmitted'
+      readonly response: InteractionResponse
+      readonly request?: InteractionRequest
+    } & ToolRunNoTiming)
+  | ({
+      readonly _tag: 'InteractionCancelled'
+      readonly response: InteractionResponse
+      readonly request?: InteractionRequest
     } & ToolRunNoTiming)
   | ({ readonly _tag: 'Accepted'; readonly result: ToolResult } & ToolRunTerminalTiming)
   | ({ readonly _tag: 'Completed'; readonly result: ToolResult } & ToolRunTerminalTiming)
@@ -256,6 +272,26 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
 
   if (Predicate.isTagged(state, 'InputCancelled')) {
     return ToolRunState.InputCancelled({
+      ...noTiming(),
+      response: state.response,
+      request: state.request
+    })
+  }
+
+  if (Predicate.isTagged(state, 'InteractionRequested')) {
+    return ToolRunState.InteractionRequested({ ...noTiming(), request: state.request })
+  }
+
+  if (Predicate.isTagged(state, 'InteractionSubmitted')) {
+    return ToolRunState.InteractionSubmitted({
+      ...noTiming(),
+      response: state.response,
+      request: state.request
+    })
+  }
+
+  if (Predicate.isTagged(state, 'InteractionCancelled')) {
+    return ToolRunState.InteractionCancelled({
       ...noTiming(),
       response: state.response,
       request: state.request

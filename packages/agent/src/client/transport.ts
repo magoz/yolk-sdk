@@ -26,6 +26,7 @@ import {
   AgentEvent,
   AgentWebSocketServerMessage,
   InputResponseInput,
+  InteractionResponseInput,
   QuestionResponseInput,
   ToolApprovalResponseInput,
   UserInput,
@@ -39,6 +40,7 @@ import type {
   AgentWebSocketServerMessage as AgentWebSocketServerMessageType,
   HitlResponse,
   InputResponse,
+  InteractionResponse,
   QuestionResponse,
   ToolApprovalResponse,
   UserMessage
@@ -121,6 +123,10 @@ export type SubmitQuestionResponseRequest = StreamAgentEventsRequest & {
 
 export type SubmitInputResponseRequest = StreamAgentEventsRequest & {
   readonly response: InputResponse
+}
+
+export type SubmitInteractionResponseRequest = StreamAgentEventsRequest & {
+  readonly response: InteractionResponse
 }
 
 export type AgentHttpResponseInfo = {
@@ -523,6 +529,14 @@ const makeClientInputJson = (
           reasoningEffort: request.reasoningEffort
         })
       ),
+      Match.tag('InteractionResponse', answer =>
+        InteractionResponseInput.make({
+          response: answer,
+          expectedRevision,
+          model: request.model,
+          reasoningEffort: request.reasoningEffort
+        })
+      ),
       Match.exhaustive
     )
 
@@ -843,6 +857,9 @@ export const streamQuestionResponseEventStream = (request: SubmitQuestionRespons
   streamAgentEventStream({ ...request, hitlResponses: [request.response] })
 
 export const streamInputResponseEventStream = (request: SubmitInputResponseRequest) =>
+  streamAgentEventStream({ ...request, hitlResponses: [request.response] })
+
+export const streamInteractionResponseEventStream = (request: SubmitInteractionResponseRequest) =>
   streamAgentEventStream({ ...request, hitlResponses: [request.response] })
 
 type AgentEventChunkResult = {

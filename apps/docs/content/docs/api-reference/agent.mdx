@@ -51,7 +51,8 @@ payloads or enforce provider capabilities. See [private attachment integration](
 for fresh signing inside retries.
 
 `PlainHitlResponse` is also a constructor value on `@yolk-sdk/agent/protocol`:
-`PlainHitlResponse.QuestionResponse`, `.ToolApprovalResponse`, and `.InputResponse` construct plain encoded payloads.
+`PlainHitlResponse.QuestionResponse`, `.ToolApprovalResponse`, `.InputResponse`, and
+`.InteractionResponse` construct plain encoded payloads.
 Use `plainHitlResponse` to project existing protocol class instances while omitting absent optionals.
 
 Typed-input protocol exports:
@@ -66,6 +67,24 @@ Typed-input protocol exports:
 
 Input descriptors carry display hints only; original server schemas own validation. Input collection
 never authorizes an action. See [Collect typed input](../agent/tools-hitl#collect-typed-input).
+
+Action-backed interaction protocol exports:
+
+| Export                                                                                                             | Purpose                                                           |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `InteractionDescriptor`, `InteractionActionDescriptor`                                                             | App-renderer metadata and server-defined action labels            |
+| `InteractionRequest`, `InteractionResponse`, `InteractionResponseOutcome`                                          | Distinct action-backed request and submitted/cancelled response   |
+| `InteractionRequested`, `InteractionSubmitted`, `InteractionCancelled`, `InteractionResponseInput`                 | Lifecycle events and typed client control input                   |
+| `InteractionHost`, `InteractionRef`, `InteractionReceipt`, `InteractionReceiptStatus`, `InteractionClaim`          | Scoped host-owned accepted records and fenced execution           |
+| `InteractionPreflight`, `InteractionResponseValidator`, `InteractionCandidate`                                     | Original-schema admission contracts; candidates are not authority |
+| `InteractionAdmissionError`, `InteractionValidationError`, `InteractionHostError`                                  | Typed admission, business-validation, and host failures           |
+| `validateInteractionSubmission`, `interactionRequestId`                                                            | Validate a candidate against the authoritative pending request    |
+| `InteractionOutcome`, `InteractionBusinessOutcome`, `makeInteractionToolResult`, `interactionUnknownOutcomeNotice` | Explicit completed, failed, or unknown observations               |
+| `validInteractionReceipt`, `sameInteractionBinding`, `sameInteractionCall`, `interactionJsonEquals`                | Pure receipt/binding checks; never authentication                 |
+| `plainInteractionResponse`, `interactionResponseStructuredContent`, `formatInteractionResponseContent`             | Serialization and cancellation-content helpers                    |
+
+See [Authorize one action](../agent/tools-hitl#authorize-one-action) for authenticated acceptance,
+immutable receipt storage and host-owned rendering. `InteractionSubmitted` is not completion.
 
 ## Loop
 
@@ -99,6 +118,11 @@ import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
 
 `LoopConfigShape` is removed. Update `import type { LoopConfigShape }` to `LoopConfigSettings`.
 
+`loadInteractionReceipts(calls, interactionHost)` loads authoritative snapshots before preflight.
+Pass `interactions: toolSet.interactions` and `interactionHost: toolSet.interactionHost` into
+`run`, `runToolBatch`, or `RuntimeConfig`. `ToolExecutionOptions.interaction` carries only an
+`InteractionRef`; executor decorators must forward it or fail closed.
+
 ### Whole-batch preflight
 
 `prepareToolBatch({ tools, inputs, responses, calls })` returns `Effect.Effect<PreparedToolBatch>`
@@ -118,6 +142,11 @@ input tools; definitions alone fail closed as unavailable. Forward the same hand
 Any `pendingRequests` fence **all** dispatch, even when `callsToExecute` is nonempty. Hosts carry
 HITL state through pause/resume, preserve synthetic results, and merge executed results by original
 index before the next model turn. The helper computes the preflight; the host enforces the fence.
+
+For action-backed tools, also pass `interactions` and the freshly loaded `interactionReceipts`
+map. Preparation itself never reads storage, claims or executes. The returned
+`interactionBindings` map is keyed by tool-call ID; forward its ref to
+`ToolExecutor.execute(call, { interaction: ref })` only after every pending sibling is resolved.
 
 Testing: `@yolk-sdk/agent/loop/testing`
 
@@ -177,6 +206,11 @@ Typed-input helpers: `makeInputTool` keeps original call/response validators ser
 serializable advertisement, not a handler or executor. `ResolvedToolSet.inputs` carries the resolved
 handlers alongside `tools` and `execute`; pass it explicitly to loop/runtime configs. Input tools
 reject approval/background policy and direct execution.
+
+Action-backed helpers: `makeInteractionTool` and `makeInteractionToolModule` register inferred
+call/response schemas and server-defined actions. Resolve with `{ interactionHost }`; pass both
+`ResolvedToolSet.interactions` and `ResolvedToolSet.interactionHost` to the loop/runtime. Host
+acceptance precedes SDK claim/execute; ordinary `makeInputTool` remains data-only.
 
 Subagent/question helpers: `makeSubagentToolModule`, `makeSubagentToolDef`, `makeSubagentToolResult`, `subagentToolName`, `makeQuestionToolDef`, `questionToolName`.
 
@@ -360,6 +394,10 @@ it via `SubmitInputResponseRequest` from `@yolk-sdk/agent/client`. `InputRespons
 through the Cloudflare WebSocket transport and durable HITL
 helpers. Hosts own auth, pending-request matching, and server validation.
 
+`streamInteractionResponseEventStream` takes a `SubmitInteractionResponseRequest` for HTTP.
+`InteractionResponseInput` is its WebSocket control variant; durable HITL helpers also carry
+`InteractionResponse`. Transports submit candidates, not authenticated execution authority.
+
 ## React
 
 `@yolk-sdk/agent/react`
@@ -380,6 +418,12 @@ helpers. Hosts own auth, pending-request matching, and server validation.
 `ToolRunState` include `InputRequested`, `InputSubmitted`, and `InputCancelled`; render pending requests using host-owned forms keyed by
 `InputRequest.input.kind`. Keep it pending until server acceptance. Invalid submissions re-pend
 the same request and may be corrected; never synthesize replayable input results optimistically.
+
+`useAgentChat().submitInteractionResponse(response)` submits an interaction candidate.
+`ChatToolState` and `ToolRunState` include `InteractionRequested`, `InteractionSubmitted`, and
+`InteractionCancelled`. Render by `InteractionRequest.interaction.kind`. Local submission does
+not accept or complete the action; server acceptance stays active until a real result, and stored
+`interaction_outcome` metadata distinguishes completed, failed, unknown and cancelled observations.
 
 Tagged model constructors are also exported from `@yolk-sdk/agent/react`:
 

@@ -341,6 +341,13 @@ const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest
         current.requestId === request.requestId &&
         current.toolCallId === request.toolCallId
     ),
+    Match.tag(
+      'InteractionResponse',
+      current =>
+        Predicate.isTagged(request, 'InteractionRequest') &&
+        current.requestId === request.requestId &&
+        current.toolCallId === request.toolCallId
+    ),
     Match.exhaustive
   )
 

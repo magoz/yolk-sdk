@@ -39,7 +39,13 @@ export type {
 
 export { decorateLLMProvider, makeAgentLoopLayer } from './layer.ts'
 
-export { run, runModelTurn, runToolBatch, prepareToolBatch } from './run.ts'
+export {
+  run,
+  runModelTurn,
+  runToolBatch,
+  prepareToolBatch,
+  loadInteractionReceipts
+} from './run.ts'
 
 export type {
   AgentLoopRunId,
@@ -62,3 +68,5 @@ export { LoopConfig } from './services/loop-config.ts'
 export type { LoopConfigSettings } from './services/loop-config.ts'
 
 export { ToolExecutor } from './services/tool-executor.ts'
+
+export type { ToolExecutionOptions } from './services/tool-executor.ts'

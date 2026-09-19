@@ -20,6 +20,17 @@ export { makeInputTool, makeInputToolDef, makeInputToolModule } from './input.ts
 
 export type { MakeInputToolOptions, InputToolModule } from './input.ts'
 
+export { makeInteractionTool, makeInteractionToolModule } from './interaction.ts'
+
+export type {
+  InteractionActionDefinition,
+  InteractionActionExecute,
+  InteractionActionResult,
+  InteractionActionValidate,
+  InteractionToolModule,
+  MakeInteractionToolOptions
+} from './interaction.ts'
+
 export {
   makeQuestionToolDef,
   makeQuestionToolModule,
@@ -44,8 +55,11 @@ export {
 
 export type {
   ResolvedInputTool,
+  ResolvedInteractionTool,
   ResolvedToolSet,
   SchemaToolExecutionInput,
+  InteractionActionHandler,
+  InteractionToolRegistration,
   ModelVisibleToolErrorInput,
   ModelVisibleToolErrorStructuredContent,
   ToolExecutionInput,
@@ -53,6 +67,8 @@ export type {
   ToolModule,
   ToolRegistration
 } from './registry.ts'
+
+export type { ToolExecutionOptions } from './registry.ts'
 
 export type { QuestionExecutionInput, QuestionToolOptions } from './question.ts'
 

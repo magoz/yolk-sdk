@@ -9,6 +9,8 @@ import {
   ProviderToolResultPart,
   type InputRequest,
   type InputResponse,
+  type InteractionRequest,
+  type InteractionResponse,
   type QuestionRequest,
   type QuestionResponse,
   type ToolApprovalRequest,
@@ -61,6 +63,17 @@ export type ChatToolState =
       readonly _tag: 'InputCancelled'
       readonly response: InputResponse
       readonly request?: InputRequest
+    }
+  | { readonly _tag: 'InteractionRequested'; readonly request: InteractionRequest }
+  | {
+      readonly _tag: 'InteractionSubmitted'
+      readonly response: InteractionResponse
+      readonly request?: InteractionRequest
+    }
+  | {
+      readonly _tag: 'InteractionCancelled'
+      readonly response: InteractionResponse
+      readonly request?: InteractionRequest
     }
   | { readonly _tag: 'Running'; readonly startedAtMs: number }
   | {
@@ -240,6 +253,12 @@ const toolRunNameEntry = (run: AgentToolRun): ReadonlyArray<readonly [string, st
     Match.tag('InputSubmitted', 'InputCancelled', current =>
       current.request === undefined ? [] : [[current.request.call.id, current.request.call.name]]
     ),
+    Match.tag('InteractionRequested', current => [
+      [current.request.call.id, current.request.call.name]
+    ]),
+    Match.tag('InteractionSubmitted', 'InteractionCancelled', current =>
+      current.request === undefined ? [] : [[current.request.call.id, current.request.call.name]]
+    ),
     Match.tag(
       'InputReady',
       'ApprovalRequested',
@@ -340,6 +359,12 @@ const toolRunEntry = (run: AgentToolRun): readonly [string, AgentToolRun] =>
       'InputCancelled',
       current => [current.response.toolCallId, current] as const
     ),
+    Match.tag('InteractionRequested', current => [current.request.toolCallId, current] as const),
+    Match.tag(
+      'InteractionSubmitted',
+      'InteractionCancelled',
+      current => [current.response.toolCallId, current] as const
+    ),
     Match.tag(
       'InputReady',
       'ApprovalRequested',
@@ -367,6 +392,9 @@ const questionRequestFromToolState = (state: ChatToolState): QuestionRequest | u
       'InputRequested',
       'InputSubmitted',
       'InputCancelled',
+      'InteractionRequested',
+      'InteractionSubmitted',
+      'InteractionCancelled',
       'ApprovalRequested',
       'Denied',
       'Running',
@@ -386,6 +414,34 @@ const inputRequestFromToolState = (state: ChatToolState): InputRequest | undefin
     Match.tag(
       'Called',
       'InputStreaming',
+      'ApprovalRequested',
+      'Denied',
+      'QuestionRequested',
+      'QuestionAnswered',
+      'QuestionCancelled',
+      'InteractionRequested',
+      'InteractionSubmitted',
+      'InteractionCancelled',
+      'Running',
+      'Accepted',
+      'Completed',
+      'Errored',
+      'ProviderCompleted',
+      () => undefined
+    ),
+    Match.exhaustive
+  )
+
+const interactionRequestFromToolState = (state: ChatToolState): InteractionRequest | undefined =>
+  Match.value(state).pipe(
+    Match.tag('InteractionRequested', current => current.request),
+    Match.tag('InteractionSubmitted', 'InteractionCancelled', current => current.request),
+    Match.tag(
+      'Called',
+      'InputStreaming',
+      'InputRequested',
+      'InputSubmitted',
+      'InputCancelled',
       'ApprovalRequested',
       'Denied',
       'QuestionRequested',
@@ -421,6 +477,17 @@ const preserveInputRequest = (
   request: InputRequest | undefined,
   state: InputTerminalState
 ): InputTerminalState =>
+  state.request !== undefined || request === undefined ? state : { ...state, request }
+
+type InteractionTerminalState = Extract<
+  ChatToolState,
+  { readonly _tag: 'InteractionSubmitted' | 'InteractionCancelled' }
+>
+
+const preserveInteractionRequest = (
+  request: InteractionRequest | undefined,
+  state: InteractionTerminalState
+): InteractionTerminalState =>
   state.request !== undefined || request === undefined ? state : { ...state, request }
 
 const toolStateFor = (
@@ -465,6 +532,24 @@ const toolStateFor = (
     return preserveInputRequest(
       run.request,
       ChatToolState.InputCancelled({ response: run.response })
+    )
+  }
+
+  if (Predicate.isTagged(run, 'InteractionRequested')) {
+    return ChatToolState.InteractionRequested({ request: run.request })
+  }
+
+  if (Predicate.isTagged(run, 'InteractionSubmitted')) {
+    return preserveInteractionRequest(
+      run.request,
+      ChatToolState.InteractionSubmitted({ response: run.response })
+    )
+  }
+
+  if (Predicate.isTagged(run, 'InteractionCancelled')) {
+    return preserveInteractionRequest(
+      run.request,
+      ChatToolState.InteractionCancelled({ response: run.response })
     )
   }
 
@@ -612,6 +697,7 @@ const isOpenToolState = (state: ChatToolState) =>
   Predicate.isTagged(state, 'ApprovalRequested') ||
   Predicate.isTagged(state, 'QuestionRequested') ||
   Predicate.isTagged(state, 'InputRequested') ||
+  Predicate.isTagged(state, 'InteractionRequested') ||
   Predicate.isTagged(state, 'Running')
 
 const hasOpenToolCall = (message: AgentChatMessage) =>
@@ -863,6 +949,13 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
 
   if (Predicate.isTagged(next, 'InputSubmitted') || Predicate.isTagged(next, 'InputCancelled')) {
     return preserveInputRequest(inputRequestFromToolState(existing), next)
+  }
+
+  if (
+    Predicate.isTagged(next, 'InteractionSubmitted') ||
+    Predicate.isTagged(next, 'InteractionCancelled')
+  ) {
+    return preserveInteractionRequest(interactionRequestFromToolState(existing), next)
   }
 
   if (Predicate.isTagged(next, 'Denied') || Predicate.isTagged(next, 'ProviderCompleted')) {
@@ -1239,8 +1332,13 @@ export const appendProtocolMessage = (
     Match.tag('ToolResult', current => {
       const result = toolResultFromMessage(current)
 
+      const isInteractionOutcome =
+        Predicate.isObject(result.structuredContent) &&
+        'type' in result.structuredContent &&
+        result.structuredContent.type === 'interaction_outcome'
+
       if (
-        current.acceptance !== undefined &&
+        (current.acceptance !== undefined || isInteractionOutcome) &&
         messages.some(existing => hasToolCall(existing, current.toolCallId))
       ) {
         return messages.map(existing => ({
@@ -1251,10 +1349,12 @@ export const appendProtocolMessage = (
                   ...part,
                   state: mergeToolState(
                     part.state,
-                    ChatToolState.Accepted({
-                      result,
-                      resultEnvelope: chatMessageEnvelope(current)
-                    })
+                    current.acceptance !== undefined
+                      ? ChatToolState.Accepted({
+                          result,
+                          resultEnvelope: chatMessageEnvelope(current)
+                        })
+                      : ChatToolState.Completed({ result })
                   )
                 }
               : part
@@ -1360,6 +1460,13 @@ export const applyAgentEventToChatMessages = (
           ChatToolState.InputRequested({ request: current.request })
         )
       ),
+      Match.tag('InteractionRequested', current =>
+        upsertToolCallPart(
+          messages,
+          current.request.call,
+          ChatToolState.InteractionRequested({ request: current.request })
+        )
+      ),
       Match.tag('InputSubmitted', current =>
         messages.map(message => ({
           ...message,
@@ -1386,6 +1493,38 @@ export const applyAgentEventToChatMessages = (
                   state: preserveInputRequest(
                     inputRequestFromToolState(part.state),
                     ChatToolState.InputCancelled({ response: current.response })
+                  )
+                }
+              : part
+          )
+        }))
+      ),
+      Match.tag('InteractionSubmitted', current =>
+        messages.map(message => ({
+          ...message,
+          parts: message.parts.map(part =>
+            Predicate.isTagged(part, 'ToolCall') && part.call.id === current.response.toolCallId
+              ? {
+                  ...part,
+                  state: preserveInteractionRequest(
+                    interactionRequestFromToolState(part.state),
+                    ChatToolState.InteractionSubmitted({ response: current.response })
+                  )
+                }
+              : part
+          )
+        }))
+      ),
+      Match.tag('InteractionCancelled', current =>
+        messages.map(message => ({
+          ...message,
+          parts: message.parts.map(part =>
+            Predicate.isTagged(part, 'ToolCall') && part.call.id === current.response.toolCallId
+              ? {
+                  ...part,
+                  state: preserveInteractionRequest(
+                    interactionRequestFromToolState(part.state),
+                    ChatToolState.InteractionCancelled({ response: current.response })
                   )
                 }
               : part
@@ -1472,6 +1611,9 @@ export const applyAgentEventToChatMessages = (
                   ChatToolState.QuestionRequested({ request })
                 ),
                 Match.tag('InputRequest', request => ChatToolState.InputRequested({ request })),
+                Match.tag('InteractionRequest', request =>
+                  ChatToolState.InteractionRequested({ request })
+                ),
                 Match.exhaustive
               )
             ),
@@ -1759,6 +1901,17 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
               structuredContent: inputResponseStructuredContent(response, name)
             })
           ]
+        }
+
+        // Interaction acceptance is never a synthetic tool result: submitted
+        // interactions settle only through a server execution result. Only
+        // Completed/Accepted states (real results) project above.
+        if (
+          Predicate.isTagged(current.state, 'InteractionRequested') ||
+          Predicate.isTagged(current.state, 'InteractionSubmitted') ||
+          Predicate.isTagged(current.state, 'InteractionCancelled')
+        ) {
+          return []
         }
 
         return []

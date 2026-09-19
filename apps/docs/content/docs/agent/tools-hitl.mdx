@@ -111,6 +111,190 @@ Rules:
 - `callParameters` validates model-supplied context before opening the request (defaults to no arguments). Invalid user payloads re-pend the same request for correction. The first valid submission or cancellation settles it; stale/duplicate responses cannot replace it. React keeps the form pending until server acceptance, including after transport failures.
 - Voice sessions deny input tools; omit them from subagents and other hosts without nested HITL resume.
 
+## Authorize one action
+
+`makeInteractionTool` lets a person review proposed values, edit them, and authorize one
+server-defined action, such as Publish or Archive. It is distinct from data-only `makeInputTool`.
+Opt in only on surfaces with an authenticated, durable host adapter and an app-owned renderer.
+
+Registration fragment (the host supplies the document service and renderer):
+
+```ts
+import { Effect, Schema } from 'effect'
+import type { ToolError } from '@yolk-sdk/agent/loop'
+import {
+  makeInteractionTool,
+  type InteractionActionResult,
+  type ToolModule
+} from '@yolk-sdk/agent/tools'
+
+const DocumentDraft = Schema.Struct({ title: Schema.String, body: Schema.String })
+
+type DocumentContext = {
+  readonly publish: (
+    data: typeof DocumentDraft.Type,
+    submissionId: string
+  ) => Effect.Effect<InteractionActionResult, ToolError>
+  readonly archive: (
+    data: typeof DocumentDraft.Type,
+    submissionId: string
+  ) => Effect.Effect<InteractionActionResult, ToolError>
+}
+
+export const documents: ToolModule<DocumentContext> = {
+  id: 'documents',
+  tools: [
+    makeInteractionTool({
+      name: 'document',
+      description: 'Review and file a document.',
+      access: 'write',
+      callParameters: Schema.Struct({ folder: Schema.String }),
+      response: DocumentDraft,
+      renderer: 'document-editor',
+      title: 'Review document',
+      actions: {
+        publish: {
+          label: 'Publish',
+          execute: ({ data, context, submissionId }) => context.publish(data, submissionId)
+        },
+        archive: {
+          label: 'Archive',
+          execute: ({ data, context, submissionId }) => context.archive(data, submissionId)
+        }
+      }
+    })
+  ]
+}
+```
+
+Callbacks infer `data` from `response` and `call.params` from `callParameters`. Original Effect
+schemas validate both; provider JSON Schema is display/model guidance only. V1 supports
+JSON-preserving schemas: excess, missing and invalid values are rejected, as are nested
+normalization/defaults/transforms that change the exact consented JSON. `null`, `false` and `0`
+are valid when the schema admits them; absence is not.
+
+### Accept on the host before execution
+
+The host owns authentication, pending ownership, session/run/generation, current account policy,
+renderers and storage. A click, `source: 'user'`, raw `InteractionResponse`, transcript entry or
+opaque ID does **not** authorize execution.
+
+Integration fragment; `host` and `scopedReceipts` below are explicitly **host-owned** services,
+not Yolk exports:
+
+```ts
+import { Effect } from 'effect'
+import { validateInteractionSubmission, type InteractionResponse } from '@yolk-sdk/agent/protocol'
+import { resolveTools } from '@yolk-sdk/agent/tools'
+
+const acceptResponse = (response: InteractionResponse) =>
+  Effect.gen(function* () {
+    const actor = yield* host.authenticate()
+    const pending = yield* host.pendingOwnedBy(actor, response.requestId)
+    const context = yield* host.freshDocumentContext(actor)
+    // Bind the receipt port to THIS active session/run/pending generation, never a
+    // global model-supplied call-ID lookup.
+    const scopedReceipts = host.receiptsFor(pending.scope)
+    const toolSet = yield* resolveTools([documents], context, { interactionHost: scopedReceipts })
+    const interaction = toolSet.interactions[pending.call.name]
+    if (interaction === undefined) return yield* host.unavailable()
+    const candidate = yield* validateInteractionSubmission({
+      request: pending.request,
+      response,
+      ...interaction
+    })
+    // Host transaction: recheck scope/ownership and atomically choose the first valid
+    // submission across ALL actions and cancellation. Persist an immutable full binding
+    // beside a unique host-allocated submission ID. Invalid attempts consume nothing.
+    yield* host.acceptTransaction({ actor, pending, candidate, response })
+    // Only now append/resume; transport submission alone is not acceptance.
+    return toolSet
+  })
+```
+
+Optional action `validate` is called by the resolved `validateAction` during admission,
+with fresh bound context and no business effects. Use `InteractionValidationError` from
+`@yolk-sdk/agent/protocol` for an expected business rejection; the person can edit or cancel.
+Validation is not authentication and is rechecked before new execution.
+
+`InteractionHost` is a port over host storage, not an SDK storage engine:
+
+- `read(slot)` returns an independent immutable accepted/started/settled receipt, including the
+  original call, selected action and exact final data. Scope is already bound in the adapter.
+- `claim(ref)` only advances **existing accepted → started** atomically and returns the same
+  binding with a fencing token. It must never manufacture acceptance. Concurrent losers and
+  abandoned started records cannot take over or resend.
+- `settle(token, outcome)` is token-fenced and idempotent. It validates receipt identity and
+  never overwrites a settled result. A lost acknowledgement may replay completed on retry,
+  but never licenses another dispatch.
+
+The protocol subpath exports `validInteractionReceipt`, `sameInteractionBinding`,
+`sameInteractionCall`, and `interactionJsonEquals` for adapter binding and settlement checks.
+These pure checks do not authenticate storage records or replace host ownership checks.
+
+Submission IDs are unique host-owned identities, not authentication or globally safe
+payload-derived provider idempotency keys. All actions and cancellation compete for one slot;
+identical retries reuse acceptance, changed action/data/call conflict. Built-in cancellation
+rejects action/data, requires no valid form (even after schema changes), and executes no business
+handler. The host records cancellation as a settled receipt with an error tool result whose
+`structuredContent` is `{ type: 'interaction_outcome', requestId, slot, submissionId, outcome: 'cancelled' }`.
+
+### Resume and replay
+
+Pass **both** `toolSet.interactions` and `toolSet.interactionHost` into `run`, `runToolBatch` or
+runtime config. The executor layer still comes from `makeToolExecutorLayer(toolSet)`. Without a
+host adapter, forms are unavailable rather than executing through an in-memory fallback.
+If a form keeps reappearing after acceptance, check that the same scoped `interactionHost`
+is passed to the loop/runtime, not only to `resolveTools`: without it the loop cannot load
+accepted receipts. Durable preflight must load and pass fresh receipt snapshots.
+
+Durable preflight fragment:
+
+```ts
+import { loadInteractionReceipts, prepareToolBatch } from '@yolk-sdk/agent/loop'
+
+const interactionReceipts = yield * loadInteractionReceipts(calls, toolSet.interactionHost)
+const prepared =
+  yield *
+  prepareToolBatch({
+    calls,
+    tools: toolSet.tools,
+    inputs: toolSet.inputs,
+    interactions: toolSet.interactions,
+    interactionReceipts,
+    responses: hitlResponses
+  })
+// Do not dispatch ANY sibling while prepared.pendingRequests is nonempty.
+// Forward prepared.interactionBindings.get(call.id) as { interaction: ref } to
+// ToolExecutor.execute. Dropping the ref fails closed.
+```
+
+Preparation only validates and plans: no reads, claims, settlements or actions. Load fresh
+snapshots before every preparation boundary. Historical receipts replay before current
+schemas/actions, even if a tool is removed or disabled; a missing handler can never start new
+work. The executor re-reads and validates the full receipt binding, then runs only its chosen
+action/data, before the next model turn. No extra approval or ambient permission is introduced.
+
+### Observe truthful outcomes
+
+`InteractionSubmitted` is authoritative acceptance, **not completion**. It stays active until
+a real server result. Local submit remains pending; neither acceptance nor transcripts synthesize
+completed tool results. Submit transport options are `streamInteractionResponseEventStream`,
+`InteractionResponseInput`, `AppendHitlResponse` or React `submitInteractionResponse`; these do
+not replace the authenticated host acceptance step.
+
+Action results distinguish `completed`, explicit `failed` (known no effect), and `unknown`.
+Escaped post-dispatch failures, including `ModelVisibleToolError` timeouts, are **unknown**, not
+proof of failure. Defects and interruption retain their original Cause while a bounded finalizer
+attempts uncertainty settlement. Host callbacks must cooperate with interruption. Unknown
+results carry receipt identity, `isError: true`, and explicit text that the action may have happened
+and must not be retried automatically, including rich content. Headless result metadata preserves
+`outcome: 'unknown'` separately from `failed`.
+
+Hosts own reconciliation, external-provider idempotency and warnings against separately consented
+duplicates. Voice/realtime, background activation and hosts without authenticated receipt storage
+remain unsupported. This API does not promise exactly-once external effects.
+
 ## Let the model choose background execution
 
 Any `makeTool` registration may opt into background execution with `background: true`. The flag is

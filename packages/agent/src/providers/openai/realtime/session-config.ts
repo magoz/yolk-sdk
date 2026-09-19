@@ -252,6 +252,14 @@ const realtimeToolResult = (
     return Result.fail(new VoiceToolBridgeError({ message: backgroundVoiceUnsupportedMessage }))
   }
 
+  if (tool.interaction !== undefined) {
+    return Result.fail(
+      new VoiceToolBridgeError({
+        message: 'Interaction tools are not supported in voice sessions. Do not retry them here.'
+      })
+    )
+  }
+
   return Result.match(Schema.decodeUnknownResult(Schema.Json)(tool.parameters), {
     onFailure: error =>
       Result.fail(
