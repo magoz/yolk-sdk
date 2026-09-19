@@ -49,6 +49,15 @@ When upgrading from canary.81:
 See [typed input wiring](./agent/tools-hitl#collect-typed-input) and
 [Gateway setup](./integrations/provider-setup#vercel-ai-gateway).
 
+### Next canary: generic-email labels, flags, moves, and required headers
+
+New `@yolk-sdk/connectors` actions `email.modify_labels`, `email.set_flag`, and `email.move`
+work through optional `EmailClient` host methods; missing methods fail with a typed validation
+error, so existing adapters keep working. `email.get_message` now requires `headers` and
+runtime-validates host output: hosts that omit `headers` fail with `validation_failed`, so update
+`EmailClient.getMessage` adapters to return RFC 5322 headers. Outlook `outlook.get_message`
+returns required `internetMessageHeaders`; list, draft, and mutation responses are unchanged.
+
 ### Next canary: chat-stream failure diagnostics
 
 OpenAI-compatible chat streaming now rejects a 2xx response with an explicit non-SSE content type

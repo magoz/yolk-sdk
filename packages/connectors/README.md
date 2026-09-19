@@ -207,7 +207,7 @@ the Google and Microsoft connectors.
 
 The common action set is `email.list_messages`, `email.get_message`, `email.get_attachment`,
 `email.create_draft`, `email.send_message`, `email.set_read`, `email.trash`, `email.untrash`,
-`email.modify_labels`, and `email.move`.
+`email.modify_labels`, `email.move`, and `email.set_flag`.
 Draft creation requires IMAP and uses the incoming
 credential. An optional
 `folder` selects the target mailbox; when omitted, the host adapter discovers a mailbox advertised
@@ -223,8 +223,7 @@ never raw MIME. `email.get_message` additionally requires `headers` name/value p
 `List-Unsubscribe` when the mail carries it); hosts fetch them via IMAP `BODY.PEEK[HEADER]` or
 POP3 `TOP` without marking the message read. Successful host output is schema-validated, so a
 missing `headers` array fails. List summaries carry no headers. The package root exports the pure
-`parseUnsubscribeMethods` helper for `List-Unsubscribe` discovery; see the unsubscribe recipe in
-the catalog. When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
+`parseUnsubscribeMethods` helper for `List-Unsubscribe` discovery; see the [unsubscribe recipe](../../apps/docs/content/docs/integrations/connectors.mdx#unsubscribe-from-mailing-lists-and-report-spam). When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
 `email.get_attachment`. The host returns decoded file bytes—not MIME transfer-encoded text—as
 base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `EmailClient`
 implementations may omit the optional `getAttachment` method; invoking the action then fails with a
@@ -664,7 +663,7 @@ size policy, durable storage, and content scanning.
   declared access should override `move_message` to `destructive` for well-known destructive
   destinations.
 
-All four return the provider's updated `OutlookMessage` and request immutable IDs. Use the returned
+All five return the provider's updated `OutlookMessage` and request immutable IDs. Use the returned
 `id` for subsequent calls. They use `Mail.ReadWrite` for the signed-in mailbox/application mode and
 `Mail.ReadWrite.Shared` for other explicit delegated mailboxes, with the same own-mailbox identity
 exception and application mailbox guard
@@ -952,7 +951,7 @@ orchestration only.
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                                  |
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete; host-only download plus create/update |
-| `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/trash/restore/labels                             |
+| `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/flag/trash/restore/move/labels                   |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                                   |
 | `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, supplier invoices, and supplier-invoice files    |
 | `@yolk-sdk/connectors/google`          | Gmail mail and label actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions     |

@@ -252,6 +252,17 @@ typed `ConnectorError`
 effects, while expected server rejection should be returned by the host port as
 `ActionResult.failure`.
 
+### Generic email labels, flags, and moves fail
+
+Label, flag, and move inputs are validated before any host call: `EmailImapKeyword` rejects
+system flags such as `\Seen`, whitespace, control characters, and IMAP atom specials;
+`email.modify_labels` requires at least one of `addLabels`/`removeLabels`;
+`email.move` requires a `destinationFolder` that differs from the source folder. Hosts return
+`ActionResult.failure` for keywords the server rejects (check `PERMANENTFLAGS` first) and for
+missing destinations. A moved message gets a new destination UID, so omitted `messageId` means
+re-list the destination rather than reusing the source UID. Hosts own partial-move
+reconciliation. See [the generic-email catalog](./integrations/connectors#mark-readunread-and-move-tofrom-trash).
+
 ### Google Drive action is unauthorized or search is incomplete
 
 All Google workloads share the `google.oauth` credential binding, but the resolved token still needs
