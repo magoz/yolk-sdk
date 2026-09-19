@@ -275,7 +275,7 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 | `gmail.list_send_as`     | list send-as aliases           |
 | `gmail.list_accounts`    | list accessible Gmail accounts |
 
-#Label creation takes `{ name, messageListVisibility?, labelListVisibility? }`. Get/delete take
+Label creation takes `{ name, messageListVisibility?, labelListVisibility? }`. Get/delete take
 `{ id }`; update takes `{ id, name?, messageListVisibility?, labelListVisibility? }` with at
 least one changed field. Visibility values are `show | hide` and
 `labelShow | labelShowIfUnread | labelHide`, respectively. Reads use `gmail.readonly`; lifecycle
@@ -457,7 +457,8 @@ explicit `mailbox`. List accepts the same null/blank placeholders as message lis
 Assign names, **not category IDs**, using `outlook.set_categories` with
 `{ messageId, mailbox?, categories }`; `[]` clears all names. `outlook.modify_categories` takes
 `{ messageId, mailbox?, addCategories?, removeCategories? }` with at least one list. It reads
-current categories, merges names (deduped, removals win), and PATCHes the result. Invalid/failed
+current categories, merges names (deduped by exact case-sensitive match, removals win), and PATCHes
+the result. Invalid/failed
 reads never trigger a PATCH. Both calls use `Mail.ReadWrite` or `Mail.ReadWrite.Shared` and
 preserve the existing own-mailbox/application guards and immutable-ID headers. Neither action
 creates master categories automatically. The merge is **non-atomic**: hosts must serialize

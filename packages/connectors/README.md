@@ -247,7 +247,7 @@ delivered.
 
 Set `isRead: true` to mark read, or `false` to mark unread. These actions use the incoming
 credential and require IMAP; POP3 is rejected before credential resolution or adapter calls.
-SMTP is submission-only. The three host methods are optional for compatibility: old adapters
+SMTP is submission-only. These host methods are optional for compatibility: old adapters
 continue working, but calling an unsupported action fails with a typed validation error.
 Successful host output is schema-validated; provider failures pass through unchanged.
 
@@ -660,7 +660,7 @@ as draft writes. Read-state and restore actions declare `write`; trash declares 
   selection, own-mailbox identity exception, immutable IDs, and application mailbox guard.
 - `outlook.modify_categories` takes `{ messageId, mailbox?, addCategories?, removeCategories? }`
   (at least one of the two) and merges through GET-then-PATCH: removals win over additions and
-  the resulting names are deduped. Both requests use `Mail.ReadWrite` (or its Shared variant),
+  the resulting names are deduped by exact case-sensitive match. Both requests use `Mail.ReadWrite` (or its Shared variant),
   without requiring separate read consent. The GET requires a valid `categories` array and never defaults
   omitted or malformed data to `[]`, so a failed or invalid read sends no PATCH. This
   read/modify/write is non-atomic: hosts must serialize competing updates. There are no

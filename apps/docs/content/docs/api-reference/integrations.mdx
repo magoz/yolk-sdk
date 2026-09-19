@@ -138,7 +138,9 @@ with `EmailSetReadInput`, `EmailTrashInput`, `EmailUntrashInput`, matching `*Req
 `untrash` methods receive IMAP connections and incoming credentials. Successful output is validated;
 POP3 is rejected. Move output includes the destination folder and an optional new message ID.
 See the [catalog](../integrations/connectors#mark-readunread-and-move-tofrom-trash) for adapter safety
-and trash-discovery requirements.
+and trash-discovery requirements. Label mutations export `emailModifyLabelsAction` with
+`EmailModifyLabelsInput`, `EmailModifyLabelsRequest`, `EmailModifyLabelsOutput` (an Effect `Chunk`
+of `EmailImapKeyword` atoms), and optional `EmailClient.modifyLabels` host support.
 
 Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageIdInput`,
 `OutlookListMessagesInput`, `OutlookSearchMessagesInput`, `OutlookListMessagesOutput`,
@@ -152,7 +154,11 @@ IDs. Restore targets Deleted Items as its source and defaults the destination to
 File attachment retrieval requires Graph's file
 discriminator and valid base64 content, then exposes it as required `contentBase64`; item and
 reference attachments are available only as list metadata.
-`OutlookListAttachmentsOutput.attachments` decodes to an Effect `Chunk`. OAuth exports include generic,
+`OutlookListAttachmentsOutput.attachments` decodes to an Effect `Chunk`. Category exports are
+`OutlookCategory`, `OutlookCategoryColor`, `OutlookListCategoriesInput/Output`,
+`OutlookCreateCategoryInput`, `OutlookDeleteCategoryInput/Output`, `OutlookSetCategoriesInput`,
+`OutlookModifyCategoriesInput`, plus `MicrosoftOutlookCategoryRead/WriteOAuthCredentialSlot` opt-in
+slots (excluded from the combined slot). OAuth exports include generic,
 signed-in-mailbox, shared-mailbox, and combined
 slots that share `microsoft.oauth`. Action inputs use `/me` by default and accept optional `mailbox`
 for `/users/{id|userPrincipalName}` Exchange Online targets. Set integration config key
@@ -237,6 +243,12 @@ Non-success provider responses return `ActionResult.failure`; authorization fail
 `google_unauthorized`, while action-specific failures use `gmail_get_thread_failed`,
 `gmail_list_attachments_failed`, or `gmail_get_attachment_failed`. Invalid JSON or response shape
 fails with `ConnectorError { cause: 'validation_failed' }`.
+
+Gmail label contracts are `GmailLabel` (with `GmailLabelMessageListVisibility`,
+`GmailLabelListVisibility`, and `GmailLabelType`), `GmailCreateLabelInput`, `GmailLabelIdInput`,
+`GmailUpdateLabelInput` (PATCH rename, at least one updatable field), and `GmailDeleteLabelOutput`
+(`{ id, deleted: true }` without decoding the empty 204 body). Label mutations reuse the existing
+`gmail.modify` slot; reads use the readonly slot.
 
 See [Connectors catalog](../integrations/connectors) for action ids.
 

@@ -1789,7 +1789,7 @@ const OutlookMessageCategoriesApi = Schema.Struct({
 export const outlookModifyCategoriesAction = defineAction({
   id: 'outlook.modify_categories',
   description:
-    'Add or remove category displayName strings on an Outlook message. Reads current categories, then PATCHes the merge (remove wins, deduped). This read/modify/write is non-atomic: hosts must serialize competing updates. No retries or implied compare-and-swap. Assignment never creates or deletes master categories.',
+    'Add or remove category displayName strings on an Outlook message. Reads current categories, then PATCHes the merge (remove wins, deduped by exact case-sensitive match). This read/modify/write is non-atomic: hosts must serialize competing updates. No retries or implied compare-and-swap. Assignment never creates or deletes master categories.',
   access: 'write',
   inputSchema: OutlookModifyCategoriesActionInput,
   outputSchema: OutlookMessage,

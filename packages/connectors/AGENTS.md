@@ -13,29 +13,29 @@
 
 ## Public model
 
-| Export area       | Purpose                                                                                                   |
-| ----------------- | --------------------------------------------------------------------------------------------------------- |
-| `connector`       | connector definition and action dispatch                                                                  |
-| `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                                |
-| `integration`     | configured invokable connector instance data                                                              |
-| `action`          | typed action definitions over Effect Schema                                                               |
-| `config`          | required/optional string config helpers for integration config                                            |
-| `credential`      | slots, bindings, host resolver service, runtime credential values                                         |
-| `http`            | host-provided HTTP request/response port; not a connector                                                 |
-| `result`          | value-level success/failure results for expected upstream failures                                        |
-| `error`           | typed package/runtime failures                                                                            |
-| `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                          |
-| `dropbox`         | Dropbox metadata/file-management actions, OAuth slot constants, and host-only download plus create/update |
-| `email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email client     |
-| `figma`           | Figma remote MCP auth data action and OAuth constants                                                     |
-| `fortnox`         | Read-only company/customer/invoice/supplier actions plus resource-scoped OAuth slot constants             |
-| `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                                |
-| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                                 |
-| `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants                  |
-| `notion`          | Notion search/page/block/database/data-source/comment/user actions plus API token slot constants          |
-| `r2-storage`      | Cloudflare R2 upload URL action plus separate host conditional object port                                |
-| `telegram`        | Telegram bot send/validate actions and hosted file byte helper                                            |
-| `todoist`         | Todoist project/task/label/comment actions plus API token slot constants                                  |
+| Export area       | Purpose                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------ |
+| `connector`       | connector definition and action dispatch                                                                     |
+| `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                                   |
+| `integration`     | configured invokable connector instance data                                                                 |
+| `action`          | typed action definitions over Effect Schema                                                                  |
+| `config`          | required/optional string config helpers for integration config                                               |
+| `credential`      | slots, bindings, host resolver service, runtime credential values                                            |
+| `http`            | host-provided HTTP request/response port; not a connector                                                    |
+| `result`          | value-level success/failure results for expected upstream failures                                           |
+| `error`           | typed package/runtime failures                                                                               |
+| `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                             |
+| `dropbox`         | Dropbox metadata/file-management actions, OAuth slot constants, and host-only download plus create/update    |
+| `email`           | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email client |
+| `figma`           | Figma remote MCP auth data action and OAuth constants                                                        |
+| `fortnox`         | Read-only company/customer/invoice/supplier actions plus resource-scoped OAuth slot constants                |
+| `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                                   |
+| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                                    |
+| `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants                     |
+| `notion`          | Notion search/page/block/database/data-source/comment/user actions plus API token slot constants             |
+| `r2-storage`      | Cloudflare R2 upload URL action plus separate host conditional object port                                   |
+| `telegram`        | Telegram bot send/validate actions and hosted file byte helper                                               |
+| `todoist`         | Todoist project/task/label/comment actions plus API token slot constants                                     |
 
 ## Design rules
 
@@ -62,7 +62,9 @@
 - Keep incoming and SMTP credential slots separate. POP3 rejects folders and drafts. IMAP draft adapters generate MIME, `APPEND` with `\Draft`, and, when no folder is provided, discover an advertised `\Drafts` SPECIAL-USE mailbox with a host-defined fallback. SMTP acceptance means submission only, not delivery.
 - Preserve generic email port invariants in schemas: draft requests carry `EmailImapConnection`; folder names and draft IDs are branded non-empty values; UIDPLUS-derived opaque IDs include both UIDVALIDITY and UID.
 - Generic email `set_read`, `trash`, and `untrash` require IMAP and optional host `setRead`/`trash`/`untrash` methods; preserve old adapters and schema-validate successful outputs. Hosts own UID `STORE`/safe UID moves, `\Trash` discovery, and partial-move reconciliation; never blanket-expunge or fabricate destination IDs. Restore defaults to INBOX, not the original folder; moved IDs must use destination UIDVALIDITY/UID when known.
+- Generic email labels are IMAP keyword atoms only (RFC 3501 `atom`, never backslash system flags) through optional host `modifyLabels`; schema-validate entries, preserve unrelated flags with UID `STORE` `+FLAGS.SILENT`/`-FLAGS.SILENT`, check `PERMANENTFLAGS` first, and let removals win on overlap. There is no IMAP label catalog: assignment creates keyword usage, removal clears it; POP3/SMTP cannot persist labels.
 - Outlook `set_read` uses Graph PATCH; `trash`/`untrash` use `/move` to Deleted Items/from Deleted Items. Restore defaults to inbox, not the original folder. Preserve immutable-ID headers, return the provider message, and reuse draft-write permission selection and application mailbox guards.
+- Outlook master-category lifecycle uses opt-in `MailboxSettings.Read`/`MailboxSettings.ReadWrite` slots, excluded from the combined slot, with no `.Shared` mailbox-settings scopes; application mode still requires an explicit `mailbox`. Message assignment uses category `displayName` strings, never master IDs, and never auto-creates catalog entries. `modify_categories` is a non-atomic GET-then-PATCH (remove wins, deduped, exact case-sensitive match) that must fail on an invalid read instead of erasing categories; hosts serialize competing updates with no retries or implied compare-and-swap.
 - `outlook.create_reply_draft` is a multi-step write: POST `createReply` without a replacement body so Graph generates quoted history, reuse (or read back in the requested text/html format) the generated body, then PATCH the created draft with the reply prepended (inside the generated HTML body element; newline-joined for text). Post-creation read/save failures, including typed transport and decoding errors once the id is known, retain sanitized `underlying: { draftId, retryable: false, recovery: 'read_edit_existing_draft' }` with read/edit-instead-of-recreate guidance. HTTP failures use `outlook_create_reply_draft_partial` without `retryAfterMs` or generic status-code mapping; never retry creation or delete the draft. No post-write GET only for the return payload.
 - Microsoft actions use Microsoft Graph v1.0, not the retired Outlook REST endpoint, direct Exchange APIs, or legacy OneDrive endpoints. Outlook and OneDrive action-scoped slots share the `microsoft.oauth` binding id; hosts own OAuth authority/tenant selection and token lifecycle.
 - Outlook inputs default to `/me`; optional `mailbox` targets `/users/{id|userPrincipalName}` for Exchange Online mailboxes. Delegated mode selects `Mail.*.Shared`, except an explicit `mailbox` that case-insensitively equals the resolved `OAuthCredential.accountId` keeps ordinary `Mail.*` slots while preserving the `/users` path (same Graph ID or principal-name form; no trimming, alias resolution, or ID-to-UPN mapping); Bearer credentials, missing account identity, or any mismatch stay Shared. Identity resolution uses the scope-free `microsoft.oauth` binding slot and never authorizes the operation; the selected operation slot still enforces its scopes, so explicit-mailbox delegated actions resolve credentials twice. Integration config `mailboxAccessMode: 'application'` selects non-Shared application permission hints and requires `mailbox`. Exchange mailbox grants and application-token scoping remain host/admin policy.
@@ -76,6 +78,7 @@
   `OAuthCredential`; never read them from integration config.
 - Gmail MIME discovery omits malformed optional attachment sizes; present sizes are nonnegative integers, including zero. This best-effort normalization must not throw on bad optional size metadata.
 - Gmail attachment discovery is metadata-only through `gmail.get_thread` or single-message `gmail.list_attachments`; neither exposes MIME-part content. `gmail.get_attachment` requires an `attachmentId`, preserves Gmail's validated base64url `data`, and adds standard-base64 `contentBase64`; inline parts without an attachment ID remain non-retrievable.
+- Gmail label lifecycle (`create`/`get`/`update`/`delete`) reuses the existing `gmail.modify` slot for mutations and the readonly slot for reads; renames go through PATCH and require at least one updatable field. Deletes answer 204 with an empty body, so return typed output without JSON decoding; reject dot-only IDs before URL construction.
 - `gmail.get_thread` is a bounded normalized boundary: require an explicit format, decode message text with plain text preferred over HTML, retain selected headers and attachment metadata, and never expose raw MIME or attachment content. Text/nested attachment parts must not enter the message body.
 - Agent adapters require a host-provided Effect layer for connector dependencies; adapters must not construct HTTP or credential services themselves.
 
