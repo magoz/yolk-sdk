@@ -862,6 +862,7 @@ describe('@yolk-sdk/connectors', () => {
       'gmail.get_attachment',
       'gmail.draft_compose',
       'gmail.draft_update',
+      'gmail.send_message',
       'gmail.get_thread',
       'gmail.list_labels',
       'gmail.create_label',
@@ -923,8 +924,10 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.get_attachment',
       'outlook.create_draft',
       'outlook.create_reply_draft',
+      'outlook.update_draft',
       'outlook.send_mail',
       'outlook.send_draft',
+      'outlook.reply',
       'outlook.set_read',
       'outlook.set_flag',
       'outlook.trash',
@@ -950,6 +953,7 @@ describe('@yolk-sdk/connectors', () => {
     ).toEqual([
       'outlook.create_draft',
       'outlook.create_reply_draft',
+      'outlook.update_draft',
       'outlook.set_read',
       'outlook.set_flag',
       'outlook.untrash',
@@ -967,6 +971,7 @@ describe('@yolk-sdk/connectors', () => {
     ).toEqual([
       'outlook.send_mail',
       'outlook.send_draft',
+      'outlook.reply',
       'outlook.trash',
       'outlook.delete_category',
       'onedrive.delete_item'

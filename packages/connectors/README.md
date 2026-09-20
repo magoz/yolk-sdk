@@ -343,7 +343,35 @@ const driveProgram = GoogleConnector.invoke({
 
 Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`. If using Effect HTTP, adapt `effect/unstable/http` in host code rather than importing a Yolk wrapper. Preserve connector request headers and body content type when adapting HTTP; provider connectors may rely on `content-type: application/json` for request parsing.
 
-Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, `GoogleCalendarEventsOAuthCredentialSlot`, `GoogleDriveMetadataReadonlyOAuthCredentialSlot`, and `GoogleDriveFileOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains all Google connector scopes for broad-consent hosts.
+Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, `GoogleCalendarEventsOAuthCredentialSlot`, `GoogleDriveMetadataReadonlyOAuthCredentialSlot`, and `GoogleDriveFileOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains the existing broad-consent scope set (its `gmail.compose` grant already permits sending).
+
+`gmail.send_message` (`gmailSendMessageAction`, access `destructive`) accepts
+`GmailSendMessageInput`: `{ raw, threadId? }`. `raw` is a complete host-generated RFC 5322 MIME
+message encoded as canonical padded or unpadded base64url (`GmailRawMessage`); the SDK validates
+encoding and forwards it unchanged, but does not parse MIME or validate recipients/send-as aliases.
+Hosts own MIME construction, header-injection protection, sender/account binding, recipient and
+content review, size limits, and explicit sending authorization. Gmail routes to the MIME
+To/Cc/Bcc headers, not a separate SMTP envelope: configure the encoder to retain Bcc for submission.
+No MIME or transport library is added to the SDK. Replies need the original RFC Message-ID in `In-Reply-To`, the appropriate
+`References` chain, and a matching Subject plus Gmail `threadId`; a Gmail resource ID is not an RFC
+Message-ID. Changing the subject can start a new conversation. See Google's
+[threading requirements](https://developers.google.com/workspace/gmail/api/guides/threads).
+
+Sending selects `GoogleGmailSendOAuthCredentialSlot` with `googleGmailSendScopes` (`gmail.send`)
+and the existing `google.oauth` binding. These are least-privilege consent hints: Google's
+[`messages.send`](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send)
+also accepts `gmail.compose`, `gmail.modify`, or `https://mail.google.com/`. The action inspects the
+resolved OAuth credential's scopes through the scope-free binding, then re-resolves through the
+selected operation slot: send first, otherwise an existing compose/modify/full-mail grant. The host
+still enforces that slot; inspection alone never authorizes sending. Bearer credentials or absent
+scope metadata fall back to the send slot. No additional consent or combined-scope change is made. Success returns `GmailSendMessageOutput`
+`{ accepted: true, id, threadId? }`, meaning provider submission, **not delivery**. Recognized HTTP rejections
+return `gmail_send_message_rejected`; ambiguous HTTP failures return `gmail_send_message_unknown`.
+Both omit retry hints and carry `underlying: { outcome: 'rejected' | 'unknown', retryable: false }`.
+Transport errors or invalid success acknowledgements are typed `ConnectorError`s with the unknown
+metadata. No automatic retry occurs. Hosts must reconcile an unconfirmed send before proposing
+another; a deterministic Message-ID does not make sending idempotent. Keep raw sending out of
+model tool allowlists when it is intended only for a host-owned reviewed action.
 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
@@ -619,6 +647,38 @@ accepts global Graph v1.0 links for the selected mailbox and folder collection. 
 requests a text body plus required `internetMessageHeaders` (name/value pairs: `List-Unsubscribe`,
 `References`, and authentication results when the message carries them); list, draft, and mutation
 actions return the base `OutlookMessage` without headers. Read and draft-returning actions request immutable IDs.
+
+`outlook.update_draft` (`outlookUpdateDraftAction`, `OutlookUpdateDraftInput`, access `write`)
+edits an existing draft with `{ messageId, mailbox?, to?, cc?, bcc?, subject?, body?, contentType? }`.
+At least one editable field is required; `contentType` alone is invalid. Omission preserves a field;
+empty recipient arrays clear it. `body` is the **complete replacement**, text by default or HTML
+when explicitly selected, with no prepended quote or rewritten whitespace. Retain any desired
+quoted history in that replacement. Graph enforces that these fields are draft-only. The SDK
+issues one PATCH, preserves immutable-ID headers and existing own/shared/application mailbox
+permission selection, and validates the returned identified draft as `OutlookMessage`. It never
+sends. Failures after dispatch retain `{ draftId, retryable: false,
+recovery: 'read_edit_existing_draft' }` in `underlying`, omit retry hints and provider bodies, and
+require reconciliation of the same draft, not recreation. This operation is not compare-and-swap;
+update followed by `outlook.send_draft` is not an atomic transaction, and other mailbox clients can
+change a draft between those requests. Hosts own serialization and review of the full final content.
+
+`outlook.reply` (`outlookReplyAction`, `OutlookReplyInput`, access `destructive`) sends the
+complete reviewed reply for an existing message in one Graph `POST .../messages/{id}/reply` with
+`{ message: { subject, body, toRecipients, ccRecipients, bccRecipients } }`. The original
+`messageId` plus required `to`/`cc`/`bcc` arrays (explicit, including empty), `subject`, and full
+`body` travel in that single request: at least one To address is required, no recipient field is
+left implicit, and no `comment`, `from`, quoted history, subject prefix, recipient inference, or
+draft round-trip is involved. `body` is the caller's exact string, text by default
+or HTML when explicitly selected, with whitespace preserved. The `mailbox` selects the authorized
+`/me` or `/users/{id}` send path with existing own/shared/application send permissions and
+immutable-ID headers; Graph chooses the sender identity and documents saving replies in Sent
+Items. Only HTTP 202 Accepted returns `OutlookSendOutput` `{ accepted: true }`. Other HTTP statuses
+return `outlook_reply_rejected` or `outlook_reply_unknown` failures with
+`underlying: { outcome: 'rejected' | 'unknown', retryable: false }`. After-dispatch transport
+failures are typed `ConnectorError`s with the unknown metadata. Neither includes retry hints or
+provider bodies. Acceptance is submission, not delivery, with no message ID or exactly-once
+claim. Prefer this over `update_draft` followed by `send_draft` for reviewed replies, since no
+intermediate mutable draft can change between requests.
 
 `outlook.create_reply_draft` creates a bodyless reply draft, then prepends the supplied text or HTML
 to Graph's generated quoted history and saves it. This is a multi-step write: once a draft ID is
@@ -981,7 +1041,7 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 Connector actions can declare default `read`, `write`, or `destructive` access metadata. The agent
 adapter uses that declaration unless the host supplies `access`; host access resolvers always win.
 Google Drive folder creation and Microsoft draft/folder-create actions declare `write`. Google Drive
-trash/delete, Microsoft message sends, and OneDrive deletion declare `destructive`. Legacy actions without metadata default to `read`, so hosts should continue assigning explicit access
+trash/delete, Gmail `send_message`, Microsoft message sends, and OneDrive deletion declare `destructive`. Legacy actions without metadata default to `read`, so hosts should continue assigning explicit access
 when adapting other write-capable connectors. This currently includes write-capable Gmail, Google
 Calendar, Notion, Todoist, Telegram, and R2 actions; hosts should provide an `access` resolver for
 those actions rather than relying on the fallback.

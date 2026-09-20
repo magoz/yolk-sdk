@@ -25,6 +25,32 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Unreleased: reviewed email connector primitives
+
+- `gmail.send_message` is a new **destructive** action for complete host-generated base64url MIME.
+  It supports new messages and replies whose headers and `threadId` meet Google's threading
+  requirements. Keep it out of model allowlists unless the host explicitly intends that exposure;
+  a host-owned reviewed interaction is a separate opt-in. Success means submission, not delivery.
+- Its `GoogleGmailSendOAuthCredentialSlot` uses the existing `google.oauth` binding and hints
+  `gmail.send`. Existing `gmail.compose`, `gmail.modify`, or full-mail grants already permit sending;
+  the action inspects OAuth scope metadata, then re-resolves through the selected operation slot
+  so strict host resolvers enforce an existing sufficient grant without additional consent. Bearer
+  credentials or missing scope metadata fall back to the send slot. Combined consent and existing
+  draft APIs are unchanged.
+- `outlook.update_draft` is a new **write** action for edited recipients, subject, and complete body.
+  Omitted fields remain unchanged; empty arrays clear recipients. Unlike `create_reply_draft`, its
+  body replaces the full content and does not prepend quoted history. Update followed by send is
+  not atomic and does not provide compare-and-swap.
+- `outlook.reply` is a new **destructive** action that sends the complete reviewed reply in one
+  Graph `POST .../reply` with explicit `to`/`cc`/`bcc`, subject, and full body. Required recipient
+  arrays (including empty ones) prevent provider recipient defaults; no `comment`, `from`, quoted
+  history, or draft round-trip is involved. It reuses the existing send-slot mailbox permissions.
+  Only HTTP 202 counts as accepted, meaning submission rather than delivery, with no message ID
+  or exactly-once claim. Prefer it over update-then-send for reviewed replies.
+- None of these three actions retries automatically. Gmail/Outlook unconfirmed-send metadata and
+  Outlook's existing-draft recovery identity must be handled before another mutation. See
+  [connector sending and editing](./integrations/connectors#submit-a-reviewed-gmail-message).
+
 ### Action-backed interaction opt-in
 
 `makeInteractionTool` introduces distinct interaction request, response, event and client-input

@@ -436,6 +436,49 @@ export class OutlookComposeInput extends Schema.Class<OutlookComposeInput>('Outl
   bcc: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
+// Encode complete path segments. Reject URL-normalized dot IDs and lone surrogates
+// (encodeURIComponent throws); Unicode mode preserves valid paired code points.
+const OutlookDraftIdentity = Schema.NonEmptyString.check(
+  Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f\uD800-\uDFFF]+$/u)
+)
+
+export class OutlookUpdateDraftInput extends Schema.Class<OutlookUpdateDraftInput>(
+  'OutlookUpdateDraftInput'
+)({
+  messageId: OutlookDraftIdentity,
+  mailbox: Schema.optional(OutlookDraftIdentity),
+  to: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+  cc: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+  bcc: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+  subject: Schema.optional(Schema.String),
+  body: Schema.optional(Schema.String),
+  contentType: Schema.optional(Schema.Literals(['text', 'html']))
+}) {}
+
+// Struct validation rechecks every field even when executeTyped receives a mutable
+// schema-class instance; Schema.toType(Class) alone only checks instance identity.
+const OutlookUpdateDraftActionInput = Schema.Struct(OutlookUpdateDraftInput.fields).check(
+  Schema.makeFilter<OutlookUpdateDraftInput>(input => {
+    if (input.contentType !== undefined && input.body === undefined) {
+      return { path: ['body'], issue: 'contentType requires a replacement body' }
+    }
+
+    return [input.to, input.cc, input.bcc, input.subject, input.body].every(
+      value => value === undefined
+    )
+      ? { path: ['subject'], issue: 'A draft update requires at least one editable field' }
+      : undefined
+  })
+)
+
+const OutlookUpdatedDraft = OutlookMessage.check(
+  Schema.makeFilter<OutlookMessage>(message =>
+    message.id !== '' && message.isDraft === true
+      ? undefined
+      : 'The provider must return an identified draft'
+  )
+)
+
 export class OutlookCreateReplyDraftInput extends Schema.Class<OutlookCreateReplyDraftInput>(
   'OutlookCreateReplyDraftInput'
 )({
@@ -461,6 +504,23 @@ export class OutlookSendMailInput extends Schema.Class<OutlookSendMailInput>(
 export class OutlookSendOutput extends Schema.Class<OutlookSendOutput>('OutlookSendOutput')({
   accepted: Schema.Boolean
 }) {}
+
+// One string is one recipient address field: reject empty or
+// control-character-only values without trimming or normalizing the field.
+const OutlookReplyAddress = Schema.NonEmptyString.check(Schema.isPattern(/[^\u0000-\u0020\u007f]/))
+
+export class OutlookReplyInput extends Schema.Class<OutlookReplyInput>('OutlookReplyInput')({
+  messageId: OutlookDraftIdentity,
+  mailbox: Schema.optional(OutlookDraftIdentity),
+  to: Schema.NonEmptyArray(OutlookReplyAddress),
+  cc: Schema.Array(OutlookReplyAddress),
+  bcc: Schema.Array(OutlookReplyAddress),
+  subject: Schema.String,
+  body: Schema.String,
+  contentType: Schema.optional(Schema.Literals(['text', 'html']))
+}) {}
+
+const OutlookReplyActionInput = Schema.Struct(OutlookReplyInput.fields)
 
 const outlookContentType = (contentType: 'text' | 'html' | undefined) =>
   contentType === 'html' ? 'HTML' : 'Text'
@@ -517,6 +577,14 @@ const outlookMessageBody = (
   }
 
   return message
+}
+
+type OutlookGraphDraftPatchFields = {
+  subject?: string
+  body?: OutlookGraphMessageBodyFields
+  toRecipients?: ReadonlyArray<OutlookGraphRecipientFields>
+  ccRecipients?: ReadonlyArray<OutlookGraphRecipientFields>
+  bccRecipients?: ReadonlyArray<OutlookGraphRecipientFields>
 }
 
 type OutlookSendMailPayloadFields = {
@@ -1053,6 +1121,77 @@ export const outlookCreateDraftAction = defineAction({
     })
 })
 
+export const outlookUpdateDraftAction = defineAction({
+  id: 'outlook.update_draft',
+  description:
+    'Edit an existing Outlook draft, including a reply draft. Omitted fields remain unchanged; empty recipient arrays clear them. Body is the complete replacement (text by default), not text to prepend. Does not send, retry, or provide compare-and-swap.',
+  access: 'write',
+  inputSchema: OutlookUpdateDraftActionInput,
+  outputSchema: OutlookMessage,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookWriteSlot(integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+      const patch: OutlookGraphDraftPatchFields = {}
+
+      if (input.to !== undefined) patch.toRecipients = outlookRecipients(input.to)
+
+      if (input.cc !== undefined) patch.ccRecipients = outlookRecipients(input.cc)
+
+      if (input.bcc !== undefined) patch.bccRecipients = outlookRecipients(input.bcc)
+
+      if (input.subject !== undefined) patch.subject = input.subject
+
+      if (input.body !== undefined) {
+        patch.body = { contentType: outlookContentType(input.contentType), content: input.body }
+      }
+
+      const recovery = {
+        draftId: input.messageId,
+        retryable: false,
+        recovery: 'read_edit_existing_draft'
+      }
+
+      return yield* Effect.gen(function* () {
+        const response = yield* http.request(
+          ConnectorHttpRequest.make({
+            method: 'PATCH',
+            url: `${microsoftGraphApiBaseUrl}${outlookMailboxPath(input.mailbox)}/messages/${encodeURIComponent(input.messageId)}`,
+            headers: outlookDraftWriteHeaders(token),
+            body: JSON.stringify(patch)
+          })
+        )
+
+        if (!isMicrosoftSuccessStatus(response.status)) {
+          return ActionResult.failure({
+            code: 'outlook_update_draft_failed',
+            message:
+              'Outlook draft update was not confirmed. Read the existing draft before editing or sending; do not recreate or automatically retry.',
+            status: response.status,
+            underlying: recovery
+          })
+        }
+
+        const updated = yield* decodeJsonResponse(OutlookUpdatedDraft, response)
+
+        return ActionResult.success(updated)
+      }).pipe(
+        Effect.mapError(
+          error =>
+            new ConnectorError({
+              cause: error.cause,
+              connectorId: integration.connectorId,
+              actionId: 'outlook.update_draft',
+              message:
+                'Outlook draft update was not confirmed. Read the existing draft before editing or sending; do not recreate or automatically retry.',
+              underlying: recovery
+            })
+        )
+      )
+    })
+})
+
 const combineReplyText = (reply: string, generated: string) => {
   if (reply.trim() === '') return generated
 
@@ -1344,6 +1483,72 @@ export const outlookSendDraftAction = defineAction({
       }
 
       return ActionResult.success(OutlookSendOutput.make({ accepted: true }))
+    })
+})
+
+export const outlookReplyAction = defineAction({
+  id: 'outlook.reply',
+  description:
+    'Send the complete reviewed reply for an Outlook message in one request. The explicit to/cc/bcc recipients, subject, and full body (text by default) travel in a single POST, so no intermediate mutable draft can change between requests. Success means accepted, not delivered.',
+  access: 'destructive',
+  inputSchema: OutlookReplyActionInput,
+  outputSchema: OutlookSendOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookSendSlot(integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      return yield* Effect.gen(function* () {
+        const response = yield* http.request(
+          ConnectorHttpRequest.make({
+            method: 'POST',
+            url: `${microsoftGraphApiBaseUrl}${outlookMailboxPath(input.mailbox)}/messages/${encodeURIComponent(input.messageId)}/reply`,
+            headers: outlookDraftWriteHeaders(token),
+            body: JSON.stringify({
+              message: {
+                subject: input.subject,
+                body: {
+                  contentType: outlookContentType(input.contentType),
+                  content: input.body
+                },
+                toRecipients: outlookRecipients(input.to),
+                ccRecipients: outlookRecipients(input.cc),
+                bccRecipients: outlookRecipients(input.bcc)
+              }
+            })
+          })
+        )
+
+        // The Graph reply contract documents HTTP 202 Accepted with an empty
+        // body as the only success: never parse a body or claim delivery.
+        if (response.status !== 202) {
+          const rejected = [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(response.status)
+
+          return ActionResult.failure({
+            code: rejected ? 'outlook_reply_rejected' : 'outlook_reply_unknown',
+            message: rejected
+              ? 'Outlook rejected the reply. Do not automatically resend.'
+              : 'Outlook reply was not confirmed. Reconcile before considering another send.',
+            status: response.status,
+            underlying: { outcome: rejected ? 'rejected' : 'unknown', retryable: false }
+          })
+        }
+
+        return ActionResult.success(OutlookSendOutput.make({ accepted: true }))
+      }).pipe(
+        Effect.mapError(
+          error =>
+            new ConnectorError({
+              cause: error.cause,
+              connectorId: integration.connectorId,
+              actionId: 'outlook.reply',
+              message:
+                'Outlook reply was not confirmed. Reconcile before considering another send.',
+              underlying: { outcome: 'unknown', retryable: false }
+            })
+        )
+      )
     })
 })
 
@@ -2019,8 +2224,10 @@ export const outlookMailActions = [
   outlookGetAttachmentAction,
   outlookCreateDraftAction,
   outlookCreateReplyDraftAction,
+  outlookUpdateDraftAction,
   outlookSendMailAction,
   outlookSendDraftAction,
+  outlookReplyAction,
   outlookSetReadAction,
   outlookSetFlagAction,
   outlookTrashAction,

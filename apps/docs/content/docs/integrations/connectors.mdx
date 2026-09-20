@@ -272,30 +272,31 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 
 ### Gmail actions
 
-| Action id                | What it does                   |
-| ------------------------ | ------------------------------ |
-| `gmail.search`           | search Gmail messages          |
-| `gmail.get_message`      | fetch one message              |
-| `gmail.list`             | list messages                  |
-| `gmail.list_drafts`      | list drafts                    |
-| `gmail.get_thread`       | fetch normalized thread        |
-| `gmail.list_labels`      | list labels                    |
-| `gmail.create_label`     | create a user label            |
-| `gmail.get_label`        | get label details              |
-| `gmail.update_label`     | rename/update label visibility |
-| `gmail.delete_label`     | delete a user label            |
-| `gmail.modify_labels`    | add/remove labels              |
-| `gmail.set_starred`      | star/unstar a message          |
-| `gmail.trash`            | move a message to trash        |
-| `gmail.untrash`          | restore a trashed message      |
-| `gmail.draft_compose`    | create a draft                 |
-| `gmail.draft_update`     | update a draft                 |
-| `gmail.draft_delete`     | delete a draft                 |
-| `gmail.draft_reply`      | create a reply draft           |
-| `gmail.list_attachments` | list attachment metadata       |
-| `gmail.get_attachment`   | fetch attachment content       |
-| `gmail.list_send_as`     | list send-as aliases           |
-| `gmail.list_accounts`    | list accessible Gmail accounts |
+| Action id                | What it does                           |
+| ------------------------ | -------------------------------------- |
+| `gmail.search`           | search Gmail messages                  |
+| `gmail.get_message`      | fetch one message                      |
+| `gmail.list`             | list messages                          |
+| `gmail.list_drafts`      | list drafts                            |
+| `gmail.get_thread`       | fetch normalized thread                |
+| `gmail.list_labels`      | list labels                            |
+| `gmail.create_label`     | create a user label                    |
+| `gmail.get_label`        | get label details                      |
+| `gmail.update_label`     | rename/update label visibility         |
+| `gmail.delete_label`     | delete a user label                    |
+| `gmail.modify_labels`    | add/remove labels                      |
+| `gmail.set_starred`      | star/unstar a message                  |
+| `gmail.trash`            | move a message to trash                |
+| `gmail.untrash`          | restore a trashed message              |
+| `gmail.draft_compose`    | create a draft                         |
+| `gmail.draft_update`     | update a draft                         |
+| `gmail.draft_delete`     | delete a draft                         |
+| `gmail.draft_reply`      | create a reply draft                   |
+| `gmail.send_message`     | submit host-generated MIME for sending |
+| `gmail.list_attachments` | list attachment metadata               |
+| `gmail.get_attachment`   | fetch attachment content               |
+| `gmail.list_send_as`     | list send-as aliases                   |
+| `gmail.list_accounts`    | list accessible Gmail accounts         |
 
 Label creation takes `{ name, messageListVisibility?, labelListVisibility? }`. Get/delete take
 `{ id }`; update takes `{ id, name?, messageListVisibility?, labelListVisibility? }` with at
@@ -305,6 +306,37 @@ mutations and message assignment reuse `gmail.modify`. System labels cannot be r
 Delete returns `{ id, deleted: true }`; it deletes the label, not messages. Assign/remove labels
 with `gmail.modify_labels` and `{ messageId, addLabelIds?, removeLabelIds? }`. Star/unstar with
 `gmail.set_starred` and `{ messageId, isStarred }`, which assigns the `STARRED` system label.
+
+### Submit a reviewed Gmail message
+
+`gmail.send_message` accepts `{ raw, threadId? }`, where `raw` is a complete RFC 5322 MIME
+message encoded as canonical padded or unpadded base64url. The action forwards those bytes
+unchanged; the host builds the MIME, protects against header injection, binds the sender account,
+validates recipients, bounds size, and obtains explicit send authorization. The SDK does not parse
+MIME or check send-as aliases. Prefer a host-owned reviewed interaction over exposing this raw
+send action directly to the model. Its access metadata is `destructive`. Gmail routes to the MIME
+To/Cc/Bcc headers, not a separate SMTP envelope; retain Bcc when encoding the submitted MIME.
+
+For a reply, the host must include `In-Reply-To` and `References` using RFC Message-IDs, plus a
+matching Subject and the Gmail `threadId`; Gmail resource IDs are not RFC Message-IDs. Changing
+the subject can start a new conversation. See Google's [threading requirements](https://developers.google.com/workspace/gmail/api/guides/threads).
+
+`GoogleGmailSendOAuthCredentialSlot` shares `google.oauth` and hints the least-privilege
+`gmail.send` scope. Google's [send API](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send)
+also accepts existing `gmail.compose`, `gmail.modify`, or `https://mail.google.com/` grants. The
+action first inspects OAuth scope metadata through the scope-free binding, then re-resolves
+through an operation slot selecting send first, otherwise an existing compose/modify/full-mail
+grant. Strict host resolvers still enforce the selected slot; the initial inspection never grants
+permission. Bearer credentials or missing scope metadata fall back to the send slot. No additional
+consent is requested and the combined slot is unchanged.
+
+Success is `{ accepted: true, id, threadId? }`: submission, **not delivery**. Recognized HTTP
+rejections return `gmail_send_message_rejected`; ambiguous HTTP responses return
+`gmail_send_message_unknown`. Both omit retry hints and include
+`underlying: { outcome: 'rejected' | 'unknown', retryable: false }`. Transport failures or malformed
+success acknowledgements are typed `ConnectorError`s with the unknown metadata. No automatic
+retry occurs. An unconfirmed send may already have taken effect: reconcile mailbox state before
+proposing another send. A deterministic Message-ID is not an idempotency guarantee.
 
 ### Fetch a normalized Gmail thread
 
@@ -450,8 +482,10 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.get_attachment`     | fetch one file attachment with base64 content                  |
 | `outlook.create_draft`       | create a new message draft                                     |
 | `outlook.create_reply_draft` | create a reply draft preserving Graph-generated quoted history |
+| `outlook.update_draft`       | edit recipients, subject, and full body on an existing draft   |
 | `outlook.send_mail`          | submit a new message for sending                               |
 | `outlook.send_draft`         | submit an existing draft for sending                           |
+| `outlook.reply`              | send the reviewed reply in one request, no draft in between    |
 | `outlook.set_read`           | mark a message read or unread                                  |
 | `outlook.set_flag`           | flag/unflag a message for follow-up                            |
 | `outlook.trash`              | move a message to Deleted Items                                |
@@ -502,8 +536,8 @@ or `email.get_message`, then
 call the pure `parseUnsubscribeMethods(headers)` helper from `@yolk-sdk/connectors` (no IO) to get
 `mailto` address methods and HTTP methods with a `oneClick` flag from
 `List-Unsubscribe-Post`. Executing a method stays host-owned: send `mailto:` removals through
-`outlook.send_mail` or `email.send_message` (reusing the URI `subject` when present; Gmail has no
-send action, so compose a `gmail.draft_compose` for host review), and perform HTTP methods with a
+`outlook.send_mail`, `email.send_message`, or host-generated MIME via `gmail.send_message`
+(reusing the URI `subject` when present, after host authorization), and perform HTTP methods with a
 host network call — plain GET, or POST with `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
 for one-click endpoints. Verify authentication results (DKIM covering the list headers) before
 automatic one-click POSTs and apply the same public-network policy as other host fetches. Never
@@ -515,6 +549,49 @@ Report spam with existing actions and no new code: add the `SPAM` label through
 `outlook.move_message`, or move to the server's Junk mailbox through `email.move` with an
 explicit destination folder (there is no `\Junk` special-use discovery; use the server's advertised
 name such as `Junk` or `Spam`).
+
+#### Edit a draft
+
+`outlook.update_draft` takes `{ messageId, mailbox?, to?, cc?, bcc?, subject?, body?, contentType? }`.
+It requires at least one editable field; `contentType` alone is invalid. Omitted fields remain
+unchanged and empty recipient arrays clear them. `body` is the **complete replacement**, not text
+to prepend, so include any quoted history you want to retain. The default content type is `text`;
+select `html` explicitly for HTML. No whitespace is rewritten.
+
+The action issues one Graph PATCH and returns the updated identified draft as `OutlookMessage`.
+Graph enforces draft-only edits. Existing own/shared/application mailbox write permissions and
+immutable-ID headers apply. This is a `write` action, never a send operation. After-dispatch HTTP
+failures (`outlook_update_draft_failed`) and typed failures preserve the draft ID in
+`underlying: { draftId, retryable: false, recovery: 'read_edit_existing_draft' }` without provider
+bodies or retry hints. Read the same draft using its original mailbox before another edit or send.
+
+There is no compare-and-swap guarantee. Updating a draft and then calling `outlook.send_draft`
+is **not atomic**: another mailbox client can change it between requests. Hosts own serialization
+and review of the full final content, including any quoted history. Do not infer that the
+interaction receipt makes the provider's draft immutable.
+
+#### Send a reviewed reply
+
+`outlook.reply` takes `{ messageId, mailbox?, to, cc, bcc, subject, body, contentType? }`,
+where `messageId` identifies the original message. All three recipient arrays are required and
+sent explicitly, including empty ones, so no recipient field is left implicit in the request;
+`to` must hold at least one address. `body` is the caller's complete string, preserved
+exactly with no appended quote, subject prefix, or recipient inference. The default content type
+is `text`; select `html` explicitly for HTML. The action issues one Graph `POST .../reply` with
+`{ message: { subject, body, toRecipients, ccRecipients, bccRecipients } }` and never sets
+`comment` or `from`: the mailbox selects the authorized sender path and Graph chooses the
+mailbox identity. Existing own/shared/application mailbox send permissions and immutable-ID
+headers apply. This is a `destructive` action.
+
+Prefer it over `outlook.update_draft` followed by `outlook.send_draft` for dispatching a reviewed
+reply: placing the reviewed fields in the send request avoids an intermediate mutable draft that
+another mailbox client could edit between requests. Only HTTP 202 Accepted counts as accepted
+(`{ accepted: true }`); Graph documents saving replies in Sent Items. Other HTTP statuses return
+`outlook_reply_rejected` or `outlook_reply_unknown` failures with
+`underlying: { outcome: 'rejected' | 'unknown', retryable: false }`. After-dispatch transport
+failures are typed `ConnectorError`s with the unknown metadata. Neither includes retry hints or
+provider bodies. Acceptance is not delivery, and success carries no message ID or exactly-once
+claim. Reconcile before considering another send.
 
 #### Reply drafts and recovery
 

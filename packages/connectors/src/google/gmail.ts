@@ -1,7 +1,8 @@
 import { Chunk, Effect, Match, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
-import type { CredentialSlot } from '../credential.ts'
+import { CredentialSlot, resolveCredential } from '../credential.ts'
+import { ConnectorError } from '../error.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../http.ts'
 import { ActionResult } from '../result.ts'
 import {
@@ -10,6 +11,11 @@ import {
   GoogleGmailModifyOAuthCredentialSlot,
   GoogleGmailReadonlyOAuthCredentialSlot,
   GoogleGmailSettingsOAuthCredentialSlot,
+  GoogleGmailSendOAuthCredentialSlot,
+  GoogleOAuthCredentialSlot,
+  googleGmailSendScope,
+  googleGmailComposeScope,
+  googleGmailModifyScope,
   googleAuthorizationHeaders
 } from './oauth.ts'
 import {
@@ -63,6 +69,35 @@ export class GmailListInput extends Schema.Class<GmailListInput>('GmailListInput
   labelId: Schema.optional(Schema.String),
   maxResults: Schema.optional(Schema.Number),
   pageToken: Schema.optional(Schema.String)
+}) {}
+
+/** A complete host-generated RFC 5322 MIME message, not a model-authored form.
+ * Accept padded or unpadded canonical base64url; never rewrite consent-bearing bytes. */
+export const GmailRawMessage = Schema.NonEmptyString.check(
+  Schema.isPattern(
+    /^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw](?:==)?|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048]=?)?$/
+  )
+)
+
+export type GmailRawMessage = typeof GmailRawMessage.Type
+
+export class GmailSendMessageInput extends Schema.Class<GmailSendMessageInput>(
+  'GmailSendMessageInput'
+)({
+  raw: GmailRawMessage,
+  threadId: Schema.optional(Schema.NonEmptyString)
+}) {}
+
+const GmailSentMessage = Schema.Struct({
+  id: Schema.NonEmptyString,
+  threadId: Schema.optional(Schema.NonEmptyString)
+})
+
+export class GmailSendMessageOutput extends Schema.Class<GmailSendMessageOutput>(
+  'GmailSendMessageOutput'
+)({
+  accepted: Schema.Literal(true),
+  ...GmailSentMessage.fields
 }) {}
 
 export class GmailDraftComposeInput extends Schema.Class<GmailDraftComposeInput>(
@@ -1363,6 +1398,84 @@ export const gmailUntrashAction = defineAction({
     )
 })
 
+export const gmailSendMessageAction = defineAction({
+  id: 'gmail.send_message',
+  description:
+    'Submit a complete host-generated base64url MIME message to Gmail. Success is submission, not delivery. For replies, the host supplies matching Subject, In-Reply-To and References headers plus threadId. Never automatically retry an unconfirmed send.',
+  access: 'destructive',
+  // Recheck fields of mutable decoded instances on the typed path as well.
+  inputSchema: Schema.Struct(GmailSendMessageInput.fields),
+  outputSchema: GmailSendMessageOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      // Scope inspection is not authorization. Re-resolve through the selected operation
+      // slot so strict host resolvers can enforce an existing sufficient grant, including
+      // compose-only credentials, without requesting additional consent.
+      const credential = yield* resolveCredential(integration, GoogleOAuthCredentialSlot)
+
+      const sendScope = Predicate.isTagged(credential, 'OAuthCredential')
+        ? [
+            googleGmailSendScope,
+            googleGmailComposeScope,
+            googleGmailModifyScope,
+            'https://mail.google.com/'
+          ].find(scope => credential.scopes?.includes(scope))
+        : undefined
+
+      const slot =
+        sendScope === undefined || sendScope === googleGmailSendScope
+          ? GoogleGmailSendOAuthCredentialSlot
+          : CredentialSlot.make({
+              id: GoogleGmailSendOAuthCredentialSlot.id,
+              kind: 'oauth',
+              requiredScopes: [sendScope]
+            })
+
+      const token = yield* resolveGoogleAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      return yield* Effect.gen(function* () {
+        const response = yield* http.request(
+          ConnectorHttpRequest.make({
+            method: 'POST',
+            url: `${googleGmailApiBaseUrl}/users/me/messages/send`,
+            headers: { ...googleAuthorizationHeaders(token), 'content-type': 'application/json' },
+            body: JSON.stringify(input)
+          })
+        )
+
+        if (!isSuccessStatus(response.status)) {
+          const rejected = [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(response.status)
+
+          return ActionResult.failure({
+            code: rejected ? 'gmail_send_message_rejected' : 'gmail_send_message_unknown',
+            message: rejected
+              ? 'Gmail rejected the submission. Do not automatically resend.'
+              : 'Gmail submission was not confirmed. Reconcile before considering another send.',
+            status: response.status,
+            underlying: { outcome: rejected ? 'rejected' : 'unknown', retryable: false }
+          })
+        }
+
+        const message = yield* decodeJsonResponse(GmailSentMessage, response)
+
+        return ActionResult.success(GmailSendMessageOutput.make({ accepted: true, ...message }))
+      }).pipe(
+        Effect.mapError(
+          error =>
+            new ConnectorError({
+              cause: error.cause,
+              connectorId: integration.connectorId,
+              actionId: 'gmail.send_message',
+              message:
+                'Gmail submission was not confirmed. Reconcile before considering another send.',
+              underlying: { outcome: 'unknown', retryable: false }
+            })
+        )
+      )
+    })
+})
+
 export const gmailDraftComposeAction = defineAction({
   id: 'gmail.draft_compose',
   description: 'Create a Gmail draft message.',
@@ -1721,6 +1834,7 @@ export const gmailActions = [
   gmailGetAttachmentAction,
   gmailDraftComposeAction,
   gmailDraftUpdateAction,
+  gmailSendMessageAction,
   gmailGetThreadAction,
   gmailListLabelsAction,
   gmailCreateLabelAction,

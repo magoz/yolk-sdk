@@ -29,6 +29,8 @@ export const googleDriveFileScope = 'https://www.googleapis.com/auth/drive.file'
 
 export const googleGmailReadonlyScopes = Object.freeze([googleGmailReadonlyScope])
 
+export const googleGmailSendScopes = Object.freeze([googleGmailSendScope])
+
 export const googleGmailComposeScopes = Object.freeze([
   googleGmailComposeScope,
   googleGmailSettingsBasicScope
@@ -61,6 +63,12 @@ export const GoogleGmailReadonlyOAuthCredentialSlot = CredentialSlot.make({
   id: googleOAuthSlotId,
   kind: 'oauth',
   requiredScopes: [...googleGmailReadonlyScopes]
+})
+
+export const GoogleGmailSendOAuthCredentialSlot = CredentialSlot.make({
+  id: googleOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...googleGmailSendScopes]
 })
 
 export const GoogleGmailComposeOAuthCredentialSlot = CredentialSlot.make({
