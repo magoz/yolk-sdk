@@ -1,5 +1,13 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.87
+
+### Patch Changes
+
+- 30f73f0: Advance unchanged public packages in lockstep with the reviewed-email submission primitives in the connectors package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [30f73f0]
+  - @yolk-sdk/agent@0.1.0-canary.87
+
 ## 0.1.0-canary.86
 
 ### Patch Changes
