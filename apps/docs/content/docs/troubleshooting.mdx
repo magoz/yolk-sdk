@@ -315,6 +315,23 @@ folder; `not_downloadable` is a Paper or other export-only entry; `unexpected_re
 adapter returned a 3xx that the helper refuses to follow. `partial_content` covers incomplete or
 ranged 200 responses and a body whose length differs from the served metadata `size`. Host-only writes use a separate port; see [Transfer connector files](./connectors/files).
 
+### Gmail submission is unconfirmed or its send scope is rejected
+
+`gmail.send_message` forwards host-generated base64url MIME unchanged. Its input validation checks
+encoding, not MIME structure, recipient correctness, or sender aliases. The host must construct and
+review the message before dispatch. A valid success returns an accepted message ID, not delivery
+confirmation. HTTP ambiguity, transport errors, or malformed success acknowledgements can follow
+an actual send; do not automatically resend. Reconcile mailbox state first. Failure metadata uses
+`underlying: { outcome: 'rejected' | 'unknown', retryable: false }` after a response, or the unknown
+variant on after-dispatch typed errors; neither includes provider bodies or retry-delay hints.
+
+The action's slot hints `gmail.send`, but Google also accepts `gmail.compose`, `gmail.modify`, or
+`https://mail.google.com/`. The action inspects OAuth scope metadata, then re-resolves through a
+slot for the existing sufficient grant; the host must still authorize that operation slot. Return
+accurate scopes on `OAuthCredential` so compose-only credentials do not fall back to a literal send
+hint. Bearer credentials or missing scope metadata use the send slot. Do not weaken unrelated
+scope checks or add unnecessary consent. See [Gmail submission](./integrations/connectors#submit-a-reviewed-gmail-message).
+
 ### Microsoft action is unauthorized
 
 Microsoft Outlook and OneDrive actions call Microsoft Graph, so the token audience and consent must be for
@@ -351,6 +368,21 @@ post-create typed `ConnectorError`s include
 is known. Read and edit that draft using the original `mailbox` instead of invoking creation again:
 a failed save response may follow a successful save. If the creation response was lost or no usable
 ID was returned, reconcile mailbox state before another creation. See [reply draft recovery](./integrations/connectors#reply-drafts-and-recovery).
+
+For `outlook.update_draft`, the body is a complete replacement, not a reply to prepend. Omitted
+fields are unchanged and empty arrays clear recipient fields. After-dispatch HTTP failures use
+`outlook_update_draft_failed`; typed failures also preserve the existing draft ID with
+`retryable: false` and `recovery: 'read_edit_existing_draft'`. Read the original draft/mailbox
+before any further edit or send. Update then send is not atomic, and the interaction host cannot
+prevent another mailbox client from changing the provider draft between calls.
+
+For `outlook.reply`, the reviewed recipients, subject, and complete body travel in a single send
+request, so there is no intermediate mutable draft. Only HTTP 202 Accepted returns
+`{ accepted: true }`; recognized rejections use `outlook_reply_rejected` and anything else
+(including other 2xx statuses, redirects, 408, and 5xx) uses `outlook_reply_unknown`, both with
+`underlying: { outcome: 'rejected' | 'unknown', retryable: false }` and no retry hints or provider
+bodies. Typed after-dispatch failures carry the unknown variant. Acceptance means submission,
+not delivery: reconcile mailbox state before considering another send.
 
 For OneDrive, delegated reads and writes use `Files.Read` or `Files.ReadWrite` by default, including
 an explicit `driveId` when those permissions cover the target. Set `oneDriveAccessMode` to
