@@ -200,7 +200,14 @@ describe('generic email connector', () => {
       'email.trash',
       'email.untrash',
       'email.modify_labels',
-      'email.move'
+      'email.move',
+      'email.batch_set_read',
+      'email.batch_set_flag',
+      'email.batch_move',
+      'email.batch_trash',
+      'email.batch_untrash',
+      'email.batch_modify_labels',
+      'email.delete_permanently'
     ])
     expect(emailListMessagesAction.access).toBe('read')
     expect(emailGetMessageAction.access).toBe('read')

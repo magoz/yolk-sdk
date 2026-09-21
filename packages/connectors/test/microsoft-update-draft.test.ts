@@ -116,6 +116,28 @@ describe('Outlook draft updates', () => {
     })
   )
 
+  it.effect('normalizes returned draft flag state instead of trusting lookalike fields', () =>
+    Effect.gen(function* () {
+      const host = makeHost(
+        response(
+          200,
+          JSON.stringify({
+            id: 'existing-draft',
+            isDraft: true,
+            isFlagged: false,
+            flag: { flagStatus: 'flagged' }
+          })
+        )
+      )
+
+      const result = yield* outlookUpdateDraftAction
+        .execute({ integration, input: { messageId: 'existing-draft', subject: 'Edited' } })
+        .pipe(Effect.provide(host.layer))
+
+      expect(result).toMatchObject({ value: { id: 'existing-draft', isFlagged: true } })
+    })
+  )
+
   it.effect('preserves omitted fields and permits explicit clearing and HTML replacement', () =>
     Effect.gen(function* () {
       const updates = [

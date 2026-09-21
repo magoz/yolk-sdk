@@ -1,13 +1,25 @@
 import { Chunk, Effect, Match, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
+import {
+  EmailBatchOperationOutput,
+  EmailBatchResultItem,
+  makeEmailBatchSummary,
+  type EmailBatchResultCode
+} from '../email-batch.ts'
 import { defineAction } from '../action.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
-import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../http.ts'
+import {
+  ConnectorHttpClient,
+  ConnectorHttpRequest,
+  decodeJsonResponse,
+  type ConnectorHttpClientApi
+} from '../http.ts'
 import { ActionResult } from '../result.ts'
 import {
   GoogleGmailComposeOAuthCredentialSlot,
   GoogleGmailDraftReplyOAuthCredentialSlot,
+  GoogleGmailFullMailOAuthCredentialSlot,
   GoogleGmailModifyOAuthCredentialSlot,
   GoogleGmailReadonlyOAuthCredentialSlot,
   GoogleGmailSettingsOAuthCredentialSlot,
@@ -35,7 +47,9 @@ export class GmailMessageRef extends Schema.Class<GmailMessageRef>('GmailMessage
 
 export class GmailSearchInput extends Schema.Class<GmailSearchInput>('GmailSearchInput')({
   query: Schema.optional(Schema.String),
-  maxResults: Schema.optional(Schema.Number)
+  maxResults: Schema.optional(Schema.Number),
+  isRead: Schema.optional(Schema.Boolean),
+  isFlagged: Schema.optional(Schema.Boolean)
 }) {}
 
 export class GmailSearchOutput extends Schema.Class<GmailSearchOutput>('GmailSearchOutput')({
@@ -68,7 +82,9 @@ export class GmailListInput extends Schema.Class<GmailListInput>('GmailListInput
   query: Schema.optional(Schema.String),
   labelId: Schema.optional(Schema.String),
   maxResults: Schema.optional(Schema.Number),
-  pageToken: Schema.optional(Schema.String)
+  pageToken: Schema.optional(Schema.String),
+  isRead: Schema.optional(Schema.Boolean),
+  isFlagged: Schema.optional(Schema.Boolean)
 }) {}
 
 /** A complete host-generated RFC 5322 MIME message, not a model-authored form.
@@ -250,6 +266,10 @@ export class GmailMessageOutput extends Schema.Class<GmailMessageOutput>('GmailM
   threadId: Schema.optional(Schema.String),
   snippet: Schema.optional(Schema.String),
   labelIds: Schema.optional(Schema.Array(Schema.String)),
+  /** Derived from `labelIds` only: `!includes('UNREAD')`. Absent when labels are omitted. */
+  isRead: Schema.optional(Schema.Boolean),
+  /** Derived from `labelIds` only: `includes('STARRED')`. Absent when labels are omitted. */
+  isFlagged: Schema.optional(Schema.Boolean),
   payload: Schema.optional(
     Schema.Struct({
       headers: Schema.optional(Schema.Array(GmailMessagePayloadHeader))
@@ -257,6 +277,16 @@ export class GmailMessageOutput extends Schema.Class<GmailMessageOutput>('GmailM
   ),
   raw: Schema.optional(Schema.String)
 }) {}
+
+const {
+  isRead: _gmailMessageIsRead,
+  isFlagged: _gmailMessageIsFlagged,
+  ...GmailMessageWireFields
+} = GmailMessageOutput.fields
+
+const GmailMessageWire = Schema.Struct(GmailMessageWireFields)
+
+type GmailMessageWireType = typeof GmailMessageWire.Type
 
 const GmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
 
@@ -278,6 +308,10 @@ export class GmailThreadMessage extends Schema.Class<GmailThreadMessage>('GmailT
   id: Schema.String,
   threadId: Schema.optional(Schema.String),
   labelIds: Schema.optional(Schema.Array(Schema.String)),
+  /** Derived from `labelIds` only: `!includes('UNREAD')`. Absent when labels are omitted. */
+  isRead: Schema.optional(Schema.Boolean),
+  /** Derived from `labelIds` only: `includes('STARRED')`. Absent when labels are omitted. */
+  isFlagged: Schema.optional(Schema.Boolean),
   snippet: Schema.optional(Schema.String),
   internalDate: Schema.optional(Schema.String),
   headers: Schema.Array(GmailMessagePayloadHeader),
@@ -521,6 +555,8 @@ type GmailThreadMessageWithHeadersFields = {
   readonly headers: ReadonlyArray<GmailThreadHeaderFields>
   body?: string
   bodyMimeType?: 'text/plain' | 'text/html'
+  isRead?: boolean
+  isFlagged?: boolean
 }
 
 type GmailThreadOutputFields = {
@@ -674,6 +710,14 @@ const normalizeGmailThreadMessage = (
         fields.bodyMimeType = usesPlain ? 'text/plain' : 'text/html'
       }
 
+      // Normalize read/flag state from labels only. An empty array establishes
+      // read/unflagged; omitted labels establish neither. Provider-supplied
+      // lookalike fields are never trusted.
+      if (message.labelIds !== undefined) {
+        fields.isRead = !message.labelIds.includes('UNREAD')
+        fields.isFlagged = message.labelIds.includes('STARRED')
+      }
+
       return { ...fields, attachments: collected.attachments }
     })()
   )
@@ -721,6 +765,51 @@ const gmailRequest = (input: {
     headers,
     body: input.body === undefined ? undefined : JSON.stringify(input.body)
   })
+}
+
+/**
+ * Normalize Gmail read/flag discovery from `labelIds` only. An empty array
+ * establishes `isRead: true`, `isFlagged: false`; omitted labels establish
+ * neither. Any provider-supplied lookalike fields are discarded, never trusted.
+ */
+const withGmailReadState = (message: GmailMessageWireType): GmailMessageOutput => {
+  if (message.labelIds === undefined) return GmailMessageOutput.make({ ...message })
+
+  return GmailMessageOutput.make({
+    ...message,
+    labelIds: [...message.labelIds],
+    isRead: !message.labelIds.includes('UNREAD'),
+    isFlagged: message.labelIds.includes('STARRED')
+  })
+}
+
+/**
+ * Compose one Gmail `q` value from an optional raw query plus typed read/flag
+ * filters. A nonblank existing query is grouped before typed predicates are
+ * appended with conjunction semantics; grouping preserves ordinary `OR`
+ * expressions. The raw query stays Gmail syntax. Returns the query unchanged
+ * when neither typed filter is supplied.
+ */
+const composeGmailQuery = (input: {
+  readonly query?: string | undefined
+  readonly isRead?: boolean | undefined
+  readonly isFlagged?: boolean | undefined
+}): string | undefined => {
+  const predicates: Array<string> = []
+
+  if (input.isRead !== undefined) predicates.push(input.isRead ? 'is:read' : 'is:unread')
+
+  if (input.isFlagged !== undefined) {
+    predicates.push(input.isFlagged ? 'is:starred' : '-is:starred')
+  }
+
+  if (predicates.length === 0) return input.query
+
+  const suffix = predicates.join(' ')
+
+  if (input.query === undefined || input.query.trim() === '') return suffix
+
+  return `(${input.query}) ${suffix}`
 }
 
 const rawEmail = (input: {
@@ -962,7 +1051,8 @@ const runGmailJsonAction = (
 
 export const gmailSearchAction = defineAction({
   id: 'gmail.search',
-  description: 'Search Gmail messages for the integration account.',
+  description:
+    'Search Gmail messages for the integration account. Optional isRead/isFlagged filters are composed into the Gmail query as is:read/is:unread and is:starred/-is:starred.',
   inputSchema: GmailSearchInput,
   outputSchema: GmailSearchOutput,
   execute: ({ integration, input }) =>
@@ -974,7 +1064,7 @@ export const gmailSearchAction = defineAction({
 
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
-      appendSearchParam(params, 'q', input.query)
+      appendSearchParam(params, 'q', composeGmailQuery(input))
       appendNumberSearchParam(params, 'maxResults', input.maxResults)
       const query = params.toString()
       const url = `${googleGmailApiBaseUrl}/users/me/messages${query === '' ? '' : `?${query}`}`
@@ -1037,15 +1127,16 @@ export const gmailGetMessageAction = defineAction({
         })
       }
 
-      const output = yield* decodeJsonResponse(GmailMessageOutput, response)
+      const output = yield* decodeJsonResponse(GmailMessageWire, response)
 
-      return ActionResult.success(output)
+      return ActionResult.success(withGmailReadState(output))
     })
 })
 
 export const gmailListAction = defineAction({
   id: 'gmail.list',
-  description: 'List Gmail messages for the integration account.',
+  description:
+    'List Gmail messages for the integration account. Optional isRead/isFlagged filters are composed into the Gmail query; labelId, page token, and limits are preserved.',
   inputSchema: GmailListInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
@@ -1053,7 +1144,7 @@ export const gmailListAction = defineAction({
       integration,
       token => {
         const params = new URLSearchParams()
-        appendSearchParam(params, 'q', input.query)
+        appendSearchParam(params, 'q', composeGmailQuery(input))
         appendSearchParam(params, 'labelIds', input.labelId)
         appendNumberSearchParam(params, 'maxResults', input.maxResults)
         appendSearchParam(params, 'pageToken', input.pageToken)
@@ -1624,7 +1715,9 @@ export const gmailDraftReplyAction = defineAction({
         )
       }
 
-      const original = yield* decodeJsonResponse(GmailMessageOutput, messageResponse)
+      const original = withGmailReadState(
+        yield* decodeJsonResponse(GmailMessageWire, messageResponse)
+      )
 
       const profile = yield* decodeJsonResponse(
         Schema.Struct({ emailAddress: Schema.optional(Schema.String) }),
@@ -1824,6 +1917,569 @@ export const gmailListAccountsAction = defineAction({
     )
 })
 
+// Path-bound Gmail message IDs: URL parsers normalize even percent-encoded dot
+// segments, so reject dot-only IDs, surrounding whitespace, control/space
+// characters, and lone UTF-16
+// surrogates (encodeURIComponent throws) before credentials or HTTP.
+const GmailBatchMessageId = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f\uD800-\uDFFF]+$/u)
+)
+
+const GmailBatchMessageIds = Schema.Array(GmailBatchMessageId).check(
+  Schema.isLengthBetween(1, 100),
+  Schema.isUnique()
+)
+
+export class GmailSetReadInput extends Schema.Class<GmailSetReadInput>('GmailSetReadInput')({
+  messageId: GmailBatchMessageId,
+  isRead: Schema.Boolean
+}) {}
+
+export class GmailBatchSetReadInput extends Schema.Class<GmailBatchSetReadInput>(
+  'GmailBatchSetReadInput'
+)({
+  messageIds: GmailBatchMessageIds,
+  isRead: Schema.Boolean
+}) {}
+
+export class GmailBatchSetStarredInput extends Schema.Class<GmailBatchSetStarredInput>(
+  'GmailBatchSetStarredInput'
+)({
+  messageIds: GmailBatchMessageIds,
+  isStarred: Schema.Boolean
+}) {}
+
+const GmailLabelIdDelta = Schema.NonEmptyString
+
+const GmailLabelDeltaArray = Schema.Array(GmailLabelIdDelta).check(Schema.isLengthBetween(1, 100))
+
+export class GmailBatchModifyLabelsInput extends Schema.Class<GmailBatchModifyLabelsInput>(
+  'GmailBatchModifyLabelsInput'
+)({
+  messageIds: GmailBatchMessageIds,
+  addLabelIds: Schema.optional(GmailLabelDeltaArray),
+  removeLabelIds: Schema.optional(GmailLabelDeltaArray)
+}) {}
+
+class GmailModifyLabelsRequestBody extends Schema.Class<GmailModifyLabelsRequestBody>(
+  'GmailModifyLabelsRequestBody'
+)({
+  addLabelIds: Schema.optional(Schema.Array(Schema.String)),
+  removeLabelIds: Schema.optional(Schema.Array(Schema.String))
+}) {}
+
+const gmailBatchModifyLabelsActionInput = Schema.Struct(GmailBatchModifyLabelsInput.fields).check(
+  Schema.makeFilter<{
+    readonly addLabelIds?: ReadonlyArray<string>
+    readonly removeLabelIds?: ReadonlyArray<string>
+  }>(input =>
+    input.addLabelIds === undefined && input.removeLabelIds === undefined
+      ? {
+          path: ['addLabelIds'],
+          issue: 'modify requires addLabelIds or removeLabelIds'
+        }
+      : undefined
+  )
+)
+
+export class GmailBatchTrashInput extends Schema.Class<GmailBatchTrashInput>(
+  'GmailBatchTrashInput'
+)({
+  messageIds: GmailBatchMessageIds
+}) {}
+
+export class GmailBatchUntrashInput extends Schema.Class<GmailBatchUntrashInput>(
+  'GmailBatchUntrashInput'
+)({
+  messageIds: GmailBatchMessageIds
+}) {}
+
+export class GmailDeletePermanentlyInput extends Schema.Class<GmailDeletePermanentlyInput>(
+  'GmailDeletePermanentlyInput'
+)({
+  messageIds: GmailBatchMessageIds
+}) {}
+
+type GmailBatchItemOutcome = {
+  readonly item: EmailBatchResultItem
+  /** True when later IDs must not be attempted (auth, throttling, transport, 5xx). */
+  readonly stop: boolean
+}
+
+const gmailQuotaReasons = new Set([
+  'dailyLimitExceeded',
+  'rateLimitExceeded',
+  'sharingRateLimitExceeded',
+  'userRateLimitExceeded'
+])
+
+const GmailQuotaErrorWire = Schema.Struct({
+  error: Schema.optional(
+    Schema.Struct({
+      errors: Schema.optional(
+        Schema.Array(Schema.Struct({ reason: Schema.optional(Schema.String) }))
+      )
+    })
+  )
+})
+
+// Parse fixed quota reasons internally; all provider text is discarded and
+// never surfaces in batch codes, messages, or failures.
+const gmailBodyHasQuotaReason = (body: string) =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(GmailQuotaErrorWire))(body).pipe(
+    Effect.result,
+    Effect.map(result => {
+      if (Result.isFailure(result)) return false
+
+      const errors = result.success.error?.errors ?? []
+
+      return errors.some(entry => entry.reason !== undefined && gmailQuotaReasons.has(entry.reason))
+    })
+  )
+
+const gmailItemFailure = (input: {
+  readonly messageId: string
+  readonly status: number
+  readonly quota: boolean
+}): GmailBatchItemOutcome => {
+  const failed = (code: EmailBatchResultCode): GmailBatchItemOutcome => ({
+    item: EmailBatchResultItem.make({ messageId: input.messageId, status: 'failed', code }),
+    stop: false
+  })
+
+  const stoppedFailure = (code: EmailBatchResultCode): GmailBatchItemOutcome => ({
+    item: EmailBatchResultItem.make({ messageId: input.messageId, status: 'failed', code }),
+    stop: true
+  })
+
+  const ambiguous = (): GmailBatchItemOutcome => ({
+    item: EmailBatchResultItem.make({
+      messageId: input.messageId,
+      status: 'unknown',
+      code: 'outcome_ambiguous'
+    }),
+    stop: true
+  })
+
+  if (input.status === 401) return stoppedFailure('unauthorized')
+
+  if (input.status === 403) {
+    return input.quota ? stoppedFailure('rate_limited') : stoppedFailure('forbidden')
+  }
+
+  if (input.status === 429) return stoppedFailure('rate_limited')
+
+  if (input.status === 408 || input.status >= 500) return ambiguous()
+
+  if (input.status === 404) return failed('not_found')
+
+  if (input.status === 400 || input.status === 422) return failed('invalid_request')
+
+  if (input.status === 409) return failed('conflict')
+
+  if (input.status === 412) return failed('precondition_failed')
+
+  if (input.status === 413) return failed('payload_too_large')
+
+  if (input.status === 423) return failed('locked')
+
+  if (input.status >= 400 && input.status < 500) return failed('provider_rejected')
+
+  return {
+    item: EmailBatchResultItem.make({
+      messageId: input.messageId,
+      status: 'unknown',
+      code: 'invalid_response'
+    }),
+    stop: false
+  }
+}
+
+const gmailBatchFailureMessage = (code: EmailBatchResultCode | undefined): string => {
+  switch (code) {
+    case 'unauthorized':
+      return 'Gmail rejected the request: unauthorized'
+    case 'forbidden':
+      return 'Gmail rejected the request: permission denied'
+    case 'not_found':
+      return 'Gmail rejected the request: message not found'
+    case 'rate_limited':
+      return 'Gmail rejected the request: rate limited'
+    case 'invalid_request':
+      return 'Gmail rejected the request: invalid request'
+    case 'conflict':
+      return 'Gmail rejected the request: conflict'
+    case 'precondition_failed':
+      return 'Gmail rejected the request: precondition failed'
+    case 'payload_too_large':
+      return 'Gmail rejected the request: payload too large'
+    case 'locked':
+      return 'Gmail rejected the request: locked'
+    case 'outcome_ambiguous':
+      return 'Gmail outcome is ambiguous; reconcile before retrying'
+    case 'invalid_response':
+      return 'Gmail returned an invalid response; outcome is unknown'
+    default:
+      return 'Gmail rejected the request'
+  }
+}
+
+const GmailMutationIdentity = Schema.Struct({ id: Schema.String })
+
+type GmailBatchOperation = {
+  readonly build: (messageId: string) => ConnectorHttpRequest
+  /** JSON-returning mutations require a 2xx plus an identified matching message. */
+  readonly expectJson: boolean
+}
+
+const executeGmailBatchItem = (input: {
+  readonly http: ConnectorHttpClientApi
+  readonly messageId: string
+  readonly operation: GmailBatchOperation
+}): Effect.Effect<GmailBatchItemOutcome, never> =>
+  Effect.gen(function* () {
+    const response = yield* Effect.catch(
+      input.http.request(input.operation.build(input.messageId)),
+      () => Effect.succeed(undefined)
+    )
+
+    // Transport problems after dispatch cannot establish the outcome.
+    if (response === undefined) {
+      return {
+        item: EmailBatchResultItem.make({
+          messageId: input.messageId,
+          status: 'unknown',
+          code: 'outcome_ambiguous'
+        }),
+        stop: true
+      } satisfies GmailBatchItemOutcome
+    }
+
+    if (!input.operation.expectJson) {
+      // Individually addressed deletes establish success only with 204 and no
+      // JSON body. A 404 is a definitive rejection, not success.
+      if (response.status === 204) {
+        return {
+          item: EmailBatchResultItem.make({
+            messageId: input.messageId,
+            status: 'succeeded'
+          }),
+          stop: false
+        } satisfies GmailBatchItemOutcome
+      }
+
+      return gmailItemFailure({
+        messageId: input.messageId,
+        status: response.status,
+        quota: yield* gmailBodyHasQuotaReason(response.body)
+      })
+    }
+
+    if (response.status !== 200) {
+      return gmailItemFailure({
+        messageId: input.messageId,
+        status: response.status,
+        quota: yield* gmailBodyHasQuotaReason(response.body)
+      })
+    }
+
+    // Never treat an unexpected 2xx, {}, malformed JSON, or an unrelated
+    // message as success.
+    const identity = yield* decodeJsonResponse(GmailMutationIdentity, response).pipe(Effect.result)
+
+    if (Result.isFailure(identity) || identity.success.id !== input.messageId) {
+      return {
+        item: EmailBatchResultItem.make({
+          messageId: input.messageId,
+          status: 'unknown',
+          code: 'invalid_response'
+        }),
+        stop: false
+      } satisfies GmailBatchItemOutcome
+    }
+
+    return {
+      item: EmailBatchResultItem.make({ messageId: input.messageId, status: 'succeeded' }),
+      stop: false
+    } satisfies GmailBatchItemOutcome
+  })
+
+// Individually addressed requests, executed sequentially: Gmail bulk endpoints
+// return no per-ID results, so envelope success must never expand into
+// per-ID success. Later IDs become not_attempted after a stop condition.
+const runGmailBatch = (input: {
+  readonly messageIds: ReadonlyArray<string>
+  readonly operation: GmailBatchOperation
+}): Effect.Effect<EmailBatchOperationOutput, never, ConnectorHttpClient> =>
+  Effect.gen(function* () {
+    const http = yield* ConnectorHttpClient
+    const items: Array<EmailBatchResultItem> = []
+    let stopped = false
+
+    for (const messageId of input.messageIds) {
+      if (stopped) {
+        items.push(
+          EmailBatchResultItem.make({
+            messageId,
+            status: 'not_attempted',
+            code: 'batch_stopped'
+          })
+        )
+        continue
+      }
+
+      const outcome = yield* executeGmailBatchItem({ http, messageId, operation: input.operation })
+      items.push(outcome.item)
+
+      if (outcome.stop) stopped = true
+    }
+
+    return EmailBatchOperationOutput.make({
+      results: items,
+      summary: makeEmailBatchSummary(items)
+    })
+  })
+
+type GmailBatchExecutorInput = {
+  readonly integration: Parameters<typeof resolveGoogleAccessToken>[0]
+  readonly messageIds: ReadonlyArray<string>
+  readonly operation: (token: string) => GmailBatchOperation
+  readonly slot?: CredentialSlot
+}
+
+const executeGmailBatch = (input: GmailBatchExecutorInput) =>
+  Effect.gen(function* () {
+    const token = yield* resolveGoogleAccessToken(
+      input.integration,
+      input.slot ?? GoogleGmailModifyOAuthCredentialSlot
+    )
+
+    const output = yield* runGmailBatch({
+      messageIds: input.messageIds,
+      operation: input.operation(token)
+    })
+
+    return ActionResult.success(output)
+  })
+
+export const gmailSetReadAction = defineAction({
+  id: 'gmail.set_read',
+  description:
+    'Mark a Gmail message read (isRead: true) or unread (isRead: false) via the UNREAD system label. Returns the normalized message.',
+  access: 'write',
+  inputSchema: Schema.Struct(GmailSetReadInput.fields),
+  outputSchema: GmailMessageOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailModifyOAuthCredentialSlot
+      )
+
+      const http = yield* ConnectorHttpClient
+
+      return yield* Effect.gen(function* () {
+        const response = yield* http.request(
+          gmailRequest({
+            token,
+            method: 'POST',
+            path: `/users/me/messages/${encodeURIComponent(input.messageId)}/modify`,
+            body: input.isRead ? { removeLabelIds: ['UNREAD'] } : { addLabelIds: ['UNREAD'] }
+          })
+        )
+
+        if (response.status !== 200) {
+          const outcome = gmailItemFailure({
+            messageId: input.messageId,
+            status: response.status,
+            quota: yield* gmailBodyHasQuotaReason(response.body)
+          })
+
+          return ActionResult.failure({
+            code: 'gmail_set_read_failed',
+            message: gmailBatchFailureMessage(outcome.item.code),
+            status: response.status
+          })
+        }
+
+        const output = yield* decodeJsonResponse(GmailMessageWire, response)
+
+        if (output.id !== input.messageId) {
+          return ActionResult.failure({
+            code: 'gmail_set_read_failed',
+            message: gmailBatchFailureMessage('invalid_response'),
+            status: response.status
+          })
+        }
+
+        return ActionResult.success(withGmailReadState(output))
+      }).pipe(
+        Effect.mapError(
+          error =>
+            new ConnectorError({
+              cause: error.cause,
+              connectorId: integration.connectorId,
+              actionId: 'gmail.set_read',
+              message: 'Gmail read-state mutation failed without a confirmed outcome'
+            })
+        )
+      )
+    })
+})
+
+export const gmailBatchSetReadAction = defineAction({
+  id: 'gmail.batch_set_read',
+  description:
+    'Mark 1-100 unique Gmail messages read or unread with individually addressed modify requests. Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: Schema.Struct(GmailBatchSetReadInput.fields),
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeGmailBatch({
+      integration,
+      messageIds: input.messageIds,
+      operation: token => ({
+        expectJson: true,
+        build: messageId =>
+          gmailRequest({
+            token,
+            method: 'POST',
+            path: `/users/me/messages/${encodeURIComponent(messageId)}/modify`,
+            body: input.isRead ? { removeLabelIds: ['UNREAD'] } : { addLabelIds: ['UNREAD'] }
+          })
+      })
+    })
+})
+
+export const gmailBatchSetStarredAction = defineAction({
+  id: 'gmail.batch_set_starred',
+  description:
+    'Star or unstar 1-100 unique Gmail messages with individually addressed modify requests on the STARRED system label. Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: Schema.Struct(GmailBatchSetStarredInput.fields),
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeGmailBatch({
+      integration,
+      messageIds: input.messageIds,
+      operation: token => ({
+        expectJson: true,
+        build: messageId =>
+          gmailRequest({
+            token,
+            method: 'POST',
+            path: `/users/me/messages/${encodeURIComponent(messageId)}/modify`,
+            body: input.isStarred ? { addLabelIds: ['STARRED'] } : { removeLabelIds: ['STARRED'] }
+          })
+      })
+    })
+})
+
+export const gmailBatchModifyLabelsAction = defineAction({
+  id: 'gmail.batch_modify_labels',
+  description:
+    'Add or remove Gmail label IDs on 1-100 unique messages with individually addressed modify requests. Removals win on overlap; labels are never created. Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: gmailBatchModifyLabelsActionInput,
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeGmailBatch({
+      integration,
+      messageIds: input.messageIds,
+      operation: token => {
+        const removals = [...new Set(input.removeLabelIds ?? [])]
+
+        const additions = [...new Set(input.addLabelIds ?? [])].filter(id => !removals.includes(id))
+
+        const addLabelIds = additions.length > 0 ? additions : undefined
+        const removeLabelIds = removals.length > 0 ? removals : undefined
+        const body = GmailModifyLabelsRequestBody.make({ addLabelIds, removeLabelIds })
+
+        return {
+          expectJson: true,
+          build: messageId =>
+            gmailRequest({
+              token,
+              method: 'POST',
+              path: `/users/me/messages/${encodeURIComponent(messageId)}/modify`,
+              body
+            })
+        }
+      }
+    })
+})
+
+export const gmailBatchTrashAction = defineAction({
+  id: 'gmail.batch_trash',
+  description:
+    'Move 1-100 unique Gmail messages to trash with individually addressed requests. Returns complete per-ID outcomes with exact counts.',
+  access: 'destructive',
+  inputSchema: Schema.Struct(GmailBatchTrashInput.fields),
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeGmailBatch({
+      integration,
+      messageIds: input.messageIds,
+      operation: token => ({
+        expectJson: true,
+        build: messageId =>
+          gmailRequest({
+            token,
+            method: 'POST',
+            path: `/users/me/messages/${encodeURIComponent(messageId)}/trash`
+          })
+      })
+    })
+})
+
+export const gmailBatchUntrashAction = defineAction({
+  id: 'gmail.batch_untrash',
+  description:
+    'Restore 1-100 unique Gmail messages from trash with individually addressed requests. Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: Schema.Struct(GmailBatchUntrashInput.fields),
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeGmailBatch({
+      integration,
+      messageIds: input.messageIds,
+      operation: token => ({
+        expectJson: true,
+        build: messageId =>
+          gmailRequest({
+            token,
+            method: 'POST',
+            path: `/users/me/messages/${encodeURIComponent(messageId)}/untrash`
+          })
+      })
+    })
+})
+
+export const gmailDeletePermanentlyAction = defineAction({
+  id: 'gmail.delete_permanently',
+  description:
+    'Immediately and permanently delete 1-100 unique Gmail messages with individually addressed DELETE requests; this is not trash and does not claim backup erasure. Requires full-mail consent. Returns complete per-ID outcomes with exact counts.',
+  access: 'destructive',
+  inputSchema: Schema.Struct(GmailDeletePermanentlyInput.fields),
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeGmailBatch({
+      integration,
+      messageIds: input.messageIds,
+      slot: GoogleGmailFullMailOAuthCredentialSlot,
+      operation: token => ({
+        expectJson: false,
+        build: messageId =>
+          gmailRequest({
+            token,
+            method: 'DELETE',
+            path: `/users/me/messages/${encodeURIComponent(messageId)}`
+          })
+      })
+    })
+})
+
 export const gmailActions = [
   gmailSearchAction,
   gmailListAction,
@@ -1843,6 +2499,13 @@ export const gmailActions = [
   gmailDeleteLabelAction,
   gmailModifyLabelsAction,
   gmailSetStarredAction,
+  gmailSetReadAction,
+  gmailBatchSetReadAction,
+  gmailBatchSetStarredAction,
+  gmailBatchModifyLabelsAction,
+  gmailBatchTrashAction,
+  gmailBatchUntrashAction,
+  gmailDeletePermanentlyAction,
   gmailTrashAction,
   gmailUntrashAction,
   gmailDraftDeleteAction,

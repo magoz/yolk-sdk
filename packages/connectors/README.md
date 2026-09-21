@@ -205,9 +205,10 @@ reads. Incoming and SMTP bindings are separate, but both may point to the same h
 Both slots require `UsernamePasswordCredential`; provider-specific OAuth remains available through
 the Google and Microsoft connectors.
 
-The common action set is `email.list_messages`, `email.get_message`, `email.get_attachment`,
-`email.create_draft`, `email.send_message`, `email.set_read`, `email.trash`, `email.untrash`,
-`email.modify_labels`, `email.move`, and `email.set_flag`.
+The common action set includes list/get/attachment/draft/send, the existing single-message IMAP
+mutations, batch variants (`email.batch_set_read`, `email.batch_set_flag`, `email.batch_move`,
+`email.batch_trash`, `email.batch_untrash`, `email.batch_modify_labels`), and the separate destructive
+`email.delete_permanently` action.
 Draft creation requires IMAP and uses the incoming
 credential. An optional
 `folder` selects the target mailbox; when omitted, the host adapter discovers a mailbox advertised
@@ -218,8 +219,13 @@ return an `APPENDUID`. `draftId`, when present, is an opaque adapter identifier;
 must encode both UIDVALIDITY and UID rather than exposing a bare UID. The host adapter generates MIME
 and performs `APPEND` with the `\Draft` flag.
 
-Message list/get outputs expose normalized addresses, text/HTML bodies, and attachment metadata,
-never raw MIME. `email.get_message` additionally requires `headers` name/value pairs (including
+Message list/get outputs expose normalized addresses, text/HTML bodies, attachment metadata, and
+optional `isRead` / `isFlagged` booleans; omission means unavailable or unknown and remains backward
+compatible. `email.list_messages` accepts optional `isRead` / `isFlagged` filters. Filtered IMAP
+requests use optional `EmailClient.listMessagesFiltered` and never silently fall back to legacy
+`listMessages`; POP3 filters fail before credential resolution. Successful list output is
+schema-validated. Outputs never contain raw MIME. `email.get_message` additionally requires
+`headers` name/value pairs (including
 `List-Unsubscribe` when the mail carries it); hosts fetch them via IMAP `BODY.PEEK[HEADER]` or
 POP3 `TOP` without marking the message read. Successful host output is schema-validated, so a
 missing `headers` array fails. List summaries carry no headers. The package root exports the pure
@@ -250,6 +256,26 @@ delivered.
 | `email.untrash`       | `{ messageId, folder?, destinationFolder? }`        | `EmailClient.untrash`      | `write`       |
 | `email.modify_labels` | `{ messageId, folder?, addLabels?, removeLabels? }` | `EmailClient.modifyLabels` | `write`       |
 | `email.move`          | `{ messageId, folder?, destinationFolder }`         | `EmailClient.move`         | `write`       |
+
+Batch inputs replace only the identifier field with `messageIds`: 1-100 unique, nonempty IDs, one
+source folder, and the same operation-specific payload/defaults as the single-message action. They
+use optional `EmailClient.batchSetRead`, `batchSetFlag`, `batchMove`, `batchTrash`, `batchUntrash`,
+and `batchModifyLabels` methods. `email.delete_permanently` takes `{ messageIds, folder? }`, defaults
+`folder` to `INBOX`, uses optional `EmailClient.deletePermanently`, and is destructive. Missing
+optional methods fail clearly; old adapters remain valid.
+
+Every successful batch/delete output contains one result for every requested ID, preserves
+`messageIds` input order, uses status `succeeded | failed | unknown | not_attempted`, includes an
+optional sanitized code, and has exact summary counts. Every succeeded result from
+`email.batch_move`, `email.batch_trash`, or
+`email.batch_untrash` must include destination `folder`; only `movedMessageId` is optional, and
+only when the adapter knows the destination UIDVALIDITY/UID mapping. The connector validates the
+schema, requested-ID coverage, and counts. Hosts must never return raw provider errors.
+
+Permanent deletion means removing exactly the identified UID-scoped messages from the selected
+folder. Hosts must never use blanket `EXPUNGE`; approval/authorization remain downstream host
+policy. Success does not promise erasure from backups, provider retention, journaling, or compliance
+systems.
 
 Set `isRead: true` to mark read, or `false` to mark unread. Set `isFlagged: true` to star for
 follow-up via `\Flagged`, or `false` to unstar. These actions use the incoming
@@ -386,6 +412,24 @@ field. Delete answers `204` with an empty body and returns a typed `{ id, delete
 result without JSON decoding. Label ids are encoded once and dot-only ids are rejected to avoid
 URL normalization. Labels with `type: 'system'` (such as `INBOX`) cannot be renamed or deleted;
 the provider rejects those mutations.
+
+Gmail messages report `isRead` (derived as `!labelIds.includes('UNREAD')`) and `isFlagged`
+(`labelIds.includes('STARRED')`) wherever labels are present; omitted labels assert neither, and
+provider-supplied lookalikes are ignored. `gmail.search` and `gmail.list` accept optional
+`isRead`/`isFlagged` booleans composed into one `q` value with the existing query grouped first.
+`gmail.set_read` flips `UNREAD` through the `gmail.modify` slot and returns the normalized message
+with sanitized failures.
+
+Explicit Gmail batch actions (`gmail.batch_set_read`, `gmail.batch_set_starred`,
+`gmail.batch_modify_labels`, `gmail.batch_trash`, `gmail.batch_untrash`, and the destructive
+`gmail.delete_permanently`) take 1-100 unique nonempty path-safe message IDs and return shared
+`EmailBatchOperationOutput` with complete per-ID outcomes in `messageIds` order, exact counts, and
+sanitized codes only. Execution issues individually addressed requests sequentially and never the bulk
+endpoints, whose empty success cannot establish per-ID outcomes. Label deltas are deduplicated with removal winning
+and capped at 100 entries each; labels are never created. Permanent deletion issues individual
+`DELETE` requests (only 204 confirms success; 404 is an honest rejection) through the opt-in
+`GoogleGmailFullMailOAuthCredentialSlot` (`https://mail.google.com/`), which is never added to the
+combined/default consent. It is immediate deletion, not trash, and claims no backup erasure.
 
 Gmail discovery omits invalid optional attachment sizes; present sizes are nonnegative integers.
 Best-effort malformed **optional** sizes (`-1`, `1.5`, `null`, `"12"`, missing) still omit size and
@@ -640,6 +684,23 @@ string inputs (`mailbox`, `folderId`, `nextLink`, plus list `filter`/`orderBy`) 
 accepts omission or `null` for the provider default; explicit values must be integers from 1 to 1000. Decoding normalizes these placeholders to `undefined`, while preserving non-blank values
 unchanged. Search still requires a string `query`, and application access still requires an
 explicit non-blank `mailbox`. This applies to direct connector calls and generated agent tools.
+
+Outlook messages report `isRead` plus follow-up flag state as `isFlagged` (`flagged` is true;
+`notFlagged` and `complete` are false; omitted, null, or unrecognized states assert nothing).
+`outlook.list_messages` accepts optional `isRead`/`isFlagged` booleans composed into `$filter`
+with any raw filter (grouped when combined); fresh typed filters cannot be combined with `nextLink`.
+
+Explicit Outlook batch actions (`outlook.batch_set_read`, `outlook.batch_set_flag`,
+`outlook.batch_move`, `outlook.batch_trash`, `outlook.batch_untrash`,
+`outlook.batch_modify_categories`, and the destructive `outlook.delete_permanently`) take 1-100
+unique nonempty path-safe message IDs plus optional `mailbox` and return complete per-ID outcomes
+in `messageIds` order with exact counts and sanitized codes only. Execution uses Graph JSON batching
+(`src/microsoft/mail-batch.ts`) with at most 20 subrequests per sequential envelope, unique correlation IDs, per-subrequest
+immutable-ID preferences, outer authorization headers only, and responses matched by correlation
+ID. Move-shaped results report the provider-returned message ID and actual `parentFolderId`
+(never a fabricated destination); category updates read before PATCHing and leave failed reads
+`not_attempted`. Permanent deletion POSTs `permanentDelete` (documented 204); items enter
+Recoverable Items/Purges, so retention or holds may still preserve them.
 
 Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged. Repeat `mailbox` for
 an explicit mailbox continuation and `folderId` for a folder continuation. The connector only

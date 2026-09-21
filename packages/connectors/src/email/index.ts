@@ -16,6 +16,23 @@ import { defineAction } from '../action.ts'
 import { requiredStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
 import {
+  EmailBatchMessageIds,
+  EmailBatchOperationOutput,
+  EmailBatchOperationStatus,
+  EmailBatchResultCode,
+  EmailBatchSummary
+} from '../email-batch.ts'
+
+export {
+  EmailBatchMessageIds,
+  EmailBatchOperationOutput,
+  EmailBatchOperationStatus,
+  EmailBatchResultCode,
+  EmailBatchResultItem,
+  EmailBatchSummary
+} from '../email-batch.ts'
+
+import {
   CredentialSlot,
   UsernamePasswordCredential,
   resolveCredential,
@@ -165,7 +182,9 @@ export class EmailMessageSummary extends Schema.Class<EmailMessageSummary>('Emai
   receivedAt: Schema.optional(Schema.String),
   snippet: Schema.optional(Schema.String),
   hasAttachments: Schema.Boolean,
-  labels: Schema.optional(Schema.Array(EmailImapKeyword))
+  labels: Schema.optional(Schema.Array(EmailImapKeyword)),
+  isRead: Schema.optional(Schema.Boolean),
+  isFlagged: Schema.optional(Schema.Boolean)
 }) {}
 
 export class EmailMessage extends Schema.Class<EmailMessage>('EmailMessage')({
@@ -182,6 +201,8 @@ export class EmailMessage extends Schema.Class<EmailMessage>('EmailMessage')({
   body: EmailBody,
   attachments: Schema.Array(EmailAttachmentMetadata),
   labels: Schema.optional(Schema.Array(EmailImapKeyword)),
+  isRead: Schema.optional(Schema.Boolean),
+  isFlagged: Schema.optional(Schema.Boolean),
   headers: Schema.Array(EmailMessageHeader)
 }) {}
 
@@ -198,7 +219,9 @@ export class EmailListMessagesInput extends Schema.Class<EmailListMessagesInput>
 )({
   folder: Schema.optional(EmailFolderName),
   cursor: Schema.optional(Schema.String),
-  limit: Schema.optional(EmailPageSize)
+  limit: Schema.optional(EmailPageSize),
+  isRead: Schema.optional(Schema.Boolean),
+  isFlagged: Schema.optional(Schema.Boolean)
 }) {}
 
 export class EmailListMessagesOutput extends Schema.Class<EmailListMessagesOutput>(
@@ -380,6 +403,172 @@ export class EmailModifyLabelsRequest extends Schema.Class<EmailModifyLabelsRequ
   removeLabels: Schema.optional(Schema.Array(EmailImapKeyword))
 }) {}
 
+export class EmailBatchSetReadInput extends Schema.Class<EmailBatchSetReadInput>(
+  'EmailBatchSetReadInput'
+)({
+  messageIds: EmailBatchMessageIds,
+  folder: Schema.optional(EmailFolderName),
+  isRead: Schema.Boolean
+}) {}
+
+const EmailBatchSetReadActionInput = Schema.Struct(EmailBatchSetReadInput.fields)
+
+export class EmailBatchSetFlagInput extends Schema.Class<EmailBatchSetFlagInput>(
+  'EmailBatchSetFlagInput'
+)({
+  messageIds: EmailBatchMessageIds,
+  folder: Schema.optional(EmailFolderName),
+  isFlagged: Schema.Boolean
+}) {}
+
+const EmailBatchSetFlagActionInput = Schema.Struct(EmailBatchSetFlagInput.fields)
+
+export class EmailBatchTrashInput extends Schema.Class<EmailBatchTrashInput>(
+  'EmailBatchTrashInput'
+)({
+  messageIds: EmailBatchMessageIds,
+  folder: Schema.optional(EmailFolderName),
+  trashFolder: Schema.optional(EmailFolderName)
+}) {}
+
+const EmailBatchTrashActionInput = Schema.Struct(EmailBatchTrashInput.fields)
+
+export class EmailBatchUntrashInput extends Schema.Class<EmailBatchUntrashInput>(
+  'EmailBatchUntrashInput'
+)({
+  messageIds: EmailBatchMessageIds,
+  folder: Schema.optional(EmailFolderName),
+  destinationFolder: Schema.optional(EmailFolderName)
+}) {}
+
+const EmailBatchUntrashActionInput = Schema.Struct(EmailBatchUntrashInput.fields)
+
+export class EmailBatchMoveInput extends Schema.Class<EmailBatchMoveInput>('EmailBatchMoveInput')({
+  messageIds: EmailBatchMessageIds,
+  folder: Schema.optional(EmailFolderName),
+  destinationFolder: EmailFolderName
+}) {}
+
+const EmailBatchMoveActionInput = Schema.Struct(EmailBatchMoveInput.fields).check(
+  moveRequiresDifferentFolder
+)
+
+export class EmailBatchModifyLabelsInput extends Schema.Class<EmailBatchModifyLabelsInput>(
+  'EmailBatchModifyLabelsInput'
+)({
+  messageIds: EmailBatchMessageIds,
+  folder: Schema.optional(EmailFolderName),
+  addLabels: Schema.optional(Schema.Array(EmailImapKeyword)),
+  removeLabels: Schema.optional(Schema.Array(EmailImapKeyword))
+}) {}
+
+const EmailBatchModifyLabelsActionInput = Schema.Struct(EmailBatchModifyLabelsInput.fields).check(
+  modifyLabelsRequiresField
+)
+
+export class EmailDeletePermanentlyInput extends Schema.Class<EmailDeletePermanentlyInput>(
+  'EmailDeletePermanentlyInput'
+)({
+  messageIds: EmailBatchMessageIds,
+  folder: Schema.optional(EmailFolderName)
+}) {}
+
+const EmailDeletePermanentlyActionInput = Schema.Struct(EmailDeletePermanentlyInput.fields)
+
+export class EmailBatchSetReadRequest extends Schema.Class<EmailBatchSetReadRequest>(
+  'EmailBatchSetReadRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageIds: EmailBatchMessageIds,
+  folder: EmailFolderName,
+  isRead: Schema.Boolean
+}) {}
+
+export class EmailBatchSetFlagRequest extends Schema.Class<EmailBatchSetFlagRequest>(
+  'EmailBatchSetFlagRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageIds: EmailBatchMessageIds,
+  folder: EmailFolderName,
+  isFlagged: Schema.Boolean
+}) {}
+
+export class EmailBatchTrashRequest extends Schema.Class<EmailBatchTrashRequest>(
+  'EmailBatchTrashRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageIds: EmailBatchMessageIds,
+  folder: EmailFolderName,
+  trashFolder: Schema.optional(EmailFolderName)
+}) {}
+
+export class EmailBatchUntrashRequest extends Schema.Class<EmailBatchUntrashRequest>(
+  'EmailBatchUntrashRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageIds: EmailBatchMessageIds,
+  folder: Schema.optional(EmailFolderName),
+  destinationFolder: EmailFolderName
+}) {}
+
+export class EmailBatchMoveRequest extends Schema.Class<EmailBatchMoveRequest>(
+  'EmailBatchMoveRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageIds: EmailBatchMessageIds,
+  folder: EmailFolderName,
+  destinationFolder: EmailFolderName
+}) {}
+
+export class EmailBatchModifyLabelsRequest extends Schema.Class<EmailBatchModifyLabelsRequest>(
+  'EmailBatchModifyLabelsRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageIds: EmailBatchMessageIds,
+  folder: EmailFolderName,
+  addLabels: Schema.optional(Schema.Array(EmailImapKeyword)),
+  removeLabels: Schema.optional(Schema.Array(EmailImapKeyword))
+}) {}
+
+export class EmailDeletePermanentlyRequest extends Schema.Class<EmailDeletePermanentlyRequest>(
+  'EmailDeletePermanentlyRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageIds: EmailBatchMessageIds,
+  folder: EmailFolderName
+}) {}
+
+export class EmailBatchMoveResultItem extends Schema.Class<EmailBatchMoveResultItem>(
+  'EmailBatchMoveResultItem'
+)({
+  messageId: EmailNonEmptyMessageId,
+  status: EmailBatchOperationStatus,
+  code: Schema.optional(EmailBatchResultCode),
+  movedMessageId: Schema.optional(EmailNonEmptyMessageId),
+  folder: Schema.optional(EmailFolderName)
+}) {}
+
+/**
+ * Every succeeded result from `email.batch_move`, `email.batch_trash`, or
+ * `email.batch_untrash` must include destination `folder`. `movedMessageId` is
+ * optional and must only be supplied when the adapter knows the destination
+ * UIDVALIDITY/UID mapping; omit it and re-list the destination when no reliable
+ * mapping is available, never reusing a stale source UID.
+ */
+export class EmailBatchMoveOutput extends Schema.Class<EmailBatchMoveOutput>(
+  'EmailBatchMoveOutput'
+)({
+  results: Schema.Array(EmailBatchMoveResultItem),
+  summary: EmailBatchSummary
+}) {}
+
 export class EmailComposeMessage extends Schema.Class<EmailComposeMessage>('EmailComposeMessage')({
   from: Schema.optional(EmailAddress),
   to: Schema.Array(EmailAddress),
@@ -433,7 +622,9 @@ export class EmailListMessagesRequest extends Schema.Class<EmailListMessagesRequ
   credential: UsernamePasswordCredential,
   folder: Schema.optional(EmailFolderName),
   cursor: Schema.optional(Schema.String),
-  limit: EmailPageSize
+  limit: EmailPageSize,
+  isRead: Schema.optional(Schema.Boolean),
+  isFlagged: Schema.optional(Schema.Boolean)
 }) {}
 
 export class EmailGetMessageRequest extends Schema.Class<EmailGetMessageRequest>(
@@ -487,6 +678,10 @@ export type EmailClientApi = {
     input: EmailGetAttachmentRequest & { readonly maxBytes: number }
   ) => Effect.Effect<EmailAttachmentBytesResult, ConnectorFileTransferError>
   readonly listMessages: (
+    input: EmailListMessagesRequest
+  ) => Effect.Effect<ActionResult<EmailListMessagesOutput>, ConnectorError>
+  /** Filter-aware list path. Filtered requests never fall back to listMessages. */
+  readonly listMessagesFiltered?: (
     input: EmailListMessagesRequest
   ) => Effect.Effect<ActionResult<EmailListMessagesOutput>, ConnectorError>
   /**
@@ -548,6 +743,37 @@ export type EmailClientApi = {
   readonly modifyLabels?: (
     input: EmailModifyLabelsRequest
   ) => Effect.Effect<ActionResult<EmailModifyLabelsOutput>, ConnectorError>
+  /**
+   * Batch methods process one source folder and return one result for every requested ID. Result
+   * codes are sanitized classifications only; never expose raw provider errors. `unknown` marks an
+   * ambiguous outcome and `not_attempted` marks an ID the host did not try.
+   */
+  readonly batchSetRead?: (
+    input: EmailBatchSetReadRequest
+  ) => Effect.Effect<ActionResult<EmailBatchOperationOutput>, ConnectorError>
+  readonly batchSetFlag?: (
+    input: EmailBatchSetFlagRequest
+  ) => Effect.Effect<ActionResult<EmailBatchOperationOutput>, ConnectorError>
+  readonly batchMove?: (
+    input: EmailBatchMoveRequest
+  ) => Effect.Effect<ActionResult<EmailBatchMoveOutput>, ConnectorError>
+  readonly batchTrash?: (
+    input: EmailBatchTrashRequest
+  ) => Effect.Effect<ActionResult<EmailBatchMoveOutput>, ConnectorError>
+  readonly batchUntrash?: (
+    input: EmailBatchUntrashRequest
+  ) => Effect.Effect<ActionResult<EmailBatchMoveOutput>, ConnectorError>
+  readonly batchModifyLabels?: (
+    input: EmailBatchModifyLabelsRequest
+  ) => Effect.Effect<ActionResult<EmailBatchOperationOutput>, ConnectorError>
+  /**
+   * Permanently remove exactly the UID-scoped messages identified by messageIds from folder.
+   * Hosts must never issue a blanket EXPUNGE and must not claim deletion from backups or provider
+   * retention systems. Approval and authorization remain host policy.
+   */
+  readonly deletePermanently?: (
+    input: EmailDeletePermanentlyRequest
+  ) => Effect.Effect<ActionResult<EmailBatchOperationOutput>, ConnectorError>
   readonly createDraft: (
     input: EmailCreateDraftRequest
   ) => Effect.Effect<ActionResult<EmailCreateDraftOutput>, ConnectorError>
@@ -754,7 +980,8 @@ const requireImap = (
 
 export const emailListMessagesAction = defineAction({
   id: 'email.list_messages',
-  description: 'List normalized messages from a configured IMAP or POP3 account.',
+  description:
+    'List normalized messages from a configured IMAP or POP3 account, optionally filtering IMAP messages by read or flagged state.',
   access: 'read',
   inputSchema: EmailListMessagesInput,
   outputSchema: EmailListMessagesOutput,
@@ -762,19 +989,51 @@ export const emailListMessagesAction = defineAction({
     Effect.gen(function* () {
       const connection = yield* incomingConnection(integration)
       yield* rejectPop3Folder(integration, connection, input.folder)
+
+      const filtered = input.isRead !== undefined || input.isFlagged !== undefined
+
+      if (connection.protocol === 'pop3' && filtered) {
+        return yield* Effect.fail(
+          validationError(
+            integration,
+            'POP3 does not support read or flagged filters; configure IMAP or omit the filters'
+          )
+        )
+      }
+
+      const client = yield* EmailClient
+      const listMessages = filtered ? client.listMessagesFiltered : client.listMessages
+
+      if (listMessages === undefined) {
+        return yield* Effect.fail(
+          validationError(integration, 'EmailClient does not support filtered message listing')
+        )
+      }
+
       const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
       const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
-      const client = yield* EmailClient
 
-      return yield* client.listMessages(
-        EmailListMessagesRequest.make({
-          connection,
-          credential,
-          folder: input.folder,
-          cursor: input.cursor,
-          limit: input.limit ?? 50
-        })
+      const request = EmailListMessagesRequest.make({
+        connection,
+        credential,
+        folder: input.folder,
+        cursor: input.cursor,
+        limit: input.limit ?? 50,
+        isRead: input.isRead,
+        isFlagged: input.isFlagged
+      })
+
+      const result = yield* listMessages.call(client, request)
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const output = yield* Schema.decodeUnknownEffect(EmailListMessagesOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid listMessages output', error)
+        )
       )
+
+      return ActionResult.success(output)
     })
 })
 
@@ -1157,6 +1416,311 @@ export const emailMoveAction = defineAction({
     })
 })
 
+type EmailBatchOutputContract = {
+  readonly results: ReadonlyArray<{
+    readonly messageId: string
+    readonly status: EmailBatchOperationStatus
+    readonly folder?: string
+  }>
+  readonly summary: {
+    readonly requested: number
+    readonly succeeded: number
+    readonly failed: number
+    readonly unknown: number
+    readonly notAttempted: number
+  }
+}
+
+const validateBatchOutput = <Output extends EmailBatchOutputContract>(input: {
+  readonly integration: ConnectorIntegration
+  readonly operation: string
+  readonly requestedIds: ReadonlyArray<string>
+  readonly outputSchema: Schema.Schema<Output> & { readonly DecodingServices: never }
+  readonly value: unknown
+  readonly moved: boolean
+}) =>
+  Effect.gen(function* () {
+    const output = yield* Schema.decodeUnknownEffect(input.outputSchema)(input.value).pipe(
+      Effect.mapError(error =>
+        invalidHostOutput(
+          input.integration,
+          `EmailClient returned invalid ${input.operation} output`,
+          error
+        )
+      )
+    )
+
+    const hasOrderedIds =
+      output.results.length === input.requestedIds.length &&
+      output.results.every((result, index) => result.messageId === input.requestedIds[index])
+
+    const counts = {
+      succeeded: 0,
+      failed: 0,
+      unknown: 0,
+      notAttempted: 0
+    }
+
+    for (const result of output.results) {
+      if (result.status === 'not_attempted') counts.notAttempted += 1
+      else counts[result.status] += 1
+    }
+
+    const summaryMatches =
+      output.summary.requested === input.requestedIds.length &&
+      output.summary.succeeded === counts.succeeded &&
+      output.summary.failed === counts.failed &&
+      output.summary.unknown === counts.unknown &&
+      output.summary.notAttempted === counts.notAttempted
+
+    const successfulMovesHaveFolders =
+      !input.moved ||
+      output.results.every(result => result.status !== 'succeeded' || result.folder !== undefined)
+
+    if (!hasOrderedIds || !summaryMatches || !successfulMovesHaveFolders) {
+      return yield* Effect.fail(
+        validationError(
+          input.integration,
+          `EmailClient returned inconsistent ${input.operation} output`
+        )
+      )
+    }
+
+    return output
+  })
+
+type EmailBatchHostMethod<Request, Output> = (
+  request: Request
+) => Effect.Effect<ActionResult<Output>, ConnectorError>
+
+const executeEmailBatch = <Request, Output extends EmailBatchOutputContract>(input: {
+  readonly integration: ConnectorIntegration
+  readonly operation: string
+  readonly methodName: string
+  readonly requestedIds: ReadonlyArray<string>
+  readonly getMethod: (client: EmailClientApi) => EmailBatchHostMethod<Request, Output> | undefined
+  readonly makeRequest: (
+    connection: EmailImapConnection,
+    credential: UsernamePasswordCredential
+  ) => Request
+  readonly outputSchema: Schema.Schema<Output> & { readonly DecodingServices: never }
+  readonly moved?: boolean
+}) =>
+  Effect.gen(function* () {
+    const { connection, credential, client } = yield* emailMutationContext(
+      input.integration,
+      input.operation
+    )
+
+    const method = input.getMethod(client)
+
+    if (method === undefined) {
+      return yield* Effect.fail(
+        validationError(input.integration, `EmailClient does not support ${input.methodName}`)
+      )
+    }
+
+    const result = yield* method.call(client, input.makeRequest(connection, credential))
+
+    if (Predicate.isTagged(result, 'Failure')) return result
+
+    const output = yield* validateBatchOutput({
+      integration: input.integration,
+      operation: input.methodName,
+      requestedIds: input.requestedIds,
+      outputSchema: input.outputSchema,
+      value: result.value,
+      moved: input.moved ?? false
+    })
+
+    return ActionResult.success(output)
+  })
+
+export const emailBatchSetReadAction = defineAction({
+  id: 'email.batch_set_read',
+  description:
+    'Mark 1-100 unique IMAP messages read or unread in one source folder. Requires host batchSetRead support.',
+  access: 'write',
+  inputSchema: EmailBatchSetReadActionInput,
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeEmailBatch({
+      integration,
+      operation: 'Changing read state in batch',
+      methodName: 'batchSetRead',
+      requestedIds: input.messageIds,
+      getMethod: client => client.batchSetRead,
+      makeRequest: (connection, credential) =>
+        EmailBatchSetReadRequest.make({
+          connection,
+          credential,
+          messageIds: input.messageIds,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          isRead: input.isRead
+        }),
+      outputSchema: EmailBatchOperationOutput
+    })
+})
+
+export const emailBatchSetFlagAction = defineAction({
+  id: 'email.batch_set_flag',
+  description:
+    'Flag or unflag 1-100 unique IMAP messages in one source folder. Requires host batchSetFlag support.',
+  access: 'write',
+  inputSchema: EmailBatchSetFlagActionInput,
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeEmailBatch({
+      integration,
+      operation: 'Changing flag state in batch',
+      methodName: 'batchSetFlag',
+      requestedIds: input.messageIds,
+      getMethod: client => client.batchSetFlag,
+      makeRequest: (connection, credential) =>
+        EmailBatchSetFlagRequest.make({
+          connection,
+          credential,
+          messageIds: input.messageIds,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          isFlagged: input.isFlagged
+        }),
+      outputSchema: EmailBatchOperationOutput
+    })
+})
+
+export const emailBatchMoveAction = defineAction({
+  id: 'email.batch_move',
+  description:
+    'Move 1-100 unique IMAP messages from one source folder to one destination folder. Requires host batchMove support. Every succeeded result includes destination folder; movedMessageId is optional and only supplied when the destination UIDVALIDITY/UID mapping is known.',
+  access: 'write',
+  inputSchema: EmailBatchMoveActionInput,
+  outputSchema: EmailBatchMoveOutput,
+  execute: ({ integration, input }) =>
+    executeEmailBatch({
+      integration,
+      operation: 'Moving messages in batch',
+      methodName: 'batchMove',
+      requestedIds: input.messageIds,
+      getMethod: client => client.batchMove,
+      makeRequest: (connection, credential) =>
+        EmailBatchMoveRequest.make({
+          connection,
+          credential,
+          messageIds: input.messageIds,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          destinationFolder: input.destinationFolder
+        }),
+      outputSchema: EmailBatchMoveOutput,
+      moved: true
+    })
+})
+
+export const emailBatchTrashAction = defineAction({
+  id: 'email.batch_trash',
+  description:
+    'Move 1-100 unique IMAP messages from one source folder to trash. Requires host batchTrash support. Every succeeded result includes destination folder; movedMessageId is optional and only supplied when the destination UIDVALIDITY/UID mapping is known.',
+  access: 'destructive',
+  inputSchema: EmailBatchTrashActionInput,
+  outputSchema: EmailBatchMoveOutput,
+  execute: ({ integration, input }) =>
+    executeEmailBatch({
+      integration,
+      operation: 'Trashing messages in batch',
+      methodName: 'batchTrash',
+      requestedIds: input.messageIds,
+      getMethod: client => client.batchTrash,
+      makeRequest: (connection, credential) =>
+        EmailBatchTrashRequest.make({
+          connection,
+          credential,
+          messageIds: input.messageIds,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          trashFolder: input.trashFolder
+        }),
+      outputSchema: EmailBatchMoveOutput,
+      moved: true
+    })
+})
+
+export const emailBatchUntrashAction = defineAction({
+  id: 'email.batch_untrash',
+  description:
+    'Move 1-100 unique IMAP messages from one trash folder to one destination folder. Requires host batchUntrash support. Every succeeded result includes destination folder; movedMessageId is optional and only supplied when the destination UIDVALIDITY/UID mapping is known.',
+  access: 'write',
+  inputSchema: EmailBatchUntrashActionInput,
+  outputSchema: EmailBatchMoveOutput,
+  execute: ({ integration, input }) =>
+    executeEmailBatch({
+      integration,
+      operation: 'Restoring messages in batch',
+      methodName: 'batchUntrash',
+      requestedIds: input.messageIds,
+      getMethod: client => client.batchUntrash,
+      makeRequest: (connection, credential) =>
+        EmailBatchUntrashRequest.make({
+          connection,
+          credential,
+          messageIds: input.messageIds,
+          folder: input.folder,
+          destinationFolder: input.destinationFolder ?? EmailFolderName.make('INBOX')
+        }),
+      outputSchema: EmailBatchMoveOutput,
+      moved: true
+    })
+})
+
+export const emailBatchModifyLabelsAction = defineAction({
+  id: 'email.batch_modify_labels',
+  description:
+    'Add or remove IMAP keyword labels on 1-100 unique messages in one source folder. Requires host batchModifyLabels support.',
+  access: 'write',
+  inputSchema: EmailBatchModifyLabelsActionInput,
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeEmailBatch({
+      integration,
+      operation: 'Modifying message labels in batch',
+      methodName: 'batchModifyLabels',
+      requestedIds: input.messageIds,
+      getMethod: client => client.batchModifyLabels,
+      makeRequest: (connection, credential) =>
+        EmailBatchModifyLabelsRequest.make({
+          connection,
+          credential,
+          messageIds: input.messageIds,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          addLabels: input.addLabels,
+          removeLabels: input.removeLabels
+        }),
+      outputSchema: EmailBatchOperationOutput
+    })
+})
+
+export const emailDeletePermanentlyAction = defineAction({
+  id: 'email.delete_permanently',
+  description:
+    'Permanently remove exactly 1-100 unique UID-scoped IMAP messages from one source folder. Never blanket-expunges; host approval policy applies.',
+  access: 'destructive',
+  inputSchema: EmailDeletePermanentlyActionInput,
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    executeEmailBatch({
+      integration,
+      operation: 'Permanently deleting messages',
+      methodName: 'deletePermanently',
+      requestedIds: input.messageIds,
+      getMethod: client => client.deletePermanently,
+      makeRequest: (connection, credential) =>
+        EmailDeletePermanentlyRequest.make({
+          connection,
+          credential,
+          messageIds: input.messageIds,
+          folder: input.folder ?? EmailFolderName.make('INBOX')
+        }),
+      outputSchema: EmailBatchOperationOutput
+    })
+})
+
 export const emailActions = [
   emailListMessagesAction,
   emailGetMessageAction,
@@ -1168,7 +1732,14 @@ export const emailActions = [
   emailTrashAction,
   emailUntrashAction,
   emailModifyLabelsAction,
-  emailMoveAction
+  emailMoveAction,
+  emailBatchSetReadAction,
+  emailBatchSetFlagAction,
+  emailBatchMoveAction,
+  emailBatchTrashAction,
+  emailBatchUntrashAction,
+  emailBatchModifyLabelsAction,
+  emailDeletePermanentlyAction
 ]
 
 export const EmailConnector = defineConnector({

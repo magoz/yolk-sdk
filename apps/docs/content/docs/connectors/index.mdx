@@ -64,6 +64,8 @@ const destructiveGoogleActions = new Set([
   'drive.trash_file',
   'drive.delete_file',
   'gmail.trash',
+  'gmail.batch_trash',
+  'gmail.delete_permanently',
   'gmail.draft_delete',
   'gmail.delete_label',
   'gmail.send_message'
@@ -77,6 +79,11 @@ const writingGoogleActions = new Set([
   'gmail.create_label',
   'gmail.update_label',
   'gmail.untrash',
+  'gmail.set_read',
+  'gmail.batch_set_read',
+  'gmail.batch_set_starred',
+  'gmail.batch_modify_labels',
+  'gmail.batch_untrash',
   'gmail.draft_compose',
   'gmail.draft_update',
   'gmail.draft_reply'
@@ -162,6 +169,37 @@ uses destination UIDVALIDITY/UID when the host can map it.
 POP3/SMTP do not support these mailbox-state actions. Restore defaults to the inbox rather than
 remembering the original folder. See the [Connectors catalog](../integrations/connectors) for
 inputs, permissions, and safe IMAP adapter requirements.
+
+Gmail reports read state from the `UNREAD` label and flag state from the `STARRED` label through
+optional `isRead`/`isFlagged` fields (absent when labels are omitted), with matching typed filters
+on `gmail.search` and `gmail.list`. `gmail.set_read` flips `UNREAD` via `gmail.modify` consent and
+returns the normalized message. Outlook reports `isRead` plus follow-up flag state as
+`isFlagged` (flagged is true; not-flagged and completed are false; anything else asserts
+nothing), with matching typed filters composed into `$filter` on `outlook.list_messages`. These
+are provider-native models: Gmail labels, Outlook flags/folders/categories, and IMAP
+flags/keywords/folders are not identical, and the connector never pretends they are.
+
+Explicit batch actions cover 1-100 unique messages with complete per-ID outcomes in `messageIds`
+order (`succeeded`, `failed`, `unknown`, `not_attempted`) plus exact summary counts, sanitized codes
+only, and provider-safe chunking: Gmail issues individually addressed requests sequentially
+(`gmail.batch_set_read`, `gmail.batch_set_starred`, `gmail.batch_modify_labels`,
+`gmail.batch_trash`, `gmail.batch_untrash`); Outlook uses Graph JSON batching with at most 20
+subrequests per envelope (`outlook.batch_set_read`, `outlook.batch_set_flag`,
+`outlook.batch_move`, `outlook.batch_trash`, `outlook.batch_untrash`,
+`outlook.batch_modify_categories`); generic email forwards to matching optional host
+`EmailClient.batch*` methods. A batch report returns `ActionResult.success` even when every item
+failed: success means a valid report exists, not that every mutation worked. `unknown` means the
+mutation may or may not have executed, so hosts must reconcile before retrying; cancellation may
+prevent a report entirely, and durable reconciliation stays host-owned.
+
+Permanent deletion is a separate destructive batch-shaped action on each provider
+(`gmail.delete_permanently`, `outlook.delete_permanently`, `email.delete_permanently`). Gmail
+deletes immediately (not trash) and requires opt-in full-mail (`https://mail.google.com/`)
+consent, which is never added to combined/default consent; `gmail.modify` is insufficient.
+Outlook `permanentDelete` moves items into Recoverable Items/Purges, so retention or holds may
+still preserve them: it is not compliance erasure. Generic email deletes exactly the identified
+UID-scoped messages without blanket-expunge and claims no backup erasure. Approval, auditing,
+retention policy, and reconciliation remain host-owned.
 
 ## Manage email labels
 

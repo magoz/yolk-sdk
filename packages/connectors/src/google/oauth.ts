@@ -18,6 +18,8 @@ export const googleGmailModifyScope = 'https://www.googleapis.com/auth/gmail.mod
 
 export const googleGmailSettingsBasicScope = 'https://www.googleapis.com/auth/gmail.settings.basic'
 
+export const googleGmailFullMailScope = 'https://mail.google.com/'
+
 export const googleCalendarReadonlyScope = 'https://www.googleapis.com/auth/calendar.readonly'
 
 export const googleCalendarEventsScope = 'https://www.googleapis.com/auth/calendar.events'
@@ -45,6 +47,8 @@ export const googleGmailDraftReplyScopes = Object.freeze([
 export const googleGmailModifyScopes = Object.freeze([googleGmailModifyScope])
 
 export const googleGmailSettingsScopes = Object.freeze([googleGmailSettingsBasicScope])
+
+export const googleGmailFullMailScopes = Object.freeze([googleGmailFullMailScope])
 
 export const googleCalendarReadonlyScopes = Object.freeze([googleCalendarReadonlyScope])
 
@@ -93,6 +97,15 @@ export const GoogleGmailSettingsOAuthCredentialSlot = CredentialSlot.make({
   id: googleOAuthSlotId,
   kind: 'oauth',
   requiredScopes: [...googleGmailSettingsScopes]
+})
+
+// Opt-in full-mail consent for permanent message deletion only. Never add this
+// restricted scope to the combined/default consent lists; hosts own consent
+// upgrades and restricted-scope verification.
+export const GoogleGmailFullMailOAuthCredentialSlot = CredentialSlot.make({
+  id: googleOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...googleGmailFullMailScopes]
 })
 
 export const GoogleCalendarReadonlyOAuthCredentialSlot = CredentialSlot.make({

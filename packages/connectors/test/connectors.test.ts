@@ -871,6 +871,13 @@ describe('@yolk-sdk/connectors', () => {
       'gmail.delete_label',
       'gmail.modify_labels',
       'gmail.set_starred',
+      'gmail.set_read',
+      'gmail.batch_set_read',
+      'gmail.batch_set_starred',
+      'gmail.batch_modify_labels',
+      'gmail.batch_trash',
+      'gmail.batch_untrash',
+      'gmail.delete_permanently',
       'gmail.trash',
       'gmail.untrash',
       'gmail.draft_delete',
@@ -940,6 +947,13 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.delete_category',
       'outlook.set_categories',
       'outlook.modify_categories',
+      'outlook.batch_set_read',
+      'outlook.batch_set_flag',
+      'outlook.batch_move',
+      'outlook.batch_trash',
+      'outlook.batch_untrash',
+      'outlook.batch_modify_categories',
+      'outlook.delete_permanently',
       'onedrive.list_items',
       'onedrive.search_items',
       'onedrive.get_item',
@@ -962,6 +976,11 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.update_category',
       'outlook.set_categories',
       'outlook.modify_categories',
+      'outlook.batch_set_read',
+      'outlook.batch_set_flag',
+      'outlook.batch_move',
+      'outlook.batch_untrash',
+      'outlook.batch_modify_categories',
       'onedrive.create_folder'
     ])
     expect(
@@ -974,6 +993,8 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.reply',
       'outlook.trash',
       'outlook.delete_category',
+      'outlook.batch_trash',
+      'outlook.delete_permanently',
       'onedrive.delete_item'
     ])
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
@@ -4803,6 +4824,8 @@ describe('@yolk-sdk/connectors', () => {
               id: 'message_1',
               threadId: 'thread_1',
               labelIds: ['INBOX'],
+              isRead: true,
+              isFlagged: false,
               snippet: 'summary',
               internalDate: '0',
               headers: [{ name: 'Subject', value: 'Hi' }],
@@ -4823,7 +4846,7 @@ describe('@yolk-sdk/connectors', () => {
         }
       })
       expect(JSON.stringify(result)).toBe(
-        '{"_tag":"Success","value":{"id":"thread_1","historyId":"history_1","messages":[{"id":"message_1","threadId":"thread_1","labelIds":["INBOX"],"snippet":"summary","internalDate":"0","headers":[{"name":"Subject","value":"Hi"}],"body":"Hello body","bodyMimeType":"text/plain","attachments":[{"partId":"2","mimeType":"image/png","size":4,"attachmentId":"inline_1","inline":true,"contentId":"<logo@example.com>"}]}]}}'
+        '{"_tag":"Success","value":{"id":"thread_1","historyId":"history_1","messages":[{"id":"message_1","threadId":"thread_1","labelIds":["INBOX"],"isRead":true,"isFlagged":false,"snippet":"summary","internalDate":"0","headers":[{"name":"Subject","value":"Hi"}],"body":"Hello body","bodyMimeType":"text/plain","attachments":[{"partId":"2","mimeType":"image/png","size":4,"attachmentId":"inline_1","inline":true,"contentId":"<logo@example.com>"}]}]}}'
       )
     })
   )
