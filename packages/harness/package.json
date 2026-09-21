@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/harness",
-  "version": "0.1.0-canary.87",
+  "version": "0.1.0-canary.88",
   "description": "Domain-free agent run lifecycle: coordinator, store, inbox, and pluggable drivers.",
   "license": "MIT",
   "type": "module",
