@@ -1,5 +1,13 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.88
+
+### Patch Changes
+
+- 879f27b: Advance unchanged public packages in lockstep with the portable email batch, filter, and permanent-deletion primitives in the connectors package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [879f27b]
+  - @yolk-sdk/agent@0.1.0-canary.88
+
 ## 0.1.0-canary.87
 
 ### Patch Changes
