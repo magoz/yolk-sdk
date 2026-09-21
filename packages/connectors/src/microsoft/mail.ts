@@ -1,11 +1,26 @@
-import { Chunk, Effect, Match, Predicate, SchemaTransformation } from 'effect'
+import { Chunk, Effect, Match, Predicate, Result, SchemaTransformation } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { optionalStringConfig } from '../config.ts'
 import { resolveCredential } from '../credential.ts'
-import type { RuntimeCredential } from '../credential.ts'
+import type { CredentialResolver, RuntimeCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
+import {
+  EmailBatchOperationOutput,
+  EmailBatchResultItem,
+  EmailBatchSummary,
+  makeEmailBatchSummary,
+  type EmailBatchOperationStatus,
+  type EmailBatchResultCode
+} from '../email-batch.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../http.ts'
+import {
+  executeGraphBatch,
+  toGraphBatchChunks,
+  type GraphBatchItemResponse,
+  type GraphBatchResponseEntry,
+  type GraphBatchSubrequest
+} from './mail-batch.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 import { ActionResult } from '../result.ts'
 import {
@@ -47,6 +62,7 @@ const outlookListSelect = [
   'sentDateTime',
   'hasAttachments',
   'isRead',
+  'flag',
   'isDraft',
   'importance',
   'conversationId',
@@ -113,6 +129,8 @@ export class OutlookMessage extends Schema.Class<OutlookMessage>('OutlookMessage
   sentDateTime: Schema.optional(Schema.NullOr(Schema.String)),
   hasAttachments: Schema.optional(Schema.Boolean),
   isRead: Schema.optional(Schema.Boolean),
+  /** Follow-up flag state, normalized from Graph `flag.flagStatus` when selected. */
+  isFlagged: Schema.optional(Schema.Boolean),
   isDraft: Schema.optional(Schema.Boolean),
   importance: Schema.optional(Schema.String),
   conversationId: Schema.optional(Schema.NullOr(Schema.String)),
@@ -127,6 +145,64 @@ export class OutlookMessageWithHeaders extends OutlookMessage.extend<OutlookMess
 )({
   internetMessageHeaders: Schema.Array(OutlookInternetMessageHeader)
 }) {}
+
+// Graph follow-up flags arrive as `flag: { flagStatus }`. Decode through a
+// private wire schema and normalize: `flagged` is true, `notFlagged` and
+// `complete` are false, and omitted/null/unrecognized states assert nothing.
+const OutlookFlagWire = Schema.optional(
+  Schema.NullOr(Schema.Struct({ flagStatus: Schema.optional(Schema.String) }))
+)
+
+const { isFlagged: _outlookMessageIsFlagged, ...OutlookMessageWireFields } = OutlookMessage.fields
+
+const OutlookMessageWire = Schema.Struct({ ...OutlookMessageWireFields, flag: OutlookFlagWire })
+
+type OutlookMessageWireType = typeof OutlookMessageWire.Type
+
+const normalizeOutlookFlagStatus = (
+  flag: { readonly flagStatus?: string } | null | undefined
+): boolean | undefined => {
+  if (flag === null || flag === undefined) return undefined
+
+  if (flag.flagStatus === 'flagged') return true
+
+  if (flag.flagStatus === 'notFlagged' || flag.flagStatus === 'complete') return false
+
+  return undefined
+}
+
+const normalizeOutlookMessage = (wire: OutlookMessageWireType): OutlookMessage => {
+  const { flag, ...rest } = wire
+  const isFlagged = normalizeOutlookFlagStatus(flag ?? undefined)
+
+  return isFlagged === undefined
+    ? OutlookMessage.make({ ...rest })
+    : OutlookMessage.make({ ...rest, isFlagged })
+}
+
+const OutlookMessagesApiWireOutput = Schema.Struct({
+  value: Schema.Array(OutlookMessageWire),
+  '@odata.nextLink': Schema.optional(Schema.String)
+})
+
+const { isFlagged: _outlookMessageWithHeadersIsFlagged, ...OutlookMessageWithHeadersWireFields } =
+  OutlookMessageWithHeaders.fields
+
+const OutlookMessageWithHeadersWire = Schema.Struct({
+  ...OutlookMessageWithHeadersWireFields,
+  flag: OutlookFlagWire
+})
+
+const normalizeOutlookMessageWithHeaders = (
+  wire: typeof OutlookMessageWithHeadersWire.Type
+): OutlookMessageWithHeaders => {
+  const { flag, ...rest } = wire
+  const isFlagged = normalizeOutlookFlagStatus(flag ?? undefined)
+
+  return isFlagged === undefined
+    ? OutlookMessageWithHeaders.make({ ...rest })
+    : OutlookMessageWithHeaders.make({ ...rest, isFlagged })
+}
 
 // Models use null/blank placeholders for absent read options. Normalize at
 // decoding, not in URL construction; never trim or rewrite a real cursor.
@@ -173,7 +249,11 @@ export class OutlookListMessagesInput extends Schema.Class<OutlookListMessagesIn
 )({
   ...outlookReadPaginationFields,
   filter: OptionalOutlookReadString,
-  orderBy: OptionalOutlookReadString
+  orderBy: OptionalOutlookReadString,
+  /** Typed read filter, composed into `$filter` as `isRead eq true|false`. */
+  isRead: Schema.optional(Schema.Boolean),
+  /** Typed flag filter: true uses `flag/flagStatus eq 'flagged'`, false uses `ne 'flagged'`. */
+  isFlagged: Schema.optional(Schema.Boolean)
 }) {}
 
 export class OutlookSearchMessagesInput extends Schema.Class<OutlookSearchMessagesInput>(
@@ -189,11 +269,6 @@ export class OutlookListMessagesOutput extends Schema.Class<OutlookListMessagesO
   messages: Schema.Array(OutlookMessage),
   nextLink: Schema.optional(Schema.String)
 }) {}
-
-const OutlookMessagesApiOutput = Schema.Struct({
-  value: Schema.Array(OutlookMessage),
-  '@odata.nextLink': Schema.optional(Schema.String)
-})
 
 export class OutlookMessageIdInput extends Schema.Class<OutlookMessageIdInput>(
   'OutlookMessageIdInput'
@@ -471,8 +546,8 @@ const OutlookUpdateDraftActionInput = Schema.Struct(OutlookUpdateDraftInput.fiel
   })
 )
 
-const OutlookUpdatedDraft = OutlookMessage.check(
-  Schema.makeFilter<OutlookMessage>(message =>
+const OutlookUpdatedDraftWire = OutlookMessageWire.check(
+  Schema.makeFilter<OutlookMessageWireType>(message =>
     message.id !== '' && message.isDraft === true
       ? undefined
       : 'The provider must return an identified draft'
@@ -818,7 +893,36 @@ const outlookWriteSlot = (integration: ConnectorIntegration, mailbox: string | u
 const outlookSendSlot = (integration: ConnectorIntegration, mailbox: string | undefined) =>
   outlookSlotFor('send', integration, mailbox)
 
+const typedOutlookListFilters = (input: OutlookListMessagesInput): Array<string> => {
+  const clauses: Array<string> = []
+
+  if (input.isRead !== undefined) clauses.push(`isRead eq ${input.isRead ? 'true' : 'false'}`)
+
+  if (input.isFlagged !== undefined) {
+    clauses.push(input.isFlagged ? "flag/flagStatus eq 'flagged'" : "flag/flagStatus ne 'flagged'")
+  }
+
+  return clauses
+}
+
 const outlookListUrl = (input: OutlookListMessagesInput) => {
+  // nextLink is an opaque continuation of a previous query: newly supplied
+  // typed filters would be silently ignored, so reject them before IO.
+  if (
+    input.nextLink !== undefined &&
+    (input.isRead !== undefined || input.isFlagged !== undefined)
+  ) {
+    return Effect.fail(
+      new ConnectorError({
+        cause: 'validation_failed',
+        message:
+          'Outlook typed filters cannot be combined with nextLink; use the returned nextLink without resupplying isRead or isFlagged',
+        connectorId: microsoftConnectorId,
+        actionId: 'outlook.list_messages'
+      })
+    )
+  }
+
   if (input.nextLink !== undefined) {
     return requireMicrosoftNextLink(
       input.nextLink,
@@ -833,7 +937,19 @@ const outlookListUrl = (input: OutlookListMessagesInput) => {
 
   if (input.top !== undefined) params.set('$top', String(input.top))
 
-  if (input.filter !== undefined && input.filter.trim() !== '') params.set('$filter', input.filter)
+  // A lone raw filter passes through verbatim for legacy compatibility; it is
+  // grouped only when combined with typed clauses so `and` binds correctly.
+  const rawFilter =
+    input.filter !== undefined && input.filter.trim() !== '' ? input.filter : undefined
+
+  const typedClauses = typedOutlookListFilters(input)
+
+  const combinedFilter =
+    typedClauses.length === 0
+      ? rawFilter
+      : [...(rawFilter === undefined ? [] : [`(${rawFilter})`]), ...typedClauses].join(' and ')
+
+  if (combinedFilter !== undefined) params.set('$filter', combinedFilter)
 
   if (input.orderBy !== undefined && input.orderBy.trim() !== '') {
     params.set('$orderby', input.orderBy)
@@ -875,9 +991,11 @@ const outlookMessagesAction = (input: {
   readonly errorMessage: string
 }) =>
   Effect.gen(function* () {
+    // Validate the URL (including nextLink/typed-filter rules) before
+    // resolving credentials or touching HTTP.
+    const url = yield* input.url
     const slot = yield* outlookReadSlot(input.integration, input.mailbox)
     const token = yield* resolveMicrosoftAccessToken(input.integration, slot)
-    const url = yield* input.url
     const http = yield* ConnectorHttpClient
 
     const response = yield* http.request(
@@ -898,13 +1016,13 @@ const outlookMessagesAction = (input: {
       })
     }
 
-    const output = yield* decodeJsonResponse(OutlookMessagesApiOutput, response)
+    const output = yield* decodeJsonResponse(OutlookMessagesApiWireOutput, response)
 
     return ActionResult.success(
       OutlookListMessagesOutput.make(
         (() => {
           const fields: OutlookListMessagesOutputFields = {
-            messages: output.value
+            messages: output.value.map(normalizeOutlookMessage)
           }
 
           if (output['@odata.nextLink'] !== undefined) {
@@ -919,7 +1037,8 @@ const outlookMessagesAction = (input: {
 
 export const outlookListMessagesAction = defineAction({
   id: 'outlook.list_messages',
-  description: 'List messages in a Microsoft Outlook mailbox or one mail folder.',
+  description:
+    'List messages in a Microsoft Outlook mailbox or one mail folder. Optional isRead/isFlagged filters are composed into $filter alongside any raw filter.',
   inputSchema: OutlookListMessagesInput,
   outputSchema: OutlookListMessagesOutput,
   execute: ({ integration, input }) =>
@@ -978,9 +1097,9 @@ export const outlookGetMessageAction = defineAction({
         })
       }
 
-      const output = yield* decodeJsonResponse(OutlookMessageWithHeaders, response)
+      const output = yield* decodeJsonResponse(OutlookMessageWithHeadersWire, response)
 
-      return ActionResult.success(output)
+      return ActionResult.success(normalizeOutlookMessageWithHeaders(output))
     })
 })
 
@@ -1115,9 +1234,9 @@ export const outlookCreateDraftAction = defineAction({
         })
       }
 
-      const output = yield* decodeJsonResponse(OutlookMessage, response)
+      const output = yield* decodeJsonResponse(OutlookMessageWire, response)
 
-      return ActionResult.success(output)
+      return ActionResult.success(normalizeOutlookMessage(output))
     })
 })
 
@@ -1173,9 +1292,9 @@ export const outlookUpdateDraftAction = defineAction({
           })
         }
 
-        const updated = yield* decodeJsonResponse(OutlookUpdatedDraft, response)
+        const updated = yield* decodeJsonResponse(OutlookUpdatedDraftWire, response)
 
-        return ActionResult.success(updated)
+        return ActionResult.success(normalizeOutlookMessage(updated))
       }).pipe(
         Effect.mapError(
           error =>
@@ -1285,7 +1404,7 @@ export const outlookCreateReplyDraftAction = defineAction({
         })
       }
 
-      const created = yield* decodeJsonResponse(OutlookMessage, createResponse).pipe(
+      const createdWire = yield* decodeJsonResponse(OutlookMessageWire, createResponse).pipe(
         Effect.catch(error =>
           Effect.gen(function* () {
             // Only decode again on failure, retaining identity even when another
@@ -1299,6 +1418,8 @@ export const outlookCreateReplyDraftAction = defineAction({
           })
         )
       )
+
+      const created = normalizeOutlookMessage(createdWire)
 
       return yield* Effect.gen(function* () {
         if (created.isDraft === false) {
@@ -1341,7 +1462,9 @@ export const outlookCreateReplyDraftAction = defineAction({
             })
           }
 
-          const fetched = yield* decodeJsonResponse(OutlookMessage, readResponse)
+          const fetched = normalizeOutlookMessage(
+            yield* decodeJsonResponse(OutlookMessageWire, readResponse)
+          )
 
           if (fetched.id !== created.id || fetched.isDraft === false) {
             return yield* Effect.fail(
@@ -1398,9 +1521,9 @@ export const outlookCreateReplyDraftAction = defineAction({
           })
         }
 
-        const output = yield* decodeJsonResponse(OutlookMessage, patchResponse)
+        const output = yield* decodeJsonResponse(OutlookMessageWire, patchResponse)
 
-        return ActionResult.success(output)
+        return ActionResult.success(normalizeOutlookMessage(output))
       }).pipe(Effect.mapError(error => outlookReplyDraftError(created.id, integration, error)))
     })
 })
@@ -1605,9 +1728,9 @@ const outlookMutateMessage = (input: {
       })
     }
 
-    const output = yield* decodeJsonResponse(OutlookMessage, response)
+    const output = yield* decodeJsonResponse(OutlookMessageWire, response)
 
-    return ActionResult.success(output)
+    return ActionResult.success(normalizeOutlookMessage(output))
   })
 
 export const outlookSetReadAction = defineAction({
@@ -2216,6 +2339,815 @@ export const outlookModifyCategoriesAction = defineAction({
     })
 })
 
+// Path-bound Outlook batch IDs: Graph IDs may contain slashes and Unicode, but
+// dot-only segments, surrounding whitespace, control/space characters, and
+// lone UTF-16 surrogates are
+// rejected before credentials or HTTP.
+const OutlookBatchPathId = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f\uD800-\uDFFF]+$/u)
+)
+
+const OutlookBatchMessageIds = Schema.Array(OutlookBatchPathId).check(
+  Schema.isLengthBetween(1, 100),
+  Schema.isUnique()
+)
+
+export class OutlookBatchSetReadInput extends Schema.Class<OutlookBatchSetReadInput>(
+  'OutlookBatchSetReadInput'
+)({
+  messageIds: OutlookBatchMessageIds,
+  mailbox: Schema.optional(OutlookBatchPathId),
+  isRead: Schema.Boolean
+}) {}
+
+export class OutlookBatchSetFlagInput extends Schema.Class<OutlookBatchSetFlagInput>(
+  'OutlookBatchSetFlagInput'
+)({
+  messageIds: OutlookBatchMessageIds,
+  mailbox: Schema.optional(OutlookBatchPathId),
+  isFlagged: Schema.Boolean
+}) {}
+
+export class OutlookBatchMoveInput extends Schema.Class<OutlookBatchMoveInput>(
+  'OutlookBatchMoveInput'
+)({
+  messageIds: OutlookBatchMessageIds,
+  mailbox: Schema.optional(OutlookBatchPathId),
+  destinationFolderId: OutlookBatchPathId
+}) {}
+
+export class OutlookBatchTrashInput extends Schema.Class<OutlookBatchTrashInput>(
+  'OutlookBatchTrashInput'
+)({
+  messageIds: OutlookBatchMessageIds,
+  mailbox: Schema.optional(OutlookBatchPathId)
+}) {}
+
+export class OutlookBatchUntrashInput extends Schema.Class<OutlookBatchUntrashInput>(
+  'OutlookBatchUntrashInput'
+)({
+  messageIds: OutlookBatchMessageIds,
+  mailbox: Schema.optional(OutlookBatchPathId),
+  destinationFolderId: Schema.optional(OutlookBatchPathId)
+}) {}
+
+export class OutlookBatchModifyCategoriesInput extends Schema.Class<OutlookBatchModifyCategoriesInput>(
+  'OutlookBatchModifyCategoriesInput'
+)({
+  messageIds: OutlookBatchMessageIds,
+  mailbox: Schema.optional(OutlookBatchPathId),
+  addCategories: Schema.optional(Schema.Array(OutlookCategoryName)),
+  removeCategories: Schema.optional(Schema.Array(OutlookCategoryName))
+}) {}
+
+const OutlookBatchModifyCategoriesActionInput = Schema.Struct(
+  OutlookBatchModifyCategoriesInput.fields
+).check(modifyCategoriesRequiresField)
+
+export class OutlookDeletePermanentlyInput extends Schema.Class<OutlookDeletePermanentlyInput>(
+  'OutlookDeletePermanentlyInput'
+)({
+  messageIds: OutlookBatchMessageIds,
+  mailbox: Schema.optional(OutlookBatchPathId)
+}) {}
+
+export class OutlookBatchMoveResultItem extends EmailBatchResultItem.extend<OutlookBatchMoveResultItem>(
+  'OutlookBatchMoveResultItem'
+)({
+  movedMessageId: Schema.optional(OutlookBatchPathId),
+  destinationFolderId: Schema.optional(OutlookBatchPathId)
+}) {}
+
+export class OutlookBatchMoveOutput extends Schema.Class<OutlookBatchMoveOutput>(
+  'OutlookBatchMoveOutput'
+)({
+  results: Schema.Array(OutlookBatchMoveResultItem),
+  summary: EmailBatchSummary
+}) {}
+
+type OutlookBatchMappedItem = {
+  readonly status: EmailBatchOperationStatus
+  readonly code?: EmailBatchResultCode | undefined
+  readonly stop: boolean
+  readonly movedMessageId?: string | undefined
+  readonly destinationFolderId?: string | undefined
+}
+
+// Connector-owned fixed codes only: never provider messages, bodies, headers,
+// URLs, or credentials. A regex-valid provider string is not automatically safe.
+const outlookBatchItemFailure = (status: number): OutlookBatchMappedItem => {
+  const failed = (code: EmailBatchResultCode): OutlookBatchMappedItem => ({
+    status: 'failed',
+    code,
+    stop: false
+  })
+
+  const stoppedFailure = (code: EmailBatchResultCode): OutlookBatchMappedItem => ({
+    status: 'failed',
+    code,
+    stop: true
+  })
+
+  const ambiguous = (): OutlookBatchMappedItem => ({
+    status: 'unknown',
+    code: 'outcome_ambiguous',
+    stop: true
+  })
+
+  if (status === 401) return stoppedFailure('unauthorized')
+
+  if (status === 403) return stoppedFailure('forbidden')
+
+  if (status === 429) return stoppedFailure('rate_limited')
+
+  if (status === 408 || status >= 500) return ambiguous()
+
+  if (status === 404) return failed('not_found')
+
+  if (status === 400 || status === 422) return failed('invalid_request')
+
+  if (status === 409) return failed('conflict')
+
+  if (status === 412) return failed('precondition_failed')
+
+  if (status === 413) return failed('payload_too_large')
+
+  if (status === 423) return failed('locked')
+
+  if (status >= 400 && status < 500) return failed('provider_rejected')
+
+  return { status: 'unknown', code: 'invalid_response', stop: false }
+}
+
+const OutlookBatchMessageIdentity = Schema.Struct({ id: Schema.String })
+
+const OutlookBatchMoveIdentity = Schema.Struct({
+  id: OutlookBatchPathId,
+  parentFolderId: OutlookBatchPathId
+})
+
+const OutlookBatchCategoriesRead = Schema.Struct({
+  id: Schema.String,
+  categories: Schema.Array(Schema.String)
+})
+
+const decodeOutlookBatchIdentity = (body: unknown) =>
+  Schema.decodeUnknownEffect(OutlookBatchMessageIdentity)(body).pipe(Effect.result)
+
+const decodeOutlookBatchMoveIdentity = (body: unknown) =>
+  Schema.decodeUnknownEffect(OutlookBatchMoveIdentity)(body).pipe(Effect.result)
+
+const decodeOutlookBatchCategoriesRead = (body: unknown) =>
+  Schema.decodeUnknownEffect(OutlookBatchCategoriesRead)(body).pipe(Effect.result)
+
+const groupGraphBatchResponses = (items: ReadonlyArray<GraphBatchResponseEntry>) => {
+  const byKey = new Map<string, Array<GraphBatchResponseEntry>>()
+
+  for (const item of items) {
+    const matches = byKey.get(item.key) ?? []
+    matches.push(item)
+    byKey.set(item.key, matches)
+  }
+
+  return byKey
+}
+
+const correlatedGraphBatchResponse = (
+  matches: ReadonlyArray<GraphBatchResponseEntry>
+): GraphBatchItemResponse | undefined => {
+  if (matches.length !== 1) return undefined
+
+  const item = matches[0]
+
+  return item?._tag === 'Response' ? item : undefined
+}
+
+// PATCH 200 plus an identified matching message establishes the mutation.
+// Unexpected success statuses such as 202 do not establish completion.
+const mapOutlookPatchItem = (input: {
+  readonly messageId: string
+  readonly response: GraphBatchItemResponse | undefined
+  readonly correlationBroken: boolean
+}): Effect.Effect<OutlookBatchMappedItem, never> =>
+  Effect.gen(function* () {
+    if (input.correlationBroken || input.response === undefined) {
+      return {
+        status: 'unknown',
+        code: 'invalid_batch_response',
+        stop: true
+      } satisfies OutlookBatchMappedItem
+    }
+
+    if (input.response.status !== 200) {
+      return outlookBatchItemFailure(input.response.status)
+    }
+
+    const identity = yield* decodeOutlookBatchIdentity(input.response.body)
+
+    if (Result.isFailure(identity) || identity.success.id !== input.messageId) {
+      return {
+        status: 'unknown',
+        code: 'invalid_response',
+        stop: false
+      } satisfies OutlookBatchMappedItem
+    }
+
+    return { status: 'succeeded', stop: false } satisfies OutlookBatchMappedItem
+  })
+
+// Move 201 plus returned message identity and actual returned parentFolderId
+// establishes the move. A well-known request destination is never fabricated
+// into a provider folder ID.
+const mapOutlookMoveItem = (input: {
+  readonly messageId: string
+  readonly response: GraphBatchItemResponse | undefined
+  readonly correlationBroken: boolean
+}): Effect.Effect<OutlookBatchMappedItem, never> =>
+  Effect.gen(function* () {
+    if (input.correlationBroken || input.response === undefined) {
+      return {
+        status: 'unknown',
+        code: 'invalid_batch_response',
+        stop: true
+      } satisfies OutlookBatchMappedItem
+    }
+
+    if (input.response.status !== 201) {
+      return outlookBatchItemFailure(input.response.status)
+    }
+
+    const identity = yield* decodeOutlookBatchMoveIdentity(input.response.body)
+
+    if (Result.isFailure(identity)) {
+      return {
+        status: 'unknown',
+        code: 'invalid_response',
+        stop: false
+      } satisfies OutlookBatchMappedItem
+    }
+
+    return {
+      status: 'succeeded',
+      stop: false,
+      movedMessageId: identity.success.id,
+      destinationFolderId: identity.success.parentFolderId
+    } satisfies OutlookBatchMappedItem
+  })
+
+const mapOutlookPermanentDeleteItem = (input: {
+  readonly messageId: string
+  readonly response: GraphBatchItemResponse | undefined
+  readonly correlationBroken: boolean
+}): Effect.Effect<OutlookBatchMappedItem, never> => {
+  if (input.correlationBroken || input.response === undefined) {
+    return Effect.succeed({
+      status: 'unknown',
+      code: 'invalid_batch_response',
+      stop: true
+    } satisfies OutlookBatchMappedItem)
+  }
+
+  // Permanent delete needs no JSON body: documented 204 establishes success.
+  if (input.response.status === 204) {
+    return Effect.succeed({ status: 'succeeded', stop: false } satisfies OutlookBatchMappedItem)
+  }
+
+  return Effect.succeed(outlookBatchItemFailure(input.response.status))
+}
+
+type OutlookBatchExecution = {
+  readonly integration: ConnectorIntegration
+  readonly mailbox: string | undefined
+  readonly messageIds: ReadonlyArray<string>
+  readonly buildSubrequest: (
+    messageId: string,
+    key: string,
+    segment: string
+  ) => GraphBatchSubrequest
+  readonly mapItem: (
+    messageId: string,
+    response: GraphBatchItemResponse | undefined,
+    correlationBroken: boolean
+  ) => Effect.Effect<OutlookBatchMappedItem, never>
+}
+
+type OutlookBatchMappedResult = {
+  readonly messageId: string
+  readonly status: EmailBatchOperationStatus
+  readonly code?: EmailBatchResultCode | undefined
+  readonly stop: boolean
+  readonly movedMessageId?: string | undefined
+  readonly destinationFolderId?: string | undefined
+}
+
+// Graph JSON batching with at most 20 subrequests per envelope, unique
+// correlation IDs, and sequential chunks. Responses match by correlation ID,
+// never position. Established results survive later transport failures;
+// unsent items become not_attempted and uncertain ones stay unknown.
+const executeOutlookBatch = (
+  input: OutlookBatchExecution
+): Effect.Effect<
+  Array<OutlookBatchMappedResult>,
+  ConnectorError,
+  CredentialResolver | ConnectorHttpClient
+> =>
+  Effect.gen(function* () {
+    // Reuse write-slot selection, mailbox guards, and binding identity: the
+    // resolved context is passed into the transport, never rebuilt there.
+    const slot = yield* outlookWriteSlot(input.integration, input.mailbox)
+    const token = yield* resolveMicrosoftAccessToken(input.integration, slot)
+
+    const segment =
+      input.mailbox === undefined ? '/me' : `/users/${encodeURIComponent(input.mailbox)}`
+
+    const results: Array<OutlookBatchMappedResult> = []
+    let stopped = false
+    let counter = 0
+
+    for (const chunk of toGraphBatchChunks(input.messageIds)) {
+      if (stopped) {
+        for (const messageId of chunk) {
+          results.push({ messageId, status: 'not_attempted', code: 'batch_stopped', stop: false })
+        }
+
+        continue
+      }
+
+      const keyed = chunk.map(messageId => {
+        counter += 1
+        const key = `req-${counter}`
+
+        return { messageId, key, subrequest: input.buildSubrequest(messageId, key, segment) }
+      })
+
+      const outcome = yield* executeGraphBatch({
+        token,
+        subrequests: keyed.map(entry => entry.subrequest)
+      })
+
+      // A definitively rejected envelope means its mutations were not attempted.
+      if (Predicate.isTagged(outcome, 'Rejected')) {
+        for (const { messageId } of keyed) {
+          results.push({ messageId, status: 'not_attempted', code: 'batch_stopped', stop: false })
+        }
+
+        stopped = true
+        continue
+      }
+
+      // Transport failures, throttling, server failures, and malformed
+      // envelopes cannot rule out execution: submitted items stay unknown.
+      if (Predicate.isTagged(outcome, 'Ambiguous')) {
+        for (const { messageId } of keyed) {
+          results.push({ messageId, status: 'unknown', code: 'outcome_ambiguous', stop: false })
+        }
+
+        stopped = true
+        continue
+      }
+
+      if (Predicate.isTagged(outcome, 'Executed')) {
+        const byKey = groupGraphBatchResponses(outcome.items)
+
+        for (const { messageId, key } of keyed) {
+          const matches = byKey.get(key) ?? []
+          const response = correlatedGraphBatchResponse(matches)
+          const mapped = yield* input.mapItem(messageId, response, response === undefined)
+          results.push({ messageId, ...mapped })
+
+          if (mapped.stop) stopped = true
+        }
+
+        if (outcome.integrityBroken) stopped = true
+      }
+    }
+
+    return results
+  })
+
+const toEmailBatchOperationOutput = (
+  mapped: ReadonlyArray<OutlookBatchMappedResult>
+): EmailBatchOperationOutput =>
+  EmailBatchOperationOutput.make({
+    results: mapped.map(item =>
+      item.code === undefined
+        ? EmailBatchResultItem.make({ messageId: item.messageId, status: item.status })
+        : EmailBatchResultItem.make({
+            messageId: item.messageId,
+            status: item.status,
+            code: item.code
+          })
+    ),
+    summary: makeEmailBatchSummary(mapped)
+  })
+
+const toOutlookBatchMoveOutput = (
+  mapped: ReadonlyArray<OutlookBatchMappedResult>
+): OutlookBatchMoveOutput =>
+  OutlookBatchMoveOutput.make({
+    results: mapped.map(item =>
+      OutlookBatchMoveResultItem.make({
+        messageId: item.messageId,
+        status: item.status,
+        code: item.code,
+        movedMessageId: item.movedMessageId,
+        destinationFolderId: item.destinationFolderId
+      })
+    ),
+    summary: makeEmailBatchSummary(mapped)
+  })
+
+export const outlookBatchSetReadAction = defineAction({
+  id: 'outlook.batch_set_read',
+  description:
+    'Mark 1-100 unique Outlook messages read or unread with Graph JSON batching (at most 20 per envelope). Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: Schema.Struct(OutlookBatchSetReadInput.fields),
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const mapped = yield* executeOutlookBatch({
+        integration,
+        mailbox: input.mailbox,
+        messageIds: input.messageIds,
+        buildSubrequest: (messageId, key, segment) => ({
+          key,
+          method: 'PATCH',
+          url: `${segment}/messages/${encodeURIComponent(messageId)}`,
+          body: { isRead: input.isRead }
+        }),
+        mapItem: (messageId, response, correlationBroken) =>
+          mapOutlookPatchItem({ messageId, response, correlationBroken })
+      })
+
+      return ActionResult.success(toEmailBatchOperationOutput(mapped))
+    })
+})
+
+export const outlookBatchSetFlagAction = defineAction({
+  id: 'outlook.batch_set_flag',
+  description:
+    'Flag or unflag 1-100 unique Outlook messages for follow-up with Graph JSON batching (at most 20 per envelope). Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: Schema.Struct(OutlookBatchSetFlagInput.fields),
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const mapped = yield* executeOutlookBatch({
+        integration,
+        mailbox: input.mailbox,
+        messageIds: input.messageIds,
+        buildSubrequest: (messageId, key, segment) => ({
+          key,
+          method: 'PATCH',
+          url: `${segment}/messages/${encodeURIComponent(messageId)}`,
+          body: { flag: { flagStatus: input.isFlagged ? 'flagged' : 'notFlagged' } }
+        }),
+        mapItem: (messageId, response, correlationBroken) =>
+          mapOutlookPatchItem({ messageId, response, correlationBroken })
+      })
+
+      return ActionResult.success(toEmailBatchOperationOutput(mapped))
+    })
+})
+
+export const outlookBatchMoveAction = defineAction({
+  id: 'outlook.batch_move',
+  description:
+    'Move 1-100 unique Outlook messages to destinationFolderId with Graph JSON batching (at most 20 per envelope). Successful items carry the provider-returned message ID and actual parent folder ID. Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: Schema.Struct(OutlookBatchMoveInput.fields),
+  outputSchema: OutlookBatchMoveOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const mapped = yield* executeOutlookBatch({
+        integration,
+        mailbox: input.mailbox,
+        messageIds: input.messageIds,
+        buildSubrequest: (messageId, key, segment) => ({
+          key,
+          method: 'POST',
+          url: `${segment}/messages/${encodeURIComponent(messageId)}/move`,
+          body: { destinationId: input.destinationFolderId }
+        }),
+        mapItem: (messageId, response, correlationBroken) =>
+          mapOutlookMoveItem({ messageId, response, correlationBroken })
+      })
+
+      return ActionResult.success(toOutlookBatchMoveOutput(mapped))
+    })
+})
+
+export const outlookBatchTrashAction = defineAction({
+  id: 'outlook.batch_trash',
+  description:
+    'Move 1-100 unique Outlook messages to Deleted Items with Graph JSON batching, never permanently deleting them. Successful items carry the provider-returned message ID and actual parent folder ID. Returns complete per-ID outcomes with exact counts.',
+  access: 'destructive',
+  inputSchema: Schema.Struct(OutlookBatchTrashInput.fields),
+  outputSchema: OutlookBatchMoveOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const mapped = yield* executeOutlookBatch({
+        integration,
+        mailbox: input.mailbox,
+        messageIds: input.messageIds,
+        buildSubrequest: (messageId, key, segment) => ({
+          key,
+          method: 'POST',
+          url: `${segment}/messages/${encodeURIComponent(messageId)}/move`,
+          body: { destinationId: 'deleteditems' }
+        }),
+        mapItem: (messageId, response, correlationBroken) =>
+          mapOutlookMoveItem({ messageId, response, correlationBroken })
+      })
+
+      return ActionResult.success(toOutlookBatchMoveOutput(mapped))
+    })
+})
+
+export const outlookBatchUntrashAction = defineAction({
+  id: 'outlook.batch_untrash',
+  description:
+    'Move 1-100 unique Outlook messages from Deleted Items to destinationFolderId (default: inbox), not their original folders, with Graph JSON batching. Successful items carry the provider-returned message ID and actual parent folder ID. Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: Schema.Struct(OutlookBatchUntrashInput.fields),
+  outputSchema: OutlookBatchMoveOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const mapped = yield* executeOutlookBatch({
+        integration,
+        mailbox: input.mailbox,
+        messageIds: input.messageIds,
+        buildSubrequest: (messageId, key, segment) => ({
+          key,
+          method: 'POST',
+          url: `${segment}/mailFolders/deleteditems/messages/${encodeURIComponent(messageId)}/move`,
+          body: { destinationId: input.destinationFolderId ?? 'inbox' }
+        }),
+        mapItem: (messageId, response, correlationBroken) =>
+          mapOutlookMoveItem({ messageId, response, correlationBroken })
+      })
+
+      return ActionResult.success(toOutlookBatchMoveOutput(mapped))
+    })
+})
+
+export const outlookBatchModifyCategoriesAction = defineAction({
+  id: 'outlook.batch_modify_categories',
+  description:
+    'Add or remove Outlook category display names on 1-100 unique messages with Graph JSON batching. Each chunk reads current categories, then PATCHes the exact case-sensitive merge (removals win, deduped); a failed read leaves that message not_attempted instead of erasing categories. This read/modify/write is non-atomic: hosts must serialize competing updates. Assignment never creates master categories. Returns complete per-ID outcomes with exact counts.',
+  access: 'write',
+  inputSchema: OutlookBatchModifyCategoriesActionInput,
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookWriteSlot(integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+
+      const segment =
+        input.mailbox === undefined ? '/me' : `/users/${encodeURIComponent(input.mailbox)}`
+
+      const removals = new Set(input.removeCategories ?? [])
+
+      const additions = [...new Set(input.addCategories ?? [])].filter(
+        category => !removals.has(category)
+      )
+
+      const mapped: Array<OutlookBatchMappedResult> = []
+      let stopped = false
+      let counter = 0
+
+      for (const chunk of toGraphBatchChunks(input.messageIds)) {
+        if (stopped) {
+          for (const messageId of chunk) {
+            mapped.push({
+              messageId,
+              status: 'not_attempted',
+              code: 'batch_stopped',
+              stop: false
+            })
+          }
+
+          continue
+        }
+
+        const reads = chunk.map(messageId => {
+          counter += 1
+          const key = `req-${counter}`
+
+          return { messageId, key }
+        })
+
+        const readOutcome = yield* executeGraphBatch({
+          token,
+          subrequests: reads.map(({ messageId, key }) => ({
+            key,
+            method: 'GET',
+            url: `${segment}/messages/${encodeURIComponent(messageId)}?$select=id,categories`
+          }))
+        })
+
+        if (!Predicate.isTagged(readOutcome, 'Executed')) {
+          // No category mutation was submitted: even an ambiguous prerequisite
+          // GET remains not_attempted for the mutation contract.
+          for (const { messageId } of reads) {
+            mapped.push({
+              messageId,
+              status: 'not_attempted',
+              code: 'prerequisite_failed',
+              stop: false
+            })
+          }
+
+          stopped = true
+          continue
+        }
+
+        const byKey = groupGraphBatchResponses(readOutcome.items)
+
+        const patches: Array<{
+          readonly messageId: string
+          readonly key: string
+          readonly body: { readonly categories: ReadonlyArray<string> }
+        }> = []
+
+        // Terminal per-ID outcomes are recorded here and emitted in chunk
+        // order after the write phase so results always follow input order.
+        const terminal = new Map<string, OutlookBatchMappedResult>()
+
+        for (const { messageId, key } of reads) {
+          const matches = byKey.get(key) ?? []
+          const response = correlatedGraphBatchResponse(matches)
+
+          if (response === undefined) {
+            terminal.set(messageId, {
+              messageId,
+              status: 'not_attempted',
+              code: 'prerequisite_failed',
+              stop: true
+            })
+            stopped = true
+            continue
+          }
+
+          if (response.status !== 200) {
+            const failure = outlookBatchItemFailure(response.status)
+            // The PATCH was never sent: not_attempted regardless of read cause.
+            terminal.set(messageId, {
+              messageId,
+              status: 'not_attempted',
+              code: 'prerequisite_failed',
+              stop: false
+            })
+
+            if (failure.stop) stopped = true
+            continue
+          }
+
+          const current = yield* decodeOutlookBatchCategoriesRead(response.body)
+
+          // Require a valid categories array: omitted or malformed data must
+          // fail instead of defaulting to [] and erasing existing categories.
+          if (Result.isFailure(current) || current.success.id !== messageId) {
+            terminal.set(messageId, {
+              messageId,
+              status: 'not_attempted',
+              code: 'prerequisite_failed',
+              stop: false
+            })
+            continue
+          }
+
+          const merged = [...new Set(current.success.categories)].filter(
+            category => !removals.has(category)
+          )
+
+          const seen = new Set(merged)
+
+          for (const category of additions) {
+            if (seen.has(category)) continue
+            seen.add(category)
+            merged.push(category)
+          }
+
+          counter += 1
+          patches.push({
+            messageId,
+            key: `req-${counter}`,
+            body: { categories: merged }
+          })
+        }
+
+        if (readOutcome.integrityBroken) stopped = true
+
+        if (stopped) {
+          for (const { messageId } of patches) {
+            terminal.set(messageId, {
+              messageId,
+              status: 'not_attempted',
+              code: 'batch_stopped',
+              stop: false
+            })
+          }
+        }
+
+        if (patches.length === 0 || stopped) {
+          for (const { messageId } of reads) {
+            const terminalResult = terminal.get(messageId)
+
+            if (terminalResult !== undefined) mapped.push(terminalResult)
+          }
+
+          continue
+        }
+
+        const writeOutcome = yield* executeGraphBatch({
+          token,
+          subrequests: patches.map(({ key, messageId, body }) => ({
+            key,
+            method: 'PATCH',
+            url: `${segment}/messages/${encodeURIComponent(messageId)}`,
+            body
+          }))
+        })
+
+        if (!Predicate.isTagged(writeOutcome, 'Executed')) {
+          const rejected = Predicate.isTagged(writeOutcome, 'Rejected')
+          const status = rejected ? 'not_attempted' : 'unknown'
+          const code = rejected ? 'batch_stopped' : 'outcome_ambiguous'
+
+          for (const { messageId } of patches) {
+            terminal.set(messageId, { messageId, status, code, stop: false })
+          }
+
+          stopped = true
+
+          for (const { messageId } of reads) {
+            const terminalResult = terminal.get(messageId)
+
+            if (terminalResult !== undefined) mapped.push(terminalResult)
+          }
+
+          continue
+        }
+
+        const writeByKey = groupGraphBatchResponses(writeOutcome.items)
+
+        for (const { messageId, key } of patches) {
+          const matches = writeByKey.get(key) ?? []
+          const response = correlatedGraphBatchResponse(matches)
+
+          const result = yield* mapOutlookPatchItem({
+            messageId,
+            response,
+            correlationBroken: response === undefined
+          })
+
+          terminal.set(messageId, { messageId, ...result })
+
+          if (result.stop) stopped = true
+        }
+
+        if (writeOutcome.integrityBroken) stopped = true
+
+        for (const { messageId } of reads) {
+          const terminalResult = terminal.get(messageId)
+
+          if (terminalResult !== undefined) mapped.push(terminalResult)
+        }
+      }
+
+      return ActionResult.success(toEmailBatchOperationOutput(mapped))
+    })
+})
+
+export const outlookDeletePermanentlyAction = defineAction({
+  id: 'outlook.delete_permanently',
+  description:
+    'Permanently delete 1-100 unique Outlook messages with Graph permanentDelete; items enter Recoverable Items/Purges and retention or holds may still preserve them, so this does not claim compliance erasure. Returns complete per-ID outcomes with exact counts.',
+  access: 'destructive',
+  inputSchema: Schema.Struct(OutlookDeletePermanentlyInput.fields),
+  outputSchema: EmailBatchOperationOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const mapped = yield* executeOutlookBatch({
+        integration,
+        mailbox: input.mailbox,
+        messageIds: input.messageIds,
+        buildSubrequest: (messageId, key, segment) => ({
+          key,
+          method: 'POST',
+          url: `${segment}/messages/${encodeURIComponent(messageId)}/permanentDelete`
+        }),
+        mapItem: (messageId, response, correlationBroken) =>
+          mapOutlookPermanentDeleteItem({ messageId, response, correlationBroken })
+      })
+
+      return ActionResult.success(toEmailBatchOperationOutput(mapped))
+    })
+})
+
 export const outlookMailActions = [
   outlookListMessagesAction,
   outlookSearchMessagesAction,
@@ -2239,5 +3171,12 @@ export const outlookMailActions = [
   outlookUpdateCategoryAction,
   outlookDeleteCategoryAction,
   outlookSetCategoriesAction,
-  outlookModifyCategoriesAction
+  outlookModifyCategoriesAction,
+  outlookBatchSetReadAction,
+  outlookBatchSetFlagAction,
+  outlookBatchMoveAction,
+  outlookBatchTrashAction,
+  outlookBatchUntrashAction,
+  outlookBatchModifyCategoriesAction,
+  outlookDeletePermanentlyAction
 ]

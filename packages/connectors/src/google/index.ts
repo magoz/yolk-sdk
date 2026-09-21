@@ -47,6 +47,16 @@ export {
 
 export {
   gmailActions,
+  gmailBatchModifyLabelsAction,
+  GmailBatchModifyLabelsInput,
+  gmailBatchSetReadAction,
+  GmailBatchSetReadInput,
+  gmailBatchSetStarredAction,
+  GmailBatchSetStarredInput,
+  gmailBatchTrashAction,
+  GmailBatchTrashInput,
+  gmailBatchUntrashAction,
+  GmailBatchUntrashInput,
   gmailCreateLabelAction,
   GmailCreateLabelInput,
   gmailDeleteLabelAction,
@@ -61,11 +71,15 @@ export {
   GmailDraftUpdateInput,
   GmailAttachmentBase64,
   GmailAttachmentBase64Url,
+  gmailDeletePermanentlyAction,
+  GmailDeletePermanentlyInput,
   gmailGetAttachmentAction,
   GmailGetAttachmentInput,
   GmailGetAttachmentOutput,
   gmailGetMessageAction,
   GmailGetMessageInput,
+  gmailSetReadAction,
+  GmailSetReadInput,
   gmailGetLabelAction,
   gmailGetThreadAction,
   GmailGetThreadInput,
@@ -131,6 +145,9 @@ export {
   googleGmailComposeScopes,
   GoogleGmailDraftReplyOAuthCredentialSlot,
   googleGmailDraftReplyScopes,
+  GoogleGmailFullMailOAuthCredentialSlot,
+  googleGmailFullMailScope,
+  googleGmailFullMailScopes,
   GoogleGmailModifyOAuthCredentialSlot,
   googleGmailModifyScope,
   googleGmailModifyScopes,
@@ -149,6 +166,17 @@ export {
 } from './oauth.ts'
 
 export { resolveGoogleAccessToken } from './shared.ts'
+
+export {
+  EmailBatchMessageIds,
+  EmailBatchOperationOutput,
+  EmailBatchOperationStatus,
+  EmailBatchResultCode,
+  EmailBatchResultItem,
+  EmailBatchSummary,
+  hasCompleteBatchCoverage,
+  makeEmailBatchSummary
+} from '../email-batch.ts'
 
 import { defineConnector } from '../connector.ts'
 import { googleCalendarActions } from './calendar.ts'

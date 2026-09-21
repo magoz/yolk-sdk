@@ -130,15 +130,17 @@ for threading, authorization, and recovery responsibilities.
 
 Generic email's principal contracts are `EmailIncomingConnection`, `EmailImapConnection`,
 `EmailSmtpConnection`, `EmailAddress`, `EmailBody`, `EmailAttachmentMetadata`,
-`EmailAttachmentBase64`, `EmailAttachmentContent`, `EmailMessageSummary`, `EmailMessage`,
-`EmailListMessagesInput`, `EmailListMessagesOutput`, `EmailGetMessageInput`, `EmailGetMessageOutput`,
+`EmailAttachmentBase64`, `EmailAttachmentContent`, `EmailMessageSummary`, `EmailMessage` (both with
+optional `isRead` / `isFlagged`), `EmailListMessagesInput`, `EmailListMessagesRequest` (both with
+optional state filters), `EmailListMessagesOutput`, `EmailGetMessageInput`, `EmailGetMessageOutput`,
 `EmailGetAttachmentInput`, `EmailGetAttachmentRequest`, `EmailGetAttachmentOutput`, `EmailMessageHeader`
 (required `headers` on `EmailMessage` from `email.get_message`; hosts fetch via `BODY.PEEK[HEADER]`),
 `EmailComposeMessage`, `EmailFolderName`, `EmailDraftId`, `EmailCreateDraftInput`,
 `EmailCreateDraftOutput`, `EmailSendMessageInput`, and `EmailSendMessageOutput`. `EmailClient` receives
 typed list/get/get-attachment/IMAP-draft/SMTP-send requests plus a runtime
 `UsernamePasswordCredential`; hosts opt into attachment retrieval through its optional
-`getAttachment` method, and successful attachment output is schema-validated before exposure. The
+`getAttachment` method. Filtered list calls use optional `listMessagesFiltered`; unfiltered calls
+retain `listMessages`. Successful list and attachment output is schema-validated before exposure. The
 connector exports separate `EmailIncomingCredentialSlot` and `EmailSmtpCredentialSlot` bindings and
 does not bundle transport or MIME libraries.
 
@@ -156,6 +158,28 @@ of `EmailImapKeyword` atoms), and optional `EmailClient.modifyLabels` host suppo
 exports `emailMoveAction` with `EmailMoveInput`, `EmailMoveRequest`, and optional
 `EmailClient.move` host support, returning `EmailMoveMessageOutput` with destination
 UIDVALIDITY/UID mapping when known.
+
+Batch exports are `emailBatchSetReadAction`, `emailBatchSetFlagAction`, `emailBatchMoveAction`,
+`emailBatchTrashAction`, `emailBatchUntrashAction`, and `emailBatchModifyLabelsAction`, with matching
+`EmailBatch*Input` / `EmailBatch*Request` contracts and optional `EmailClient.batch*` methods.
+`EmailBatchMessageIds` enforces 1-100 unique nonempty IDs. `EmailBatchOperationOutput` and
+`EmailBatchMoveOutput` contain one per-ID `EmailBatchOperationStatus` in `messageIds` order plus
+`EmailBatchSummary`; every succeeded move-shaped result requires destination `folder`, while
+`movedMessageId` is optional and only supplied when the destination UIDVALIDITY/UID mapping is known. `emailDeletePermanentlyAction`
+uses `EmailDeletePermanentlyInput` / `EmailDeletePermanentlyRequest` and optional
+`EmailClient.deletePermanently`. It is UID-scoped and destructive; hosts never blanket-expunge, and
+backup/retention erasure is outside the contract. The shared batch outcome shapes
+(`EmailBatchMessageIds`, `EmailBatchOperationStatus`, `EmailBatchResultCode`, `EmailBatchResultItem`,
+`EmailBatchSummary`, `EmailBatchOperationOutput`) live in the internal `email-batch` module and are
+re-exported from the `/email`, `/google`, and `/microsoft` entrypoints.
+
+Gmail batch exports are `gmailSetReadAction` (`gmail.set_read`, `write`, returns the normalized
+`GmailMessageOutput` with `isRead`/`isFlagged` derived from `labelIds`), `gmailBatchSetReadAction`,
+`gmailBatchSetStarredAction`, `gmailBatchModifyLabelsAction` (with `GmailBatchModifyLabelsInput`;
+removals win, each delta capped at 100), `gmailBatchTrashAction`, `gmailBatchUntrashAction`, and
+`gmailDeletePermanentlyAction`, all returning shared `EmailBatchOperationOutput` with sanitized
+codes only. `GoogleGmailFullMailOAuthCredentialSlot` requests only `https://mail.google.com/` for
+permanent deletion and is never added to combined/default consent.
 
 The package root also exports the pure `parseUnsubscribeMethods` helper (RFC 2369/8058
 `List-Unsubscribe` parser returning `UnsubscribeMethods` with mailto/http methods; execution stays
@@ -187,7 +211,15 @@ discriminator and valid base64 content, then exposes it as required `contentBase
 reference attachments are available only as list metadata.
 `OutlookListAttachmentsOutput.attachments` decodes to an Effect `Chunk`. `outlookMoveMessageAction`
 with `OutlookMoveMessageInput` moves a message to a required `destinationFolderId` via Graph
-`/move`; `outlookSetFlagAction` with `OutlookSetFlagInput` PATCHes follow-up `flagStatus`. Category exports are
+`/move`; `outlookSetFlagAction` with `OutlookSetFlagInput` PATCHes follow-up `flagStatus`.
+`OutlookMessage` carries optional `isFlagged` normalized from Graph `flag.flagStatus`, and
+`OutlookListMessagesInput` accepts optional `isRead`/`isFlagged` filters composed into `$filter`.
+Outlook batch exports are `outlookBatchSetReadAction`, `outlookBatchSetFlagAction`,
+`outlookBatchMoveAction`, `outlookBatchTrashAction`, `outlookBatchUntrashAction` (returning
+`OutlookBatchMoveOutput` with provider-returned `movedMessageId`/`destinationFolderId`),
+`outlookBatchModifyCategoriesAction`, and `outlookDeletePermanentlyAction` (returning shared
+`EmailBatchOperationOutput`), with matching `OutlookBatch*Input` contracts, Graph JSON batching
+(at most 20 subrequests per envelope), and sanitized codes only. Category exports are
 `OutlookCategory`, `OutlookCategoryColor`, `OutlookListCategoriesInput/Output`,
 `OutlookCreateCategoryInput`, `OutlookDeleteCategoryInput/Output`, `OutlookSetCategoriesInput`,
 `OutlookModifyCategoriesInput`, `OutlookGetCategoryInput`, `OutlookUpdateCategoryInput`, plus

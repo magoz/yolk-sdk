@@ -267,7 +267,32 @@ typed `ConnectorError`
 effects, while expected server rejection should be returned by the host port as
 `ActionResult.failure`.
 
-### Generic email labels, flags, and moves fail
+### Generic email filters, batches, labels, flags, and moves fail
+
+`email.list_messages` with `isRead` or `isFlagged` requires IMAP and optional
+`EmailClient.listMessagesFiltered`; it never falls back to legacy `listMessages`. POP3 filters fail
+before credentials. A missing method is a typed validation error, and malformed successful list
+output is rejected at the connector boundary.
+
+Batch/delete actions require 1-100 unique nonempty `messageIds`; duplicate, empty, or oversized
+inputs fail before credentials or host calls. Each action also needs its matching optional
+`EmailClient.batch*` or `deletePermanently` method. Successful output must cover every requested ID
+in `messageIds` order, use only `succeeded | failed | unknown | not_attempted`, include consistent
+summary counts, and keep
+error codes sanitized. Successful move-shaped results require destination `folder`; only
+`movedMessageId` is optional. For permanent deletion, use UID-scoped deletion of exactly the
+requested IDs; never blanket `EXPUNGE`. SDK success does not prove backup or retention erasure.
+
+Gmail batch failures expose sanitized codes only (`invalid_request`, `unauthorized`, `forbidden`,
+`not_found`, `conflict`, `precondition_failed`, `payload_too_large`, `locked`, `rate_limited`,
+`provider_rejected`, `outcome_ambiguous`, `invalid_response`, `batch_stopped`): never provider
+bodies or credentials. `unknown` means the mutation may have executed, so reconcile before
+retrying; `not_attempted` means no request was sent. Outlook batch results use the same codes plus
+`invalid_batch_response` (broken envelope correlation) and `prerequisite_failed` (a category read
+failed, so no PATCH was sent). Later chunks stop after auth/permission rejection, throttling,
+transport ambiguity, server failure, or broken correlation; already-established results are
+preserved. Combining fresh `isRead`/`isFlagged` filters with an Outlook `nextLink` fails before
+credentials: reuse the returned `nextLink` unchanged instead.
 
 Label, flag, and move inputs are validated before any host call: `EmailImapKeyword` rejects
 system flags such as `\Seen`, whitespace, control characters, and IMAP atom specials;

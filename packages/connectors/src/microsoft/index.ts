@@ -14,6 +14,20 @@ export type {
 export {
   MicrosoftMailboxAccessMode,
   microsoftMailboxAccessModeConfigKey,
+  outlookBatchModifyCategoriesAction,
+  OutlookBatchModifyCategoriesInput,
+  outlookBatchMoveAction,
+  OutlookBatchMoveInput,
+  OutlookBatchMoveOutput,
+  OutlookBatchMoveResultItem,
+  outlookBatchSetFlagAction,
+  OutlookBatchSetFlagInput,
+  outlookBatchSetReadAction,
+  OutlookBatchSetReadInput,
+  outlookBatchTrashAction,
+  OutlookBatchTrashInput,
+  outlookBatchUntrashAction,
+  OutlookBatchUntrashInput,
   OutlookAttachment,
   OutlookAttachmentKind,
   OutlookAttachmentMetadata,
@@ -25,6 +39,8 @@ export {
   outlookCreateDraftAction,
   OutlookCreateReplyDraftInput,
   outlookCreateReplyDraftAction,
+  outlookDeletePermanentlyAction,
+  OutlookDeletePermanentlyInput,
   OutlookUpdateDraftInput,
   outlookUpdateDraftAction,
   outlookDeleteCategoryAction,
@@ -152,6 +168,17 @@ export {
 } from './oauth.ts'
 
 export { microsoftGraphApiBaseUrl, resolveMicrosoftAccessToken } from './shared.ts'
+
+export {
+  EmailBatchMessageIds,
+  EmailBatchOperationOutput,
+  EmailBatchOperationStatus,
+  EmailBatchResultCode,
+  EmailBatchResultItem,
+  EmailBatchSummary,
+  hasCompleteBatchCoverage,
+  makeEmailBatchSummary
+} from '../email-batch.ts'
 
 import { defineConnector } from '../connector.ts'
 import { oneDriveActions } from './drive.ts'

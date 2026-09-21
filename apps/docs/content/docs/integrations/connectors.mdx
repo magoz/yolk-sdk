@@ -137,19 +137,26 @@ describe GET support, argument/result headers, and folder-ID-relative addressing
 `EmailClient` Effect layer backed by their chosen IMAP, POP3, SMTP, TLS, and MIME libraries; the
 package does not bundle those libraries.
 
-| Action id              | What it does                                   | Access        |
-| ---------------------- | ---------------------------------------------- | ------------- |
-| `email.list_messages`  | list normalized messages with an opaque cursor | `read`        |
-| `email.get_message`    | fetch one normalized message                   | `read`        |
-| `email.get_attachment` | retrieve decoded attachment content as base64  | `read`        |
-| `email.create_draft`   | append a message draft to an IMAP mailbox      | `write`       |
-| `email.send_message`   | submit a normalized message to the SMTP server | `destructive` |
-| `email.set_read`       | mark an IMAP message read or unread            | `write`       |
-| `email.set_flag`       | flag/unflag an IMAP message for follow-up      | `write`       |
-| `email.trash`          | move an IMAP message to trash                  | `destructive` |
-| `email.untrash`        | move an IMAP message out of trash              | `write`       |
-| `email.move`           | move an IMAP message to any folder             | `write`       |
-| `email.modify_labels`  | add/remove IMAP keyword labels                 | `write`       |
+| Action id                   | What it does                                   | Access        |
+| --------------------------- | ---------------------------------------------- | ------------- |
+| `email.list_messages`       | list normalized messages with an opaque cursor | `read`        |
+| `email.get_message`         | fetch one normalized message                   | `read`        |
+| `email.get_attachment`      | retrieve decoded attachment content as base64  | `read`        |
+| `email.create_draft`        | append a message draft to an IMAP mailbox      | `write`       |
+| `email.send_message`        | submit a normalized message to the SMTP server | `destructive` |
+| `email.set_read`            | mark an IMAP message read or unread            | `write`       |
+| `email.set_flag`            | flag/unflag an IMAP message for follow-up      | `write`       |
+| `email.trash`               | move an IMAP message to trash                  | `destructive` |
+| `email.untrash`             | move an IMAP message out of trash              | `write`       |
+| `email.move`                | move an IMAP message to any folder             | `write`       |
+| `email.modify_labels`       | add/remove IMAP keyword labels                 | `write`       |
+| `email.batch_set_read`      | batch mark read/unread                         | `write`       |
+| `email.batch_set_flag`      | batch flag/unflag                              | `write`       |
+| `email.batch_move`          | batch move to one folder                       | `write`       |
+| `email.batch_trash`         | batch move to trash                            | `destructive` |
+| `email.batch_untrash`       | batch restore from trash                       | `write`       |
+| `email.batch_modify_labels` | batch add/remove IMAP keywords                 | `write`       |
+| `email.delete_permanently`  | permanently delete identified messages         | `destructive` |
 
 Incoming actions require `incomingHost` and use `EmailIncomingCredentialSlot`. They default to
 `incomingProtocol: 'imap'`, `incomingSecurity: 'tls'`, and port `993`; POP3 with TLS defaults to
@@ -161,7 +168,11 @@ or numeric string from `1` through `65535`. Security is explicit: `none`, `start
 The two slots may bind separate host credential refs or the same ref. Resolve credentials immediately
 before transport calls. Both slots require `UsernamePasswordCredential`; use the provider-specific
 Google or Microsoft connectors for their OAuth flows. Message list/get outputs contain normalized
-addresses, body text/HTML, and attachment metadata, never raw MIME.
+addresses, body text/HTML, and attachment metadata, never raw MIME. Summaries and full messages
+also expose optional `isRead` and `isFlagged`; omission means unknown/unavailable. List input accepts
+matching optional filters. Filtered requests require optional `EmailClient.listMessagesFiltered`
+and never fall back to `listMessages`; POP3 rejects filters before credential resolution. Successful
+list output is schema-validated.
 
 When attachment metadata includes `id`, pass it with the parent `messageId` to
 `email.get_attachment`. The output repeats normalized metadata and exposes decoded file bytes—not
@@ -236,6 +247,22 @@ typed validation error. All successful mutation outputs are schema-validated.
   Source `folder` defaults to `INBOX`; identical source/destination folders are rejected before
   dispatch. Returns the destination and the new message ID when the host can map it.
 
+The six explicit batch actions use `messageIds` (1-100 unique nonempty values), one source folder,
+and the same payload/defaults as their single-message counterparts. Optional host methods are
+`batchSetRead`, `batchSetFlag`, `batchMove`, `batchTrash`, `batchUntrash`, and `batchModifyLabels`.
+Successful output reports every requested ID in `messageIds` order as `succeeded`, `failed`,
+`unknown`, or `not_attempted`, with an optional sanitized code and exact summary counts. Every
+succeeded result from `email.batch_move`, `email.batch_trash`, or `email.batch_untrash` must include destination
+`folder`; `movedMessageId` is optional and must only be supplied when the adapter knows the
+destination UIDVALIDITY/UID mapping (omit it and re-list the destination otherwise, never reusing
+a stale source UID). The connector validates successful host output; raw provider
+errors must not be exposed. Missing methods fail clearly while legacy adapters remain valid.
+
+`email.delete_permanently` separately accepts `{ messageIds, folder? }`, defaults the source to
+`INBOX`, and uses optional `EmailClient.deletePermanently`. Hosts permanently remove exactly those
+UID-scoped messages and never issue blanket `EXPUNGE`. Approval is host policy, and SDK success does
+not promise erasure from backups, retention, journaling, or compliance systems.
+
 Hosts perform UID `MOVE` or a safe per-message copy/delete fallback. Never use blanket `EXPUNGE`,
 permanent deletion, or merely set `\Deleted` as a substitute for a trash move. Return a failure
 when trash discovery is missing/ambiguous, folders are identical, or a safe move is unavailable.
@@ -272,31 +299,38 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 
 ### Gmail actions
 
-| Action id                | What it does                           |
-| ------------------------ | -------------------------------------- |
-| `gmail.search`           | search Gmail messages                  |
-| `gmail.get_message`      | fetch one message                      |
-| `gmail.list`             | list messages                          |
-| `gmail.list_drafts`      | list drafts                            |
-| `gmail.get_thread`       | fetch normalized thread                |
-| `gmail.list_labels`      | list labels                            |
-| `gmail.create_label`     | create a user label                    |
-| `gmail.get_label`        | get label details                      |
-| `gmail.update_label`     | rename/update label visibility         |
-| `gmail.delete_label`     | delete a user label                    |
-| `gmail.modify_labels`    | add/remove labels                      |
-| `gmail.set_starred`      | star/unstar a message                  |
-| `gmail.trash`            | move a message to trash                |
-| `gmail.untrash`          | restore a trashed message              |
-| `gmail.draft_compose`    | create a draft                         |
-| `gmail.draft_update`     | update a draft                         |
-| `gmail.draft_delete`     | delete a draft                         |
-| `gmail.draft_reply`      | create a reply draft                   |
-| `gmail.send_message`     | submit host-generated MIME for sending |
-| `gmail.list_attachments` | list attachment metadata               |
-| `gmail.get_attachment`   | fetch attachment content               |
-| `gmail.list_send_as`     | list send-as aliases                   |
-| `gmail.list_accounts`    | list accessible Gmail accounts         |
+| Action id                   | What it does                           |
+| --------------------------- | -------------------------------------- |
+| `gmail.search`              | search Gmail messages                  |
+| `gmail.get_message`         | fetch one message                      |
+| `gmail.list`                | list messages                          |
+| `gmail.list_drafts`         | list drafts                            |
+| `gmail.get_thread`          | fetch normalized thread                |
+| `gmail.list_labels`         | list labels                            |
+| `gmail.create_label`        | create a user label                    |
+| `gmail.get_label`           | get label details                      |
+| `gmail.update_label`        | rename/update label visibility         |
+| `gmail.delete_label`        | delete a user label                    |
+| `gmail.modify_labels`       | add/remove labels                      |
+| `gmail.set_starred`         | star/unstar a message                  |
+| `gmail.set_read`            | mark a message read/unread             |
+| `gmail.batch_set_read`      | batch mark read/unread                 |
+| `gmail.batch_set_starred`   | batch star/unstar                      |
+| `gmail.batch_modify_labels` | batch add/remove labels                |
+| `gmail.batch_trash`         | batch move to trash                    |
+| `gmail.batch_untrash`       | batch restore trashed messages         |
+| `gmail.delete_permanently`  | permanently delete messages            |
+| `gmail.trash`               | move a message to trash                |
+| `gmail.untrash`             | restore a trashed message              |
+| `gmail.draft_compose`       | create a draft                         |
+| `gmail.draft_update`        | update a draft                         |
+| `gmail.draft_delete`        | delete a draft                         |
+| `gmail.draft_reply`         | create a reply draft                   |
+| `gmail.send_message`        | submit host-generated MIME for sending |
+| `gmail.list_attachments`    | list attachment metadata               |
+| `gmail.get_attachment`      | fetch attachment content               |
+| `gmail.list_send_as`        | list send-as aliases                   |
+| `gmail.list_accounts`       | list accessible Gmail accounts         |
 
 Label creation takes `{ name, messageListVisibility?, labelListVisibility? }`. Get/delete take
 `{ id }`; update takes `{ id, name?, messageListVisibility?, labelListVisibility? }` with at
@@ -306,6 +340,22 @@ mutations and message assignment reuse `gmail.modify`. System labels cannot be r
 Delete returns `{ id, deleted: true }`; it deletes the label, not messages. Assign/remove labels
 with `gmail.modify_labels` and `{ messageId, addLabelIds?, removeLabelIds? }`. Star/unstar with
 `gmail.set_starred` and `{ messageId, isStarred }`, which assigns the `STARRED` system label.
+Mark read/unread with `gmail.set_read` and `{ messageId, isRead }`, which flips the `UNREAD`
+system label via `gmail.modify` consent and returns the normalized message with `isRead`/`isFlagged`
+derived from `labelIds`. `gmail.search` and `gmail.list` accept optional `isRead`/`isFlagged`
+boolean filters composed into the Gmail query (`is:read`/`is:unread`, `is:starred`/`-is:starred`)
+alongside any raw query.
+
+Batch actions take `{ messageIds, ... }` with 1-100 unique nonempty path-safe IDs and return
+complete per-ID outcomes (`succeeded`, `failed`, `unknown`, `not_attempted`) in `messageIds` order,
+with exact summary counts and sanitized codes only. Gmail executes individually addressed requests
+sequentially (never the bulk endpoints, whose empty success cannot establish per-ID outcomes):
+`gmail.batch_set_read`, `gmail.batch_set_starred`, `gmail.batch_modify_labels` (removals win,
+labels are never created, each delta capped at 100), `gmail.batch_trash`, and
+`gmail.batch_untrash`. `gmail.delete_permanently` issues individual `DELETE` requests (only 204
+confirms success; 404 is a definitive rejection) and requires opt-in full-mail
+(`https://mail.google.com/`) consent, which is never added to combined/default consent. It is
+immediate permanent deletion, not trash, and claims no backup erasure.
 
 ### Submit a reviewed Gmail message
 
@@ -473,31 +523,38 @@ required `Mail.*` and `Files.*` grants.
 
 ### Outlook actions
 
-| Action id                    | What it does                                                   |
-| ---------------------------- | -------------------------------------------------------------- |
-| `outlook.list_messages`      | list mailbox or folder messages with opaque Graph paging       |
-| `outlook.search_messages`    | search messages with Microsoft Graph mail `$search` syntax     |
-| `outlook.get_message`        | fetch one message with text body and headers                   |
-| `outlook.list_attachments`   | list attachment metadata, including inline attachments         |
-| `outlook.get_attachment`     | fetch one file attachment with base64 content                  |
-| `outlook.create_draft`       | create a new message draft                                     |
-| `outlook.create_reply_draft` | create a reply draft preserving Graph-generated quoted history |
-| `outlook.update_draft`       | edit recipients, subject, and full body on an existing draft   |
-| `outlook.send_mail`          | submit a new message for sending                               |
-| `outlook.send_draft`         | submit an existing draft for sending                           |
-| `outlook.reply`              | send the reviewed reply in one request, no draft in between    |
-| `outlook.set_read`           | mark a message read or unread                                  |
-| `outlook.set_flag`           | flag/unflag a message for follow-up                            |
-| `outlook.trash`              | move a message to Deleted Items                                |
-| `outlook.untrash`            | move a message from Deleted Items to inbox or another folder   |
-| `outlook.move_message`       | move a message to any folder                                   |
-| `outlook.list_categories`    | list master categories                                         |
-| `outlook.create_category`    | create a master category                                       |
-| `outlook.delete_category`    | delete a master category                                       |
-| `outlook.get_category`       | get one master category                                        |
-| `outlook.update_category`    | update a master category color                                 |
-| `outlook.set_categories`     | replace or clear message category names                        |
-| `outlook.modify_categories`  | add/remove message category names                              |
+| Action id                         | What it does                                                   |
+| --------------------------------- | -------------------------------------------------------------- |
+| `outlook.list_messages`           | list mailbox or folder messages with opaque Graph paging       |
+| `outlook.search_messages`         | search messages with Microsoft Graph mail `$search` syntax     |
+| `outlook.get_message`             | fetch one message with text body and headers                   |
+| `outlook.list_attachments`        | list attachment metadata, including inline attachments         |
+| `outlook.get_attachment`          | fetch one file attachment with base64 content                  |
+| `outlook.create_draft`            | create a new message draft                                     |
+| `outlook.create_reply_draft`      | create a reply draft preserving Graph-generated quoted history |
+| `outlook.update_draft`            | edit recipients, subject, and full body on an existing draft   |
+| `outlook.send_mail`               | submit a new message for sending                               |
+| `outlook.send_draft`              | submit an existing draft for sending                           |
+| `outlook.reply`                   | send the reviewed reply in one request, no draft in between    |
+| `outlook.set_read`                | mark a message read or unread                                  |
+| `outlook.set_flag`                | flag/unflag a message for follow-up                            |
+| `outlook.trash`                   | move a message to Deleted Items                                |
+| `outlook.untrash`                 | move a message from Deleted Items to inbox or another folder   |
+| `outlook.move_message`            | move a message to any folder                                   |
+| `outlook.list_categories`         | list master categories                                         |
+| `outlook.create_category`         | create a master category                                       |
+| `outlook.delete_category`         | delete a master category                                       |
+| `outlook.get_category`            | get one master category                                        |
+| `outlook.update_category`         | update a master category color                                 |
+| `outlook.set_categories`          | replace or clear message category names                        |
+| `outlook.modify_categories`       | add/remove message category names                              |
+| `outlook.batch_set_read`          | batch mark read/unread                                         |
+| `outlook.batch_set_flag`          | batch flag/unflag for follow-up                                |
+| `outlook.batch_move`              | batch move to a folder                                         |
+| `outlook.batch_trash`             | batch move to Deleted Items                                    |
+| `outlook.batch_untrash`           | batch restore from Deleted Items                               |
+| `outlook.batch_modify_categories` | batch add/remove category names                                |
+| `outlook.delete_permanently`      | permanently delete messages                                    |
 
 #### Categories
 
@@ -526,6 +583,26 @@ reads never trigger a PATCH. Both calls use `Mail.ReadWrite` or `Mail.ReadWrite.
 preserve the existing own-mailbox/application guards and immutable-ID headers. Neither action
 creates master categories automatically. The merge is **non-atomic**: hosts must serialize
 competing updates, and the SDK makes no retry or compare-and-swap guarantee.
+
+Outlook messages report `isRead` plus follow-up flag state as `isFlagged` (`flagged` is true;
+`notFlagged` and `complete` are false; anything else asserts nothing). `outlook.list_messages`
+accepts optional `isRead`/`isFlagged` booleans composed into `$filter` (`isRead eq true|false`,
+`flag/flagStatus eq 'flagged'`, `flag/flagStatus ne 'flagged'`) alongside any raw filter; typed
+filters cannot be combined with `nextLink`.
+
+Batch actions take `{ messageIds, mailbox?, ... }` with 1-100 unique nonempty path-safe IDs and
+return complete per-ID outcomes in `messageIds` order with exact summary counts and sanitized codes
+only, executed through Graph JSON batching with at most 20 subrequests per sequential envelope,
+unique correlation IDs, per-subrequest immutable-ID preferences, and responses matched by correlation
+ID (never position or outer status). `outlook.batch_set_read` and `outlook.batch_set_flag` PATCH
+individually addressed messages; `outlook.batch_move`, `outlook.batch_trash` (to `deleteditems`),
+and `outlook.batch_untrash` (from Deleted Items, defaulting to `inbox`) POST to `/move` and report
+the provider-returned message ID plus actual `parentFolderId` on success, never a fabricated
+destination. `outlook.batch_modify_categories` reads current categories per chunk (a failed read
+leaves that message `not_attempted` instead of erasing categories) then PATCHes the exact
+case-sensitive merge. `outlook.delete_permanently` POSTs `permanentDelete` (documented 204
+establishes success); items enter Recoverable Items/Purges, so retention or holds may still
+preserve them and this is not compliance erasure.
 
 #### Unsubscribe from mailing lists and report spam
 
