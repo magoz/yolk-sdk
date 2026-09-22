@@ -18,6 +18,7 @@ import {
   isMicrosoftSuccessStatus,
   microsoftGraphApiBaseUrl,
   microsoftProviderFailure,
+  microsoftSanitizedProviderFailure,
   resolveMicrosoftAccessToken
 } from './shared.ts'
 
@@ -169,6 +170,177 @@ export class OneDriveDeleteItemOutput extends Schema.Class<OneDriveDeleteItemOut
   deleted: Schema.Boolean
 }) {}
 
+const OneDriveOperationText = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter(
+    value =>
+      value.trim() === value &&
+      !/[\ud800-\udfff]/u.test(value) &&
+      !/[\u0000-\u001f\u007f]/.test(value)
+  )
+)
+
+const OneDriveOperationId = OneDriveOperationText.check(
+  Schema.makeFilter(value => !/^\.+$/.test(value))
+)
+
+const OneDriveConcreteItemId = OneDriveOperationId.check(
+  Schema.makeFilter(value => value.toLowerCase() !== 'root')
+)
+
+const OneDriveItemName = OneDriveOperationText.check(
+  Schema.makeFilter(
+    value => !/["*:<>?\/\\|]/.test(value) && value !== '.' && value !== '..' && !value.endsWith('.')
+  )
+)
+
+export class OneDriveMoveItemInput extends Schema.Class<OneDriveMoveItemInput>(
+  'OneDriveMoveItemInput'
+)({
+  itemId: OneDriveConcreteItemId,
+  driveId: Schema.optional(OneDriveOperationId),
+  destinationParentItemId: OneDriveConcreteItemId,
+  name: Schema.optional(OneDriveItemName),
+  ifMatch: Schema.optional(OneDriveOperationText)
+}) {}
+
+export class OneDriveCopyItemInput extends Schema.Class<OneDriveCopyItemInput>(
+  'OneDriveCopyItemInput'
+)({
+  itemId: OneDriveConcreteItemId,
+  driveId: Schema.optional(OneDriveOperationId),
+  destinationDriveId: OneDriveOperationId,
+  destinationParentItemId: OneDriveConcreteItemId,
+  name: Schema.optional(OneDriveItemName),
+  conflictBehavior: Schema.optional(Schema.Literals(['fail', 'rename']))
+}) {}
+
+const OneDriveCopyMonitorId = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+const OneDriveCopyMonitorRawUnsafe = /[\u0000-\u0020\u007f\\,]/
+
+const OneDriveCopyMonitorMalformedPercent = /%(?![0-9a-f]{2})/i
+
+const OneDriveCopyMonitorEncodedUnsafe = /%(?:0[0-9a-f]|1[0-9a-f]|2c|2f|5c|7f)/i
+
+const OneDriveApiMonitorPath = new RegExp(`^/monitor/${OneDriveCopyMonitorId}$`, 'i')
+
+const OneDriveSharePointMonitorPath = new RegExp(
+  `^/(?:[^/]+/)*_api/v2\\.[01]/monitor/${OneDriveCopyMonitorId}$`,
+  'i'
+)
+
+const isOneDriveCopyMonitorUrl = (value: string) => {
+  if (
+    OneDriveCopyMonitorRawUnsafe.test(value) ||
+    OneDriveCopyMonitorMalformedPercent.test(value) ||
+    OneDriveCopyMonitorEncodedUnsafe.test(value) ||
+    !URL.canParse(value)
+  ) {
+    return false
+  }
+
+  const parsed = new URL(value)
+
+  if (
+    parsed.toString() !== value ||
+    parsed.protocol !== 'https:' ||
+    parsed.port !== '' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.search !== '' ||
+    parsed.hash !== ''
+  ) {
+    return false
+  }
+
+  if (parsed.hostname === 'api.onedrive.com') {
+    return OneDriveApiMonitorPath.test(parsed.pathname)
+  }
+
+  return (
+    parsed.hostname.endsWith('.sharepoint.com') &&
+    OneDriveSharePointMonitorPath.test(parsed.pathname)
+  )
+}
+
+export const OneDriveCopyMonitorUrl = Schema.String.check(
+  Schema.makeFilter(isOneDriveCopyMonitorUrl)
+)
+
+export type OneDriveCopyMonitorUrl = typeof OneDriveCopyMonitorUrl.Type
+
+export class OneDriveCopyAcceptedOutput extends Schema.Class<OneDriveCopyAcceptedOutput>(
+  'OneDriveCopyAcceptedOutput'
+)({
+  status: Schema.Literal('accepted'),
+  monitorUrl: OneDriveCopyMonitorUrl
+}) {}
+
+export const OneDriveCopyStatus = Schema.Literals([
+  'notStarted',
+  'inProgress',
+  'completed',
+  'updating',
+  'failed',
+  'deletePending',
+  'deleteFailed',
+  'waiting'
+])
+
+export type OneDriveCopyStatus = typeof OneDriveCopyStatus.Type
+
+export class OneDriveCopyStatusInput extends Schema.Class<OneDriveCopyStatusInput>(
+  'OneDriveCopyStatusInput'
+)({
+  monitorUrl: OneDriveCopyMonitorUrl,
+  driveId: Schema.optional(OneDriveOperationId)
+}) {}
+
+export class OneDriveCopyStatusError extends Schema.Class<OneDriveCopyStatusError>(
+  'OneDriveCopyStatusError'
+)({
+  code: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.String)
+}) {}
+
+export class OneDriveCopyStatusOutput extends Schema.Class<OneDriveCopyStatusOutput>(
+  'OneDriveCopyStatusOutput'
+)({
+  status: OneDriveCopyStatus,
+  percentageComplete: Schema.optional(
+    Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }))
+  ),
+  itemId: Schema.optional(OneDriveOperationId),
+  error: Schema.optional(OneDriveCopyStatusError)
+}) {}
+
+const OneDriveCopyStatusErrorApi = Schema.Struct({
+  code: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.String),
+  details: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        code: Schema.optional(Schema.String),
+        message: Schema.optional(Schema.String),
+        target: Schema.optional(Schema.String)
+      })
+    )
+  )
+})
+
+const OneDriveCopyStatusApi = Schema.Struct({
+  status: OneDriveCopyStatus,
+  percentageComplete: Schema.optional(
+    Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }))
+  ),
+  percentComplete: Schema.optional(
+    Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }))
+  ),
+  resourceId: Schema.optional(OneDriveOperationId),
+  error: Schema.optional(OneDriveCopyStatusErrorApi)
+})
+
 const oneDriveTargetPath = (driveId: string | undefined) =>
   driveId === undefined ? '/me/drive' : `/drives/${encodeURIComponent(driveId)}`
 
@@ -284,6 +456,23 @@ const oneDriveWriteHeaders = (token: string) => ({
   ...oneDriveReadHeaders(token),
   'content-type': 'application/json'
 })
+
+const invalidOneDriveResponse = (actionId: string, message: string, underlying?: unknown) =>
+  new ConnectorError({
+    cause: 'validation_failed',
+    message,
+    connectorId: microsoftConnectorId,
+    actionId,
+    underlying
+  })
+
+const singleHeader = (headers: Readonly<Record<string, string>>, name: string) => {
+  const matches = Object.entries(headers).filter(
+    ([headerName]) => headerName.toLowerCase() === name.toLowerCase()
+  )
+
+  return matches.length === 1 ? matches[0]?.[1] : undefined
+}
 
 const oneDriveListUrl = (input: OneDriveListItemsInput) => {
   if (input.nextLink !== undefined) {
@@ -485,6 +674,242 @@ export const oneDriveCreateFolderAction = defineAction({
     })
 })
 
+export const oneDriveMoveItemAction = defineAction({
+  id: 'onedrive.move_item',
+  description:
+    'Move a Microsoft OneDrive file or folder within its current drive. Cross-drive moves are not supported. The returned item confirms the synchronous move.',
+  access: 'write',
+  inputSchema: OneDriveMoveItemInput,
+  outputSchema: OneDriveItem,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* oneDriveWriteSlot(integration, input.driveId)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      type OneDriveMoveHeaders = {
+        readonly authorization: string
+        readonly accept: string
+        readonly 'content-type': string
+        'if-match'?: string
+      }
+
+      const headers: OneDriveMoveHeaders = oneDriveWriteHeaders(token)
+
+      if (input.ifMatch !== undefined) {
+        headers['if-match'] = input.ifMatch
+      }
+
+      type OneDriveMoveBody = {
+        readonly parentReference: { readonly id: string }
+        name?: string
+      }
+
+      const body: OneDriveMoveBody = {
+        parentReference: { id: input.destinationParentItemId }
+      }
+
+      if (input.name !== undefined) {
+        body.name = input.name
+      }
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'PATCH',
+          url: `${microsoftGraphApiBaseUrl}${oneDriveTargetPath(input.driveId)}/items/${encodeURIComponent(input.itemId)}`,
+          headers,
+          body: JSON.stringify(body),
+          redirect: 'manual',
+          credentials: 'omit'
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'onedrive_move_item_failed',
+          message: 'Microsoft OneDrive move item failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      const output = yield* decodeJsonResponse(OneDriveItem, response)
+
+      return ActionResult.success(output)
+    })
+})
+
+export const oneDriveCopyItemAction = defineAction({
+  id: 'onedrive.copy_item',
+  description:
+    "Queue an asynchronous Microsoft OneDrive copy, including folder children. Returns accepted with a short-lived monitor URL; acceptance does not mean the copy completed. Omission of conflictBehavior uses Graph's documented fail default. Destructive replace mode is intentionally unsupported.",
+  access: 'write',
+  inputSchema: OneDriveCopyItemInput,
+  outputSchema: OneDriveCopyAcceptedOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* oneDriveWriteSlot(integration, input.driveId)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      const url = new URL(
+        `${microsoftGraphApiBaseUrl}${oneDriveTargetPath(input.driveId)}/items/${encodeURIComponent(input.itemId)}/copy`
+      )
+
+      if (input.conflictBehavior !== undefined) {
+        url.searchParams.set('@microsoft.graph.conflictBehavior', input.conflictBehavior)
+      }
+
+      type OneDriveCopyBody = {
+        readonly parentReference: {
+          readonly driveId: string
+          readonly id: string
+        }
+        name?: string
+      }
+
+      const body: OneDriveCopyBody = {
+        parentReference: {
+          driveId: input.destinationDriveId,
+          id: input.destinationParentItemId
+        }
+      }
+
+      if (input.name !== undefined) {
+        body.name = input.name
+      }
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'POST',
+          url: url.toString(),
+          headers: oneDriveWriteHeaders(token),
+          body: JSON.stringify(body),
+          redirect: 'manual',
+          credentials: 'omit'
+        })
+      )
+
+      if (response.status !== 202) {
+        if (!isMicrosoftSuccessStatus(response.status)) {
+          return yield* microsoftProviderFailure({
+            code: 'onedrive_copy_item_failed',
+            message: 'Microsoft OneDrive copy item failed',
+            status: response.status,
+            headers: response.headers,
+            body: response.body
+          })
+        }
+
+        return yield* Effect.fail(
+          invalidOneDriveResponse(
+            'onedrive.copy_item',
+            'Microsoft OneDrive copy item returned an unexpected success status'
+          )
+        )
+      }
+
+      const location = singleHeader(response.headers, 'location')
+
+      if (location === undefined) {
+        return yield* Effect.fail(
+          invalidOneDriveResponse(
+            'onedrive.copy_item',
+            'Microsoft OneDrive copy item did not return one monitor location'
+          )
+        )
+      }
+
+      const monitorUrl = yield* Schema.decodeUnknownEffect(OneDriveCopyMonitorUrl)(location).pipe(
+        Effect.mapError(error =>
+          invalidOneDriveResponse(
+            'onedrive.copy_item',
+            'Microsoft OneDrive copy item returned an untrusted monitor location',
+            error
+          )
+        )
+      )
+
+      return ActionResult.success(
+        OneDriveCopyAcceptedOutput.make({ status: 'accepted', monitorUrl })
+      )
+    })
+})
+
+export const oneDriveGetCopyStatusAction = defineAction({
+  id: 'onedrive.get_copy_status',
+  description:
+    'Poll one previously accepted OneDrive copy once. The short-lived monitor URL is requested without credentials and redirects are not followed. Callers must inspect status because a successful poll can report a failed copy.',
+  inputSchema: OneDriveCopyStatusInput,
+  outputSchema: OneDriveCopyStatusOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* oneDriveWriteSlot(integration, input.driveId)
+      yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'GET',
+          url: input.monitorUrl,
+          headers: { accept: 'application/json' },
+          redirect: 'manual',
+          credentials: 'omit'
+        })
+      )
+
+      if (response.status === 303) {
+        return ActionResult.success(OneDriveCopyStatusOutput.make({ status: 'completed' }))
+      }
+
+      if (response.status !== 200 && response.status !== 202) {
+        return microsoftSanitizedProviderFailure({
+          code: 'onedrive_get_copy_status_failed',
+          message: 'Microsoft OneDrive get copy status failed',
+          status: response.status,
+          headers: response.headers
+        })
+      }
+
+      const providerStatus = yield* decodeJsonResponse(OneDriveCopyStatusApi, response)
+      const firstDetail = providerStatus.error?.details?.[0]
+      const errorCode = providerStatus.error?.code ?? firstDetail?.code
+      const errorMessage = providerStatus.error?.message ?? firstDetail?.message
+
+      type OneDriveCopyStatusErrorFields = {
+        code?: string
+        message?: string
+      }
+
+      const errorFields: OneDriveCopyStatusErrorFields = {}
+
+      if (errorCode !== undefined) errorFields.code = errorCode
+
+      if (errorMessage !== undefined) errorFields.message = errorMessage
+
+      type OneDriveCopyStatusOutputFields = {
+        readonly status: OneDriveCopyStatus
+        percentageComplete?: number
+        itemId?: string
+        error?: OneDriveCopyStatusError
+      }
+
+      const output: OneDriveCopyStatusOutputFields = { status: providerStatus.status }
+      const percentageComplete = providerStatus.percentageComplete ?? providerStatus.percentComplete
+
+      if (percentageComplete !== undefined) output.percentageComplete = percentageComplete
+
+      if (providerStatus.resourceId !== undefined) output.itemId = providerStatus.resourceId
+
+      if (errorCode !== undefined || errorMessage !== undefined) {
+        output.error = OneDriveCopyStatusError.make(errorFields)
+      }
+
+      return ActionResult.success(OneDriveCopyStatusOutput.make(output))
+    })
+})
+
 export const oneDriveDeleteItemAction = defineAction({
   id: 'onedrive.delete_item',
   description: 'Move a Microsoft OneDrive file or folder to the recycle bin.',
@@ -538,5 +963,8 @@ export const oneDriveActions = [
   oneDriveSearchItemsAction,
   oneDriveGetItemAction,
   oneDriveCreateFolderAction,
+  oneDriveMoveItemAction,
+  oneDriveCopyItemAction,
+  oneDriveGetCopyStatusAction,
   oneDriveDeleteItemAction
 ]

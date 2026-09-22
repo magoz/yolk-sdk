@@ -98,6 +98,13 @@ export {
 export {
   MicrosoftOneDriveAccessMode,
   microsoftOneDriveAccessModeConfigKey,
+  OneDriveCopyAcceptedOutput,
+  OneDriveCopyItemInput,
+  OneDriveCopyMonitorUrl,
+  OneDriveCopyStatus,
+  OneDriveCopyStatusError,
+  OneDriveCopyStatusInput,
+  OneDriveCopyStatusOutput,
   OneDriveCreateFolderInput,
   OneDriveDeleteItemInput,
   OneDriveDeleteItemOutput,
@@ -108,14 +115,18 @@ export {
   OneDriveItemIdInput,
   OneDriveListItemsInput,
   OneDriveListItemsOutput,
+  OneDriveMoveItemInput,
   OneDrivePackageFacet,
   OneDriveParentReference,
   OneDriveSearchItemsInput,
   oneDriveActions,
+  oneDriveCopyItemAction,
   oneDriveCreateFolderAction,
   oneDriveDeleteItemAction,
+  oneDriveGetCopyStatusAction,
   oneDriveGetItemAction,
   oneDriveListItemsAction,
+  oneDriveMoveItemAction,
   oneDriveSearchItemsAction
 } from './drive.ts'
 

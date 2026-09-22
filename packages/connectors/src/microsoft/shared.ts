@@ -86,12 +86,14 @@ const providerCode = (fallback: string, status: number) => {
 }
 
 const retryAfterMs = (headers: Readonly<Record<string, string>>) => {
-  const retryAfter = headers['retry-after'] ?? headers['Retry-After']
+  const matches = Object.entries(headers).filter(
+    ([headerName]) => headerName.toLowerCase() === 'retry-after'
+  )
 
-  if (retryAfter === undefined) return undefined
-  const seconds = Number(retryAfter)
+  if (matches.length !== 1 || !/^\d+$/.test(matches[0]?.[1] ?? '')) return undefined
+  const milliseconds = Number(matches[0]?.[1]) * 1_000
 
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined
+  return Number.isSafeInteger(milliseconds) ? milliseconds : undefined
 }
 
 type MicrosoftProviderFailurePrefixFields = {
@@ -101,36 +103,49 @@ type MicrosoftProviderFailurePrefixFields = {
   retryAfterMs?: number
 }
 
-export const microsoftProviderFailure = (input: {
+type MicrosoftProviderFailureInput = {
   readonly code: string
   readonly message: string
   readonly status: number
   readonly headers: Readonly<Record<string, string>>
-  readonly body: string
-}) =>
+}
+
+const microsoftProviderFailureFields = (
+  input: MicrosoftProviderFailureInput
+): MicrosoftProviderFailurePrefixFields => {
+  const fields: MicrosoftProviderFailurePrefixFields = {
+    code: providerCode(input.code, input.status),
+    message: input.message,
+    status: input.status
+  }
+
+  const retryAfter = retryAfterMs(input.headers)
+
+  if (retryAfter !== undefined) {
+    fields.retryAfterMs = retryAfter
+  }
+
+  return fields
+}
+
+export const microsoftSanitizedProviderFailure = (input: MicrosoftProviderFailureInput) =>
+  ActionResult.failure(new ProviderFailure(microsoftProviderFailureFields(input)))
+
+export const microsoftProviderFailure = (
+  input: MicrosoftProviderFailureInput & {
+    readonly body: string
+  }
+) =>
   graphErrorDetail(input.body).pipe(
     Effect.map(detail => {
-      const retryAfter = retryAfterMs(input.headers)
+      const fields = microsoftProviderFailureFields(input)
 
       return ActionResult.failure(
-        new ProviderFailure(
-          (() => {
-            const fields: MicrosoftProviderFailurePrefixFields = {
-              code: providerCode(input.code, input.status),
-              message: detail === undefined ? input.message : `${input.message}: ${detail}`,
-              status: input.status
-            }
-
-            if (retryAfter !== undefined) {
-              fields.retryAfterMs = retryAfter
-            }
-
-            return {
-              ...fields,
-              underlying: input.body
-            }
-          })()
-        )
+        new ProviderFailure({
+          ...fields,
+          message: detail === undefined ? fields.message : `${fields.message}: ${detail}`,
+          underlying: input.body
+        })
       )
     })
   )

@@ -12,7 +12,11 @@ export class ConnectorHttpRequest extends Schema.Class<ConnectorHttpRequest>(
   method: HttpMethod,
   url: Schema.String,
   headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-  body: Schema.optional(Schema.String)
+  body: Schema.optional(Schema.String),
+  /** Hosts must honor manual redirects when requested instead of following Location automatically. */
+  redirect: Schema.optional(Schema.Literal('manual')),
+  /** Hosts must omit cookie jars and ambient credentials when requested. */
+  credentials: Schema.optional(Schema.Literal('omit'))
 }) {}
 
 export class ConnectorHttpResponse extends Schema.Class<ConnectorHttpResponse>(

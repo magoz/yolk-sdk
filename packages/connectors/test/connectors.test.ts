@@ -959,6 +959,9 @@ describe('@yolk-sdk/connectors', () => {
       'onedrive.search_items',
       'onedrive.get_item',
       'onedrive.create_folder',
+      'onedrive.move_item',
+      'onedrive.copy_item',
+      'onedrive.get_copy_status',
       'onedrive.delete_item'
     ])
     expect(
@@ -982,7 +985,9 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.batch_move',
       'outlook.batch_untrash',
       'outlook.batch_modify_categories',
-      'onedrive.create_folder'
+      'onedrive.create_folder',
+      'onedrive.move_item',
+      'onedrive.copy_item'
     ])
     expect(
       MicrosoftConnector.actions
