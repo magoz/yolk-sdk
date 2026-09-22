@@ -1,5 +1,18 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.91
+
+### Patch Changes
+
+- b9c5610: Add IMAP Sent-copy configuration to generic email submission. Sent saving is requested by default; `saveToSentItems: false` skips it. Legacy hosts receive synthesized `unsupported` or `skipped` status instead of an implied save. Confirmed SMTP acceptance is preserved when ancillary metadata is invalid. Hosts still own MIME rendering and Sent storage; storage failures must not trigger resubmission.
+
+  Support tool-result images, readable text documents, and PDFs when `supportsPdfAttachments` is enabled in OpenAI-compatible Chat Completions. Those parts are lowered to origin-labeled supplementary user content after the complete tool-result block. Other native document formats and audio remain unsupported. Validate all content before resolving URL-backed PDFs, preserve canonical history, and continue rejecting unresolved references.
+
+- 1478827: Accept JSON null on optional Fortnox response fields. Fortnox uses null for unset values, so strict optional schemas rejected successful company, customer, invoice, and supplier responses.
+- 6a96606: Add Microsoft OneDrive same-drive move, asynchronous copy acceptance, and copy-status polling. Polling sends no credential to the monitor URL and requires host adapters to honor `redirect: 'manual'` and `credentials: 'omit'`. Monitor URLs are secrets. Microsoft failures now match `Retry-After` case-insensitively and ignore ambiguous, non-integer, or unsafe delay values.
+- Updated dependencies [b9c5610]
+  - @yolk-sdk/agent@0.1.0-canary.91
+
 ## 0.1.0-canary.90
 
 ### Patch Changes

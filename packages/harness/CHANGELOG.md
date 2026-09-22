@@ -1,5 +1,13 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.91
+
+### Patch Changes
+
+- bd61ed3: Advance unchanged public packages in lockstep with OpenAI-compatible tool-result attachment lowering and connector email Sent-copy plus OneDrive move and copy actions. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [b9c5610]
+  - @yolk-sdk/agent@0.1.0-canary.91
+
 ## 0.1.0-canary.90
 
 ### Patch Changes
@@ -142,10 +150,10 @@
   - `DriverShape` → `DriverApi` from `@yolk-sdk/harness/driver`
 
   ```ts
-  import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
-  import type { RunStoreApi } from '@yolk-sdk/harness/store'
-  import type { InboxApi } from '@yolk-sdk/harness/inbox'
-  import type { DriverApi } from '@yolk-sdk/harness/driver'
+  import type { LoopConfigSettings } from "@yolk-sdk/agent/loop";
+  import type { RunStoreApi } from "@yolk-sdk/harness/store";
+  import type { InboxApi } from "@yolk-sdk/harness/inbox";
+  import type { DriverApi } from "@yolk-sdk/harness/driver";
   ```
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.91
+
+### Patch Changes
+
+- bd61ed3: Advance unchanged public packages in lockstep with OpenAI-compatible tool-result attachment lowering and connector email Sent-copy plus OneDrive move and copy actions. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [b9c5610]
+  - @yolk-sdk/agent@0.1.0-canary.91
+
 ## 0.1.0-canary.90
 
 ### Patch Changes
