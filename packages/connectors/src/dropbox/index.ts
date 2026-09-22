@@ -211,6 +211,14 @@ const DropboxFolderMetadataApi = Schema.Struct({
   path_display: Schema.optional(Schema.NullOr(Schema.String))
 })
 
+const DropboxCreateFolderMetadataApi = Schema.Struct({
+  '.tag': Schema.optional(Schema.Literal('folder')),
+  id: Schema.String,
+  name: Schema.String,
+  path_lower: Schema.optional(Schema.NullOr(Schema.String)),
+  path_display: Schema.optional(Schema.NullOr(Schema.String))
+})
+
 const DropboxDeletedMetadataApi = Schema.Struct({
   '.tag': Schema.Literal('deleted'),
   name: Schema.String,
@@ -260,7 +268,7 @@ const DropboxSearchApiOutput = Schema.Struct({
 })
 
 const DropboxCreateFolderApiOutput = Schema.Struct({
-  metadata: DropboxFolderMetadataApi
+  metadata: DropboxCreateFolderMetadataApi
 })
 
 const DropboxRelocationApiOutput = Schema.Struct({
@@ -427,6 +435,17 @@ const dropboxJsonAction = <A>(input: {
     })
   )
 
+const folderMetadataFromApi = (
+  metadata: typeof DropboxCreateFolderMetadataApi.Type
+): DropboxFolderMetadata =>
+  DropboxFolderMetadata.make({
+    type: 'folder',
+    id: metadata.id,
+    name: metadata.name,
+    pathLower: metadata.path_lower,
+    pathDisplay: metadata.path_display
+  })
+
 const metadataFromApi = (metadata: DropboxMetadataApi): DropboxMetadata => {
   switch (metadata['.tag']) {
     case 'file':
@@ -444,13 +463,7 @@ const metadataFromApi = (metadata: DropboxMetadataApi): DropboxMetadata => {
         contentHash: metadata.content_hash
       })
     case 'folder':
-      return DropboxFolderMetadata.make({
-        type: 'folder',
-        id: metadata.id,
-        name: metadata.name,
-        pathLower: metadata.path_lower,
-        pathDisplay: metadata.path_display
-      })
+      return folderMetadataFromApi(metadata)
     case 'deleted':
       return DropboxDeletedMetadata.make({
         type: 'deleted',
@@ -640,7 +653,7 @@ export const dropboxCreateFolderAction = defineAction({
 
       if (Predicate.isTagged(result, 'Failure')) return result
 
-      return ActionResult.success(metadataFromApi(result.value.metadata))
+      return ActionResult.success(folderMetadataFromApi(result.value.metadata))
     })
 })
 

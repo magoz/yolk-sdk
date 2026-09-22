@@ -367,6 +367,7 @@ const successBody = (name: string) => {
     case 'Notion create page':
       return '{"id":"page_1","object":"page"}'
     case 'Dropbox create folder':
+      return '{"metadata":{"id":"id:folder_1","name":"Archive","path_lower":"/archive","path_display":"/Archive"}}'
     case 'Dropbox move':
     case 'Dropbox copy':
     case 'Dropbox delete':
@@ -1591,7 +1592,7 @@ describe('@yolk-sdk/connectors', () => {
         [],
         [
           jsonHttpResponse(
-            '{"metadata":{".tag":"folder","id":"id:folder_1","name":"Archive","path_lower":"/archive","path_display":"/Archive"}}'
+            '{"metadata":{"id":"id:folder_1","name":"Archive","path_lower":"/archive","path_display":"/Archive"}}'
           )
         ]
       )
