@@ -420,14 +420,15 @@ const execute = input =>
 
 Acceptance completes the launch tool call, not the child. It emits no `SubagentCompleted` or child
 usage. Keep logical `subagent:<callId>` identity separate from the physical Workflow run id.
-Observe later results through distinct status/wait tool-call ids, not a second result for the
-original launch call; do not charge the same child usage again.
+Hosts may deliver later findings automatically or expose their own authenticated observation tools;
+when observations are separate calls, use distinct tool-call ids rather than a second result for the
+original launch call. Do not charge the same child usage again.
 
-The acknowledgement names `subagent_status` and `subagent_wait`, but these tools are **host-owned**,
-not included in the SDK. Supply them before exposing background execution. Your host also owns
-authenticated child lookup/routes, durable admission/reservations/results, child HITL handling,
-and explicit Stop/cancellation policy. Do not infer that parent completion or failure cancels an
-independent child.
+The SDK registers no status or wait tools and does not promise automatic completion delivery. Your
+host owns its completion policy, authenticated child lookup/routes, durable
+admission/reservations/results, child HITL handling, and explicit Stop/cancellation policy. Do not
+infer that parent completion or failure cancels an independent child. Preserve any lookup identity
+the model needs in model-visible content when customizing the acknowledgement.
 
 For durable hosts, see [Independent child orchestration](../vercel-workflows/step-contracts#independent-child-orchestration).
 

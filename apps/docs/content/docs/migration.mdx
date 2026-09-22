@@ -428,10 +428,11 @@ provider sizes still do not prove actual decoded byte length.
 ### Next canary: opt-in durable subagents
 
 Inline subagent registrations remain compatible. Hosts opting into `background: true` must
-implement durable child launch and later status/wait observations. Return
+implement durable child launch and choose a completion policy. They may deliver findings
+automatically or expose authenticated status/wait observations through host-owned tools. Return
 `makeSubagentAcceptedToolResult` for launch acceptance; it is not final child output and adds no
-child usage or `SubagentCompleted`. Status/wait tools, storage, ownership, and Stop policy remain
-host-owned. See [Background subagents](./agent/tools-hitl#background-subagents).
+child usage or `SubagentCompleted`. Storage, ownership, and Stop policy remain host-owned. See
+[Background subagents](./agent/tools-hitl#background-subagents).
 
 Custom Workflow tool-batch hosts can use `prepareToolBatch` inside a preflight step and
 `orchestrateWorkflowToolBatch` / `awaitWorkflowChild` in orchestration. Pending HITL fences all
