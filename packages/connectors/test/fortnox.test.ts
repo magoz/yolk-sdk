@@ -597,6 +597,93 @@ describe('Fortnox connector', () => {
     })
   )
 
+  it.effect('preserves JSON null on optional Fortnox response fields', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({
+          CompanyInformation: {
+            CompanyName: 'Example AB',
+            OrganizationNumber: null,
+            DatabaseNumber: null,
+            Address: null
+          }
+        }),
+        response({
+          Customer: { CustomerNumber: '4', Name: 'Example', Email: null, Active: null }
+        }),
+        response({
+          Invoices: [
+            {
+              DocumentNumber: '1',
+              CustomerNumber: '4',
+              Credit: null,
+              CostCenter: null,
+              Project: null,
+              Total: null,
+              Sent: null,
+              VoucherNumber: null,
+              InvoiceRows: [{ Description: null, Price: null, AccountNumber: null }]
+            }
+          ],
+          MetaInformation: meta()
+        }),
+        response({ Supplier: { SupplierNumber: '7', Name: 'Supplier', Email: null } }),
+        response({
+          SupplierInvoice: {
+            GivenNumber: '456',
+            SupplierNumber: '7',
+            Total: null,
+            Balance: null,
+            Credit: null,
+            SupplierInvoiceRows: [{ ItemDescription: null, Quantity: null }]
+          }
+        })
+      ])
+
+      const company = yield* invoke('fortnox.get_company_information').pipe(
+        Effect.provide(harness.layer)
+      )
+
+      const customer = yield* invoke('fortnox.get_customer', { customerNumber: '4' }).pipe(
+        Effect.provide(harness.layer)
+      )
+
+      const invoices = yield* invoke('fortnox.list_invoices').pipe(Effect.provide(harness.layer))
+
+      const supplier = yield* invoke('fortnox.get_supplier', { supplierNumber: '7' }).pipe(
+        Effect.provide(harness.layer)
+      )
+
+      const supplierInvoice = yield* invoke('fortnox.get_supplier_invoice', {
+        givenNumber: '456'
+      }).pipe(Effect.provide(harness.layer))
+
+      if (
+        !Predicate.isTagged(company, 'Success') ||
+        !Predicate.isTagged(customer, 'Success') ||
+        !Predicate.isTagged(invoices, 'Success') ||
+        !Predicate.isTagged(supplier, 'Success') ||
+        !Predicate.isTagged(supplierInvoice, 'Success')
+      ) {
+        throw new Error('Expected Fortnox success')
+      }
+
+      expect(company.value).toMatchObject({
+        OrganizationNumber: null,
+        DatabaseNumber: null,
+        Address: null
+      })
+      expect(customer.value).toMatchObject({ Email: null, Active: null })
+      const listed = yield* Schema.decodeUnknownEffect(FortnoxListInvoicesOutput)(invoices.value)
+      expect(Chunk.toReadonlyArray(listed.invoices)).toMatchObject([
+        { Credit: null, CostCenter: null, Total: null, Sent: null, VoucherNumber: null }
+      ])
+      expect(supplier.value).toMatchObject({ Email: null })
+      expect(supplierInvoice.value).toMatchObject({ Total: null, Balance: null, Credit: null })
+      expect(harness.requests).toHaveLength(5)
+    })
+  )
+
   it.effect('omits invoice and supplier invoice rows when the API omits them', () =>
     Effect.gen(function* () {
       const invoiceValue = yield* Schema.decodeUnknownEffect(FortnoxInvoiceApi)({
@@ -642,6 +729,7 @@ describe('Fortnox connector', () => {
     { action: 'fortnox.list_suppliers', input: { search: { field: 'name', value: '' } } },
     { action: 'fortnox.create_customer', input: {} },
     { action: 'fortnox.create_customer', input: { Name: '' } },
+    { action: 'fortnox.create_customer', input: { Name: 'Example', Email: null } },
     { action: 'fortnox.update_customer', input: { Name: 'Missing number' } },
     { action: 'fortnox.update_customer', input: { CustomerNumber: '' } },
     { action: 'fortnox.update_customer', input: { CustomerNumber: '001', Name: '' } },
