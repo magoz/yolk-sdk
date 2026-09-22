@@ -227,10 +227,11 @@ Then provide `AppAgentLayer` to `run` or `runRuntime`.
 
 ### Bound PDF attachment fetches
 
-Generic OpenAI-compatible chat supports native PDF **user-message** parts only when
+Generic OpenAI-compatible chat supports native PDF user-message and tool-result parts only when
 `supportsPdfAttachments: true`; Vercel AI Gateway enables the same behavior by default and accepts
-`supportsPdfAttachments: false` to disable it. Assistant and tool-result media are not added to this
-Chat Completions path.
+`supportsPdfAttachments: false` to disable it. Tool-result images and documents are lowered to
+origin-labeled, untrusted supplementary user content after the complete tool-result block, without
+changing canonical history. Assistant media remains unsupported on this Chat Completions path.
 
 For a URL-backed PDF, Yolk uses the host-provided `HttpClient` to perform the GET and buffer the
 response before sending base64 file data to the provider. Gateway does not fetch the source URL.
