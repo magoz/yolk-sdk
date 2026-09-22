@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.90
+
+### Patch Changes
+
+- 76d6c5c: Advance unchanged public packages in lockstep with native PDF attachment lowering in the agent package and Fortnox customer and invoice writes in the connectors package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [6c7efcb]
+  - @yolk-sdk/agent@0.1.0-canary.90
+
 ## 0.1.0-canary.89
 
 ### Patch Changes

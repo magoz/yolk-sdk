@@ -1,5 +1,13 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.90
+
+### Patch Changes
+
+- 76d6c5c: Add Fortnox customer and invoice write capabilities alongside the ten read actions. The new `fortnox.create_customer`, `fortnox.update_customer`, `fortnox.create_invoice`, and `fortnox.update_invoice` actions use `write` access metadata, typed schemas, JSON request envelopes, and resource-scoped OAuth hints. Sending, booking, cancellation, and payment actions remain absent so hosts can keep outbound invoice approval policy separate. Hosts retain HTTP execution, OAuth lifecycle, credentials, and policy; Fortnox OAuth scopes themselves still grant read and write access.
+- Updated dependencies [6c7efcb]
+  - @yolk-sdk/agent@0.1.0-canary.90
+
 ## 0.1.0-canary.89
 
 ### Patch Changes

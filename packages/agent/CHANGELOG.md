@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.90
+
+### Patch Changes
+
+- 6c7efcb: Add native PDF file-part lowering to the OpenAI-compatible Chat Completions transport, including resolving URL-backed PDF attachments, and enable it by default for the Vercel AI Gateway provider.
+
 ## 0.1.0-canary.89
 
 ### Patch Changes
