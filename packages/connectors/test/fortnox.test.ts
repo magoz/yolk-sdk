@@ -436,6 +436,25 @@ describe('Fortnox connector', () => {
     })
   )
 
+  it.effect('does not send provider-managed invoice lifecycle fields in mutation payloads', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({ Invoice: { DocumentNumber: '002', CustomerNumber: '001' } })
+      ])
+
+      yield* invoke('fortnox.create_invoice', {
+        CustomerNumber: '001',
+        Booked: true,
+        Cancelled: true,
+        VoucherNumber: 123
+      }).pipe(Effect.provide(harness.layer))
+
+      expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
+        Invoice: { CustomerNumber: '001' }
+      })
+    })
+  )
+
   for (const item of lists) {
     it.effect(`${item.action} returns one page, a next page, then an empty final page`, () =>
       Effect.gen(function* () {

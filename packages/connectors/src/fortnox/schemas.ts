@@ -328,16 +328,29 @@ export class FortnoxUpdateCustomerInput extends Schema.Class<FortnoxUpdateCustom
   ...CustomerUpdateFields
 }) {}
 
+// Booked, Cancelled, FinalPayDate, and voucher fields are provider-managed through
+// dedicated invoice lifecycle/payment APIs and must not be exposed as create/update inputs.
+const InvoiceMutationFields = {
+  Currency: OptionalString,
+  InvoiceDate: OptionalString,
+  DueDate: OptionalString,
+  OCR: OptionalString,
+  OurReference: OptionalString,
+  YourReference: OptionalString,
+  Comments: OptionalString,
+  CostCenter: OptionalString,
+  Project: OptionalString,
+  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRow))
+} as const
+
 const InvoiceWriteFields = {
   CustomerNumber: FortnoxCustomerNumber,
-  ...InvoiceFields,
-  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRow))
+  ...InvoiceMutationFields
 } as const
 
 const InvoiceUpdateFields = {
   CustomerNumber: Schema.optional(FortnoxCustomerNumber),
-  ...InvoiceFields,
-  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRow))
+  ...InvoiceMutationFields
 } as const
 
 export class FortnoxCreateInvoiceInput extends Schema.Class<FortnoxCreateInvoiceInput>(
