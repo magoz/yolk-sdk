@@ -761,16 +761,16 @@ broader delegated access. Application-token hosts set it to `application`, must 
 and use the same `Files.*.All` permission hints. The host owns admin consent and application access
 policy.
 
-| Action id                  | What it does                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------- |
-| `onedrive.list_items`      | list root or folder children with opaque Graph paging                        |
-| `onedrive.search_items`    | search names, metadata, and indexed content                                  |
-| `onedrive.get_item`        | fetch metadata by stable DriveItem id                                        |
-| `onedrive.create_folder`   | create a root or child folder with conflict behavior                         |
-| `onedrive.move_item`       | move an item within one drive; `write`; optional `ifMatch`                   |
-| `onedrive.copy_item`       | accept an asynchronous copy; `write`; `accepted` is not completed            |
-| `onedrive.get_copy_status` | poll one copy monitor; `read`; send no credential to the monitor URL         |
-| `onedrive.delete_item`     | move a file or folder to the recycle bin, optionally by ETag                 |
+| Action id                  | What it does                                                         |
+| -------------------------- | -------------------------------------------------------------------- |
+| `onedrive.list_items`      | list root or folder children with opaque Graph paging                |
+| `onedrive.search_items`    | search names, metadata, and indexed content                          |
+| `onedrive.get_item`        | fetch metadata by stable DriveItem id                                |
+| `onedrive.create_folder`   | create a root or child folder with conflict behavior                 |
+| `onedrive.move_item`       | move an item within one drive; `write`; optional `ifMatch`           |
+| `onedrive.copy_item`       | accept an asynchronous copy; `write`; `accepted` is not completed    |
+| `onedrive.get_copy_status` | poll one copy monitor; `read`; send no credential to the monitor URL |
+| `onedrive.delete_item`     | move a file or folder to the recycle bin, optionally by ETag         |
 
 `onedrive.move_item` sends a same-drive `PATCH` with a destination parent ID and optional rename.
 It does not move across drives or invent copy-then-delete. Moving to drive root requires the root
