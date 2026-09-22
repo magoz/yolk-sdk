@@ -1,5 +1,13 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.89
+
+### Patch Changes
+
+- 2af6ed0: Accept the official untagged Dropbox `create_folder_v2` metadata response while retaining compatibility with tagged folder responses and strict tagged metadata validation for other Dropbox actions.
+- Updated dependencies [4188847]
+  - @yolk-sdk/agent@0.1.0-canary.89
+
 ## 0.1.0-canary.88
 
 ### Minor Changes

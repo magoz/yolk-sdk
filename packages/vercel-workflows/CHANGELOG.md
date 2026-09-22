@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.89
+
+### Patch Changes
+
+- 7eab996: Advance unchanged public packages in lockstep with the host-neutral background subagent guidance in the agent package and the Dropbox create-folder response fix in the connectors package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.88
 
 ### Patch Changes
