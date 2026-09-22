@@ -10,9 +10,13 @@ import {
   LLMUsage
 } from '@yolk-sdk/agent/loop'
 import {
+  DocumentPart,
   ToolCall,
   ToolResult,
+  TextPart,
   UserMessage,
+  inlineBase64Source,
+  type AgentMessage,
   type AgentReasoningEffort
 } from '@yolk-sdk/agent/protocol'
 import { makeTool } from '@yolk-sdk/agent/tools'
@@ -60,6 +64,7 @@ const runProvider = (
   request: {
     readonly model?: string
     readonly reasoningEffort?: AgentReasoningEffort
+    readonly messages?: ReadonlyArray<AgentMessage>
   } = {}
 ) =>
   Effect.gen(function* () {
@@ -68,7 +73,7 @@ const runProvider = (
     const streamInput = {
       model: request.model ?? 'anthropic/claude-sonnet',
       systemPrompt: 'Be concise.',
-      messages: [UserMessage.make({ content: 'Hello' })],
+      messages: request.messages ?? [UserMessage.make({ content: 'Hello' })],
       tools: []
     }
 
@@ -139,6 +144,47 @@ describe('Vercel AI Gateway provider', () => {
         LLMTextDelta.make({ text: 'Hello from Gateway' }),
         LLMDone.make({ stopReason: 'stop' })
       ])
+    })
+  )
+
+  it.effect('lowers PDF documents to Gateway file parts', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      yield* runProvider(
+        new Response(JSON.stringify({ choices: [{ message: { content: 'summarized' } }] })),
+        requests,
+        defaultGatewayConfig,
+        {
+          model: 'anthropic/claude-sonnet-5',
+          messages: [
+            UserMessage.make({
+              content: [
+                TextPart.make({ text: 'summarize' }),
+                DocumentPart.make({
+                  source: inlineBase64Source('JVBERi0='),
+                  mimeType: 'application/pdf',
+                  filename: 'brief.pdf'
+                })
+              ]
+            })
+          ]
+        }
+      )
+
+      expect(readCapturedBody(requests).messages[1]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'text', text: 'summarize' },
+          {
+            type: 'file',
+            file: {
+              filename: 'brief.pdf',
+              file_data: 'data:application/pdf;base64,JVBERi0='
+            }
+          }
+        ]
+      })
     })
   )
 

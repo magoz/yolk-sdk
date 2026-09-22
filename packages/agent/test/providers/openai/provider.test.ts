@@ -82,6 +82,47 @@ describe('OpenAI provider', () => {
     })
   )
 
+  it.effect('resolves PDF URLs before lowering native file parts', () =>
+    Effect.gen(function* () {
+      const body = yield* lowerOpenAiRequestBody(
+        {
+          model: 'gateway-model',
+          systemPrompt: '',
+          messages: [
+            UserMessage.make({
+              content: [
+                DocumentPart.make({
+                  source: urlAttachmentSource('https://cdn.example.com/brief.pdf'),
+                  mimeType: 'application/pdf',
+                  filename: 'brief.pdf'
+                })
+              ]
+            })
+          ],
+          tools: []
+        },
+        {
+          maxCompletionTokens: openAiTestMaxOutputTokens,
+          supportsPdfAttachments: true,
+          resolvePdfUrl: () => Effect.succeed('data:application/pdf;base64,JVBERi0=')
+        }
+      )
+
+      expect(body.messages[1]).toMatchObject({
+        role: 'user',
+        content: [
+          {
+            type: 'file',
+            file: {
+              filename: 'brief.pdf',
+              file_data: 'data:application/pdf;base64,JVBERi0='
+            }
+          }
+        ]
+      })
+    })
+  )
+
   it.effect('passes image URLs through for Chat Completions input', () =>
     Effect.gen(function* () {
       const body = yield* toOpenAiRequestBody({
@@ -537,6 +578,45 @@ describe('OpenAI provider', () => {
         expect(error).toMatchObject({ cause: 'provider_error', retryable: false })
         expect(error.message).toBe('Document content is not supported by the OpenAI provider yet')
       }
+    })
+  )
+
+  it.effect('lowers PDF documents as native file parts when enabled', () =>
+    Effect.gen(function* () {
+      const body = yield* lowerOpenAiRequestBody(
+        {
+          model: 'gateway-model',
+          systemPrompt: '',
+          messages: [
+            UserMessage.make({
+              content: [
+                TextPart.make({ text: 'summarize' }),
+                DocumentPart.make({
+                  source: inlineBase64Source('JVBERi0='),
+                  mimeType: 'application/pdf',
+                  filename: 'brief.pdf'
+                })
+              ]
+            })
+          ],
+          tools: []
+        },
+        { maxCompletionTokens: openAiTestMaxOutputTokens, supportsPdfAttachments: true }
+      )
+
+      expect(body.messages[1]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'text', text: 'summarize' },
+          {
+            type: 'file',
+            file: {
+              filename: 'brief.pdf',
+              file_data: 'data:application/pdf;base64,JVBERi0='
+            }
+          }
+        ]
+      })
     })
   )
 

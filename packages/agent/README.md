@@ -255,8 +255,10 @@ as zero. Treat snapshots as best-effort; hosts own polling, stale-data policy, p
 The fetcher blocks redirects and sanitizes failures using the shared subscription-usage error types.
 
 Vercel AI Gateway uses its OpenAI-compatible Chat Completions endpoint, with a single JSON
-completion by default. Set factory option `streaming: true` for SSE deltas and independently set
-`reasoningContent: true` to preserve compatible models' `reasoning_content` output and assistant
+completion by default. Native PDF `DocumentPart` inputs are lowered to Gateway file parts by
+default; the selected Gateway model must advertise PDF input. Set factory option `streaming: true`
+for SSE deltas and independently set `reasoningContent: true` to preserve compatible models'
+`reasoning_content` output and assistant
 replay. Both default to false; replayed reasoning spends input tokens. Pass either an AI
 Gateway API key or Vercel OIDC token as `apiKey`; `maxCompletionTokens` is sent as Gateway
 `max_tokens`. The env-backed `VercelAiGatewayProviderLayer` tries `AI_GATEWAY_API_KEY` first, then
@@ -495,9 +497,11 @@ inside one source fail validation. Hosts own file discovery, storage, enablement
 - `AudioPart` with `InlineBase64`, `Url`, or host-owned `Ref` source
 
 Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
-`refAttachmentSource`. Providers can pass through supported media URLs: OpenAI Chat and Vercel AI
-Gateway support image URLs; OpenAI Codex supports image and document URLs; Anthropic supports image
-and PDF URLs. The Grok
+`refAttachmentSource`. OpenAI-compatible Chat Completions providers support inline text documents;
+native PDF `DocumentPart` lowering is opt-in through `supportsPdfAttachments`, while Vercel AI
+Gateway enables it by default. Gateway resolves URL-backed PDFs through its `HttpClient` before
+sending file data. OpenAI Chat and Vercel AI Gateway support image URLs; OpenAI Codex supports image
+and document URLs; Anthropic supports image and PDF URLs. The Grok
 Responses lowerer can encode image URLs/data URLs, but hosts should enable image capability only for
 subscription models they have verified accept image input. Use
 inline base64 for simple apps, durable URLs for app-owned uploads, or persist opaque `Ref` values and
