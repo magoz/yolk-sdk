@@ -760,8 +760,13 @@ The optional parent identity lets a later conversation run address the original 
 acceptance independent of how quickly the child finishes.
 It emits normal tool completion but **not** `SubagentCompleted`, and carries no usage. Keep the
 logical `subagent:<toolCallId>` identity separate from the physical Workflow id. Never append a
-second tool result for the original launch; expose host-owned status/wait tools whose observations
-do not masquerade as fresh child usage. Host-owned storage must remain readable after parent end.
+second tool result for the original launch. Hosts may deliver findings automatically or expose
+host-owned status/wait tools whose observations do not masquerade as fresh child usage. The SDK
+registers none of those observation tools and promises no automatic delivery. Its default background
+parameter and acceptance text therefore defer to host instructions instead of naming unavailable
+tools. Hosts should describe their actual completion policy in model-visible instructions and retain
+lookup identities in accepted-result text if they customize it; structured metadata alone may not
+survive provider lowering. Host-owned storage must remain readable after parent end.
 
 A lost control response or exhausted observation budget is not a terminal child failure. Hosts
 can return a `ToolResult` with `structuredContent.type: 'subagent_observation'` and a matching

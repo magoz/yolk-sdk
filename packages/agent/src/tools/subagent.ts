@@ -256,7 +256,7 @@ const configuredSubagentToolParams = (options: SubagentRuntimeSelectionOptions) 
       Schema.Boolean.pipe(
         Schema.annotate({
           description:
-            'Return an accepted handle immediately; use subagent_status or subagent_wait to read the result.'
+            'Return an accepted handle immediately, not the completed result. Completion delivery and observation follow the host instructions.'
         })
       )
     )
@@ -779,7 +779,9 @@ const subagentAcceptedStructuredContent = (input: {
   return structuredContent
 }
 
-/** Acceptance is a tool completion, never a child completion or usage delta. */
+/** Acceptance is a tool completion, never a child completion or usage delta.
+ * Hosts own completion delivery and any observation tools; registration supplies neither.
+ */
 export const makeSubagentAcceptedToolResult = (input: {
   readonly callId: string
   readonly workflowRunId: string
@@ -787,6 +789,6 @@ export const makeSubagentAcceptedToolResult = (input: {
 }) =>
   ToolResult.make({
     toolCallId: input.callId,
-    content: `Subagent accepted. Use subagent_status or subagent_wait with tool_call_id=${input.callId}${input.parentRunId === undefined ? '' : ` and parent_run_id=${input.parentRunId}`}.`,
+    content: `Subagent accepted, not completed. Reference: tool_call_id=${input.callId}${input.parentRunId === undefined ? '' : ` and parent_run_id=${input.parentRunId}`}. Completion delivery and observation follow the host instructions.`,
     structuredContent: subagentAcceptedStructuredContent(input)
   })
