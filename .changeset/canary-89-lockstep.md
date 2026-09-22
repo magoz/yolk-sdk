@@ -1,0 +1,9 @@
+---
+'@yolk-sdk/harness': patch
+'@yolk-sdk/knowledge': patch
+'@yolk-sdk/mcp': patch
+'@yolk-sdk/sandbox': patch
+'@yolk-sdk/vercel-workflows': patch
+---
+
+Advance unchanged public packages in lockstep with the host-neutral background subagent guidance in the agent package and the Dropbox create-folder response fix in the connectors package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
