@@ -137,8 +137,8 @@ Delegated message calls use Shared scopes unless `mailbox` matches `OAuthCredent
 case-insensitively, in the same Graph ID/principal-name form; see [Microsoft mailbox permissions](../integrations/connectors#microsoft).
 Application hosts use `mailboxAccessMode: 'application'`. OneDrive inputs use `/me/drive` by default;
 set `driveId` for an explicit drive, `oneDriveAccessMode: 'delegated_all'` for broader delegated
-permissions, or `oneDriveAccessMode: 'application'` for application tokens. Discovery and metadata
-stay on `onedrive.*` actions. Original file bytes use host-only `downloadOneDriveItem` with
+permissions, or `oneDriveAccessMode: 'application'` for application tokens. Discovery, metadata,
+same-drive move, asynchronous copy, and copy-status polling stay on `onedrive.*` actions. Original file bytes use host-only `downloadOneDriveItem` with
 `ConnectorBinaryHttpClient`; create/update use the separate binary-write port. Resumable sessions remain unimplemented. Default Microsoft
 tools still need `CredentialResolver` and `ConnectorHttpClient`. The host still owns
 Entra tenant policy, OAuth callbacks, refresh, storage, consent,

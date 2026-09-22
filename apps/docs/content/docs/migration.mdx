@@ -25,6 +25,24 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Unreleased: OneDrive move/copy and email Sent copy
+
+Upgrading `@yolk-sdk/connectors` adds three Microsoft tools when hosts pass the complete
+`MicrosoftConnector` to `makeConnectorToolModule`: `onedrive.move_item` and `onedrive.copy_item`
+(`write`), and `onedrive.get_copy_status` (`read`). Copy acceptance is not completion. Hosts that
+allowlist actions or override access should review the new ids. Copy polling sends no credential to
+the monitor URL and requires the host HTTP adapter to honor `redirect: 'manual'` and
+`credentials: 'omit'`.
+
+`email.send_message` now returns `sentCopy` even for legacy hosts: `unsupported` when saving was
+requested but unavailable, or `skipped` when disabled. Saving is requested by default; set
+`saveToSentItems: false` to skip it. A `failed` or unverified Sent copy after SMTP acceptance does
+not mean the message was not sent; do not resend.
+
+OpenAI-compatible Chat Completions lower tool-result images, readable text documents, and opted-in
+PDFs to supplementary user content after the complete tool-result block. Other document formats and
+audio still fail. Canonical history is unchanged.
+
 ### Unreleased: Fortnox customer and invoice writes
 
 Upgrading `@yolk-sdk/connectors` adds four generated write tools when hosts pass the complete

@@ -525,7 +525,10 @@ host-owned composition and bounded connector transport.
 
 OpenAI Codex preserves text, image, and document `ToolResultMessage` parts as native function output
 content. Anthropic Claude preserves text, images, inline text documents, and URL/base64 PDFs as
-nested tool-result content. Audio and unresolved `Ref` sources still fail before the provider
+nested tool-result content. OpenAI-compatible Chat Completions, including Vercel AI Gateway, keep
+tool-result text in the tool message and lower images, readable text documents, and opted-in PDFs to
+origin-labeled supplementary user content after the complete tool-result block. Canonical history is
+unchanged. Audio, unresolved references, and other document formats still fail before the provider
 request.
 
 ```ts

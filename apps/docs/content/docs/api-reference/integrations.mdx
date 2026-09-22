@@ -140,7 +140,10 @@ optional state filters), `EmailListMessagesOutput`, `EmailGetMessageInput`, `Ema
 `EmailGetAttachmentInput`, `EmailGetAttachmentRequest`, `EmailGetAttachmentOutput`, `EmailMessageHeader`
 (required `headers` on `EmailMessage` from `email.get_message`; hosts fetch via `BODY.PEEK[HEADER]`),
 `EmailComposeMessage`, `EmailFolderName`, `EmailDraftId`, `EmailCreateDraftInput`,
-`EmailCreateDraftOutput`, `EmailSendMessageInput`, and `EmailSendMessageOutput`. `EmailClient` receives
+`EmailCreateDraftOutput`, `EmailSendMessageInput`, `EmailSendMessageOutput`,
+`EmailSentCopyStatus`, `EmailSentCopyRequest`, and `EmailSentCopyOutput`. `EmailSendMessageInput`
+accepts optional `saveToSentItems` and `sentFolder`. `EmailSendMessageOutput` may include `sentCopy`
+and a fixed unverified-receipt `warning`. `EmailClient` receives
 typed list/get/get-attachment/IMAP-draft/SMTP-send requests plus a runtime
 `UsernamePasswordCredential`; hosts opt into attachment retrieval through its optional
 `getAttachment` method. Filtered list calls use optional `listMessagesFiltered`; unfiltered calls
@@ -242,7 +245,11 @@ accepted fields, page-size range, and application-mailbox requirement.
 
 OneDrive's principal contracts are `OneDriveItem`, `OneDriveItemIdInput`,
 `OneDriveListItemsInput`, `OneDriveSearchItemsInput`, `OneDriveListItemsOutput`,
-`OneDriveCreateFolderInput`, `OneDriveDeleteItemInput`, and `OneDriveDeleteItemOutput`. Inputs default
+`OneDriveCreateFolderInput`, `OneDriveDeleteItemInput`, `OneDriveDeleteItemOutput`,
+`OneDriveMoveItemInput`, `OneDriveCopyItemInput`, `OneDriveCopyAcceptedOutput`,
+`OneDriveCopyMonitorUrl`, `OneDriveCopyStatus`, `OneDriveCopyStatusInput`,
+`OneDriveCopyStatusOutput`, and `OneDriveCopyStatusError`. Action exports include
+`oneDriveMoveItemAction`, `oneDriveCopyItemAction`, and `oneDriveGetCopyStatusAction`. Inputs default
 to `/me/drive`; explicit `driveId` targets `/drives/{driveId}`. Set
 `microsoftOneDriveAccessModeConfigKey` (`oneDriveAccessMode`) to `delegated_all` for broad delegated
 slots or `application` for application-token access; application mode requires `driveId`. Microsoft
