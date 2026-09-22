@@ -28,7 +28,7 @@
 | `dropbox`         | Dropbox metadata/file-management actions, OAuth slot constants, and host-only download plus create/update    |
 | `email`           | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email client |
 | `figma`           | Figma remote MCP auth data action and OAuth constants                                                        |
-| `fortnox`         | Read-only company/customer/invoice/supplier actions plus resource-scoped OAuth slot constants                |
+| `fortnox`         | Company/customer/invoice/supplier actions, including customer/invoice create/update, plus resource-scoped OAuth slot constants |
 | `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                                   |
 | `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                                    |
 | `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants                     |
