@@ -148,13 +148,7 @@ const providerFailure = (response: ConnectorHttpResponse) =>
     )
   })
 
-export const readFortnox = <A, B>(
-  integration: ConnectorIntegration,
-  slot: CredentialSlot,
-  path: string,
-  schema: Schema.Schema<A> & { readonly DecodingServices: never },
-  map: (value: A) => B
-) =>
+const resolveFortnoxAccessToken = (integration: ConnectorIntegration, slot: CredentialSlot) =>
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, slot)
 
@@ -173,15 +167,64 @@ export const readFortnox = <A, B>(
       )
     }
 
+    return credential.accessToken
+  })
+
+const requestFortnox = (
+  integration: ConnectorIntegration,
+  slot: CredentialSlot,
+  method: 'GET' | 'POST' | 'PUT',
+  path: string,
+  body?: unknown
+) =>
+  Effect.gen(function* () {
+    const token = yield* resolveFortnoxAccessToken(integration, slot)
     const http = yield* ConnectorHttpClient
 
-    const response = yield* http.request(
+    return yield* http.request(
       ConnectorHttpRequest.make({
-        method: 'GET',
+        method,
         url: `${fortnoxApiBaseUrl}/${path}`,
-        headers: { authorization: `Bearer ${credential.accessToken}`, accept: 'application/json' }
+        headers:
+          body === undefined
+            ? { authorization: `Bearer ${token}`, accept: 'application/json' }
+            : {
+                authorization: `Bearer ${token}`,
+                accept: 'application/json',
+                'content-type': 'application/json'
+              },
+        body: body === undefined ? undefined : JSON.stringify(body)
       })
     )
+  })
+
+export const readFortnox = <A, B>(
+  integration: ConnectorIntegration,
+  slot: CredentialSlot,
+  path: string,
+  schema: Schema.Schema<A> & { readonly DecodingServices: never },
+  map: (value: A) => B
+) =>
+  Effect.gen(function* () {
+    const response = yield* requestFortnox(integration, slot, 'GET', path)
+
+    if (response.status < 200 || response.status >= 300) return yield* providerFailure(response)
+    const decoded = yield* decodeJsonResponse(schema, response)
+
+    return ActionResult.success(map(decoded))
+  })
+
+export const writeFortnox = <A, B>(
+  integration: ConnectorIntegration,
+  slot: CredentialSlot,
+  method: 'POST' | 'PUT',
+  path: string,
+  body: unknown,
+  schema: Schema.Schema<A> & { readonly DecodingServices: never },
+  map: (value: A) => B
+) =>
+  Effect.gen(function* () {
+    const response = yield* requestFortnox(integration, slot, method, path, body)
 
     if (response.status < 200 || response.status >= 300) return yield* providerFailure(response)
     const decoded = yield* decodeJsonResponse(schema, response)

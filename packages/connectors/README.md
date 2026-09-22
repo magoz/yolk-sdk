@@ -14,22 +14,22 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                | Purpose                                                                                                    |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types     |
-| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                          |
-| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update  |
-| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port |
-| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                           |
-| `@yolk-sdk/connectors/fortnox`         | Read-only company, customer, invoice, supplier, and supplier-invoice file listing with OAuth               |
-| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                        |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                                   |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                           |
-| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot                      |
-| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                          |
-| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                         |
-| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label/comment actions and API token slot constants                                    |
+| Subpath                                | Purpose                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types        |
+| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                             |
+| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                   |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update     |
+| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port    |
+| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                              |
+| `@yolk-sdk/connectors/fortnox`         | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update |
+| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                           |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                                      |
+| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                              |
+| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot                         |
+| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                             |
+| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                            |
+| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label/comment actions and API token slot constants                                       |
 
 ## Imports
 
@@ -498,8 +498,11 @@ form-urlencoded body. The connector never stores or refreshes tokens.
 `FortnoxSupplierOAuthCredentialSlot`, and `FortnoxSupplierInvoiceOAuthCredentialSlot` request
 `companyinformation`, `customer`, `invoice`, `supplier`, and `supplierinvoice`, respectively.
 All share `fortnox.oauth`; `FortnoxCombinedOAuthCredentialSlot` requests all five. These consent hints
-do not restrict the underlying token to reads. This connector exposes only GET actions with `read`
-metadata: `fortnox.get_company_information`, `fortnox.list_customers`, `fortnox.get_customer`,
+do not restrict the underlying token to reads. Read actions use `read` metadata; customer and invoice
+create/update actions use `write` metadata: `fortnox.create_customer`, `fortnox.update_customer`,
+`fortnox.create_invoice`, and `fortnox.update_invoice`. The connector intentionally exposes no send
+or book action, so no Fortnox action is marked `destructive`. The read actions are
+`fortnox.get_company_information`, `fortnox.list_customers`, `fortnox.get_customer`,
 `fortnox.list_invoices`, `fortnox.get_invoice`, `fortnox.list_suppliers`, `fortnox.get_supplier`,
 `fortnox.list_supplier_invoices`, `fortnox.get_supplier_invoice`, and `fortnox.list_supplier_invoice_files` (described below).
 
@@ -528,8 +531,10 @@ Non-2xx responses are value-level provider failures, with status-specific unauth
 not-found, and rate-limit codes. Provider error messages and codes are retained without raw error
 bodies. Valid delta-seconds `Retry-After` becomes `retryAfterMs`; there are no automatic retries.
 Validation, credential, malformed success, and transport failures remain typed Effect errors.
-The HTTP adapter must preserve Bearer authorization and JSON accept headers; hosts own redirect
-safety, response-size limits, and sensitive-data handling. No financial mutations, app UI, or database integration are included. Host-only preview/archive downloads are described below.
+The HTTP adapter must preserve Bearer authorization, JSON accept headers, and JSON content-type on
+writes; hosts own redirect safety, response-size limits, and sensitive-data handling. Customer and
+invoice create/update are the only financial writes: sending and booking remain outside this connector.
+Host-only preview/archive downloads are described below.
 
 See the [official API reference](https://apps.fortnox.se/apidocs),
 [scopes](https://www.fortnox.se/developer/guides-and-good-to-know/scopes),

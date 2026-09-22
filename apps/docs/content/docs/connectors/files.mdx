@@ -147,7 +147,8 @@ connections. `fortnox.list_supplier_invoice_files` takes `{ givenNumber, page?, 
 `{ files, pagination }`; the filter is the internal GivenNumber, not the supplier InvoiceNumber.
 `FortnoxConnectFileOAuthCredentialSlot` requests `connectfile`; archive uses
 `FortnoxArchiveOAuthCredentialSlot` (`archive`); preview uses the invoice slot (`invoice`). All
-Fortnox scopes grant **read and write at the provider**, despite the SDK's read-only operations.
+Fortnox scopes grant **read and write at the provider**. File discovery/download helpers remain
+separate from the customer/invoice action writes.
 These two new scopes are opt-in, not automatically added to the existing five-scope combined slot.
 Archive response modeling and generic list pagination in Fortnox OpenAPI are imperfect; validate
 sanitized provider responses before production, never infer a final page from missing metadata.

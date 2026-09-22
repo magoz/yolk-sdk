@@ -1,11 +1,13 @@
 ---
-title: Read Fortnox records
-description: Read company information, customers, invoices, suppliers, and supplier invoices with host-owned OAuth.
+title: Read and write Fortnox records
+description: Read Fortnox records and create or update customers and invoices with host-owned OAuth.
 ---
 
 Use `@yolk-sdk/connectors/fortnox` to read Fortnox records directly or expose them as agent tools.
-All ten actions declare `read` access and send only GET requests to `https://api.fortnox.se/3`.
-There are no create, update, send, book, cancel, payment, or file-download actions.
+The connector exposes ten `read` actions plus four `write` actions for creating and updating customers
+and invoices. It sends GET, POST, and PUT requests to `https://api.fortnox.se/3`.
+There are no send, book, cancel, payment, or file-download actions. Sending or booking an invoice
+must remain a separately approval-gated host capability.
 
 Host-only invoice preview PDF and archive downloads plus supplier-file discovery are described in
 [Transfer connector files](./files#fortnox-and-notion). Preview does not mark an invoice Sent.
@@ -47,13 +49,15 @@ credential before returning it; the connector does not refresh tokens or enforce
 Integration config needs no keys and must not contain tokens or client secrets.
 
 The HTTP adapter must preserve `Authorization: Bearer …` and `Accept: application/json`.
+For POST and PUT actions it must also preserve `Content-Type: application/json` and the JSON body.
 Hosts own network policy, response-size limits, redirect safety, and avoiding credential/body logs.
 
 ## Choose consent scopes
 
 **Fortnox has no read-only OAuth scopes.** Each resource scope grants read and write access at the
-provider, even though this connector exposes only reads. Explain this distinction during consent
-and retain host authorization checks. Fortnox also requires a company license for each resource.
+provider. Explain this distinction during consent and retain host authorization checks. Fortnox also
+requires a company license for each resource. Connector create/update actions declare `write` access;
+invoice sending or booking is not exposed and must remain separately approval-gated by the host.
 
 All slots bind through `fortnox.oauth`:
 
@@ -88,18 +92,28 @@ supplier InvoiceNumber. The new file scopes grant both reads and writes like oth
 
 ## Actions and outputs
 
-| Action                                | Input                                  | Success value                      |
-| ------------------------------------- | -------------------------------------- | ---------------------------------- |
-| `fortnox.get_company_information`     | `{}`                                   | `FortnoxCompanyInformation`        |
-| `fortnox.list_customers`              | `FortnoxListCustomersInput`            | `{ customers, pagination }`        |
-| `fortnox.get_customer`                | `{ customerNumber }`                   | `FortnoxCustomer`                  |
-| `fortnox.list_invoices`               | `FortnoxListInvoicesInput`             | `{ invoices, pagination }`         |
-| `fortnox.get_invoice`                 | `{ documentNumber }`                   | `FortnoxInvoice`                   |
-| `fortnox.list_suppliers`              | `FortnoxListSuppliersInput`            | `{ suppliers, pagination }`        |
-| `fortnox.get_supplier`                | `{ supplierNumber }`                   | `FortnoxSupplier`                  |
-| `fortnox.list_supplier_invoices`      | `FortnoxListSupplierInvoicesInput`     | `{ supplierInvoices, pagination }` |
-| `fortnox.get_supplier_invoice`        | `{ givenNumber }`                      | `FortnoxSupplierInvoice`           |
-| `fortnox.list_supplier_invoice_files` | `FortnoxListSupplierInvoiceFilesInput` | `{ files, pagination }`            |
+| Action                                | Access | Input                                  | Success value                      |
+| ------------------------------------- | ------ | -------------------------------------- | ---------------------------------- |
+| `fortnox.get_company_information`     | read   | `{}`                                   | `FortnoxCompanyInformation`        |
+| `fortnox.list_customers`              | read   | `FortnoxListCustomersInput`            | `{ customers, pagination }`        |
+| `fortnox.get_customer`                | read   | `{ customerNumber }`                   | `FortnoxCustomer`                  |
+| `fortnox.create_customer`             | write  | `FortnoxCreateCustomerInput`           | `FortnoxCustomer`                  |
+| `fortnox.update_customer`             | write  | `FortnoxUpdateCustomerInput`           | `FortnoxCustomer`                  |
+| `fortnox.list_invoices`               | read   | `FortnoxListInvoicesInput`             | `{ invoices, pagination }`         |
+| `fortnox.get_invoice`                 | read   | `{ documentNumber }`                   | `FortnoxInvoice`                   |
+| `fortnox.create_invoice`              | write  | `FortnoxCreateInvoiceInput`            | `FortnoxInvoice`                   |
+| `fortnox.update_invoice`              | write  | `FortnoxUpdateInvoiceInput`            | `FortnoxInvoice`                   |
+| `fortnox.list_suppliers`              | read   | `FortnoxListSuppliersInput`            | `{ suppliers, pagination }`        |
+| `fortnox.get_supplier`                | read   | `{ supplierNumber }`                   | `FortnoxSupplier`                  |
+| `fortnox.list_supplier_invoices`      | read   | `FortnoxListSupplierInvoicesInput`     | `{ supplierInvoices, pagination }` |
+| `fortnox.get_supplier_invoice`        | read   | `{ givenNumber }`                      | `FortnoxSupplierInvoice`           |
+| `fortnox.list_supplier_invoice_files` | read   | `FortnoxListSupplierInvoiceFilesInput` | `{ files, pagination }`            |
+
+Create customer inputs require `Name`; Fortnox assigns `CustomerNumber`. Create invoice inputs
+require `CustomerNumber`; Fortnox assigns `DocumentNumber`. Update inputs carry the provider
+identifier (`CustomerNumber` or `DocumentNumber`) and omit it from the request body because it is
+bound into the URL. Invoice write inputs use `InvoiceRows` as JSON arrays; returned invoice rows are
+runtime `Chunk` values. Writes do not send or book invoices and are subject to host authorization.
 
 Pass identifier strings returned by the provider, preserving leading zeros. `givenNumber` is the
 numeric-string **GivenNumber**, not the supplier's `InvoiceNumber`. Identifiers are validated and
@@ -181,7 +195,9 @@ const tools = makeConnectorToolModule(FortnoxConnector, {
 })
 ```
 
-The adapter inherits each action's `read` metadata; explicit host access overrides still win.
+The adapter inherits each action's declared access metadata (`read` or `write`); explicit host
+access overrides still win. Since sending and booking are not connector actions, any host-owned
+outbound action must keep its own manual approval gate.
 See [Add connector tools](../integrations/connector-tool) for tool execution and authorization.
 
 ## Official Fortnox references
