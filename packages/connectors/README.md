@@ -73,7 +73,7 @@ The root export includes connector HTTP infrastructure, not a connector. It defi
 
 Provider connectors build `ConnectorHttpRequest` values; hosts execute them by providing a `ConnectorHttpClient` layer. This keeps connector packages portable and avoids bundling `fetch`, Node HTTP clients, or app-specific networking policy.
 
-Host adapters must preserve connector headers and body content type. Several provider actions send JSON and rely on `content-type: application/json` reaching the upstream API unchanged.
+Host adapters must preserve connector headers and body content type. Several provider actions send JSON and rely on `content-type: application/json` reaching the upstream API unchanged. When a request sets `redirect: 'manual'` or `credentials: 'omit'`, adapters must not follow redirects and must not add cookie jars or ambient credentials. These request policies are security boundaries for capability URLs such as OneDrive copy monitors; ignoring them can leak credentials or bypass connector URL validation.
 
 ## Example
 
@@ -863,13 +863,43 @@ OneDrive actions default to the signed-in user's `/me/drive`; set `driveId` to t
 and always provide `driveId`; application mode also uses the `Files.*.All` slots. List and search
 continuations must repeat the same drive target; list continuations must also repeat `parentItemId`.
 
-The OneDrive action set lists, searches, and gets file/folder metadata, creates folders, and moves
-items to the recycle bin. Binary download is available only through the separate host helper below,
-not the connector action inventory or string/JSON HTTP boundary. Host-only bounded create/update helpers are available below; resumable upload sessions remain unimplemented. The built-in
-Microsoft endpoint targets the global cloud; national-cloud hosts need a cloud-specific connector
-until the API base is configurable.
+The OneDrive action set lists, searches, and gets file/folder metadata; creates folders; moves items
+within one drive; queues asynchronous copies; polls copy status; and moves items to the recycle bin.
+Binary download is available only through the separate host helper below, not the connector action
+inventory or string/JSON HTTP boundary. Host-only bounded create/update helpers are available below;
+resumable upload sessions remain unimplemented. The built-in Microsoft endpoint targets the global
+cloud; national-cloud hosts need a cloud-specific connector until the API base is configurable.
 
-See Microsoft's [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folder guide](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive DriveItem overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), and [DriveItem addressing guide](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems).
+`onedrive.move_item` sends a synchronous `PATCH` with a destination parent ID and optional rename.
+Graph does not support moving an item between drives through this request, so the action exposes no
+destination-drive field and never invents copy-then-delete atomicity. An optional `ifMatch` forwards
+the caller's eTag/cTag precondition; a mismatch returns Graph's `412` failure. Moving to drive root
+requires the root folder's actual item ID, not the literal `root` alias.
+
+`onedrive.copy_item` requires destination drive and parent IDs and returns
+`{ status: 'accepted', monitorUrl }` only after Graph responds `202 Accepted` with one trusted monitor
+location. **Accepted does not mean completed:** name conflicts and other errors can appear later.
+Omitting `conflictBehavior` uses Graph's documented `fail` default; `rename` is available for
+work/school drives, while OneDrive Consumer does not support the conflict query parameter. Destructive
+`replace` is intentionally not exposed because it deletes the preexisting file and its history, which
+would make one input mode exceed the action's `write` side-effect classification. Copies create a new
+item identity, do not retain source metadata or permissions, inherit destination permissions, and copy
+only the latest major version because version-history copying is not exposed. Graph limits one copy to
+30,000 drive items. Cross-drive copy is supported by the request shape; app-only cross-geo copy remains
+unsupported by Graph.
+
+`onedrive.get_copy_status` performs one poll and returns the provider operation status, optional
+percentage, completed item ID, or sanitized failure code/message. It rechecks the OneDrive write scope
+but sends **no authorization header** to the short-lived capability URL. Only canonical raw forms of
+documented global-cloud `api.onedrive.com` or tenant `*.sharepoint.com` monitor URL shapes are
+accepted; parser-normalized variants and coalesced locations fail closed. Requests set
+`redirect: 'manual'` and `credentials: 'omit'`; redirects are never followed. A manual `303` is mapped
+to `completed` without decoding its body or exposing its `Location`, while rejected monitor responses
+discard provider bodies. Hosts must treat monitor URLs as secrets, avoid logs/persistence, enforce
+public DNS/IP policy and TLS, and bound response bodies, timeouts, and total polling. Approval, polling
+cadence, retries, expiry handling, and reconciliation remain host policy.
+
+See Microsoft's [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folder guide](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive DriveItem overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), [DriveItem move reference](https://learn.microsoft.com/en-us/graph/api/driveitem-move?view=graph-rest-1.0), [DriveItem copy reference](https://learn.microsoft.com/en-us/graph/api/driveitem-copy?view=graph-rest-1.0), [long-running actions guide](https://learn.microsoft.com/en-us/graph/long-running-actions-overview), and [DriveItem addressing guide](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems).
 
 ### Host integration: download OneDrive/SharePoint file bytes
 
@@ -1099,7 +1129,7 @@ orchestration only.
 | `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, supplier invoices, and supplier-invoice files    |
 | `@yolk-sdk/connectors/google`          | Gmail mail and label actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions     |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                       |
-| `@yolk-sdk/connectors/microsoft`       | Outlook mail and category actions plus OneDrive metadata, search, folder-create, and recycle-bin actions           |
+| `@yolk-sdk/connectors/microsoft`       | Outlook mail/category actions plus OneDrive metadata, folder, move, async copy/status, and recycle-bin actions     |
 | `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                       |
 | `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url` plus host-only `R2ObjectClient` get/create/update                                          |
 | `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                                       |
@@ -1124,7 +1154,7 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 Connector actions can declare default `read`, `write`, or `destructive` access metadata. The agent
 adapter uses that declaration unless the host supplies `access`; host access resolvers always win.
 Google Drive folder creation and Microsoft draft/folder-create actions declare `write`. Google Drive
-trash/delete, Gmail `send_message`, Microsoft message sends, and OneDrive deletion declare `destructive`. Legacy actions without metadata default to `read`, so hosts should continue assigning explicit access
+trash/delete, Gmail `send_message`, Microsoft message sends, and OneDrive deletion declare `destructive`. OneDrive move/copy declare `write`; copy-status polling remains `read`, and hosts own approval for the initiating copy. Legacy actions without metadata default to `read`, so hosts should continue assigning explicit access
 when adapting other write-capable connectors. This currently includes write-capable Gmail, Google
 Calendar, Notion, Todoist, Telegram, and R2 actions; hosts should provide an `access` resolver for
 those actions rather than relying on the fallback.

@@ -603,6 +603,9 @@ describe('host-only OneDrive download', () => {
         'onedrive.search_items',
         'onedrive.get_item',
         'onedrive.create_folder',
+        'onedrive.move_item',
+        'onedrive.copy_item',
+        'onedrive.get_copy_status',
         'onedrive.delete_item'
       ])
 
