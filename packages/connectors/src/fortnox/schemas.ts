@@ -285,6 +285,72 @@ export class FortnoxGetCompanyInformationInput extends Schema.Class<FortnoxGetCo
   'FortnoxGetCompanyInformationInput'
 )({}) {}
 
+const CustomerWriteFields = {
+  ...ContactFields,
+  Name: NonEmptyString,
+  EmailInvoice: OptionalString,
+  Type: OptionalString
+}
+
+const CustomerUpdateFields = {
+  Name: Schema.optional(NonEmptyString),
+  Active: OptionalBoolean,
+  OrganisationNumber: OptionalString,
+  Email: OptionalString,
+  Phone: OptionalString,
+  Phone1: OptionalString,
+  Phone2: OptionalString,
+  Address1: OptionalString,
+  Address2: OptionalString,
+  City: OptionalString,
+  ZipCode: OptionalString,
+  Country: OptionalString,
+  CountryCode: OptionalString,
+  Currency: OptionalString,
+  VATNumber: OptionalString,
+  VATType: OptionalString,
+  TermsOfPayment: OptionalString,
+  OurReference: OptionalString,
+  YourReference: OptionalString,
+  Comments: OptionalString,
+  EmailInvoice: OptionalString,
+  Type: OptionalString
+}
+
+export class FortnoxCreateCustomerInput extends Schema.Class<FortnoxCreateCustomerInput>(
+  'FortnoxCreateCustomerInput'
+)(CustomerWriteFields) {}
+
+export class FortnoxUpdateCustomerInput extends Schema.Class<FortnoxUpdateCustomerInput>(
+  'FortnoxUpdateCustomerInput'
+)({
+  CustomerNumber: FortnoxCustomerNumber,
+  ...CustomerUpdateFields
+}) {}
+
+const InvoiceWriteFields = {
+  CustomerNumber: FortnoxCustomerNumber,
+  ...InvoiceFields,
+  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRow))
+} as const
+
+const InvoiceUpdateFields = {
+  CustomerNumber: Schema.optional(FortnoxCustomerNumber),
+  ...InvoiceFields,
+  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRow))
+} as const
+
+export class FortnoxCreateInvoiceInput extends Schema.Class<FortnoxCreateInvoiceInput>(
+  'FortnoxCreateInvoiceInput'
+)(InvoiceWriteFields) {}
+
+export class FortnoxUpdateInvoiceInput extends Schema.Class<FortnoxUpdateInvoiceInput>(
+  'FortnoxUpdateInvoiceInput'
+)({
+  DocumentNumber: FortnoxDocumentNumber,
+  ...InvoiceUpdateFields
+}) {}
+
 export class FortnoxGetCustomerInput extends Schema.Class<FortnoxGetCustomerInput>(
   'FortnoxGetCustomerInput'
 )({

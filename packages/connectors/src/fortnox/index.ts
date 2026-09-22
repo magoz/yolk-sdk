@@ -23,6 +23,10 @@ import {
   FortnoxGetCompanyInformationInput,
   FortnoxGetCustomerInput,
   FortnoxGetInvoiceInput,
+  FortnoxCreateCustomerInput,
+  FortnoxUpdateCustomerInput,
+  FortnoxCreateInvoiceInput,
+  FortnoxUpdateInvoiceInput,
   FortnoxGetSupplierInput,
   FortnoxGetSupplierInvoiceInput,
   FortnoxListCustomersInput,
@@ -34,7 +38,13 @@ import {
   FortnoxListSupplierInvoicesInput,
   FortnoxListSupplierInvoicesOutput
 } from './schemas.ts'
-import { FortnoxMetaInformation, listPath, paginationFromApi, readFortnox } from './shared.ts'
+import {
+  FortnoxMetaInformation,
+  listPath,
+  paginationFromApi,
+  readFortnox,
+  writeFortnox
+} from './shared.ts'
 import {
   FortnoxInvoiceApi,
   FortnoxSupplierInvoiceApi,
@@ -53,10 +63,14 @@ const CustomersResponse = Schema.Struct({
   MetaInformation: FortnoxMetaInformation
 })
 
+const CustomerResponse = Schema.Struct({ Customer: FortnoxCustomer })
+
 const InvoicesResponse = Schema.Struct({
   Invoices: Schema.Array(FortnoxInvoiceApi),
   MetaInformation: FortnoxMetaInformation
 })
+
+const InvoiceResponse = Schema.Struct({ Invoice: FortnoxInvoiceApi })
 
 const SuppliersResponse = Schema.Struct({
   Suppliers: Schema.Array(FortnoxSupplier),
@@ -117,9 +131,48 @@ export const fortnoxGetCustomerAction = defineAction({
       integration,
       FortnoxCustomerOAuthCredentialSlot,
       `customers/${encodeURIComponent(input.customerNumber)}`,
-      Schema.Struct({ Customer: FortnoxCustomer }),
+      CustomerResponse,
       value => value.Customer
     )
+})
+
+export const fortnoxCreateCustomerAction = defineAction({
+  id: 'fortnox.create_customer',
+  description: 'Create a Fortnox customer. Fortnox assigns CustomerNumber.',
+  access: 'write',
+  inputSchema: FortnoxCreateCustomerInput,
+  outputSchema: FortnoxCustomer,
+  execute: ({ integration, input }) =>
+    writeFortnox(
+      integration,
+      FortnoxCustomerOAuthCredentialSlot,
+      'POST',
+      'customers',
+      { Customer: input },
+      CustomerResponse,
+      value => value.Customer
+    )
+})
+
+export const fortnoxUpdateCustomerAction = defineAction({
+  id: 'fortnox.update_customer',
+  description: 'Update a Fortnox customer by CustomerNumber.',
+  access: 'write',
+  inputSchema: FortnoxUpdateCustomerInput,
+  outputSchema: FortnoxCustomer,
+  execute: ({ integration, input }) => {
+    const { CustomerNumber, ...customer } = input
+
+    return writeFortnox(
+      integration,
+      FortnoxCustomerOAuthCredentialSlot,
+      'PUT',
+      `customers/${encodeURIComponent(CustomerNumber)}`,
+      { Customer: customer },
+      CustomerResponse,
+      value => value.Customer
+    )
+  }
 })
 
 export const fortnoxListInvoicesAction = defineAction({
@@ -155,9 +208,48 @@ export const fortnoxGetInvoiceAction = defineAction({
       integration,
       FortnoxInvoiceOAuthCredentialSlot,
       `invoices/${encodeURIComponent(input.documentNumber)}`,
-      Schema.Struct({ Invoice: FortnoxInvoiceApi }),
+      InvoiceResponse,
       value => invoiceFromApi(value.Invoice)
     )
+})
+
+export const fortnoxCreateInvoiceAction = defineAction({
+  id: 'fortnox.create_invoice',
+  description: 'Create a Fortnox customer invoice. Fortnox assigns DocumentNumber.',
+  access: 'write',
+  inputSchema: FortnoxCreateInvoiceInput,
+  outputSchema: FortnoxInvoice,
+  execute: ({ integration, input }) =>
+    writeFortnox(
+      integration,
+      FortnoxInvoiceOAuthCredentialSlot,
+      'POST',
+      'invoices',
+      { Invoice: input },
+      InvoiceResponse,
+      value => invoiceFromApi(value.Invoice)
+    )
+})
+
+export const fortnoxUpdateInvoiceAction = defineAction({
+  id: 'fortnox.update_invoice',
+  description: 'Update a Fortnox customer invoice by DocumentNumber. Does not send or book it.',
+  access: 'write',
+  inputSchema: FortnoxUpdateInvoiceInput,
+  outputSchema: FortnoxInvoice,
+  execute: ({ integration, input }) => {
+    const { DocumentNumber, ...invoice } = input
+
+    return writeFortnox(
+      integration,
+      FortnoxInvoiceOAuthCredentialSlot,
+      'PUT',
+      `invoices/${encodeURIComponent(DocumentNumber)}`,
+      { Invoice: invoice },
+      InvoiceResponse,
+      value => invoiceFromApi(value.Invoice)
+    )
+  }
 })
 
 export const fortnoxListSuppliersAction = defineAction({
@@ -238,14 +330,18 @@ export const fortnoxGetSupplierInvoiceAction = defineAction({
 export const FortnoxConnector = defineConnector({
   id: fortnoxConnectorId,
   description:
-    'Read-only Fortnox company, customer, invoice, supplier, and supplier-invoice actions.',
+    'Fortnox company, customer, invoice, supplier, and supplier-invoice actions without sending or booking.',
   actions: [
     fortnoxListSupplierInvoiceFilesAction,
     fortnoxGetCompanyInformationAction,
     fortnoxListCustomersAction,
     fortnoxGetCustomerAction,
+    fortnoxCreateCustomerAction,
+    fortnoxUpdateCustomerAction,
     fortnoxListInvoicesAction,
     fortnoxGetInvoiceAction,
+    fortnoxCreateInvoiceAction,
+    fortnoxUpdateInvoiceAction,
     fortnoxListSuppliersAction,
     fortnoxGetSupplierAction,
     fortnoxListSupplierInvoicesAction,

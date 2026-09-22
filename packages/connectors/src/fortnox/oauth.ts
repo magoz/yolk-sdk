@@ -8,7 +8,8 @@ export const fortnoxOAuthAuthorizeUrl = 'https://apps.fortnox.se/oauth-v1/auth'
 
 export const fortnoxOAuthTokenUrl = 'https://apps.fortnox.se/oauth-v1/token'
 
-// Fortnox scopes grant read AND write access. This connector only exposes reads.
+// Fortnox scopes grant read AND write access. Connector writes remain limited to
+// customer and invoice create/update; sending or booking is intentionally absent.
 export const fortnoxCompanyInformationScope = 'companyinformation'
 
 export const fortnoxCustomerScope = 'customer'

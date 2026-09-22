@@ -13,7 +13,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management + host download |
 | Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send, IMAP message state |
 | Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                           |
-| Fortnox         | `@yolk-sdk/connectors/fortnox`         | Fortnox OAuth slots                          | none                                               | company, customer, invoice, supplier reads |
+| Fortnox         | `@yolk-sdk/connectors/fortnox`         | Fortnox OAuth slots                          | none                                               | company, customer, invoice reads/writes, supplier reads |
 | Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions           |
 | LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                     |
 | Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph           |
@@ -46,13 +46,17 @@ Return optional `refreshToken`, `clientId`, and `clientSecret` from the host's r
 
 ## Fortnox
 
-`FortnoxConnector` exposes only GET actions, all with `read` metadata:
+`FortnoxConnector` exposes read actions plus customer/invoice create and update actions. Reads have
+`read` metadata; creates and updates have `write` metadata. Sending or booking an invoice is not
+exposed and must remain separately approval-gated by the host:
 
 | Action id                                                         | What it does                                          |
 | ----------------------------------------------------------------- | ----------------------------------------------------- |
 | `fortnox.get_company_information`                                 | read company information                              |
 | `fortnox.list_customers` / `fortnox.get_customer`                 | list or retrieve customers                            |
+| `fortnox.create_customer` / `fortnox.update_customer`             | create or update customers                            |
 | `fortnox.list_invoices` / `fortnox.get_invoice`                   | list or retrieve customer invoices and available rows |
+| `fortnox.create_invoice` / `fortnox.update_invoice`               | create or update customer invoices                    |
 | `fortnox.list_suppliers` / `fortnox.get_supplier`                 | list or retrieve suppliers                            |
 | `fortnox.list_supplier_invoices` / `fortnox.get_supplier_invoice` | list or retrieve supplier invoices by GivenNumber     |
 | `fortnox.list_supplier_invoice_files`                             | list archive file IDs connected to a supplier invoice |
@@ -61,12 +65,14 @@ All resource-scoped OAuth slots share `fortnox.oauth`. Required record scope hin
 `customer`, `invoice`, `supplier`, and `supplierinvoice`. Opt-in file slots are
 `FortnoxConnectFileOAuthCredentialSlot` (`connectfile`) and `FortnoxArchiveOAuthCredentialSlot`
 (`archive`); they are **not** included in `FortnoxCombinedOAuthCredentialSlot`. **Fortnox scopes grant read and write**;
-only the SDK action surface is read-only. Hosts provide HTTP and current Fortnox OAuth credentials,
+action metadata distinguishes reads from customer/invoice writes. Hosts provide HTTP and current Fortnox OAuth credentials,
 with no integration config keys.
 
 List actions support page/limit, one resource-specific search pair, and global selection fields.
 They return runtime Chunks and normalized pagination. Resource fields retain provider spelling and
-monetary types. See [Read Fortnox records](../connectors/fortnox) for setup, inputs, selected fields,
+monetary types. Create inputs require `Name` for customers or `CustomerNumber` for invoices;
+Fortnox assigns the corresponding number. Update inputs carry `CustomerNumber` or `DocumentNumber`.
+See [Read and write Fortnox records](../connectors/fortnox) for setup, inputs, selected fields,
 consent limitations, and failure handling.
 
 ## Dropbox

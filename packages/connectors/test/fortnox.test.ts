@@ -105,15 +105,15 @@ const makeHarness = (
   return { layer, requests, scopes }
 }
 
+const invoke = (action: string, input: Schema.Json = {}) =>
+  FortnoxConnector.invoke({ integration, action, input })
+
 type FortnoxReadInput = {
   readonly customerNumber?: string
   readonly documentNumber?: string
   readonly supplierNumber?: string
   readonly givenNumber?: string
 }
-
-const invoke = (action: string, input: FortnoxReadInput | Schema.Json = {}) =>
-  FortnoxConnector.invoke({ integration, action, input })
 
 const reads: ReadonlyArray<{
   readonly action: string
@@ -247,16 +247,29 @@ describe('Fortnox connector', () => {
     expect(() => response({ n: Infinity })).toThrow('JSON fixture requires a finite JSON value')
   })
 
-  it('exports only ten reads and shared resource-scoped OAuth bindings', () => {
+  it('exports reads and customer/invoice writes with shared resource-scoped OAuth bindings', () => {
     expect(FortnoxConnector.id).toBe('fortnox')
     expect(FortnoxConnector.actions.map(action => action.id).sort()).toEqual(
       [
         ...reads.map(item => item.action),
         ...lists.map(item => item.action),
-        'fortnox.list_supplier_invoice_files'
+        'fortnox.list_supplier_invoice_files',
+        'fortnox.create_customer',
+        'fortnox.update_customer',
+        'fortnox.create_invoice',
+        'fortnox.update_invoice'
       ].sort()
     )
-    expect(FortnoxConnector.actions.every(action => action.access === 'read')).toBe(true)
+    expect(
+      FortnoxConnector.actions
+        .filter(action => action.id.includes('create_') || action.id.includes('update_'))
+        .every(action => action.access === 'write')
+    ).toBe(true)
+    expect(
+      FortnoxConnector.actions
+        .filter(action => !action.id.includes('create_') && !action.id.includes('update_'))
+        .every(action => action.access === 'read')
+    ).toBe(true)
     expect(FortnoxOAuthCredentialSlot).toMatchObject({ id: 'fortnox.oauth', kind: 'oauth' })
     expect(FortnoxCombinedOAuthCredentialSlot.requiredScopes).toEqual([
       'companyinformation',
@@ -269,7 +282,7 @@ describe('Fortnox connector', () => {
     expect(fortnoxOAuthTokenUrl).toBe('https://apps.fortnox.se/oauth-v1/token')
   })
 
-  it.effect('adapts all actions to read-only agent tools with object input schemas', () =>
+  it.effect('adapts all actions to agent tools with object input schemas and access metadata', () =>
     Effect.gen(function* () {
       const harness = makeHarness([])
 
@@ -278,11 +291,19 @@ describe('Fortnox connector', () => {
         {}
       )
 
-      expect(toolSet.tools).toHaveLength(10)
+      expect(toolSet.tools).toHaveLength(14)
 
       for (const tool of toolSet.tools) {
         expect(tool.parameters).toMatchObject({ type: 'object' })
-        expect(toolSet.metadata.find(item => item.name === tool.name)?.access).toBe('read')
+        const access = toolSet.metadata.find(item => item.name === tool.name)?.access
+        expect(access).toBe(
+          tool.name.includes('create_customer') ||
+            tool.name.includes('update_customer') ||
+            tool.name.includes('create_invoice') ||
+            tool.name.includes('update_invoice')
+            ? 'write'
+            : 'read'
+        )
       }
 
       expect(harness.requests).toHaveLength(0)
@@ -309,6 +330,111 @@ describe('Fortnox connector', () => {
       })
     )
   }
+
+  it.effect('creates and updates customers with write metadata and Fortnox envelopes', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({ Customer: { CustomerNumber: '001', Name: 'Created AB' } }),
+        response({ Customer: { CustomerNumber: '001', Name: 'Updated AB' } })
+      ])
+
+      const created = yield* invoke('fortnox.create_customer', {
+        Name: 'Created AB',
+        Email: 'created@example.com'
+      }).pipe(Effect.provide(harness.layer))
+
+      const updated = yield* invoke('fortnox.update_customer', {
+        CustomerNumber: '001',
+        Name: 'Updated AB',
+        Email: 'updated@example.com'
+      }).pipe(Effect.provide(harness.layer))
+
+      expect(created).toMatchObject({ value: { CustomerNumber: '001', Name: 'Created AB' } })
+      expect(updated).toMatchObject({ value: { CustomerNumber: '001', Name: 'Updated AB' } })
+
+      expect(harness.requests).toHaveLength(2)
+      expect(harness.requests[0]).toMatchObject({
+        method: 'POST',
+        url: 'https://api.fortnox.se/3/customers',
+        headers: {
+          authorization: 'Bearer test-access-token',
+          accept: 'application/json',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ Customer: { Name: 'Created AB', Email: 'created@example.com' } })
+      })
+
+      expect(harness.requests[1]).toMatchObject({
+        method: 'PUT',
+        url: 'https://api.fortnox.se/3/customers/001',
+        headers: {
+          authorization: 'Bearer test-access-token',
+          accept: 'application/json',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ Customer: { Name: 'Updated AB', Email: 'updated@example.com' } })
+      })
+
+      expect(harness.scopes).toEqual([['customer'], ['customer']])
+    })
+  )
+
+  it.effect('creates and updates invoices with numeric money and runtime Chunk rows', () =>
+    Effect.gen(function* () {
+      const row = { ArticleNumber: 'A-1', Price: 12.5, DeliveredQuantity: '2.00' }
+
+      const invoice = {
+        DocumentNumber: '002',
+        CustomerNumber: '001',
+        InvoiceRows: [row]
+      }
+
+      const harness = makeHarness([response({ Invoice: invoice }), response({ Invoice: invoice })])
+
+      const created = yield* invoke('fortnox.create_invoice', {
+        CustomerNumber: '001',
+        InvoiceRows: [row]
+      }).pipe(Effect.provide(harness.layer))
+
+      const updated = yield* invoke('fortnox.update_invoice', {
+        DocumentNumber: '002',
+        CustomerNumber: '001',
+        InvoiceRows: [row]
+      }).pipe(Effect.provide(harness.layer))
+
+      expect(created).toMatchObject({ value: { DocumentNumber: '002' } })
+      expect(updated).toMatchObject({ value: { DocumentNumber: '002' } })
+
+      expect(harness.requests[0]).toMatchObject({
+        method: 'POST',
+        url: 'https://api.fortnox.se/3/invoices',
+        headers: { accept: 'application/json', 'content-type': 'application/json' }
+      })
+      expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
+        Invoice: { CustomerNumber: '001', InvoiceRows: [row] }
+      })
+
+      expect(harness.requests[1]).toMatchObject({
+        method: 'PUT',
+        url: 'https://api.fortnox.se/3/invoices/002',
+        headers: { accept: 'application/json', 'content-type': 'application/json' }
+      })
+      expect(JSON.parse(harness.requests[1]?.body ?? '')).toEqual({
+        Invoice: { CustomerNumber: '001', InvoiceRows: [row] }
+      })
+
+      expect(harness.scopes).toEqual([['invoice'], ['invoice']])
+
+      if (!Predicate.isTagged(created, 'Success') || !Predicate.isTagged(updated, 'Success'))
+        throw new Error('Expected invoice successes')
+
+      const createdInvoice = yield* Schema.decodeUnknownEffect(FortnoxInvoice)(created.value)
+      const updatedInvoice = yield* Schema.decodeUnknownEffect(FortnoxInvoice)(updated.value)
+
+      expect(Chunk.toReadonlyArray(createdInvoice.InvoiceRows ?? Chunk.empty())).toEqual([row])
+      expect(Chunk.toReadonlyArray(updatedInvoice.InvoiceRows ?? Chunk.empty())).toEqual([row])
+    })
+  )
 
   for (const item of lists) {
     it.effect(`${item.action} returns one page, a next page, then an empty final page`, () =>
@@ -494,7 +620,15 @@ describe('Fortnox connector', () => {
     ...[0, 501, 1.5].map(limit => ({ action: 'fortnox.list_customers', input: { limit } })),
     { action: 'fortnox.list_invoices', input: { filter: 'pendingpayment' } },
     { action: 'fortnox.list_customers', input: { search: { field: 'limit', value: '5' } } },
-    { action: 'fortnox.list_suppliers', input: { search: { field: 'name', value: '' } } }
+    { action: 'fortnox.list_suppliers', input: { search: { field: 'name', value: '' } } },
+    { action: 'fortnox.create_customer', input: {} },
+    { action: 'fortnox.create_customer', input: { Name: '' } },
+    { action: 'fortnox.update_customer', input: { Name: 'Missing number' } },
+    { action: 'fortnox.update_customer', input: { CustomerNumber: '' } },
+    { action: 'fortnox.update_customer', input: { CustomerNumber: '001', Name: '' } },
+    { action: 'fortnox.create_invoice', input: {} },
+    { action: 'fortnox.update_invoice', input: { Total: 10 } },
+    { action: 'fortnox.update_invoice', input: { DocumentNumber: '' } }
   ]
 
   for (const [index, item] of invalidInputs.entries()) {
