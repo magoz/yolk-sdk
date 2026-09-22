@@ -27,9 +27,16 @@ export type FortnoxGivenNumber = typeof FortnoxGivenNumber.Type
 
 const OptionalString = Schema.optional(Schema.String)
 
-const OptionalNumber = Schema.optional(Schema.Number)
-
 const OptionalBoolean = Schema.optional(Schema.Boolean)
+
+// Fortnox uses JSON null for unset response fields. Preserve null; do not require omission.
+const NullableString = Schema.optional(Schema.NullOr(Schema.String))
+
+const NullableNumber = Schema.optional(Schema.NullOr(Schema.Number))
+
+const NullableBoolean = Schema.optional(Schema.NullOr(Schema.Boolean))
+
+const NullableInt = Schema.optional(Schema.NullOr(Schema.Int))
 
 // Resource fields deliberately retain Fortnox spelling and monetary wire types.
 // This is a bounded read model, not a lossless export of every provider field.
@@ -37,16 +44,16 @@ export class FortnoxCompanyInformation extends Schema.Class<FortnoxCompanyInform
   'FortnoxCompanyInformation'
 )({
   CompanyName: Schema.String,
-  OrganizationNumber: OptionalString,
-  DatabaseNumber: Schema.optional(Schema.Int),
-  Address: OptionalString,
-  City: OptionalString,
-  ZipCode: OptionalString,
-  CountryCode: OptionalString,
-  VisitAddress: OptionalString,
-  VisitCity: OptionalString,
-  VisitZipCode: OptionalString,
-  VisitCountryCode: OptionalString
+  OrganizationNumber: NullableString,
+  DatabaseNumber: NullableInt,
+  Address: NullableString,
+  City: NullableString,
+  ZipCode: NullableString,
+  CountryCode: NullableString,
+  VisitAddress: NullableString,
+  VisitCity: NullableString,
+  VisitZipCode: NullableString,
+  VisitCountryCode: NullableString
 }) {}
 
 const ContactFields = {
@@ -72,94 +79,117 @@ const ContactFields = {
   Comments: OptionalString
 }
 
+const ContactResponseFields = {
+  Name: Schema.String,
+  Active: NullableBoolean,
+  OrganisationNumber: NullableString,
+  Email: NullableString,
+  Phone: NullableString,
+  Phone1: NullableString,
+  Phone2: NullableString,
+  Address1: NullableString,
+  Address2: NullableString,
+  City: NullableString,
+  ZipCode: NullableString,
+  Country: NullableString,
+  CountryCode: NullableString,
+  Currency: NullableString,
+  VATNumber: NullableString,
+  VATType: NullableString,
+  TermsOfPayment: NullableString,
+  OurReference: NullableString,
+  YourReference: NullableString,
+  Comments: NullableString
+}
+
 export class FortnoxCustomer extends Schema.Class<FortnoxCustomer>('FortnoxCustomer')({
   CustomerNumber: FortnoxCustomerNumber,
-  ...ContactFields,
-  EmailInvoice: OptionalString,
-  Type: OptionalString
+  ...ContactResponseFields,
+  EmailInvoice: NullableString,
+  Type: NullableString
 }) {}
 
 export class FortnoxSupplier extends Schema.Class<FortnoxSupplier>('FortnoxSupplier')({
   SupplierNumber: FortnoxSupplierNumber,
-  ...ContactFields,
-  OurCustomerNumber: OptionalString
+  ...ContactResponseFields,
+  OurCustomerNumber: NullableString
 }) {}
 
 export class FortnoxInvoiceRow extends Schema.Class<FortnoxInvoiceRow>('FortnoxInvoiceRow')({
-  RowId: Schema.optional(Schema.Int),
-  AccountNumber: Schema.optional(Schema.Int),
-  ArticleNumber: OptionalString,
-  Description: OptionalString,
-  DeliveredQuantity: OptionalString,
-  Unit: OptionalString,
-  Price: OptionalNumber,
-  PriceExcludingVAT: OptionalNumber,
-  Discount: OptionalNumber,
-  DiscountType: OptionalString,
-  VAT: OptionalNumber,
-  VATCode: OptionalString,
-  Total: Schema.optional(Schema.NullOr(Schema.Number)),
-  TotalExcludingVAT: OptionalNumber,
-  CostCenter: Schema.optional(Schema.NullOr(Schema.String)),
-  Project: OptionalString
+  RowId: NullableInt,
+  AccountNumber: NullableInt,
+  ArticleNumber: NullableString,
+  Description: NullableString,
+  DeliveredQuantity: NullableString,
+  Unit: NullableString,
+  Price: NullableNumber,
+  PriceExcludingVAT: NullableNumber,
+  Discount: NullableNumber,
+  DiscountType: NullableString,
+  VAT: NullableNumber,
+  VATCode: NullableString,
+  Total: NullableNumber,
+  TotalExcludingVAT: NullableNumber,
+  CostCenter: NullableString,
+  Project: NullableString
 }) {}
 
 const InvoiceFields = {
-  Currency: OptionalString,
-  InvoiceDate: OptionalString,
-  DueDate: OptionalString,
-  FinalPayDate: OptionalString,
-  Booked: OptionalBoolean,
-  Cancelled: OptionalBoolean,
-  OCR: OptionalString,
-  OurReference: OptionalString,
-  YourReference: OptionalString,
-  Comments: OptionalString,
-  CostCenter: OptionalString,
-  Project: OptionalString,
-  VoucherNumber: Schema.optional(Schema.Int),
-  VoucherSeries: OptionalString
+  Currency: NullableString,
+  InvoiceDate: NullableString,
+  DueDate: NullableString,
+  FinalPayDate: NullableString,
+  Booked: NullableBoolean,
+  Cancelled: NullableBoolean,
+  OCR: NullableString,
+  OurReference: NullableString,
+  YourReference: NullableString,
+  Comments: NullableString,
+  CostCenter: NullableString,
+  Project: NullableString,
+  VoucherNumber: NullableInt,
+  VoucherSeries: NullableString
 }
 
 export class FortnoxInvoice extends Schema.Class<FortnoxInvoice>('FortnoxInvoice')({
   DocumentNumber: FortnoxDocumentNumber,
   CustomerNumber: FortnoxCustomerNumber,
-  CustomerName: OptionalString,
+  CustomerName: NullableString,
   ...InvoiceFields,
-  Total: OptionalNumber,
-  Balance: OptionalNumber,
-  TotalVAT: OptionalNumber,
-  TotalToPay: OptionalNumber,
-  Net: OptionalNumber,
-  Gross: OptionalNumber,
-  CurrencyRate: OptionalNumber,
-  Credit: OptionalString,
-  Sent: OptionalBoolean,
-  NotCompleted: OptionalBoolean,
-  InvoiceType: OptionalString,
-  VoucherYear: Schema.optional(Schema.Int),
+  Total: NullableNumber,
+  Balance: NullableNumber,
+  TotalVAT: NullableNumber,
+  TotalToPay: NullableNumber,
+  Net: NullableNumber,
+  Gross: NullableNumber,
+  CurrencyRate: NullableNumber,
+  Credit: NullableString,
+  Sent: NullableBoolean,
+  NotCompleted: NullableBoolean,
+  InvoiceType: NullableString,
+  VoucherYear: NullableInt,
   InvoiceRows: Schema.optional(Schema.Chunk(FortnoxInvoiceRow))
 }) {}
 
 export class FortnoxSupplierInvoiceRow extends Schema.Class<FortnoxSupplierInvoiceRow>(
   'FortnoxSupplierInvoiceRow'
 )({
-  Account: Schema.optional(Schema.Int),
-  AccountDescription: OptionalString,
-  ArticleNumber: OptionalString,
-  ItemDescription: OptionalString,
-  Code: OptionalString,
-  Debit: OptionalNumber,
-  Credit: OptionalNumber,
-  DebitCurrency: OptionalNumber,
-  CreditCurrency: OptionalNumber,
-  Price: OptionalNumber,
-  Quantity: OptionalNumber,
-  Total: Schema.optional(Schema.NullOr(Schema.Number)),
-  Unit: OptionalString,
-  CostCenter: Schema.optional(Schema.NullOr(Schema.String)),
-  Project: OptionalString,
-  TransactionInformation: OptionalString
+  Account: NullableInt,
+  AccountDescription: NullableString,
+  ArticleNumber: NullableString,
+  ItemDescription: NullableString,
+  Code: NullableString,
+  Debit: NullableNumber,
+  Credit: NullableNumber,
+  DebitCurrency: NullableNumber,
+  CreditCurrency: NullableNumber,
+  Price: NullableNumber,
+  Quantity: NullableNumber,
+  Total: NullableNumber,
+  Unit: NullableString,
+  CostCenter: NullableString,
+  Project: NullableString,
+  TransactionInformation: NullableString
 }) {}
 
 export class FortnoxSupplierInvoice extends Schema.Class<FortnoxSupplierInvoice>(
@@ -167,15 +197,15 @@ export class FortnoxSupplierInvoice extends Schema.Class<FortnoxSupplierInvoice>
 )({
   GivenNumber: FortnoxGivenNumber,
   SupplierNumber: FortnoxSupplierNumber,
-  SupplierName: OptionalString,
-  InvoiceNumber: OptionalString,
+  SupplierName: NullableString,
+  InvoiceNumber: NullableString,
   ...InvoiceFields,
   // Fortnox returns these amounts as strings; do not coerce financial values.
-  Total: OptionalString,
-  Balance: OptionalString,
-  CurrencyRate: OptionalString,
-  Credit: OptionalBoolean,
-  PaymentPending: OptionalBoolean,
+  Total: NullableString,
+  Balance: NullableString,
+  CurrencyRate: NullableString,
+  Credit: NullableBoolean,
+  PaymentPending: NullableBoolean,
   SupplierInvoiceRows: Schema.optional(Schema.Chunk(FortnoxSupplierInvoiceRow))
 }) {}
 
