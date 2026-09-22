@@ -552,7 +552,11 @@ both false by default. Enable `streaming` for SSE deltas; enable `reasoningConte
 preserve compatible models' reasoning output and assistant replay, which spends input tokens. It also
 accepts `reasoningEffortFormat` (`'reasoning-object'` by default; `'reasoning-effort'` sends the literal
 field instead for DeepSeek-style hosts) and an optional `thinking: { type: 'enabled' | 'disabled' }`
-toggle merged into the request body.
+toggle merged into the request body. `supportsPdfAttachments` defaults to `true` for Gateway and can
+be set to `false`; generic `OpenAiProviderConfig` defaults it to `false`. When enabled, URL-backed PDF
+user-message parts are fetched and buffered through the host-provided `HttpClient` before provider
+submission. Hosts own URL authorization, redirect and credential policy, streamed limits, timeouts,
+and safe logging; see [provider setup](../integrations/provider-setup#bound-pdf-attachment-fetches).
 
 | Subpath                                                | Main exports                                                                                                                                               |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |

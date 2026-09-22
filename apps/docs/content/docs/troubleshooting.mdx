@@ -122,6 +122,13 @@ media even after resolution. Resolve refs in a request-local copy inside each pr
 including overflow retry. See [Resolve private attachments](./guides/private-attachments) for
 retry composition and provider limitations.
 
+For generic OpenAI chat, native PDF user-message parts require `supportsPdfAttachments: true`;
+Gateway enables them by default and accepts `false` to disable them. URL-backed PDFs are fetched and
+buffered by the host's `HttpClient`, not by Gateway. If fetch or read fails, verify the source URL is
+authorized and reachable through a bounded transport that controls redirects, credentials, byte
+limits, timeouts, and logs, or provide validated inline bytes instead. The SDK does not add those
+network guarantees.
+
 ### Anthropic context is too long
 
 Anthropic prompt-too-long responses become non-retryable `context_overflow` failures. Generic loop

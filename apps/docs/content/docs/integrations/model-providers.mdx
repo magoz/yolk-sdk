@@ -74,6 +74,11 @@ query Vercel's model catalog instead of hard-coding an SDK model union. `VercelA
 `finish_reason` values `length` and `content_filter` fail as non-retryable `invalid_response` rather
 than reporting partial or filtered output as complete.
 
+Gateway enables native PDF user-message parts by default; set `supportsPdfAttachments: false` to
+disable them. URL-backed PDFs are fetched and buffered by the host-provided `HttpClient` before the
+Gateway request, so hosts must authorize destinations, bound the download, control redirects and
+credentials, and sanitize logs. See [Bound PDF attachment fetches](./provider-setup#bound-pdf-attachment-fetches).
+
 ## OpenCode Go
 
 Use `makeOpenCodeGoProviderLayer` from `@yolk-sdk/agent/providers/opencode/go-provider` with a

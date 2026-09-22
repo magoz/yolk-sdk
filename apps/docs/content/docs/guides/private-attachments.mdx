@@ -168,6 +168,11 @@ emitted deltas, and does not retry a second overflow. See [durable compaction](.
 - Resolution is not capability conversion. Both adapters reject unresolved image/document refs and
   audio tool results. Claude also rejects non-PDF, non-text documents. Supported MIME types,
   dimensions, page counts, byte budgets, URL accessibility, and model capabilities remain host checks.
+- Generic OpenAI chat opts into native PDF user-message parts with `supportsPdfAttachments`; Gateway
+  defaults it on. Their URL-PDF lowering performs a host-side GET through the supplied `HttpClient`
+  and buffers the response before provider submission. Enforce authorization, redirect/destination
+  policy, streamed limits, timeouts, safe logs, and credential isolation there, or use validated
+  inline bytes. Set Gateway `supportsPdfAttachments: false` when that boundary is unavailable.
 - Assistant media is traversed for protocol reuse, but Claude/Codex assistant text lowering still
   rejects media. Nested provider tool results are preserved by the helper, not newly replayed as
   native vendor tool results by those adapters.

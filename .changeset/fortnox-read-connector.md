@@ -7,4 +7,4 @@
 '@yolk-sdk/vercel-workflows': patch
 ---
 
-Add Fortnox customer and invoice write capabilities to the connector alongside its ten read actions for company information, customers, invoices, suppliers, and supplier invoices. The new `fortnox.create_customer`, `fortnox.update_customer`, `fortnox.create_invoice`, and `fortnox.update_invoice` actions use `write` access metadata, typed schemas, JSON request envelopes, and resource-scoped OAuth hints. Sending, booking, cancellation, and payment actions remain absent so hosts can keep outbound invoice approval policy separate. Hosts retain HTTP execution, OAuth lifecycle, credentials, and policy; Fortnox OAuth scopes themselves still grant read and write access.
+Add `@yolk-sdk/connectors/fortnox` with nine read-only actions for company information and list/get customers, invoices, suppliers, and supplier invoices. Include typed schemas, pagination, resource-scoped OAuth credential hints, provider failure handling, and agent-tool access metadata. Hosts retain HTTP execution, OAuth lifecycle, credentials, and policy; Fortnox OAuth scopes themselves still grant read and write access.

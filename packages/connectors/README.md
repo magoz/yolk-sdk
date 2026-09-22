@@ -506,6 +506,14 @@ or book action, so no Fortnox action is marked `destructive`. The read actions a
 `fortnox.list_invoices`, `fortnox.get_invoice`, `fortnox.list_suppliers`, `fortnox.get_supplier`,
 `fortnox.list_supplier_invoices`, `fortnox.get_supplier_invoice`, and `fortnox.list_supplier_invoice_files` (described below).
 
+Write inputs preserve Fortnox's PascalCase wire names. Creating a customer requires `Name` and lets
+Fortnox assign `CustomerNumber`; updating a customer includes `CustomerNumber` for the URL but omits
+it from the JSON body. Creating an invoice requires `CustomerNumber` and lets Fortnox assign
+`DocumentNumber`; updating one includes `DocumentNumber` for the URL. Invoice `InvoiceRows` inputs
+are JSON arrays, while returned row collections are Effect `Chunk` values. See the
+[Fortnox guide](../../apps/docs/content/docs/connectors/fortnox.mdx) for the action table and schema
+conventions.
+
 List inputs support `page` (at least 1), `limit` (1–500; provider default 100), `lastModified`, and
 one `search: { field, value }` pair with resource-specific fields. Customers accept active/inactive
 `filter`; invoice lists accept status `filter` and `fromDate`/`toDate`. Each list returns one page:

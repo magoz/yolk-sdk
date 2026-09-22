@@ -25,6 +25,18 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Unreleased: Fortnox customer and invoice writes
+
+Upgrading `@yolk-sdk/connectors` adds four generated write tools when hosts pass the complete
+`FortnoxConnector` to `makeConnectorToolModule`: `fortnox.create_customer`,
+`fortnox.update_customer`, `fortnox.create_invoice`, and `fortnox.update_invoice`. Existing Fortnox
+resource scopes already grant read and write access, so this does not require new OAuth consent.
+
+Read-only hosts should restrict enabled actions explicitly and review any host access override:
+blanket `access: 'read'` overrides declared action metadata, including these new `write` declarations.
+Keep authorization and approval policy host-owned. Sending, booking, cancellation, and payment remain
+outside the connector. See [Fortnox](./connectors/fortnox).
+
 ### Unreleased: reviewed email connector primitives
 
 - `gmail.send_message` is a new **destructive** action for complete host-generated base64url MIME.

@@ -499,8 +499,14 @@ inside one source fail validation. Hosts own file discovery, storage, enablement
 Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
 `refAttachmentSource`. OpenAI-compatible Chat Completions providers support inline text documents;
 native PDF `DocumentPart` lowering is opt-in through `supportsPdfAttachments`, while Vercel AI
-Gateway enables it by default. Gateway resolves URL-backed PDFs through its `HttpClient` before
-sending file data. OpenAI Chat and Vercel AI Gateway support image URLs; OpenAI Codex supports image
+Gateway enables it by default (set `supportsPdfAttachments: false` to disable it). For URL-backed
+user-message PDFs, both opted-in generic OpenAI chat and Gateway use the host-provided `HttpClient`
+to fetch and buffer the PDF before sending inline file data; the provider does not fetch the URL.
+Hosts must authorize attachment URLs and enforce destination and redirect policy, streamed-byte
+limits, timeouts, safe logging, and credential isolation so provider credentials are never attached
+to attachment destinations. The SDK resolver does not establish those guarantees. Prefer validated
+inline bytes when the host cannot provide a bounded attachment transport. OpenAI Chat and Vercel AI
+Gateway support image URLs; OpenAI Codex supports image
 and document URLs; Anthropic supports image and PDF URLs. The Grok
 Responses lowerer can encode image URLs/data URLs, but hosts should enable image capability only for
 subscription models they have verified accept image input. Use
