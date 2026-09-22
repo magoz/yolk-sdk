@@ -243,8 +243,17 @@ List `id` values are opaque adapter identifiers that callers pass unchanged to `
 POP3 adapters must use UIDL or another stable mapping, never transient message sequence numbers. When IMAP `folder` is omitted, adapters use `INBOX`; POP3 uses its single mailbox.
 Adapters return deterministic newest-first pages. Cursors are opaque, scoped to the integration,
 protocol, folder, and ordering, and may fail after mailbox changes. Send success returns
-`{ accepted: true }`, which means the SMTP server accepted submission, not that the message was
-delivered.
+`{ accepted: true, submissionId?, sentCopy }`, which means the SMTP server accepted submission,
+not that the message was delivered. `email.send_message` accepts optional `saveToSentItems`
+(default: save when possible) and `sentFolder`. When saving is requested and the incoming
+account uses IMAP, the connector resolves the IMAP connection plus the separate incoming
+credential before SMTP invocation and passes them as `sentCopy` with the SMTP request, so the
+host can render once, submit the same bytes, and append the Sent copy without resubmission.
+The host owns all APPEND mechanics and reports `sentCopy.status` as `saved | failed | skipped |
+unsupported` with the storage `folder` when known. `failed` after acceptance never means the
+message was not sent: do not resend. `skipped` means saving was disabled; `unsupported` means
+saving was requested but unavailable (POP3, missing IMAP incoming, or a legacy host that omits
+`sentCopy`, which the action synthesizes rather than implying `saved`).
 
 ### Read state, trash, and move (IMAP only)
 

@@ -579,7 +579,13 @@ describe('generic email connector', () => {
         }
       })
 
-      expect(result).toEqual(ActionResult.success({ accepted: true, submissionId: 'submission-1' }))
+      expect(result).toEqual(
+        ActionResult.success({
+          accepted: true,
+          submissionId: 'submission-1',
+          sentCopy: { status: 'unsupported' }
+        })
+      )
       expect(requests.send[0]).toMatchObject({
         connection: {
           protocol: 'smtp',
@@ -616,7 +622,11 @@ describe('generic email connector', () => {
         }).pipe(Effect.provide(makeHostLayer({ requests })))
 
         expect(result).toEqual(
-          ActionResult.success({ accepted: true, submissionId: 'submission-1' })
+          ActionResult.success({
+            accepted: true,
+            submissionId: 'submission-1',
+            sentCopy: { status: 'unsupported' }
+          })
         )
         expect(requests.send[0]?.connection).toMatchObject({
           protocol: 'smtp',

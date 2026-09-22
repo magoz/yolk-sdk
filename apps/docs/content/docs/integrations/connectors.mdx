@@ -229,7 +229,11 @@ sequence numbers. An omitted IMAP `folder` means `INBOX`; POP3 uses its single m
 return deterministic newest-first pages. Cursors are opaque and scoped to the integration, protocol,
 folder, and ordering; mailbox changes may invalidate them. SMTP input needs at least one recipient
 across `to`, `cc`, and `bcc`. `{ accepted: true }` confirms server submission acceptance only, not
-delivery.
+delivery. `email.send_message` also accepts optional `saveToSentItems` (default: save when possible)
+and `sentFolder`. When saving is requested and the incoming account uses IMAP, the connector passes
+IMAP Sent-copy details with the SMTP request so the host can store the same submitted bytes without
+resubmission; the output `sentCopy` reports `saved | failed | skipped | unsupported`. A Sent-save
+failure after acceptance never means the message was not sent: do not resend.
 
 ### Mark read/unread and move to/from trash
 

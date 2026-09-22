@@ -34,6 +34,7 @@ export {
 
 import {
   CredentialSlot,
+  type CredentialResolver,
   UsernamePasswordCredential,
   resolveCredential,
   type RuntimeCredential
@@ -602,18 +603,64 @@ export class EmailCreateDraftOutput extends Schema.Class<EmailCreateDraftOutput>
   draftId: Schema.optional(EmailDraftId)
 }) {}
 
+export const EmailSentCopyStatus = Schema.Literals(['saved', 'failed', 'skipped', 'unsupported'])
+
+export type EmailSentCopyStatus = typeof EmailSentCopyStatus.Type
+
+/**
+ * Host-owned Sent-copy details for `email.send_message`. The connector resolves the
+ * IMAP connection and incoming credential and passes them with the SMTP request so
+ * the host can render once, submit the same bytes, and append the Sent copy without
+ * resubmission. Hosts own all APPEND mechanics; there is no separate append port.
+ * `folder` selects the Sent mailbox; when omitted the host discovers it.
+ */
+export class EmailSentCopyRequest extends Schema.Class<EmailSentCopyRequest>(
+  'EmailSentCopyRequest'
+)({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  folder: Schema.optional(EmailFolderName)
+}) {}
+
+/**
+ * Sent-copy outcome for `email.send_message`. `saved` means the host stored the
+ * submitted bytes; `failed` means storage failed or could not be confirmed after
+ * SMTP acceptance (never resend); `skipped` means
+ * saving was disabled via `saveToSentItems: false`; `unsupported` means saving was
+ * requested but unavailable (POP3, missing IMAP incoming, or a legacy host that
+ * omits `sentCopy`). A missing `sentCopy` from a legacy host is synthesized by the
+ * action as `unsupported` (saving requested) or `skipped` (disabled), never `saved`.
+ */
+export class EmailSentCopyOutput extends Schema.Class<EmailSentCopyOutput>('EmailSentCopyOutput')({
+  status: EmailSentCopyStatus,
+  folder: Schema.optional(EmailFolderName)
+}) {}
+
 export class EmailSendMessageInput extends Schema.Class<EmailSendMessageInput>(
   'EmailSendMessageInput'
 )({
-  message: EmailComposeMessage
+  message: EmailComposeMessage,
+  saveToSentItems: Schema.optional(Schema.Boolean),
+  sentFolder: Schema.optional(EmailFolderName)
 }) {}
+
+const unverifiedSentCopyWarning =
+  'SMTP submission was accepted, but its receipt or Sent-copy metadata could not be verified. Do not resend.'
 
 export class EmailSendMessageOutput extends Schema.Class<EmailSendMessageOutput>(
   'EmailSendMessageOutput'
 )({
   accepted: Schema.Literal(true),
-  submissionId: Schema.optional(Schema.String)
+  submissionId: Schema.optional(Schema.String),
+  sentCopy: Schema.optional(EmailSentCopyOutput),
+  warning: Schema.optional(Schema.Literal(unverifiedSentCopyWarning))
 }) {}
+
+// Ancillary metadata cannot erase an already-confirmed external submission.
+const EmailSubmissionReceipt = Schema.Struct({
+  accepted: Schema.Literal(true),
+  submissionId: Schema.optional(Schema.Unknown)
+})
 
 export class EmailListMessagesRequest extends Schema.Class<EmailListMessagesRequest>(
   'EmailListMessagesRequest'
@@ -660,7 +707,8 @@ export class EmailSendMessageRequest extends Schema.Class<EmailSendMessageReques
 )({
   connection: EmailSmtpConnection,
   credential: UsernamePasswordCredential,
-  message: EmailComposeMessage
+  message: EmailComposeMessage,
+  sentCopy: Schema.optional(EmailSentCopyRequest)
 }) {}
 
 export interface EmailAttachmentBytesResult extends ConnectorFileBytes {
@@ -1143,23 +1191,115 @@ export const emailCreateDraftAction = defineAction({
     })
 })
 
+/**
+ * Build the optional Sent-copy request for `email.send_message`. Saving is requested
+ * unless the caller explicitly opts out with `saveToSentItems: false`; in that case
+ * no incoming config or credential is touched. When saving is requested, the IMAP
+ * incoming connection and credential are resolved before SMTP invocation and passed
+ * with the SMTP request so the host can append the Sent copy without resubmission.
+ * Sent saving is best-effort configuration: POP3, a missing/unusable incoming
+ * setup, or an opt-out sends via SMTP anyway and the output reports `unsupported`
+ * (saving requested but unavailable) or `skipped` (disabled). SMTP submission is
+ * never blocked by Sent-save prerequisites, and no raw credentials or errors leak
+ * into the result.
+ */
+const resolveSentCopyRequest = (
+  integration: ConnectorIntegration,
+  input: EmailSendMessageInput
+): Effect.Effect<EmailSentCopyRequest | undefined, never, CredentialResolver> =>
+  Effect.gen(function* () {
+    if (input.saveToSentItems === false) return undefined
+
+    const incoming = yield* incomingConnection(integration).pipe(
+      Effect.catch(() => Effect.succeed(undefined))
+    )
+
+    if (incoming === undefined || incoming.protocol !== 'imap') return undefined
+
+    const credential = yield* Effect.gen(function* () {
+      const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
+
+      return yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
+    }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+
+    if (credential === undefined) return undefined
+
+    let request: EmailSentCopyRequest = {
+      connection: EmailImapConnection.make({
+        protocol: 'imap',
+        host: incoming.host,
+        port: incoming.port,
+        security: incoming.security
+      }),
+      credential
+    }
+
+    if (input.sentFolder !== undefined) request = { ...request, folder: input.sentFolder }
+
+    return EmailSentCopyRequest.make(request)
+  })
+
 export const emailSendMessageAction = defineAction({
   id: 'email.send_message',
-  description: 'Submit a normalized message to a configured SMTP server.',
+  description:
+    'Submit a normalized message to a configured SMTP server. Success reports SMTP acceptance ({ accepted: true }), not delivery. When Sent saving is requested (the default) and the incoming account uses IMAP, the connector attaches IMAP Sent-copy details so the host can store the same submitted bytes without resubmission; the returned sentCopy reports saved | failed | skipped | unsupported. A Sent-save failure after acceptance never means the message was not sent: do not resend.',
   access: 'destructive',
   inputSchema: EmailSendMessageInput,
   outputSchema: EmailSendMessageOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       yield* requireRecipient(integration, input.message)
+      const sentCopy = yield* resolveSentCopyRequest(integration, input)
       const connection = yield* smtpConnection(integration)
       const resolved = yield* resolveCredential(integration, EmailSmtpCredentialSlot)
       const credential = yield* usableCredential(integration, resolved, EmailSmtpCredentialSlot)
       const client = yield* EmailClient
 
-      return yield* client.sendMessage(
-        EmailSendMessageRequest.make({ connection, credential, message: input.message })
+      let request: EmailSendMessageRequest = { connection, credential, message: input.message }
+
+      if (sentCopy !== undefined) request = { ...request, sentCopy }
+
+      const result = yield* client.sendMessage(EmailSendMessageRequest.make(request))
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      const receipt = yield* Schema.decodeUnknownEffect(EmailSubmissionReceipt)(result.value).pipe(
+        Effect.mapError(error =>
+          invalidHostOutput(integration, 'EmailClient returned invalid sendMessage output', error)
+        )
       )
+
+      const output = yield* Schema.decodeUnknownEffect(EmailSendMessageOutput)(result.value).pipe(
+        Effect.catch(() => {
+          let unverified: EmailSendMessageOutput = {
+            accepted: true,
+            sentCopy: EmailSentCopyOutput.make({ status: 'failed' }),
+            warning: unverifiedSentCopyWarning
+          }
+
+          if (Predicate.isString(receipt.submissionId)) {
+            unverified = { ...unverified, submissionId: receipt.submissionId }
+          }
+
+          return Effect.succeed(EmailSendMessageOutput.make(unverified))
+        })
+      )
+
+      if (output.sentCopy !== undefined) return ActionResult.success(output)
+
+      // Legacy hosts omit sentCopy: synthesize the honest non-saved status. Saving
+      // requested means storage was unavailable; disabled means it was skipped.
+      let legacy: EmailSendMessageOutput = {
+        accepted: true,
+        sentCopy: EmailSentCopyOutput.make({
+          status: input.saveToSentItems === false ? 'skipped' : 'unsupported'
+        })
+      }
+
+      if (output.submissionId !== undefined)
+        legacy = { ...legacy, submissionId: output.submissionId }
+
+      return ActionResult.success(EmailSendMessageOutput.make(legacy))
     })
 })
 
