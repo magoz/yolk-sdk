@@ -895,7 +895,7 @@ describe('subagent omission contract', () => {
     const omittedContent = structuredContentObject(omitted)
 
     expect(omitted.content).toBe(
-      'Subagent accepted. Use subagent_status or subagent_wait with tool_call_id=call_accept.'
+      'Subagent accepted, not completed. Reference: tool_call_id=call_accept. Completion delivery and observation follow the host instructions.'
     )
     expect(Object.keys(omittedContent)).toEqual([
       'type',
@@ -924,7 +924,7 @@ describe('subagent omission contract', () => {
     const presentContent = structuredContentObject(present)
 
     expect(present.content).toBe(
-      'Subagent accepted. Use subagent_status or subagent_wait with tool_call_id=call_accept_parent and parent_run_id=parent_1.'
+      'Subagent accepted, not completed. Reference: tool_call_id=call_accept_parent and parent_run_id=parent_1. Completion delivery and observation follow the host instructions.'
     )
     expect(Object.keys(presentContent)).toEqual([
       'type',

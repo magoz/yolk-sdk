@@ -43,6 +43,10 @@ describe('background subagent contract', () => {
         workflow_run_id: 'physical-child'
       })
       expect(subagentUsageFromToolResult(result)).toBeUndefined()
+      expect(result.content).toContain('not completed')
+      expect(result.content).toContain('tool_call_id=child-call')
+      expect(result.content).not.toContain('subagent_status')
+      expect(result.content).not.toContain('subagent_wait')
     })
   )
 
@@ -92,6 +96,15 @@ describe('background subagent contract', () => {
       expect(makeSubagentToolDef(subagents, { background: true }).parameters).toHaveProperty(
         'properties.background'
       )
+      // This host registers only the launch tool. Neither status/wait nor
+      // automatic delivery is supplied by the SDK's background opt-in.
+      const definition = makeSubagentToolDef(subagents, { background: true })
+      expect(definition.parameters).toHaveProperty(
+        'properties.background.description',
+        'Return an accepted handle immediately, not the completed result. Completion delivery and observation follow the host instructions.'
+      )
+      expect(JSON.stringify(definition)).not.toContain('subagent_status')
+      expect(JSON.stringify(definition)).not.toContain('subagent_wait')
       let background: boolean | undefined
 
       const tool = makeSubagentToolRegistration({

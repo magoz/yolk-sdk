@@ -102,7 +102,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 ## Durable subagent host seams
 
 - `prepareToolBatch` is public via `./loop`; `pendingRequests` fences **all** launches, including otherwise executable sibling calls. Hosts preserve synthetic results and original order.
-- `makeSubagentAcceptedToolResult` is an opt-in background acknowledgement (`background: true` registration option); it must never emit `SubagentCompleted` or contribute child usage.
+- `makeSubagentAcceptedToolResult` is an opt-in background acknowledgement (`background: true` registration option); it must never emit `SubagentCompleted` or contribute child usage. Default model guidance is host-neutral: registration supplies no status/wait tools or automatic delivery. Preserve model-visible lookup identities in acceptance text; structured metadata alone is not guaranteed to reach the provider.
 - Keep logical `subagent:<callId>` identity independent of physical run ids. Status/wait observations use their own tool-call ids and must not duplicate original usage accounting. Host results marked `type: 'subagent_observation'` with the matching logical `subagent_run_id` suppress child completion (not tool completion); uncertainty/budget exhaustion must not claim a terminal outcome.
 - Existing inline registrations do not advertise background execution and retain final-result compatibility.
 
