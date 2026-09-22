@@ -38,6 +38,8 @@ export type VercelAiGatewayProviderConfig = {
    * Defaults to false; reasoning output is otherwise dropped.
    */
   readonly reasoningContent?: boolean
+  /** Enables native PDF file parts for the Gateway Chat Completions endpoint. */
+  readonly supportsPdfAttachments?: boolean
   /**
    * Override the reasoning-effort wire format. Defaults to the Anthropic
    * `reasoning` object; DeepSeek-style hosts expect the literal
@@ -99,6 +101,7 @@ type VercelAiGatewayOpenAiLayerFields = {
   extraHeaders?: VercelAiGatewayProviderConfig['extraHeaders']
   streaming?: VercelAiGatewayProviderConfig['streaming']
   reasoningContent?: VercelAiGatewayProviderConfig['reasoningContent']
+  supportsPdfAttachments: boolean
 }
 
 export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProviderConfig) =>
@@ -111,7 +114,8 @@ export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProvider
         reasoningEffortFormat: config.reasoningEffortFormat ?? 'reasoning-object',
         chatCompletionsUrl: config.chatCompletionsUrl ?? vercelAiGatewayChatCompletionsUrl,
         providerIdentity: vercelAiGatewayProviderIdentity,
-        extraBody: gatewayExtraBody(config)
+        extraBody: gatewayExtraBody(config),
+        supportsPdfAttachments: config.supportsPdfAttachments ?? true
       }
 
       if (config.extraHeaders !== undefined) {

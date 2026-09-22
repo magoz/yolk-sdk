@@ -2,6 +2,7 @@ import {
   Config,
   Context,
   Effect,
+  Encoding,
   Layer,
   Match,
   Option,
@@ -231,6 +232,8 @@ export type OpenAiProviderConfig = {
    * must only enable this against endpoints that serve chat SSE.
    */
   readonly streaming?: boolean
+  /** Enables native PDF file parts for compatible Chat Completions endpoints. */
+  readonly supportsPdfAttachments?: boolean
   /** Customizes safe error metadata for a branded OpenAI-compatible endpoint. */
   readonly providerIdentity?: OpenAiProviderIdentity
   readonly apiKey: Redacted.Redacted<string>
@@ -248,7 +251,17 @@ type OpenAiImageContentPart = {
   }
 }
 
-type OpenAiUserContent = string | ReadonlyArray<OpenAiTextContentPart | OpenAiImageContentPart>
+type OpenAiFileContentPart = {
+  readonly type: 'file'
+  readonly file: {
+    readonly filename: string
+    readonly file_data: string
+  }
+}
+
+type OpenAiUserContent =
+  | string
+  | ReadonlyArray<OpenAiTextContentPart | OpenAiImageContentPart | OpenAiFileContentPart>
 
 type OpenAiToolCall = {
   readonly id: string
@@ -296,6 +309,8 @@ type OpenAiRequestBody = {
   readonly parallel_tool_calls?: true
 }
 
+type ResolvePdfUrl = (url: string) => Effect.Effect<string, LLMError>
+
 type OpenAiRequestBodyConfig = {
   readonly maxCompletionTokens: number
   readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
@@ -303,6 +318,8 @@ type OpenAiRequestBodyConfig = {
   readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
   readonly reasoningContent?: boolean
   readonly streaming?: boolean
+  readonly supportsPdfAttachments?: boolean
+  readonly resolvePdfUrl?: ResolvePdfUrl
   readonly providerName?: string
 }
 
@@ -314,6 +331,8 @@ type OpenAiRequestBodyConfigFields = {
   reasoningEffortFormat?: OpenAiRequestBodyConfig['reasoningEffortFormat']
   reasoningContent?: boolean
   streaming?: boolean
+  supportsPdfAttachments?: boolean
+  resolvePdfUrl?: ResolvePdfUrl
 }
 
 const defaultOpenAiProviderIdentity: OpenAiProviderIdentity = {
@@ -571,10 +590,45 @@ const textDocumentToOpenAiPart = (
     )
   )
 
+const pdfDocumentToOpenAiPart = (
+  part: Extract<ContentPart, { readonly _tag: 'Document' }>,
+  providerName: string,
+  resolvePdfUrl: ResolvePdfUrl | undefined
+): Effect.Effect<OpenAiFileContentPart, LLMError> =>
+  Match.value(part.source).pipe(
+    Match.tag('InlineBase64', source =>
+      Effect.succeed(`data:${part.mimeType};base64,${source.data}`)
+    ),
+    Match.tag('Url', source =>
+      resolvePdfUrl === undefined
+        ? Effect.fail(unsupportedContentError('Unresolved document source', providerName))
+        : resolvePdfUrl(source.url)
+    ),
+    Match.tag('Ref', () =>
+      Effect.fail(unsupportedContentError('Unresolved document source', providerName))
+    ),
+    Match.exhaustive,
+    Effect.map(fileData => ({
+      type: 'file' as const,
+      file: {
+        filename: part.filename,
+        file_data: fileData
+      }
+    }))
+  )
+
+const normalizedMimeType = (mimeType: string) =>
+  mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+
 const contentPartToUserPart = (
   part: ContentPart,
-  providerName: string
-): Effect.Effect<OpenAiTextContentPart | OpenAiImageContentPart, LLMError> =>
+  providerName: string,
+  supportsPdfAttachments: boolean,
+  resolvePdfUrl: ResolvePdfUrl | undefined
+): Effect.Effect<
+  OpenAiTextContentPart | OpenAiImageContentPart | OpenAiFileContentPart,
+  LLMError
+> =>
   Match.value(part).pipe(
     Match.tag(
       'Text',
@@ -593,7 +647,9 @@ const contentPartToUserPart = (
     Match.tag('Document', current =>
       isTextDocumentMimeType(current.mimeType)
         ? textDocumentToOpenAiPart(current, providerName)
-        : Effect.fail(unsupportedContentError('Document', providerName))
+        : supportsPdfAttachments && normalizedMimeType(current.mimeType) === 'application/pdf'
+          ? pdfDocumentToOpenAiPart(current, providerName, resolvePdfUrl)
+          : Effect.fail(unsupportedContentError('Document', providerName))
     ),
     Match.tag('Audio', () => Effect.fail(unsupportedContentError('Audio', providerName))),
     Match.exhaustive
@@ -601,11 +657,15 @@ const contentPartToUserPart = (
 
 const contentToUserContent = (
   content: Content,
-  providerName: string
+  providerName: string,
+  supportsPdfAttachments: boolean,
+  resolvePdfUrl: ResolvePdfUrl | undefined
 ): Effect.Effect<OpenAiUserContent, LLMError> =>
   Predicate.isString(content)
     ? Effect.succeed(content)
-    : Effect.forEach(content, part => contentPartToUserPart(part, providerName))
+    : Effect.forEach(content, part =>
+        contentPartToUserPart(part, providerName, supportsPdfAttachments, resolvePdfUrl)
+      )
 
 const contentPartToText = (
   part: ContentPart,
@@ -661,14 +721,18 @@ const toolCallToOpenAiToolCall = (
 const toOpenAiMessage = (
   message: AgentMessage,
   providerName: string,
-  reasoningContent: boolean
+  reasoningContent: boolean,
+  supportsPdfAttachments: boolean,
+  resolvePdfUrl: ResolvePdfUrl | undefined
 ): Effect.Effect<OpenAiMessage, LLMError> =>
   Match.value(message).pipe(
     Match.withReturnType<Effect.Effect<OpenAiMessage, LLMError>>(),
     Match.tag('User', current =>
       contentToUserContent(
         prependMessageContextToContent(current.content, messageContextText(current)),
-        providerName
+        providerName,
+        supportsPdfAttachments,
+        resolvePdfUrl
       ).pipe(Effect.map(content => ({ role: 'user' as const, content })))
     ),
     Match.tag('Assistant', current => {
@@ -755,7 +819,13 @@ export const toOpenAiRequestBody = (
     const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
 
     const requestMessages = yield* Effect.forEach(request.messages, message =>
-      toOpenAiMessage(message, providerName, config.reasoningContent ?? false)
+      toOpenAiMessage(
+        message,
+        providerName,
+        config.reasoningContent ?? false,
+        config.supportsPdfAttachments ?? false,
+        config.resolvePdfUrl
+      )
     )
 
     const messages = [systemMessage, ...requestMessages]
@@ -1373,7 +1443,8 @@ const parseOpenAiResponseJson = (
 
 const openAiRequestBodyFields = (
   config: OpenAiProviderConfig,
-  providerIdentity: OpenAiProviderIdentity
+  providerIdentity: OpenAiProviderIdentity,
+  resolvePdfUrl?: ResolvePdfUrl
 ): OpenAiRequestBodyConfigFields => {
   const fields: OpenAiRequestBodyConfigFields = {
     maxCompletionTokens: config.maxCompletionTokens,
@@ -1398,6 +1469,14 @@ const openAiRequestBodyFields = (
 
   if (config.streaming !== undefined) {
     fields.streaming = config.streaming
+  }
+
+  if (config.supportsPdfAttachments !== undefined) {
+    fields.supportsPdfAttachments = config.supportsPdfAttachments
+  }
+
+  if (resolvePdfUrl !== undefined) {
+    fields.resolvePdfUrl = resolvePdfUrl
   }
 
   return fields
@@ -1474,15 +1553,65 @@ const postOpenAiRequest = (
     return response
   })
 
+const pdfDataUrlFromResponse = (
+  response: HttpClientResponse.HttpClientResponse,
+  providerName: string
+) => {
+  if (response.status < 200 || response.status >= 300) {
+    return Effect.fail(
+      new LLMError({
+        cause: 'provider_error',
+        message: `Could not fetch PDF attachment for ${providerName}: returned ${response.status}`,
+        retryable: false
+      })
+    )
+  }
+
+  return response.arrayBuffer.pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'provider_error',
+          message: `Could not read PDF attachment for ${providerName}: ${error.message}`,
+          retryable: false
+        })
+    ),
+    Effect.map(
+      bytes => `data:application/pdf;base64,${Encoding.encodeBase64(new Uint8Array(bytes))}`
+    )
+  )
+}
+
+const pdfUrlResolver =
+  (client: HttpClient.HttpClient, providerName: string): ResolvePdfUrl =>
+  url =>
+    client.get(url).pipe(
+      Effect.mapError(
+        error =>
+          new LLMError({
+            cause: 'provider_error',
+            message: `Could not fetch PDF attachment for ${providerName}: ${error.message}`,
+            retryable: false
+          })
+      ),
+      Effect.flatMap(response => pdfDataUrlFromResponse(response, providerName))
+    )
+
 const sendOpenAiRequestBody = (
   config: OpenAiProviderConfig,
   request: LLMRequest,
-  providerIdentity: OpenAiProviderIdentity
+  providerIdentity: OpenAiProviderIdentity,
+  client: HttpClient.HttpClient
 ): Effect.Effect<string, LLMError> =>
   Effect.gen(function* () {
+    const resolvePdfUrl =
+      config.supportsPdfAttachments === true
+        ? pdfUrlResolver(client, providerIdentity.name)
+        : undefined
+
     const body = yield* toOpenAiRequestBody(
       request,
-      openAiRequestBodyFields(config, providerIdentity)
+      openAiRequestBodyFields(config, providerIdentity, resolvePdfUrl)
     )
 
     return yield* serializeOpenAiRequestBody(body, providerIdentity.name)
@@ -1495,7 +1624,7 @@ const sendOpenAiRequest = (
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
-    const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity)
+    const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity, client)
     const response = yield* postOpenAiRequest(config, providerIdentity, serializedBody, client)
     const json = yield* parseOpenAiResponseJson(response, providerIdentity.name)
 
@@ -1536,7 +1665,7 @@ const streamOpenAiRequest = (
   Stream.unwrap(
     Effect.gen(function* () {
       const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
-      const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity)
+      const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity, client)
       const response = yield* postOpenAiRequest(config, providerIdentity, serializedBody, client)
       const responseFormat = yield* expectChatSseResponse(providerIdentity, response)
 
