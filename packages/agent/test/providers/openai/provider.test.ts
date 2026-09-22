@@ -111,6 +111,37 @@ describe('OpenAI provider', () => {
     })
   )
 
+  it.effect('lowers only intentional tool content, not durable structured metadata', () =>
+    Effect.gen(function* () {
+      const call = ToolCall.make({ id: 'call-1', name: 'calendar', params: {} })
+
+      const body = yield* toOpenAiRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'list calendar events' }),
+          AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] }),
+          ToolResultMessage.make({
+            toolCallId: call.id,
+            content: 'Calendar page loaded.',
+            structuredContent: {
+              events: [{ id: 'event-1', subject: 'Planning' }],
+              nextCursor: 'private-host-cursor'
+            }
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.messages[3]).toEqual({
+        role: 'tool',
+        tool_call_id: call.id,
+        content: 'Calendar page loaded.'
+      })
+      expect(JSON.stringify(body.messages[3])).not.toContain('private-host-cursor')
+    })
+  )
+
   it.effect('lowers opt-in reasoning after compatible endpoint extensions', () =>
     Effect.gen(function* () {
       const body = yield* lowerOpenAiRequestBody(

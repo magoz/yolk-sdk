@@ -244,6 +244,74 @@ describe('run', () => {
     })
   )
 
+  it.effect('preserves structured tool metadata in events and the next-turn transcript', () =>
+    Effect.gen(function* () {
+      const requests: Array<LLMRequest> = []
+
+      const structuredContent = {
+        events: [{ id: 'event-1', subject: 'Planning' }],
+        nextCursor: 'cursor-2'
+      }
+
+      const executor = Layer.succeed(
+        ToolExecutor,
+        ToolExecutor.of({
+          execute: call =>
+            Effect.succeed(
+              ToolResult.make({
+                toolCallId: call.id,
+                content: 'Calendar page loaded.',
+                structuredContent
+              })
+            )
+        })
+      )
+
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'list calendar events' })],
+        systemPrompt: 'Use tools when useful.',
+        tools: [
+          ToolDef.make({
+            name: 'calendar',
+            description: 'List one calendar page.',
+            parameters: {}
+          })
+        ],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layerWithRequests({
+              responses: [
+                Reply.toolCall({ id: 'call_1', name: 'calendar', params: {} }),
+                Reply.text('done')
+              ],
+              requests
+            }),
+            executor
+          ).pipe(Layer.provideMerge(BaseLayer))
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+
+      const completed = events.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+
+      expect(completed?.result.structuredContent).toBe(structuredContent)
+
+      const nextTurnResult = requests[1]?.messages.find(message =>
+        Predicate.isTagged(message, 'ToolResult')
+      )
+
+      expect(nextTurnResult).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'Calendar page loaded.',
+        structuredContent
+      })
+    })
+  )
+
   it.effect('pauses before manually approved tool execution', () =>
     Effect.gen(function* () {
       const eventsChunk = yield* run({
