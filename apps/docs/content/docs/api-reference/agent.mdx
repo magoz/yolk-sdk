@@ -334,7 +334,7 @@ Subagent helper signatures:
 | `makeSubagentToolModule`             | `<Context>(options: SubagentToolOptions<Context>) => ToolModule<Context>`                                        |
 | `makeNonRecursiveSubagentToolModule` | `<Context extends SubagentContext>(options: SubagentToolOptions<Context>) => ToolModule<Context>`                |
 | `makeSubagentToolResult`             | `(input: SubagentToolResultInput) => ToolResult`                                                                 |
-| `makeSubagentAcceptedToolResult`    | `({ callId, workflowRunId, parentRunId? }) => ToolResult`                                                        |
+| `makeSubagentAcceptedToolResult`     | `({ callId, workflowRunId, parentRunId? }) => ToolResult`                                                        |
 | `formatSubagentResult`               | `(output: string) => string`                                                                                     |
 | `subagentResultFromEvents`           | `(events: ReadonlyArray<AgentEvent>) => SubagentRunResult`                                                       |
 | `subagentResultText`                 | `(events: ReadonlyArray<AgentEvent>) => string`                                                                  |
