@@ -334,6 +334,7 @@ Subagent helper signatures:
 | `makeSubagentToolModule`             | `<Context>(options: SubagentToolOptions<Context>) => ToolModule<Context>`                                        |
 | `makeNonRecursiveSubagentToolModule` | `<Context extends SubagentContext>(options: SubagentToolOptions<Context>) => ToolModule<Context>`                |
 | `makeSubagentToolResult`             | `(input: SubagentToolResultInput) => ToolResult`                                                                 |
+| `makeSubagentAcceptedToolResult`    | `({ callId, workflowRunId, parentRunId? }) => ToolResult`                                                        |
 | `formatSubagentResult`               | `(output: string) => string`                                                                                     |
 | `subagentResultFromEvents`           | `(events: ReadonlyArray<AgentEvent>) => SubagentRunResult`                                                       |
 | `subagentResultText`                 | `(events: ReadonlyArray<AgentEvent>) => string`                                                                  |
@@ -363,9 +364,10 @@ usage for this result. Later status/wait calls use their own tool-call ids; usag
 the logical child id to match the result's call id, preventing observation calls from charging the
 original child again.
 
-`subagent_status` and `subagent_wait` mentioned in the acknowledgement are host-owned tools, not
-SDK exports. Hosts own lookup, authorization, persistence, and Stop policy. Existing inline
-registrations remain unchanged. See [Background subagents](../agent/tools-hitl#background-subagents).
+The SDK registers no status or wait tools and does not promise automatic completion delivery. Hosts
+choose whether to deliver findings automatically or expose authenticated observation tools, and own
+lookup, authorization, persistence, and Stop policy. Existing inline registrations remain unchanged.
+See [Background subagents](../agent/tools-hitl#background-subagents).
 
 ## Client
 

@@ -460,9 +460,9 @@ Timeout is owned by Yolk. Long-running commands may be killed and returned as co
 ### Background launch completes but child output is missing
 
 `makeSubagentAcceptedToolResult` acknowledges launch only. It intentionally adds no child usage or
-`SubagentCompleted`. Implement host-owned status/wait tools and authenticated durable lookup;
-observe results with new tool-call ids rather than completing the original launch twice. The SDK
-does not ship the `subagent_status` / `subagent_wait` tools named by the acknowledgement.
+`SubagentCompleted`. Choose a host-owned completion policy: deliver findings automatically or expose
+authenticated observation tools and durable lookup. If observations use new tool-call ids, do not
+complete the original launch twice. The SDK registers no status or wait tools.
 See [Background subagents](./agent/tools-hitl#background-subagents).
 
 ### Child steps run inline or waiting never finishes
