@@ -54,6 +54,10 @@
       "types": "./src/fortnox/index.ts",
       "default": "./src/fortnox/index.ts"
     },
+    "./github": {
+      "types": "./src/github/index.ts",
+      "default": "./src/github/index.ts"
+    },
     "./google": {
       "types": "./src/google/index.ts",
       "default": "./src/google/index.ts"
@@ -129,6 +133,11 @@
         "types": "./dist/fortnox/index.d.mts",
         "import": "./dist/fortnox/index.mjs",
         "default": "./dist/fortnox/index.mjs"
+      },
+      "./github": {
+        "types": "./dist/github/index.d.mts",
+        "import": "./dist/github/index.mjs",
+        "default": "./dist/github/index.mjs"
       },
       "./google": {
         "types": "./dist/google/index.d.mts",

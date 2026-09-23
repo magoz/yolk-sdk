@@ -3,7 +3,7 @@ title: Connectors package
 description: Define external API actions and turn them into agent tools.
 ---
 
-Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Afloat, Dropbox, Fortnox, generic IMAP/POP3/SMTP email, Google Gmail/Calendar/Drive, Microsoft Outlook/OneDrive, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
+Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Afloat, Dropbox, Fortnox, generic IMAP/POP3/SMTP email, GitHub, Google Gmail/Calendar/Drive, Microsoft Outlook/OneDrive, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
 
 Install:
 
@@ -112,6 +112,7 @@ Resolve the module with `@yolk-sdk/agent/tools`, pass the tool definitions into 
 | `@yolk-sdk/connectors/email`           | Generic IMAP reads/drafts/message state, POP3 reads, and SMTP submission                 |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth data                                                               |
 | `@yolk-sdk/connectors/fortnox`         | Company information, customer/invoice reads and writes, suppliers, and supplier invoices |
+| `@yolk-sdk/connectors/github`          | GitHub issues, pull requests, reviews, and repository context for one configured repo    |
 | `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive                                                               |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email                                         |
 | `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook and OneDrive through Microsoft Graph                                   |
