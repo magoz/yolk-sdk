@@ -1,5 +1,13 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.92
+
+### Patch Changes
+
+- 7bc4f70: Advance unchanged public packages in lockstep with the new GitHub connector at `@yolk-sdk/connectors/github`. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [7bc4f70]
+  - @yolk-sdk/agent@0.1.0-canary.92
+
 ## 0.1.0-canary.91
 
 ### Patch Changes
