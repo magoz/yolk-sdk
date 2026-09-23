@@ -54,6 +54,7 @@ All names below are exported through the indicated `@yolk-sdk/connectors/*` subp
 | IMAP/POP3 (`email`)    | `downloadEmailAttachment`                                     | Not added                                  | Optional `EmailClient.getAttachmentBytes`; no MIME library bundled                      |
 | Telegram (`telegram`)  | `downloadTelegramFile`                                        | Not added                                  | File IDs from messages available to the bot; 20,000,000-byte hosted download cap        |
 | Todoist (`todoist`)    | `downloadTodoistAttachment`                                   | Not added                                  | `todoist.list_comments` with task/project selection; download by comment ID             |
+| GitHub (`github`)      | Not added                                                     | `uploadGithubAttachment`                   | Undocumented user-attachments endpoint; user token only; 10 MB image / 100 MB video cap |
 | Afloat (`afloat`)      | Reuse remote MCP file grants                                  | Reuse remote MCP upload intents            | Dynamic discovery owns exact contracts; no duplicate SDK file wrappers                  |
 | Figma (`figma`)        | Reuse remote MCP asset exports                                | Reuse remote MCP asset/design tools        | No whole `.fig` download or arbitrary file-upload claim                                 |
 

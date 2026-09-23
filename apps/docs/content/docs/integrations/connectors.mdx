@@ -14,6 +14,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send, IMAP message state              |
 | Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                                        |
 | Fortnox         | `@yolk-sdk/connectors/fortnox`         | Fortnox OAuth slots                          | none                                               | company, customer, invoice reads/writes, supplier reads |
+| GitHub          | `@yolk-sdk/connectors/github`          | `GithubTokenSlot`, `GithubUploadTokenSlot`   | `owner`, `repo`                                    | issue, PR, review, merge, repo context actions          |
 | Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions                        |
 | LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                                  |
 | Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph                        |
@@ -846,6 +847,25 @@ Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en
 | `r2_storage.upload_url` | create a presigned PUT upload URL through a host-provided `R2Presigner` |
 
 R2 presigning is host-provided. The connector does not bundle an AWS SDK.
+
+## GitHub
+
+`GithubConnector` is scoped to integration config `owner`/`repo`; action inputs never carry
+either. `github.token` accepts an installation token, PAT, or OAuth token. Every action declares
+access metadata; `delete_issue_comment` and `merge_pull_request` are `destructive`, and merges
+require `expectedHeadSha`.
+
+| Action family | Action ids (`github.*`)                                                                                                                                                                                                                                                                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Issues        | `search_issues`, `list_issues`, `get_issue`, `create_issue`, `update_issue`, `lock_issue`, `unlock_issue`, `add_assignees`, `remove_assignees`, `list_assignees`, `list_issue_timeline`                                                                                                                                                                    |
+| Comments      | `list_issue_comments`, `create_issue_comment`, `update_issue_comment`, `delete_issue_comment`, `list_labels`, `add_labels`, `remove_label`, `list_milestones`, `create_reaction`                                                                                                                                                                           |
+| Structure     | `list_sub_issues`, `add_sub_issue`, `remove_sub_issue`, `list_issue_dependencies`, `add_blocked_by`, `remove_blocked_by`, `list_issue_types`, `list_issue_fields`, `set_issue_field_values`                                                                                                                                                                |
+| Pull requests | `list_pull_requests`, `get_pull_request`, `list_pull_request_files`, `list_pull_request_commits`, `get_pull_request_checks`, `list_pull_request_reviews`, `list_pull_request_review_comments`, `create_pull_request`, `update_pull_request`, `request_reviewers`, `create_pull_request_review`, `create_pull_request_review_comment`, `merge_pull_request` |
+| Repository    | `compare_commits`, `list_releases`, `get_file_contents`, `search_code`                                                                                                                                                                                                                                                                                     |
+
+Host-only helpers, not actions: `createGithubAppInstallationToken` mints GitHub App installation
+tokens with a WebCrypto-signed JWT, and `uploadGithubAttachment` uploads images/videos through
+GitHub's undocumented user-attachments endpoint with a user token (`github.upload_token`).
 
 ## Telegram
 

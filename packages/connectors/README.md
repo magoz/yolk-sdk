@@ -23,6 +23,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port    |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                              |
 | `@yolk-sdk/connectors/fortnox`         | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update |
+| `@yolk-sdk/connectors/github`          | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                |
 | `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                           |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                                      |
 | `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                              |
@@ -468,6 +469,66 @@ Google Drive actions list, search, and get metadata; create folders; move items 
 `drive.list_files` and `drive.search_files` return `GoogleDriveListFilesOutput` with a `Chunk` of files and an opaque `nextPageToken`; pass the token back through `pageToken`. Repeated file metadata such as parents and owners also decodes to `Chunk`. Trashed items are excluded unless `includeTrashed` is true. Optional `driveId` targets one shared drive using `corpora=drive`; requests include current shared-drive support parameters. Pass a returned link-shared file `resourceKey` with get/trash/delete, or `parentResourceKey` with parent-scoped list/search/create, so the connector sends `X-Goog-Drive-Resource-Keys`; `parentResourceKey` requires `parentId`. `drive.trash_file` is reversible until Google removes the item, while `drive.delete_file` permanently deletes it without moving it to trash. Hosts should authorize both as destructive and may inspect returned `capabilities` first.
 
 Binary Drive download/export uses the host-only helpers below; uploads remain outside this SDK surface. Hosts own file-content transfer, OAuth code exchange, refresh, storage, consent UX, Google Picker integration, and restricted-scope compliance.
+
+## GitHub connector
+
+`GithubConnector` works against exactly one repository taken from integration config. The model
+never supplies `owner` or `repo`.
+
+```ts
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
+import { GithubConnector, githubTokenSlotId } from '@yolk-sdk/connectors/github'
+
+const integration = makeIntegration({
+  connectorId: 'github',
+  config: { owner: 'acme', repo: 'widgets' },
+  credentialBindings: [makeCredentialBinding({ slotId: githubTokenSlotId, credentialRef: 'gh' })]
+})
+```
+
+- `github.token` (`GithubTokenSlot`) accepts `BearerTokenCredential`, `ApiKeyCredential`, or
+  `OAuthCredential` (installation token, PAT, or OAuth token) and is used by every action.
+- Requests send `X-GitHub-Api-Version: 2026-03-10`. Outputs are normalized (never raw payloads),
+  long bodies, messages, patches, fragments, and file contents are truncated with a sibling
+  boolean flag (`bodyTruncated`, `patchTruncated`, `truncated`, …), and lists take
+  `perPage`/`page` and return `hasNextPage` from the `Link` header.
+- Provider errors return `ActionResult.failure` with `github_unauthorized`, `github_forbidden`,
+  `github_not_found`, `github_rate_limited` (with `retryAfterMs`), `github_validation`,
+  `github_conflict`, or `github_request_failed`; `merge_pull_request` adds
+  `github_not_mergeable` and `get_file_contents` adds `github_unsupported_content`.
+
+| Family          | Actions (`github.*`) and access                                                                                                                                                                                                                                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Issues          | read: `search_issues`, `list_issues`, `get_issue`, `list_assignees`, `list_issue_timeline`; write: `create_issue`, `update_issue`, `lock_issue`, `unlock_issue`, `add_assignees`, `remove_assignees`                                                                                                                                                                                 |
+| Comments/labels | read: `list_issue_comments`, `list_labels`, `list_milestones`; write: `create_issue_comment`, `update_issue_comment`, `add_labels`, `remove_label`, `create_reaction`; destructive: `delete_issue_comment`                                                                                                                                                                           |
+| Structure       | read: `list_sub_issues`, `list_issue_dependencies`, `list_issue_types`, `list_issue_fields`; write: `add_sub_issue`, `remove_sub_issue`, `add_blocked_by`, `remove_blocked_by`, `set_issue_field_values`                                                                                                                                                                             |
+| Pull requests   | read: `list_pull_requests`, `get_pull_request`, `list_pull_request_files`, `list_pull_request_commits`, `get_pull_request_checks`, `list_pull_request_reviews`, `list_pull_request_review_comments`; write: `create_pull_request`, `update_pull_request`, `request_reviewers`, `create_pull_request_review`, `create_pull_request_review_comment`; destructive: `merge_pull_request` |
+| Repository      | read: `compare_commits`, `list_releases`, `get_file_contents`, `search_code`                                                                                                                                                                                                                                                                                                         |
+
+Issue and code search always add `repo:{owner}/{repo}` and reject queries with their own
+`repo:`, `org:`, `user:`, or `owner:` qualifiers. Issue types and issue fields are org-level
+and only work when `owner` is an organization. Sub-issue and dependency actions take issue
+numbers and resolve GitHub's internal issue ids. `set_issue_field_values` adds or updates the
+listed fields only. `merge_pull_request` requires `expectedHeadSha`, so a head that moved
+after review fails with `github_conflict` instead of merging unreviewed commits.
+
+### Host-only GitHub helpers
+
+These are not actions and never appear in `GithubConnector.actions`:
+
+- `createGithubAppInstallationToken({ appId, installationId, privateKeyPem, repositories?, repositoryIds?, permissions? })`
+  signs an RS256 App JWT with WebCrypto (PKCS#8 or GitHub's PKCS#1 download format; literal
+  `\n` escapes are normalized) and exchanges it for an installation token, optionally
+  down-scoped. Returns `{ token, expiresAt }` (epoch ms). It needs `ConnectorHttpClient`, does
+  no caching, and fails with a code-only `GithubAppTokenError`.
+- `uploadGithubAttachment(integration, { name, contentType, bytes, repositoryId?, alt? }, budget, options?)`
+  uploads a PNG, JPEG, GIF, WebP, SVG, MP4, MOV, or WebM file (10 MB images, 100 MB videos;
+  `options` may only lower these) and returns `{ url, markdown }`. It uses GitHub's
+  **undocumented, unstable** `uploads.github.com/user-attachments/assets` endpoint through
+  `ConnectorBinaryWriteHttpClient`, and requires the optional `github.upload_token` slot to hold a
+  user token (OAuth or PAT). GitHub refuses installation tokens there (they surface as `not_found`,
+  so the helper rejects `ghs_` tokens up front). A 404 otherwise means no push access. Without
+  `repositoryId`, the helper looks it up via `GET /repos/{owner}/{repo}`.
 
 ## Fortnox connector
 
@@ -1005,6 +1066,7 @@ base64 attachment actions remain unchanged. Full API/policy reference:
 | `email`      | `downloadEmailAttachment`                                                     | Not added                                  |
 | `telegram`   | `downloadTelegramFile`                                                        | Not added                                  |
 | `todoist`    | `downloadTodoistAttachment`                                                   | Not added                                  |
+| `github`     | Not added                                                                     | `uploadGithubAttachment`                   |
 
 Host integration fragment (approval, integration, transport layers and runtime omitted):
 
@@ -1127,6 +1189,7 @@ orchestration only.
 | `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/flag/trash/restore/move/labels                   |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                                   |
 | `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, supplier invoices, and supplier-invoice files    |
+| `@yolk-sdk/connectors/github`          | Issues, comments, labels, sub-issues, dependencies, issue fields, pull requests, reviews, merge, repo context      |
 | `@yolk-sdk/connectors/google`          | Gmail mail and label actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions     |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                       |
 | `@yolk-sdk/connectors/microsoft`       | Outlook mail/category actions plus OneDrive metadata, folder, move, async copy/status, and recycle-bin actions     |

@@ -45,6 +45,12 @@ import {
   todoistListCommentsAction
 } from '../packages/connectors/src/todoist/index.ts'
 import {
+  createGithubAppInstallationToken,
+  GithubConnector,
+  githubMergePullRequestAction,
+  uploadGithubAttachment
+} from '../packages/connectors/src/github/index.ts'
+import {
   R2ObjectClient,
   getR2Object,
   createR2Object,
@@ -150,6 +156,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './email',
       './figma',
       './fortnox',
+      './github',
       './google',
       './linkedin-search',
       './microsoft',
@@ -329,6 +336,8 @@ if (
     downloadEmailAttachment,
     downloadTelegramFile,
     downloadTodoistAttachment,
+    createGithubAppInstallationToken,
+    uploadGithubAttachment,
     R2ObjectClient,
     getR2Object,
     createR2Object,
@@ -336,7 +345,9 @@ if (
   ].some(value => !Predicate.isFunction(value)) ||
   GoogleDriveReadonlyOAuthCredentialSlot.id !== 'google.oauth' ||
   fortnoxListSupplierInvoiceFilesAction.access !== 'read' ||
-  todoistListCommentsAction.access !== 'read'
+  todoistListCommentsAction.access !== 'read' ||
+  githubMergePullRequestAction.access !== 'destructive' ||
+  GithubConnector.actions.some(action => action.access === undefined)
 ) {
   failures.push('Connector file capabilities runtime exports are missing')
 }
