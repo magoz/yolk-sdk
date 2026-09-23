@@ -489,7 +489,8 @@ const integration = makeIntegration({
 - `github.token` (`GithubTokenSlot`) accepts `BearerTokenCredential`, `ApiKeyCredential`, or
   `OAuthCredential` (installation token, PAT, or OAuth token) and is used by every action.
 - Requests send `X-GitHub-Api-Version: 2026-03-10`. Outputs are normalized (never raw payloads),
-  long bodies/patches/file contents are truncated with `*Truncated` flags, and lists take
+  long bodies, messages, patches, fragments, and file contents are truncated with a sibling
+  boolean flag (`bodyTruncated`, `patchTruncated`, `truncated`, …), and lists take
   `perPage`/`page` and return `hasNextPage` from the `Link` header.
 - Provider errors return `ActionResult.failure` with `github_unauthorized`, `github_forbidden`,
   `github_not_found`, `github_rate_limited` (with `retryAfterMs`), `github_validation`,
@@ -1065,6 +1066,7 @@ base64 attachment actions remain unchanged. Full API/policy reference:
 | `email`      | `downloadEmailAttachment`                                                     | Not added                                  |
 | `telegram`   | `downloadTelegramFile`                                                        | Not added                                  |
 | `todoist`    | `downloadTodoistAttachment`                                                   | Not added                                  |
+| `github`     | Not added                                                                     | `uploadGithubAttachment`                   |
 
 Host integration fragment (approval, integration, transport layers and runtime omitted):
 

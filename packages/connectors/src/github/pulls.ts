@@ -518,7 +518,8 @@ export const GithubGetPullRequestChecksOutput = Schema.Struct({
   checkRuns: Schema.Array(GithubCheckRun),
   checkRunsTotal: Schema.Number,
   checkRunsHasNextPage: Schema.Boolean,
-  combinedStatus: GithubCombinedStatus
+  combinedStatus: GithubCombinedStatus,
+  combinedStatusHasNextPage: Schema.Boolean
 })
 
 export const githubGetPullRequestChecksAction = defineAction({
@@ -567,7 +568,8 @@ export const githubGetPullRequestChecksAction = defineAction({
 
       const statusResponse = yield* githubRepoRequest(context, {
         method: 'GET',
-        path: `/commits/${encodeURIComponent(headSha)}/status`
+        path: `/commits/${encodeURIComponent(headSha)}/status`,
+        query: githubPaginationQuery(input)
       })
 
       if (!isGithubSuccess(statusResponse.status)) {
@@ -601,7 +603,8 @@ export const githubGetPullRequestChecksAction = defineAction({
             description: status.description ?? null,
             url: status.target_url ?? null
           }))
-        }
+        },
+        combinedStatusHasNextPage: githubHasNextPage(statusResponse.headers)
       })
     })
 })
@@ -976,6 +979,7 @@ export const GithubPullRequestReviewResult = Schema.Struct({
   state: Schema.String,
   author: Schema.NullOr(Schema.String),
   body: Schema.NullOr(Schema.String),
+  bodyTruncated: Schema.Boolean,
   commitId: Schema.NullOr(Schema.String),
   submittedAt: Schema.NullOr(Schema.String),
   url: Schema.String
@@ -1026,11 +1030,17 @@ export const githubCreatePullRequestReviewAction = defineAction({
 
       const review = yield* decodeJsonResponse(GithubWirePullRequestReview, response)
 
+      const body =
+        review.body === undefined || review.body === null
+          ? { text: null, truncated: false }
+          : truncateGithubText(review.body, githubBodyMaxChars)
+
       return ActionResult.success({
         id: review.id,
         state: review.state,
         author: githubLogin(review.user),
-        body: review.body ?? null,
+        body: body.text,
+        bodyTruncated: body.truncated,
         commitId: review.commit_id ?? null,
         submittedAt: review.submitted_at ?? null,
         url: review.html_url
@@ -1054,33 +1064,34 @@ export const GithubCreatePullRequestReviewCommentInput = Schema.Struct({
   commitId: Schema.optional(NonEmptyString)
 })
 
-const resolveReviewCommentCommitId = (
+const postInlineReviewComment = (
   context: GithubRequestContext,
-  integration: ConnectorIntegration,
-  pullNumber: number
+  input: typeof GithubCreatePullRequestReviewCommentInput.Type,
+  position: { readonly path: string; readonly line: number },
+  commitId: string
 ) =>
   Effect.gen(function* () {
-    const pullResponse = yield* githubRepoRequest(context, {
-      method: 'GET',
-      path: `/pulls/${encodeURIComponent(pullNumber)}`
+    const response = yield* githubRepoRequest(context, {
+      method: 'POST',
+      path: `/pulls/${encodeURIComponent(input.pullNumber)}/comments`,
+      body: {
+        body: input.body,
+        commit_id: commitId,
+        path: position.path,
+        line: position.line,
+        side: input.side,
+        start_line: input.startLine,
+        start_side: input.startSide
+      }
     })
 
-    if (!isGithubSuccess(pullResponse.status)) {
-      return yield* githubFailure(pullResponse, { operation: 'get pull request' })
+    if (!isGithubSuccess(response.status)) {
+      return yield* githubFailure(response, { operation: 'create pull request review comment' })
     }
 
-    const pullRequest = yield* decodeJsonResponse(GithubWirePullRequest, pullResponse)
-    const headSha = pullRequest.head?.sha
+    const comment = yield* decodeJsonResponse(GithubWirePullRequestReviewComment, response)
 
-    if (headSha === undefined || headSha === '') {
-      return yield* validationFailure(
-        integration,
-        'github.create_pull_request_review_comment',
-        'Pull request has no head commit sha'
-      )
-    }
-
-    return headSha
+    return ActionResult.success(normalizeGithubPullRequestReviewComment(comment))
   })
 
 export const githubCreatePullRequestReviewCommentAction = defineAction({
@@ -1138,31 +1149,35 @@ export const githubCreatePullRequestReviewCommentAction = defineAction({
 
       const context = yield* resolveGithubContext(integration)
 
-      const commitId = yield* input.commitId === undefined
-        ? resolveReviewCommentCommitId(context, integration, input.pullNumber)
-        : Effect.succeed(input.commitId)
+      const position = { path: input.path, line: input.line }
 
-      const response = yield* githubRepoRequest(context, {
-        method: 'POST',
-        path: `/pulls/${encodeURIComponent(input.pullNumber)}/comments`,
-        body: {
-          body: input.body,
-          commit_id: commitId,
-          path: input.path,
-          line: input.line,
-          side: input.side,
-          start_line: input.startLine,
-          start_side: input.startSide
-        }
-      })
-
-      if (!isGithubSuccess(response.status)) {
-        return yield* githubFailure(response, { operation: 'create pull request review comment' })
+      if (input.commitId !== undefined) {
+        return yield* postInlineReviewComment(context, input, position, input.commitId)
       }
 
-      const comment = yield* decodeJsonResponse(GithubWirePullRequestReviewComment, response)
+      // Default to the head sha; a failed lookup returns its own failure and never POSTs.
+      const pullResponse = yield* githubRepoRequest(context, {
+        method: 'GET',
+        path: `/pulls/${encodeURIComponent(input.pullNumber)}`
+      })
 
-      return ActionResult.success(normalizeGithubPullRequestReviewComment(comment))
+      if (!isGithubSuccess(pullResponse.status)) {
+        return yield* githubFailure(pullResponse, { operation: 'get pull request' })
+      }
+
+      const pullRequest = yield* decodeJsonResponse(GithubWirePullRequest, pullResponse)
+
+      const headSha = pullRequest.head?.sha
+
+      if (headSha === undefined || headSha === '') {
+        return yield* validationFailure(
+          integration,
+          'github.create_pull_request_review_comment',
+          'Pull request has no head commit sha'
+        )
+      }
+
+      return yield* postInlineReviewComment(context, input, position, headSha)
     })
 })
 

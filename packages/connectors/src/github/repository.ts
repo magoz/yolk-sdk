@@ -117,7 +117,8 @@ const GithubCompareResponse = Schema.Struct({
   url: Schema.optional(Schema.String)
 })
 
-const invalidCompareRef = /[\s\x00-\x1f\x7f]/
+// `:` would select another fork (`user:branch`); keep compares inside the configured repo.
+const invalidCompareRef = /[\s:\x00-\x1f\x7f]/
 
 const assertGithubCompareRef = (
   field: 'base' | 'head',
@@ -128,7 +129,7 @@ const assertGithubCompareRef = (
     return Effect.fail(
       new ConnectorError({
         cause: 'validation_failed',
-        message: `GitHub compare commits requires ${field} to be a single ref or SHA without '..' or whitespace`,
+        message: `GitHub compare commits requires ${field} to be a single ref or SHA in the configured repository (no '..', ':', or whitespace)`,
         connectorId: integration.connectorId,
         actionId: 'github.compare_commits'
       })
@@ -504,7 +505,9 @@ export const GithubSearchedCode = Schema.Struct({
   name: Schema.String,
   sha: Schema.String,
   url: Schema.String,
-  fragments: Schema.Array(Schema.String)
+  fragments: Schema.Array(Schema.String),
+  /** True when any fragment was cut to 500 chars or more than 3 fragments existed. */
+  fragmentsTruncated: Schema.Boolean
 })
 
 export type GithubSearchedCode = typeof GithubSearchedCode.Type
@@ -598,11 +601,16 @@ export const githubSearchCodeAction = defineAction({
           return []
         }
 
-        const fragments = (item.text_matches ?? [])
-          .flatMap(match =>
-            Predicate.isString(match.fragment) ? [truncateGithubText(match.fragment, 500).text] : []
-          )
-          .slice(0, 3)
+        const allFragments = (item.text_matches ?? []).flatMap(match =>
+          Predicate.isString(match.fragment) ? [truncateGithubText(match.fragment, 500)] : []
+        )
+
+        const kept = allFragments.slice(0, 3)
+
+        const fragments = kept.map(fragment => fragment.text)
+
+        const fragmentsTruncated =
+          allFragments.length > kept.length || kept.some(fragment => fragment.truncated)
 
         return [
           GithubSearchedCode.make({
@@ -610,7 +618,8 @@ export const githubSearchCodeAction = defineAction({
             name: item.name,
             sha: item.sha,
             url: item.html_url,
-            fragments
+            fragments,
+            fragmentsTruncated
           })
         ]
       })

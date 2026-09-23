@@ -3,8 +3,8 @@ import * as Schema from 'effect/Schema'
 import { requiredStringConfig } from '../config.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
-import { ConnectorHttpClient, ConnectorHttpRequest } from '../http.ts'
-import type { ConnectorHttpResponse, HttpMethod } from '../http.ts'
+import { ConnectorHttpClient, ConnectorHttpRequest, ConnectorHttpResponse } from '../http.ts'
+import type { HttpMethod } from '../http.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 import { ActionResult } from '../result.ts'
 import type { ProviderFailureInput } from '../result.ts'
@@ -220,18 +220,71 @@ export const githubRequest = (token: string, input: GithubRequestInput) =>
     const url = githubUrl(input.path, input.query)
     const headers = githubHeaders(token, input.accept)
 
-    if (input.body === undefined) {
-      return yield* http.request(ConnectorHttpRequest.make({ method: input.method, url, headers }))
-    }
+    const request =
+      input.body === undefined
+        ? ConnectorHttpRequest.make({ method: input.method, url, headers })
+        : ConnectorHttpRequest.make({
+            method: input.method,
+            url,
+            headers: { ...headers, 'content-type': 'application/json' },
+            body: JSON.stringify(input.body)
+          })
 
-    return yield* http.request(
-      ConnectorHttpRequest.make({
-        method: input.method,
-        url,
-        headers: { ...headers, 'content-type': 'application/json' },
-        body: JSON.stringify(input.body)
-      })
+    // Host transport errors may embed the request (and its bearer token): keep only the category.
+    const response = yield* http.request(request).pipe(
+      Effect.mapError(
+        error =>
+          new ConnectorError({
+            cause: error.cause,
+            message: `GitHub ${input.method} request failed before a response`,
+            connectorId: githubConnectorId
+          })
+      )
     )
+
+    return yield* redactGithubErrorBody(response, token)
+  })
+
+const redactText = (value: string, token: string) => value.split(token).join('[redacted]')
+
+/** Walks whatever JSON.parse produced (incl. non-finite numbers); only strings/keys change. */
+const redactDecoded = (value: unknown, token: string): unknown => {
+  if (Predicate.isString(value)) return redactText(value, token)
+
+  if (Array.isArray(value)) return value.map((item: unknown) => redactDecoded(item, token))
+
+  if (Predicate.isObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        redactText(key, token),
+        redactDecoded(item, token)
+      ])
+    )
+  }
+
+  return value
+}
+
+/**
+ * Error bodies feed failure messages. Decode with the SAME `Schema.Unknown` JSON boundary that
+ * `githubFailure` uses, redact every decoded string and key (so `\u`-escaped echoes are
+ * caught), and fall back to raw-text redaction only for JSON syntax failures.
+ */
+const redactGithubErrorBody = (response: ConnectorHttpResponse, token: string) =>
+  Effect.gen(function* () {
+    if (isGithubSuccess(response.status)) return response
+
+    const decoded = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+      response.body
+    ).pipe(Effect.result)
+
+    const body = Result.isSuccess(decoded)
+      ? JSON.stringify(redactDecoded(decoded.success, token))
+      : redactText(response.body, token)
+
+    return body === response.body
+      ? response
+      : ConnectorHttpResponse.make({ status: response.status, headers: response.headers, body })
   })
 
 /** Request relative to `/repos/{owner}/{repo}`; `path` is `''` or begins with `/`. */
@@ -319,6 +372,8 @@ export type GithubFailureCode =
   | 'github_rate_limited'
   | 'github_validation'
   | 'github_conflict'
+  | 'github_not_mergeable'
+  | 'github_unsupported_content'
   | 'github_request_failed'
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
@@ -411,7 +466,7 @@ export type GithubFailureOptions = {
   /** Short human operation label, e.g. `get issue`. */
   readonly operation: string
   /** Status-specific code overrides (e.g. merge `405` -> `github_not_mergeable`). */
-  readonly codes?: Readonly<Partial<Record<number, string>>>
+  readonly codes?: Readonly<Partial<Record<number, GithubFailureCode>>>
 }
 
 /**

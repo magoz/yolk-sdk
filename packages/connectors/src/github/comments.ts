@@ -303,9 +303,16 @@ export const githubAddLabelsAction = defineAction({
     })
 })
 
+/** Dot-only names would be URL-normalized into a different (broader) endpoint. */
+const GithubLabelPathSegment = GithubNonEmptyString.check(
+  Schema.makeFilter(value => !/^\.+$/.test(value), {
+    message: 'Label name must not consist only of dots'
+  })
+)
+
 export const GithubRemoveLabelInput = Schema.Struct({
   issueNumber: GithubIssueNumber,
-  label: GithubNonEmptyString
+  label: GithubLabelPathSegment
 })
 
 export const githubRemoveLabelAction = defineAction({
@@ -462,7 +469,7 @@ export const githubCreateReactionAction = defineAction({
   outputSchema: GithubReaction,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      if (input.issueNumber !== undefined && input.commentId !== undefined) {
+      if ((input.issueNumber === undefined) === (input.commentId === undefined)) {
         return yield* Effect.fail(reactionTargetError(integration))
       }
 

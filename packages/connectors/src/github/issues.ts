@@ -627,8 +627,10 @@ export const GithubTimelineEvent = Schema.Struct({
   body: Schema.optional(Schema.NullOr(Schema.String)),
   bodyTruncated: Schema.optional(Schema.Boolean),
   source: Schema.optional(GithubTimelineSource),
+  lockReason: Schema.optional(Schema.String),
   sha: Schema.optional(Schema.String),
-  message: Schema.optional(Schema.String)
+  message: Schema.optional(Schema.String),
+  messageTruncated: Schema.optional(Schema.Boolean)
 })
 
 export type GithubTimelineEvent = typeof GithubTimelineEvent.Type
@@ -732,10 +734,16 @@ const normalizeTimelineEvent = (
     normalized = { ...normalized, commitId }
   }
 
-  const stateReason = wire.state_reason ?? wire.lock_reason ?? undefined
+  const stateReason = wire.state_reason ?? undefined
 
   if (stateReason !== undefined) {
     normalized = { ...normalized, stateReason }
+  }
+
+  const lockReason = wire.lock_reason ?? undefined
+
+  if (lockReason !== undefined) {
+    normalized = { ...normalized, lockReason }
   }
 
   const label = wire.label?.name ?? undefined
@@ -796,7 +804,9 @@ const normalizeTimelineEvent = (
     const message = wire.message ?? undefined
 
     if (message !== undefined) {
-      normalized = { ...normalized, message }
+      const truncated = truncateGithubText(message, githubListBodyMaxChars)
+
+      normalized = { ...normalized, message: truncated.text, messageTruncated: truncated.truncated }
     }
   }
 
