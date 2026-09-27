@@ -18,6 +18,11 @@ import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import {
   FortnoxConnector,
   FortnoxCombinedOAuthCredentialSlot,
+  FortnoxCreateCustomerInput,
+  FortnoxCustomerNumber,
+  FortnoxUpdateCustomerInput,
+  fortnoxCreateCustomerAction,
+  fortnoxUpdateCustomerAction,
   FortnoxOAuthCredentialSlot,
   FortnoxInvoice,
   FortnoxSupplierInvoice,
@@ -409,7 +414,7 @@ describe('Fortnox connector', () => {
     })
   )
 
-  it.effect('advertises closed customer write tool schemas without Country or Phone', () =>
+  it.effect('advertises customer write tool schemas without Country or Phone', () =>
     Effect.gen(function* () {
       const harness = makeHarness([])
 
@@ -432,6 +437,59 @@ describe('Fortnox connector', () => {
         expect(keys).not.toContain('Country')
         expect(keys).not.toContain('Phone')
       }
+    })
+  )
+
+  it.effect('rejects Country, Phone, and unknown keys on typed customer writes', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([])
+
+      for (const extra of [{ Country: 'Sverige' }, { Phone: '08-123' }, { Unknown: 'value' }]) {
+        // Class instances with extra own keys model callers bypassing the static input type.
+        const created = Object.assign(
+          FortnoxCreateCustomerInput.make({ Name: 'Example AB' }),
+          extra
+        )
+
+        const updated = Object.assign(
+          FortnoxUpdateCustomerInput.make({ CustomerNumber: FortnoxCustomerNumber.make('001') }),
+          extra
+        )
+
+        const createResult = yield* fortnoxCreateCustomerAction
+          .executeTyped({ integration, input: created })
+          .pipe(Effect.provide(harness.layer), Effect.result)
+
+        const updateResult = yield* fortnoxUpdateCustomerAction
+          .executeTyped({ integration, input: updated })
+          .pipe(Effect.provide(harness.layer), Effect.result)
+
+        expect(createResult).toMatchObject({ failure: { cause: 'validation_failed' } })
+        expect(updateResult).toMatchObject({ failure: { cause: 'validation_failed' } })
+      }
+
+      expect(harness.requests).toHaveLength(0)
+      expect(harness.scopes).toHaveLength(0)
+    })
+  )
+
+  it.effect('sends typed customer writes built from the exported input classes', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({ Customer: { CustomerNumber: '001', Name: 'Example AB' } })
+      ])
+
+      const result = yield* fortnoxCreateCustomerAction
+        .executeTyped({
+          integration,
+          input: FortnoxCreateCustomerInput.make({ Name: 'Example AB', CountryCode: 'SE' })
+        })
+        .pipe(Effect.provide(harness.layer))
+
+      expect(result).toMatchObject({ value: { CustomerNumber: '001' } })
+      expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
+        Customer: { Name: 'Example AB', CountryCode: 'SE' }
+      })
     })
   )
 
@@ -945,6 +1003,8 @@ describe('Fortnox connector', () => {
     { action: 'fortnox.create_customer', input: { Name: 'Example', Phone: '08-123' } },
     { action: 'fortnox.update_customer', input: { CustomerNumber: '001', Country: 'Sverige' } },
     { action: 'fortnox.update_customer', input: { CustomerNumber: '001', Phone: '08-123' } },
+    { action: 'fortnox.create_customer', input: { Name: 'Example', Unknown: 'value' } },
+    { action: 'fortnox.update_customer', input: { CustomerNumber: '001', Unknown: 'value' } },
     { action: 'fortnox.create_invoice', input: {} },
     { action: 'fortnox.update_invoice', input: { Total: 10 } },
     { action: 'fortnox.update_invoice', input: { DocumentNumber: '' } }

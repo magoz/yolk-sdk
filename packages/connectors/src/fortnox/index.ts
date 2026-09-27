@@ -88,6 +88,8 @@ const SupplierInvoicesResponse = Schema.Struct({
 // Parse options are call-scoped in Effect rc.115, not schema annotations. Customer writes reject
 // unknown keys (including Fortnox's read-only `Country` and list-only `Phone`) instead of
 // stripping them, so a request is never silently sent without a field the caller supplied.
+// Wrap a Struct of the Class fields, not the Class: `Schema.toType` (used by `executeTyped`)
+// accepts an existing Class instance without checking its keys.
 const closedInput = <S extends Schema.Constraint>(schema: S) =>
   Schema.declareConstructor<S['Type'], S['Encoded']>()(
     [schema],
@@ -106,7 +108,7 @@ const fortnoxInvoiceReferencesNote =
   'Referenced CostCenter, Project, ArticleNumber, AccountNumber, and non-SEK Currency must already exist in the Fortnox company.'
 
 const fortnoxInvoiceRowsUpdateNote =
-  'Sending InvoiceRows replaces the row list: existing rows not sent are deleted. Rows sent without RowId are matched to existing rows by position, and fields omitted on a matched row keep their previous value (for example Discount/DiscountType), so send every row that should remain with all pricing fields, including Discount 0 when no discount is intended. With RowId, rows with that RowId are updated and rows without RowId are added. RowIds are regenerated on every update; read the invoice again before reusing RowIds.'
+  'Sending InvoiceRows replaces the row list: existing rows not sent are deleted. If no sent row has RowId, rows are matched to existing rows by position, and fields omitted on a matched row keep their previous value (for example Discount/DiscountType), so send every row that should remain with all pricing fields, including Discount 0 when no discount is intended. If any sent row has RowId, rows with a matching RowId are updated and rows without RowId are added. RowIds are regenerated on every update; read the invoice again before reusing RowIds.'
 
 export const fortnoxGetCompanyInformationAction = defineAction({
   id: 'fortnox.get_company_information',
@@ -166,7 +168,7 @@ export const fortnoxCreateCustomerAction = defineAction({
   id: 'fortnox.create_customer',
   description: `Create a Fortnox customer. Fortnox assigns CustomerNumber. ${fortnoxCustomerContactFieldsNote}`,
   access: 'write',
-  inputSchema: closedInput(FortnoxCreateCustomerInput),
+  inputSchema: closedInput(Schema.Struct(FortnoxCreateCustomerInput.fields)),
   outputSchema: FortnoxCustomer,
   execute: ({ integration, input }) =>
     writeFortnox(
@@ -184,7 +186,7 @@ export const fortnoxUpdateCustomerAction = defineAction({
   id: 'fortnox.update_customer',
   description: `Update a Fortnox customer by CustomerNumber. Only provided fields change; omitted fields keep their stored value. An empty string does not clear a stored value. ${fortnoxCustomerContactFieldsNote}`,
   access: 'write',
-  inputSchema: closedInput(FortnoxUpdateCustomerInput),
+  inputSchema: closedInput(Schema.Struct(FortnoxUpdateCustomerInput.fields)),
   outputSchema: FortnoxCustomer,
   execute: ({ integration, input }) => {
     const { CustomerNumber, ...customer } = input

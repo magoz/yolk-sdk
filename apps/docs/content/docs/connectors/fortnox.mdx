@@ -114,25 +114,30 @@ require `CustomerNumber`; Fortnox assigns `DocumentNumber`. Update inputs carry 
 identifier (`CustomerNumber` or `DocumentNumber`) and omit it from the request body because it is
 bound into the URL. Invoice write inputs use `InvoiceRows` as JSON arrays; returned invoice rows are
 runtime `Chunk` values. Writes do not send or book invoices and are subject to host authorization.
-The connector forwards write fields unchanged; it does not inject defaults or rewrite values.
+The connector forwards accepted write fields unchanged; it does not inject defaults or rewrite
+values. Invoice write inputs are not closed: unknown or provider-managed keys (such as `Booked` or
+`VoucherNumber`) are dropped before the request.
 
 ### Fortnox write semantics
 
-These rules come from Fortnox and are repeated in the action descriptions that agents see:
+These notes describe Fortnox behavior and connector validation, and the action descriptions that
+agents see repeat them:
 
 - **Customer contact fields.** Customer write inputs omit `Country` and `Phone`. Fortnox derives the
   read-only `Country` from `CountryCode`, and the Customer resource has no `Phone` field; use
-  `Phone1`/`Phone2`. `Phone` appears only in list rows. Customer create/update inputs are closed:
-  `Country`, `Phone`, or any other unknown key fails input validation before a request is sent,
-  rather than being stripped. `FortnoxCustomer` and `FortnoxSupplier` responses still include
+  `Phone1`/`Phone2`. `Phone` appears only in list rows. The `fortnox.create_customer` and
+  `fortnox.update_customer` action inputs are closed: `Country`, `Phone`, or any other unknown key
+  fails input validation before a request is sent, rather than being stripped. Decoding the
+  exported input classes directly uses default Effect parsing, which strips unknown keys. `FortnoxCustomer` and `FortnoxSupplier` responses still include
   `Country` and `Phone`.
 - **Customer updates.** Only provided fields change; omitted fields keep their stored value. An
   empty string does not clear a stored value.
 - **Invoice rows on update.** Sending `InvoiceRows` replaces the row list: existing rows that are
-  not sent are deleted. Rows without `RowId` are matched to existing rows by position, and fields
-  omitted on a matched row keep their previous value (for example `Discount`/`DiscountType`). Send
-  every row that should remain with all pricing fields, including `Discount: 0` when no discount is
-  intended. With `RowId`, rows with that id are updated and rows without one are added. Fortnox
+  not sent are deleted. If no sent row has `RowId`, rows are matched to existing rows by position,
+  and fields omitted on a matched row keep their previous value (for example
+  `Discount`/`DiscountType`). Send every row that should remain with all pricing fields, including
+  `Discount: 0` when no discount is intended. If any sent row has `RowId`, rows with a matching
+  `RowId` are updated and rows without one are added. Fortnox
   regenerates RowIds on every update, so read the invoice again before reusing them.
 - **Referenced records.** `CostCenter`, `Project`, `ArticleNumber`, `AccountNumber`, and a non-SEK
   `Currency` must already exist in the Fortnox company.
