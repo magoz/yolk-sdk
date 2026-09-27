@@ -25,6 +25,26 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Unreleased: Fortnox customer write inputs
+
+This is a breaking change to the Fortnox customer write actions that shipped in canary.90. When upgrading
+`@yolk-sdk/connectors`:
+
+- `FortnoxCreateCustomerInput` and `FortnoxUpdateCustomerInput` no longer accept `Country` or
+  `Phone`. Set `CountryCode` instead of `Country`, and `Phone1`/`Phone2` instead of `Phone`.
+  `FortnoxCustomer` and `FortnoxSupplier` responses still include both fields.
+- `fortnox.create_customer` and `fortnox.update_customer` reject unknown keys with
+  `validation_failed` instead of dropping them, before any request is sent. This applies to
+  `execute`, `executeTyped`, and generated agent tools. Remove `Country`, `Phone`, and any other
+  unsupported keys from host-built inputs, and expect model tool calls that include them to fail
+  validation.
+- The `inputSchema` of both actions is now a closed wrapper, not the input class. Build typed
+  inputs with `FortnoxCreateCustomerInput.make` / `FortnoxUpdateCustomerInput.make`. Decoding those
+  classes directly still strips unknown keys.
+
+Invoice write inputs are unchanged and still drop unknown keys. See
+[Fortnox write semantics](./connectors/fortnox#fortnox-write-semantics).
+
 ### Unreleased: OneDrive move/copy and email Sent copy
 
 Upgrading `@yolk-sdk/connectors` adds three Microsoft tools when hosts pass the complete
