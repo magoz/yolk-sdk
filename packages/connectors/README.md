@@ -1051,7 +1051,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 
 New byte helpers are separate from connector actions and generic agent serialization. They use
 root `ConnectorFileTransferBudget` (`maxBytes`, `maxMetadataBytes`, `maxErrorBodyBytes`) and fail
-with code-only `ConnectorFileTransferError`. Existing Dropbox/OneDrive download APIs and all
+with `ConnectorFileTransferError` carrying only `code` plus an optional HTTP `status` number. Existing Dropbox/OneDrive download APIs and all
 base64 attachment actions remain unchanged. Full API/policy reference:
 [Transfer connector files](../../apps/docs/content/docs/connectors/files.mdx).
 
@@ -1133,7 +1133,8 @@ state rather than dropping conditions or silently changing modes.
   Docs PDF/DOCX/ODT/RTF/text/HTML/ZIP/EPUB/Markdown; Sheets XLSX/ODS/PDF/CSV/TSV/ZIP;
   Slides PPTX/ODP/PDF/text; Drawings PDF/JPEG/PNG/SVG; Apps Script JSON. CSV/TSV is first-sheet only.
 - Fortnox preview `{ documentNumber }` uses `/preview`, not `/print`, and does not mark Sent true.
-  It is a generated PDF, not an immutable original. Archive `{ fileId }` uses `/3/archive/{id}`.
+  It is a generated PDF, not an immutable original. The preview request sends no `Accept` header;
+  success is verified by `%PDF-` magic bytes, not the response content type. Archive `{ fileId }` uses `/3/archive/{id}`.
   New `fortnox.list_supplier_invoice_files` takes `{ givenNumber, page?, limit? }`, filters internal
   GivenNumber, and returns `{ files, pagination }`. `FortnoxConnectFileOAuthCredentialSlot` requests
   `connectfile`; `FortnoxArchiveOAuthCredentialSlot` requests `archive`; preview uses `invoice`.

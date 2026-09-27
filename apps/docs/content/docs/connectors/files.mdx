@@ -143,7 +143,8 @@ Fortnox preview input is `{ documentNumber }`; archive input is `{ fileId }`.
 `documentNumber` uses `FortnoxDocumentNumber` from `@yolk-sdk/connectors/fortnox`: decode external
 strings with that schema, or use `.make` for trusted values. `fileId` remains a plain string.
 Preview uses `/3/invoices/{DocumentNumber}/preview`, **not `/print`**, and does not set `Sent` true.
-Archive retrieval uses `/3/archive/{id}` with IDs from discovery, not supplier external-URL
+The preview request sends no `Accept` header and success is verified by `%PDF-` magic bytes,
+not the response content type. Archive retrieval uses `/3/archive/{id}` with IDs from discovery, not supplier external-URL
 connections. `fortnox.list_supplier_invoice_files` takes `{ givenNumber, page?, limit? }` and returns
 `{ files, pagination }`; the filter is the internal GivenNumber, not the supplier InvoiceNumber.
 `FortnoxConnectFileOAuthCredentialSlot` requests `connectfile`; archive uses
@@ -230,7 +231,7 @@ existing OneDrive download retains its own unauthenticated redirect handling. Pr
 licensing, host materialization/storage/retention, malware scanning and format readers are not
 implemented here. No download metadata establishes a consistent provider snapshot.
 
-New helpers fail with root `ConnectorFileTransferError` containing only `code`: `invalid_input`,
+New helpers fail with root `ConnectorFileTransferError` containing only `code` plus an optional HTTP `status` number: `invalid_input`,
 `credential_failed`, `transport_failed`, `network_policy_rejected`, `response_too_large`,
 `upload_session_required`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `rate_limited`,
 `upstream_failed`, `invalid_metadata`, `not_downloadable`, `unexpected_redirect`, or `partial_content`.
