@@ -114,6 +114,34 @@ require `CustomerNumber`; Fortnox assigns `DocumentNumber`. Update inputs carry 
 identifier (`CustomerNumber` or `DocumentNumber`) and omit it from the request body because it is
 bound into the URL. Invoice write inputs use `InvoiceRows` as JSON arrays; returned invoice rows are
 runtime `Chunk` values. Writes do not send or book invoices and are subject to host authorization.
+The connector forwards accepted write fields unchanged; it does not inject defaults or rewrite
+values. Invoice write inputs are not closed: when `execute` or an agent tool decodes input, unknown
+or provider-managed keys (such as `Booked` or `VoucherNumber`) are dropped before the request.
+`executeTyped` trusts an existing invoice input class instance and does not re-check its keys.
+
+### Fortnox write semantics
+
+These notes describe Fortnox behavior and connector validation. The action descriptions that agents
+see repeat the Fortnox behavior:
+
+- **Customer contact fields.** Customer write inputs omit `Country` and `Phone`. Fortnox derives the
+  read-only `Country` from `CountryCode`, and the Customer resource has no `Phone` field; use
+  `Phone1`/`Phone2`. `Phone` appears only in list rows. The `fortnox.create_customer` and
+  `fortnox.update_customer` action inputs are closed: `Country`, `Phone`, or any other unknown key
+  fails input validation before a request is sent, rather than being stripped. Decoding the
+  exported input classes directly uses default Effect parsing, which strips unknown keys. `FortnoxCustomer` and `FortnoxSupplier` responses still include
+  `Country` and `Phone`.
+- **Customer updates.** Only provided fields change; omitted fields keep their stored value. An
+  empty string does not clear a stored value.
+- **Invoice rows on update.** Sending `InvoiceRows` replaces the row list: existing rows that are
+  not sent are deleted. If no sent row has `RowId`, rows are matched to existing rows by position,
+  and fields omitted on a matched row keep their previous value (for example
+  `Discount`/`DiscountType`). Send every row that should remain with all pricing fields, including
+  `Discount: 0` when no discount is intended. If any sent row has `RowId`, rows with a matching
+  `RowId` are updated and rows without one are added. Fortnox
+  regenerates RowIds on every update, so read the invoice again before reusing them.
+- **Referenced records.** `CostCenter`, `Project`, `ArticleNumber`, `AccountNumber`, and a non-SEK
+  `Currency` must already exist in the Fortnox company.
 
 Pass identifier strings returned by the provider, preserving leading zeros. `givenNumber` is the
 numeric-string **GivenNumber**, not the supplier's `InvoiceNumber`. Identifiers are validated and
@@ -167,6 +195,10 @@ Customers additionally accept `filter: 'active' | 'inactive'`. Both invoice list
 and `authorizepending`. Supplier lists do not expose a status filter. Unsupported sort/offset or
 arbitrary query parameters are not part of this connector.
 
+Fortnox's API docs do not state how payment-status filters treat unbooked invoices. On a demo
+tenant, `unpaid`, `unpaidoverdue`, and `fullypaid` did not return unbooked customer invoices; use
+`filter: 'unbooked'` for those. An empty payment-status result does not prove nothing is outstanding.
+
 ## Handle failures and rate limits
 
 Non-2xx responses return `ActionResult.failure`, including `fortnox_unauthorized` (401),
@@ -176,6 +208,22 @@ Non-2xx responses return `ActionResult.failure`, including `fortnox_unauthorized
 `error.underlying.providerCode`. Raw error bodies are not
 returned. Missing/invalid credentials, input validation, malformed success bodies, and transport
 errors stay in the typed Effect error channel.
+
+Hosts can classify failures from `underlying.providerCode` using Fortnox's
+[documented error codes](https://www.fortnox.se/developer/guides-and-good-to-know/errors). The
+connector does not map these codes itself. Codes relevant to these actions include:
+
+| Code(s)                         | Fortnox meaning                                           |
+| ------------------------------- | --------------------------------------------------------- |
+| `2000310`, `2000311`            | Access token (or client secret) missing or incorrect      |
+| `2001101`, `2001103`, `2000663` | No license for the scope or API, or no access to scope    |
+| `2001399`                       | Invalid field name                                        |
+| `2000106`, `2000108`, `2000134` | Value must be alphanumeric, numeric, or boolean           |
+| `2000359`, `2000588`            | Value contains invalid characters; invalid parameter      |
+| `2001304`                       | Account not found                                         |
+| `2001302`, `2000428`            | Article not found                                         |
+| `2000204`, `2000433`            | Customer not found                                        |
+| `2000637`                       | Customer number already used or reserved by a deleted one |
 
 Fortnox documents 25 requests per 5 seconds per access token. Hosts own throttling and retry policy;
 the connector never retries automatically. A valid delta-seconds `Retry-After` header is exposed as
@@ -210,3 +258,6 @@ See [Add connector tools](../integrations/connector-tool) for tool execution and
 - [API request authentication](https://www.fortnox.se/developer/authorization/make-request)
 - [Parameters and pagination](https://www.fortnox.se/developer/guides-and-good-to-know/parameters/)
 - [Response and error envelopes](https://www.fortnox.se/developer/guides-and-good-to-know/responses)
+- [Error codes](https://www.fortnox.se/developer/guides-and-good-to-know/errors)
+- [Customer resource (archived)](https://web.archive.org/web/20220812174224/https://developer.fortnox.se/documentation/resources/customers/)
+- [Updating document rows with RowId (archived)](https://web.archive.org/web/20211203193604/https://developer.fortnox.se/blog/updating-document-rows-using-rowid/)

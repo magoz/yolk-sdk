@@ -4,6 +4,9 @@ export * from './files.ts'
 
 import { Chunk } from 'effect'
 import * as Schema from 'effect/Schema'
+import * as SchemaAST from 'effect/SchemaAST'
+import * as SchemaParser from 'effect/SchemaParser'
+import * as SchemaTransformation from 'effect/SchemaTransformation'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
 import {
@@ -82,6 +85,31 @@ const SupplierInvoicesResponse = Schema.Struct({
   MetaInformation: FortnoxMetaInformation
 })
 
+// Parse options are call-scoped in Effect rc.115, not schema annotations. Customer writes reject
+// unknown keys (including Fortnox's read-only `Country` and list-only `Phone`) instead of
+// stripping them, so a request is never silently sent without a field the caller supplied.
+// Take fields, not a Class: `Schema.toType` (used by `executeTyped`) accepts an existing Class
+// instance without checking its keys, so the closed member must be a Struct.
+const closedInput = <Fields extends Schema.Struct.Fields>(fields: Fields) =>
+  Schema.declareConstructor<Schema.Struct<Fields>['Type'], Schema.Struct<Fields>['Encoded']>()(
+    [Schema.Struct(fields)],
+    ([member]) =>
+      (input, _ast, options) =>
+        SchemaParser.decodeUnknownEffect(member, { ...options, onExcessProperty: 'error' })(input),
+    {
+      toCodecJson: ([member]) => new SchemaAST.Link(member.ast, SchemaTransformation.passthrough())
+    }
+  )
+
+const fortnoxCustomerContactFieldsNote =
+  'Country is read-only and derived from CountryCode; set CountryCode. Customers use Phone1/Phone2, not Phone. Unknown fields are rejected.'
+
+const fortnoxInvoiceReferencesNote =
+  'Referenced CostCenter, Project, ArticleNumber, AccountNumber, and non-SEK Currency must already exist in the Fortnox company.'
+
+const fortnoxInvoiceRowsUpdateNote =
+  'Sending InvoiceRows replaces the row list: existing rows not sent are deleted. If no sent row has RowId, rows are matched to existing rows by position, and fields omitted on a matched row keep their previous value (for example Discount/DiscountType), so send every row that should remain with all pricing fields, including Discount 0 when no discount is intended. If any sent row has RowId, rows with a matching RowId are updated and rows without RowId are added. RowIds are regenerated on every update; read the invoice again before reusing RowIds.'
+
 export const fortnoxGetCompanyInformationAction = defineAction({
   id: 'fortnox.get_company_information',
   description:
@@ -138,9 +166,9 @@ export const fortnoxGetCustomerAction = defineAction({
 
 export const fortnoxCreateCustomerAction = defineAction({
   id: 'fortnox.create_customer',
-  description: 'Create a Fortnox customer. Fortnox assigns CustomerNumber.',
+  description: `Create a Fortnox customer. Fortnox assigns CustomerNumber. ${fortnoxCustomerContactFieldsNote}`,
   access: 'write',
-  inputSchema: FortnoxCreateCustomerInput,
+  inputSchema: closedInput(FortnoxCreateCustomerInput.fields),
   outputSchema: FortnoxCustomer,
   execute: ({ integration, input }) =>
     writeFortnox(
@@ -156,9 +184,9 @@ export const fortnoxCreateCustomerAction = defineAction({
 
 export const fortnoxUpdateCustomerAction = defineAction({
   id: 'fortnox.update_customer',
-  description: 'Update a Fortnox customer by CustomerNumber.',
+  description: `Update a Fortnox customer by CustomerNumber. Only provided fields change; omitted fields keep their stored value. An empty string does not clear a stored value. ${fortnoxCustomerContactFieldsNote}`,
   access: 'write',
-  inputSchema: FortnoxUpdateCustomerInput,
+  inputSchema: closedInput(FortnoxUpdateCustomerInput.fields),
   outputSchema: FortnoxCustomer,
   execute: ({ integration, input }) => {
     const { CustomerNumber, ...customer } = input
@@ -178,7 +206,7 @@ export const fortnoxUpdateCustomerAction = defineAction({
 export const fortnoxListInvoicesAction = defineAction({
   id: 'fortnox.list_invoices',
   description:
-    'List one page of Fortnox customer invoices. Repeat search/filter/date range/limit with pagination.nextPage to continue.',
+    'List one page of Fortnox customer invoices. Repeat search/filter/date range/limit with pagination.nextPage to continue. Observed behavior (not stated in Fortnox API docs): payment-status filters unpaid, unpaidoverdue, and fullypaid do not include unbooked invoices; use filter unbooked for those. An empty payment-status result does not mean nothing is outstanding.',
   access: 'read',
   inputSchema: FortnoxListInvoicesInput,
   outputSchema: FortnoxListInvoicesOutput,
@@ -215,7 +243,7 @@ export const fortnoxGetInvoiceAction = defineAction({
 
 export const fortnoxCreateInvoiceAction = defineAction({
   id: 'fortnox.create_invoice',
-  description: 'Create a Fortnox customer invoice. Fortnox assigns DocumentNumber.',
+  description: `Create a Fortnox customer invoice. Fortnox assigns DocumentNumber. ${fortnoxInvoiceReferencesNote}`,
   access: 'write',
   inputSchema: FortnoxCreateInvoiceInput,
   outputSchema: FortnoxInvoice,
@@ -233,7 +261,7 @@ export const fortnoxCreateInvoiceAction = defineAction({
 
 export const fortnoxUpdateInvoiceAction = defineAction({
   id: 'fortnox.update_invoice',
-  description: 'Update a Fortnox customer invoice by DocumentNumber. Does not send or book it.',
+  description: `Update a Fortnox customer invoice by DocumentNumber. Does not send or book it. ${fortnoxInvoiceRowsUpdateNote} ${fortnoxInvoiceReferencesNote}`,
   access: 'write',
   inputSchema: FortnoxUpdateInvoiceInput,
   outputSchema: FortnoxInvoice,

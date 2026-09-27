@@ -580,7 +580,11 @@ Write inputs preserve Fortnox's PascalCase wire names. Creating a customer requi
 Fortnox assign `CustomerNumber`; updating a customer includes `CustomerNumber` for the URL but omits
 it from the JSON body. Creating an invoice requires `CustomerNumber` and lets Fortnox assign
 `DocumentNumber`; updating one includes `DocumentNumber` for the URL. Invoice `InvoiceRows` inputs
-are JSON arrays, while returned row collections are Effect `Chunk` values. See the
+are JSON arrays, while returned row collections are Effect `Chunk` values. Customer write inputs
+omit Fortnox's read-only `Country` (set `CountryCode`) and list-only `Phone` (use `Phone1`/`Phone2`),
+and the customer create/update actions reject unknown keys instead of stripping them; customer and
+supplier responses keep both fields. Action descriptions document Fortnox update semantics (partial customer updates, invoice
+row replacement, pre-existing referenced records). See the
 [Fortnox guide](../../apps/docs/content/docs/connectors/fortnox.mdx) for the action table and schema
 conventions.
 
