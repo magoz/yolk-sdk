@@ -1,5 +1,15 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.94
+
+### Minor Changes
+
+- 32b90b3: Align Fortnox customer writes with the Fortnox Customer resource. `FortnoxCreateCustomerInput` and `FortnoxUpdateCustomerInput` no longer accept `Country` (read-only, derived from `CountryCode`) or `Phone` (customers use `Phone1`/`Phone2`), and `fortnox.create_customer` / `fortnox.update_customer` reject unknown keys instead of stripping them, including through `executeTyped`. Those actions' `inputSchema` is now a closed wrapper rather than the Class; construct inputs with the exported `FortnoxCreateCustomerInput` / `FortnoxUpdateCustomerInput` classes. `FortnoxCustomer` and `FortnoxSupplier` responses still include both fields. Fortnox action descriptions now document partial customer updates, invoice row replacement and RowId matching, required pre-existing referenced records, and the observed exclusion of unbooked invoices from payment-status filters.
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.94
+
 ## 0.1.0-canary.93
 
 ### Patch Changes
