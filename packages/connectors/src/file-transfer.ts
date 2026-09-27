@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
 
-/** Code-only host boundary. Never attach provider bodies, URLs, credentials or causes. */
+/** Code and optional HTTP status host boundary. Never attach provider bodies, URLs, credentials or causes: status number only. */
 export class ConnectorFileTransferError extends Schema.TaggedError<ConnectorFileTransferError>()(
   'ConnectorFileTransferError',
   {
@@ -21,7 +21,8 @@ export class ConnectorFileTransferError extends Schema.TaggedError<ConnectorFile
       'not_downloadable',
       'unexpected_redirect',
       'partial_content'
-    ])
+    ]),
+    status: Schema.optional(Schema.Int)
   }
 ) {}
 

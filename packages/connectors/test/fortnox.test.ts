@@ -597,6 +597,138 @@ describe('Fortnox connector', () => {
     })
   )
 
+  it.effect(
+    'list_invoices decodes string CurrencyRate and numeric totals from populated rows',
+    () =>
+      Effect.gen(function* () {
+        const harness = makeHarness([
+          response({
+            Invoices: [
+              {
+                DocumentNumber: '7',
+                CustomerNumber: '001',
+                CurrencyRate: '1',
+                Total: 3750,
+                Balance: 3750,
+                VoucherNumber: null,
+                Sent: false,
+                '@url': 'https://api.fortnox.se/3/invoices/7',
+                CurrencyUnit: 1,
+                NoxFinans: false,
+                ExternalInvoiceReference1: '',
+                TermsOfPayment: '30',
+                WayOfDelivery: '',
+                FinalPayDate: null,
+                InvoiceType: 'INVOICE'
+              }
+            ],
+            MetaInformation: meta()
+          })
+        ])
+
+        const result = yield* invoke('fortnox.list_invoices').pipe(Effect.provide(harness.layer))
+
+        if (!Predicate.isTagged(result, 'Success')) throw new Error('Expected invoice list success')
+        const listed = yield* Schema.decodeUnknownEffect(FortnoxListInvoicesOutput)(result.value)
+        const invoices = Chunk.toReadonlyArray(listed.invoices)
+        expect(invoices).toHaveLength(1)
+        expect(invoices[0]).toMatchObject({
+          DocumentNumber: '7',
+          CurrencyRate: 1,
+          Total: 3750,
+          Balance: 3750,
+          VoucherNumber: null,
+          Sent: false
+        })
+      })
+  )
+
+  it.effect('get_invoice accepts numeric and empty-string amounts at the wire boundary', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({
+          Invoice: {
+            DocumentNumber: '8',
+            CustomerNumber: '001',
+            CurrencyRate: 1.5,
+            Total: '10.5432',
+            Balance: '',
+            Net: '-3',
+            Gross: ' 2.5 '
+          }
+        }),
+        response({
+          Invoice: { DocumentNumber: '9', CustomerNumber: '001', CurrencyRate: '' }
+        })
+      ])
+
+      const numeric = yield* invoke('fortnox.get_invoice', { documentNumber: '8' }).pipe(
+        Effect.provide(harness.layer)
+      )
+
+      const empty = yield* invoke('fortnox.get_invoice', { documentNumber: '9' }).pipe(
+        Effect.provide(harness.layer)
+      )
+
+      if (!Predicate.isTagged(numeric, 'Success') || !Predicate.isTagged(empty, 'Success'))
+        throw new Error('Expected invoice successes')
+      expect(numeric.value).toMatchObject({
+        CurrencyRate: 1.5,
+        Total: 10.5432,
+        Balance: null,
+        Net: -3,
+        Gross: 2.5
+      })
+      expect(empty.value).toMatchObject({ CurrencyRate: null })
+    })
+  )
+
+  it.effect('get_invoice rejects non-numeric amount strings as a validation failure', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({
+          Invoice: { DocumentNumber: '10', CustomerNumber: '001', CurrencyRate: 'abc' }
+        })
+      ])
+
+      const result = yield* invoke('fortnox.get_invoice', { documentNumber: '10' }).pipe(
+        Effect.provide(harness.layer),
+        Effect.result
+      )
+
+      expect(result._tag).toBe('Failure')
+      expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
+      expect(harness.requests).toHaveLength(1)
+    })
+  )
+
+  it.effect('get_supplier_invoice decodes numeric amounts to their string form', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({
+          SupplierInvoice: {
+            GivenNumber: '11',
+            SupplierNumber: '003',
+            Total: 125.5,
+            Balance: 0,
+            CurrencyRate: 1
+          }
+        })
+      ])
+
+      const result = yield* invoke('fortnox.get_supplier_invoice', { givenNumber: '11' }).pipe(
+        Effect.provide(harness.layer)
+      )
+
+      if (!Predicate.isTagged(result, 'Success'))
+        throw new Error('Expected supplier invoice success')
+      const decoded = yield* Schema.decodeUnknownEffect(FortnoxSupplierInvoice)(result.value)
+      expect(decoded.Total).toBe('125.5')
+      expect(decoded.Balance).toBe('0')
+      expect(decoded.CurrencyRate).toBe('1')
+    })
+  )
+
   it.effect('preserves JSON null on optional Fortnox response fields', () =>
     Effect.gen(function* () {
       const harness = makeHarness([

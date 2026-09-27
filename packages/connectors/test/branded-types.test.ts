@@ -241,7 +241,9 @@ describe('branded identities', () => {
       const documentNumber = FortnoxDocumentNumber.make('a/b?#%')
 
       const host = binaryHost([
-        binaryResponse(new Uint8Array([0, 1, 2]), 200, { 'content-type': 'application/pdf' })
+        binaryResponse(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]), 200, {
+          'content-type': 'application/pdf'
+        })
       ])
 
       const result = yield* downloadFortnoxInvoicePreview(

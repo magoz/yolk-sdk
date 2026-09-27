@@ -21,6 +21,8 @@ const budget = { maxBytes: 16, maxMetadataBytes: 2000, maxErrorBodyBytes: 32 }
 
 const bytes = new Uint8Array([0, 128, 255])
 
+const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34])
+
 const integration = (connectorId: string) =>
   makeIntegration({
     connectorId,
@@ -212,7 +214,7 @@ describe('bounded document retrieval', () => {
   )
   it.effect('Fortnox preview is generated PDF, archive is bytes, each with resource consent', () =>
     Effect.gen(function* () {
-      const h = host([response(bytes, 200, { 'content-type': 'application/pdf' }), response()])
+      const h = host([response(pdfBytes, 200, { 'content-type': 'application/pdf' }), response()])
       expect(
         (yield* downloadFortnoxInvoicePreview(
           integration('fortnox'),
@@ -232,6 +234,82 @@ describe('bounded document retrieval', () => {
         'https://api.fortnox.se/3/archive/archive-id'
       ])
       expect(h.scopes).toEqual([['invoice'], ['archive']])
+      expect(h.requests[0]?.headers).toEqual({ authorization: 'Bearer secret' })
+      expect(h.requests[1]?.headers).toEqual({
+        authorization: 'Bearer secret',
+        accept: 'application/octet-stream'
+      })
+    })
+  )
+  it.effect(
+    'Fortnox preview accepts PDF magic under any content type without an accept header',
+    () =>
+      Effect.gen(function* () {
+        const h = host([response(pdfBytes, 200, { 'content-type': 'application/octet-stream' })])
+
+        const result = yield* downloadFortnoxInvoicePreview(
+          integration('fortnox'),
+          { documentNumber: FortnoxDocumentNumber.make('12') },
+          budget
+        ).pipe(Effect.provide(h.layer))
+
+        expect(result.bytes).toEqual(pdfBytes)
+        expect(result.source.generatedPreview).toBe(true)
+        expect(h.requests[0]?.headers).toEqual({ authorization: 'Bearer secret' })
+      })
+  )
+  it.effect('Fortnox preview rejects non-PDF bodies regardless of content type', () =>
+    Effect.gen(function* () {
+      const jsonError = new TextEncoder().encode(
+        JSON.stringify({ ErrorInformation: { Message: 'not a pdf' } })
+      )
+
+      const wideBudget = { ...budget, maxBytes: 1024 }
+
+      for (const headers of [
+        { 'content-type': 'application/pdf' },
+        { 'content-type': 'application/octet-stream' },
+        {}
+      ]) {
+        const h = host([response(jsonError, 200, headers)])
+
+        const result = yield* downloadFortnoxInvoicePreview(
+          integration('fortnox'),
+          { documentNumber: FortnoxDocumentNumber.make('12') },
+          wideBudget
+        ).pipe(Effect.provide(h.layer), Effect.result)
+
+        expect(result._tag).toBe('Failure')
+
+        if (Predicate.isTagged(result, 'Failure'))
+          expect(result.failure).toMatchObject({ code: 'invalid_metadata' })
+      }
+    })
+  )
+  it.effect('Fortnox transfer failures carry the HTTP status number only', () =>
+    Effect.gen(function* () {
+      const h = host([response(new Uint8Array(), 406), response(new Uint8Array(), 429)])
+
+      const upstream = yield* downloadFortnoxArchiveFile(
+        integration('fortnox'),
+        { fileId: 'archive-id' },
+        budget
+      ).pipe(Effect.provide(h.layer), Effect.result)
+
+      const throttled = yield* downloadFortnoxArchiveFile(
+        integration('fortnox'),
+        { fileId: 'archive-id' },
+        budget
+      ).pipe(Effect.provide(h.layer), Effect.result)
+
+      expect(upstream._tag).toBe('Failure')
+      expect(throttled._tag).toBe('Failure')
+
+      if (Predicate.isTagged(upstream, 'Failure'))
+        expect(upstream.failure).toMatchObject({ code: 'upstream_failed', status: 406 })
+
+      if (Predicate.isTagged(throttled, 'Failure'))
+        expect(throttled.failure).toMatchObject({ code: 'rate_limited', status: 429 })
     })
   )
   it.effect('Notion file objects fetch without credentials and require external opt-in', () =>

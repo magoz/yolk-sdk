@@ -8,8 +8,12 @@ import { ConnectorFileTransferError } from './file-transfer.ts'
 import type { ConnectorFileTransferBudget } from './file-transfer.ts'
 import type { ConnectorIntegration } from './integration.ts'
 
-export const failTransfer = (code: ConnectorFileTransferError['code']) =>
-  Effect.fail(new ConnectorFileTransferError({ code }))
+export const failTransfer = (code: ConnectorFileTransferError['code'], status?: number) =>
+  Effect.fail(
+    status === undefined
+      ? new ConnectorFileTransferError({ code })
+      : new ConnectorFileTransferError({ code, status })
+  )
 
 const isUint8ArrayView = (value: ArrayBufferView) =>
   Object.prototype.toString.call(value) === '[object Uint8Array]'
@@ -110,26 +114,27 @@ export const checkResponse = (
       return r
     }
 
-    if (r.status >= 300 && r.status < 400) return yield* failTransfer('unexpected_redirect')
+    if (r.status >= 300 && r.status < 400)
+      return yield* failTransfer('unexpected_redirect', r.status)
 
     switch (r.status) {
       case 401:
-        return yield* failTransfer('unauthorized')
+        return yield* failTransfer('unauthorized', r.status)
       case 403:
-        return yield* failTransfer('forbidden')
+        return yield* failTransfer('forbidden', r.status)
       case 404:
-        return yield* failTransfer('not_found')
+        return yield* failTransfer('not_found', r.status)
       case 409:
       case 412:
-        return yield* failTransfer('conflict')
+        return yield* failTransfer('conflict', r.status)
       case 413:
-        return yield* failTransfer('response_too_large')
+        return yield* failTransfer('response_too_large', r.status)
       case 429:
-        return yield* failTransfer('rate_limited')
+        return yield* failTransfer('rate_limited', r.status)
       case 206:
-        return yield* failTransfer('partial_content')
+        return yield* failTransfer('partial_content', r.status)
       default:
-        return yield* failTransfer('upstream_failed')
+        return yield* failTransfer('upstream_failed', r.status)
     }
   })
 

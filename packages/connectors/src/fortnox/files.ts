@@ -13,7 +13,6 @@ import {
   fileBytes,
   readBytes,
   safeToken,
-  singleHeader,
   validateTransfer
 } from '../transfer-internal.ts'
 import { FortnoxInvoiceOAuthCredentialSlot, fortnoxOAuthSlotId } from './oauth.ts'
@@ -123,19 +122,27 @@ const download = <Id extends string>(
 
     const response = yield* readBytes(
       `https://api.fortnox.se/3/${path}`,
-      {
-        authorization: `Bearer ${token}`,
-        accept: preview ? 'application/pdf' : 'application/octet-stream'
-      },
+      preview
+        ? { authorization: `Bearer ${token}` }
+        : { authorization: `Bearer ${token}`, accept: 'application/octet-stream' },
       limits
     )
 
-    if (
-      preview &&
-      singleHeader(response.headers, 'content-type')?.split(';')[0]?.trim().toLowerCase() !==
-        'application/pdf'
-    )
-      return yield* failTransfer('invalid_metadata')
+    // Fortnox may serve previews as application/octet-stream or with a charset suffix,
+    // so accept any content type and verify the PDF magic bytes instead.
+    if (preview) {
+      const bytes = response.bytes
+
+      const isPdf =
+        bytes.length >= 5 &&
+        bytes[0] === 0x25 &&
+        bytes[1] === 0x50 &&
+        bytes[2] === 0x44 &&
+        bytes[3] === 0x46 &&
+        bytes[4] === 0x2d
+
+      if (!isPdf) return yield* failTransfer('invalid_metadata')
+    }
 
     return { ...fileBytes(response.bytes), source: { id, generatedPreview: preview } }
   })
