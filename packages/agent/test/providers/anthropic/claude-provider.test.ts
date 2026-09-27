@@ -202,6 +202,53 @@ const collectProviderEvents = (response: Response, requests: Array<CapturedReque
   })
 
 describe('Anthropic Claude provider', () => {
+  it.effect('prefers request maxOutputTokens over the configured limit', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody(
+        {
+          model: 'claude-sonnet-4-6',
+          systemPrompt: 'Use tools carefully.',
+          messages: [UserMessage.make({ content: 'inspect' })],
+          tools: [],
+          maxOutputTokens: 456
+        },
+        { maxTokens: anthropicTestMaxTokens }
+      )
+
+      expect(body.max_tokens).toBe(456)
+    })
+  )
+
+  it.effect('keeps the configured limit when the request omits maxOutputTokens', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: 'Use tools carefully.',
+        messages: [UserMessage.make({ content: 'inspect' })],
+        tools: []
+      })
+
+      expect(body.max_tokens).toBe(anthropicTestMaxTokens)
+    })
+  )
+
+  it.effect('fails invalid request maxOutputTokens', () =>
+    Effect.gen(function* () {
+      const error = yield* toAnthropicClaudeRequestBody(
+        {
+          model: 'claude-sonnet-4-6',
+          systemPrompt: 'Use tools carefully.',
+          messages: [UserMessage.make({ content: 'inspect' })],
+          tools: [],
+          maxOutputTokens: 0
+        },
+        { maxTokens: anthropicTestMaxTokens }
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'validation_error' })
+    })
+  )
+
   it.effect('lowers protocol transcript to Claude Messages input', () =>
     Effect.gen(function* () {
       const body = yield* toAnthropicClaudeRequestBody(

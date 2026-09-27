@@ -21,7 +21,10 @@ For copy-paste provider layer setup, see [Use model providers](./provider-setup)
 
 Provider output-token limits are host-owned when supported. OpenAI-compatible chat, Vercel AI
 Gateway, OpenCode Go, Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does not
-maintain a model-limit catalog or apply hidden fallbacks.
+maintain a model-limit catalog or apply hidden fallbacks. A per-request `LLMRequest.maxOutputTokens`
+(positive integer) overrides the configured default for one call and lowers to the same native
+field; when omitted, request bodies are unchanged. For a bounded single-shot text call that reuses
+the loop provider, see [`completeText`](../agent/loop-runtime#single-shot-text-calls).
 
 ## OpenAI-compatible chat
 

@@ -968,7 +968,9 @@ export const toOpenAiRequestBody = (
   Effect.gen(function* () {
     const providerName = config.providerName ?? defaultOpenAiProviderIdentity.name
 
-    if (!Number.isSafeInteger(config.maxCompletionTokens) || config.maxCompletionTokens <= 0) {
+    const maxCompletionTokens = request.maxOutputTokens ?? config.maxCompletionTokens
+
+    if (!Number.isSafeInteger(maxCompletionTokens) || maxCompletionTokens <= 0) {
       return yield* Effect.fail(
         new LLMError({
           cause: 'validation_error',
@@ -1012,8 +1014,8 @@ export const toOpenAiRequestBody = (
 
     const completionTokenLimit =
       config.completionTokenField === 'max_tokens'
-        ? { max_tokens: config.maxCompletionTokens }
-        : { max_completion_tokens: config.maxCompletionTokens }
+        ? { max_tokens: maxCompletionTokens }
+        : { max_completion_tokens: maxCompletionTokens }
 
     const reasoning =
       request.reasoningEffort === undefined

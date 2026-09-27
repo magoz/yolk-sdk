@@ -180,6 +180,69 @@ describe('OpenAI Codex provider', () => {
     })
   )
 
+  it.effect('ignores request maxOutputTokens because the endpoint rejects it', () =>
+    Effect.gen(function* () {
+      const body = yield* lowerOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: 'Be concise.',
+        messages: [UserMessage.make({ content: 'Hello' })],
+        tools: [],
+        maxOutputTokens: 999
+      })
+
+      expect(body).not.toHaveProperty('max_output_tokens')
+    })
+  )
+
+  it.effect('strips request maxOutputTokens before the provider request', () =>
+    Effect.gen(function* () {
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+      const response = sseWebResponse([
+        completedCodexResponse({
+          type: 'message',
+          content: [{ type: 'output_text', text: 'Hi' }]
+        })
+      ])
+
+      const events = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+
+        return yield* provider
+          .stream({ ...defaultCodexRequest, maxOutputTokens: 999 })
+          .pipe(Stream.runCollect)
+      }).pipe(
+        Effect.provide(
+          makeOpenAiCodexProviderLayer({ token: codexToken }).pipe(
+            Layer.provide(
+              Layer.succeed(
+                HttpClient.HttpClient,
+                HttpClient.make(request =>
+                  Effect.sync(() => {
+                    requests.push(request)
+
+                    return HttpClientResponse.fromWeb(request, response)
+                  })
+                )
+              )
+            )
+          )
+        )
+      )
+
+      expect(events.map(event => event._tag)).toEqual(['TextDelta', 'Done'])
+      const body = requests[0]?.body
+
+      if (body?._tag !== 'Uint8Array') {
+        expect.fail('Expected Codex request body')
+      }
+
+      expect(JSON.parse(new TextDecoder().decode(body.body))).not.toHaveProperty(
+        'max_output_tokens'
+      )
+    })
+  )
+
   it.effect('lowers protocol transcript to Codex Responses input', () =>
     Effect.gen(function* () {
       const body = yield* toOpenAiCodexRequestBody(

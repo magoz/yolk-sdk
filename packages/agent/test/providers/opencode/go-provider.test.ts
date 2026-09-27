@@ -268,6 +268,23 @@ describe('OpenCode Go', () => {
       })
     )
 
+    it.effect(`${protocol}: prefers request maxOutputTokens over the host limit`, () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+        yield* run(protocol, success(protocol), requests, { ...input, maxOutputTokens: 4096 })
+        const body = bodyOf(requests)
+        expect(body).toMatchObject(
+          Match.value(protocol).pipe(
+            Match.when('responses', () => ({ max_output_tokens: 4096 })),
+            Match.when('messages', () => ({ max_tokens: 4096 })),
+            Match.when('chat-completions', () => ({ max_tokens: 4096 })),
+            Match.exhaustive
+          )
+        )
+        expect(body).not.toHaveProperty('max_completion_tokens')
+      })
+    )
+
     for (const status of [401, 429, 503]) {
       it.effect(`${protocol}: classifies HTTP ${status} without leaking error bodies`, () =>
         Effect.gen(function* () {

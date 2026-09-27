@@ -1216,6 +1216,21 @@ export const toAnthropicRequestBody = (
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
     const claudeCompatibility = config.claudeCompatibility ?? true
+
+    if (
+      request.maxOutputTokens !== undefined &&
+      (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens <= 0)
+    ) {
+      return yield* Effect.fail(
+        new LLMError({
+          cause: 'validation_error',
+          message: 'Anthropic maxOutputTokens must be a positive safe integer',
+          retryable: false
+        })
+      )
+    }
+
+    const maxTokens = request.maxOutputTokens ?? config.maxTokens
     yield* validateProviderTranscript(request.messages)
 
     const rawMessages = yield* Effect.forEach(request.messages, message =>
@@ -1250,7 +1265,7 @@ export const toAnthropicRequestBody = (
       model: request.model,
       system,
       messages,
-      max_tokens: config.maxTokens
+      max_tokens: maxTokens
     }
 
     if (outputConfig !== undefined) {

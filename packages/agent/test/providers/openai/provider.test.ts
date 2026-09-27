@@ -764,6 +764,67 @@ describe('OpenAI provider', () => {
       )
     })
   )
+
+  it.effect('prefers request maxOutputTokens over the configured limit', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'hello' })],
+        tools: [],
+        maxOutputTokens: 456
+      })
+
+      expect(body.max_completion_tokens).toBe(456)
+      expect(body).not.toHaveProperty('max_tokens')
+    })
+  )
+
+  it.effect('keeps the configured limit when the request omits maxOutputTokens', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'hello' })],
+        tools: []
+      })
+
+      expect(body.max_completion_tokens).toBe(openAiTestMaxOutputTokens)
+      expect(body).not.toHaveProperty('max_tokens')
+    })
+  )
+
+  it.effect('lowers request maxOutputTokens to max_tokens when configured', () =>
+    Effect.gen(function* () {
+      const body = yield* lowerOpenAiRequestBody(
+        {
+          model: 'gpt-5.4',
+          systemPrompt: '',
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: [],
+          maxOutputTokens: 456
+        },
+        { maxCompletionTokens: openAiTestMaxOutputTokens, completionTokenField: 'max_tokens' }
+      )
+
+      expect(body.max_tokens).toBe(456)
+      expect(body).not.toHaveProperty('max_completion_tokens')
+    })
+  )
+
+  it.effect('fails invalid request maxOutputTokens', () =>
+    Effect.gen(function* () {
+      const error = yield* toOpenAiRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'hello' })],
+        tools: [],
+        maxOutputTokens: 0
+      }).pipe(Effect.flip)
+
+      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'validation_error' })
+    })
+  )
 })
 
 describe('OpenAI provider streaming', () => {
