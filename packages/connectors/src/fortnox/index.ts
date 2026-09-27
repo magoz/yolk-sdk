@@ -88,11 +88,11 @@ const SupplierInvoicesResponse = Schema.Struct({
 // Parse options are call-scoped in Effect rc.115, not schema annotations. Customer writes reject
 // unknown keys (including Fortnox's read-only `Country` and list-only `Phone`) instead of
 // stripping them, so a request is never silently sent without a field the caller supplied.
-// Wrap a Struct of the Class fields, not the Class: `Schema.toType` (used by `executeTyped`)
-// accepts an existing Class instance without checking its keys.
-const closedInput = <S extends Schema.Constraint>(schema: S) =>
-  Schema.declareConstructor<S['Type'], S['Encoded']>()(
-    [schema],
+// Take fields, not a Class: `Schema.toType` (used by `executeTyped`) accepts an existing Class
+// instance without checking its keys, so the closed member must be a Struct.
+const closedInput = <Fields extends Schema.Struct.Fields>(fields: Fields) =>
+  Schema.declareConstructor<Schema.Struct<Fields>['Type'], Schema.Struct<Fields>['Encoded']>()(
+    [Schema.Struct(fields)],
     ([member]) =>
       (input, _ast, options) =>
         SchemaParser.decodeUnknownEffect(member, { ...options, onExcessProperty: 'error' })(input),
@@ -168,7 +168,7 @@ export const fortnoxCreateCustomerAction = defineAction({
   id: 'fortnox.create_customer',
   description: `Create a Fortnox customer. Fortnox assigns CustomerNumber. ${fortnoxCustomerContactFieldsNote}`,
   access: 'write',
-  inputSchema: closedInput(Schema.Struct(FortnoxCreateCustomerInput.fields)),
+  inputSchema: closedInput(FortnoxCreateCustomerInput.fields),
   outputSchema: FortnoxCustomer,
   execute: ({ integration, input }) =>
     writeFortnox(
@@ -186,7 +186,7 @@ export const fortnoxUpdateCustomerAction = defineAction({
   id: 'fortnox.update_customer',
   description: `Update a Fortnox customer by CustomerNumber. Only provided fields change; omitted fields keep their stored value. An empty string does not clear a stored value. ${fortnoxCustomerContactFieldsNote}`,
   access: 'write',
-  inputSchema: closedInput(Schema.Struct(FortnoxUpdateCustomerInput.fields)),
+  inputSchema: closedInput(FortnoxUpdateCustomerInput.fields),
   outputSchema: FortnoxCustomer,
   execute: ({ integration, input }) => {
     const { CustomerNumber, ...customer } = input

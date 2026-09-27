@@ -476,6 +476,7 @@ describe('Fortnox connector', () => {
   it.effect('sends typed customer writes built from the exported input classes', () =>
     Effect.gen(function* () {
       const harness = makeHarness([
+        response({ Customer: { CustomerNumber: '001', Name: 'Example AB' } }),
         response({ Customer: { CustomerNumber: '001', Name: 'Example AB' } })
       ])
 
@@ -486,9 +487,27 @@ describe('Fortnox connector', () => {
         })
         .pipe(Effect.provide(harness.layer))
 
+      const updated = yield* fortnoxUpdateCustomerAction
+        .executeTyped({
+          integration,
+          input: FortnoxUpdateCustomerInput.make({
+            CustomerNumber: FortnoxCustomerNumber.make('001'),
+            Phone1: '08-123'
+          })
+        })
+        .pipe(Effect.provide(harness.layer))
+
       expect(result).toMatchObject({ value: { CustomerNumber: '001' } })
+      expect(updated).toMatchObject({ value: { CustomerNumber: '001' } })
       expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
         Customer: { Name: 'Example AB', CountryCode: 'SE' }
+      })
+      expect(harness.requests[1]).toMatchObject({
+        method: 'PUT',
+        url: 'https://api.fortnox.se/3/customers/001'
+      })
+      expect(JSON.parse(harness.requests[1]?.body ?? '')).toEqual({
+        Customer: { Phone1: '08-123' }
       })
     })
   )
