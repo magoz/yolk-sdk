@@ -25,27 +25,28 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
-### Unreleased: Fortnox customer write inputs
+### Canary.94: Fortnox customer write inputs
 
-This is a breaking change to the Fortnox customer write actions that shipped in canary.90. When upgrading
-`@yolk-sdk/connectors`:
+This is a breaking change to the Fortnox customer write actions that shipped in canary.90. When
+upgrading `@yolk-sdk/connectors` from canary.93:
 
 - `FortnoxCreateCustomerInput` and `FortnoxUpdateCustomerInput` no longer accept `Country` or
   `Phone`. Set `CountryCode` instead of `Country`, and `Phone1`/`Phone2` instead of `Phone`.
   `FortnoxCustomer` and `FortnoxSupplier` responses still include both fields.
-- `fortnox.create_customer` and `fortnox.update_customer` reject unknown keys with
-  `validation_failed` instead of dropping them, before any request is sent. This applies to
-  `execute`, `executeTyped`, and generated agent tools. Remove `Country`, `Phone`, and any other
-  unsupported keys from host-built inputs, and expect model tool calls that include them to fail
-  validation.
+- `fortnox.create_customer` and `fortnox.update_customer` reject unknown keys instead of dropping
+  them, before any request is sent. Connector `execute`/`invoke` and `executeTyped` fail with
+  `ConnectorError` cause `validation_failed`; generated agent tools reject the call arguments with a
+  tool `validation` error. Remove `Country`, `Phone`, and any other unsupported keys from host-built
+  inputs, and expect model tool calls that include them to fail validation.
 - The `inputSchema` of both actions is now a closed wrapper, not the input class. Build typed
   inputs with `FortnoxCreateCustomerInput.make` / `FortnoxUpdateCustomerInput.make`. Decoding those
   classes directly still strips unknown keys.
 
-Invoice write inputs are unchanged and still drop unknown keys. See
+Invoice write inputs are unchanged: `execute` and generated agent tools still drop unknown keys, and
+`executeTyped` trusts an existing invoice input class instance without rechecking its keys. See
 [Fortnox write semantics](./connectors/fortnox#fortnox-write-semantics).
 
-### Unreleased: OneDrive move/copy and email Sent copy
+### Canary.91: OneDrive move/copy and email Sent copy
 
 Upgrading `@yolk-sdk/connectors` adds three Microsoft tools when hosts pass the complete
 `MicrosoftConnector` to `makeConnectorToolModule`: `onedrive.move_item` and `onedrive.copy_item`
@@ -63,7 +64,7 @@ OpenAI-compatible Chat Completions lower tool-result images, readable text docum
 PDFs to supplementary user content after the complete tool-result block. Other document formats and
 audio still fail. Canonical history is unchanged.
 
-### Unreleased: Fortnox customer and invoice writes
+### Canary.90: Fortnox customer and invoice writes
 
 Upgrading `@yolk-sdk/connectors` adds four generated write tools when hosts pass the complete
 `FortnoxConnector` to `makeConnectorToolModule`: `fortnox.create_customer`,
