@@ -583,8 +583,11 @@ it from the JSON body. Creating an invoice requires `CustomerNumber` and lets Fo
 are JSON arrays, while returned row collections are Effect `Chunk` values. Customer write inputs
 omit Fortnox's read-only `Country` (set `CountryCode`) and list-only `Phone` (use `Phone1`/`Phone2`),
 and the customer create/update actions reject unknown keys instead of stripping them; customer and
-supplier responses keep both fields. Action descriptions document Fortnox update semantics (partial customer updates, invoice
-row replacement, pre-existing referenced records). See the
+supplier responses keep both fields. Those actions' `inputSchema` is a closed wrapper, not the
+class: build typed inputs with `FortnoxCreateCustomerInput.make` /
+`FortnoxUpdateCustomerInput.make`; decoding those classes directly strips unknown keys. Action
+descriptions document Fortnox update semantics (partial customer updates, invoice row replacement,
+pre-existing referenced records). See the
 [Fortnox guide](../../apps/docs/content/docs/connectors/fortnox.mdx) for the action table and schema
 conventions.
 
@@ -1193,7 +1196,7 @@ orchestration only.
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete; host-only download plus create/update |
 | `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/flag/trash/restore/move/labels                   |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                                   |
-| `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, supplier invoices, and supplier-invoice files    |
+| `@yolk-sdk/connectors/fortnox`         | company info; list/get customers, invoices, suppliers, supplier invoices/files; create/update customers, invoices  |
 | `@yolk-sdk/connectors/github`          | Issues, comments, labels, sub-issues, dependencies, issue fields, pull requests, reviews, merge, repo context      |
 | `@yolk-sdk/connectors/google`          | Gmail mail and label actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions     |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                       |
