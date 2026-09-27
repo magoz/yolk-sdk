@@ -56,19 +56,20 @@ export class FortnoxCompanyInformation extends Schema.Class<FortnoxCompanyInform
   VisitCountryCode: NullableString
 }) {}
 
+// Customer write fields follow the Fortnox Customer resource: `Country` is read-only (derived
+// from `CountryCode`) and customers have no `Phone` field (use Phone1/Phone2; `Phone` only
+// appears in list rows). Response schemas keep both.
 const ContactFields = {
   Name: Schema.String,
   Active: OptionalBoolean,
   OrganisationNumber: OptionalString,
   Email: OptionalString,
-  Phone: OptionalString,
   Phone1: OptionalString,
   Phone2: OptionalString,
   Address1: OptionalString,
   Address2: OptionalString,
   City: OptionalString,
   ZipCode: OptionalString,
-  Country: OptionalString,
   CountryCode: OptionalString,
   Currency: OptionalString,
   VATNumber: OptionalString,
@@ -327,14 +328,12 @@ const CustomerUpdateFields = {
   Active: OptionalBoolean,
   OrganisationNumber: OptionalString,
   Email: OptionalString,
-  Phone: OptionalString,
   Phone1: OptionalString,
   Phone2: OptionalString,
   Address1: OptionalString,
   Address2: OptionalString,
   City: OptionalString,
   ZipCode: OptionalString,
-  Country: OptionalString,
   CountryCode: OptionalString,
   Currency: OptionalString,
   VATNumber: OptionalString,
