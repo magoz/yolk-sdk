@@ -78,6 +78,7 @@
     "fix-gateway-reasoning",
     "fix-http-stream-cleanup",
     "flexible-task-runtimes",
+    "fortnox-invoice-wire-amounts",
     "fortnox-nullable-response-fields",
     "fortnox-read-connector",
     "fortnox-write-actions",

@@ -1,5 +1,7 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.93
+
 ## 0.1.0-canary.92
 
 ### Patch Changes
@@ -142,10 +144,10 @@
   - `DriverShape` → `DriverApi` from `@yolk-sdk/harness/driver`
 
   ```ts
-  import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
-  import type { RunStoreApi } from '@yolk-sdk/harness/store'
-  import type { InboxApi } from '@yolk-sdk/harness/inbox'
-  import type { DriverApi } from '@yolk-sdk/harness/driver'
+  import type { LoopConfigSettings } from "@yolk-sdk/agent/loop";
+  import type { RunStoreApi } from "@yolk-sdk/harness/store";
+  import type { InboxApi } from "@yolk-sdk/harness/inbox";
+  import type { DriverApi } from "@yolk-sdk/harness/driver";
   ```
 
 - 5ff44d6: Breaking: `OpenAiProviderConfig.extraBody` takes JSON-object input (`OpenAiRequestExtras`). Untyped runtime input is still snapshotted and validated at request lowering; layer creation stays Effect-lazy and does not walk extras or credentials.
