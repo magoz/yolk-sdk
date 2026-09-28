@@ -306,26 +306,46 @@ describe('Gmail message submission', () => {
     })
   )
 
-  it.effect('rejects 8-bit MIME before resolving credentials or sending anything', () =>
+  it.effect('sends 8-bit MIME unchanged as one JSON raw request to the metadata endpoint', () =>
     Effect.gen(function* () {
       const eightBit = Buffer.from('Subject: hi\r\n\r\ncafé').toString('base64url')
 
-      for (const raw of [eightBit, '____', Buffer.from([0x80]).toString('base64url')]) {
+      for (const [raw, threadId] of [
+        [eightBit, 'thread'],
+        ['____', undefined],
+        [Buffer.from([0x80]).toString('base64url'), undefined]
+      ] as const) {
         const host = makeHost()
+        const input = threadId === undefined ? { raw } : { raw, threadId }
 
         const result = yield* gmailSendMessageAction
-          .execute({ integration, input: { raw, threadId: 'thread' } })
+          .execute({ integration, input })
+          .pipe(Effect.provide(host.layer))
+
+        expect(result._tag).toBe('Success')
+        expect(host.requests).toHaveLength(1)
+        expect(host.requests[0]).toMatchObject({
+          method: 'POST',
+          url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+          headers: { 'content-type': 'application/json' }
+        })
+        expect(JSON.parse(host.requests[0]?.body ?? '')).toEqual(input)
+      }
+    })
+  )
+
+  it.effect('rejects long padding runs in linear time before resolving credentials', () =>
+    Effect.gen(function* () {
+      for (const raw of [`${'='.repeat(2_000_000)}A`, `A${'='.repeat(2_000_000)}`]) {
+        const host = makeHost()
+        const started = performance.now()
+
+        const result = yield* gmailSendMessageAction
+          .execute({ integration, input: { raw } })
           .pipe(Effect.provide(host.layer), Effect.result)
 
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: {
-            _tag: 'ConnectorError',
-            cause: 'validation_failed',
-            actionId: 'gmail.send_message',
-            underlying: { outcome: 'rejected', retryable: false, reason: 'eight_bit_content' }
-          }
-        })
+        expect(performance.now() - started).toBeLessThan(2_000)
+        expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'validation_failed' } })
         expect(host.scopes).toHaveLength(0)
         expect(host.requests).toHaveLength(0)
       }

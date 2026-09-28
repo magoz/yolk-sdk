@@ -1,4 +1,4 @@
-import { Chunk, Effect, Match, Predicate, Result } from 'effect'
+import { Chunk, Data, Effect, Match, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   EmailBatchOperationOutput,
@@ -90,13 +90,22 @@ export class GmailListInput extends Schema.Class<GmailListInput>('GmailListInput
 const gmailRawMessagePattern =
   '^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw](?:==)?|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048]=?)?$'
 
+// Count trailing '=' with one backward scan: an unanchored /=+$/ retries from every position
+// of a long '=' run and is quadratic on untrusted multi-megabyte input.
+const splitBase64Padding = (value: string) => {
+  let end = value.length
+
+  while (end > 0 && value.charCodeAt(end - 1) === 61) end -= 1
+
+  return { unpadded: value.slice(0, end), padding: value.length - end }
+}
+
 // Linear equivalent of gmailRawMessagePattern: V8 recurses on the repeated group and
 // overflows its stack for multi-megabyte messages, so it is only published as JSON Schema.
 const isCanonicalBase64Url = (value: string) => {
-  const unpadded = value.replace(/=+$/, '')
-  const padding = value.length - unpadded.length
+  const { unpadded, padding } = splitBase64Padding(value)
 
-  if (!/^[A-Za-z0-9_-]*$/.test(unpadded)) return false
+  if (padding > 2 || !/^[A-Za-z0-9_-]*$/.test(unpadded)) return false
 
   switch (unpadded.length % 4) {
     case 0:
@@ -147,11 +156,23 @@ export const gmailSendMessageMaxBytes = 35 * 1024 * 1024
 const gmailSendUploadUrl =
   'https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart'
 
-type GmailSendRejection = 'eight_bit_content' | 'invalid_encoding' | 'too_large'
+/** Defensive only: the input schema already admits canonical base64url exclusively. */
+type GmailSendRejection = 'invalid_encoding' | 'too_large'
 
-// The string HTTP port carries the multipart body, so only 7-bit MIME round-trips byte-exactly.
-const decodeGmailRawForUpload = (raw: string): Result.Result<string, GmailSendRejection> => {
-  const unpadded = raw.replace(/=+$/, '')
+/**
+ * The string HTTP port carries the multipart body, so only 7-bit MIME round-trips byte-exactly
+ * through the upload endpoint. 8-bit MIME keeps the JSON `{raw}` endpoint, whose base64url body
+ * is port-safe. Both are one request, never resumable and never retried.
+ */
+type GmailSendPlan = Data.TaggedEnum<{
+  MultipartUpload: { readonly mime: string }
+  JsonRaw: Record<never, never>
+}>
+
+const GmailSendPlan = Data.taggedEnum<GmailSendPlan>()
+
+const planGmailSend = (raw: string): Result.Result<GmailSendPlan, GmailSendRejection> => {
+  const { unpadded } = splitBase64Padding(raw)
 
   if (Math.floor((unpadded.length * 3) / 4) > gmailSendMessageMaxBytes) {
     return Result.fail('too_large')
@@ -161,17 +182,15 @@ const decodeGmailRawForUpload = (raw: string): Result.Result<string, GmailSendRe
 
   return Result.try(() => atob(padded)).pipe(
     Result.mapError((): GmailSendRejection => 'invalid_encoding'),
-    Result.flatMap(mime =>
+    Result.map((mime): GmailSendPlan =>
       /[^\u0000-\u007f]/.test(mime)
-        ? Result.fail<GmailSendRejection>('eight_bit_content')
-        : Result.succeed(mime)
+        ? GmailSendPlan.JsonRaw()
+        : GmailSendPlan.MultipartUpload({ mime })
     )
   )
 }
 
 const gmailSendRejectionMessages: Record<GmailSendRejection, string> = {
-  eight_bit_content:
-    'Gmail submission rejected before sending: decoded MIME must be 7-bit ASCII; use a quoted-printable or base64 Content-Transfer-Encoding.',
   invalid_encoding: 'Gmail submission rejected before sending: raw is not decodable base64url.',
   too_large: 'Gmail submission rejected before sending: decoded MIME exceeds 35 MiB.'
 }
@@ -1583,14 +1602,14 @@ export const gmailUntrashAction = defineAction({
 export const gmailSendMessageAction = defineAction({
   id: 'gmail.send_message',
   description:
-    'Submit a complete host-generated base64url MIME message to Gmail. The decoded MIME must be 7-bit ASCII and at most 35 MiB. Success is submission, not delivery. For replies, the host supplies matching Subject, In-Reply-To and References headers plus threadId. Never automatically retry an unconfirmed send.',
+    'Submit a complete host-generated base64url MIME message to Gmail. The decoded MIME must be at most 35 MiB. Success is submission, not delivery. For replies, the host supplies matching Subject, In-Reply-To and References headers plus threadId. Never automatically retry an unconfirmed send.',
   access: 'destructive',
   // Recheck fields of mutable decoded instances on the typed path as well.
   inputSchema: Schema.Struct(GmailSendMessageInput.fields),
   outputSchema: GmailSendMessageOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const decoded = decodeGmailRawForUpload(input.raw)
+      const decoded = planGmailSend(input.raw)
 
       if (Result.isFailure(decoded)) {
         return yield* Effect.fail(
@@ -1604,8 +1623,19 @@ export const gmailSendMessageAction = defineAction({
         )
       }
 
-      const upload = yield* Effect.sync(() =>
-        gmailMultipartSendBody(decoded.success, input.threadId)
+      const request = yield* Effect.sync(() =>
+        GmailSendPlan.$match(decoded.success, {
+          JsonRaw: () => ({
+            url: `${googleGmailApiBaseUrl}/users/me/messages/send`,
+            contentType: 'application/json',
+            body: JSON.stringify(input)
+          }),
+          MultipartUpload: ({ mime }) => {
+            const upload = gmailMultipartSendBody(mime, input.threadId)
+
+            return { url: gmailSendUploadUrl, contentType: upload.contentType, body: upload.body }
+          }
+        })
       )
 
       // Scope inspection is not authorization. Re-resolve through the selected operation
@@ -1635,13 +1665,13 @@ export const gmailSendMessageAction = defineAction({
       const http = yield* ConnectorHttpClient
 
       return yield* Effect.gen(function* () {
-        // One simple multipart media upload: never resumable, never retried.
+        // Exactly one request: never resumable, never retried.
         const response = yield* http.request(
           ConnectorHttpRequest.make({
             method: 'POST',
-            url: gmailSendUploadUrl,
-            headers: { ...googleAuthorizationHeaders(token), 'content-type': upload.contentType },
-            body: upload.body
+            url: request.url,
+            headers: { ...googleAuthorizationHeaders(token), 'content-type': request.contentType },
+            body: request.body
           })
         )
 

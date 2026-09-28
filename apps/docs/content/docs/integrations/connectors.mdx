@@ -371,15 +371,14 @@ immediate permanent deletion, not trash, and claims no backup erasure.
 ### Submit a reviewed Gmail message
 
 `gmail.send_message` accepts `{ raw, threadId? }`, where `raw` is a complete RFC 5322 MIME
-message encoded as canonical padded or unpadded base64url. The action forwards the decoded bytes
-unchanged in one simple multipart upload to
-`POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart`
+message encoded as canonical padded or unpadded base64url. The action sends exactly one request,
+never resumable and never retried. 7-bit MIME is forwarded unchanged in one simple multipart upload
+to `POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart`
 (`multipart/related`: JSON metadata with `threadId` only when provided, then a `message/rfc822`
-part). It is never resumable and never retried. Decoded MIME must be 7-bit ASCII and at most 35 MiB
-(`gmailSendMessageMaxBytes`); otherwise the action fails before credentials or network with a
-`validation_failed` `ConnectorError` whose `underlying` is
-`{ outcome: 'rejected', retryable: false, reason: 'eight_bit_content' | 'too_large' }`. Use
-quoted-printable or base64 transfer encodings for non-ASCII content. The host builds the MIME, protects against header injection, binds the sender account,
+part); MIME with any byte `>= 0x80` keeps the JSON `raw` request. Decoded MIME above 35 MiB
+(`gmailSendMessageMaxBytes`) fails before credentials or network with a `validation_failed`
+`ConnectorError` whose `underlying` is `{ outcome: 'rejected', retryable: false, reason: 'too_large' }`.
+Prefer quoted-printable or base64 transfer encodings for large messages. The host builds the MIME, protects against header injection, binds the sender account,
 validates recipients, bounds size, and obtains explicit send authorization. The SDK does not parse
 MIME or check send-as aliases. Prefer a host-owned reviewed interaction over exposing this raw
 send action directly to the model. Its access metadata is `destructive`. Gmail routes to the MIME

@@ -53,7 +53,7 @@ export interface ConnectorBinaryWriteHttpClientApi {
    * `upload_session_required` before any network request when a host omits it.
    *
    * Hosts must: allowlist the exact origin and path shape before connecting (Outlook:
-   * `https://outlook.office.com/api/v2.0/.../AttachmentSessions(...)` only); send the URL
+   * `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)` only); send the URL
    * unchanged; add no Authorization, cookies or ambient credentials; never log, trace or
    * persist the URL (including query strings) or bodies; follow no redirects; never retry;
    * enforce the same TLS, DNS/socket, timeout, cancellation and streamed byte limits as

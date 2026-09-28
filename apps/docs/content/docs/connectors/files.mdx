@@ -109,8 +109,8 @@ const overwriteDrive = updateOneDriveFile(
 Dropbox, OneDrive and R2 uploads are single-request, memory-bounded only. Larger files fail
 `upload_session_required` before transport; a smaller host budget can fail `response_too_large`.
 Dropbox requires upload sessions beyond its simple-upload limit; OneDrive requires upload sessions
-beyond 250 MB. Only Outlook draft attachments use upload sessions (below). The SDK does not
-implement resume or multipart, and does not claim atomic conditional R2 multipart completion. No write retries occur. Transport errors, timeouts, cancellation or an
+beyond 250 MB. Only Outlook draft attachments use upload sessions (below). These file helpers do not
+implement resumable or multipart file uploads, and do not claim atomic conditional R2 multipart completion. No write retries occur. Transport errors, timeouts, cancellation or an
 invalid success response may follow a committed write: reconcile with provider metadata before
 trying again; never remove a precondition or silently switch to another write mode.
 
@@ -140,13 +140,13 @@ sequential 3,932,160-byte ranges (`outlookAttachmentUploadChunkBytes`, 12 x 320 
 `PUT`, `Content-Range: bytes start-end/total`, `Content-Type: application/octet-stream` and **no
 Authorization header** to the pre-authenticated `uploadUrl`. Each intermediate 200 must name exactly
 the next expected range, and the final range must return 201; its `Location` header supplies
-`attachmentId` when parseable. A 2xx creation without a readable ID still succeeds, without
+`attachmentId` when parseable. A 200/201 POST or final 201 without a readable ID still succeeds, without
 `attachmentId`. See Microsoft's [large attachment guide](https://learn.microsoft.com/en-us/graph/outlook-large-attachments),
 including its known issue for shared or delegated mailboxes.
 
 Session ranges need the optional `ConnectorBinaryWriteHttpClient.uploadSession` method. Hosts
 without it fail `upload_session_required` for files of 3 MiB or more, before credentials or network.
-The `uploadUrl` embeds an auth token: the SDK only contacts `https://outlook.office.com/api/v2.0/.../AttachmentSessions('...')`
+The `uploadUrl` embeds an auth token: the SDK only contacts `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions('...')`
 URLs (others fail `network_policy_rejected` without being contacted), never returns the URL, and
 sends one best-effort `DELETE` to cancel the session after any later failure or interruption.
 Failures are code/status-only `ConnectorFileTransferError`s. The draft is never sent, but a failure
@@ -261,7 +261,7 @@ The root exports `ConnectorBinaryWriteHttpClient` separately from the unchanged 
 credentials. Reads accept HTTP 200 only. The optional `uploadSession` method takes a
 `ConnectorBinaryUploadSessionRequest` (`PUT` range or `DELETE` cancellation, success
 `[200, 201]` or `[204]`) for a provider-issued pre-authenticated URL. Implement it only with an
-origin and path allowlist (Outlook: `https://outlook.office.com/api/v2.0/.../AttachmentSessions(...)`),
+origin and path allowlist (Outlook: `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)`),
 the URL sent unchanged, no Authorization or ambient credentials, no redirects or retries, no URL
 logging/tracing/persistence, and response headers (including `Location`) returned intact. Existing
 adapters without it keep compiling. Host adapters must enforce limits while consuming streams,

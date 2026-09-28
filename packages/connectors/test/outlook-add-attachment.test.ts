@@ -634,7 +634,9 @@ describe('addOutlookAttachment host-only helper', () => {
         uploadUrl.replace('outlook.office.com', 'outlook.office.com.evil.example'),
         uploadUrl.replace('outlook.office.com', 'graph.microsoft.com'),
         uploadUrl.replace('outlook.office.com', 'outlook.office.com:8443'),
-        uploadUrl.replace('/api/v2.0/', '/api/beta/'),
+        uploadUrl.replace('/api/v2.0/', '/api/v3.0/'),
+        uploadUrl.replace('/api/v2.0/', '/api/'),
+        uploadUrl.replace('/api/v2.0/', '/v2.0/'),
         uploadUrl.replace('AttachmentSessions', 'Attachments'),
         uploadUrl.replace('https://', 'https://user:pass@'),
         `${uploadUrl}#fragment`,
@@ -667,10 +669,7 @@ describe('addOutlookAttachment host-only helper', () => {
 
   it.effect('does not leak the upload URL when the session response is malformed', () =>
     Effect.gen(function* () {
-      for (const body of [
-        { uploadUrl: 42, echo: uploadUrl },
-        { uploadUrl, nextExpectedRanges: uploadUrl }
-      ]) {
+      for (const body of [{ uploadUrl: 42, echo: uploadUrl }]) {
         const host = makeHost({ graph: [Effect.succeed(json(body, 201))] })
 
         const result = yield* addOutlookAttachment(
@@ -690,6 +689,103 @@ describe('addOutlookAttachment host-only helper', () => {
         expectSecretFree(failure)
         expect(host.sessionRequests).toHaveLength(0)
       }
+    })
+  )
+
+  it.effect('cancels a created session whose initial range metadata is malformed', () =>
+    Effect.gen(function* () {
+      const host = makeHost({
+        graph: [Effect.succeed(json({ uploadUrl, nextExpectedRanges: uploadUrl }, 201))],
+        session: [Effect.succeed(empty(204))]
+      })
+
+      const result = yield* addOutlookAttachment(
+        integration,
+        {
+          messageId: 'draft',
+          name: 'x.bin',
+          contentType: 'image/png',
+          bytes: patterned(outlookAttachmentSingleRequestMaxBytes)
+        },
+        budget
+      ).pipe(Effect.provide(host.layer), Effect.result)
+
+      const failure = failureOf(result)
+
+      expect(failure).toMatchObject({ code: 'invalid_metadata' })
+      expectSecretFree(failure)
+      expect(host.sessionRequests.map(request => request.method)).toEqual(['DELETE'])
+    })
+  )
+
+  it.effect('accepts every documented Outlook session API version segment', () =>
+    Effect.gen(function* () {
+      for (const version of ['v1.0', 'v2.0', 'gv1.0', 'beta', 'GV1.0']) {
+        const size = outlookAttachmentSingleRequestMaxBytes
+        const url = uploadUrl.replace('/api/v2.0/', `/api/${version}/`)
+
+        const host = makeHost({
+          graph: [Effect.succeed(json({ uploadUrl: url }, 201))],
+          session: [Effect.succeed(empty(201))]
+        })
+
+        const result = yield* addOutlookAttachment(
+          integration,
+          { messageId: 'draft', name: 'x.bin', contentType: 'image/png', bytes: patterned(size) },
+          budget
+        ).pipe(Effect.provide(host.layer), Effect.result)
+
+        expect(result._tag).toBe('Success')
+        expect(host.sessionRequests.map(request => request.url)).toEqual([url])
+      }
+    })
+  )
+
+  it.effect('calls a class-based upload session port with its receiver', () =>
+    Effect.gen(function* () {
+      class Port {
+        readonly urls: string[] = []
+
+        request(_request: ConnectorBinaryWriteHttpRequest): Reply {
+          return Effect.succeed(json({ uploadUrl }, 201))
+        }
+
+        uploadSession(request: ConnectorBinaryUploadSessionRequest): Reply {
+          this.urls.push(request.url)
+
+          return Effect.succeed(empty(201))
+        }
+      }
+
+      const port = new Port()
+
+      const layer = Layer.mergeAll(
+        Layer.succeed(CredentialResolver, {
+          resolve: () =>
+            Effect.succeed(
+              OAuthCredential.make({
+                provider: 'microsoft',
+                accessToken: SECRET_TOKEN,
+                expiresAt: 4e12
+              })
+            )
+        }),
+        Layer.succeed(ConnectorBinaryWriteHttpClient, port)
+      )
+
+      const result = yield* addOutlookAttachment(
+        integration,
+        {
+          messageId: 'draft',
+          name: 'x.bin',
+          contentType: 'image/png',
+          bytes: patterned(outlookAttachmentSingleRequestMaxBytes)
+        },
+        budget
+      ).pipe(Effect.provide(layer), Effect.result)
+
+      expect(result._tag).toBe('Success')
+      expect(port.urls).toEqual([uploadUrl])
     })
   )
 

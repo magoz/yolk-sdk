@@ -20,6 +20,7 @@ import {
   validateTransfer,
   writeBytes
 } from '../transfer-internal.ts'
+import { GraphId } from './mail-download.ts'
 import { outlookWriteSlot } from './mail.ts'
 import { microsoftGraphApiBaseUrl, resolveMicrosoftAccessToken } from './shared.ts'
 
@@ -49,9 +50,6 @@ export interface OutlookAddAttachmentResult {
   readonly size: number
 }
 
-// Graph IDs are opaque base64 strings and can contain '/'; encode the complete segment.
-const GraphId = SafeText.check(Schema.isPattern(/^(?!\.+$)\S+$/))
-
 const ContentType = SafeText.check(
   Schema.isPattern(/^[A-Za-z0-9][\w!#$&^.+-]*\/[A-Za-z0-9][\w!#$&^.+-]*(?:\s*;[\x20-\x7e]*)?$/)
 )
@@ -65,8 +63,10 @@ const Input = Schema.Struct({
 
 const CreatedAttachment = Schema.Struct({ id: GraphId })
 
-const UploadSession = Schema.Struct({
-  uploadUrl: Schema.String,
+// Decode the capability URL alone first, so cancellation covers every later metadata failure.
+const UploadSessionUrl = Schema.Struct({ uploadUrl: Schema.String })
+
+const UploadSessionRanges = Schema.Struct({
   nextExpectedRanges: Schema.optional(Schema.Array(Schema.String))
 })
 
@@ -76,7 +76,9 @@ const UploadProgress = Schema.Struct({
   NextExpectedRanges: Schema.optional(Schema.Array(Schema.String))
 })
 
-const uploadSessionPath = /^\/api\/v2\.0\/[^?#]+\/AttachmentSessions\('[^'/?#]+'\)$/i
+// Graph has documented v1.0, v2.0, gv1.0 and beta session paths on outlook.office.com.
+const uploadSessionPath =
+  /^\/api\/(?:v1\.0|v2\.0|gv1\.0|beta)\/[^?#]+\/AttachmentSessions\('[^'/?#]+'\)$/i
 
 const encoder = new TextEncoder()
 
@@ -153,13 +155,17 @@ const uploadRanges = (input: {
   readonly session: UploadSessionPort
   readonly url: string
   readonly bytes: Uint8Array
-  readonly initialRanges: ReadonlyArray<string> | undefined
+  readonly created: Uint8Array
   readonly budget: ConnectorFileTransferBudget
 }) =>
   Effect.gen(function* () {
     const total = input.bytes.byteLength
+    const initial = yield* decodeMetadata(UploadSessionRanges, input.created)
 
-    if (input.initialRanges !== undefined && !expectsRangeFrom(input.initialRanges, 0, total))
+    if (
+      initial.nextExpectedRanges !== undefined &&
+      !expectsRangeFrom(initial.nextExpectedRanges, 0, total)
+    )
       return yield* failTransfer('invalid_metadata')
 
     let start = 0
@@ -236,7 +242,13 @@ export const addOutlookAttachment = (
       return yield* failTransfer('response_too_large')
 
     const http = yield* ConnectorBinaryWriteHttpClient
-    const session = size < outlookAttachmentSingleRequestMaxBytes ? undefined : http.uploadSession
+    const uploadSessionMethod = http.uploadSession
+
+    // Call as a method so class-based host ports keep their receiver.
+    const session: UploadSessionPort | undefined =
+      size < outlookAttachmentSingleRequestMaxBytes || uploadSessionMethod === undefined
+        ? undefined
+        : request => uploadSessionMethod.call(http, request)
 
     // Hosts without the session capability fail definitively before credentials or network.
     if (size >= outlookAttachmentSingleRequestMaxBytes && session === undefined)
@@ -315,10 +327,10 @@ export const addOutlookAttachment = (
       limits.maxMetadataBytes
     )
 
-    const uploadSession = yield* decodeMetadata(UploadSession, created.bytes)
-    const url = yield* outlookUploadSessionUrl(uploadSession.uploadUrl)
+    const { uploadUrl } = yield* decodeMetadata(UploadSessionUrl, created.bytes)
+    const url = yield* outlookUploadSessionUrl(uploadUrl)
 
-    // Best-effort cancellation: lazily built, and its own outcome never masks the failure.
+    // Best-effort, time-bounded cancellation: lazily built; its outcome never masks the failure.
     const cancel = Effect.suspend(() =>
       session({
         method: 'DELETE',
@@ -332,13 +344,13 @@ export const addOutlookAttachment = (
         redirect: 'manual',
         credentials: 'omit'
       })
-    ).pipe(Effect.exit, Effect.asVoid)
+    ).pipe(Effect.timeout('10 seconds'), Effect.exit, Effect.asVoid)
 
     const attachmentId = yield* uploadRanges({
       session,
       url,
       bytes,
-      initialRanges: uploadSession.nextExpectedRanges,
+      created: created.bytes,
       budget: limits
     }).pipe(Effect.onError(() => cancel))
 

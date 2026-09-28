@@ -385,16 +385,18 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 `GmailSendMessageInput`: `{ raw, threadId? }`. `raw` is a complete host-generated RFC 5322 MIME
 message encoded as canonical padded or unpadded base64url (`GmailRawMessage`); the SDK validates
 encoding and forwards the decoded MIME unchanged, but does not parse MIME or validate recipients/send-as aliases.
-The action sends exactly one simple multipart media upload,
-`POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart`,
+The action always sends exactly one request, never resumable and never retried. 7-bit MIME uses
+the simple multipart media upload
+`POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart`
 with `Content-Type: multipart/related`: an `application/json; charset=UTF-8` metadata part (`{}`,
 or `{ "threadId": ... }` only when provided) and a `message/rfc822` part holding the decoded MIME.
-The boundary is chosen so it never occurs in the MIME. Uploads are never resumable and never
-retried. Before resolving credentials or sending anything, decoded MIME containing any byte
-`>= 0x80` or larger than 35 MiB (`gmailSendMessageMaxBytes`) fails with a `ConnectorError`
-`validation_failed` carrying `underlying: { outcome: 'rejected', retryable: false, reason }`
-(`eight_bit_content` or `too_large`): nothing was sent. Encode non-ASCII bodies and attachments
-with quoted-printable or base64 `Content-Transfer-Encoding` and RFC 2047/2231 headers. The
+The boundary is chosen so it never occurs in the MIME. MIME containing any byte `>= 0x80` cannot
+cross the string HTTP port exactly, so it keeps the JSON `{ raw, threadId? }` request to
+`/gmail/v1/users/me/messages/send` (the previous behaviour); prefer 7-bit transfer encodings for
+large messages. Before resolving credentials or sending anything, decoded MIME larger than 35 MiB
+(`gmailSendMessageMaxBytes`) fails with a `ConnectorError` `validation_failed` carrying
+`underlying: { outcome: 'rejected', retryable: false, reason: 'too_large' }`: nothing was sent.
+`reason: 'invalid_encoding'` is a defensive guard for undecodable base64url. The
 `ConnectorHttpRequest` port has no timeout field; host adapters own request timeouts, and a timeout
 after dispatch must surface as a transport failure (unknown outcome).
 Hosts own MIME construction, header-injection protection, sender/account binding, recipient and
@@ -1125,7 +1127,7 @@ The optional `uploadSession` method (request type `ConnectorBinaryUploadSessionR
 `PUT` ranges or a `DELETE` cancellation to a provider-issued, pre-authenticated upload-session URL.
 Existing adapters without it still compile; helpers that need it fail `upload_session_required`
 before credentials or network. Hosts implementing it must allowlist the origin and path shape
-(Outlook: `https://outlook.office.com/api/v2.0/.../AttachmentSessions(...)` only), send the URL
+(Outlook: `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)` only), send the URL
 unchanged with no Authorization/cookies/ambient credentials, never log/trace/persist the URL (it
 embeds an auth token) or bodies, follow no redirects, never retry, apply the same TLS, DNS/socket,
 timeout, cancellation and streamed limits as `request`, and return response headers including
