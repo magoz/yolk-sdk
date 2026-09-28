@@ -25,6 +25,22 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.95: Gmail multipart send and Outlook draft attachments
+
+`gmail.send_message` keeps its `{ raw, threadId? }` input and output, but now sends one
+`upload/gmail/v1/users/me/messages/send?uploadType=multipart` request carrying the decoded MIME.
+Decoded MIME containing any byte `>= 0x80` (8-bit `Content-Transfer-Encoding`, raw UTF-8 bodies or
+headers) or larger than 35 MiB now fails before credentials or network with `validation_failed`
+and `underlying: { outcome: 'rejected', retryable: false, reason }`; nothing is sent. Hosts that
+previously sent 8-bit MIME must encode those parts as quoted-printable or base64 and use RFC 2047
+encoded words for non-ASCII headers. Host HTTP adapters must preserve the `multipart/related`
+content type and the string body exactly. Rejected/unknown HTTP classification is unchanged.
+
+`addOutlookAttachment` is a new host-only helper (not an action) on `@yolk-sdk/connectors/microsoft`.
+Files of 3 MiB or more need the new optional `ConnectorBinaryWriteHttpClient.uploadSession` method;
+existing adapters compile unchanged and fail those uploads with `upload_session_required`. See
+[Attach a file to an Outlook draft](./connectors/files#attach-a-file-to-an-outlook-draft).
+
 ### Canary.94: Fortnox customer write inputs
 
 This is a breaking change to the Fortnox customer write actions that shipped in canary.90. When

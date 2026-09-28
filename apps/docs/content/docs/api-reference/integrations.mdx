@@ -100,7 +100,7 @@ implementations still validate external outputs themselves.
 | `@yolk-sdk/connectors/telegram`        | `TelegramConnector`, `TelegramBotTokenSlot`                                                                                                                                                                                                                                        |
 | `@yolk-sdk/connectors/figma`           | `FigmaConnector`, `FigmaOAuthCredentialSlot`                                                                                                                                                                                                                                       |
 | `@yolk-sdk/connectors/linkedin-search` | LinkedIn search/profile/email connector and API key slots                                                                                                                                                                                                                          |
-| `@yolk-sdk/connectors/microsoft`       | `MicrosoftConnector`, shared OAuth slots, Outlook mail and OneDrive actions/schemas, host-only OneDrive download/create/update and Outlook attachment bytes                                                                                                                        |
+| `@yolk-sdk/connectors/microsoft`       | `MicrosoftConnector`, shared OAuth slots, Outlook mail and OneDrive actions/schemas, host-only OneDrive download/create/update, Outlook attachment bytes and draft uploads                                                                                                         |
 | `@yolk-sdk/connectors/r2-storage`      | `R2StorageConnector`, `R2Presigner`, R2 credential slots, host-only `R2ObjectClient` get/create/update                                                                                                                                                                             |
 
 Fortnox exports `FortnoxCompanyInformation`, `FortnoxCustomer`, `FortnoxInvoice`,
@@ -126,8 +126,9 @@ pagination, selected fields, and monetary wire types.
 
 Gmail submission exports `gmailSendMessageAction` (`gmail.send_message`, `destructive`),
 `GmailRawMessage`, `GmailSendMessageInput` (`{ raw, threadId? }`), `GmailSendMessageOutput`
-(`{ accepted: true, id, threadId? }`), `GoogleGmailSendOAuthCredentialSlot`, and
-`googleGmailSendScopes`. The host constructs and reviews complete base64url MIME; no MIME parsing
+(`{ accepted: true, id, threadId? }`), `gmailSendMessageMaxBytes` (35 MiB of decoded 7-bit MIME),
+`GoogleGmailSendOAuthCredentialSlot`, and `googleGmailSendScopes`. Sending uses one
+`upload/gmail/v1/users/me/messages/send?uploadType=multipart` request. The host constructs and reviews complete base64url MIME; no MIME parsing
 or sender validation is performed by this action. Existing broader Gmail grants can authorize
 sending without new consent. Submission is not delivery, and unconfirmed sends must not be
 retried automatically. See [Submit a reviewed Gmail message](../integrations/connectors#submit-a-reviewed-gmail-message)
@@ -342,8 +343,8 @@ See [Connectors catalog](../integrations/connectors) for action ids.
 
 ## Connector file APIs
 
-The root additionally exports `ConnectorBinaryWriteHttpClient`, `ConnectorBinaryWriteHttpClientApi`,
-`ConnectorBinaryWriteHttpRequest`, `ConnectorFileTransferError`, `ConnectorFileTransferBudget` and
+The root additionally exports `ConnectorBinaryWriteHttpClient`, `ConnectorBinaryWriteHttpClientApi`
+(with optional `uploadSession`), `ConnectorBinaryWriteHttpRequest`, `ConnectorBinaryUploadSessionRequest`, `ConnectorFileTransferError`, `ConnectorFileTransferBudget` and
 `ConnectorFileBytes`. Existing GET-only binary ports remain unchanged.
 
 See [Transfer connector files](../connectors/files) for all helper signatures and the complete

@@ -87,12 +87,37 @@ export class GmailListInput extends Schema.Class<GmailListInput>('GmailListInput
   isFlagged: Schema.optional(Schema.Boolean)
 }) {}
 
+const gmailRawMessagePattern =
+  '^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw](?:==)?|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048]=?)?$'
+
+// Linear equivalent of gmailRawMessagePattern: V8 recurses on the repeated group and
+// overflows its stack for multi-megabyte messages, so it is only published as JSON Schema.
+const isCanonicalBase64Url = (value: string) => {
+  const unpadded = value.replace(/=+$/, '')
+  const padding = value.length - unpadded.length
+
+  if (!/^[A-Za-z0-9_-]*$/.test(unpadded)) return false
+
+  switch (unpadded.length % 4) {
+    case 0:
+      return padding === 0
+    case 2:
+      return /[AQgw]$/.test(unpadded) && (padding === 0 || padding === 2)
+    case 3:
+      return /[AEIMQUYcgkosw048]$/.test(unpadded) && padding <= 1
+    default:
+      return false
+  }
+}
+
 /** A complete host-generated RFC 5322 MIME message, not a model-authored form.
  * Accept padded or unpadded canonical base64url; never rewrite consent-bearing bytes. */
 export const GmailRawMessage = Schema.NonEmptyString.check(
-  Schema.isPattern(
-    /^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw](?:==)?|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048]=?)?$/
-  )
+  Schema.makeFilter(isCanonicalBase64Url, {
+    expected: `a string matching the RegExp ${gmailRawMessagePattern}`,
+    toJsonSchema: () => ({ pattern: gmailRawMessagePattern }),
+    arbitraryConstraint: { patterns: [{ source: gmailRawMessagePattern, flags: '' }] }
+  })
 )
 
 export type GmailRawMessage = typeof GmailRawMessage.Type
@@ -115,6 +140,72 @@ export class GmailSendMessageOutput extends Schema.Class<GmailSendMessageOutput>
   accepted: Schema.Literal(true),
   ...GmailSentMessage.fields
 }) {}
+
+/** Gmail's documented `messages.send` media upload cap (35 MB), applied to decoded MIME bytes. */
+export const gmailSendMessageMaxBytes = 35 * 1024 * 1024
+
+const gmailSendUploadUrl =
+  'https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart'
+
+type GmailSendRejection = 'eight_bit_content' | 'invalid_encoding' | 'too_large'
+
+// The string HTTP port carries the multipart body, so only 7-bit MIME round-trips byte-exactly.
+const decodeGmailRawForUpload = (raw: string): Result.Result<string, GmailSendRejection> => {
+  const unpadded = raw.replace(/=+$/, '')
+
+  if (Math.floor((unpadded.length * 3) / 4) > gmailSendMessageMaxBytes) {
+    return Result.fail('too_large')
+  }
+
+  const padded = `${unpadded.replaceAll('-', '+').replaceAll('_', '/')}${'='.repeat((4 - (unpadded.length % 4)) % 4)}`
+
+  return Result.try(() => atob(padded)).pipe(
+    Result.mapError((): GmailSendRejection => 'invalid_encoding'),
+    Result.flatMap(mime =>
+      /[^\u0000-\u007f]/.test(mime)
+        ? Result.fail<GmailSendRejection>('eight_bit_content')
+        : Result.succeed(mime)
+    )
+  )
+}
+
+const gmailSendRejectionMessages: Record<GmailSendRejection, string> = {
+  eight_bit_content:
+    'Gmail submission rejected before sending: decoded MIME must be 7-bit ASCII; use a quoted-printable or base64 Content-Transfer-Encoding.',
+  invalid_encoding: 'Gmail submission rejected before sending: raw is not decodable base64url.',
+  too_large: 'Gmail submission rejected before sending: decoded MIME exceeds 35 MiB.'
+}
+
+// Random candidates make collisions negligible; the inclusion check makes them impossible.
+const gmailMultipartBoundary = (mime: string) => {
+  let boundary = `yolk_gmail_send_${crypto.randomUUID().replaceAll('-', '')}`
+
+  while (mime.includes(boundary)) {
+    boundary = `yolk_gmail_send_${crypto.randomUUID().replaceAll('-', '')}`
+  }
+
+  return boundary
+}
+
+const gmailMultipartSendBody = (mime: string, threadId: string | undefined) => {
+  const boundary = gmailMultipartBoundary(mime)
+  const metadata = threadId === undefined ? {} : { threadId }
+
+  return {
+    contentType: `multipart/related; boundary=${boundary}`,
+    body: [
+      `--${boundary}`,
+      'Content-Type: application/json; charset=UTF-8',
+      '',
+      JSON.stringify(metadata),
+      `--${boundary}`,
+      'Content-Type: message/rfc822',
+      '',
+      mime,
+      `--${boundary}--`
+    ].join('\r\n')
+  }
+}
 
 export class GmailDraftComposeInput extends Schema.Class<GmailDraftComposeInput>(
   'GmailDraftComposeInput'
@@ -1492,13 +1583,31 @@ export const gmailUntrashAction = defineAction({
 export const gmailSendMessageAction = defineAction({
   id: 'gmail.send_message',
   description:
-    'Submit a complete host-generated base64url MIME message to Gmail. Success is submission, not delivery. For replies, the host supplies matching Subject, In-Reply-To and References headers plus threadId. Never automatically retry an unconfirmed send.',
+    'Submit a complete host-generated base64url MIME message to Gmail. The decoded MIME must be 7-bit ASCII and at most 35 MiB. Success is submission, not delivery. For replies, the host supplies matching Subject, In-Reply-To and References headers plus threadId. Never automatically retry an unconfirmed send.',
   access: 'destructive',
   // Recheck fields of mutable decoded instances on the typed path as well.
   inputSchema: Schema.Struct(GmailSendMessageInput.fields),
   outputSchema: GmailSendMessageOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
+      const decoded = decodeGmailRawForUpload(input.raw)
+
+      if (Result.isFailure(decoded)) {
+        return yield* Effect.fail(
+          new ConnectorError({
+            cause: 'validation_failed',
+            connectorId: integration.connectorId,
+            actionId: 'gmail.send_message',
+            message: gmailSendRejectionMessages[decoded.failure],
+            underlying: { outcome: 'rejected', retryable: false, reason: decoded.failure }
+          })
+        )
+      }
+
+      const upload = yield* Effect.sync(() =>
+        gmailMultipartSendBody(decoded.success, input.threadId)
+      )
+
       // Scope inspection is not authorization. Re-resolve through the selected operation
       // slot so strict host resolvers can enforce an existing sufficient grant, including
       // compose-only credentials, without requesting additional consent.
@@ -1526,12 +1635,13 @@ export const gmailSendMessageAction = defineAction({
       const http = yield* ConnectorHttpClient
 
       return yield* Effect.gen(function* () {
+        // One simple multipart media upload: never resumable, never retried.
         const response = yield* http.request(
           ConnectorHttpRequest.make({
             method: 'POST',
-            url: `${googleGmailApiBaseUrl}/users/me/messages/send`,
-            headers: { ...googleAuthorizationHeaders(token), 'content-type': 'application/json' },
-            body: JSON.stringify(input)
+            url: gmailSendUploadUrl,
+            headers: { ...googleAuthorizationHeaders(token), 'content-type': upload.contentType },
+            body: upload.body
           })
         )
 

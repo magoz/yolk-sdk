@@ -114,6 +114,7 @@ export {
   GmailSendMessageInput,
   GmailSendMessageOutput,
   gmailSendMessageAction,
+  gmailSendMessageMaxBytes,
   gmailSetStarredAction,
   GmailSetStarredInput,
   gmailTrashAction,

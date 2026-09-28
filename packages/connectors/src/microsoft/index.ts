@@ -209,3 +209,12 @@ export type { OneDriveCreateFileInput, OneDriveUpdateFileInput } from './write.t
 export { downloadOutlookAttachment } from './mail-download.ts'
 
 export type { OutlookDownloadAttachmentInput } from './mail-download.ts'
+
+export {
+  addOutlookAttachment,
+  outlookAttachmentSingleRequestMaxBytes,
+  outlookAttachmentUploadChunkBytes,
+  outlookAttachmentUploadSessionMaxBytes
+} from './mail-upload.ts'
+
+export type { OutlookAddAttachmentInput, OutlookAddAttachmentResult } from './mail-upload.ts'
