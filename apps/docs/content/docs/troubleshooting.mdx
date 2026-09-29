@@ -350,7 +350,10 @@ ranged 200 responses and a body whose length differs from the served metadata `s
 ### Gmail submission is unconfirmed or its send scope is rejected
 
 `gmail.send_message` forwards host-generated base64url MIME unchanged. Its input validation checks
-encoding, not MIME structure, recipient correctness, or sender aliases. The host must construct and
+encoding, not MIME structure, recipient correctness, or sender aliases. A `validation_failed` error
+with `underlying.outcome: 'rejected'` and `reason: 'too_large'` means nothing was sent: keep decoded
+MIME at or below 35 MiB. 7-bit MIME uses Gmail's multipart upload; 8-bit MIME keeps the JSON `raw`
+request, so prefer quoted-printable/base64 parts for large messages. The host must construct and
 review the message before dispatch. A valid success returns an accepted message ID, not delivery
 confirmation. HTTP ambiguity, transport errors, or malformed success acknowledgements can follow
 an actual send; do not automatically resend. Reconcile mailbox state first. Failure metadata uses

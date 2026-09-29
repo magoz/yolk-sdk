@@ -24,7 +24,7 @@ export interface OutlookDownloadAttachmentInput {
 }
 
 // Graph IDs are opaque base64 strings and can contain '/'; encode the complete segment.
-const GraphId = SafeText.check(Schema.isPattern(/^(?!\.+$)\S+$/))
+export const GraphId = SafeText.check(Schema.isPattern(/^(?!\.+$)\S+$/))
 
 const Input = Schema.Struct({
   messageId: GraphId,

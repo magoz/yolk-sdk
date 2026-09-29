@@ -887,7 +887,7 @@ const outlookSlotFor = (
 export const outlookReadSlot = (integration: ConnectorIntegration, mailbox: string | undefined) =>
   outlookSlotFor('read', integration, mailbox)
 
-const outlookWriteSlot = (integration: ConnectorIntegration, mailbox: string | undefined) =>
+export const outlookWriteSlot = (integration: ConnectorIntegration, mailbox: string | undefined) =>
   outlookSlotFor('write', integration, mailbox)
 
 const outlookSendSlot = (integration: ConnectorIntegration, mailbox: string | undefined) =>

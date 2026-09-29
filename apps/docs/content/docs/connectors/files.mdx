@@ -50,7 +50,7 @@ All names below are exported through the indicated `@yolk-sdk/connectors/*` subp
 | Fortnox (`fortnox`)    | `downloadFortnoxInvoicePreview`, `downloadFortnoxArchiveFile` | Not added                                  | `fortnox.list_supplier_invoice_files`; preview is generated PDF, not immutable original |
 | Notion (`notion`)      | `downloadNotionFile`                                          | Not added                                  | Page/property/block file objects; required host URL policy                              |
 | Gmail (`google`)       | `downloadGmailAttachment`                                     | Not added                                  | Existing attachment discovery; canonical base64url decoded inside host helper           |
-| Outlook (`microsoft`)  | `downloadOutlookAttachment`                                   | Not added                                  | Existing discovery; file attachments only, raw `/$value`                                |
+| Outlook (`microsoft`)  | `downloadOutlookAttachment`                                   | `addOutlookAttachment` (drafts)            | Existing discovery; file attachments only, raw `/$value`; uploads up to 150 MiB         |
 | IMAP/POP3 (`email`)    | `downloadEmailAttachment`                                     | Not added                                  | Optional `EmailClient.getAttachmentBytes`; no MIME library bundled                      |
 | Telegram (`telegram`)  | `downloadTelegramFile`                                        | Not added                                  | File IDs from messages available to the bot; 20,000,000-byte hosted download cap        |
 | Todoist (`todoist`)    | `downloadTodoistAttachment`                                   | Not added                                  | `todoist.list_comments` with task/project selection; download by comment ID             |
@@ -106,13 +106,66 @@ const overwriteDrive = updateOneDriveFile(
   is bundled. ETag conditions do not distinguish every identical-content rewrite. Existing
   `R2Presigner` and `r2_storage.upload_url` are unchanged and do not inherit these conditions.
 
-Uploads are single-request, memory-bounded only. Larger files fail `upload_session_required`
-before transport; a smaller host budget can fail `response_too_large`. Dropbox requires upload
-sessions beyond its simple-upload limit; OneDrive requires upload sessions beyond 250 MB.
-The SDK does not implement sessions, resume or multipart, and does not claim atomic conditional
-R2 multipart completion. No write retries occur. Transport errors, timeouts, cancellation or an
+Dropbox, OneDrive and R2 uploads are single-request, memory-bounded only. Larger files fail
+`upload_session_required` before transport; a smaller host budget can fail `response_too_large`.
+Dropbox requires upload sessions beyond its simple-upload limit; OneDrive requires upload sessions
+beyond 250 MB. Only Outlook draft attachments use upload sessions (below). These file helpers do not
+implement resumable or multipart file uploads, and do not claim atomic conditional R2 multipart completion. No write retries occur. Transport errors, timeouts, cancellation or an
 invalid success response may follow a committed write: reconcile with provider metadata before
 trying again; never remove a precondition or silently switch to another write mode.
+
+## Attach a file to an Outlook draft
+
+Host integration fragment (approval, transport layers and execution omitted):
+
+```ts
+import { addOutlookAttachment } from '@yolk-sdk/connectors/microsoft'
+
+const attach = addOutlookAttachment(
+  microsoftIntegration,
+  { messageId: draft.id, name: 'report.pdf', contentType: 'application/pdf', bytes, mailbox },
+  budget
+)
+// Result: { attachmentId?, name, size }. Send later with outlook.send_draft after review.
+```
+
+`addOutlookAttachment` adds one file to an **existing draft** and never sends it. It uses the Outlook
+write slot (`Mail.ReadWrite`; `Mail.ReadWrite.Shared` for a delegated mailbox that is not the
+connected account) and the application-mode `mailbox` guard. Files under 3 MiB
+(`outlookAttachmentSingleRequestMaxBytes`) use one Graph `POST .../messages/{id}/attachments`
+with a `#microsoft.graph.fileAttachment` body; Graph echoes the base64 content, so the success
+budget is `maxMetadataBytes` plus that base64 length. Files from 3 MiB up to 150 MiB
+(`outlookAttachmentUploadSessionMaxBytes`) use `POST .../attachments/createUploadSession`, then
+sequential 3,932,160-byte ranges (`outlookAttachmentUploadChunkBytes`, 12 x 320 KiB) sent with
+`PUT`, `Content-Range: bytes start-end/total`, `Content-Type: application/octet-stream` and **no
+Authorization header** to the pre-authenticated `uploadUrl`. Each intermediate 200 must name exactly
+the next expected range, and the final range must return 201; its `Location` header supplies
+`attachmentId` when parseable. A 200/201 POST or final 201 without a readable ID still succeeds, without
+`attachmentId`. See Microsoft's [large attachment guide](https://learn.microsoft.com/en-us/graph/outlook-large-attachments),
+including its known issue for shared or delegated mailboxes.
+
+The helper requires `CredentialResolver` and `ConnectorHttpClient`. Both authenticated Graph POSTs
+(`fileAttachment` and `createUploadSession`) go through the regular `ConnectorHttpClient` as
+ASCII-only JSON string bodies with Bearer, JSON `accept`/`content-type` and
+`Prefer: IdType="ImmutableId"` headers, `redirect: 'manual'` and `credentials: 'omit'`. Your HTTP
+adapter must allow those Graph POSTs and a success body of `maxMetadataBytes` plus the echoed base64
+content (about 4 MiB for a file just under 3 MiB). The adapter must not log, trace or persist these
+request or response bodies: they carry file content and the token-bearing `uploadUrl`. Status codes
+map the same way as the binary port; success bodies are bounded after the adapter returns them, so
+enforce your own streaming cap. The helper never reads error bodies from these Graph POSTs, so your adapter may truncate them for
+these requests (other connectors, such as Fortnox, do read error bodies); cap them without failing so
+the status still maps, because an adapter failure becomes `transport_failed` without a status.
+
+Only session ranges need the optional `ConnectorBinaryWriteHttpClient.uploadSession` method; the
+helper reads that port optionally, so hosts without any binary write port can still attach files
+under 3 MiB. Hosts without it fail `upload_session_required` for files of 3 MiB or more, before
+credentials or network.
+The `uploadUrl` embeds an auth token: the SDK only contacts `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions('...')`
+URLs (others fail `network_policy_rejected` without being contacted), never returns the URL, and
+sends one best-effort `DELETE` to cancel the session after any later failure or interruption.
+Failures are code/status-only `ConnectorFileTransferError`s. The draft is never sent, but a failure
+after dispatch (transport error, timeout, malformed response) may still have attached the file:
+list the draft's attachments before retrying. No automatic retries occur.
 
 ## Provider retrieval details
 
@@ -219,7 +272,14 @@ to validate these capabilities.
 The root exports `ConnectorBinaryWriteHttpClient` separately from the unchanged GET-only
 `ConnectorBinaryHttpClient`. Write requests carry raw bytes, `maxUploadBytes`, successful metadata
 `maxBytes`, `maxErrorBodyBytes`, `successStatuses: [200, 201]`, manual redirects and omitted ambient
-credentials. Reads accept HTTP 200 only. Host adapters must enforce limits while consuming streams,
+credentials. Reads accept HTTP 200 only. The optional `uploadSession` method takes a
+`ConnectorBinaryUploadSessionRequest` (`PUT` range or `DELETE` cancellation, success
+`[200, 201]` or `[204]`) for a provider-issued pre-authenticated URL. Implement it only with an
+origin and path allowlist (Outlook: `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)`),
+the URL sent unchanged, no Authorization or ambient credentials, no redirects or retries, no URL
+logging/tracing/persistence, and response headers (including `Location`) returned intact. Existing
+adapters without it keep compiling. `addOutlookAttachment` uses this port only for `uploadSession`;
+its authenticated Graph JSON POSTs use `ConnectorHttpClient`. Host adapters must enforce limits while consuming streams,
 including decompression, cap headers independently, close/cancel I/O, verify TLS, implement
 timeouts/cancellation, and enforce public DNS **and socket IP** policy on every request/hop.
 Never use cookie jars, automatic redirects/retries, ambient auth or URL/header/body logging.

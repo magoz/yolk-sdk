@@ -71,6 +71,7 @@ export type { ActionResult as ActionResultType } from './result.ts'
 export { ConnectorBinaryWriteHttpClient } from './binary-write-http.ts'
 
 export type {
+  ConnectorBinaryUploadSessionRequest,
   ConnectorBinaryWriteHttpClientApi,
   ConnectorBinaryWriteHttpRequest
 } from './binary-write-http.ts'

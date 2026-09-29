@@ -371,8 +371,14 @@ immediate permanent deletion, not trash, and claims no backup erasure.
 ### Submit a reviewed Gmail message
 
 `gmail.send_message` accepts `{ raw, threadId? }`, where `raw` is a complete RFC 5322 MIME
-message encoded as canonical padded or unpadded base64url. The action forwards those bytes
-unchanged; the host builds the MIME, protects against header injection, binds the sender account,
+message encoded as canonical padded or unpadded base64url. The action sends exactly one request,
+never resumable and never retried. 7-bit MIME is forwarded unchanged in one simple multipart upload
+to `POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart`
+(`multipart/related`: JSON metadata with `threadId` only when provided, then a `message/rfc822`
+part); MIME with any byte `>= 0x80` keeps the JSON `raw` request. Decoded MIME above 35 MiB
+(`gmailSendMessageMaxBytes`) fails before credentials or network with a `validation_failed`
+`ConnectorError` whose `underlying` is `{ outcome: 'rejected', retryable: false, reason: 'too_large' }`.
+Prefer quoted-printable or base64 transfer encodings for large messages. The host builds the MIME, protects against header injection, binds the sender account,
 validates recipients, bounds size, and obtains explicit send authorization. The SDK does not parse
 MIME or check send-as aliases. Prefer a host-owned reviewed interaction over exposing this raw
 send action directly to the model. Its access metadata is `destructive`. Gmail routes to the MIME
@@ -395,7 +401,8 @@ Success is `{ accepted: true, id, threadId? }`: submission, **not delivery**. Re
 rejections return `gmail_send_message_rejected`; ambiguous HTTP responses return
 `gmail_send_message_unknown`. Both omit retry hints and include
 `underlying: { outcome: 'rejected' | 'unknown', retryable: false }`. Transport failures or malformed
-success acknowledgements are typed `ConnectorError`s with the unknown metadata. No automatic
+success acknowledgements are typed `ConnectorError`s with the unknown metadata; a host request
+timeout after dispatch is a transport failure with the same unknown outcome. No automatic
 retry occurs. An unconfirmed send may already have taken effect: reconcile mailbox state before
 proposing another send. A deterministic Message-ID is not an idempotency guarantee.
 
@@ -566,6 +573,10 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.batch_untrash`           | batch restore from Deleted Items                               |
 | `outlook.batch_modify_categories` | batch add/remove category names                                |
 | `outlook.delete_permanently`      | permanently delete messages                                    |
+
+Attaching files to a draft is host-only, not an action: call `addOutlookAttachment` from
+`@yolk-sdk/connectors/microsoft` after `outlook.create_draft`/`outlook.create_reply_draft` and
+before `outlook.send_draft`. See [Transfer connector files](../connectors/files#attach-a-file-to-an-outlook-draft).
 
 #### Categories
 

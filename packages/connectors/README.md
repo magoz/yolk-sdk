@@ -384,7 +384,21 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 `gmail.send_message` (`gmailSendMessageAction`, access `destructive`) accepts
 `GmailSendMessageInput`: `{ raw, threadId? }`. `raw` is a complete host-generated RFC 5322 MIME
 message encoded as canonical padded or unpadded base64url (`GmailRawMessage`); the SDK validates
-encoding and forwards it unchanged, but does not parse MIME or validate recipients/send-as aliases.
+encoding and forwards the decoded MIME unchanged, but does not parse MIME or validate recipients/send-as aliases.
+The action always sends exactly one request, never resumable and never retried. 7-bit MIME uses
+the simple multipart media upload
+`POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart`
+with `Content-Type: multipart/related`: an `application/json; charset=UTF-8` metadata part (`{}`,
+or `{ "threadId": ... }` only when provided) and a `message/rfc822` part holding the decoded MIME.
+The boundary is chosen so it never occurs in the MIME. MIME containing any byte `>= 0x80` cannot
+cross the string HTTP port exactly, so it keeps the JSON `{ raw, threadId? }` request to
+`/gmail/v1/users/me/messages/send` (the previous behaviour); prefer 7-bit transfer encodings for
+large messages. Before resolving credentials or sending anything, decoded MIME larger than 35 MiB
+(`gmailSendMessageMaxBytes`) fails with a `ConnectorError` `validation_failed` carrying
+`underlying: { outcome: 'rejected', retryable: false, reason: 'too_large' }`: nothing was sent.
+`reason: 'invalid_encoding'` is a defensive guard for undecodable base64url. The
+`ConnectorHttpRequest` port has no timeout field; host adapters own request timeouts, and a timeout
+after dispatch must surface as a transport failure (unknown outcome).
 Hosts own MIME construction, header-injection protection, sender/account binding, recipient and
 content review, size limits, and explicit sending authorization. Gmail routes to the MIME
 To/Cc/Bcc headers, not a separate SMTP envelope: configure the encoder to retain Bcc for submission.
@@ -856,6 +870,11 @@ as list metadata and are rejected by this action. Both actions use the existing 
 permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
 size policy, durable storage, and content scanning.
 
+To add a file to an existing draft (for example one from `outlook.create_draft` or
+`outlook.create_reply_draft`) before `outlook.send_draft`, host code calls the host-only
+`addOutlookAttachment` helper described under [host-only file transfers](#write-guarantees-and-limits).
+It is deliberately not a connector action, so attachment bytes never enter model tool JSON.
+
 ### Outlook read state, flags, and trash
 
 - `outlook.set_read` takes `{ messageId, isRead, mailbox? }`: `true` marks read, `false` marks
@@ -1062,18 +1081,18 @@ with `ConnectorFileTransferError` carrying only `code` plus an optional HTTP `st
 base64 attachment actions remain unchanged. Full API/policy reference:
 [Transfer connector files](../../apps/docs/content/docs/connectors/files.mdx).
 
-| Subpath      | Retrieval helpers                                                             | Create/update helpers                      |
-| ------------ | ----------------------------------------------------------------------------- | ------------------------------------------ |
-| `dropbox`    | `downloadDropboxFile`                                                         | `createDropboxFile`, `updateDropboxFile`   |
-| `microsoft`  | `downloadOneDriveItem`, `downloadOutlookAttachment`                           | `createOneDriveFile`, `updateOneDriveFile` |
-| `r2-storage` | `getR2Object`                                                                 | `createR2Object`, `updateR2Object`         |
-| `google`     | `downloadGoogleDriveFile`, `exportGoogleDriveFile`, `downloadGmailAttachment` | Not added                                  |
-| `fortnox`    | `downloadFortnoxInvoicePreview`, `downloadFortnoxArchiveFile`                 | Not added                                  |
-| `notion`     | `downloadNotionFile`                                                          | Not added                                  |
-| `email`      | `downloadEmailAttachment`                                                     | Not added                                  |
-| `telegram`   | `downloadTelegramFile`                                                        | Not added                                  |
-| `todoist`    | `downloadTodoistAttachment`                                                   | Not added                                  |
-| `github`     | Not added                                                                     | `uploadGithubAttachment`                   |
+| Subpath      | Retrieval helpers                                                             | Create/update helpers                                              |
+| ------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `dropbox`    | `downloadDropboxFile`                                                         | `createDropboxFile`, `updateDropboxFile`                           |
+| `microsoft`  | `downloadOneDriveItem`, `downloadOutlookAttachment`                           | `createOneDriveFile`, `updateOneDriveFile`, `addOutlookAttachment` |
+| `r2-storage` | `getR2Object`                                                                 | `createR2Object`, `updateR2Object`                                 |
+| `google`     | `downloadGoogleDriveFile`, `exportGoogleDriveFile`, `downloadGmailAttachment` | Not added                                                          |
+| `fortnox`    | `downloadFortnoxInvoicePreview`, `downloadFortnoxArchiveFile`                 | Not added                                                          |
+| `notion`     | `downloadNotionFile`                                                          | Not added                                                          |
+| `email`      | `downloadEmailAttachment`                                                     | Not added                                                          |
+| `telegram`   | `downloadTelegramFile`                                                        | Not added                                                          |
+| `todoist`    | `downloadTodoistAttachment`                                                   | Not added                                                          |
+| `github`     | Not added                                                                     | `uploadGithubAttachment`                                           |
 
 Host integration fragment (approval, integration, transport layers and runtime omitted):
 
@@ -1104,6 +1123,21 @@ const download = downloadGoogleDriveFile(googleIntegration, { fileId: driveFileI
 GET-only `ConnectorBinaryHttpClient`. Requests carry `Uint8Array`, `maxUploadBytes`, successful
 metadata `maxBytes`, `maxErrorBodyBytes`, `successStatuses: [200, 201]`, `redirect: 'manual'` and
 `credentials: 'omit'`. Only complete HTTP 200/201 metadata is accepted; redirects never replay writes.
+The optional `uploadSession` method (request type `ConnectorBinaryUploadSessionRequest`) sends
+`PUT` ranges or a `DELETE` cancellation to a provider-issued, pre-authenticated upload-session URL.
+Existing adapters without it still compile; helpers that need it fail `upload_session_required`
+before credentials or network, including when no binary write port is provided at all. Outlook
+draft attachments use this port only for session ranges: their authenticated Graph JSON POSTs
+(`fileAttachment`, `createUploadSession`) travel over `ConnectorHttpClient`, whose host adapter
+must allow those Graph POSTs and a success body of `maxMetadataBytes` plus the echoed base64 content
+(about 4 MiB for a file just under 3 MiB), and must not log, trace or persist those request or
+response bodies (file content and the token-bearing `uploadUrl`). The helper never reads their error
+bodies; cap oversized ones without failing so the status still maps. Hosts implementing `uploadSession`
+must allowlist the origin and path shape (Outlook: `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)` only), send the URL
+unchanged with no Authorization/cookies/ambient credentials, never log/trace/persist the URL (it
+embeds an auth token) or bodies, follow no redirects, never retry, apply the same TLS, DNS/socket,
+timeout, cancellation and streamed limits as `request`, and return response headers including
+`Location` on a final 201.
 
 - Dropbox uses `files.content.write`. Create is strict `add`; update requires stable `id:` and
   a concrete revision with `mode: update`. Both enforce `strict_conflict: true`, `autorename: false`;
@@ -1113,6 +1147,31 @@ metadata `maxBytes`, `maxErrorBodyBytes`, `successStatuses: [200, 201]`, `redire
   **Acknowledgement is not CAS: concurrent edits can be overwritten.** No simple-upload `If-Match`
   guarantee is invented. Require informed host overwrite approval or decline when CAS is required.
   Write permission/application-drive guards match metadata writes. Cap: **250,000,000 bytes**.
+- `addOutlookAttachment` takes `{ messageId, name, contentType, bytes, mailbox? }` and attaches one
+  file to an existing Outlook **draft**; it never sends. It reuses Outlook write-slot selection
+  (`Mail.ReadWrite`, `Mail.ReadWrite.Shared` for delegated non-own mailboxes, application mailbox
+  guard). Files under 3 MiB (`outlookAttachmentSingleRequestMaxBytes`) use one Graph `POST
+/messages/{id}/attachments` `#microsoft.graph.fileAttachment`; the success metadata budget is
+  `maxMetadataBytes` plus the echoed base64 length. 3 MiB through 150 MiB
+  (`outlookAttachmentUploadSessionMaxBytes`) use `POST .../attachments/createUploadSession`
+  (bounded by `maxMetadataBytes`). Both authenticated Graph POSTs go through the regular
+  `ConnectorHttpClient` as ASCII-only JSON string bodies with the Outlook Bearer, JSON
+  accept/content-type and `Prefer: IdType="ImmutableId"` headers, `redirect: 'manual'` and
+  `credentials: 'omit'`; the helper requires `CredentialResolver | ConnectorHttpClient` only.
+  `ConnectorBinaryWriteHttpClient` is read optionally and used only for session ranges, so hosts
+  without any binary write port can still attach files under 3 MiB. Session uploads then send
+  sequential 3,932,160-byte (12 x 320 KiB) `PUT` ranges through `uploadSession` with
+  `Content-Range: bytes start-end/total`, `Content-Type: application/octet-stream` and no
+  Authorization. Every intermediate 200 must report exactly the next expected range; the final
+  range must return 201, whose `Location` yields `attachmentId` when parseable. Session URLs outside
+  the allowlist fail `network_policy_rejected` without being contacted; after any later failure or
+  interruption the helper sends one best-effort `DELETE` to cancel the session. Result:
+  `{ attachmentId?, name, size }` where `size` is the uploaded byte count. A created attachment
+  whose ID is missing still succeeds without `attachmentId`. Failures are code/status-only
+  `ConnectorFileTransferError`s and never include the session URL, token or provider bodies; the
+  draft is never sent, but a failure after dispatch may still have attached the file, so list
+  attachments before retrying. Graph documents a known issue for large attachments in shared or
+  delegated mailboxes.
 - R2's separate `R2ObjectClient` host port supports binding or signed transport, not an AWS dependency.
   Get takes `{ bucket, key, expectedEtag? }`; create takes `{ bucket, key, bytes }`; update requires
   `expectedEtag`. Hosts atomically implement `condition: { kind: 'absent' }` as `If-None-Match: *`,
@@ -1123,9 +1182,10 @@ metadata `maxBytes`, `maxErrorBodyBytes`, `successStatuses: [200, 201]`, `redire
   ETags cannot distinguish all identical-content rewrites. Cap: **100,000,000 bytes**.
   `R2Presigner`/`r2_storage.upload_url` stay unchanged and do not inherit these conditions.
 
-Single-request bounded uploads only: larger files fail `upload_session_required` before transport;
-smaller host budgets fail `response_too_large`. No sessions, resume or multipart implementation,
-including no claim of conditional R2 multipart completion. No automatic write retry. A timeout,
+Dropbox, OneDrive and R2 are single-request bounded uploads only: larger files fail
+`upload_session_required` before transport; smaller host budgets fail `response_too_large`. Only
+Outlook draft attachments use upload sessions; there is no resume, and no claim of conditional R2
+multipart completion. No automatic write retry. A timeout,
 cancellation or malformed success response may follow a committed write; hosts reconcile provider
 state rather than dropping conditions or silently changing modes.
 
@@ -1243,6 +1303,7 @@ from the runtime `OAuthCredential`. Keep these values in the host credential sto
 - Own OAuth routes, callbacks, state, token persistence, and required-scope consent.
 - Provide the `ConnectorHttpClient` implementation and Effect layers required by enabled connectors.
 - Provide `ConnectorBinaryHttpClient` / `ConnectorBinaryWriteHttpClient` when using host-only byte APIs; never log URLs/bodies; enforce streamed limits, TLS, and connection-time DNS/IP policy.
+- Implement optional `ConnectorBinaryWriteHttpClient.uploadSession` only with an origin/path allowlist for pre-authenticated session URLs, no Authorization, redirects, retries, or URL logging, and response headers (including `Location`) returned intact.
 - Provide `R2ObjectClient` for conditional R2 get/create/update; provide `EmailClient` (including optional `getAttachmentBytes`) for email.
 - Keep byte results out of `makeConnectorToolModule` / generic tool JSON; own materialization, scanning, and format readers.
 - Preserve connector request headers and body content types while applying host networking policy.
