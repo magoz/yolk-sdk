@@ -112,13 +112,17 @@ const credentialFieldRedaction = new RegExp(
   'gi'
 )
 
-// Candidate `Name: value` / `Name=value` header-like pairs inside one line.
-const headerLikeNamePattern = /(?:^|[^A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]*)\s*[:=]/g
+// Candidate unquoted `Name:` header-like names inside one line (colon only; quoted keys such as
+// `"x-api-key": "..."` are handled by `quotedCredentialHeaderRedaction`; `name=value` pairs are left to
+// the quote-aware field and parameter passes).
+const headerLikeNamePattern = /(?:^|[^A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]*)\s*:/g
 
 /**
- * Redact the rest of a line after the first header-like name that `isCredentialHeaderName`
+ * Redact the rest of a line after the first header-like `Name:` that `isCredentialHeaderName`
  * accepts (`X-Api-Key: ...`, `Proxy-Authorization: Basic ...`, `Cookie: ...`), so every header the
- * fixture scan flags is also redacted in report text.
+ * fixture scan flags is also redacted in report text. Runs on the raw text before any other pass,
+ * so a partially matched value (for example a key-shaped cookie name) never shields the rest of
+ * the line.
  */
 const redactCredentialHeaderLines = (text: string): string =>
   text
@@ -130,16 +134,7 @@ const redactCredentialHeaderLines = (text: string): string =>
         const name = match[1]
 
         if (name !== undefined && isCredentialHeaderName(name)) {
-          const cut = match.index + match[0].length
-          const rest = line.slice(cut).trimStart()
-
-          // Values an earlier pass already redacted stay as they are; keep scanning the line.
-          if (
-            !rest.startsWith(redactedHeaderValue) &&
-            !rest.toLowerCase().startsWith(`bearer ${redactedHeaderValue}`)
-          ) {
-            return `${line.slice(0, cut)} ${redactedHeaderValue}`
-          }
+          return `${line.slice(0, match.index + match[0].length)} ${redactedHeaderValue}`
         }
 
         match = headerLikeNamePattern.exec(line)
@@ -149,32 +144,47 @@ const redactCredentialHeaderLines = (text: string): string =>
     })
     .join('')
 
+// A quoted key that `isCredentialHeaderName` accepts (`"x-api-key": "..."`,
+// `'Proxy-Authorization': '...'`): only the value is redacted, so JSON stays balanced.
+const quotedCredentialHeaderRedaction =
+  /(["'])([A-Za-z][A-Za-z0-9_-]*)\1(\s*:\s*)("(?:[^"\\]|\\.)*"?|'[^']*'?|[^\s,;&}\]]+)/g
+
+const redactQuotedCredentialHeaders = (text: string): string =>
+  text.replace(
+    quotedCredentialHeaderRedaction,
+    (match, quote: string, name: string, separator: string) =>
+      isCredentialHeaderName(name)
+        ? `${quote}${name}${quote}${separator}${redactedHeaderValue}`
+        : match
+  )
+
 /**
- * Redact every credential pattern shared with the fixture secret scan: bearer tokens, API-key
- * prefixes, JWTs, private keys, credential field pairs (`"api_key": "..."`, `password="..."`),
- * credential query/form parameters, and credential header lines. Best effort; used on report
- * messages. Quote-aware field redaction runs before parameter redaction so a quoted value with
- * spaces is removed whole.
+ * Redact every credential pattern shared with the fixture secret scan: credential header lines
+ * (first, to the end of the line), quoted credential header keys (value only), bearer tokens, API-key prefixes, JWTs, private keys, credential
+ * field pairs (`"api_key": "..."`, `password="..."`), and credential query/form parameters. Best
+ * effort; used on report messages. Quote-aware field redaction runs before parameter redaction so
+ * a quoted value with spaces is removed whole.
  */
 export const redactCredentialText = (text: string): string => {
-  let result = text.replace(bearerRedaction, `Bearer ${redactedHeaderValue}`)
+  let result = redactCredentialHeaderLines(text).replace(
+    bearerRedaction,
+    `Bearer ${redactedHeaderValue}`
+  )
 
   for (const pattern of apiKeyRedactions) {
     result = result.replace(pattern, redactedHeaderValue)
   }
 
-  return redactCredentialHeaderLines(
-    result
-      .replace(
-        credentialFieldRedaction,
-        (_match, prefix: string, quote: string, name: string, separator: string) =>
-          `${prefix}${quote}${name}${quote}${separator}${redactedHeaderValue}`
-      )
-      .replace(
-        credentialParamRedaction,
-        (_match, prefix: string, name: string) => `${prefix}${name}=${redactedHeaderValue}`
-      )
-  )
+  return redactQuotedCredentialHeaders(result)
+    .replace(
+      credentialFieldRedaction,
+      (_match, prefix: string, quote: string, name: string, separator: string) =>
+        `${prefix}${quote}${name}${quote}${separator}${redactedHeaderValue}`
+    )
+    .replace(
+      credentialParamRedaction,
+      (_match, prefix: string, name: string) => `${prefix}${name}=${redactedHeaderValue}`
+    )
 }
 
 export const redactHeaders = (headers: Readonly<Record<string, string>>) => {

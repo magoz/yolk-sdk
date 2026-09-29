@@ -82,11 +82,12 @@ There is no root export or barrel.
 - Each case runs under `Effect.exit`; failures, layer build failures, throwing layer factories,
   and defects become `failed` results. Interrupt-only causes re-interrupt the run instead of
   becoming results.
-- Reports carry only an identifier-like, non-credential-shaped error `_tag` and a message. `ConformanceMismatch`
-  messages keep the case-authored text with credential patterns redacted; every other message is
-  sanitized best-effort by `sanitizeConformanceMessage` (credential patterns and credential header
-  lines redacted, JSON spans elided, whitespace collapsed, capped at 300). Hosts should still keep secrets out of
-  error messages. Never copy request bodies, headers, or mismatch details into reports.
+- Reports carry only an identifier-like, non-credential-shaped error `_tag` and a message.
+  `ConformanceMismatch` messages keep the case-authored text with credential patterns redacted;
+  every other message is sanitized best-effort by `sanitizeConformanceMessage` (credential patterns
+  and credential header lines redacted, JSON spans elided, whitespace collapsed, capped at 300).
+  Hosts should still keep secrets out of error messages. Never copy request bodies, headers, or
+  mismatch details into reports.
 - Credential patterns live once in `wire-internal.ts`; the fixture secret scan and the report
   sanitizer both use them. Change them there, never in a copy.
 - Live targets omit all fixture-level warnings (`unverified-fixture`, `stale-fixture`,

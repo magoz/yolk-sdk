@@ -337,7 +337,7 @@ describe('runConformance failures', () => {
 
         const [bearer, capped, plain, opaque] = report.results
 
-        expect(bearer?.failure?.message).toBe('sent Authorization: Bearer <redacted> then failed')
+        expect(bearer?.failure?.message).toBe('sent Authorization: <redacted> then failed')
         expect(capped?.failure?.message.length).toBe(300)
         expect(capped?.failure?.message.endsWith('...')).toBe(true)
         expect(plain?.failure).toEqual({ kind: 'failure', message: 'plain string failure' })
@@ -509,6 +509,17 @@ describe('report sanitization', () => {
     expect(sanitizeConformanceMessage("secret='quoted delim;iter value' next")).toBe(
       'secret=<redacted> next'
     )
+    // A partially matched value never shields the rest of the header line.
+    expect(
+      sanitizeConformanceMessage(
+        `Cookie: ${['vck', 'synthetic0000000000000000'].join('_')}=opaque; session=plain-cookie-secret`
+      )
+    ).toBe('Cookie: <redacted>')
+    expect(
+      sanitizeConformanceMessage(
+        'Authorization: AWS4-HMAC-SHA256 Credential=x/y, SignedHeaders=host, Signature=plainsig'
+      )
+    ).toBe('Authorization: <redacted>')
     // Ordinary colon-separated text is untouched.
     expect(sanitizeConformanceMessage('expected status: 400, got 404')).toBe(
       'expected status: 400, got 404'
@@ -530,7 +541,10 @@ describe('report sanitization', () => {
       sanitizeConformanceMessage(
         "api_key: synthetic-api-key-value, token='synthetic-query-token' Authorization: Basic c3ludGhldGlj"
       )
-    ).toBe('api_key: <redacted>, token=<redacted> Authorization: <redacted>')
+    ).toBe('api_key: <redacted>')
+    expect(sanitizeConformanceMessage("token='synthetic-query-token' next")).toBe(
+      'token=<redacted> next'
+    )
     // Usage counters and ordinary words are not credential fields.
     expect(sanitizeConformanceMessage('max_tokens: 64, prompt_tokens=12 keys ok')).toBe(
       'max_tokens: 64, prompt_tokens=12 keys ok'
@@ -618,6 +632,30 @@ describe('report tags', () => {
       ])
       expect(JSON.stringify(report)).not.toContain(credentialTag)
       expect(formatConformanceReport(report)).not.toContain(credentialTag)
+    })
+  )
+
+  it.effect('redacts quoted credential header names in mismatch messages', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance(
+        [
+          {
+            ...baseCase('example.mismatch.header'),
+            run: expectConformance(
+              false,
+              'unexpected request headers {"x-api-key":"plain-mismatch-secret","accept":"*/*"}'
+            )
+          }
+        ],
+        { target: { kind: 'replay' }, now, layer: () => Layer.empty }
+      )
+
+      expect(report.results[0]?.failure).toEqual({
+        kind: 'failure',
+        tag: 'ConformanceMismatch',
+        message: 'unexpected request headers {"x-api-key":<redacted>,"accept":"*/*"}'
+      })
+      expect(JSON.stringify(report)).not.toContain('plain-mismatch-secret')
     })
   )
 })

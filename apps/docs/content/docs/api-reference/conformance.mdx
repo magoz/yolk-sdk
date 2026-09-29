@@ -152,14 +152,14 @@ instance)` reused across cases) or provided by the caller's environment is not r
 shared. Failures, layer build failures, a throwing `layer` factory, and defects become `failed`
 results; interruption still interrupts the run.
 
-Failure reports carry an identifier-like, non-credential-shaped error tag (other tags are omitted) and a message, never
-request bodies, headers, or mismatch `expected` / `actual` details. A `ConformanceMismatch` keeps
-its case-authored message with credential patterns redacted. Every other message is sanitized
-best-effort by `sanitizeConformanceMessage`: credential patterns shared with the fixture secret
-scan and credential header lines (`Cookie:`, `X-Api-Key:`, `Proxy-Authorization:`, ...) are
-redacted, JSON-looking spans become `[json]`,
-whitespace is collapsed, and the length is capped at 300 characters. Hosts should still keep
-secrets out of error messages.
+Failure reports carry an identifier-like, non-credential-shaped error tag (other tags are omitted)
+and a message, never request bodies, headers, or mismatch `expected` / `actual` details. A
+`ConformanceMismatch` keeps its case-authored message with credential patterns redacted. Every
+other message is sanitized best-effort by `sanitizeConformanceMessage`: credential patterns shared
+with the fixture secret scan and credential header lines (`Cookie:`, `X-Api-Key:`,
+`Proxy-Authorization:`, ...) are redacted, JSON-looking spans become `[json]`, whitespace is
+collapsed, and the length is capped at 300 characters. Hosts should still keep secrets out of error
+messages.
 
 Live targets omit all fixture-level warnings (`unverified-fixture`, `stale-fixture`,
 `missing-fixture`) because fixtures are not used live; case-level warnings always apply. On other
