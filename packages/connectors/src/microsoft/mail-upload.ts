@@ -161,7 +161,6 @@ const graphJsonPost = (input: {
   readonly token: string
   readonly body: string
   readonly maxBytes: number
-  readonly maxErrorBodyBytes: number
 }) =>
   input.http
     .request(
@@ -182,22 +181,20 @@ const graphJsonPost = (input: {
     .pipe(
       Effect.mapError(() => new ConnectorFileTransferError({ code: 'transport_failed' })),
       Effect.flatMap(response => {
-        const body: unknown = response.body
-        const success = response.status === 200 || response.status === 201
-
-        // Error bodies are never read: map the status without bounding or decoding them.
-        if (!success)
+        if (response.status !== 200 && response.status !== 201)
           return checkResponse(
             {
               status: response.status,
               headers: response.headers,
               bytes: new Uint8Array(0),
-              bodyComplete: false
+              bodyComplete: true
             },
             input.maxBytes,
-            input.maxErrorBodyBytes,
+            0,
             true
           )
+
+        const body: unknown = response.body
 
         // UTF-8 is never shorter than UTF-16 code units: reject oversized bodies before encoding.
         if (!Predicate.isString(body) || body.length > input.maxBytes)
@@ -211,7 +208,7 @@ const graphJsonPost = (input: {
             bodyComplete: true
           },
           input.maxBytes,
-          input.maxErrorBodyBytes,
+          0,
           true
         )
       })
@@ -361,8 +358,7 @@ export const addOutlookAttachment = (
         url,
         token,
         body: headerSafeJson(body),
-        maxBytes,
-        maxErrorBodyBytes: limits.maxErrorBodyBytes
+        maxBytes
       })
 
     if (session === undefined) {

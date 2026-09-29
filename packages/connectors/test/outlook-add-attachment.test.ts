@@ -346,13 +346,39 @@ describe('addOutlookAttachment host-only helper', () => {
     })
   )
 
-  it.effect('keeps the mapped status for oversized error bodies without reading them', () =>
+  it.effect('keeps the mapped status for error bodies of any size without reading them', () =>
     Effect.gen(function* () {
-      const body = JSON.stringify({ error: { message: 'x'.repeat(budget.maxErrorBodyBytes) } })
+      // Larger than both the error budget and the small POST's success budget.
+      const huge = 'x'.repeat(budget.maxMetadataBytes * 4 + 8 * 1024 * 1024)
 
-      const host = makeHost({
-        graph: [Effect.succeed(ConnectorHttpResponse.make({ status: 429, headers: {}, body }))]
+      for (const size of [3, outlookAttachmentSingleRequestMaxBytes]) {
+        const host = makeHost({
+          graph: [
+            Effect.succeed(ConnectorHttpResponse.make({ status: 429, headers: {}, body: huge }))
+          ],
+          session: []
+        })
+
+        const result = yield* addOutlookAttachment(
+          integration,
+          { messageId: 'draft', name: 'a.txt', contentType: 'text/plain', bytes: patterned(size) },
+          budget
+        ).pipe(Effect.provide(host.layer), Effect.result)
+
+        expect(failureOf(result)).toMatchObject({ code: 'rate_limited', status: 429 })
+        expect(host.sessionRequests).toHaveLength(0)
+      }
+
+      // A body the SDK must never touch: reading it would throw instead of mapping 403.
+      const untouchable = ConnectorHttpResponse.make({ status: 403, headers: {}, body: '' })
+
+      Object.defineProperty(untouchable, 'body', {
+        get: () => {
+          throw new Error('error body was read')
+        }
       })
+
+      const host = makeHost({ graph: [Effect.succeed(untouchable)] })
 
       const result = yield* addOutlookAttachment(
         integration,
@@ -360,7 +386,7 @@ describe('addOutlookAttachment host-only helper', () => {
         budget
       ).pipe(Effect.provide(host.layer), Effect.result)
 
-      expect(failureOf(result)).toMatchObject({ code: 'rate_limited', status: 429 })
+      expect(failureOf(result)).toMatchObject({ code: 'forbidden', status: 403 })
     })
   )
 
@@ -453,6 +479,8 @@ describe('addOutlookAttachment host-only helper', () => {
         [413, 'response_too_large'],
         [429, 'rate_limited'],
         [302, 'unexpected_redirect'],
+        [206, 'partial_content'],
+        [204, 'upstream_failed'],
         [503, 'upstream_failed']
       ] as const) {
         const host = makeHost({
