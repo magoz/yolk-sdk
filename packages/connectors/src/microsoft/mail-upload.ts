@@ -1,10 +1,13 @@
-import { Effect, Result } from 'effect'
+import { Effect, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ConnectorBinaryHttpError, ConnectorBinaryHttpResponse } from '../binary-http.ts'
 import { ConnectorBinaryWriteHttpClient } from '../binary-write-http.ts'
 import type { ConnectorBinaryUploadSessionRequest } from '../binary-write-http.ts'
+import type { CredentialResolver } from '../credential.ts'
 import { ConnectorFileTransferError } from '../file-transfer.ts'
 import type { ConnectorFileTransferBudget } from '../file-transfer.ts'
+import { ConnectorHttpClient, ConnectorHttpRequest } from '../http.ts'
+import type { ConnectorHttpClientApi } from '../http.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 import {
   SafeText,
@@ -13,12 +16,12 @@ import {
   decodeInput,
   decodeMetadata,
   failTransfer,
+  headerSafeJson,
   isBytes,
   safeHttpsUrl,
   safeToken,
   singleHeader,
-  validateTransfer,
-  writeBytes
+  validateTransfer
 } from '../transfer-internal.ts'
 import { GraphId } from './mail-download.ts'
 import { outlookWriteSlot } from './mail.ts'
@@ -82,8 +85,6 @@ const uploadSessionPath =
 
 const encoder = new TextEncoder()
 
-const jsonBytes = (value: unknown) => encoder.encode(JSON.stringify(value))
-
 const toBase64 = (bytes: Uint8Array) => {
   let binary = ''
 
@@ -146,6 +147,62 @@ const result = (
 
 const portFailure = (error: ConnectorBinaryHttpError) =>
   new ConnectorFileTransferError({ code: error.code })
+
+/**
+ * One authenticated Graph JSON POST through the regular string `ConnectorHttpClient`. The body is
+ * ASCII-only JSON (non-ASCII escaped), so its string length equals its byte length on any host.
+ * Responses get the same bounds, status mapping and code-only errors as the binary write port;
+ * transport failures never expose their cause.
+ */
+const graphJsonPost = (input: {
+  readonly http: ConnectorHttpClientApi
+  readonly url: string
+  readonly token: string
+  readonly body: string
+  readonly maxBytes: number
+  readonly maxErrorBodyBytes: number
+}) =>
+  input.http
+    .request(
+      ConnectorHttpRequest.make({
+        method: 'POST',
+        url: input.url,
+        headers: {
+          authorization: `Bearer ${input.token}`,
+          accept: 'application/json',
+          'content-type': 'application/json',
+          prefer: 'IdType="ImmutableId"'
+        },
+        body: input.body,
+        redirect: 'manual',
+        credentials: 'omit'
+      })
+    )
+    .pipe(
+      Effect.mapError(() => new ConnectorFileTransferError({ code: 'transport_failed' })),
+      Effect.flatMap(response => {
+        const body: unknown = response.body
+
+        // UTF-8 is never shorter than UTF-16 code units: reject oversized bodies before encoding.
+        if (
+          !Predicate.isString(body) ||
+          body.length > Math.max(input.maxBytes, input.maxErrorBodyBytes)
+        )
+          return failTransfer('response_too_large')
+
+        return checkResponse(
+          {
+            status: response.status,
+            headers: response.headers,
+            bytes: encoder.encode(body),
+            bodyComplete: true
+          },
+          input.maxBytes,
+          input.maxErrorBodyBytes,
+          true
+        )
+      })
+    )
 
 type UploadSessionPort = (
   request: ConnectorBinaryUploadSessionRequest
@@ -219,8 +276,10 @@ const uploadRanges = (input: {
   })
 
 /**
- * Host-only: attach one file to an existing Outlook draft. Files under 3 MiB use one Graph POST;
- * 3 MiB-150 MiB use an upload session through `ConnectorBinaryWriteHttpClient.uploadSession`.
+ * Host-only: attach one file to an existing Outlook draft. Files under 3 MiB use one Graph JSON
+ * POST through `ConnectorHttpClient`. 3 MiB-150 MiB files POST `createUploadSession` through the
+ * same port, then send byte ranges through `ConnectorBinaryWriteHttpClient.uploadSession`; only
+ * that path needs the binary write port, which stays optional in the environment.
  * Never sends the draft and never retries. Every failure leaves the draft unsent; a failure after
  * a request was dispatched may still have attached the file, so reconcile before trying again.
  */
@@ -228,7 +287,11 @@ export const addOutlookAttachment = (
   integration: ConnectorIntegration,
   input: OutlookAddAttachmentInput,
   budget: ConnectorFileTransferBudget
-) =>
+): Effect.Effect<
+  OutlookAddAttachmentResult,
+  ConnectorFileTransferError,
+  CredentialResolver | ConnectorHttpClient
+> =>
   Effect.gen(function* () {
     const limits = yield* validateTransfer(integration, 'microsoft', budget)
     yield* decodeInput(Schema.Record(Schema.String, Schema.Unknown), input)
@@ -241,18 +304,23 @@ export const addOutlookAttachment = (
     if (size > outlookAttachmentUploadSessionMaxBytes || size > limits.maxBytes)
       return yield* failTransfer('response_too_large')
 
-    const http = yield* ConnectorBinaryWriteHttpClient
-    const uploadSessionMethod = http.uploadSession
+    const needsSession = size >= outlookAttachmentSingleRequestMaxBytes
+
+    // Only upload sessions need the binary write port; small files work without one.
+    const binary = needsSession
+      ? Option.getOrUndefined(yield* Effect.serviceOption(ConnectorBinaryWriteHttpClient))
+      : undefined
+
+    const uploadSessionMethod = binary?.uploadSession
 
     // Call as a method so class-based host ports keep their receiver.
     const session: UploadSessionPort | undefined =
-      size < outlookAttachmentSingleRequestMaxBytes || uploadSessionMethod === undefined
+      binary === undefined || uploadSessionMethod === undefined
         ? undefined
-        : request => uploadSessionMethod.call(http, request)
+        : request => uploadSessionMethod.call(binary, request)
 
     // Hosts without the session capability fail definitively before credentials or network.
-    if (size >= outlookAttachmentSingleRequestMaxBytes && session === undefined)
-      return yield* failTransfer('upload_session_required')
+    if (needsSession && session === undefined) return yield* failTransfer('upload_session_required')
 
     const slot = yield* outlookWriteSlot(integration, target.mailbox).pipe(
       Effect.catch(error =>
@@ -272,34 +340,27 @@ export const addOutlookAttachment = (
 
     const attachments = `${microsoftGraphApiBaseUrl}${mailbox}/messages/${encodeURIComponent(target.messageId)}/attachments`
 
-    const graphRequest = (url: string, body: Uint8Array, maxBytes: number) =>
-      writeBytes({
-        method: 'POST',
+    const http = yield* ConnectorHttpClient
+
+    const graphRequest = (url: string, body: Schema.Json, maxBytes: number) =>
+      graphJsonPost({
+        http,
         url,
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: 'application/json',
-          'content-type': 'application/json',
-          prefer: 'IdType="ImmutableId"'
-        },
-        bytes: body,
-        maxUploadBytes: body.byteLength,
+        token,
+        body: headerSafeJson(body),
         maxBytes,
-        maxErrorBodyBytes: limits.maxErrorBodyBytes,
-        successStatuses: [200, 201],
-        redirect: 'manual',
-        credentials: 'omit'
+        maxErrorBodyBytes: limits.maxErrorBodyBytes
       })
 
     if (session === undefined) {
       const contentBytes = toBase64(bytes)
 
-      const body = jsonBytes({
+      const body = {
         '@odata.type': '#microsoft.graph.fileAttachment',
         name: target.name,
         contentType: target.contentType,
         contentBytes
-      })
+      }
 
       // Graph echoes contentBytes in the created attachment: allow exactly that expansion.
       const response = yield* graphRequest(
@@ -316,14 +377,14 @@ export const addOutlookAttachment = (
 
     const created = yield* graphRequest(
       `${attachments}/createUploadSession`,
-      jsonBytes({
+      {
         AttachmentItem: {
           attachmentType: 'file',
           name: target.name,
           size,
           contentType: target.contentType
         }
-      }),
+      },
       limits.maxMetadataBytes
     )
 

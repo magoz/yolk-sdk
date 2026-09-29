@@ -5,7 +5,10 @@ import * as Schema from 'effect/Schema'
 import {
   ConnectorBinaryHttpError,
   ConnectorBinaryWriteHttpClient,
+  ConnectorError,
   ConnectorFileTransferError,
+  ConnectorHttpClient,
+  ConnectorHttpResponse,
   CredentialResolver,
   OAuthCredential,
   makeCredentialBinding,
@@ -14,7 +17,8 @@ import {
 import type {
   ConnectorBinaryHttpResponse,
   ConnectorBinaryUploadSessionRequest,
-  ConnectorBinaryWriteHttpRequest
+  ConnectorBinaryWriteHttpRequest,
+  ConnectorHttpRequest
 } from '@yolk-sdk/connectors'
 import {
   MicrosoftConnector,
@@ -66,7 +70,25 @@ const empty = (status: number, headers: Record<string, string> = {}) => ({
   bodyComplete: true
 })
 
+// Graph JSON POSTs travel over the string ConnectorHttpClient.
+const graphJson = (value: unknown, status: number, headers: Record<string, string> = {}) =>
+  ConnectorHttpResponse.make({ status, headers, body: JSON.stringify(value) })
+
+const graphEmpty = (status: number) => ConnectorHttpResponse.make({ status, headers: {}, body: '' })
+
 type Reply = Effect.Effect<ConnectorBinaryHttpResponse, ConnectorBinaryHttpError>
+
+type GraphReply = Effect.Effect<ConnectorHttpResponse, ConnectorError>
+
+const credentialLayer = Layer.succeed(CredentialResolver, {
+  resolve: () =>
+    Effect.succeed(
+      OAuthCredential.make({ provider: 'microsoft', accessToken: SECRET_TOKEN, expiresAt: 4e12 })
+    )
+})
+
+const graphLayer = (reply: (request: ConnectorHttpRequest) => GraphReply) =>
+  Layer.succeed(ConnectorHttpClient, { request: reply })
 
 const patterned = (size: number) => {
   const bytes = new Uint8Array(size)
@@ -76,59 +98,82 @@ const patterned = (size: number) => {
   return bytes
 }
 
+/**
+ * `session`: replies for the upload-session capability; `'missing'` provides a binary write port
+ * without `uploadSession`; `'absent'` provides no binary write port at all.
+ */
 const makeHost = (options: {
-  readonly graph?: ReadonlyArray<Reply>
-  readonly session?: ReadonlyArray<Reply> | 'missing'
+  readonly graph?: ReadonlyArray<GraphReply>
+  readonly session?: ReadonlyArray<Reply> | 'missing' | 'absent'
   readonly accountId?: string
 }) => {
-  const graphRequests: ConnectorBinaryWriteHttpRequest[] = []
+  const graphRequests: ConnectorHttpRequest[] = []
+  const binaryWriteRequests: ConnectorBinaryWriteHttpRequest[] = []
   const sessionRequests: ConnectorBinaryUploadSessionRequest[] = []
   const scopes: Array<ReadonlyArray<string> | undefined> = []
   const graphReplies = [...(options.graph ?? [])]
-  const sessionReplies = options.session === 'missing' ? [] : [...(options.session ?? [])]
 
-  const next = (replies: Reply[]) =>
-    replies.shift() ?? Effect.fail(new ConnectorBinaryHttpError({ code: 'transport_failed' }))
+  const sessionReplies =
+    options.session === 'missing' || options.session === 'absent'
+      ? []
+      : [...(options.session ?? [])]
 
-  const request = (req: ConnectorBinaryWriteHttpRequest) => {
-    graphRequests.push(req)
+  const binaryFailure = () =>
+    Effect.fail(new ConnectorBinaryHttpError({ code: 'transport_failed' }))
 
-    return next(graphReplies)
+  // The helper must never use the binary write port's generic request method.
+  const request = (req: ConnectorBinaryWriteHttpRequest): Reply => {
+    binaryWriteRequests.push(req)
+
+    return binaryFailure()
   }
 
   const uploadSession = (req: ConnectorBinaryUploadSessionRequest) => {
     sessionRequests.push(req)
 
-    return next(sessionReplies)
+    return sessionReplies.shift() ?? binaryFailure()
   }
 
   const port = options.session === 'missing' ? { request } : { request, uploadSession }
 
+  const layer = Layer.mergeAll(
+    Layer.succeed(CredentialResolver, {
+      resolve: req => {
+        scopes.push(req.slot.requiredScopes)
+
+        const fields = { provider: 'microsoft', accessToken: SECRET_TOKEN, expiresAt: 4e12 }
+
+        return Effect.succeed(
+          OAuthCredential.make(
+            options.accountId === undefined ? fields : { ...fields, accountId: options.accountId }
+          )
+        )
+      }
+    }),
+    graphLayer(req => {
+      graphRequests.push(req)
+
+      return (
+        graphReplies.shift() ??
+        Effect.fail(new ConnectorError({ cause: 'transport_failed', message: 'no reply' }))
+      )
+    })
+  )
+
   return {
     graphRequests,
+    binaryWriteRequests,
     sessionRequests,
     scopes,
-    layer: Layer.mergeAll(
-      Layer.succeed(CredentialResolver, {
-        resolve: req => {
-          scopes.push(req.slot.requiredScopes)
-
-          const fields = { provider: 'microsoft', accessToken: SECRET_TOKEN, expiresAt: 4e12 }
-
-          return Effect.succeed(
-            OAuthCredential.make(
-              options.accountId === undefined ? fields : { ...fields, accountId: options.accountId }
-            )
-          )
-        }
-      }),
-      Layer.succeed(ConnectorBinaryWriteHttpClient, port)
-    )
+    layer:
+      options.session === 'absent'
+        ? layer
+        : Layer.merge(layer, Layer.succeed(ConnectorBinaryWriteHttpClient, port))
   }
 }
 
-const decodeJsonBody = (bytes: Uint8Array | undefined) =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(new TextDecoder().decode(bytes))
+const decodeJsonBody = (body: string | undefined) =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(body)
 
 const failureOf = <A, E>(result: Result.Result<A, E>) =>
   Result.isFailure(result) ? result.failure : undefined
@@ -159,7 +204,7 @@ describe('addOutlookAttachment host-only helper', () => {
       const bytes = new Uint8Array([0, 255, 128, 10, 13])
 
       const host = makeHost({
-        graph: [Effect.succeed(json({ id: 'attachment/id', contentBytes: 'AP+ACg0=' }, 201))],
+        graph: [Effect.succeed(graphJson({ id: 'attachment/id', contentBytes: 'AP+ACg0=' }, 201))],
         session: 'missing'
       })
 
@@ -172,6 +217,7 @@ describe('addOutlookAttachment host-only helper', () => {
       expect(result).toEqual({ attachmentId: 'attachment/id', name: 'report.pdf', size: 5 })
       expect(host.scopes).toEqual([[microsoftGraphMailReadWriteScope]])
       expect(host.sessionRequests).toHaveLength(0)
+      expect(host.binaryWriteRequests).toHaveLength(0)
       expect(host.graphRequests).toHaveLength(1)
 
       const request = host.graphRequests[0]
@@ -181,18 +227,14 @@ describe('addOutlookAttachment host-only helper', () => {
         url: 'https://graph.microsoft.com/v1.0/me/messages/draft%2Fid/attachments',
         headers: {
           authorization: `Bearer ${SECRET_TOKEN}`,
+          accept: 'application/json',
           'content-type': 'application/json',
           prefer: 'IdType="ImmutableId"'
         },
         redirect: 'manual',
-        credentials: 'omit',
-        successStatuses: [200, 201],
-        maxErrorBodyBytes: 256
+        credentials: 'omit'
       })
-      expect(request?.maxUploadBytes).toBe(request?.bytes.byteLength)
-      // Graph echoes contentBytes on success; allow exactly that expansion over metadata.
-      expect(request?.maxBytes).toBe(4096 + 'AP+ACg0='.length)
-      expect(yield* decodeJsonBody(request?.bytes)).toEqual({
+      expect(yield* decodeJsonBody(request?.body)).toEqual({
         '@odata.type': '#microsoft.graph.fileAttachment',
         name: 'report.pdf',
         contentType: 'application/pdf',
@@ -201,12 +243,168 @@ describe('addOutlookAttachment host-only helper', () => {
     })
   )
 
+  it.effect('attaches a small file when the host provides no binary write port at all', () =>
+    Effect.gen(function* () {
+      const host = makeHost({
+        graph: [Effect.succeed(graphJson({ id: 'a1' }, 201))],
+        session: 'absent'
+      })
+
+      const result = yield* addOutlookAttachment(
+        integration,
+        { messageId: 'draft', name: 'a.txt', contentType: 'text/plain', bytes: patterned(3) },
+        budget
+      ).pipe(Effect.provide(host.layer))
+
+      expect(result).toEqual({ attachmentId: 'a1', name: 'a.txt', size: 3 })
+      expect(host.graphRequests).toHaveLength(1)
+      expect(host.graphRequests[0]?.url).toBe(
+        'https://graph.microsoft.com/v1.0/me/messages/draft/attachments'
+      )
+    })
+  )
+
+  it.effect('sends an ASCII-only JSON body that preserves non-ASCII file names', () =>
+    Effect.gen(function* () {
+      const host = makeHost({ graph: [Effect.succeed(graphJson({ id: 'a1' }, 201))] })
+      const name = 'Informe año 2026 \u{1F4C4}.pdf'
+
+      yield* addOutlookAttachment(
+        integration,
+        { messageId: 'draft', name, contentType: 'application/pdf', bytes: patterned(3) },
+        budget
+      ).pipe(Effect.provide(host.layer))
+
+      const body = host.graphRequests[0]?.body ?? ''
+
+      expect(body).toMatch(/^[\x20-\x7e]+$/)
+
+      const decoded = yield* decodeJsonBody(body)
+
+      expect(Predicate.hasProperty(decoded, 'name') && decoded.name).toBe(name)
+    })
+  )
+
+  it.effect('bounds the small POST response by metadata plus the echoed contentBytes', () =>
+    Effect.gen(function* () {
+      const bytes = patterned(30)
+      const contentBytes = Buffer.from(bytes).toString('base64')
+      const limit = budget.maxMetadataBytes + contentBytes.length
+
+      const padded = (length: number) => {
+        const base = JSON.stringify({ id: 'a1', contentBytes, pad: '' })
+
+        return JSON.stringify({ id: 'a1', contentBytes, pad: 'x'.repeat(length - base.length) })
+      }
+
+      for (const [length, expected] of [
+        [limit, 'success'],
+        [limit + 1, 'response_too_large']
+      ] as const) {
+        const body = padded(length)
+
+        expect(body.length).toBe(length)
+
+        const host = makeHost({
+          graph: [Effect.succeed(ConnectorHttpResponse.make({ status: 201, headers: {}, body }))]
+        })
+
+        const result = yield* addOutlookAttachment(
+          integration,
+          { messageId: 'draft', name: 'a.bin', contentType: 'application/zip', bytes },
+          budget
+        ).pipe(Effect.provide(host.layer), Effect.result)
+
+        if (expected === 'success') expect(result._tag).toBe('Success')
+        else {
+          expect(failureOf(result)).toMatchObject({ code: expected })
+          expect(Predicate.hasProperty(failureOf(result), 'status')).toBe(false)
+        }
+      }
+
+      // Multi-byte UTF-8 counts in bytes, not UTF-16 code units.
+      const multiByte = JSON.stringify({
+        id: 'a1',
+        pad: 'é'.repeat(Math.ceil(limit / 2))
+      })
+
+      const host = makeHost({
+        graph: [
+          Effect.succeed(ConnectorHttpResponse.make({ status: 201, headers: {}, body: multiByte }))
+        ]
+      })
+
+      expect(multiByte.length).toBeLessThanOrEqual(limit)
+
+      const result = yield* addOutlookAttachment(
+        integration,
+        { messageId: 'draft', name: 'a.bin', contentType: 'application/zip', bytes },
+        budget
+      ).pipe(Effect.provide(host.layer), Effect.result)
+
+      expect(failureOf(result)).toMatchObject({ code: 'response_too_large' })
+    })
+  )
+
+  it.effect('bounds error bodies by maxErrorBodyBytes', () =>
+    Effect.gen(function* () {
+      const body = JSON.stringify({ error: { message: 'x'.repeat(budget.maxErrorBodyBytes) } })
+
+      const host = makeHost({
+        graph: [Effect.succeed(ConnectorHttpResponse.make({ status: 400, headers: {}, body }))]
+      })
+
+      const result = yield* addOutlookAttachment(
+        integration,
+        { messageId: 'draft', name: 'a.txt', contentType: 'text/plain', bytes: patterned(3) },
+        budget
+      ).pipe(Effect.provide(host.layer), Effect.result)
+
+      expect(failureOf(result)).toMatchObject({ code: 'response_too_large' })
+    })
+  )
+
+  it.effect('maps a Graph transport failure to transport_failed without its cause text', () =>
+    Effect.gen(function* () {
+      for (const size of [3, outlookAttachmentSingleRequestMaxBytes]) {
+        const host = makeHost({
+          graph: [
+            Effect.fail(
+              new ConnectorError({
+                cause: 'transport_failed',
+                message: `PRIVATE Bearer ${SECRET_TOKEN} ${uploadUrl}`,
+                underlying: new Error(`PRIVATE ${uploadUrl}`)
+              })
+            )
+          ],
+          session: []
+        })
+
+        const result = yield* addOutlookAttachment(
+          integration,
+          { messageId: 'draft', name: 'x.bin', contentType: 'image/png', bytes: patterned(size) },
+          budget
+        ).pipe(Effect.provide(host.layer), Effect.result)
+
+        const failure = failureOf(result)
+
+        expect(failure).toBeInstanceOf(ConnectorFileTransferError)
+        expect(failure).toMatchObject({ code: 'transport_failed' })
+        expect(Predicate.hasProperty(failure, 'status')).toBe(false)
+        expect(JSON.stringify(failure) + String(failure)).not.toContain('PRIVATE')
+        expectSecretFree(failure)
+        expect(host.graphRequests).toHaveLength(1)
+        expect(host.sessionRequests).toHaveLength(0)
+      }
+    })
+  )
+
   it.effect('uses one POST just below 3 MiB even without the session capability', () =>
     Effect.gen(function* () {
       const bytes = patterned(outlookAttachmentSingleRequestMaxBytes - 1)
 
       const host = makeHost({
-        graph: [Effect.succeed(json({ id: 'a1' }, 201))],
+        graph: [Effect.succeed(graphJson({ id: 'a1' }, 201))],
         session: 'missing'
       })
 
@@ -219,7 +417,7 @@ describe('addOutlookAttachment host-only helper', () => {
       expect(result).toEqual({ attachmentId: 'a1', name: 'big.bin', size: bytes.byteLength })
       expect(host.graphRequests).toHaveLength(1)
 
-      const body = yield* decodeJsonBody(host.graphRequests[0]?.bytes)
+      const body = yield* decodeJsonBody(host.graphRequests[0]?.body)
 
       expect(Predicate.hasProperty(body, 'contentBytes') && body.contentBytes).toBe(
         Buffer.from(bytes).toString('base64')
@@ -229,7 +427,7 @@ describe('addOutlookAttachment host-only helper', () => {
 
   it.effect('reports success without an ID when a created attachment has no readable ID', () =>
     Effect.gen(function* () {
-      for (const reply of [json({}, 201), empty(201), json({ id: '' }, 200)]) {
+      for (const reply of [graphJson({}, 201), graphEmpty(201), graphJson({ id: '' }, 200)]) {
         const host = makeHost({ graph: [Effect.succeed(reply)] })
 
         const result = yield* addOutlookAttachment(
@@ -258,7 +456,9 @@ describe('addOutlookAttachment host-only helper', () => {
         [503, 'upstream_failed']
       ] as const) {
         const host = makeHost({
-          graph: [Effect.succeed(json({ error: { message: 'PRIVATE provider detail' } }, status))]
+          graph: [
+            Effect.succeed(graphJson({ error: { message: 'PRIVATE provider detail' } }, status))
+          ]
         })
 
         const result = yield* addOutlookAttachment(
@@ -287,7 +487,7 @@ describe('addOutlookAttachment host-only helper', () => {
       const host = makeHost({
         graph: [
           Effect.succeed(
-            json(
+            graphJson(
               {
                 '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#uploadSession',
                 uploadUrl,
@@ -330,13 +530,20 @@ describe('addOutlookAttachment host-only helper', () => {
       expect(host.scopes).toEqual([undefined, [microsoftGraphMailReadWriteSharedScope]])
 
       expect(host.graphRequests).toHaveLength(1)
+      expect(host.binaryWriteRequests).toHaveLength(0)
       expect(host.graphRequests[0]).toMatchObject({
         method: 'POST',
         url: 'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/draft%2Fid/attachments/createUploadSession',
-        headers: { authorization: `Bearer ${SECRET_TOKEN}`, 'content-type': 'application/json' },
-        maxBytes: 4096
+        headers: {
+          authorization: `Bearer ${SECRET_TOKEN}`,
+          accept: 'application/json',
+          'content-type': 'application/json',
+          prefer: 'IdType="ImmutableId"'
+        },
+        redirect: 'manual',
+        credentials: 'omit'
       })
-      expect(yield* decodeJsonBody(host.graphRequests[0]?.bytes)).toEqual({
+      expect(yield* decodeJsonBody(host.graphRequests[0]?.body)).toEqual({
         AttachmentItem: {
           attachmentType: 'file',
           name: 'video.mp4',
@@ -395,7 +602,7 @@ describe('addOutlookAttachment host-only helper', () => {
       const size = outlookAttachmentSingleRequestMaxBytes
 
       const host = makeHost({
-        graph: [Effect.succeed(json({ uploadUrl }, 201))],
+        graph: [Effect.succeed(graphJson({ uploadUrl }, 201))],
         session: [Effect.succeed(empty(201))]
       })
 
@@ -415,25 +622,65 @@ describe('addOutlookAttachment host-only helper', () => {
 
   it.effect('fails definitively before credentials when the host lacks upload sessions', () =>
     Effect.gen(function* () {
-      const host = makeHost({ session: 'missing' })
+      // Binary write port without `uploadSession`, and no binary write port at all.
+      for (const session of ['missing', 'absent'] as const) {
+        const host = makeHost({ session })
+
+        const result = yield* addOutlookAttachment(
+          integration,
+          {
+            messageId: 'draft',
+            name: 'big.bin',
+            contentType: 'application/octet-stream',
+            bytes: patterned(outlookAttachmentSingleRequestMaxBytes)
+          },
+          budget
+        ).pipe(Effect.provide(host.layer), Effect.result)
+
+        expect(failureOf(result)).toMatchObject({
+          _tag: 'ConnectorFileTransferError',
+          code: 'upload_session_required'
+        })
+        expect(host.scopes).toHaveLength(0)
+        expect(host.graphRequests).toHaveLength(0)
+        expect(host.binaryWriteRequests).toHaveLength(0)
+      }
+    })
+  )
+
+  it.effect('bounds the createUploadSession response by maxMetadataBytes', () =>
+    Effect.gen(function* () {
+      const base = JSON.stringify({ uploadUrl, pad: '' })
+
+      const body = JSON.stringify({
+        uploadUrl,
+        pad: 'x'.repeat(budget.maxMetadataBytes + 1 - base.length)
+      })
+
+      expect(body.length).toBe(budget.maxMetadataBytes + 1)
+
+      const host = makeHost({
+        graph: [Effect.succeed(ConnectorHttpResponse.make({ status: 201, headers: {}, body }))],
+        session: [Effect.succeed(empty(204))]
+      })
 
       const result = yield* addOutlookAttachment(
         integration,
         {
           messageId: 'draft',
-          name: 'big.bin',
-          contentType: 'application/octet-stream',
+          name: 'x.bin',
+          contentType: 'image/png',
           bytes: patterned(outlookAttachmentSingleRequestMaxBytes)
         },
         budget
       ).pipe(Effect.provide(host.layer), Effect.result)
 
-      expect(failureOf(result)).toMatchObject({
-        _tag: 'ConnectorFileTransferError',
-        code: 'upload_session_required'
-      })
-      expect(host.scopes).toHaveLength(0)
-      expect(host.graphRequests).toHaveLength(0)
+      const failure = failureOf(result)
+
+      expect(failure).toMatchObject({ code: 'response_too_large' })
+      expectSecretFree(failure)
+      // The oversized session was never read, so no URL was contacted or cancelled.
+      expect(host.sessionRequests).toHaveLength(0)
     })
   )
 
@@ -511,7 +758,7 @@ describe('addOutlookAttachment host-only helper', () => {
         const size = outlookAttachmentUploadChunkBytes + 10
 
         const host = makeHost({
-          graph: [Effect.succeed(json({ uploadUrl, nextExpectedRanges: ['0-'] }, 201))],
+          graph: [Effect.succeed(graphJson({ uploadUrl, nextExpectedRanges: ['0-'] }, 201))],
           session: [
             ...scenario.replies,
             // Cancellation failure must never mask the original error.
@@ -558,7 +805,7 @@ describe('addOutlookAttachment host-only helper', () => {
       const started = yield* Deferred.make<void>()
 
       const host = makeHost({
-        graph: [Effect.succeed(json({ uploadUrl }, 201))],
+        graph: [Effect.succeed(graphJson({ uploadUrl }, 201))],
         session: [Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))]
       })
 
@@ -586,7 +833,7 @@ describe('addOutlookAttachment host-only helper', () => {
       const cancelling = yield* Deferred.make<void>()
 
       const host = makeHost({
-        graph: [Effect.succeed(json({ uploadUrl }, 201))],
+        graph: [Effect.succeed(graphJson({ uploadUrl }, 201))],
         session: [
           Effect.succeed(empty(500)),
           Deferred.succeed(cancelling, undefined).pipe(Effect.andThen(Effect.never))
@@ -617,7 +864,7 @@ describe('addOutlookAttachment host-only helper', () => {
   it.effect('does not create or cancel a session when Graph refuses to create it', () =>
     Effect.gen(function* () {
       const host = makeHost({
-        graph: [Effect.succeed(json({ error: { message: 'PRIVATE' } }, 403))],
+        graph: [Effect.succeed(graphJson({ error: { message: 'PRIVATE' } }, 403))],
         session: []
       })
 
@@ -641,7 +888,7 @@ describe('addOutlookAttachment host-only helper', () => {
   it.effect('rejects a mismatched initial session range and cancels before any PUT', () =>
     Effect.gen(function* () {
       const host = makeHost({
-        graph: [Effect.succeed(json({ uploadUrl, nextExpectedRanges: ['5-'] }, 201))],
+        graph: [Effect.succeed(graphJson({ uploadUrl, nextExpectedRanges: ['5-'] }, 201))],
         session: [Effect.succeed(empty(204))]
       })
 
@@ -677,7 +924,7 @@ describe('addOutlookAttachment host-only helper', () => {
         'not a url'
       ]) {
         const host = makeHost({
-          graph: [Effect.succeed(json({ uploadUrl: url }, 201))],
+          graph: [Effect.succeed(graphJson({ uploadUrl: url }, 201))],
           session: [Effect.succeed(empty(204))]
         })
 
@@ -704,7 +951,7 @@ describe('addOutlookAttachment host-only helper', () => {
   it.effect('does not leak the upload URL when the session response is malformed', () =>
     Effect.gen(function* () {
       for (const body of [{ uploadUrl: 42, echo: uploadUrl }]) {
-        const host = makeHost({ graph: [Effect.succeed(json(body, 201))] })
+        const host = makeHost({ graph: [Effect.succeed(graphJson(body, 201))] })
 
         const result = yield* addOutlookAttachment(
           integration,
@@ -729,7 +976,7 @@ describe('addOutlookAttachment host-only helper', () => {
   it.effect('cancels a created session whose initial range metadata is malformed', () =>
     Effect.gen(function* () {
       const host = makeHost({
-        graph: [Effect.succeed(json({ uploadUrl, nextExpectedRanges: uploadUrl }, 201))],
+        graph: [Effect.succeed(graphJson({ uploadUrl, nextExpectedRanges: uploadUrl }, 201))],
         session: [Effect.succeed(empty(204))]
       })
 
@@ -759,7 +1006,7 @@ describe('addOutlookAttachment host-only helper', () => {
         const url = uploadUrl.replace('/api/v2.0/', `/api/${version}/`)
 
         const host = makeHost({
-          graph: [Effect.succeed(json({ uploadUrl: url }, 201))],
+          graph: [Effect.succeed(graphJson({ uploadUrl: url }, 201))],
           session: [Effect.succeed(empty(201))]
         })
 
@@ -781,7 +1028,7 @@ describe('addOutlookAttachment host-only helper', () => {
         readonly urls: string[] = []
 
         request(_request: ConnectorBinaryWriteHttpRequest): Reply {
-          return Effect.succeed(json({ uploadUrl }, 201))
+          return Effect.fail(new ConnectorBinaryHttpError({ code: 'transport_failed' }))
         }
 
         uploadSession(request: ConnectorBinaryUploadSessionRequest): Reply {
@@ -794,16 +1041,8 @@ describe('addOutlookAttachment host-only helper', () => {
       const port = new Port()
 
       const layer = Layer.mergeAll(
-        Layer.succeed(CredentialResolver, {
-          resolve: () =>
-            Effect.succeed(
-              OAuthCredential.make({
-                provider: 'microsoft',
-                accessToken: SECRET_TOKEN,
-                expiresAt: 4e12
-              })
-            )
-        }),
+        credentialLayer,
+        graphLayer(() => Effect.succeed(graphJson({ uploadUrl }, 201))),
         Layer.succeed(ConnectorBinaryWriteHttpClient, port)
       )
 
@@ -876,7 +1115,7 @@ describe('addOutlookAttachment host-only helper', () => {
       }
 
       for (const testCase of cases) {
-        const host = makeHost({ graph: [Effect.succeed(json({ id: 'a' }, 201))] })
+        const host = makeHost({ graph: [Effect.succeed(graphJson({ id: 'a' }, 201))] })
 
         const result = yield* addOutlookAttachment(
           testCase.integration ?? integration,
@@ -887,7 +1126,7 @@ describe('addOutlookAttachment host-only helper', () => {
         expectRejected(host, result, testCase.code)
       }
 
-      const arrayHost = makeHost({ graph: [Effect.succeed(json({ id: 'a' }, 201))] })
+      const arrayHost = makeHost({ graph: [Effect.succeed(graphJson({ id: 'a' }, 201))] })
 
       const arrayResult = yield* addOutlookAttachment(
         integration,
@@ -898,7 +1137,7 @@ describe('addOutlookAttachment host-only helper', () => {
 
       expectRejected(arrayHost, arrayResult, 'invalid_input')
 
-      const wideHost = makeHost({ graph: [Effect.succeed(json({ id: 'a' }, 201))] })
+      const wideHost = makeHost({ graph: [Effect.succeed(graphJson({ id: 'a' }, 201))] })
 
       const wideResult = yield* addOutlookAttachment(
         integration,
@@ -913,7 +1152,7 @@ describe('addOutlookAttachment host-only helper', () => {
 
   it.effect('keeps ordinary write scopes for an explicit own mailbox in application mode', () =>
     Effect.gen(function* () {
-      const host = makeHost({ graph: [Effect.succeed(json({ id: 'a' }, 201))] })
+      const host = makeHost({ graph: [Effect.succeed(graphJson({ id: 'a' }, 201))] })
 
       yield* addOutlookAttachment(
         makeMicrosoftIntegration({ mailboxAccessMode: 'application' }),

@@ -1126,7 +1126,11 @@ metadata `maxBytes`, `maxErrorBodyBytes`, `successStatuses: [200, 201]`, `redire
 The optional `uploadSession` method (request type `ConnectorBinaryUploadSessionRequest`) sends
 `PUT` ranges or a `DELETE` cancellation to a provider-issued, pre-authenticated upload-session URL.
 Existing adapters without it still compile; helpers that need it fail `upload_session_required`
-before credentials or network. Hosts implementing it must allowlist the origin and path shape
+before credentials or network, including when no binary write port is provided at all. Outlook
+draft attachments use this port only for session ranges: their authenticated Graph JSON POSTs
+(`fileAttachment`, `createUploadSession`) travel over `ConnectorHttpClient`, whose host adapter
+must allow those Graph POSTs and a success body of `maxMetadataBytes` plus the echoed base64 content
+(about 4 MiB for a file just under 3 MiB). Hosts implementing it must allowlist the origin and path shape
 (Outlook: `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)` only), send the URL
 unchanged with no Authorization/cookies/ambient credentials, never log/trace/persist the URL (it
 embeds an auth token) or bodies, follow no redirects, never retry, apply the same TLS, DNS/socket,
@@ -1147,8 +1151,14 @@ timeout, cancellation and streamed limits as `request`, and return response head
   guard). Files under 3 MiB (`outlookAttachmentSingleRequestMaxBytes`) use one Graph `POST
 /messages/{id}/attachments` `#microsoft.graph.fileAttachment`; the success metadata budget is
   `maxMetadataBytes` plus the echoed base64 length. 3 MiB through 150 MiB
-  (`outlookAttachmentUploadSessionMaxBytes`) use `POST .../attachments/createUploadSession` and
-  then sequential 3,932,160-byte (12 x 320 KiB) `PUT` ranges through `uploadSession` with
+  (`outlookAttachmentUploadSessionMaxBytes`) use `POST .../attachments/createUploadSession`
+  (bounded by `maxMetadataBytes`). Both authenticated Graph POSTs go through the regular
+  `ConnectorHttpClient` as ASCII-only JSON string bodies with the Outlook Bearer, JSON
+  accept/content-type and `Prefer: IdType="ImmutableId"` headers, `redirect: 'manual'` and
+  `credentials: 'omit'`; the helper requires `CredentialResolver | ConnectorHttpClient` only.
+  `ConnectorBinaryWriteHttpClient` is read optionally and used only for session ranges, so hosts
+  without any binary write port can still attach files under 3 MiB. Session uploads then send
+  sequential 3,932,160-byte (12 x 320 KiB) `PUT` ranges through `uploadSession` with
   `Content-Range: bytes start-end/total`, `Content-Type: application/octet-stream` and no
   Authorization. Every intermediate 200 must report exactly the next expected range; the final
   range must return 201, whose `Location` yields `attachmentId` when parseable. Session URLs outside

@@ -50,7 +50,10 @@ export interface ConnectorBinaryWriteHttpClientApi {
   ) => Effect.Effect<ConnectorBinaryHttpResponse, ConnectorBinaryHttpError>
   /**
    * Optional upload-session capability. Helpers that need it fail with
-   * `upload_session_required` before any network request when a host omits it.
+   * `upload_session_required` before any network request when a host omits it (or omits this
+   * whole port). Only the pre-authenticated session requests use it: `addOutlookAttachment` sends
+   * its authenticated Graph JSON POSTs (`fileAttachment`, `createUploadSession`) through the
+   * regular `ConnectorHttpClient`, never through `request`.
    *
    * Hosts must: allowlist the exact origin and path shape before connecting (Outlook:
    * `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)` only); send the URL

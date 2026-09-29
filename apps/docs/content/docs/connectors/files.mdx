@@ -144,8 +144,18 @@ the next expected range, and the final range must return 201; its `Location` hea
 `attachmentId`. See Microsoft's [large attachment guide](https://learn.microsoft.com/en-us/graph/outlook-large-attachments),
 including its known issue for shared or delegated mailboxes.
 
-Session ranges need the optional `ConnectorBinaryWriteHttpClient.uploadSession` method. Hosts
-without it fail `upload_session_required` for files of 3 MiB or more, before credentials or network.
+The helper requires `CredentialResolver` and `ConnectorHttpClient`. Both authenticated Graph POSTs
+(`fileAttachment` and `createUploadSession`) go through the regular `ConnectorHttpClient` as
+ASCII-only JSON string bodies with Bearer, JSON `accept`/`content-type` and
+`Prefer: IdType="ImmutableId"` headers, `redirect: 'manual'` and `credentials: 'omit'`. Your HTTP
+adapter must allow those Graph POSTs and a success body of `maxMetadataBytes` plus the echoed base64
+content (about 4 MiB for a file just under 3 MiB). Status codes, response bounds and code-only
+transport failures match the binary port.
+
+Only session ranges need the optional `ConnectorBinaryWriteHttpClient.uploadSession` method; the
+helper reads that port optionally, so hosts without any binary write port can still attach files
+under 3 MiB. Hosts without it fail `upload_session_required` for files of 3 MiB or more, before
+credentials or network.
 The `uploadUrl` embeds an auth token: the SDK only contacts `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions('...')`
 URLs (others fail `network_policy_rejected` without being contacted), never returns the URL, and
 sends one best-effort `DELETE` to cancel the session after any later failure or interruption.
@@ -264,7 +274,8 @@ credentials. Reads accept HTTP 200 only. The optional `uploadSession` method tak
 origin and path allowlist (Outlook: `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)`),
 the URL sent unchanged, no Authorization or ambient credentials, no redirects or retries, no URL
 logging/tracing/persistence, and response headers (including `Location`) returned intact. Existing
-adapters without it keep compiling. Host adapters must enforce limits while consuming streams,
+adapters without it keep compiling. `addOutlookAttachment` uses this port only for `uploadSession`;
+its authenticated Graph JSON POSTs use `ConnectorHttpClient`. Host adapters must enforce limits while consuming streams,
 including decompression, cap headers independently, close/cancel I/O, verify TLS, implement
 timeouts/cancellation, and enforce public DNS **and socket IP** policy on every request/hop.
 Never use cookie jars, automatic redirects/retries, ambient auth or URL/header/body logging.
