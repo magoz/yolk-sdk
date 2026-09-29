@@ -112,9 +112,9 @@ const credentialFieldRedaction = new RegExp(
   'gi'
 )
 
-// Candidate unquoted `Name:` header-like names inside one line (colon only; quoted keys such as
-// `"x-api-key": "..."` are handled by `quotedCredentialHeaderRedaction`; `name=value` pairs are left to
-// the quote-aware field and parameter passes).
+// Candidate unquoted `Name:` header-like names inside one line (colon only). Quoted keys such
+// as `"x-api-key": "..."` are handled by `quotedCredentialHeaderRedaction`; `name=value` pairs
+// are left to the quote-aware field and parameter passes.
 const headerLikeNamePattern = /(?:^|[^A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]*)\s*:/g
 
 /**
@@ -147,7 +147,7 @@ const redactCredentialHeaderLines = (text: string): string =>
 // A quoted key that `isCredentialHeaderName` accepts (`"x-api-key": "..."`,
 // `'Proxy-Authorization': '...'`): only the value is redacted, so JSON stays balanced.
 const quotedCredentialHeaderRedaction =
-  /(["'])([A-Za-z][A-Za-z0-9_-]*)\1(\s*:\s*)("(?:[^"\\]|\\.)*"?|'[^']*'?|[^\s,;&}\]]+)/g
+  /(["'])([A-Za-z][A-Za-z0-9_-]*)\1(\s*:\s*)("(?:[^"\\]|\\.)*"?|'[^']*'?|[^\s,;&{}[\]]+)/g
 
 const redactQuotedCredentialHeaders = (text: string): string =>
   text.replace(
@@ -160,10 +160,11 @@ const redactQuotedCredentialHeaders = (text: string): string =>
 
 /**
  * Redact every credential pattern shared with the fixture secret scan: credential header lines
- * (first, to the end of the line), quoted credential header keys (value only), bearer tokens, API-key prefixes, JWTs, private keys, credential
- * field pairs (`"api_key": "..."`, `password="..."`), and credential query/form parameters. Best
- * effort; used on report messages. Quote-aware field redaction runs before parameter redaction so
- * a quoted value with spaces is removed whole.
+ * (first, to the end of the line), quoted credential header keys (value only), bearer tokens,
+ * API-key prefixes, JWTs, private keys, credential field pairs (`"api_key": "..."`,
+ * `password="..."`), and credential query/form parameters. Best effort; used on report messages.
+ * Quote-aware field redaction runs before parameter redaction so a quoted value with spaces is
+ * removed whole.
  */
 export const redactCredentialText = (text: string): string => {
   let result = redactCredentialHeaderLines(text).replace(

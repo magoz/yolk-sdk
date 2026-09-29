@@ -658,6 +658,29 @@ describe('report tags', () => {
       expect(JSON.stringify(report)).not.toContain('plain-mismatch-secret')
     })
   )
+
+  it.effect('redacts nested quoted credential header keys in mismatch messages', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance(
+        [
+          {
+            ...baseCase('example.mismatch.nested'),
+            run: expectConformance(
+              false,
+              'sent {"headers":{"x-api-key":"plain-nested-secret"},"list":[{"private-token":"plain-array-secret"}]}'
+            )
+          }
+        ],
+        { target: { kind: 'replay' }, now, layer: () => Layer.empty }
+      )
+
+      expect(report.results[0]?.failure?.message).toBe(
+        'sent {"headers":{"x-api-key":<redacted>},"list":[{"private-token":<redacted>}]}'
+      )
+      expect(JSON.stringify(report)).not.toContain('plain-nested-secret')
+      expect(JSON.stringify(report)).not.toContain('plain-array-secret')
+    })
+  )
 })
 
 describe('runConformance concurrency', () => {

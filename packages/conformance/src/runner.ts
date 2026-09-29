@@ -81,7 +81,7 @@ export type ConformanceWarningKind = ConformanceWarning['kind']
  * Sanitized failure. `message` is a `ConformanceMismatch`'s case-authored
  * message (credential patterns redacted) or, for every other failure, layer
  * failure, and defect, the error's own message passed through
- * `sanitizeConformanceMessage` (credential patterns and cookies redacted, JSON
+ * `sanitizeConformanceMessage` (credential patterns and header lines redacted, JSON
  * spans elided, whitespace collapsed, length capped). `tag` is the error's
  * `_tag` only when it is identifier-like. Request bodies, headers, and
  * `ConformanceMismatch` `expected`/`actual` details are never copied.
