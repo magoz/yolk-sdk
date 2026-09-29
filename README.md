@@ -32,7 +32,7 @@ The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 | `@yolk-sdk/sandbox`                                       | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes                                               |
 | `@yolk-sdk/vercel-workflows`                              | Workflow loop contract, durable stream helpers, and Effect Workflow client/layer                                     |
 | [`@yolk-sdk/harness`](packages/harness/README.md)         | Run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)                                 |
-| [`@yolk-sdk/conformance`](packages/conformance/README.md) | Experimental wire fixtures: record, replay offline (fail closed), and inject wire faults                             |
+| [`@yolk-sdk/conformance`](packages/conformance/README.md) | Experimental wire fixtures (record, fail-closed replay, wire faults) and a safety-gated conformance case runner      |
 
 Docs site source lives in `apps/docs` and uses Fumadocs to explain the public SDK package set.
 

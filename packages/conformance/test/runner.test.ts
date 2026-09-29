@@ -1,0 +1,648 @@
+import { Context, Data, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { describe, expect, it } from '@effect/vitest'
+import {
+  defineConformanceCase,
+  expectConformance,
+  expectEqual,
+  type ConformanceCase,
+  type ConformanceSafety
+} from '../src/case.ts'
+import type { WireFixture } from '../src/fixture.ts'
+import { ReplayHttpClient } from '../src/replay.ts'
+import {
+  conformanceCaseWarnings,
+  conformanceReportFailed,
+  conformanceSkipReason,
+  formatConformanceReport,
+  runConformance,
+  type ConformanceSkipReason,
+  type ConformanceTarget
+} from '../src/runner.ts'
+
+const now = new Date('2026-09-29T12:00:00.000Z')
+
+const baseCase = (id: string, safety: ConformanceSafety = 'read') =>
+  defineConformanceCase({
+    id,
+    safety,
+    docs: 'Synthetic docs claim.',
+    wire: 'Synthetic wire claim.',
+    observed: { account: 'synthetic', date: '2026-09-20' },
+    fixtures: [],
+    run: Effect.void
+  })
+
+describe('conformanceSkipReason (safety policy)', () => {
+  const safeties: ReadonlyArray<ConformanceSafety> = [
+    'read',
+    'write-reversible',
+    'write-irreversible'
+  ]
+
+  const id = 'example.items.send'
+
+  // [target label, target, expected skip reason per safety: read, write-reversible, write-irreversible]
+  const matrix: ReadonlyArray<
+    readonly [
+      string,
+      ConformanceTarget,
+      readonly [
+        ConformanceSkipReason | undefined,
+        ConformanceSkipReason | undefined,
+        ConformanceSkipReason | undefined
+      ]
+    ]
+  > = [
+    ['replay', { kind: 'replay' }, [undefined, undefined, undefined]],
+    ['in-process', { kind: 'in-process' }, [undefined, undefined, undefined]],
+    ['emulated', { kind: 'emulated' }, [undefined, undefined, undefined]],
+    [
+      'live default',
+      { kind: 'live', account: 'synthetic' },
+      [undefined, 'writes-not-allowed', 'manual-only']
+    ],
+    [
+      'live allowWrites none',
+      { kind: 'live', account: 'synthetic', allowWrites: 'none' },
+      [undefined, 'writes-not-allowed', 'manual-only']
+    ],
+    [
+      'live allowWrites reversible',
+      { kind: 'live', account: 'synthetic', allowWrites: 'reversible' },
+      [undefined, undefined, 'manual-only']
+    ],
+    [
+      'live reversible + other irreversible id',
+      {
+        kind: 'live',
+        account: 'synthetic',
+        allowWrites: 'reversible',
+        allowIrreversible: ['example.items.other', 'example.items']
+      },
+      [undefined, undefined, 'manual-only']
+    ],
+    [
+      'live reversible + exact irreversible id',
+      {
+        kind: 'live',
+        account: 'synthetic',
+        allowWrites: 'reversible',
+        allowIrreversible: [id]
+      },
+      [undefined, undefined, undefined]
+    ],
+    [
+      'live none + exact irreversible id',
+      { kind: 'live', account: 'synthetic', allowIrreversible: [id] },
+      [undefined, 'writes-not-allowed', undefined]
+    ]
+  ]
+
+  for (const [label, target, expected] of matrix) {
+    it(`${label}`, () => {
+      expect(safeties.map(safety => conformanceSkipReason(target, { id, safety }))).toEqual(
+        expected
+      )
+    })
+  }
+
+  it.effect('skipped cases never build their layer or run', () =>
+    Effect.gen(function* () {
+      const built = yield* Ref.make<ReadonlyArray<string>>([])
+      const ran = yield* Ref.make<ReadonlyArray<string>>([])
+
+      const track = (testCase: ConformanceCase) =>
+        ({
+          ...testCase,
+          run: Ref.update(ran, ids => [...ids, testCase.id])
+        }) satisfies ConformanceCase
+
+      const cases = [
+        track(baseCase('example.policy.read', 'read')),
+        track(baseCase('example.policy.reversible', 'write-reversible')),
+        track(baseCase('example.policy.irreversible', 'write-irreversible'))
+      ]
+
+      const report = yield* runConformance(cases, {
+        target: { kind: 'live', account: 'synthetic' },
+        now,
+        layer: testCase => Layer.effectDiscard(Ref.update(built, ids => [...ids, testCase.id]))
+      })
+
+      expect(yield* Ref.get(built)).toEqual(['example.policy.read'])
+      expect(yield* Ref.get(ran)).toEqual(['example.policy.read'])
+      expect(report.target).toEqual({ kind: 'live', account: 'synthetic' })
+      expect(report.results.map(result => [result.id, result.status, result.skipReason])).toEqual([
+        ['example.policy.read', 'passed', undefined],
+        ['example.policy.reversible', 'skipped', 'writes-not-allowed'],
+        ['example.policy.irreversible', 'skipped', 'manual-only']
+      ])
+      expect(report.summary).toEqual({ passed: 1, failed: 0, skipped: 2 })
+      expect(conformanceReportFailed(report)).toBe(false)
+    })
+  )
+
+  it.effect('an explicitly started irreversible case runs on live', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance(
+        [baseCase('example.policy.send', 'write-irreversible')],
+        {
+          target: {
+            kind: 'live',
+            account: 'synthetic',
+            allowIrreversible: ['example.policy.send']
+          },
+          now,
+          layer: () => Layer.empty
+        }
+      )
+
+      expect(report.results.map(result => result.status)).toEqual(['passed'])
+    })
+  )
+})
+
+class Counter extends Context.Service<Counter, Ref.Ref<number>>()('test/Counter') {}
+
+class CaseFailure extends Data.TaggedError('CaseFailure')<{ readonly message: string }> {}
+
+class LayerFailure extends Data.TaggedError('LayerFailure')<{ readonly message: string }> {}
+
+describe('runConformance isolation', () => {
+  it.effect('builds a fresh layer per case even when the factory reuses one Layer value', () =>
+    Effect.gen(function* () {
+      const builds = yield* Ref.make(0)
+
+      const shared = Layer.effect(
+        Counter,
+        Ref.update(builds, count => count + 1).pipe(Effect.andThen(Ref.make(0)))
+      )
+
+      const bump = (id: string) =>
+        defineConformanceCase({
+          ...baseCase(id),
+          run: Effect.gen(function* () {
+            const counter = yield* Counter
+            const before = yield* Ref.getAndUpdate(counter, count => count + 1)
+
+            yield* expectEqual(before, 0, 'state leaked from an earlier case')
+          })
+        })
+
+      const report = yield* runConformance([bump('example.fresh.one'), bump('example.fresh.two')], {
+        target: { kind: 'in-process' },
+        now,
+        layer: () => shared
+      })
+
+      expect(report.summary).toEqual({ passed: 2, failed: 0, skipped: 0 })
+      expect(yield* Ref.get(builds)).toBe(2)
+    })
+  )
+
+  it.effect('gives each case fresh replay consumption', () =>
+    Effect.gen(function* () {
+      const fixture: WireFixture = {
+        id: 'example.ping.synthetic',
+        caseId: 'example.ping',
+        evidence: 'unverified',
+        recordedAt: '2026-09-28',
+        account: 'synthetic',
+        endpoint: 'https://api.example.test/ping',
+        exchanges: [
+          {
+            request: { method: 'GET', url: 'https://api.example.test/ping' },
+            response: { status: 200, headers: {}, body: 'pong' }
+          }
+        ]
+      }
+
+      const ping = (id: string) =>
+        defineConformanceCase({
+          ...baseCase(id),
+          fixtures: [fixture.id],
+          run: Effect.gen(function* () {
+            const client = yield* HttpClient.HttpClient
+
+            const response = yield* client.execute(
+              HttpClientRequest.get('https://api.example.test/ping')
+            )
+
+            yield* expectEqual(response.status, 200, 'ping answers 200')
+          })
+        })
+
+      const report = yield* runConformance([ping('example.ping.one'), ping('example.ping.two')], {
+        target: { kind: 'replay' },
+        now,
+        fixtures: [fixture],
+        layer: () => ReplayHttpClient.layer([fixture])
+      })
+
+      expect(report.results.map(result => result.status)).toEqual(['passed', 'passed'])
+    })
+  )
+})
+
+describe('runConformance failures', () => {
+  it.effect(
+    'reports mismatches, own errors, layer build failures, and defects without crashing',
+    () =>
+      Effect.gen(function* () {
+        // Different error types per case: the run infers the union without annotations.
+        const cases = [
+          {
+            ...baseCase('example.fail.mismatch'),
+            run: expectConformance(false, 'reasoning arrived after text', {
+              expected: 'secret-expected-detail',
+              actual: 'secret-actual-detail'
+            })
+          },
+          {
+            ...baseCase('example.fail.own-error'),
+            run: Effect.fail(new CaseFailure({ message: 'upstream said no' }))
+          },
+          { ...baseCase('example.fail.layer'), run: Effect.void },
+          {
+            ...baseCase('example.fail.defect'),
+            run: Effect.die(new Error('unexpected\n  boom'))
+          },
+          baseCase('example.fail.after')
+        ]
+
+        const report = yield* runConformance(cases, {
+          target: { kind: 'emulated' },
+          now,
+          layer: testCase =>
+            testCase.id === 'example.fail.layer'
+              ? Layer.effectDiscard(
+                  Effect.fail(new LayerFailure({ message: 'emulator not ready' }))
+                )
+              : Layer.empty
+        })
+
+        expect(report.results.map(result => [result.id, result.status, result.failure])).toEqual([
+          [
+            'example.fail.mismatch',
+            'failed',
+            { kind: 'failure', tag: 'ConformanceMismatch', message: 'reasoning arrived after text' }
+          ],
+          [
+            'example.fail.own-error',
+            'failed',
+            { kind: 'failure', tag: 'CaseFailure', message: 'upstream said no' }
+          ],
+          [
+            'example.fail.layer',
+            'failed',
+            { kind: 'failure', tag: 'LayerFailure', message: 'emulator not ready' }
+          ],
+          ['example.fail.defect', 'failed', { kind: 'defect', message: 'unexpected boom' }],
+          ['example.fail.after', 'passed', undefined]
+        ])
+        expect(report.summary).toEqual({ passed: 1, failed: 4, skipped: 0 })
+        expect(conformanceReportFailed(report)).toBe(true)
+        expect(JSON.stringify(report)).not.toContain('secret-expected-detail')
+        expect(JSON.stringify(report)).not.toContain('secret-actual-detail')
+      })
+  )
+
+  it.effect(
+    'sanitizes failure messages: masks bearer tokens, collapses whitespace, caps length',
+    () =>
+      Effect.gen(function* () {
+        const long = 'x'.repeat(2_000)
+
+        const report = yield* runConformance(
+          [
+            {
+              ...baseCase('example.fail.bearer'),
+              run: Effect.fail(
+                new CaseFailure({ message: 'sent Authorization: Bearer abc.def-123\nthen failed' })
+              )
+            },
+            {
+              ...baseCase('example.fail.long'),
+              run: Effect.fail(new CaseFailure({ message: long }))
+            },
+            { ...baseCase('example.fail.string'), run: Effect.fail('plain string failure') },
+            { ...baseCase('example.fail.opaque'), run: Effect.fail({ status: 500 }) }
+          ],
+          { target: { kind: 'replay' }, now, layer: () => Layer.empty }
+        )
+
+        const [bearer, capped, plain, opaque] = report.results
+
+        expect(bearer?.failure?.message).toBe('sent Authorization: Bearer <redacted> then failed')
+        expect(capped?.failure?.message.length).toBe(500)
+        expect(capped?.failure?.message.endsWith('...')).toBe(true)
+        expect(plain?.failure).toEqual({ kind: 'failure', message: 'plain string failure' })
+        expect(opaque?.failure).toEqual({ kind: 'failure', message: 'case failed' })
+      })
+  )
+
+  it('requires the per-case layer to provide every case requirement', () => {
+    const needsCounter = defineConformanceCase({
+      ...baseCase('example.types.counter'),
+      run: Effect.gen(function* () {
+        yield* Counter
+      })
+    })
+
+    const needsNothing = baseCase('example.types.plain')
+
+    const provided: Effect.Effect<unknown, never, never> = runConformance(
+      [needsCounter, needsNothing],
+      { target: { kind: 'replay' }, layer: () => Layer.effect(Counter, Ref.make(0)) }
+    )
+
+    const missing = runConformance([needsCounter, needsNothing], {
+      target: { kind: 'replay' },
+      // @ts-expect-error the layer must provide Counter
+      layer: () => Layer.empty
+    })
+
+    expect(Effect.isEffect(provided) && Effect.isEffect(missing)).toBe(true)
+  })
+
+  it.effect('propagates interruption of the whole run', () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+
+      const fiber = yield* runConformance(
+        [
+          {
+            ...baseCase('example.slow.case'),
+            run: Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+          }
+        ],
+        { target: { kind: 'replay' }, now, layer: () => Layer.empty }
+      ).pipe(Effect.forkChild)
+
+      yield* Deferred.await(started)
+      yield* Fiber.interrupt(fiber)
+
+      const exit = yield* Fiber.await(fiber)
+
+      expect(Exit.isFailure(exit) && Exit.hasInterrupts(exit)).toBe(true)
+    })
+  )
+
+  it.effect('does not turn a case interrupting itself into a failed result', () =>
+    Effect.gen(function* () {
+      const exit = yield* runConformance(
+        [{ ...baseCase('example.self.interrupt'), run: Effect.interrupt }],
+        { target: { kind: 'replay' }, now, layer: () => Layer.empty }
+      ).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit) && Exit.hasInterrupts(exit)).toBe(true)
+    })
+  )
+})
+
+describe('runConformance concurrency', () => {
+  const recording = (log: Ref.Ref<ReadonlyArray<string>>, id: string) =>
+    defineConformanceCase({
+      ...baseCase(id),
+      run: Ref.update(log, entries => [...entries, `${id}:start`]).pipe(
+        Effect.andThen(Effect.yieldNow),
+        Effect.andThen(Ref.update(log, entries => [...entries, `${id}:end`]))
+      )
+    })
+
+  it.effect('runs one case at a time by default', () =>
+    Effect.gen(function* () {
+      const log = yield* Ref.make<ReadonlyArray<string>>([])
+
+      yield* runConformance([recording(log, 'example.seq.a'), recording(log, 'example.seq.b')], {
+        target: { kind: 'live', account: 'synthetic' },
+        now,
+        layer: () => Layer.empty
+      })
+
+      expect(yield* Ref.get(log)).toEqual([
+        'example.seq.a:start',
+        'example.seq.a:end',
+        'example.seq.b:start',
+        'example.seq.b:end'
+      ])
+    })
+  )
+
+  it.effect('runs cases in parallel up to the concurrency limit, keeping result order', () =>
+    Effect.gen(function* () {
+      const latch = yield* Deferred.make<void>()
+
+      const report = yield* runConformance(
+        [
+          { ...baseCase('example.par.waits'), run: Deferred.await(latch) },
+          { ...baseCase('example.par.opens'), run: Deferred.succeed(latch, undefined) }
+        ],
+        { target: { kind: 'replay' }, now, layer: () => Layer.empty, concurrency: 2 }
+      )
+
+      expect(report.results.map(result => [result.id, result.status])).toEqual([
+        ['example.par.waits', 'passed'],
+        ['example.par.opens', 'passed']
+      ])
+    })
+  )
+})
+
+describe('conformance warnings', () => {
+  const fixture = (
+    id: string,
+    evidence: WireFixture['evidence'],
+    recordedAt: string
+  ): WireFixture => ({
+    id,
+    caseId: 'example.warn.case',
+    evidence,
+    recordedAt,
+    account: 'synthetic',
+    endpoint: 'https://api.example.test/items',
+    exchanges: [
+      {
+        request: { method: 'GET', url: 'https://api.example.test/items' },
+        response: { status: 200, headers: {}, body: '[]' }
+      }
+    ]
+  })
+
+  const fixtures = [
+    fixture('example.warn.fresh-verified', 'verified', '2026-09-28'),
+    fixture('example.warn.fresh-unverified', 'unverified', '2026-09-28'),
+    fixture('example.warn.stale-verified', 'verified', '2026-08-01'),
+    fixture('example.warn.bad-date', 'verified', 'yesterday')
+  ]
+
+  const referencing = {
+    fixtures: [
+      'example.warn.fresh-verified',
+      'example.warn.fresh-unverified',
+      'example.warn.stale-verified',
+      'example.warn.bad-date',
+      'example.warn.absent'
+    ]
+  }
+
+  it('flags unverified cases and every fixture problem on replay', () => {
+    expect(
+      conformanceCaseWarnings(referencing, { target: { kind: 'replay' }, now, fixtures })
+    ).toEqual([
+      { kind: 'unverified-case' },
+      { kind: 'unverified-fixture', fixtureId: 'example.warn.fresh-unverified' },
+      { kind: 'stale-fixture', fixtureId: 'example.warn.stale-verified', ageDays: 59 },
+      { kind: 'stale-fixture', fixtureId: 'example.warn.bad-date' },
+      { kind: 'missing-fixture', fixtureId: 'example.warn.absent' }
+    ])
+  })
+
+  it('honours maxFixtureAgeDays for fixtures and observations', () => {
+    expect(
+      conformanceCaseWarnings(
+        { ...referencing, observed: { account: 'synthetic', date: '2026-09-20' } },
+        {
+          target: { kind: 'emulated' },
+          now,
+          fixtures: fixtures.slice(0, 1),
+          maxFixtureAgeDays: 0
+        }
+      )
+    ).toEqual([
+      { kind: 'stale-observation', ageDays: 9 },
+      { kind: 'stale-fixture', fixtureId: 'example.warn.fresh-verified', ageDays: 1 },
+      { kind: 'missing-fixture', fixtureId: 'example.warn.fresh-unverified' },
+      { kind: 'missing-fixture', fixtureId: 'example.warn.stale-verified' },
+      { kind: 'missing-fixture', fixtureId: 'example.warn.bad-date' },
+      { kind: 'missing-fixture', fixtureId: 'example.warn.absent' }
+    ])
+  })
+
+  it('reports no fixture warnings without supplied fixtures, and only case-level ones on live', () => {
+    expect(conformanceCaseWarnings(referencing, { target: { kind: 'replay' }, now })).toEqual([
+      { kind: 'unverified-case' }
+    ])
+
+    expect(
+      conformanceCaseWarnings(
+        { ...referencing, observed: { account: 'synthetic', date: '2026-07-01' } },
+        { target: { kind: 'live', account: 'synthetic' }, now, fixtures }
+      )
+    ).toEqual([{ kind: 'stale-observation', ageDays: 90 }])
+
+    expect(
+      conformanceCaseWarnings(
+        { ...referencing, observed: { account: 'synthetic', date: '2026-09-28' } },
+        { target: { kind: 'live', account: 'synthetic' }, now, fixtures }
+      )
+    ).toEqual([])
+  })
+
+  it.effect('attaches warnings to results, including skipped ones', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance(
+        [
+          defineConformanceCase({
+            id: 'example.warn.write',
+            safety: 'write-reversible',
+            docs: 'Docs claim.',
+            wire: 'Wire claim.',
+            fixtures: [],
+            run: Effect.void
+          })
+        ],
+        { target: { kind: 'live', account: 'synthetic' }, now, layer: () => Layer.empty }
+      )
+
+      expect(report.results[0]).toEqual({
+        id: 'example.warn.write',
+        safety: 'write-reversible',
+        status: 'skipped',
+        skipReason: 'writes-not-allowed',
+        durationMs: 0,
+        warnings: [{ kind: 'unverified-case' }]
+      })
+    })
+  )
+
+  it.effect('defaults the reference time to the Effect Clock', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance([baseCase('example.clock.case')], {
+        target: { kind: 'replay' },
+        layer: () => Layer.empty
+      })
+
+      // `it.effect` runs on the TestClock, which starts at the epoch.
+      expect(report.startedAt).toBe('1970-01-01T00:00:00.000Z')
+      // The observation (2026-09-20) is in the future relative to the epoch: not stale.
+      expect(report.results[0]?.warnings).toEqual([])
+    })
+  )
+})
+
+describe('formatConformanceReport', () => {
+  it.effect('prints one plain line per case and a summary line', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance(
+        [
+          defineConformanceCase({
+            id: 'example.format.pass',
+            safety: 'read',
+            docs: 'Docs claim.',
+            wire: 'Wire claim.',
+            fixtures: ['example.format.pass.synthetic', 'example.format.absent'],
+            run: Effect.void
+          }),
+          {
+            ...baseCase('example.format.fail'),
+            run: expectConformance(false, 'claim did not hold')
+          },
+          baseCase('example.format.skip', 'write-irreversible')
+        ],
+        {
+          target: { kind: 'live', account: 'synthetic' },
+          now,
+          layer: () => Layer.empty
+        }
+      )
+
+      expect(formatConformanceReport(report)).toBe(
+        [
+          'PASS  example.format.pass  [read]  warnings: unverified-case',
+          'FAIL  example.format.fail  [read]  ConformanceMismatch: claim did not hold',
+          'SKIP  example.format.skip  [write-irreversible]  manual-only',
+          '1 passed, 1 failed, 1 skipped; target live (account synthetic); started 2026-09-29T12:00:00.000Z'
+        ].join('\n')
+      )
+    })
+  )
+
+  it.effect('formats fixture warnings and defects', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance(
+        [
+          defineConformanceCase({
+            id: 'example.format.warn',
+            safety: 'read',
+            docs: 'Docs claim.',
+            wire: 'Wire claim.',
+            observed: { account: 'synthetic', date: '2026-01-01' },
+            fixtures: ['example.format.absent'],
+            run: Effect.die('boom')
+          })
+        ],
+        { target: { kind: 'replay' }, now, fixtures: [], layer: () => Layer.empty }
+      )
+
+      expect(formatConformanceReport(report)).toBe(
+        [
+          'FAIL  example.format.warn  [read]  defect boom  warnings: stale-observation(271d), missing-fixture:example.format.absent',
+          '0 passed, 1 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
+        ].join('\n')
+      )
+      expect(formatConformanceReport(report)).not.toMatch(/\u001b\[/)
+    })
+  )
+})

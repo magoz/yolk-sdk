@@ -5,7 +5,9 @@
 
 A small Effect-only toolkit for recording real HTTP exchanges with outside services, replaying them
 in tests (offline, fail closed), and injecting wire faults such as mid-stream drops, truncation,
-and rate-limit responses.
+and rate-limit responses. It also defines conformance cases (small Effect programs that each prove
+one claim about how a service really behaves on the wire) and a runner that decides which cases may
+run where and reports the results.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -19,11 +21,13 @@ pnpm add -D @yolk-sdk/conformance@canary effect@4.0.0-rc.115
 
 There is no root export. Import an explicit subpath:
 
-| Subpath                         | Purpose                                                                                                           |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/conformance/fixture` | `WireFixture` / `WireExchange` schemas and types, `decodeWireFixture`, staleness helpers, `scanFixtureForSecrets` |
-| `@yolk-sdk/conformance/replay`  | `ReplayHttpClient.layer`, `makeReplayHttpClient`, `ReplayLedger`, `WireFault`                                     |
-| `@yolk-sdk/conformance/record`  | `WireRecorder.layer`, `makeRecordingHttpClient`, `makeWireFixture`                                                |
+| Subpath                         | Purpose                                                                                                                    |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/conformance/fixture` | `WireFixture` / `WireExchange` schemas and types, `decodeWireFixture`, staleness helpers, `scanFixtureForSecrets`          |
+| `@yolk-sdk/conformance/replay`  | `ReplayHttpClient.layer`, `makeReplayHttpClient`, `ReplayLedger`, `WireFault`                                              |
+| `@yolk-sdk/conformance/record`  | `WireRecorder.layer`, `makeRecordingHttpClient`, `makeWireFixture`                                                         |
+| `@yolk-sdk/conformance/case`    | `defineConformanceCase`, `ConformanceCase`, `ConformanceSafety`, `expectConformance`, `expectEqual`, `ConformanceMismatch` |
+| `@yolk-sdk/conformance/runner`  | `runConformance`, `ConformanceTarget`, `ConformanceReport`, `conformanceSkipReason`, `formatConformanceReport`             |
 
 ## Fixtures
 
@@ -147,3 +151,114 @@ A request still pending at `drain` time is reported by that drain and then dropp
 later, it never appears in, or overwrites an entry of, a later drain.
 
 Only record against accounts and data you are allowed to publish, and keep live recording out of CI.
+
+## Cases
+
+A conformance case is a small, named, pure Effect program that proves one claim about how an outside
+service really behaves on the wire, next to what its docs say. It states only what it needs (its
+`R`), so the same case runs unchanged against replayed fixtures, an in-process emulator, a local
+emulator process, or a real practice account: only the layers change.
+
+```ts
+import { Effect } from 'effect'
+import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { defineConformanceCase, expectEqual } from '@yolk-sdk/conformance/case'
+
+export const missingItemCase = defineConformanceCase({
+  id: 'example.items.missing',
+  safety: 'read',
+  docs: 'The docs say a missing item returns 404.',
+  wire: 'A missing item returns 404 with an empty JSON object.',
+  fixtures: ['example.items.missing.synthetic'],
+  run: Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const response = yield* client.execute(
+      HttpClientRequest.get('https://api.example.test/items/0')
+    )
+
+    yield* expectEqual(response.status, 404, 'expected 404 for a missing item')
+  })
+})
+```
+
+- `id` is dotted lower-case (`a-z`, `0-9`, inner hyphens; two or more segments).
+- `safety` is `read` (only reads), `write-reversible` (writes but leaves the account as it found
+  it: it creates its own records and cleans up, or the write is rejected and changes nothing), or
+  `write-irreversible` (for example sending an email; never automated against a live account).
+- `docs` is what the documentation claims; `wire` is what the wire actually does.
+- `observed` (`{ account, date }`, a synthetic account label and `YYYY-MM-DD`) records the last time
+  a person watched the claim hold against the real service. Absent means unverified.
+- `fixtures` lists the `WireFixture` ids that back replay of the case.
+- `defineConformanceCase` validates this metadata and **throws** `ConformanceCaseInvalid` for an
+  invalid definition. Cases are module-level constants, so a bad one fails when its module loads
+  rather than mid-run.
+
+`expectConformance(condition, message, details?)` and `expectEqual(actual, expected, message)`
+fail with a `ConformanceMismatch` (`message`, optional JSON `expected` / `actual`). `expectEqual`
+compares JSON values structurally (effect `Equal.equals`: array order matters, object key order
+does not). Cases may also fail with their own errors or with the errors of the ports they use.
+
+## Runner
+
+```ts
+import { Effect } from 'effect'
+import { ReplayHttpClient } from '@yolk-sdk/conformance/replay'
+import { formatConformanceReport, runConformance } from '@yolk-sdk/conformance/runner'
+
+const text = await Effect.runPromise(
+  runConformance([missingItemCase], {
+    target: { kind: 'replay' },
+    fixtures: hostFixtures,
+    layer: testCase =>
+      ReplayHttpClient.layer(hostFixtures.filter(fixture => testCase.fixtures.includes(fixture.id)))
+  }).pipe(Effect.map(formatConformanceReport))
+)
+```
+
+`hostFixtures` is a placeholder for your own fixtures.
+
+Safety policy (`conformanceSkipReason`):
+
+| Target                             | `read` | `write-reversible`                                                    | `write-irreversible`                                                    |
+| ---------------------------------- | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `replay`, `in-process`, `emulated` | runs   | runs                                                                  | runs                                                                    |
+| `live` (`account` required)        | runs   | runs only with `allowWrites: 'reversible'`, else `writes-not-allowed` | runs only if its exact id is in `allowIrreversible`, else `manual-only` |
+
+`allowWrites` defaults to `'none'`. `allowIrreversible` lists the exact case ids a person
+explicitly started and applies regardless of `allowWrites`. Nothing real happens on the other
+targets, so every case runs there.
+
+- `layer(testCase)` is called once per case that runs (never for skipped cases) and must provide
+  what that case needs. It is built with a fresh memo map in its own scope, so replay consumption,
+  ledgers, and emulator state never leak between cases, even if the factory returns the same
+  `Layer` value. Whatever the layers still need (for example a host's live `HttpClient`) becomes
+  the requirement of the run.
+- Cases with different error and requirement types can share a run; the case type is inferred as
+  their union.
+- Each case runs under `Effect.exit`: typed failures, layer build failures, and defects become
+  `failed` results and the run continues. Interruption is not captured: interrupting the run, or a
+  case interrupting itself, interrupts the whole run.
+- `concurrency` defaults to 1 (live accounts are shared); results keep case order.
+- `now` defaults to the Effect `Clock`; `maxFixtureAgeDays` defaults to 30.
+
+A `ConformanceReport` has the `target` (kind, plus `account` for live), `startedAt` (ISO), one
+result per case (`id`, `safety`, `status` `passed` / `failed` / `skipped`, `skipReason`,
+`failure`, `durationMs`, `warnings`), and a `summary` count. `failure` is `{ kind, tag?, message }`
+with `kind` `failure` or `defect`; the message is the error's own message with whitespace
+collapsed, bearer tokens masked, and length capped. Request bodies, headers, and mismatch details
+are never copied into the report, so keep secrets out of error messages.
+
+Warnings are non-fatal and listed per case:
+
+| Warning              | When                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| `unverified-case`    | The case has no `observed`                                                           |
+| `stale-observation`  | `observed.date` is older than `maxFixtureAgeDays` (`ageDays`)                        |
+| `unverified-fixture` | A referenced fixture has `evidence: 'unverified'`                                    |
+| `stale-fixture`      | A referenced fixture is older than `maxFixtureAgeDays` (`ageDays`)                   |
+| `missing-fixture`    | A referenced fixture id is not in `fixtures` (only checked when `fixtures` is given) |
+
+Fixture warnings need `fixtures` and are not reported on a `live` target, where fixtures are not
+used; case-level warnings always are. `formatConformanceReport` prints one plain-text line per
+case (status, id, safety, skip reason or failure, warnings) and a summary line, without colors.
+`conformanceReportFailed` is true when any case failed; skipped cases never fail a report.

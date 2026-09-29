@@ -1,0 +1,8 @@
+---
+'@yolk-sdk/conformance': patch
+'@yolk-sdk/agent': patch
+---
+
+Add experimental conformance cases and a runner to `@yolk-sdk/conformance`. `./case` defines a case as a small Effect program proving one wire claim (`defineConformanceCase` with dotted lower-case ids, `read` / `write-reversible` / `write-irreversible` safety, `docs` vs `wire` claims, an optional live `observed` record, and backing fixture ids) plus `expectConformance` / `expectEqual` helpers that fail with a typed `ConformanceMismatch`. `./runner` adds `runConformance`, which skips cases a target does not allow (on a live account: reads run, reversible writes only with `allowWrites: 'reversible'`, irreversible writes only when explicitly listed by id), runs each allowed case with a freshly built layer, turns failures and defects into sanitized `failed` results, and reports unverified or stale cases and fixtures as warnings; `formatConformanceReport` prints a plain-text summary.
+
+`@yolk-sdk/agent/providers/vercel/conformance` now also exports four read-only Vercel AI Gateway conformance cases (plain-text streaming, DeepSeek reasoning before text, tool-call argument assembly, and the error envelope) that run against the replay fixtures or a host-provided live `HttpClient` via `VercelAiGatewayConformanceConfig`. They are not yet observed against the live Gateway.
