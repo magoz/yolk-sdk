@@ -1131,7 +1131,8 @@ draft attachments use this port only for session ranges: their authenticated Gra
 (`fileAttachment`, `createUploadSession`) travel over `ConnectorHttpClient`, whose host adapter
 must allow those Graph POSTs and a success body of `maxMetadataBytes` plus the echoed base64 content
 (about 4 MiB for a file just under 3 MiB), and must not log, trace or persist those request or
-response bodies (file content and the token-bearing `uploadUrl`). Hosts implementing `uploadSession`
+response bodies (file content and the token-bearing `uploadUrl`). The helper never reads their error
+bodies; cap oversized ones without failing so the status still maps. Hosts implementing `uploadSession`
 must allowlist the origin and path shape (Outlook: `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)` only), send the URL
 unchanged with no Authorization/cookies/ambient credentials, never log/trace/persist the URL (it
 embeds an auth token) or bodies, follow no redirects, never retry, apply the same TLS, DNS/socket,
