@@ -473,6 +473,22 @@ describe('makeWireFixture', () => {
         ])
       }
 
+      const bareCrSse = yield* makeWireFixture({
+        ...input,
+        exchanges: [
+          {
+            request: exchange.request,
+            response: {
+              status: 200,
+              headers: { 'content-type': 'text/event-stream' },
+              chunks: ['data: {"access_token":"opaque-', 'synthetic"}\r\rdata: [DONE]\r\r']
+            }
+          }
+        ]
+      }).pipe(Effect.flip)
+
+      expect(bareCrSse._tag).toBe('WireFixtureSecretsFound')
+
       const empty = yield* makeWireFixture({ ...input, exchanges: [] }).pipe(Effect.flip)
 
       expect(empty._tag).toBe('WireFixtureInvalid')

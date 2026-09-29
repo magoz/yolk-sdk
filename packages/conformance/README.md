@@ -48,8 +48,10 @@ fields (`access_token`, `client_secret`, `password`, `api_key`, `token`, ...; nu
 counters such as `max_tokens` are not flagged). It covers metadata strings, URLs, headers, request
 bodies, response bodies (including decodable `bodyBase64` text), each chunk, and the reassembled
 stream, so a secret split across chunks is still found; JSON bodies and SSE `data:` payloads get
-the credential-field scan. It reports locations, never the secret itself. The scan is a safety net,
-not a guarantee: review fixtures before publishing them.
+the credential-field scan. SSE framing with CRLF, LF, or bare CR line endings is recognized. It
+reports locations, never the secret itself. The scan errs toward flagging: a field named exactly
+`token` (for example an OpenAI `logprobs` entry) is flagged, so avoid recording logprobs. The scan
+is a safety net, not a guarantee: review fixtures before publishing them.
 
 `fixtureAgeDays(fixture, now)` and `isFixtureStale(fixture, now, maxAgeDays = 30)` help hosts
 decide when a recording should be refreshed.
@@ -102,7 +104,10 @@ Chunk faults take an optional 1-based `attempt`. A chunk fault that cannot take 
 request with an `HttpClientError` whose cause is `WireReplayInvalid` (ledger outcome `invalid`, no
 fault tag, exchange left unconsumed) instead of silently doing nothing: any chunk fault matched
 against a whole-body response, `TruncateAfterChunks` / `HoldAfterChunks` with `chunks` at or beyond
-the recorded chunk count, or `FailAfterChunks` with `chunks` beyond it.
+the recorded chunk count, or `FailAfterChunks` with `chunks` beyond it. The error reason is a
+`TransportError`, which generic transient-retry policies retry; when a test runs through a retrying
+client, also assert the ledger has no `invalid` outcome so a misconfigured fault cannot be retried
+into a silent success.
 
 ## Record
 

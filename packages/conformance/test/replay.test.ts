@@ -514,6 +514,38 @@ describe('ReplayHttpClient bytes', () => {
   )
 })
 
+describe('ReplayHttpClient hold cancellation', () => {
+  it.effect('interrupting a held consumer interrupts the release effect', () =>
+    Effect.gen(function* () {
+      const releaseStarted = yield* Deferred.make<void>()
+      const releaseInterrupted = yield* Deferred.make<void>()
+
+      const release = Deferred.succeed(releaseStarted, undefined).pipe(
+        Effect.andThen(Effect.never),
+        Effect.onInterrupt(() => Deferred.succeed(releaseInterrupted, undefined))
+      )
+
+      const program = Effect.gen(function* () {
+        const consumer = yield* readChunks(HttpClientRequest.post(`${base}/stream`)).pipe(
+          Effect.forkChild
+        )
+
+        yield* Deferred.await(releaseStarted)
+        yield* Fiber.interrupt(consumer)
+        yield* Deferred.await(releaseInterrupted)
+      })
+
+      yield* program.pipe(
+        withReplay([streamFixture], {
+          faults: [WireFault.HoldAfterChunks({ chunks: 1, release })]
+        })
+      )
+
+      expect(yield* Deferred.isDone(releaseInterrupted)).toBe(true)
+    })
+  )
+})
+
 describe('ReplayHttpClient fail-closed faults', () => {
   it.effect('an unfiltered status fault never answers an unknown request', () =>
     Effect.gen(function* () {

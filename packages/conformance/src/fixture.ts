@@ -275,15 +275,19 @@ const scanJson = (value: Schema.Json, location: string, issues: IssueSink): void
 const parseJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 // `data:` payloads of each server-sent event, multi-line data joined with `\n`.
+// SSE allows CRLF, LF, or bare CR line endings; normalize before splitting events.
 const sseDataPayloads = (text: string): ReadonlyArray<string> =>
-  text.split(/\r?\n\r?\n/).flatMap(event => {
-    const data = event
-      .split(/\r?\n/)
-      .filter(line => line.startsWith('data:'))
-      .map(line => line.slice('data:'.length).replace(/^ /, ''))
+  text
+    .replace(/\r\n?/g, '\n')
+    .split('\n\n')
+    .flatMap(event => {
+      const data = event
+        .split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice('data:'.length).replace(/^ /, ''))
 
-    return data.length > 0 ? [data.join('\n')] : []
-  })
+      return data.length > 0 ? [data.join('\n')] : []
+    })
 
 /**
  * Scan a whole payload (request/response body or reassembled stream): token

@@ -479,15 +479,36 @@ const SseChunkPayload = Schema.Struct({
 
 const decodeSseChunkPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(SseChunkPayload))
 
-// Gateway SSE fixtures are recorded as UTF-8 text chunks.
-const fixtureChunks = (fixture: WireFixture): ReadonlyArray<string> => {
+// Recorded chunks are text, or `{ base64 }` when a network chunk is not standalone UTF-8
+// (for example a multibyte character split across chunks). Keep the original bytes per chunk.
+const fixtureChunkBytes = (fixture: WireFixture): ReadonlyArray<Uint8Array> => {
   const response = fixture.exchanges[0].response
 
   return isWireStreamResponse(response)
     ? response.chunks.map(chunk =>
-        Predicate.isString(chunk) ? chunk : expect.fail(`fixture ${fixture.id} has a base64 chunk`)
+        Predicate.isString(chunk)
+          ? new TextEncoder().encode(chunk)
+          : Uint8Array.from(atob(chunk.base64), char => char.charCodeAt(0))
       )
     : []
+}
+
+// Per-chunk text for locating ASCII markers; a split multibyte character decodes lossily here.
+const fixtureChunks = (fixture: WireFixture): ReadonlyArray<string> =>
+  fixtureChunkBytes(fixture).map(bytes => new TextDecoder().decode(bytes))
+
+// The whole stream decoded from its reassembled bytes.
+const fixtureStreamText = (fixture: WireFixture): string => {
+  const parts = fixtureChunkBytes(fixture)
+  const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
+  let offset = 0
+
+  for (const part of parts) {
+    joined.set(part, offset)
+    offset += part.length
+  }
+
+  return new TextDecoder('utf-8', { fatal: true }).decode(joined)
 }
 
 const fixtureModel = (fixture: WireFixture): string => {
@@ -500,8 +521,7 @@ const fixtureModel = (fixture: WireFixture): string => {
 
 const fixtureDeltas = (fixture: WireFixture) =>
   Effect.gen(function* () {
-    const payloads = fixtureChunks(fixture)
-      .join('')
+    const payloads = fixtureStreamText(fixture)
       .split('\n\n')
       .map(block => block.replace(/^data: ?/, ''))
       .filter(payload => payload.length > 0 && payload !== '[DONE]')
@@ -635,7 +655,65 @@ describe('Vercel AI Gateway wire fixtures', () => {
   })
 })
 
+// Derive a lossless recording where a multibyte character in a content delta is split across two
+// network chunks, as the recorder stores it: the halves become `{ base64 }` chunks.
+const splitMultibyteFixture = (): WireFixture => {
+  const base = vercelAiGatewayPlainTextFixture
+  const [exchange] = base.exchanges
+  const response = exchange.response
+
+  if (!isWireStreamResponse(response)) {
+    return expect.fail('plain-text fixture must be a stream')
+  }
+
+  const target = response.chunks.findIndex(
+    chunk => Predicate.isString(chunk) && chunk.includes('"content":"Hello"')
+  )
+
+  const source = response.chunks[target]
+
+  if (!Predicate.isString(source)) {
+    return expect.fail('plain-text fixture must contain the Hello delta as text')
+  }
+
+  const bytes = new TextEncoder().encode(source.replace('"Hello"', '"H\u00e9llo"'))
+  // "\u00e9" is 0xC3 0xA9; cut between the two bytes.
+  const cut = bytes.indexOf(0xc3) + 1
+  const toBase64 = (part: Uint8Array) => btoa(String.fromCharCode(...part))
+
+  const chunks = [
+    ...response.chunks.slice(0, target),
+    { base64: toBase64(bytes.slice(0, cut)) },
+    { base64: toBase64(bytes.slice(cut)) },
+    ...response.chunks.slice(target + 1)
+  ]
+
+  return {
+    ...base,
+    id: `${base.id}.split-multibyte`,
+    exchanges: [{ request: exchange.request, response: { ...response, chunks } }]
+  }
+}
+
 describe('Vercel AI Gateway streaming over replayed fixtures', () => {
+  it.effect('streams a multibyte character split across lossless base64 chunks', () =>
+    Effect.gen(function* () {
+      const fixture = splitMultibyteFixture()
+
+      expect(scanFixtureForSecrets(fixture)).toEqual([])
+      expect((yield* decodeWireFixture(fixture)).id).toBe(fixture.id)
+
+      const events = Array.from(
+        yield* gatewayStream({ model: fixtureModel(fixture) }).pipe(Stream.runCollect)
+      )
+
+      const expected = yield* fixtureDeltas(fixture)
+
+      expect(expected.content).toContain('H\u00e9llo')
+      expect(textOf(events)).toBe(expected.content)
+    }).pipe(Effect.provide(replayGatewayLayer(streamingGatewayConfig, [splitMultibyteFixture()])))
+  )
+
   it.effect('streams plain text deltas, done, and usage with a streaming request', () =>
     Effect.gen(function* () {
       const fixture = vercelAiGatewayPlainTextFixture

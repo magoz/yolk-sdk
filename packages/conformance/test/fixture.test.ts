@@ -268,6 +268,32 @@ describe('scanFixtureForSecrets', () => {
     noSecretValues(issues)
   })
 
+  it('flags credential fields in SSE framed with CRLF or bare CR line endings', () => {
+    for (const eol of ['\r\n', '\r']) {
+      const issues = scanFixtureForSecrets(
+        withExchange({
+          request: getRequest,
+          response: {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+            chunks: [
+              `data: {"ok":true}${eol}${eol}data: {"access_token":"opaque-`,
+              `synthetic"}${eol}${eol}data: [DONE]${eol}${eol}`
+            ]
+          }
+        })
+      )
+
+      expect(issues).toEqual([
+        {
+          kind: 'credential_field',
+          location: 'exchanges[0].response.chunks.events[1].access_token'
+        }
+      ])
+      noSecretValues(issues)
+    }
+  })
+
   it('flags a key split across stream chunks in the reassembled stream', () => {
     const issues = scanFixtureForSecrets(
       withExchange({

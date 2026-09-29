@@ -45,7 +45,10 @@ There is no root export or barrel.
 - Streamed responses replay the exact recorded bytes: one `Uint8Array` per chunk (including empty
   ones), each produced only on pull.
 - Chunk faults that cannot take effect fail the request (`WireReplayInvalid` cause, ledger outcome
-  `invalid`, no fault tag); never a silent no-op.
+  `invalid`, no fault tag); never a silent no-op. The reason is a `TransportError`, so retrying
+  clients may retry past it; tests through retrying clients assert no `invalid` ledger outcome.
+- `HoldAfterChunks` keeps the release fiber and interrupts it when the body is cancelled.
+- SSE scanning normalizes CRLF and bare CR line endings before splitting events.
 - `FailAfterChunks` fails the body the way `FetchHttpClient` reports a dropped connection
   (`HttpClientError` with a `DecodeError` reason whose cause is `WireTransportFault`).
 - Recorder allowlists headers and always drops credential headers; the caller must receive the

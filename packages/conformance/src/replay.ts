@@ -9,7 +9,20 @@
  *
  * @experimental
  */
-import { Context, Data, Effect, Layer, Match, Option, Predicate, Ref, Result } from 'effect'
+import {
+  Cause,
+  Context,
+  Data,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Match,
+  Option,
+  Predicate,
+  Ref,
+  Result
+} from 'effect'
 import type * as Schema from 'effect/Schema'
 import {
   HttpClient,
@@ -305,6 +318,8 @@ const bodyReadable = (
 ): ReadableStream<Uint8Array> => {
   let next = 0
   let faultApplied = false
+  let cancelled = false
+  let held: Fiber.Fiber<void> | undefined
 
   const emitNext = (controller: ReadableStreamDefaultController<Uint8Array>): void => {
     const chunk = chunks[next]
@@ -334,9 +349,38 @@ const bodyReadable = (
           FailAfterChunks: ({ chunks: afterChunks }) =>
             controller.error(new WireTransportFault({ afterChunks })),
           TruncateAfterChunks: () => controller.close(),
-          HoldAfterChunks: ({ release }) =>
-            Effect.runPromise(release).then(() => emitNext(controller))
+          HoldAfterChunks: ({ release }) => {
+            // Keep the release fiber so cancelling the body interrupts it (and runs its finalizers).
+            // `runFork` starts `release` synchronously, so a cancel can land before `held` is set.
+            const fiber = Effect.runFork(release)
+            held = fiber
+
+            if (cancelled) {
+              held = undefined
+
+              return Effect.runPromise(Fiber.interrupt(fiber))
+            }
+
+            return Effect.runPromise(Fiber.await(fiber)).then(exit => {
+              held = undefined
+
+              if (cancelled) return
+
+              if (Exit.isSuccess(exit)) {
+                emitNext(controller)
+              } else {
+                controller.error(Cause.squash(exit.cause))
+              }
+            })
+          }
         })
+      },
+      cancel: () => {
+        cancelled = true
+
+        if (held === undefined) return
+
+        return Effect.runPromise(Fiber.interrupt(held))
       }
     },
     { highWaterMark: 0 }

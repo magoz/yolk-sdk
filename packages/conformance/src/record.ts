@@ -207,9 +207,9 @@ const recordRequest = (
  * UTF-8 on its own (empty chunks as `""`), otherwise as `{ base64 }` of its
  * exact bytes. Other responses are recorded as one `body` (valid UTF-8) or
  * `bodyBase64` (anything else). The caller receives the same status, headers,
- * and bytes. Body
- * read failures still reach the caller as `HttpClientError`s (the upstream
- * error is kept as the cause), matching how `FetchHttpClient` reports them.
+ * and bytes. Body read failures still reach the caller as `HttpClientError`s
+ * (the upstream error is kept as the cause), matching how `FetchHttpClient`
+ * reports them.
  */
 export const makeRecordingHttpClient = (
   upstream: HttpClient.HttpClient,
