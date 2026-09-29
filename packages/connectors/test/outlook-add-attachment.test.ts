@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber, Layer, Predicate, Result } from 'effect'
+import * as TestClock from 'effect/testing/TestClock'
 import * as Schema from 'effect/Schema'
 import {
   ConnectorBinaryHttpError,
@@ -577,6 +578,39 @@ describe('addOutlookAttachment host-only helper', () => {
 
       expect(host.sessionRequests.map(request => request.method)).toEqual(['PUT', 'DELETE'])
       expect(host.sessionRequests[1]?.url).toBe(uploadUrl)
+    })
+  )
+
+  it.effect('bounds a hanging session cancellation at 10 seconds', () =>
+    Effect.gen(function* () {
+      const cancelling = yield* Deferred.make<void>()
+
+      const host = makeHost({
+        graph: [Effect.succeed(json({ uploadUrl }, 201))],
+        session: [
+          Effect.succeed(empty(500)),
+          Deferred.succeed(cancelling, undefined).pipe(Effect.andThen(Effect.never))
+        ]
+      })
+
+      const fiber = yield* addOutlookAttachment(
+        integration,
+        {
+          messageId: 'draft',
+          name: 'x.bin',
+          contentType: 'image/png',
+          bytes: patterned(outlookAttachmentSingleRequestMaxBytes)
+        },
+        budget
+      ).pipe(Effect.provide(host.layer), Effect.result, Effect.forkChild)
+
+      yield* Deferred.await(cancelling)
+      yield* TestClock.adjust('10 seconds')
+
+      const result = yield* Fiber.join(fiber)
+
+      expect(failureOf(result)).toMatchObject({ status: 500 })
+      expect(host.sessionRequests.map(request => request.method)).toEqual(['PUT', 'DELETE'])
     })
   )
 

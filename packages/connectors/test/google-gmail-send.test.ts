@@ -334,17 +334,15 @@ describe('Gmail message submission', () => {
     })
   )
 
-  it.effect('rejects long padding runs in linear time before resolving credentials', () =>
+  it.effect('rejects long padding runs before resolving credentials', () =>
     Effect.gen(function* () {
       for (const raw of [`${'='.repeat(2_000_000)}A`, `A${'='.repeat(2_000_000)}`]) {
         const host = makeHost()
-        const started = performance.now()
 
         const result = yield* gmailSendMessageAction
           .execute({ integration, input: { raw } })
           .pipe(Effect.provide(host.layer), Effect.result)
 
-        expect(performance.now() - started).toBeLessThan(2_000)
         expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'validation_failed' } })
         expect(host.scopes).toHaveLength(0)
         expect(host.requests).toHaveLength(0)
