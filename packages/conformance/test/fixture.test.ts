@@ -1,10 +1,12 @@
-import { Effect } from 'effect'
+import { Effect, Encoding } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   decodeWireFixture,
   fixtureAgeDays,
   isFixtureStale,
   scanFixtureForSecrets,
+  type FixtureSecretIssue,
+  type WireExchange,
   type WireFixture
 } from '../src/fixture.ts'
 
@@ -51,6 +53,57 @@ describe('wire fixture schema', () => {
       expect(decoded.exchanges).toHaveLength(2)
       expect(decoded.exchanges[0]?.response).toHaveProperty('chunks')
       expect(decoded.exchanges[1]?.response).toHaveProperty('body', '{"error":"missing"}')
+    })
+  )
+
+  it.effect('decodes base64 chunks and bodyBase64 bodies', () =>
+    Effect.gen(function* () {
+      const decoded = yield* decodeWireFixture({
+        ...cleanFixture,
+        exchanges: [
+          {
+            request: { method: 'GET', url: 'https://api.example.test/v1/stream' },
+            response: { status: 200, headers: {}, chunks: ['data: caf', { base64: 'ww==' }, ''] }
+          },
+          {
+            request: { method: 'GET', url: 'https://api.example.test/v1/document' },
+            response: { status: 200, headers: {}, bodyBase64: 'JVBERi3/' }
+          }
+        ]
+      })
+
+      expect(decoded.exchanges[0]?.response).toMatchObject({
+        chunks: ['data: caf', { base64: 'ww==' }, '']
+      })
+      expect(decoded.exchanges[1]?.response).toEqual({
+        status: 200,
+        headers: {},
+        bodyBase64: 'JVBERi3/'
+      })
+    })
+  )
+
+  it.effect('requires exactly one of body, bodyBase64, or chunks', () =>
+    Effect.gen(function* () {
+      const request = { method: 'GET', url: 'https://api.example.test/v1/document' }
+
+      const responses: ReadonlyArray<unknown> = [
+        { status: 200, headers: {}, body: '', bodyBase64: 'JVBERi3/' },
+        { status: 200, headers: {}, body: '', chunks: [] },
+        { status: 200, headers: {}, bodyBase64: 'JVBERi3/', chunks: [] },
+        { status: 200, headers: {} },
+        { status: 200, headers: {}, bodyBase64: 'not base64!' },
+        { status: 200, headers: {}, chunks: [{ base64: 'not base64!' }] }
+      ]
+
+      for (const response of responses) {
+        const error = yield* decodeWireFixture({
+          ...cleanFixture,
+          exchanges: [{ request, response }]
+        }).pipe(Effect.flip)
+
+        expect(error._tag).toBe('SchemaError')
+      }
     })
   )
 
@@ -152,5 +205,227 @@ describe('scanFixtureForSecrets', () => {
     expect(issues.some(issue => issue.location.includes('chunks[0]'))).toBe(false)
     expect(JSON.stringify(issues)).not.toContain('synthetic-token-value')
     expect(JSON.stringify(issues)).not.toContain(syntheticKey)
+  })
+
+  const syntheticKey = ['sk', 'synthetic0000000000000000'].join('-')
+
+  const withExchange = (exchange: WireExchange): WireFixture => ({
+    ...cleanFixture,
+    exchanges: [exchange]
+  })
+
+  const getRequest = { method: 'GET', url: 'https://api.example.test/v1/me' }
+
+  const noSecretValues = (issues: ReadonlyArray<FixtureSecretIssue>) => {
+    const serialized = JSON.stringify(issues)
+
+    for (const value of ['opaque-synthetic', 'synthetic-refresh', syntheticKey, 'synthetic-pw']) {
+      expect(serialized).not.toContain(value)
+    }
+  }
+
+  it('flags opaque credential fields in a JSON response body', () => {
+    const issues = scanFixtureForSecrets(
+      withExchange({
+        request: getRequest,
+        response: {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: '{"access_token":"opaque-synthetic","refresh_token":"synthetic-refresh","expires_in":3600,"token_type":"bearer"}'
+        }
+      })
+    )
+
+    expect(issues).toEqual([
+      { kind: 'credential_field', location: 'exchanges[0].response.body.access_token' },
+      { kind: 'credential_field', location: 'exchanges[0].response.body.refresh_token' }
+    ])
+    noSecretValues(issues)
+  })
+
+  it('flags credential fields inside SSE data payloads of a stream', () => {
+    const issues = scanFixtureForSecrets(
+      withExchange({
+        request: getRequest,
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [
+            'data: {"ok":true}\n\n',
+            'data: {"session":{"apiKey":"opaque-',
+            'synthetic"}}\n\n'
+          ]
+        }
+      })
+    )
+
+    expect(issues).toEqual([
+      {
+        kind: 'credential_field',
+        location: 'exchanges[0].response.chunks.events[1].session.apiKey'
+      }
+    ])
+    noSecretValues(issues)
+  })
+
+  it('flags a key split across stream chunks in the reassembled stream', () => {
+    const issues = scanFixtureForSecrets(
+      withExchange({
+        request: getRequest,
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [`data: ${syntheticKey.slice(0, 10)}`, `${syntheticKey.slice(10)}\n\n`]
+        }
+      })
+    )
+
+    expect(issues).toEqual([{ kind: 'api_key', location: 'exchanges[0].response.chunks' }])
+    noSecretValues(issues)
+  })
+
+  it('scans the decodable text of base64 chunks and bodyBase64 bodies', () => {
+    const encoded = Encoding.encodeBase64(`{"password":"synthetic-pw","key":"${syntheticKey}"}`)
+
+    const stream = scanFixtureForSecrets(
+      withExchange({
+        request: getRequest,
+        response: { status: 200, headers: {}, chunks: [{ base64: encoded }] }
+      })
+    )
+
+    expect(stream).toEqual(
+      expect.arrayContaining([
+        { kind: 'api_key', location: 'exchanges[0].response.chunks[0]' },
+        { kind: 'credential_field', location: 'exchanges[0].response.chunks.password' }
+      ])
+    )
+
+    const body = scanFixtureForSecrets(
+      withExchange({
+        request: getRequest,
+        response: { status: 200, headers: {}, bodyBase64: encoded }
+      })
+    )
+
+    expect(body).toEqual(
+      expect.arrayContaining([
+        { kind: 'api_key', location: 'exchanges[0].response.bodyBase64' },
+        { kind: 'credential_field', location: 'exchanges[0].response.bodyBase64.password' }
+      ])
+    )
+    noSecretValues([...stream, ...body])
+  })
+
+  it('flags credential parameters in form-encoded request and response bodies', () => {
+    const issues = scanFixtureForSecrets(
+      withExchange({
+        request: {
+          method: 'POST',
+          url: 'https://auth.example.test/oauth/token',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: 'grant_type=refresh_token&refresh_token=synthetic-refresh&client_secret=opaque-synthetic'
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: 'access_token=opaque-synthetic&scope=repo'
+        }
+      })
+    )
+
+    expect(issues).toEqual([
+      { kind: 'credential_query_param', location: 'exchanges[0].request.body' },
+      { kind: 'credential_query_param', location: 'exchanges[0].response.body' }
+    ])
+    noSecretValues(issues)
+  })
+
+  it('scans fixture metadata strings with the token patterns', () => {
+    const issues = scanFixtureForSecrets({
+      ...cleanFixture,
+      id: `example.${syntheticKey}`,
+      caseId: 'example.case',
+      account: `Bearer ${'opaque-synthetic'}`,
+      model: syntheticKey,
+      note: `recorded with ${syntheticKey}`
+    })
+
+    expect(issues).toEqual([
+      { kind: 'api_key', location: 'id' },
+      { kind: 'bearer_token', location: 'account' },
+      { kind: 'api_key', location: 'model' },
+      { kind: 'api_key', location: 'note' }
+    ])
+    noSecretValues(issues)
+  })
+
+  it('flags token and key bearing headers but not content, retry, or rate-limit headers', () => {
+    const issues = scanFixtureForSecrets(
+      withExchange({
+        request: {
+          ...getRequest,
+          headers: {
+            'x-auth-token': 'opaque-synthetic',
+            'private-token': 'opaque-synthetic',
+            'x-figma-token': 'opaque-synthetic',
+            'x-service-token': 'opaque-synthetic',
+            'x-service-key': 'opaque-synthetic',
+            'content-type': 'application/json',
+            accept: 'application/json'
+          }
+        },
+        response: {
+          status: 429,
+          headers: {
+            'content-type': 'application/json',
+            'retry-after': '3',
+            'x-ratelimit-remaining-tokens': '100',
+            'x-ratelimit-limit-tokens': '1000',
+            'anthropic-ratelimit-input-tokens-remaining': '10',
+            'ratelimit-reset': '5'
+          },
+          body: '{}'
+        }
+      })
+    )
+
+    expect(issues).toEqual(
+      ['x-auth-token', 'private-token', 'x-figma-token', 'x-service-token', 'x-service-key'].map(
+        name => ({ kind: 'credential_header', location: `exchanges[0].request.headers.${name}` })
+      )
+    )
+    noSecretValues(issues)
+  })
+
+  it('does not flag usage counters, plural token fields, or non-string credential fields', () => {
+    const usage = {
+      max_tokens: 64,
+      max_completion_tokens: 64,
+      max_output_tokens: 64,
+      prompt_tokens: 14,
+      completion_tokens: 6,
+      total_tokens: 20,
+      reasoning_tokens: 4,
+      completion_tokens_details: { reasoning_tokens: 4 },
+      tokens: 'many',
+      token_budget: 'low',
+      token: '',
+      password: 5,
+      secret: null
+    }
+
+    const issues = scanFixtureForSecrets(
+      withExchange({
+        request: { method: 'POST', url: 'https://api.example.test/v1/chat', body: usage },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [`data: ${JSON.stringify({ usage })}\n\n`, 'data: [DONE]\n\n']
+        }
+      })
+    )
+
+    expect(issues).toEqual([])
   })
 })

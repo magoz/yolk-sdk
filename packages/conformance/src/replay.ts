@@ -9,7 +9,7 @@
  *
  * @experimental
  */
-import { Context, Data, Effect, Layer, Match, Option, Ref, Stream } from 'effect'
+import { Context, Data, Effect, Layer, Match, Option, Predicate, Ref, Result } from 'effect'
 import type * as Schema from 'effect/Schema'
 import {
   HttpClient,
@@ -18,13 +18,16 @@ import {
   type HttpClientRequest
 } from 'effect/unstable/http'
 import {
+  isWireBase64BodyResponse,
   isWireStreamResponse,
+  type WireChunk,
   type WireExchange,
   type WireFixture,
   type WireHeaders,
   type WireResponse
 } from './fixture.ts'
 import {
+  decodeBase64Bytes,
   headerRecord,
   isNullBodyStatus,
   normalizeWireUrl,
@@ -49,7 +52,9 @@ export type WireFaultMatch = {
  * per method + normalized URL.
  *
  * - `StatusOnAttempt`: respond with this status instead of consuming a recorded
- *   exchange, so the next attempt still gets the recording.
+ *   exchange, so the next attempt still gets the recording. It fires only when
+ *   an unconsumed recorded exchange exists for the method + normalized URL;
+ *   unknown or exhausted requests still fail closed as `unmatched`.
  * - `FailAfterChunks`: emit the first `chunks` recorded chunks, then fail the
  *   body stream the way a dropped connection does under `FetchHttpClient`.
  * - `TruncateAfterChunks`: emit the first `chunks` recorded chunks, then end
@@ -57,8 +62,12 @@ export type WireFaultMatch = {
  * - `HoldAfterChunks`: emit the first `chunks` recorded chunks, run `release`,
  *   then emit the rest.
  *
- * Chunk faults apply only to streamed (`chunks`) responses; `attempt` omitted
- * means every matching attempt.
+ * `attempt` omitted means every matching attempt. A chunk fault that cannot
+ * take effect fails the request with a typed `HttpClientError` (and a ledger
+ * `invalid` outcome) instead of silently doing nothing: any chunk fault matched
+ * against a whole-body response, `TruncateAfterChunks`/`HoldAfterChunks` with
+ * `chunks` >= the recorded chunk count, or `FailAfterChunks` with `chunks` >
+ * the recorded chunk count.
  */
 export type WireFault = Data.TaggedEnum<{
   StatusOnAttempt: {
@@ -103,12 +112,22 @@ export class WireTransportFault extends Data.TaggedError('WireTransportFault')<{
 
 /**
  * How a replayed request was answered: a recorded exchange, a response
- * injected by a `StatusOnAttempt` fault, or nothing (fail closed).
+ * injected by a `StatusOnAttempt` fault, nothing (fail closed), or a matched
+ * exchange that could not be replayed (`invalid`: a chunk fault that cannot
+ * take effect, or undecodable base64). `invalid` requests fail with a typed
+ * `HttpClientError` and do not consume the exchange.
  */
 export type ReplayLedgerMatch =
   | { readonly outcome: 'matched'; readonly fixtureId: string; readonly exchangeIndex: number }
   | { readonly outcome: 'injected' }
   | { readonly outcome: 'unmatched' }
+  | {
+      readonly outcome: 'invalid'
+      readonly fixtureId: string
+      readonly exchangeIndex: number
+      /** Why the recording could not be replayed; never contains request or response data. */
+      readonly reason: string
+    }
 
 export type ReplayLedgerEntry = {
   readonly method: string
@@ -122,7 +141,7 @@ export type ReplayLedgerEntry = {
   /** 1-based attempt number for this method + URL. */
   readonly attempt: number
   readonly match: ReplayLedgerMatch
-  /** Tag of the fault that shaped this response, if any. */
+  /** Tag of the fault that shaped this response, if any (never set for a fault that did not apply). */
   readonly fault?: WireFaultTag
 }
 
@@ -160,13 +179,23 @@ type ReplayState = {
   readonly entries: ReadonlyArray<ReplayLedgerEntry>
 }
 
+// Bytes to replay: one whole body, or one Uint8Array per recorded chunk.
+type ReplayBody =
+  | { readonly kind: 'body'; readonly body: string | Uint8Array<ArrayBuffer> }
+  | {
+      readonly kind: 'chunks'
+      readonly chunks: ReadonlyArray<Uint8Array>
+      readonly fault: ChunkFault | undefined
+    }
+
 type ReplayDecision =
   | { readonly kind: 'status'; readonly fault: Extract<WireFault, { _tag: 'StatusOnAttempt' }> }
   | {
       readonly kind: 'exchange'
       readonly response: WireResponse
-      readonly fault: ChunkFault | undefined
+      readonly body: ReplayBody
     }
+  | { readonly kind: 'invalid'; readonly reason: string }
   | { readonly kind: 'unmatched' }
 
 type LedgerEntryFields = {
@@ -209,53 +238,123 @@ const candidatesFrom = (fixtures: ReadonlyArray<WireFixture>): ReadonlyArray<Can
   return candidates
 }
 
-const bodyStream = (
-  chunks: ReadonlyArray<string>,
-  fault: ChunkFault | undefined
-): Stream.Stream<Uint8Array, WireTransportFault> => {
-  const encoder = new TextEncoder()
+const chunkBytes = (chunk: WireChunk): Option.Option<Uint8Array> =>
+  Predicate.isString(chunk)
+    ? Option.some(new TextEncoder().encode(chunk))
+    : decodeBase64Bytes(chunk.base64)
 
-  // One Uint8Array per recorded chunk, each in its own stream chunk so the
-  // consumer observes the original boundaries progressively.
-  const emit = (texts: ReadonlyArray<string>) =>
-    Stream.fromIterable(texts).pipe(
-      Stream.map(text => encoder.encode(text)),
-      Stream.rechunk(1)
-    )
-
-  if (fault === undefined) {
-    return emit(chunks)
+const chunkFaultProblem = (fault: ChunkFault, recorded: number): string | undefined => {
+  if (!Number.isSafeInteger(fault.chunks) || fault.chunks < 0) {
+    return `${fault._tag} needs a non-negative integer chunk count`
   }
 
-  const head = emit(chunks.slice(0, fault.chunks))
-  const rest = chunks.slice(fault.chunks)
+  // `FailAfterChunks` may fail after the last chunk; truncating or holding
+  // there would change nothing.
+  const applies = WireFault.$is('FailAfterChunks')(fault)
+    ? fault.chunks <= recorded
+    : fault.chunks < recorded
 
-  return Match.valueTags(fault, {
-    FailAfterChunks: ({ chunks: afterChunks }) =>
-      head.pipe(Stream.concat(Stream.fail(new WireTransportFault({ afterChunks })))),
-    TruncateAfterChunks: () => head,
-    HoldAfterChunks: ({ release }) =>
-      head.pipe(Stream.concat(Stream.fromEffectDrain(release)), Stream.concat(emit(rest)))
-  })
+  return applies
+    ? undefined
+    : `${fault._tag} after ${fault.chunks} chunk(s) cannot apply to a response with ${recorded} recorded chunk(s)`
 }
 
-const webResponse = (response: WireResponse, fault: ChunkFault | undefined): Response => {
-  const init = { status: response.status, headers: { ...response.headers } }
+/** Resolve the exact bytes to replay, or why the recording cannot be replayed as requested. */
+const replayBody = (
+  response: WireResponse,
+  fault: ChunkFault | undefined
+): Result.Result<ReplayBody, string> => {
+  if (isWireStreamResponse(response)) {
+    const chunks = Option.all(response.chunks.map(chunkBytes))
 
-  if (isNullBodyStatus(response.status)) {
+    if (Option.isNone(chunks)) {
+      return Result.fail('a recorded chunk is not valid base64')
+    }
+
+    const problem = fault === undefined ? undefined : chunkFaultProblem(fault, chunks.value.length)
+
+    return problem === undefined
+      ? Result.succeed({ kind: 'chunks', chunks: chunks.value, fault })
+      : Result.fail(problem)
+  }
+
+  if (fault !== undefined) {
+    return Result.fail(`${fault._tag} cannot apply to a whole-body response`)
+  }
+
+  if (isWireBase64BodyResponse(response)) {
+    return Option.match(decodeBase64Bytes(response.bodyBase64), {
+      onNone: () => Result.fail('the recorded bodyBase64 is not valid base64'),
+      // Copy into an ArrayBuffer-backed view, as `Response` requires.
+      onSome: bytes => Result.succeed({ kind: 'body', body: new Uint8Array(bytes) })
+    })
+  }
+
+  return Result.succeed({ kind: 'body', body: response.body })
+}
+
+/**
+ * Strictly pull-driven body: one `Uint8Array` per recorded chunk (including
+ * empty ones), and chunk `k` is produced only when the consumer pulls it,
+ * never ahead of demand. The fault (already validated against the chunk count)
+ * applies when the consumer pulls past `fault.chunks` chunks.
+ */
+const bodyReadable = (
+  chunks: ReadonlyArray<Uint8Array>,
+  fault: ChunkFault | undefined
+): ReadableStream<Uint8Array> => {
+  let next = 0
+  let faultApplied = false
+
+  const emitNext = (controller: ReadableStreamDefaultController<Uint8Array>): void => {
+    const chunk = chunks[next]
+
+    if (chunk === undefined) {
+      controller.close()
+
+      return
+    }
+
+    next += 1
+    controller.enqueue(chunk)
+  }
+
+  return new ReadableStream<Uint8Array>(
+    {
+      pull: controller => {
+        if (fault === undefined || faultApplied || next !== fault.chunks) {
+          emitNext(controller)
+
+          return
+        }
+
+        faultApplied = true
+
+        return Match.valueTags(fault, {
+          FailAfterChunks: ({ chunks: afterChunks }) =>
+            controller.error(new WireTransportFault({ afterChunks })),
+          TruncateAfterChunks: () => controller.close(),
+          HoldAfterChunks: ({ release }) =>
+            Effect.runPromise(release).then(() => emitNext(controller))
+        })
+      }
+    },
+    { highWaterMark: 0 }
+  )
+}
+
+const webResponse = (status: number, headers: WireHeaders, body: ReplayBody): Response => {
+  const init = { status, headers: { ...headers } }
+
+  if (isNullBodyStatus(status)) {
     return new Response(null, init)
   }
 
-  if (!isWireStreamResponse(response)) {
-    return new Response(response.body, init)
+  if (body.kind === 'body') {
+    return new Response(body.body, init)
   }
 
-  // highWaterMark 0: chunks are produced only when the consumer pulls.
-  const readable = Stream.toReadableStream(bodyStream(response.chunks, fault), {
-    strategy: { highWaterMark: 0 }
-  })
-
-  return new Response(readable, init)
+  return new Response(bodyReadable(body.chunks, body.fault), init)
 }
 
 const unmatchedError = (request: HttpClientRequest.HttpClientRequest) =>
@@ -274,6 +373,15 @@ const invalidRecordingError = (request: HttpClientRequest.HttpClientRequest, cau
       description: 'recorded response could not be replayed'
     })
   })
+
+/** Cause attached to the `HttpClientError` of a request whose recording could not be replayed. */
+export class WireReplayInvalid extends Data.TaggedError('WireReplayInvalid')<{
+  readonly reason: string
+}> {
+  override get message(): string {
+    return this.reason
+  }
+}
 
 /**
  * Build a replay `HttpClient` and its ledger over the given fixtures. Each
@@ -304,6 +412,18 @@ export const makeReplayHttpClient = (
         const attempts = new Map(current.attempts).set(key, attempt)
         const fields: LedgerEntryFields = { ...entry, attempt, match: { outcome: 'unmatched' } }
 
+        const candidate = candidates.find(
+          item => item.key === key && !current.consumed.has(item.id)
+        )
+
+        // Fail closed first: faults never answer unknown or exhausted requests.
+        if (candidate === undefined) {
+          return [
+            { kind: 'unmatched' },
+            { ...current, attempts, entries: [...current.entries, fields] }
+          ]
+        }
+
         const statusFault = faults
           .filter(WireFault.$is('StatusOnAttempt'))
           .find(
@@ -320,41 +440,38 @@ export const makeReplayHttpClient = (
           ]
         }
 
-        const candidate = candidates.find(
-          item => item.key === key && !current.consumed.has(item.id)
-        )
+        const response = candidate.exchange.response
 
-        if (candidate === undefined) {
+        const chunkFault = faults
+          .filter((fault): fault is ChunkFault => !WireFault.$is('StatusOnAttempt')(fault))
+          .find(
+            fault =>
+              (fault.attempt === undefined || fault.attempt === attempt) &&
+              faultMatches(fault.match, method, normalizedUrl)
+          )
+
+        const body = replayBody(response, chunkFault)
+        const ref = { fixtureId: candidate.fixtureId, exchangeIndex: candidate.exchangeIndex }
+
+        if (Result.isFailure(body)) {
+          // The fault (or recording) did not apply: record the failure, not the
+          // fault, and leave the exchange unconsumed.
+          fields.match = { outcome: 'invalid', ...ref, reason: body.failure }
+
           return [
-            { kind: 'unmatched' },
+            { kind: 'invalid', reason: body.failure },
             { ...current, attempts, entries: [...current.entries, fields] }
           ]
         }
 
-        const response = candidate.exchange.response
-
-        const chunkFault = isWireStreamResponse(response)
-          ? faults
-              .filter((fault): fault is ChunkFault => !WireFault.$is('StatusOnAttempt')(fault))
-              .find(
-                fault =>
-                  (fault.attempt === undefined || fault.attempt === attempt) &&
-                  faultMatches(fault.match, method, normalizedUrl)
-              )
-          : undefined
-
-        fields.match = {
-          outcome: 'matched',
-          fixtureId: candidate.fixtureId,
-          exchangeIndex: candidate.exchangeIndex
-        }
+        fields.match = { outcome: 'matched', ...ref }
 
         if (chunkFault !== undefined) {
           fields.fault = chunkFault._tag
         }
 
         return [
-          { kind: 'exchange', response, fault: chunkFault },
+          { kind: 'exchange', response, body: body.success },
           {
             consumed: new Set(current.consumed).add(candidate.id),
             attempts,
@@ -390,18 +507,20 @@ export const makeReplayHttpClient = (
           return yield* Effect.fail(unmatchedError(request))
         }
 
-        const response: WireResponse =
-          decision.kind === 'status'
-            ? {
-                status: decision.fault.status,
-                headers: decision.fault.headers ?? {},
-                body: decision.fault.body ?? ''
-              }
-            : decision.response
+        if (decision.kind === 'invalid') {
+          return yield* Effect.fail(
+            invalidRecordingError(request, new WireReplayInvalid({ reason: decision.reason }))
+          )
+        }
 
         const source = yield* Effect.try({
           try: () =>
-            webResponse(response, decision.kind === 'exchange' ? decision.fault : undefined),
+            decision.kind === 'status'
+              ? webResponse(decision.fault.status, decision.fault.headers ?? {}, {
+                  kind: 'body',
+                  body: decision.fault.body ?? ''
+                })
+              : webResponse(decision.response.status, decision.response.headers, decision.body),
           catch: cause => invalidRecordingError(request, cause)
         })
 

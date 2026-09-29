@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Predicate, Ref, Stream } from 'effect'
+import { Deferred, Effect, Encoding, Fiber, Predicate, Ref, Stream } from 'effect'
 import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { WireFixture } from '../src/fixture.ts'
@@ -6,6 +6,7 @@ import {
   ReplayHttpClient,
   ReplayLedger,
   WireFault,
+  WireReplayInvalid,
   WireTransportFault,
   type ReplayHttpClientOptions
 } from '../src/replay.ts'
@@ -68,6 +69,34 @@ const streamFixture: WireFixture = {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
         chunks: ['data: second\n\n']
+      }
+    }
+  ]
+}
+
+const bytesFixture: WireFixture = {
+  id: 'example.bytes',
+  caseId: 'example.bytes',
+  evidence: 'unverified',
+  recordedAt: '2026-09-01',
+  account: 'synthetic',
+  endpoint: `${base}/bytes`,
+  exchanges: [
+    {
+      request: { method: 'GET', url: `${base}/bytes` },
+      response: {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+        // "é" (0xC3 0xA9) split across two chunks, plus an empty chunk
+        chunks: ['data: caf', { base64: 'ww==' }, '', { base64: 'qQoK' }]
+      }
+    },
+    {
+      request: { method: 'GET', url: `${base}/document` },
+      response: {
+        status: 200,
+        headers: { 'content-type': 'application/pdf' },
+        bodyBase64: Encoding.encodeBase64(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0xff]))
       }
     }
   ]
@@ -168,6 +197,9 @@ describe('ReplayHttpClient matching', () => {
             HttpClientRequest.setHeaders({
               authorization: 'Bearer synthetic-secret',
               'x-api-key': 'synthetic-key',
+              'x-figma-token': 'synthetic-figma',
+              'private-token': 'synthetic-private',
+              'x-ratelimit-remaining-tokens': '9',
               'x-trace': 'kept'
             })
           )
@@ -191,6 +223,9 @@ describe('ReplayHttpClient matching', () => {
       expect(unmatched?.headers).toMatchObject({
         authorization: '<redacted>',
         'x-api-key': '<redacted>',
+        'x-figma-token': '<redacted>',
+        'private-token': '<redacted>',
+        'x-ratelimit-remaining-tokens': '9',
         'x-trace': 'kept',
         'content-type': 'application/json'
       })
@@ -350,10 +385,11 @@ describe('ReplayHttpClient faults', () => {
         streamChunks.slice(0, 1)
       )
 
-      // no attempt filter: every matching attempt is truncated
-      expect(yield* readChunks(HttpClientRequest.post(`${base}/stream`))).toEqual([
-        'data: second\n\n'
-      ])
+      // No attempt filter: the fault also matches attempt 2, whose recording has
+      // only one chunk, so the truncation cannot apply and the request fails.
+      const error = yield* readChunks(HttpClientRequest.post(`${base}/stream`)).pipe(Effect.flip)
+
+      expect(error.cause).toBeInstanceOf(WireReplayInvalid)
     }).pipe(
       withReplay([streamFixture], {
         faults: [WireFault.TruncateAfterChunks({ match: { url: `${base}/stream` }, chunks: 1 })]
@@ -375,6 +411,230 @@ describe('ReplayHttpClient faults', () => {
           WireFault.FailAfterChunks({ match: { method: 'GET' }, chunks: 1 }),
           WireFault.StatusOnAttempt({ match: { url: `${base}/items` }, attempt: 1, status: 500 })
         ]
+      })
+    )
+  )
+})
+
+describe('ReplayHttpClient bytes', () => {
+  it.effect('emits the exact recorded bytes per chunk, including base64 and empty chunks', () =>
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      const response = yield* client.execute(HttpClientRequest.get(`${base}/bytes`))
+
+      const chunks = yield* response.stream.pipe(
+        Stream.map(bytes => Array.from(bytes)),
+        Stream.runCollect
+      )
+
+      expect(Array.from(chunks)).toEqual([
+        Array.from(new TextEncoder().encode('data: caf')),
+        [0xc3],
+        [],
+        [0xa9, 0x0a, 0x0a]
+      ])
+
+      const document = yield* client.execute(HttpClientRequest.get(`${base}/document`))
+
+      expect(Array.from(new Uint8Array(yield* document.arrayBuffer))).toEqual([
+        0x25, 0x50, 0x44, 0x46, 0x2d, 0xff
+      ])
+    }).pipe(withReplay([bytesFixture]))
+  )
+
+  it.effect('fails a recording with invalid base64 as an invalid replay', () =>
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      const error = yield* client.execute(HttpClientRequest.get(`${base}/bytes`)).pipe(Effect.flip)
+
+      expect(error.cause).toBeInstanceOf(WireReplayInvalid)
+
+      const ledger = yield* ReplayLedger
+
+      expect((yield* ledger.entries)[0]?.match).toMatchObject({ outcome: 'invalid' })
+      expect(yield* ledger.remaining).toEqual([{ fixtureId: 'example.bytes', exchangeIndex: 0 }])
+    }).pipe(
+      withReplay([
+        {
+          ...bytesFixture,
+          exchanges: [
+            {
+              request: { method: 'GET', url: `${base}/bytes` },
+              response: { status: 200, headers: {}, chunks: [{ base64: '***' }] }
+            }
+          ]
+        }
+      ])
+    )
+  )
+
+  it.effect('produces replayed chunks only when the consumer pulls', () =>
+    Effect.gen(function* () {
+      // The release effect runs when the replay stream produces past chunk 2,
+      // so it marks how far production has gone.
+      const producedPastTwo = yield* Ref.make(false)
+
+      const program = Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        const response = yield* client.execute(HttpClientRequest.post(`${base}/stream`))
+        const decoder = new TextDecoder()
+
+        const firstTwo = yield* response.stream.pipe(
+          Stream.take(2),
+          Stream.map(bytes => decoder.decode(bytes)),
+          Stream.runCollect
+        )
+
+        expect(Array.from(firstTwo)).toEqual(streamChunks.slice(0, 2))
+        expect(yield* Ref.get(producedPastTwo)).toBe(false)
+      })
+
+      yield* program.pipe(
+        withReplay([streamFixture], {
+          faults: [
+            WireFault.HoldAfterChunks({ chunks: 2, release: Ref.set(producedPastTwo, true) })
+          ]
+        })
+      )
+
+      // Control: reading the whole body does produce past chunk 2.
+      const readAll = Effect.gen(function* () {
+        expect(yield* readChunks(HttpClientRequest.post(`${base}/stream`))).toEqual(streamChunks)
+        expect(yield* Ref.get(producedPastTwo)).toBe(true)
+      })
+
+      yield* readAll.pipe(
+        withReplay([streamFixture], {
+          faults: [
+            WireFault.HoldAfterChunks({ chunks: 2, release: Ref.set(producedPastTwo, true) })
+          ]
+        })
+      )
+    })
+  )
+})
+
+describe('ReplayHttpClient fail-closed faults', () => {
+  it.effect('an unfiltered status fault never answers an unknown request', () =>
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+
+      const error = yield* client
+        .execute(HttpClientRequest.get(`${base}/unknown`))
+        .pipe(Effect.flip)
+
+      expect(error.message).toContain('replay has no remaining recorded exchange')
+
+      const entries = yield* (yield* ReplayLedger).entries
+
+      expect(entries.map(entry => [entry.url, entry.match, entry.fault])).toEqual([
+        [`${base}/unknown`, { outcome: 'unmatched' }, undefined]
+      ])
+    }).pipe(
+      withReplay([itemsFixture], {
+        faults: [WireFault.StatusOnAttempt({ attempt: 1, status: 500 })]
+      })
+    )
+  )
+
+  it.effect('a matching status fault never answers an exhausted request', () =>
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+
+      yield* client.execute(postJson(`${base}/items`, { name: 'first' }))
+
+      const error = yield* client
+        .execute(postJson(`${base}/items`, { name: 'again' }))
+        .pipe(Effect.flip)
+
+      expect(error.message).toContain('replay has no remaining recorded exchange')
+
+      const entries = yield* (yield* ReplayLedger).entries
+
+      expect(entries.map(entry => [entry.attempt, entry.match.outcome, entry.fault])).toEqual([
+        [1, 'matched', undefined],
+        [2, 'unmatched', undefined]
+      ])
+    }).pipe(
+      withReplay([itemsFixture], {
+        faults: [
+          WireFault.StatusOnAttempt({
+            match: { method: 'POST', url: `${base}/items` },
+            attempt: 2,
+            status: 503
+          })
+        ]
+      })
+    )
+  )
+})
+
+describe('ReplayHttpClient chunk faults that cannot apply', () => {
+  const expectInvalid = (request: HttpClientRequest.HttpClientRequest) =>
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      const error = yield* client.execute(request).pipe(Effect.flip)
+
+      expect(error._tag).toBe('HttpClientError')
+      expect(Predicate.isTagged(error.reason, 'TransportError')).toBe(true)
+      expect(error.cause).toBeInstanceOf(WireReplayInvalid)
+
+      const ledger = yield* ReplayLedger
+      const [entry] = yield* ledger.entries
+
+      expect(entry?.match.outcome).toBe('invalid')
+      expect(entry?.fault).toBeUndefined()
+
+      return { remaining: yield* ledger.remaining }
+    })
+
+  it.effect('fails a chunk fault matched against a whole-body response', () =>
+    Effect.gen(function* () {
+      const { remaining } = yield* expectInvalid(postJson(`${base}/items`, { name: 'first' }))
+
+      expect(remaining).toContainEqual({ fixtureId: 'example.items.crud', exchangeIndex: 0 })
+    }).pipe(
+      withReplay([itemsFixture], {
+        faults: [WireFault.TruncateAfterChunks({ match: { url: `${base}/items` }, chunks: 0 })]
+      })
+    )
+  )
+
+  it.effect('fails TruncateAfterChunks at or beyond the recorded chunk count', () =>
+    expectInvalid(HttpClientRequest.post(`${base}/stream`)).pipe(
+      withReplay([streamFixture], {
+        faults: [WireFault.TruncateAfterChunks({ chunks: streamChunks.length })]
+      })
+    )
+  )
+
+  it.effect('fails HoldAfterChunks at or beyond the recorded chunk count', () =>
+    expectInvalid(HttpClientRequest.post(`${base}/stream`)).pipe(
+      withReplay([streamFixture], {
+        faults: [
+          WireFault.HoldAfterChunks({ chunks: streamChunks.length + 1, release: Effect.void })
+        ]
+      })
+    )
+  )
+
+  it.effect('fails FailAfterChunks beyond the recorded chunk count', () =>
+    expectInvalid(HttpClientRequest.post(`${base}/stream`)).pipe(
+      withReplay([streamFixture], {
+        faults: [WireFault.FailAfterChunks({ chunks: streamChunks.length + 1 })]
+      })
+    )
+  )
+
+  it.effect('allows FailAfterChunks at exactly the recorded chunk count', () =>
+    Effect.gen(function* () {
+      const error = yield* readChunks(HttpClientRequest.post(`${base}/stream`)).pipe(Effect.flip)
+
+      expect(error.cause).toBeInstanceOf(WireTransportFault)
+      expect((yield* (yield* ReplayLedger).entries)[0]?.fault).toBe('FailAfterChunks')
+    }).pipe(
+      withReplay([streamFixture], {
+        faults: [WireFault.FailAfterChunks({ chunks: streamChunks.length })]
       })
     )
   )

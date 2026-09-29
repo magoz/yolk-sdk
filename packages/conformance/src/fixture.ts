@@ -7,9 +7,9 @@
  *
  * @experimental
  */
-import { Predicate } from 'effect'
+import { Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
-import { isCredentialHeaderName } from './wire-internal.ts'
+import { decodeBase64Bytes, isCredentialHeaderName } from './wire-internal.ts'
 
 /** `verified` = recorded from a live service; `unverified` = synthetic placeholder. */
 export const WireFixtureEvidence = Schema.Literals(['verified', 'unverified'])
@@ -28,34 +28,74 @@ export const WireRequest = Schema.Struct({
   /** Absolute URL including any query string. */
   url: Schema.NonEmptyString,
   headers: Schema.optionalKey(WireHeaders),
-  /** Parsed JSON request body, when the request had one. */
+  /** Parsed JSON request body, or the raw text when it is not JSON (for example a form body). */
   body: Schema.optionalKey(Schema.Json)
 })
 
 export type WireRequest = typeof WireRequest.Type
 
-/** A response whose whole body was read as one UTF-8 string. */
-export const WireBodyResponse = Schema.Struct({
+const Base64String = Schema.String.check(Schema.isBase64())
+
+/**
+ * One recorded network chunk. A chunk that is valid UTF-8 on its own is stored
+ * as readable text (empty chunks as `""`); any other chunk is stored as
+ * `{ base64 }` holding its exact bytes. Replay emits exactly these bytes.
+ */
+export const WireChunk = Schema.Union([Schema.String, Schema.Struct({ base64: Base64String })])
+
+export type WireChunk = typeof WireChunk.Type
+
+// `Never` keys keep the response shapes mutually exclusive when decoding: a
+// response carries exactly one of `body`, `bodyBase64`, or `chunks`.
+const absent = Schema.optionalKey(Schema.Never)
+
+/** A response whose whole body is valid UTF-8, stored as one string. */
+export const WireTextBodyResponse = Schema.Struct({
   status: HttpStatus,
   headers: WireHeaders,
-  body: Schema.String
+  body: Schema.String,
+  bodyBase64: absent,
+  chunks: absent
 })
+
+export type WireTextBodyResponse = typeof WireTextBodyResponse.Type
+
+/** A response whose whole body is not valid UTF-8 (for example a PDF), stored as base64 bytes. */
+export const WireBase64BodyResponse = Schema.Struct({
+  status: HttpStatus,
+  headers: WireHeaders,
+  bodyBase64: Base64String,
+  body: absent,
+  chunks: absent
+})
+
+export type WireBase64BodyResponse = typeof WireBase64BodyResponse.Type
+
+/** A response recorded as one whole body: exactly one of `body` or `bodyBase64`. */
+export const WireBodyResponse = Schema.Union([WireTextBodyResponse, WireBase64BodyResponse])
 
 export type WireBodyResponse = typeof WireBodyResponse.Type
 
 /**
  * A streamed response (for example `text/event-stream`). Each entry is one
- * network chunk as UTF-8 text; chunk boundaries are preserved on replay.
+ * network chunk (see `WireChunk`); chunk boundaries and bytes are preserved on
+ * replay.
  */
 export const WireStreamResponse = Schema.Struct({
   status: HttpStatus,
   headers: WireHeaders,
-  chunks: Schema.Array(Schema.String)
+  chunks: Schema.Array(WireChunk),
+  body: absent,
+  bodyBase64: absent
 })
 
 export type WireStreamResponse = typeof WireStreamResponse.Type
 
-export const WireResponse = Schema.Union([WireBodyResponse, WireStreamResponse])
+export const WireResponse = Schema.Union([
+  WireTextBodyResponse,
+  WireBase64BodyResponse,
+  WireStreamResponse
+])
 
 export type WireResponse = typeof WireResponse.Type
 
@@ -89,6 +129,10 @@ export const decodeWireFixture = Schema.decodeUnknownEffect(WireFixture)
 
 export const isWireStreamResponse = (response: WireResponse): response is WireStreamResponse =>
   Predicate.hasProperty(response, 'chunks')
+
+export const isWireBase64BodyResponse = (
+  response: WireResponse
+): response is WireBase64BodyResponse => Predicate.hasProperty(response, 'bodyBase64')
 
 const millisPerDay = 86_400_000
 
@@ -156,13 +200,19 @@ const apiKeyPatterns: ReadonlyArray<RegExp> = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/
 ]
 
-const credentialQueryPattern =
-  /[?&](api[_-]?key|key|token|access[_-]?token|auth|secret|password|client[_-]?secret|x-amz-signature|x-amz-credential|x-amz-security-token)=[^&#]+/i
+// Query-string or form-encoded credential parameter, anchored at the start of
+// the text or after `?`/`&` (URLs and `application/x-www-form-urlencoded` bodies).
+const credentialParamPattern =
+  /(?:^|[?&])(api[_-]?key|key|token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth|secret|password|client[_-]?secret|x-amz-signature|x-amz-credential|x-amz-security-token)=[^&#]+/i
 
+// Singular credential field names (snake, kebab, or camel case). Plural usage
+// counters such as `max_tokens` or `prompt_tokens` never match.
 const credentialFieldPattern =
-  /^(api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|secret|authorization)$/i
+  /^((access|refresh|id|auth|api|session|private|bearer|oauth)[_-]?token|token|client[_-]?secret|secret([_-]?key)?|private[_-]?key|password|passwd|api[_-]?key|authorization)$/i
 
-const scanText = (text: string, location: string, issues: Array<FixtureSecretIssue>): void => {
+type IssueSink = Array<FixtureSecretIssue>
+
+const scanText = (text: string, location: string, issues: IssueSink): void => {
   if (bearerPattern.test(text)) {
     issues.push({ kind: 'bearer_token', location })
   }
@@ -175,7 +225,7 @@ const scanText = (text: string, location: string, issues: Array<FixtureSecretIss
 const scanHeaders = (
   headers: WireHeaders | undefined,
   location: string,
-  issues: Array<FixtureSecretIssue>
+  issues: IssueSink
 ): void => {
   for (const [name, value] of Object.entries(headers ?? {})) {
     const headerLocation = `${location}.${name}`
@@ -188,19 +238,15 @@ const scanHeaders = (
   }
 }
 
-const scanUrl = (url: string, location: string, issues: Array<FixtureSecretIssue>): void => {
-  if (credentialQueryPattern.test(url)) {
+const scanUrl = (url: string, location: string, issues: IssueSink): void => {
+  if (credentialParamPattern.test(url)) {
     issues.push({ kind: 'credential_query_param', location })
   }
 
   scanText(url, location, issues)
 }
 
-const scanJson = (
-  value: Schema.Json,
-  location: string,
-  issues: Array<FixtureSecretIssue>
-): void => {
+const scanJson = (value: Schema.Json, location: string, issues: IssueSink): void => {
   if (Predicate.isString(value)) {
     scanText(value, location, issues)
 
@@ -226,15 +272,118 @@ const scanJson = (
   }
 }
 
+const parseJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+// `data:` payloads of each server-sent event, multi-line data joined with `\n`.
+const sseDataPayloads = (text: string): ReadonlyArray<string> =>
+  text.split(/\r?\n\r?\n/).flatMap(event => {
+    const data = event
+      .split(/\r?\n/)
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice('data:'.length).replace(/^ /, ''))
+
+    return data.length > 0 ? [data.join('\n')] : []
+  })
+
+/**
+ * Scan a whole payload (request/response body or reassembled stream): token
+ * patterns, form-encoded credential parameters, and credential fields in the
+ * payload itself when it is JSON, or in each SSE `data:` payload that is JSON
+ * (located as `<location>.events[n]`).
+ */
+const scanPayload = (text: string, location: string, issues: IssueSink): void => {
+  scanText(text, location, issues)
+
+  if (credentialParamPattern.test(text)) {
+    issues.push({ kind: 'credential_query_param', location })
+  }
+
+  const json = parseJsonOption(text)
+
+  if (Option.isSome(json)) {
+    scanJson(json.value, location, issues)
+
+    return
+  }
+
+  sseDataPayloads(text).forEach((payload, index) => {
+    const event = parseJsonOption(payload)
+
+    if (Option.isSome(event)) {
+      scanJson(event.value, `${location}.events[${index}]`, issues)
+    }
+  })
+}
+
+const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
+
+const chunkBytes = (chunk: WireChunk): Uint8Array =>
+  Predicate.isString(chunk)
+    ? new TextEncoder().encode(chunk)
+    : Option.getOrElse(decodeBase64Bytes(chunk.base64), () => new Uint8Array())
+
+const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
+  const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
+  let offset = 0
+
+  for (const part of parts) {
+    joined.set(part, offset)
+    offset += part.length
+  }
+
+  return joined
+}
+
+const scanStream = (
+  chunks: ReadonlyArray<WireChunk>,
+  location: string,
+  issues: IssueSink
+): void => {
+  const parts = chunks.map(chunkBytes)
+
+  parts.forEach((bytes, index) => scanText(lossyText(bytes), `${location}[${index}]`, issues))
+
+  // The reassembled stream catches secrets split across chunks and JSON
+  // credential fields inside SSE events. Bytes are decoded non-fatally.
+  scanPayload(lossyText(concatBytes(parts)), location, issues)
+}
+
+const uniqueIssues = (issues: IssueSink): ReadonlyArray<FixtureSecretIssue> => {
+  const seen = new Set<string>()
+
+  return issues.filter(issue => {
+    const key = `${issue.kind} ${issue.location}`
+
+    if (seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+
+    return true
+  })
+}
+
 /**
  * Pure secret scan. Flags credential headers, bearer tokens, common API-key
- * prefixes, JWTs, private keys, credential query parameters, and credential
- * JSON fields anywhere in the fixture. Returns an empty array when clean.
+ * prefixes, JWTs, private keys, credential query/form parameters, and
+ * credential JSON fields anywhere in the fixture: metadata, URLs, headers,
+ * request bodies, response bodies (text or decodable base64), each stream
+ * chunk, and the reassembled stream (so a secret split across chunks is still
+ * found). JSON bodies and SSE `data:` payloads get the credential-field scan.
+ * Issues name locations only. Returns an empty array when clean.
  */
 export const scanFixtureForSecrets = (fixture: WireFixture): ReadonlyArray<FixtureSecretIssue> => {
-  const issues: Array<FixtureSecretIssue> = []
+  const issues: IssueSink = []
 
+  scanText(fixture.id, 'id', issues)
+  scanText(fixture.caseId, 'caseId', issues)
+  scanText(fixture.account, 'account', issues)
   scanUrl(fixture.endpoint, 'endpoint', issues)
+
+  if (fixture.model !== undefined) {
+    scanText(fixture.model, 'model', issues)
+  }
 
   if (fixture.note !== undefined) {
     scanText(fixture.note, 'note', issues)
@@ -242,12 +391,15 @@ export const scanFixtureForSecrets = (fixture: WireFixture): ReadonlyArray<Fixtu
 
   fixture.exchanges.forEach((exchange, index) => {
     const base = `exchanges[${index}]`
+    const requestBody = exchange.request.body
 
     scanUrl(exchange.request.url, `${base}.request.url`, issues)
     scanHeaders(exchange.request.headers, `${base}.request.headers`, issues)
 
-    if (exchange.request.body !== undefined) {
-      scanJson(exchange.request.body, `${base}.request.body`, issues)
+    if (Predicate.isString(requestBody)) {
+      scanPayload(requestBody, `${base}.request.body`, issues)
+    } else if (requestBody !== undefined) {
+      scanJson(requestBody, `${base}.request.body`, issues)
     }
 
     const response = exchange.response
@@ -255,13 +407,17 @@ export const scanFixtureForSecrets = (fixture: WireFixture): ReadonlyArray<Fixtu
     scanHeaders(response.headers, `${base}.response.headers`, issues)
 
     if (isWireStreamResponse(response)) {
-      response.chunks.forEach((chunk, chunkIndex) =>
-        scanText(chunk, `${base}.response.chunks[${chunkIndex}]`, issues)
-      )
+      scanStream(response.chunks, `${base}.response.chunks`, issues)
+    } else if (isWireBase64BodyResponse(response)) {
+      const bytes = decodeBase64Bytes(response.bodyBase64)
+
+      if (Option.isSome(bytes)) {
+        scanPayload(lossyText(bytes.value), `${base}.response.bodyBase64`, issues)
+      }
     } else {
-      scanText(response.body, `${base}.response.body`, issues)
+      scanPayload(response.body, `${base}.response.body`, issues)
     }
   })
 
-  return issues
+  return uniqueIssues(issues)
 }

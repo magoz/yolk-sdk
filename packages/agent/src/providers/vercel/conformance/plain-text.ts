@@ -5,7 +5,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * finish chunk, a usage-only chunk, and `data: [DONE]`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `scripts/record-gateway-fixtures.ts --live`.
+ * replaces it. Regenerate with `pnpm conformance:gateway --live --account <label>`.
  */
 export const vercelAiGatewayPlainTextFixture: WireFixture = {
   id: 'vercel-ai-gateway.stream.plain-text.synthetic',
@@ -15,7 +15,7 @@ export const vercelAiGatewayPlainTextFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
   model: 'openai/gpt-4.1-nano',
-  note: 'Synthetic placeholder shaped like OpenAI-compatible Gateway chat.completion.chunk SSE. Not recorded from a live service; replace with a verified recording from scripts/record-gateway-fixtures.ts --live.',
+  note: 'Synthetic placeholder shaped like OpenAI-compatible Gateway chat.completion.chunk SSE. Not recorded from a live service; replace with a verified recording from pnpm conformance:gateway --live --account <label>.',
   exchanges: [
     {
       request: {

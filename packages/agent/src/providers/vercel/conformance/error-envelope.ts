@@ -5,7 +5,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * invalid model id.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `scripts/record-gateway-fixtures.ts --live`.
+ * replaces it. Regenerate with `pnpm conformance:gateway --live --account <label>`.
  */
 export const vercelAiGatewayErrorEnvelopeFixture: WireFixture = {
   id: 'vercel-ai-gateway.stream.error-envelope.synthetic',
@@ -15,7 +15,7 @@ export const vercelAiGatewayErrorEnvelopeFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
   model: 'yolk-conformance/model-does-not-exist',
-  note: 'Synthetic placeholder for a non-2xx OpenAI-compatible error envelope returned for an unknown model id. Not recorded from a live service; replace with a verified recording from scripts/record-gateway-fixtures.ts --live.',
+  note: 'Synthetic placeholder for a non-2xx OpenAI-compatible error envelope returned for an unknown model id. Not recorded from a live service; replace with a verified recording from pnpm conformance:gateway --live --account <label>.',
   exchanges: [
     {
       request: {

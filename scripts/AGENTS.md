@@ -4,16 +4,16 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 
 ## Files
 
-| File                          | Role                                                                                                                              |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `clone-repos.ts`              | Delete/re-clone gitignored reference repos under `.repos/*`                                                                       |
-| `build-skillset.ts`           | Compile configured project skillset sources/commands into Cloudflare generated skillset                                           |
-| `codex-ws-smoke.ts`           | Manual Codex WebSocket smoke check                                                                                                |
-| `check-package-boundaries.ts` | Validate example/package import boundaries, retired packages, sandbox provider isolation, and conformance/connector import scopes |
-| `check-package-exports.ts`    | Validate package export shape and tree-shaking smoke rules                                                                        |
-| `check-package-publint.ts`    | Run `publint` strict checks across public packages                                                                                |
-| `smoke-package-imports.ts`    | Pack public packages, install/extract into temp fixture, import every public subpath                                              |
-| `record-gateway-fixtures.ts`  | Vercel AI Gateway fixture probe: dry run by default; `--live` records verified fixture modules                                    |
+| File                          | Role                                                                                                                                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clone-repos.ts`              | Delete/re-clone gitignored reference repos under `.repos/*`                                                                                                                                    |
+| `build-skillset.ts`           | Compile configured project skillset sources/commands into Cloudflare generated skillset                                                                                                        |
+| `codex-ws-smoke.ts`           | Manual Codex WebSocket smoke check                                                                                                                                                             |
+| `check-package-boundaries.ts` | Validate example/package import boundaries, retired packages, sandbox provider isolation, and conformance/connector import scopes                                                              |
+| `check-package-exports.ts`    | Validate package export shape and tree-shaking smoke rules                                                                                                                                     |
+| `check-package-publint.ts`    | Run `publint` strict checks across public packages                                                                                                                                             |
+| `smoke-package-imports.ts`    | Pack public packages, install/extract into temp fixture, import every public subpath                                                                                                           |
+| `record-gateway-fixtures.ts`  | Vercel AI Gateway fixture probe (`pnpm conformance:gateway`): dry run by default; `--live --account <label>` records verified fixture modules; the label must be synthetic and non-identifying |
 
 `pnpm skillset:build` is the canonical generated fallback writer for `cloudflare/agent/src/generated/skillset.ts` and includes a formatter post-stage. Direct `tsx scripts/build-skillset.ts` does not format.
 

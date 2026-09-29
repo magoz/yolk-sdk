@@ -4,7 +4,10 @@
  * Default: DRY RUN. Prints the four planned requests and exits without any
  * network call.
  *
- * `--live`: requires `AI_GATEWAY_API_KEY`, runs the real Gateway provider over
+ * `--live`: requires `AI_GATEWAY_API_KEY` and an explicit `--account <label>`
+ * (a synthetic, non-identifying label such as `synthetic`; never a real team,
+ * project, or person name: it is committed in public fixtures). Runs the real
+ * Gateway provider over
  * the conformance recorder wrapped around a real fetch `HttpClient`, and
  * rewrites the fixture modules under
  * `packages/agent/src/providers/vercel/conformance/` as `verified` recordings
@@ -44,7 +47,8 @@ export type ProbeOptions = {
   readonly maxTokens: number
   readonly reasoningMaxTokens: number
   readonly reasoningEffort: AgentReasoningEffort
-  readonly account: string
+  /** Synthetic, non-identifying fixture account label. Required with `--live`. */
+  readonly account: string | undefined
 }
 
 type MutableProbeOptions = { -readonly [Key in keyof ProbeOptions]: ProbeOptions[Key] }
@@ -59,7 +63,7 @@ export const defaultProbeOptions: ProbeOptions = {
   maxTokens: 64,
   reasoningMaxTokens: 512,
   reasoningEffort: 'low',
-  account: 'gateway-practice'
+  account: undefined
 }
 
 const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = [
@@ -70,12 +74,12 @@ const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = [
   'xhigh'
 ]
 
-const usage = `Usage: pnpm conformance:gateway [--live] [options]
+const usage = `Usage: pnpm conformance:gateway [--live --account <label>] [options]
 
 Dry run by default: prints the planned requests and performs no network I/O.
 
 Options:
-  --live                          Record against the real Gateway (needs AI_GATEWAY_API_KEY)
+  --live                          Record against the real Gateway (needs AI_GATEWAY_API_KEY and --account)
   --plain-model <id>              default ${defaultProbeOptions.plainModel}
   --reasoning-model <id>          default ${defaultProbeOptions.reasoningModel} (DeepSeek-style reasoning_content)
   --tool-model <id>               default ${defaultProbeOptions.toolModel}
@@ -83,7 +87,9 @@ Options:
   --max-tokens <n>                default ${defaultProbeOptions.maxTokens}
   --reasoning-max-tokens <n>      default ${defaultProbeOptions.reasoningMaxTokens}
   --reasoning-effort <effort>     default ${defaultProbeOptions.reasoningEffort}
-  --account <label>               synthetic account label, default ${defaultProbeOptions.account}
+  --account <label>               required with --live: synthetic, non-identifying fixture
+                                  account label (for example synthetic); never a real team,
+                                  project, or person name
   --help
 
 Confirm model ids are available on the Gateway before a live probe. Review the
@@ -99,7 +105,13 @@ const positiveInteger = (flag: string, value: string): number => {
   return parsed
 }
 
-/** Parse CLI arguments (without the node/script prefix). Throws on unknown flags. */
+export const liveAccountRequiredMessage =
+  '--live requires --account <label>: a synthetic, non-identifying label (for example synthetic) that is committed in public fixtures'
+
+/**
+ * Parse CLI arguments (without the node/script prefix). Throws on unknown
+ * flags, and on `--live` without an explicit `--account`.
+ */
 export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
   const options: MutableProbeOptions = { ...defaultProbeOptions }
 
@@ -163,6 +175,10 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
       default:
         throw new Error(`Unknown argument: ${argument}`)
     }
+  }
+
+  if (options.live && !options.help && options.account === undefined) {
+    throw new Error(liveAccountRequiredMessage)
   }
 
   return options
@@ -241,7 +257,7 @@ export const plannedGatewayProbeCases = (options: ProbeOptions): ReadonlyArray<P
 
 export const dryRunReport = (options: ProbeOptions): string =>
   [
-    'DRY RUN: no network request was made. Pass --live to record (needs AI_GATEWAY_API_KEY).',
+    'DRY RUN: no network request was made. Pass --live --account <label> to record (needs AI_GATEWAY_API_KEY).',
     `Endpoint: ${vercelAiGatewayChatCompletionsUrl}`,
     ...plannedGatewayProbeCases(options).map(probe =>
       JSON.stringify(
@@ -279,7 +295,7 @@ const fixtureDir = join(workspaceRoot, 'packages/agent/src/providers/vercel/conf
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-const recordCase = (probe: ProbeCase, apiKey: Redacted.Redacted<string>, options: ProbeOptions) =>
+const recordCase = (probe: ProbeCase, apiKey: Redacted.Redacted<string>, account: string) =>
   Effect.gen(function* () {
     const provider = yield* LLMProvider
     const recorder = yield* WireRecorder
@@ -327,10 +343,10 @@ const recordCase = (probe: ProbeCase, apiKey: Redacted.Redacted<string>, options
       caseId: probe.caseId,
       evidence: 'verified',
       recordedAt: today(),
-      account: options.account,
+      account,
       endpoint: vercelAiGatewayChatCompletionsUrl,
       model: probe.model,
-      note: 'Recorded from the live Vercel AI Gateway by scripts/record-gateway-fixtures.ts --live. Prompts and outputs are synthetic.',
+      note: 'Recorded from the live Vercel AI Gateway by pnpm conformance:gateway --live. Prompts and outputs are synthetic.',
       exchanges
     })
   }).pipe(
@@ -349,7 +365,7 @@ export const renderFixtureModule = (probe: ProbeCase, fixture: WireFixture): str
     ` * ${probe.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}). Regenerate with`,
-    ' * `scripts/record-gateway-fixtures.ts --live`.',
+    ' * `pnpm conformance:gateway --live --account <label>`.',
     ' */',
     `export const ${probe.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''
@@ -357,6 +373,12 @@ export const renderFixtureModule = (probe: ProbeCase, fixture: WireFixture): str
 
 const live = (options: ProbeOptions) =>
   Effect.gen(function* () {
+    const account = options.account
+
+    if (account === undefined) {
+      return yield* new ProbeCaseFailed({ caseId: '*', message: liveAccountRequiredMessage })
+    }
+
     const key = process.env.AI_GATEWAY_API_KEY
 
     if (key === undefined || key.trim().length === 0) {
@@ -371,7 +393,7 @@ const live = (options: ProbeOptions) =>
 
     // Record everything first; write nothing unless every case succeeded.
     const recorded = yield* Effect.forEach(cases, probe =>
-      recordCase(probe, apiKey, options).pipe(Effect.map(fixture => ({ probe, fixture })))
+      recordCase(probe, apiKey, account).pipe(Effect.map(fixture => ({ probe, fixture })))
     )
 
     const files = recorded.map(({ probe, fixture }) => {
@@ -396,9 +418,18 @@ const invokedAsCli = (): boolean => {
   return invoked !== undefined && resolve(invoked) === fileURLToPath(import.meta.url)
 }
 
-if (invokedAsCli()) {
-  const options = parseProbeArgs(process.argv.slice(2))
+const parseCliArgs = (): ProbeOptions | undefined => {
+  try {
+    return parseProbeArgs(process.argv.slice(2))
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error)
+    process.exitCode = 1
 
+    return undefined
+  }
+}
+
+const runCli = (options: ProbeOptions): void => {
   if (options.help) {
     console.log(usage)
   } else if (!options.live) {
@@ -408,5 +439,13 @@ if (invokedAsCli()) {
       console.error(error instanceof Error ? error.message : error)
       process.exitCode = 1
     })
+  }
+}
+
+if (invokedAsCli()) {
+  const options = parseCliArgs()
+
+  if (options !== undefined) {
+    runCli(options)
   }
 }

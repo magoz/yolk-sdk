@@ -6,6 +6,7 @@ import { vercelAiGatewayPlainTextFixture } from '../../packages/agent/src/provid
 import {
   defaultProbeOptions,
   dryRunReport,
+  liveAccountRequiredMessage,
   parseProbeArgs,
   plannedGatewayProbeCases,
   renderFixtureModule
@@ -18,9 +19,24 @@ const tsxCli = join(repoRoot, 'node_modules/tsx/dist/cli.mjs')
 const probeScript = join(repoRoot, 'scripts/record-gateway-fixtures.ts')
 
 describe('record-gateway-fixtures arguments', () => {
-  it('defaults to a dry run with documented model ids', () => {
+  it('defaults to a dry run with documented model ids and no account label', () => {
     expect(parseProbeArgs([])).toEqual(defaultProbeOptions)
     expect(defaultProbeOptions.live).toBe(false)
+    expect(defaultProbeOptions.account).toBeUndefined()
+  })
+
+  it('requires an explicit --account label with --live', () => {
+    expect(() => parseProbeArgs(['--live'])).toThrow(liveAccountRequiredMessage)
+    expect(() => parseProbeArgs(['--live', '--plain-model', 'vendor/plain'])).toThrow(
+      '--live requires --account <label>'
+    )
+    expect(parseProbeArgs(['--live', '--account', 'synthetic'])).toMatchObject({
+      live: true,
+      account: 'synthetic'
+    })
+    // Dry runs and help do not need a label.
+    expect(parseProbeArgs(['--account=synthetic']).live).toBe(false)
+    expect(parseProbeArgs(['--live', '--help']).help).toBe(true)
   })
 
   it('reads flags in both --flag value and --flag=value forms', () => {
@@ -93,6 +109,9 @@ describe('record-gateway-fixtures plan', () => {
     expect(source).toContain("import type { WireFixture } from '@yolk-sdk/conformance/fixture'")
     expect(source).toContain('export const vercelAiGatewayPlainTextFixture: WireFixture = {')
     expect(source).toContain(`"caseId": "${vercelAiGatewayPlainTextFixture.caseId}"`)
+    expect(source).toContain(
+      'Regenerate with\n * `pnpm conformance:gateway --live --account <label>`.'
+    )
   })
 })
 

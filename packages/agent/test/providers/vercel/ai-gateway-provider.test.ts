@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Layer, Redacted, Ref, Schema, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Layer, Predicate, Redacted, Ref, Schema, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -479,10 +479,15 @@ const SseChunkPayload = Schema.Struct({
 
 const decodeSseChunkPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(SseChunkPayload))
 
+// Gateway SSE fixtures are recorded as UTF-8 text chunks.
 const fixtureChunks = (fixture: WireFixture): ReadonlyArray<string> => {
   const response = fixture.exchanges[0].response
 
-  return isWireStreamResponse(response) ? response.chunks : []
+  return isWireStreamResponse(response)
+    ? response.chunks.map(chunk =>
+        Predicate.isString(chunk) ? chunk : expect.fail(`fixture ${fixture.id} has a base64 chunk`)
+      )
+    : []
 }
 
 const fixtureModel = (fixture: WireFixture): string => {
@@ -611,6 +616,23 @@ describe('Vercel AI Gateway wire fixtures', () => {
       }
     })
   )
+
+  // Regression: the secret scan also checks JSON bodies and SSE `data:` payloads for credential
+  // fields; numeric usage counters (`max_tokens`, `prompt_tokens`, `reasoning_tokens`, ...) must
+  // not be mistaken for credentials.
+  it('scan clean under the JSON and SSE credential-field scan despite usage token counters', () => {
+    for (const fixture of vercelAiGatewayConformanceFixtures) {
+      const exchange = fixture.exchanges[0]
+
+      expect(JSON.stringify(exchange.request.body)).toContain('"max_tokens":')
+      expect(scanFixtureForSecrets(fixture)).toEqual([])
+    }
+
+    expect(fixtureChunks(vercelAiGatewayPlainTextFixture).join('')).toContain('"prompt_tokens":')
+    expect(fixtureChunks(vercelAiGatewayDeepSeekReasoningFixture).join('')).toContain(
+      '"reasoning_tokens":'
+    )
+  })
 })
 
 describe('Vercel AI Gateway streaming over replayed fixtures', () => {

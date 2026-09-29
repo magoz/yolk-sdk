@@ -18,6 +18,8 @@ import {
   decodeWireFixture,
   scanFixtureForSecrets,
   type FixtureSecretIssue,
+  type WireBodyResponse,
+  type WireChunk,
   type WireExchange,
   type WireFixture,
   type WireHeaders,
@@ -30,6 +32,7 @@ import {
   isNullBodyStatus,
   mediaType,
   parseJsonText,
+  recordBytes,
   requestBodyText
 } from './wire-internal.ts'
 
@@ -73,6 +76,11 @@ export type WireRecorderApi = {
    * Take every recorded exchange, in request order, and clear the recorder.
    * Fails with `WireRecordingIncomplete` (and discards the drained entries)
    * when any request failed or its body was not fully read.
+   *
+   * A request still pending at drain time is reported in that drain's
+   * `WireRecordingIncomplete` and is then dropped: if its body finishes later,
+   * the result is ignored and never appears in, or overwrites an entry of, a
+   * later drain.
    */
   readonly drain: Effect.Effect<ReadonlyArray<WireExchange>, WireRecordingIncomplete>
 }
@@ -104,6 +112,31 @@ type RecordingEntry =
   | { readonly status: 'pending'; readonly label: string }
   | { readonly status: 'failed'; readonly label: string }
   | { readonly status: 'complete'; readonly label: string; readonly exchange: WireExchange }
+
+// `id` is a monotonic reservation id that is never reused, so a finalizer from
+// a request reserved before a `drain` cannot settle an entry reserved after it.
+type RecordingState = {
+  readonly nextId: number
+  readonly entries: ReadonlyArray<{ readonly id: number; readonly entry: RecordingEntry }>
+}
+
+const recordedChunk = (bytes: Uint8Array): WireChunk => {
+  const recorded = recordBytes(bytes)
+
+  return 'text' in recorded ? recorded.text : { base64: recorded.base64 }
+}
+
+const recordedBody = (
+  status: number,
+  headers: WireHeaders,
+  bytes: Uint8Array
+): WireBodyResponse => {
+  const recorded = recordBytes(bytes)
+
+  return 'text' in recorded
+    ? { status, headers, body: recorded.text }
+    : { status, headers, bodyBase64: recorded.base64 }
+}
 
 const headerAllowed = (allowlist: ReadonlyArray<string>, name: string): boolean =>
   !isCredentialHeaderName(name) &&
@@ -168,11 +201,13 @@ const recordRequest = (
   })
 
 /**
- * Wrap a host-provided `HttpClient` so every exchange is recorded. Streamed
- * responses (see `streamMediaTypes`) are teed chunk by chunk with network
- * boundaries preserved (a multi-byte UTF-8 character split across chunks is
- * attributed to the chunk that completes it); other responses are recorded as
- * one `body`. The caller receives the same status, headers, and bytes. Body
+ * Wrap a host-provided `HttpClient` so every exchange is recorded losslessly.
+ * Streamed responses (see `streamMediaTypes`) are teed chunk by chunk with
+ * network boundaries preserved: each chunk is stored as text when it is valid
+ * UTF-8 on its own (empty chunks as `""`), otherwise as `{ base64 }` of its
+ * exact bytes. Other responses are recorded as one `body` (valid UTF-8) or
+ * `bodyBase64` (anything else). The caller receives the same status, headers,
+ * and bytes. Body
  * read failures still reach the caller as `HttpClientError`s (the upstream
  * error is kept as the cause), matching how `FetchHttpClient` reports them.
  */
@@ -188,16 +223,26 @@ export const makeRecordingHttpClient = (
       type.toLowerCase()
     )
 
-    const entries = yield* Ref.make<ReadonlyArray<RecordingEntry>>([])
+    const state = yield* Ref.make<RecordingState>({ nextId: 0, entries: [] })
 
     const reserve = (label: string) =>
-      Ref.modify(entries, current => [
-        current.length,
-        [...current, { status: 'pending', label }] satisfies ReadonlyArray<RecordingEntry>
+      Ref.modify(state, (current): [number, RecordingState] => [
+        current.nextId,
+        {
+          nextId: current.nextId + 1,
+          entries: [...current.entries, { id: current.nextId, entry: { status: 'pending', label } }]
+        }
       ])
 
-    const settle = (index: number, entry: RecordingEntry) =>
-      Ref.update(entries, current => current.map((item, at) => (at === index ? entry : item)))
+    // Settles only a still-pending entry with this id; an entry already drained
+    // (or settled) is left untouched.
+    const settle = (id: number, entry: RecordingEntry) =>
+      Ref.update(state, current => ({
+        ...current,
+        entries: current.entries.map(item =>
+          item.id === id && item.entry.status === 'pending' ? { id, entry } : item
+        )
+      }))
 
     const client = HttpClient.transform(
       upstream,
@@ -212,15 +257,15 @@ export const makeRecordingHttpClient = (
           const wireRequest = yield* recordRequest(request, requestAllowlist)
           // Query strings may carry credentials: labels keep origin and path only.
           const label = `${wireRequest.method} ${wireRequest.url.split('?', 1)[0]}`
-          const index = yield* reserve(label)
-          const failed = settle(index, { status: 'failed', label })
+          const id = yield* reserve(label)
+          const failed = settle(id, { status: 'failed', label })
           const response = yield* effect.pipe(Effect.tapError(() => failed))
           const headers = headerRecord(response.headers)
           const recordedHeaders = allowlistHeaders(headers, responseAllowlist)
           const init = { status: response.status, headers }
 
           const complete = (wireResponse: WireResponse) =>
-            settle(index, {
+            settle(id, {
               status: 'complete',
               label,
               exchange: { request: wireRequest, response: wireResponse }
@@ -229,32 +274,17 @@ export const makeRecordingHttpClient = (
           const type = mediaType(headers['content-type'])
 
           if (type !== undefined && streamMediaTypes.includes(type)) {
-            const decoder = new TextDecoder()
-            const chunks: Array<string> = []
+            const chunks: Array<WireChunk> = []
 
+            // Each network chunk is recorded standalone (no decoder carry-over),
+            // so replay can reproduce the original bytes and boundaries.
             const teed = response.stream.pipe(
-              Stream.tap(bytes =>
-                Effect.sync(() => {
-                  const text = decoder.decode(bytes, { stream: true })
-
-                  if (text.length > 0) {
-                    chunks.push(text)
-                  }
-                })
-              ),
-              Stream.onExit(exit => {
-                if (Exit.isFailure(exit)) {
-                  return failed
-                }
-
-                const tail = decoder.decode()
-
-                if (tail.length > 0) {
-                  chunks.push(tail)
-                }
-
-                return complete({ status: response.status, headers: recordedHeaders, chunks })
-              })
+              Stream.tap(bytes => Effect.sync(() => chunks.push(recordedChunk(bytes)))),
+              Stream.onExit(exit =>
+                Exit.isFailure(exit)
+                  ? failed
+                  : complete({ status: response.status, headers: recordedHeaders, chunks })
+              )
             )
 
             const readable = Stream.toReadableStream(teed, { strategy: { highWaterMark: 0 } })
@@ -264,11 +294,7 @@ export const makeRecordingHttpClient = (
 
           const bytes = yield* response.arrayBuffer.pipe(Effect.tapError(() => failed))
 
-          yield* complete({
-            status: response.status,
-            headers: recordedHeaders,
-            body: new TextDecoder().decode(bytes)
-          })
+          yield* complete(recordedBody(response.status, recordedHeaders, new Uint8Array(bytes)))
 
           return HttpClientResponse.fromWeb(
             request,
@@ -278,12 +304,15 @@ export const makeRecordingHttpClient = (
     )
 
     const recorder: WireRecorderApi = {
-      drain: Ref.getAndSet(entries, []).pipe(
+      drain: Ref.modify(state, (current): [RecordingState['entries'], RecordingState] => [
+        current.entries,
+        { nextId: current.nextId, entries: [] }
+      ]).pipe(
         Effect.flatMap(drained => {
           const exchanges: Array<WireExchange> = []
           const incomplete: Array<string> = []
 
-          for (const entry of drained) {
+          for (const { entry } of drained) {
             if (entry.status === 'complete') {
               exchanges.push(entry.exchange)
             } else {

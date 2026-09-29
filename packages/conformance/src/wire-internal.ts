@@ -1,4 +1,4 @@
-import { Effect, type Option, Predicate } from 'effect'
+import { Effect, Encoding, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { HttpClientRequest } from 'effect/unstable/http'
 
@@ -19,12 +19,25 @@ const credentialHeaderNames: ReadonlySet<string> = new Set([
   'x-csrf-token'
 ])
 
-const credentialHeaderPattern = /(api[-_]?key|secret|password|cookie)/i
+const credentialHeaderPattern = /(api[-_]?key|secret|password|cookie|authorization)/i
 
+// A `-`/`_`-separated name segment that is exactly `token`, `key`, or `auth`
+// (`x-auth-token`, `private-token`, `x-figma-token`, `x-*-key`). Plural
+// segments such as `x-ratelimit-remaining-tokens` do not match.
+const credentialHeaderSegmentPattern = /(^|[-_])(token|key|auth)([-_]|$)/i
+
+/**
+ * True for header names that carry credentials or session state. Used by the
+ * fixture secret scan, recorder drop rules, and ledger redaction.
+ */
 export const isCredentialHeaderName = (name: string): boolean => {
   const lower = name.toLowerCase()
 
-  return credentialHeaderNames.has(lower) || credentialHeaderPattern.test(lower)
+  return (
+    credentialHeaderNames.has(lower) ||
+    credentialHeaderPattern.test(lower) ||
+    credentialHeaderSegmentPattern.test(lower)
+  )
 }
 
 export const redactedHeaderValue = '<redacted>'
@@ -100,6 +113,28 @@ export const requestBodyText = (
 
   return undefined
 }
+
+/** Exact bytes of standard base64 text; `None` when the text is not valid base64. */
+export const decodeBase64Bytes = (text: string): Option.Option<Uint8Array> =>
+  Result.getSuccess(Encoding.decodeBase64(text))
+
+/**
+ * Decode bytes as UTF-8 only when they are valid UTF-8 on their own. A leading
+ * byte-order mark is kept so that re-encoding yields the same bytes.
+ */
+export const decodeUtf8Strict = (bytes: Uint8Array): Option.Option<string> =>
+  Option.liftThrowable(() =>
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  )()
+
+/** Lossless recording of bytes: readable text when valid UTF-8, otherwise base64. */
+export const recordBytes = (
+  bytes: Uint8Array
+): { readonly text: string } | { readonly base64: string } =>
+  Option.match(decodeUtf8Strict(bytes), {
+    onNone: () => ({ base64: Encoding.encodeBase64(bytes) }),
+    onSome: text => ({ text })
+  })
 
 const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 

@@ -89,7 +89,7 @@ Mention host-owned providers, persistence, tools, context compaction, token stor
 
 `react` docs should cover hook state/actions, render model, custom transport, optional React peer, and no UI/styling/auth.
 
-`oauth` and `providers/*` docs should cover broker/credential-source flow and host-owned token storage. Never imply package stores secrets. Subscription-usage docs distinguish allowance snapshots from `AgentUsage` and document fixed private endpoints plus credential-bearing redirect constraints.
+`oauth` and `providers/*` docs should cover broker/credential-source flow and host-owned token storage. Never imply package stores secrets. Subscription-usage docs distinguish allowance snapshots from `AgentUsage` and document default private endpoints with a trusted-only `url` override plus credential-bearing redirect constraints.
 
 `skillset` docs should cover skill markdown, command markdown, render/parse APIs, manifests, and merge priority.
 
