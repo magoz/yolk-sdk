@@ -26,7 +26,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/github`          | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                |
 | `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                           |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                                      |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                              |
+| `@yolk-sdk/connectors/microsoft`       | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments      |
 | `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot                         |
 | `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                             |
 | `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                            |
@@ -393,7 +393,9 @@ or `{ "threadId": ... }` only when provided) and a `message/rfc822` part holding
 The boundary is chosen so it never occurs in the MIME. MIME containing any byte `>= 0x80` cannot
 cross the string HTTP port exactly, so it keeps the JSON `{ raw, threadId? }` request to
 `/gmail/v1/users/me/messages/send` (the previous behaviour); prefer 7-bit transfer encodings for
-large messages. Before resolving credentials or sending anything, decoded MIME larger than 35 MiB
+large messages. Host HTTP adapters must preserve the `multipart/related` content type and forward
+the string body exactly (CRLF line endings, no re-encoding) and accept outgoing bodies up to about
+35 MiB. Before resolving credentials or sending anything, decoded MIME larger than 35 MiB
 (`gmailSendMessageMaxBytes`) fails with a `ConnectorError` `validation_failed` carrying
 `underlying: { outcome: 'rejected', retryable: false, reason: 'too_large' }`: nothing was sent.
 `reason: 'invalid_encoding'` is a defensive guard for undecodable base64url. The
@@ -759,7 +761,9 @@ const filesProgram = MicrosoftConnector.invoke({
 
 This integration targets **Microsoft Outlook and OneDrive through Microsoft Graph v1.0**. It does
 not use the retired Outlook REST endpoint, direct Exchange Online APIs, or legacy OneDrive APIs.
-Microsoft Graph is the shared API and OAuth resource boundary.
+Microsoft Graph is the shared API and OAuth resource boundary. The sole exception is the
+pre-authenticated Outlook attachment upload-session URLs that Graph issues to `addOutlookAttachment`,
+contacted without Authorization.
 
 All action-scoped slots share the `microsoft.oauth` binding id, so one host credential can serve
 Outlook and OneDrive when its consent includes the selected actions' `Mail.*` and `Files.*`
@@ -954,8 +958,8 @@ The OneDrive action set lists, searches, and gets file/folder metadata; creates 
 within one drive; queues asynchronous copies; polls copy status; and moves items to the recycle bin.
 Binary download is available only through the separate host helper below, not the connector action
 inventory or string/JSON HTTP boundary. Host-only bounded create/update helpers are available below;
-resumable upload sessions remain unimplemented. The built-in Microsoft endpoint targets the global
-cloud; national-cloud hosts need a cloud-specific connector until the API base is configurable.
+OneDrive resumable upload sessions remain unimplemented. The built-in Microsoft endpoint targets the
+global cloud; national-cloud hosts need a cloud-specific connector until the API base is configurable.
 
 `onedrive.move_item` sends a synchronous `PATCH` with a destination parent ID and optional rename.
 Graph does not support moving an item between drives through this request, so the action exposes no
@@ -1260,7 +1264,7 @@ orchestration only.
 | `@yolk-sdk/connectors/github`          | Issues, comments, labels, sub-issues, dependencies, issue fields, pull requests, reviews, merge, repo context      |
 | `@yolk-sdk/connectors/google`          | Gmail mail and label actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions     |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                       |
-| `@yolk-sdk/connectors/microsoft`       | Outlook mail/category actions plus OneDrive metadata, folder, move, async copy/status, and recycle-bin actions     |
+| `@yolk-sdk/connectors/microsoft`       | Outlook mail/category and OneDrive metadata/folder/move/copy/recycle actions; host-only file and attachment I/O    |
 | `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                       |
 | `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url` plus host-only `R2ObjectClient` get/create/update                                          |
 | `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                                       |

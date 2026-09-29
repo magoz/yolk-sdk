@@ -378,7 +378,9 @@ to `POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?upl
 part); MIME with any byte `>= 0x80` keeps the JSON `raw` request. Decoded MIME above 35 MiB
 (`gmailSendMessageMaxBytes`) fails before credentials or network with a `validation_failed`
 `ConnectorError` whose `underlying` is `{ outcome: 'rejected', retryable: false, reason: 'too_large' }`.
-Prefer quoted-printable or base64 transfer encodings for large messages. The host builds the MIME, protects against header injection, binds the sender account,
+Prefer quoted-printable or base64 transfer encodings for large messages. Host HTTP adapters must
+preserve the `multipart/related` content type and forward the string body exactly (CRLF line
+endings, no re-encoding) and accept outgoing bodies up to about 35 MiB. The host builds the MIME, protects against header injection, binds the sender account,
 validates recipients, bounds size, and obtains explicit send authorization. The SDK does not parse
 MIME or check send-as aliases. Prefer a host-owned reviewed interaction over exposing this raw
 send action directly to the model. Its access metadata is `destructive`. Gmail routes to the MIME
@@ -493,7 +495,8 @@ Google references: [files.list](https://developers.google.com/workspace/drive/ap
 Use `@yolk-sdk/connectors/microsoft` for Microsoft Outlook mail and OneDrive files. Both workloads
 share Microsoft Graph v1.0 as the API and OAuth resource boundary, plus the same `microsoft.oauth`
 credential binding. The connector does not use the retired Outlook REST endpoint, direct Exchange
-Online APIs, or legacy OneDrive APIs.
+Online APIs, or legacy OneDrive APIs. The sole exception is the pre-authenticated Outlook attachment
+upload-session URLs that Graph issues to `addOutlookAttachment`, contacted without Authorization.
 
 All OAuth slots use the shared `microsoft.oauth` binding id:
 
