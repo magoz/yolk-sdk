@@ -1,5 +1,13 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.95
+
+### Patch Changes
+
+- 8d919b4: Advance unchanged public packages in lockstep with Gmail multipart sending and host-only Outlook draft attachment uploads in the connectors package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [8d919b4]
+  - @yolk-sdk/agent@0.1.0-canary.95
+
 ## 0.1.0-canary.94
 
 ### Patch Changes
