@@ -44,6 +44,7 @@
     "changeset:canary:exit": "changeset pre exit",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "codex-ws:smoke": "tsx scripts/codex-ws-smoke.ts",
+    "conformance:fortnox": "tsx scripts/run-fortnox-conformance.ts",
     "conformance:gateway": "tsx scripts/record-gateway-fixtures.ts",
     "skillset:build": "tsx scripts/build-skillset.ts && oxfmt --config .oxfmtrc.json --write cloudflare/agent/src/generated/skillset.ts",
     "clone-repos": "node --experimental-strip-types scripts/clone-repos.ts",

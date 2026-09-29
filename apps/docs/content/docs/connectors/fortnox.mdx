@@ -248,6 +248,32 @@ access overrides still win. Since sending and booking are not connector actions,
 outbound action must keep its own manual approval gate.
 See [Add connector tools](../integrations/connector-tool) for tool execution and authorization.
 
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a Fortnox developer test company.
+
+`@yolk-sdk/connectors/fortnox/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Each proves one observed Fortnox behavior through the real connector
+actions (claims as currently understood; none is observed live yet):
+
+- **Invoice lists** carry `MetaInformation`, and numeric-string amounts such as `CurrencyRate: "1"`
+  decode to numbers (`read`).
+- **Invoice preview** returns a complete PDF whatever content type it declares (`read`).
+- **Payment-status filters** `unpaid` and `unpaidoverdue` leave out an unbooked invoice with a
+  balance (`read`).
+- **Invoice rows**: a positional row update without `Discount` keeps the previous discount; only
+  `Discount: 0` clears it (`write-reversible`, restores the original rows).
+- **Customer fields**: updating `Comments` to `""` keeps the stored value; how to clear a value is
+  not established (`write-reversible`, restores the original value).
+- **Rejected writes** return `ErrorInformation` with a code and message, surfaced as
+  `underlying.providerCode` and the provider message (`write-reversible`: the write is rejected).
+- **Invoice email** (`GET /3/invoices/{DocumentNumber}/email`) answers with the invoice; whether a
+  test company delivers the email is not established (`write-irreversible`, never automated).
+
+The cases need `FortnoxConformanceConfig` seed identities (never hard-coded account data) and the
+connector ports; `@yolk-sdk/connectors/conformance` bridges an Effect `HttpClient` to those ports for
+tests only. See [Conformance APIs](../api-reference/conformance#connector-conformance).
+
 ## Official Fortnox references
 
 - [API reference](https://apps.fortnox.se/apidocs)

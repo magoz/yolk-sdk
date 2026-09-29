@@ -8,36 +8,39 @@
 - No user/team/org/workspace/project concepts; hosts own identity and lifecycle.
 - No Promise facade; public APIs are Effect-native only.
 - Do not repackage Effect HTTP/runtime adapters; expose ports and let hosts wire Effect layers.
+  - Named exception: `@yolk-sdk/connectors/conformance` (`src/conformance/index.ts`) bridges an Effect `HttpClient` to `ConnectorHttpClient`/`ConnectorBinaryHttpClient` and provides `staticCredentialResolverLayer`, for conformance and tests only (replay, emulators, live-by-hand practice runs). It enforces NO streamed byte limits, redirect, DNS/IP, timeout, or TLS policy (binary limits are checked only after buffering), maps transport failures to code-only errors without URL/headers/body, and must never be documented or used as a production adapter or credential store.
 - Raw secrets may flow through host-provided Effect services at invocation time, but integrations store only opaque credential refs.
 - Provider modules may define vendor mechanics and schemas, not host policy.
 - Only `src/agent.ts` may import `@yolk-sdk/agent`; `@yolk-sdk/conformance` (wire fixtures) may be imported only under a `src/**/conformance/` directory. `scripts/check-package-boundaries.ts` enforces both.
 
 ## Public model
 
-| Export area       | Purpose                                                                                                                        |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `connector`       | connector definition and action dispatch                                                                                       |
-| `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                                                     |
-| `integration`     | configured invokable connector instance data                                                                                   |
-| `action`          | typed action definitions over Effect Schema                                                                                    |
-| `config`          | required/optional string config helpers for integration config                                                                 |
-| `credential`      | slots, bindings, host resolver service, runtime credential values                                                              |
-| `http`            | host-provided HTTP request/response port; not a connector                                                                      |
-| `result`          | value-level success/failure results for expected upstream failures                                                             |
-| `error`           | typed package/runtime failures                                                                                                 |
-| `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                                               |
-| `dropbox`         | Dropbox metadata/file-management actions, OAuth slot constants, and host-only download plus create/update                      |
-| `email`           | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email client                   |
-| `figma`           | Figma remote MCP auth data action and OAuth constants                                                                          |
-| `fortnox`         | Company/customer/invoice/supplier actions, including customer/invoice create/update, plus resource-scoped OAuth slot constants |
-| `github`          | Repo-scoped issue/PR/repository actions, bearer token slots, host-only App installation tokens and attachment upload           |
-| `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                                                     |
-| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                                                      |
-| `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants                                       |
-| `notion`          | Notion search/page/block/database/data-source/comment/user actions plus API token slot constants                               |
-| `r2-storage`      | Cloudflare R2 upload URL action plus separate host conditional object port                                                     |
-| `telegram`        | Telegram bot send/validate actions and hosted file byte helper                                                                 |
-| `todoist`         | Todoist project/task/label/comment actions plus API token slot constants                                                       |
+| Export area           | Purpose                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `connector`           | connector definition and action dispatch                                                                                       |
+| `agent`               | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                                                     |
+| `integration`         | configured invokable connector instance data                                                                                   |
+| `action`              | typed action definitions over Effect Schema                                                                                    |
+| `config`              | required/optional string config helpers for integration config                                                                 |
+| `credential`          | slots, bindings, host resolver service, runtime credential values                                                              |
+| `http`                | host-provided HTTP request/response port; not a connector                                                                      |
+| `result`              | value-level success/failure results for expected upstream failures                                                             |
+| `error`               | typed package/runtime failures                                                                                                 |
+| `afloat`              | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                                               |
+| `conformance`         | Experimental conformance/testing-only bridges from an Effect `HttpClient` to the HTTP ports, plus a static credential resolver |
+| `dropbox`             | Dropbox metadata/file-management actions, OAuth slot constants, and host-only download plus create/update                      |
+| `email`               | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email client                   |
+| `figma`               | Figma remote MCP auth data action and OAuth constants                                                                          |
+| `fortnox`             | Company/customer/invoice/supplier actions, including customer/invoice create/update, plus resource-scoped OAuth slot constants |
+| `fortnox/conformance` | Experimental Fortnox conformance cases, `FortnoxConformanceConfig` seeds, and synthetic replay fixtures                        |
+| `github`              | Repo-scoped issue/PR/repository actions, bearer token slots, host-only App installation tokens and attachment upload           |
+| `google`              | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                                                     |
+| `linkedin-search`     | Exa people search plus Enrich Layer profile/email actions                                                                      |
+| `microsoft`           | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants                                       |
+| `notion`              | Notion search/page/block/database/data-source/comment/user actions plus API token slot constants                               |
+| `r2-storage`          | Cloudflare R2 upload URL action plus separate host conditional object port                                                     |
+| `telegram`            | Telegram bot send/validate actions and hosted file byte helper                                                                 |
+| `todoist`             | Todoist project/task/label/comment actions plus API token slot constants                                                       |
 
 ## Design rules
 
@@ -52,6 +55,7 @@
 - Best-effort provider error-body detail parsing uses `Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown)).pipe(Effect.result)`; never `try/catch`, raw `JSON.parse`, or sync Schema option decoders.
 - If a provider failure builder performs Effect decoding, action executors must `yield*` it so non-2xx responses remain `ActionResult.failure` values.
 - Fortnox actions share the `fortnox.oauth` binding; resource scopes (`companyinformation`, `customer`, `invoice`, `supplier`, `supplierinvoice`) grant read AND write at Fortnox, not read-only consent. Customer/invoice create and update actions are `write`; sending or booking is intentionally absent and remains host approval policy if added later. Hosts own licensing, OAuth lifecycle, and throttling. Keep `GivenNumber` distinct from supplier `InvoiceNumber`, preserve monetary wire types, decode JSON arrays separately from runtime Chunks, and accept both lowercase and PascalCase `ErrorInformation` fields (official guide/OpenAPI differ). Optional Fortnox response fields accept JSON null and preserve it. Customer write inputs omit read-only `Country` and list-only `Phone`; the customer create/update actions close them over a Struct of the Class fields (unknown keys fail validation on `execute` and `executeTyped`, not stripped; `Schema.toType` skips key checks on existing Class instances). Invoice write inputs intentionally still strip unknown keys on `execute` (`executeTyped` trusts existing invoice Class instances). Responses keep `Country`/`Phone`. Customer and invoice write fields still reject null; invoice and supplier-invoice rows share the response schema and therefore also accept null. Lists require pagination metadata rather than silently assuming a final page.
+- Fortnox conformance (`src/fortnox/conformance/`) proves observed Fortnox behavior through the real actions/helpers over the ports plus `FortnoxConformanceConfig` seed identities (never hard-coded account data): invoice list decoding with pagination and numeric-string amounts, complete preview PDF, payment-status filters excluding unbooked invoices (read); sticky omitted row `Discount`, empty string not clearing customer `Comments`, rejected write `ErrorInformation` (write-reversible); invoice email send via raw `ConnectorHttpClient` (write-irreversible, manual only; the connector still has no send action). Write cases always restore through `withRestore` (uninterruptible, verified by read-back) and fail with `FortnoxConformanceRestoreFailed` instead of swallowing restore errors; the rejection case first confirms the customer is missing. Fixtures are synthetic (`unverified`) until `pnpm conformance:fortnox --live --account <label> --record` (owner-approved, by hand) replaces them; tests replay them in `test/fortnox-conformance.test.ts` with disagreement drills.
 - GitHub actions are scoped to integration config `owner`/`repo` (validated syntax; `requiredStringConfig`); inputs never carry owner/repo and org-level reads (`issue-types`, `issue-fields`) use `owner` as the org. `github.token` accepts bearer/API-key/OAuth credentials (installation token, PAT, OAuth). Send `X-GitHub-Api-Version: 2026-03-10` (no singular `assignee`, no `merge_commit_sha`). Outputs are normalized, long text is truncated with a sibling boolean flag (`bodyTruncated`, `patchTruncated`, `fragmentsTruncated`, file `truncated`), lists use `perPage`/`page` plus Link-header `hasNextPage`. Non-2xx map through `githubFailure` to `github_unauthorized|forbidden|not_found|rate_limited|validation|conflict|request_failed` (plus action-specific `github_not_mergeable`, `github_unsupported_content`); 403 with exhausted rate limit or `Retry-After` is `github_rate_limited` with `retryAfterMs`. Never put tokens, headers, or raw bodies in failures: `githubRequest` rebuilds host transport errors from their `cause` only and redacts echoed tokens from decoded error-body strings (including `\u`-escaped JSON). User-controlled path segments reject dot-only values (URL normalization would change the endpoint), and `compare_commits` rejects `:` refs (cross-fork).
 - GitHub issue/code search prefixes `repo:{owner}/{repo}`, rejects any `repo:`/`org:`/`user:`/`owner:` qualifier (negated/grouped too, since GitHub ORs repeated `repo:`), and drops results from other repositories (a top-level user `OR` can still inflate `totalCount`/`hasNextPage`; items never leak). Sub-issue and dependency endpoints take the issue database `id`; actions accept issue numbers in the configured repo and resolve ids first. `set_issue_field_values` uses additive `POST` with at least one value (an empty array clears all fields; never use replace-all `PUT`). `merge_pull_request` is `destructive` and requires `expectedHeadSha` sent as `sha`.
 - Google action-scoped OAuth slots share the `google.oauth` binding id; `requiredScopes` are consent hints, not separate storage slots.

@@ -1,0 +1,298 @@
+/**
+ * Conformance-only bridges from Effect's `HttpClient` to the connector ports, plus a static
+ * credential resolver.
+ *
+ * **Conformance and testing only; not for production.** These layers let connector conformance
+ * cases run the real connector actions over a replay `HttpClient` (`@yolk-sdk/conformance/replay`),
+ * an emulator, or a host's live client driven by hand. They enforce NO streamed byte limits,
+ * redirect policy, DNS/IP policy, timeouts, or TLS policy beyond what the wrapped `HttpClient`
+ * does. Production hosts implement `ConnectorHttpClient` / `ConnectorBinaryHttpClient` themselves
+ * (see the connectors README host integration contract) and own real credential storage.
+ *
+ * @experimental
+ */
+import { Effect, Layer, Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  type HttpClientError,
+  type HttpClientResponse
+} from 'effect/unstable/http'
+import {
+  ConnectorBinaryHttpClient,
+  ConnectorBinaryHttpError,
+  type ConnectorBinaryHttpRequest,
+  type ConnectorBinaryHttpResponse
+} from '../binary-http.ts'
+import {
+  CredentialResolver,
+  RuntimeCredential,
+  type CredentialResolveRequest
+} from '../credential.ts'
+import { ConnectorError } from '../error.ts'
+import { ConnectorHttpClient, ConnectorHttpResponse, type ConnectorHttpRequest } from '../http.ts'
+
+type FetchOptions = {
+  redirect?: 'manual'
+  credentials?: 'omit'
+}
+
+const headerValue = (
+  headers: Readonly<Record<string, string>> | undefined,
+  name: string
+): string | undefined =>
+  Object.entries(headers ?? {}).find(([key]) => key.toLowerCase() === name)?.[1]
+
+const plainHeaders = (response: HttpClientResponse.HttpClientResponse): Record<string, string> =>
+  Object.fromEntries(Object.entries(response.headers))
+
+const toEffectRequest = (input: {
+  readonly method: ConnectorHttpRequest['method']
+  readonly url: string
+  readonly headers?: Readonly<Record<string, string>> | undefined
+  readonly body?: string | undefined
+}): HttpClientRequest.HttpClientRequest => {
+  const base = HttpClientRequest.make(input.method)(input.url)
+
+  // The body sets a default content type; the connector's own headers are applied afterwards so
+  // a caller-supplied `content-type` (for example `application/json`) always wins.
+  const withBody =
+    input.body === undefined
+      ? base
+      : HttpClientRequest.bodyText(base, input.body, headerValue(input.headers, 'content-type'))
+
+  return HttpClientRequest.setHeaders(withBody, input.headers ?? {})
+}
+
+/**
+ * Execute one request with the port's fetch semantics. `redirect: 'manual'` and
+ * `credentials: 'omit'` are forwarded as `FetchHttpClient.RequestInit` for this request only
+ * (merged over any host defaults), which `FetchHttpClient` honors; other `HttpClient`
+ * implementations must honor them on their own. Trace-context propagation headers are disabled so
+ * the upstream sees exactly the connector's headers.
+ */
+const executeWithPortSemantics = <A>(
+  client: HttpClient.HttpClient,
+  request: HttpClientRequest.HttpClientRequest,
+  options: FetchOptions,
+  read: (
+    response: HttpClientResponse.HttpClientResponse
+  ) => Effect.Effect<A, HttpClientError.HttpClientError>
+): Effect.Effect<A, HttpClientError.HttpClientError> =>
+  Effect.gen(function* () {
+    const hostDefaults = yield* Effect.serviceOption(FetchHttpClient.RequestInit)
+
+    const requestInit: globalThis.RequestInit = {
+      ...Option.getOrElse(hostDefaults, () => ({})),
+      ...options
+    }
+
+    return yield* client
+      .execute(request)
+      .pipe(
+        Effect.flatMap(read),
+        Effect.provideService(FetchHttpClient.RequestInit, requestInit),
+        Effect.provideService(HttpClient.TracerPropagationEnabled, false)
+      )
+  })
+
+const fetchOptions = (request: {
+  readonly redirect?: 'manual' | undefined
+  readonly credentials?: 'omit' | undefined
+}): FetchOptions => {
+  const options: FetchOptions = {}
+
+  if (request.redirect !== undefined) {
+    options.redirect = request.redirect
+  }
+
+  if (request.credentials !== undefined) {
+    options.credentials = request.credentials
+  }
+
+  return options
+}
+
+// Never attach the HttpClientError: its request carries the URL (and possibly query secrets).
+const transportFailure = () =>
+  new ConnectorError({
+    cause: 'transport_failed',
+    message: 'HTTP request failed before a complete response'
+  })
+
+/**
+ * `ConnectorHttpClient` over the `HttpClient` in context. Conformance/testing only.
+ *
+ * Preserves method, URL, headers (including `content-type`), the string body, and response
+ * status/headers/body text. `redirect: 'manual'` and `credentials: 'omit'` are forwarded as
+ * `FetchHttpClient.RequestInit` options (see `executeWithPortSemantics`). Transport and body-read
+ * failures become `ConnectorError` with cause `transport_failed` and a fixed message: never the
+ * URL, headers, or body. Enforces NO byte limits, redirect, or DNS/IP policy. Not for production.
+ */
+export const connectorHttpClientFromEffectHttpClientLayer: Layer.Layer<
+  ConnectorHttpClient,
+  never,
+  HttpClient.HttpClient
+> = Layer.effect(
+  ConnectorHttpClient,
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+
+    return ConnectorHttpClient.of({
+      request: request =>
+        executeWithPortSemantics(
+          client,
+          toEffectRequest(request),
+          fetchOptions(request),
+          response =>
+            response.text.pipe(
+              Effect.map(body =>
+                ConnectorHttpResponse.make({
+                  status: response.status,
+                  headers: plainHeaders(response),
+                  body
+                })
+              )
+            )
+        ).pipe(Effect.mapError(transportFailure))
+    })
+  })
+)
+
+const isByteLimit = (value: number) => Number.isSafeInteger(value) && value >= 0
+
+const binaryResponse = (
+  request: ConnectorBinaryHttpRequest,
+  status: number,
+  headers: Record<string, string>,
+  bytes: Uint8Array
+): Effect.Effect<ConnectorBinaryHttpResponse, ConnectorBinaryHttpError> => {
+  if (status === 200) {
+    // An oversize success must fail, never succeed truncated.
+    return bytes.byteLength > request.maxBytes
+      ? Effect.fail(new ConnectorBinaryHttpError({ code: 'response_too_large' }))
+      : Effect.succeed({ status, headers, bytes, bodyComplete: true })
+  }
+
+  return bytes.byteLength > request.maxErrorBodyBytes
+    ? Effect.succeed({
+        status,
+        headers,
+        bytes: bytes.slice(0, request.maxErrorBodyBytes),
+        bodyComplete: false
+      })
+    : Effect.succeed({ status, headers, bytes, bodyComplete: true })
+}
+
+/**
+ * `ConnectorBinaryHttpClient` over the `HttpClient` in context. Conformance/testing only.
+ *
+ * GET only. Buffers the whole response, then applies the port contract: an HTTP 200 body larger
+ * than `maxBytes` fails with `response_too_large`; any other status keeps at most
+ * `maxErrorBodyBytes` bytes and reports `bodyComplete: false` when it truncated. Because limits
+ * are checked only AFTER buffering, this enforces no streamed byte limit, and no redirect, DNS/IP,
+ * timeout, or TLS policy beyond the wrapped client. `redirect: 'manual'` and `credentials: 'omit'`
+ * are forwarded as `FetchHttpClient.RequestInit` options. Transport failures become
+ * `ConnectorBinaryHttpError` `transport_failed` without URL, headers, or body. Not for production.
+ */
+export const connectorBinaryHttpClientFromEffectHttpClientLayer: Layer.Layer<
+  ConnectorBinaryHttpClient,
+  never,
+  HttpClient.HttpClient
+> = Layer.effect(
+  ConnectorBinaryHttpClient,
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+
+    return ConnectorBinaryHttpClient.of({
+      request: request =>
+        Effect.gen(function* () {
+          if (
+            request.method !== 'GET' ||
+            !isByteLimit(request.maxBytes) ||
+            !isByteLimit(request.maxErrorBodyBytes)
+          ) {
+            return yield* new ConnectorBinaryHttpError({ code: 'transport_failed' })
+          }
+
+          const { status, headers, bytes } = yield* executeWithPortSemantics(
+            client,
+            toEffectRequest({ method: 'GET', url: request.url, headers: request.headers }),
+            fetchOptions(request),
+            response =>
+              response.arrayBuffer.pipe(
+                Effect.map(buffer => ({
+                  status: response.status,
+                  headers: plainHeaders(response),
+                  bytes: new Uint8Array(buffer)
+                }))
+              )
+          ).pipe(Effect.mapError(() => new ConnectorBinaryHttpError({ code: 'transport_failed' })))
+
+          return yield* binaryResponse(request, status, headers, bytes)
+        })
+    })
+  })
+)
+
+/** Both conformance bridges over the `HttpClient` in context. Conformance/testing only. */
+export const connectorHttpClientsFromEffectHttpClientLayer: Layer.Layer<
+  ConnectorHttpClient | ConnectorBinaryHttpClient,
+  never,
+  HttpClient.HttpClient
+> = Layer.mergeAll(
+  connectorHttpClientFromEffectHttpClientLayer,
+  connectorBinaryHttpClientFromEffectHttpClientLayer
+)
+
+/** One credential for every slot, or credentials keyed by credential slot id. */
+export type StaticCredentials =
+  | RuntimeCredential
+  | Readonly<Record<string, RuntimeCredential | undefined>>
+
+const isRuntimeCredential = Schema.is(RuntimeCredential)
+
+const staticCredentialFor = (
+  credentials: StaticCredentials,
+  request: CredentialResolveRequest
+): RuntimeCredential | undefined => {
+  if (isRuntimeCredential(credentials)) {
+    return credentials
+  }
+
+  const entry = Object.entries(credentials).find(([slotId]) => slotId === request.slot.id)
+
+  return entry?.[1]
+}
+
+/**
+ * `CredentialResolver` that returns fixed runtime credentials: one credential for every slot, or a
+ * record keyed by credential slot id (a missing slot fails with `credential_missing`). For replay,
+ * emulated, and live-by-hand conformance runs only. It ignores `requiredScopes`, never refreshes,
+ * and holds the raw secret in memory for the life of the layer. Hosts own real credential
+ * storage, refresh, scope checks, and auditing.
+ */
+export const staticCredentialResolverLayer = (
+  credentials: StaticCredentials
+): Layer.Layer<CredentialResolver> =>
+  Layer.succeed(
+    CredentialResolver,
+    CredentialResolver.of({
+      resolve: request => {
+        const credential = staticCredentialFor(credentials, request)
+
+        return Predicate.isNotUndefined(credential)
+          ? Effect.succeed(credential)
+          : Effect.fail(
+              new ConnectorError({
+                cause: 'credential_missing',
+                message: `No static credential for slot: ${request.slot.id}`,
+                connectorId: request.integration.connectorId,
+                slotId: request.slot.id
+              })
+            )
+      }
+    })
+  )
