@@ -32,8 +32,10 @@ Fixtures must contain synthetic or scrubbed data only. The scan covers metadata 
 headers, request and response bodies (including decodable `bodyBase64` text), each chunk, and the
 reassembled stream, so a secret split across chunks is still found. JSON bodies and SSE `data:`
 payloads get the credential-field scan (`access_token`, `client_secret`, `password`, `token`, ...);
-numeric usage counters such as `max_tokens` are not flagged. It reports locations, never secret
-values, and is a safety net rather than a guarantee.
+numeric usage counters such as `max_tokens` are not flagged. SSE framing with CRLF, LF, or bare CR
+line endings is recognized. The scan errs toward flagging: a field named exactly `token` (for
+example an OpenAI `logprobs` entry) is flagged, so avoid recording logprobs. It reports locations,
+never secret values, and is a safety net rather than a guarantee.
 
 ## Replay
 
@@ -61,7 +63,9 @@ ends with `*`.
 A chunk fault that cannot take effect fails the request with an `HttpClientError` whose cause is
 `WireReplayInvalid`, recorded in the ledger as `invalid` without a fault tag: any chunk fault
 matched against a whole-body response, `TruncateAfterChunks` or `HoldAfterChunks` with `chunks` at
-or beyond the recorded chunk count, or `FailAfterChunks` with `chunks` beyond it.
+or beyond the recorded chunk count, or `FailAfterChunks` with `chunks` beyond it. The error reason
+is a `TransportError`, which generic transient-retry policies retry; when a test runs through a
+retrying client, also assert the ledger has no `invalid` outcome.
 
 ```ts
 import { Effect } from 'effect'

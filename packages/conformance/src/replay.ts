@@ -80,7 +80,9 @@ export type WireFaultMatch = {
  * `invalid` outcome) instead of silently doing nothing: any chunk fault matched
  * against a whole-body response, `TruncateAfterChunks`/`HoldAfterChunks` with
  * `chunks` >= the recorded chunk count, or `FailAfterChunks` with `chunks` >
- * the recorded chunk count.
+ * the recorded chunk count. That error's reason is a `TransportError`, so
+ * transient-retry policies may retry past it: assert the ledger has no
+ * `invalid` outcome when testing through a retrying client.
  */
 export type WireFault = Data.TaggedEnum<{
   StatusOnAttempt: {
@@ -418,7 +420,11 @@ const invalidRecordingError = (request: HttpClientRequest.HttpClientRequest, cau
     })
   })
 
-/** Cause attached to the `HttpClientError` of a request whose recording could not be replayed. */
+/**
+ * Cause attached to the `HttpClientError` (reason `TransportError`) of a request
+ * whose recording could not be replayed. Retrying clients may retry past it;
+ * check the ledger for an `invalid` outcome.
+ */
 export class WireReplayInvalid extends Data.TaggedError('WireReplayInvalid')<{
   readonly reason: string
 }> {
