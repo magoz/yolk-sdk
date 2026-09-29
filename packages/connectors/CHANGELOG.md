@@ -1,5 +1,17 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.95
+
+### Minor Changes
+
+- 8d919b4: Send 7-bit `gmail.send_message` MIME as one simple multipart media upload to `upload/gmail/v1/users/me/messages/send?uploadType=multipart` (`multipart/related` JSON metadata with `threadId` only when provided, then the decoded `message/rfc822` MIME) so messages with attachments up to Gmail's 35 MiB cap are accepted. MIME containing bytes `>= 0x80` keeps the previous JSON `raw` request. Host HTTP adapters must preserve the `multipart/related` content type and forward the string body exactly (CRLF, no re-encoding); prefer quoted-printable or base64 transfer encodings for large messages. Every send is exactly one request, never resumable or retried; input/output schemas and rejected/unknown status classification are unchanged. Decoded MIME over 35 MiB (`gmailSendMessageMaxBytes`) now fails before credentials or network with `validation_failed` and `underlying: { outcome: 'rejected', retryable: false, reason: 'too_large' }`. `GmailRawMessage` now validates in linear time (same accepted strings and published JSON Schema pattern): the previous regex overflowed the stack on multi-megabyte messages.
+- 8d919b4: Add host-only `addOutlookAttachment` on `@yolk-sdk/connectors/microsoft` (not a connector action) to attach one file to an existing Outlook draft with the Outlook write slot and mailbox guards; it returns `{ attachmentId?, name, size }` and never sends. Files under 3 MiB (`outlookAttachmentSingleRequestMaxBytes`) use one Graph `fileAttachment` POST; 3 MiB to 150 MiB (`outlookAttachmentUploadSessionMaxBytes`) use `createUploadSession` and sequential pre-authenticated `PUT` ranges of `outlookAttachmentUploadChunkBytes` with validated `nextExpectedRanges` and a final 201 `Location` attachment ID. Once a valid, allowlisted session URL is obtained, any later failure or interruption triggers best-effort, time-bounded session cancellation; unusable session URLs are never contacted. Larger files or budgets fail with `response_too_large`. Input and result types are exported as `OutlookAddAttachmentInput` and `OutlookAddAttachmentResult`. The helper requires `CredentialResolver | ConnectorHttpClient`: both authenticated Graph JSON POSTs go through the regular `ConnectorHttpClient`, so hosts without any binary write port can attach files under 3 MiB. That string HTTP adapter must allow success bodies of `maxMetadataBytes` plus the echoed base64 content and must not log, trace or persist these request/response bodies (file content and the token-bearing `uploadUrl`). Add the optional `ConnectorBinaryWriteHttpClient.uploadSession` method and `ConnectorBinaryUploadSessionRequest` type, used only for session ranges and cancellation; existing adapters still compile, and hosts without the method or the port fail session-sized uploads with `upload_session_required` before any request. Session URLs are allowlisted to `https://outlook.office.com/api/{v1.0,v2.0,gv1.0,beta}/.../AttachmentSessions(...)` and never appear in results or errors.
+
+### Patch Changes
+
+- Updated dependencies [8d919b4]
+  - @yolk-sdk/agent@0.1.0-canary.95
+
 ## 0.1.0-canary.94
 
 ### Minor Changes
