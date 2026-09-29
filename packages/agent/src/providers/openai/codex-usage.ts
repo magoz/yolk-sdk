@@ -23,6 +23,12 @@ export const openAiCodexSubscriptionUsageUrl = 'https://chatgpt.com/backend-api/
 
 export type OpenAiCodexSubscriptionUsageOptions = {
   readonly requestTimeoutMs?: number
+  /**
+   * Endpoint override. Defaults to `openAiCodexSubscriptionUsageUrl`. Override only with a trusted
+   * proxy or a local emulator: the credential is sent to this URL. Redirects stay
+   * manual and non-2xx redirects are still rejected.
+   */
+  readonly url?: string
 }
 
 const NullableNumber = Schema.NullOr(Schema.Number)
@@ -186,7 +192,7 @@ export const fetchOpenAiCodexSubscriptionUsage = (
 
     const client = yield* HttpClient.HttpClient
 
-    const request = HttpClientRequest.get(openAiCodexSubscriptionUsageUrl).pipe(
+    const request = HttpClientRequest.get(options.url ?? openAiCodexSubscriptionUsageUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
         authorization: `Bearer ${token.accessToken}`,

@@ -12,6 +12,7 @@ description: Package roles and explicit public subpaths.
 | `@yolk-sdk/sandbox`          | sandbox execution plane, Vercel adapter, agent sandbox tool                            |
 | `@yolk-sdk/vercel-workflows` | durable Workflow orchestration contracts                                               |
 | `@yolk-sdk/harness`          | run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)   |
+| `@yolk-sdk/conformance`      | experimental: record, replay, and fault-inject HTTP wire fixtures in tests             |
 
 Package roots stay tiny. Import feature APIs from explicit subpaths.
 
@@ -36,6 +37,7 @@ Package roots stay tiny. Import feature APIs from explicit subpaths.
 | `@yolk-sdk/agent/providers/openai/realtime`            | OpenAI Realtime session config and event codecs                                              |
 | `@yolk-sdk/agent/providers/openai/speech`              | OpenAI text-to-speech and transcription adapters                                             |
 | `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | Vercel AI Gateway Chat Completions provider factory                                          |
+| `@yolk-sdk/agent/providers/vercel/conformance`         | Vercel AI Gateway wire fixtures for replay tests (synthetic placeholders)                    |
 | `@yolk-sdk/agent/providers/opencode/go-provider`       | OpenCode Go Chat Completions, Messages, and Responses provider                               |
 | `@yolk-sdk/agent/providers/opencode/usage`             | OpenCode Go subscription-allowance snapshots                                                 |
 | `@yolk-sdk/agent/providers/anthropic`                  | Claude OAuth and token broker helpers                                                        |
@@ -62,6 +64,7 @@ Package roots stay tiny. Import feature APIs from explicit subpaths.
 | `@yolk-sdk/sandbox`          | `agent`, `vercel`, `testing`                                                                                                                                 |
 | `@yolk-sdk/vercel-workflows` | root, `workflow`, `effect`, `testing`                                                                                                                        |
 | `@yolk-sdk/harness`          | `coordinator`, `store`, `inbox`, `driver`, `driver/memory`, `driver/durable-object`, `outcome`                                                               |
+| `@yolk-sdk/conformance`      | `fixture`, `replay`, `record` (no root export)                                                                                                               |
 
 ## Import rule
 

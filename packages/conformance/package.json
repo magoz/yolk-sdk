@@ -1,0 +1,80 @@
+{
+  "name": "@yolk-sdk/conformance",
+  "version": "0.1.0-canary.95",
+  "description": "Experimental Effect toolkit to record, replay, and fault-inject HTTP wire fixtures for conformance tests.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk-sdk.git",
+    "directory": "packages/conformance"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk-sdk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk-sdk#readme",
+  "keywords": [
+    "conformance",
+    "fixtures",
+    "replay",
+    "http",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./fixture": {
+      "types": "./src/fixture.ts",
+      "default": "./src/fixture.ts"
+    },
+    "./replay": {
+      "types": "./src/replay.ts",
+      "default": "./src/replay.ts"
+    },
+    "./record": {
+      "types": "./src/record.ts",
+      "default": "./src/record.ts"
+    }
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      "./fixture": {
+        "types": "./dist/fixture.d.mts",
+        "import": "./dist/fixture.mjs",
+        "default": "./dist/fixture.mjs"
+      },
+      "./replay": {
+        "types": "./dist/replay.d.mts",
+        "import": "./dist/replay.mjs",
+        "default": "./dist/replay.mjs"
+      },
+      "./record": {
+        "types": "./dist/record.d.mts",
+        "import": "./dist/record.mjs",
+        "default": "./dist/record.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  }
+}

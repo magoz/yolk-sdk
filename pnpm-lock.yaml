@@ -389,12 +389,21 @@ importers:
 
   packages/agent:
     dependencies:
+      '@yolk-sdk/conformance':
+        specifier: workspace:^
+        version: link:../conformance
       effect:
         specifier: 'catalog:'
         version: 4.0.0-rc.115
       react:
         specifier: '>=19'
         version: 19.2.3
+
+  packages/conformance:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.115
 
   packages/connectors:
     dependencies:

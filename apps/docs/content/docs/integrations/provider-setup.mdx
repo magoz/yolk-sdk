@@ -113,7 +113,8 @@ const usageEffect = fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeG
 ```
 
 The best-effort snapshot has `five-hour`, `seven-day`, and `monthly` used-percentage windows when
-available. The fetcher uses a fixed URL, rejects redirects, and returns shared
+available. The fetcher defaults to `openCodeGoSubscriptionUsageUrl` (override `url` only with a
+trusted proxy or local emulator, since it receives the API key), rejects redirects, and returns shared
 `ProviderSubscriptionUsageError` variants without raw HTTP bodies or credential-bearing traces.
 Use provider reset timestamps and keep allowance failures separate from inference; do not derive
 subscription usage from token totals.

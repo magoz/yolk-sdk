@@ -96,6 +96,33 @@ describe('OpenAI Codex subscription usage', () => {
     })
   })
 
+  it.effect('requests a caller-supplied endpoint override with the same credentials', () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+    const client = HttpClient.make(request => {
+      requests.push(request)
+
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json({ rate_limit: { primary_window: { used_percent: 2 } } })
+        )
+      )
+    })
+
+    return Effect.gen(function* () {
+      yield* fetchOpenAiCodexSubscriptionUsage(token, {
+        url: 'http://127.0.0.1:4010/backend-api/wham/usage'
+      }).pipe(Effect.provideService(HttpClient.HttpClient, client))
+
+      expect(requests.map(request => [request.method, request.url])).toEqual([
+        ['GET', 'http://127.0.0.1:4010/backend-api/wham/usage']
+      ])
+      expect(requests[0]?.headers.authorization).toBe('Bearer codex-secret')
+      expect(requests[0]?.headers['chatgpt-account-id']).toBe('redacted-account')
+    })
+  })
+
   it.effect('fails before HTTP when the account id is missing or blank', () => {
     let called = false
 

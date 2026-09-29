@@ -25,6 +25,12 @@ export type XAiGrokSubscriptionUsageOptions = {
   readonly xAiUserId: string
   readonly clientVersion: string
   readonly requestTimeoutMs?: number
+  /**
+   * Endpoint override. Defaults to `xAiGrokSubscriptionUsageUrl`. Override only with a trusted
+   * proxy or a local emulator: the credential is sent to this URL. Redirects stay
+   * manual and non-2xx redirects are still rejected.
+   */
+  readonly url?: string
 }
 
 const NullableString = Schema.NullOr(Schema.String)
@@ -272,7 +278,7 @@ export const fetchXAiGrokSubscriptionUsage = (
 
     const client = yield* HttpClient.HttpClient
 
-    const request = HttpClientRequest.get(xAiGrokSubscriptionUsageUrl).pipe(
+    const request = HttpClientRequest.get(options.url ?? xAiGrokSubscriptionUsageUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
         authorization: `Bearer ${token.accessToken}`,

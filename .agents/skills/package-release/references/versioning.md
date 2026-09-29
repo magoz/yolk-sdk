@@ -14,6 +14,7 @@ Public packages are lockstep/fixed:
 @yolk-sdk/sandbox
 @yolk-sdk/vercel-workflows
 @yolk-sdk/harness
+@yolk-sdk/conformance
 ```
 
 All public packages share one version, even if only one package changed.

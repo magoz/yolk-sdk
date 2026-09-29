@@ -21,6 +21,12 @@ export const openCodeGoSubscriptionUsageUrl = 'https://opencode.ai/zen/go/v1/usa
 
 export type OpenCodeGoSubscriptionUsageOptions = {
   readonly requestTimeoutMs?: number
+  /**
+   * Endpoint override. Defaults to `openCodeGoSubscriptionUsageUrl`. Override only with a trusted
+   * proxy or a local emulator: the credential is sent to this URL. Redirects stay
+   * manual and non-2xx redirects are still rejected.
+   */
+  readonly url?: string
 }
 
 class OpenCodeGoUsageWindowWire extends Schema.Class<OpenCodeGoUsageWindowWire>(
@@ -101,7 +107,7 @@ export const parseOpenCodeGoSubscriptionUsage = (
   )
 }
 
-/** Fixed best-effort endpoint; API key belongs to the Go subscription's user/workspace. */
+/** Best-effort endpoint (overridable via `url`); API key belongs to the Go subscription's user/workspace. */
 export const fetchOpenCodeGoSubscriptionUsage = (
   apiKey: Redacted.Redacted<string>,
   options: OpenCodeGoSubscriptionUsageOptions = {}
@@ -133,7 +139,7 @@ export const fetchOpenCodeGoSubscriptionUsage = (
 
     const client = yield* HttpClient.HttpClient
 
-    const request = HttpClientRequest.get(openCodeGoSubscriptionUsageUrl).pipe(
+    const request = HttpClientRequest.get(options.url ?? openCodeGoSubscriptionUsageUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
         authorization: `Bearer ${Redacted.value(apiKey)}`

@@ -10,6 +10,7 @@
 - Do not repackage Effect HTTP/runtime adapters; expose ports and let hosts wire Effect layers.
 - Raw secrets may flow through host-provided Effect services at invocation time, but integrations store only opaque credential refs.
 - Provider modules may define vendor mechanics and schemas, not host policy.
+- Only `src/agent.ts` may import `@yolk-sdk/agent`; `@yolk-sdk/conformance` (wire fixtures) may be imported only under a `src/**/conformance/` directory. `scripts/check-package-boundaries.ts` enforces both.
 
 ## Public model
 

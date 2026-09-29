@@ -18,40 +18,41 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                                | Purpose                                                        |
-| ------------------------------------------------------ | -------------------------------------------------------------- |
-| `@yolk-sdk/agent/protocol`                             | Wire messages, events, content, usage, tool schemas            |
-| `@yolk-sdk/agent/loop`                                 | Stateless LLM/tool loop                                        |
-| `@yolk-sdk/agent/loop/testing`                         | Faux provider and tool executor test helpers                   |
-| `@yolk-sdk/agent/runtime`                              | Transcript or append-backed runtime orchestration              |
-| `@yolk-sdk/agent/client`                               | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
-| `@yolk-sdk/agent/compaction`                           | Host-owned compaction budgets, checkpoints, formatting, retry  |
-| `@yolk-sdk/agent/tools`                                | Tool registry, typed inputs, interactions, subagents/questions |
-| `@yolk-sdk/agent/react`                                | Headless React chat hook, reducer, selectors, and render model |
-| `@yolk-sdk/agent/oauth`                                | Provider-neutral OAuth token and broker contracts              |
-| `@yolk-sdk/agent/providers/openai`                     | OpenAI/Codex OAuth and broker helpers                          |
-| `@yolk-sdk/agent/providers/openai/codex`               | OpenAI Codex request and auth helpers                          |
-| `@yolk-sdk/agent/providers/openai/codex-usage`         | Codex subscription-allowance snapshots                         |
-| `@yolk-sdk/agent/providers/openai/codex-provider`      | Codex LLM provider factory                                     |
-| `@yolk-sdk/agent/providers/openai/provider`            | OpenAI-compatible LLM provider factory                         |
-| `@yolk-sdk/agent/providers/openai/realtime`            | OpenAI Realtime session config and event codecs                |
-| `@yolk-sdk/agent/providers/openai/speech`              | OpenAI text-to-speech and transcription adapters               |
-| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | Vercel AI Gateway Chat Completions provider factory            |
-| `@yolk-sdk/agent/providers/opencode/go-provider`       | OpenCode Go Chat Completions, Messages, and Responses provider |
-| `@yolk-sdk/agent/providers/opencode/usage`             | OpenCode Go subscription-allowance snapshots                   |
-| `@yolk-sdk/agent/providers/anthropic`                  | Anthropic/Claude OAuth and broker helpers                      |
-| `@yolk-sdk/agent/providers/anthropic/claude`           | Claude request and auth helpers                                |
-| `@yolk-sdk/agent/providers/anthropic/usage`            | Claude subscription-allowance snapshots                        |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider`  | Claude LLM provider factory                                    |
-| `@yolk-sdk/agent/providers/xai`                        | Grok subscription OAuth and token broker helpers               |
-| `@yolk-sdk/agent/providers/xai/grok`                   | Grok subscription request and auth helpers                     |
-| `@yolk-sdk/agent/providers/xai/grok-provider`          | Grok subscription LLM provider factory                         |
-| `@yolk-sdk/agent/providers/xai/usage`                  | Grok subscription-allowance snapshots                          |
-| `@yolk-sdk/agent/providers/subscription-usage`         | Shared allowance snapshot and safe error schemas               |
-| `@yolk-sdk/agent/skillset`                             | Portable skill and slash-command parsing/catalogs              |
-| `@yolk-sdk/agent/voice`                                | Voice protocol, controller, tool handler, projection, speech   |
-| `@yolk-sdk/agent/voice/browser`                        | Browser WebRTC voice transport                                 |
-| `@yolk-sdk/agent/voice/react`                          | Headless browser voice React hook                              |
+| Subpath                                                | Purpose                                                                  |
+| ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `@yolk-sdk/agent/protocol`                             | Wire messages, events, content, usage, tool schemas                      |
+| `@yolk-sdk/agent/loop`                                 | Stateless LLM/tool loop                                                  |
+| `@yolk-sdk/agent/loop/testing`                         | Faux provider and tool executor test helpers                             |
+| `@yolk-sdk/agent/runtime`                              | Transcript or append-backed runtime orchestration                        |
+| `@yolk-sdk/agent/client`                               | HTTP/NDJSON transport, HITL resume, retry/error state helpers            |
+| `@yolk-sdk/agent/compaction`                           | Host-owned compaction budgets, checkpoints, formatting, retry            |
+| `@yolk-sdk/agent/tools`                                | Tool registry, typed inputs, interactions, subagents/questions           |
+| `@yolk-sdk/agent/react`                                | Headless React chat hook, reducer, selectors, and render model           |
+| `@yolk-sdk/agent/oauth`                                | Provider-neutral OAuth token and broker contracts                        |
+| `@yolk-sdk/agent/providers/openai`                     | OpenAI/Codex OAuth and broker helpers                                    |
+| `@yolk-sdk/agent/providers/openai/codex`               | OpenAI Codex request and auth helpers                                    |
+| `@yolk-sdk/agent/providers/openai/codex-usage`         | Codex subscription-allowance snapshots                                   |
+| `@yolk-sdk/agent/providers/openai/codex-provider`      | Codex LLM provider factory                                               |
+| `@yolk-sdk/agent/providers/openai/provider`            | OpenAI-compatible LLM provider factory                                   |
+| `@yolk-sdk/agent/providers/openai/realtime`            | OpenAI Realtime session config and event codecs                          |
+| `@yolk-sdk/agent/providers/openai/speech`              | OpenAI text-to-speech and transcription adapters                         |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | Vercel AI Gateway Chat Completions provider factory                      |
+| `@yolk-sdk/agent/providers/vercel/conformance`         | Synthetic Gateway wire fixtures for `@yolk-sdk/conformance` replay tests |
+| `@yolk-sdk/agent/providers/opencode/go-provider`       | OpenCode Go Chat Completions, Messages, and Responses provider           |
+| `@yolk-sdk/agent/providers/opencode/usage`             | OpenCode Go subscription-allowance snapshots                             |
+| `@yolk-sdk/agent/providers/anthropic`                  | Anthropic/Claude OAuth and broker helpers                                |
+| `@yolk-sdk/agent/providers/anthropic/claude`           | Claude request and auth helpers                                          |
+| `@yolk-sdk/agent/providers/anthropic/usage`            | Claude subscription-allowance snapshots                                  |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider`  | Claude LLM provider factory                                              |
+| `@yolk-sdk/agent/providers/xai`                        | Grok subscription OAuth and token broker helpers                         |
+| `@yolk-sdk/agent/providers/xai/grok`                   | Grok subscription request and auth helpers                               |
+| `@yolk-sdk/agent/providers/xai/grok-provider`          | Grok subscription LLM provider factory                                   |
+| `@yolk-sdk/agent/providers/xai/usage`                  | Grok subscription-allowance snapshots                                    |
+| `@yolk-sdk/agent/providers/subscription-usage`         | Shared allowance snapshot and safe error schemas                         |
+| `@yolk-sdk/agent/skillset`                             | Portable skill and slash-command parsing/catalogs                        |
+| `@yolk-sdk/agent/voice`                                | Voice protocol, controller, tool handler, projection, speech             |
+| `@yolk-sdk/agent/voice/browser`                        | Browser WebRTC voice transport                                           |
+| `@yolk-sdk/agent/voice/react`                          | Headless browser voice React hook                                        |
 
 ## Imports
 
@@ -248,7 +249,7 @@ const usageEffect = fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeG
 }).pipe(Effect.provide(FetchHttpClient.layer))
 ```
 
-The fixed API-key endpoint returns used percentages/reset instants for `five-hour`, `seven-day`, and
+The API-key endpoint (default `openCodeGoSubscriptionUsageUrl`) returns used percentages/reset instants for `five-hour`, `seven-day`, and
 `monthly` windows. Monthly resets follow the subscription's anniversary, not the first of the month;
 the adapter preserves the provider's timestamp. Missing/invalid percentages are omitted, not treated
 as zero. Treat snapshots as best-effort; hosts own polling, stale-data policy, persistence, and UI.
@@ -430,7 +431,8 @@ version.
 Provider adapters return an immutable Effect `Chunk` of semantic window ids, percentages, and
 optional reset/duration fields; hosts own labels, polling, persistence, stale-data policy, alert
 thresholds, billing interpretation, and UI. Configure `requestTimeoutMs` at the server integration
-boundary. Endpoint origins stay fixed, and `FetchHttpClient.layer` is configured for manual
+boundary. Each fetcher defaults to its exported URL constant; the optional `url` override is only
+for a trusted proxy or local emulator, because the credential is sent to it. `FetchHttpClient.layer` is configured for manual
 redirects. A custom `HttpClient` must not follow redirects for these credential-bearing requests.
 
 Subscription allowance snapshots are separate from protocol `AgentUsage`, which accounts for tokens

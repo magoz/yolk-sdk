@@ -17,7 +17,12 @@ import {
 } from '../transfer-internal.ts'
 import { FortnoxInvoiceOAuthCredentialSlot, fortnoxOAuthSlotId } from './oauth.ts'
 import { FortnoxDocumentNumber, FortnoxGivenNumber, FortnoxPagination } from './schemas.ts'
-import { FortnoxMetaInformation, paginationFromApi, readFortnox } from './shared.ts'
+import {
+  FortnoxMetaInformation,
+  fortnoxApiBaseUrl,
+  paginationFromApi,
+  readFortnox
+} from './shared.ts'
 
 export const fortnoxArchiveScope = 'archive'
 
@@ -121,7 +126,7 @@ const download = <Id extends string>(
       : `archive/${encodeURIComponent(id)}`
 
     const response = yield* readBytes(
-      `https://api.fortnox.se/3/${path}`,
+      `${fortnoxApiBaseUrl}/${path}`,
       preview
         ? { authorization: `Bearer ${token}` }
         : { authorization: `Bearer ${token}`, accept: 'application/octet-stream' },
