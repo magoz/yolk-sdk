@@ -127,17 +127,17 @@ in a later drain.
 
 `@yolk-sdk/conformance/runner`
 
-| Export                                               | Purpose                                                                                                                                            |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runConformance(cases, options)`                     | `Effect<ConformanceReport, never, LR>`; runs allowed cases one at a time by default, each with a freshly built `options.layer(case)`               |
-| `ConformanceRunOptions`                              | `target`, `layer`, `fixtures?`, `now?` (default `Clock`), `maxFixtureAgeDays?` (default 30), `concurrency?` (default 1)                            |
-| `ConformanceTarget`                                  | `replay`, `in-process`, `emulated`, or `live` with `account`, `allowWrites?` (`none` default / `reversible`), and `allowIrreversible?` (exact ids) |
-| `conformanceSkipReason`                              | The safety policy: `undefined` (runs), `writes-not-allowed`, or `manual-only`                                                                      |
-| `conformanceCaseWarnings`, `ConformanceWarning`      | `unverified-case`, `stale-observation`, `unverified-fixture`, `stale-fixture`, `missing-fixture`                                                   |
-| `ConformanceReport`, `ConformanceCaseResult`         | Target, `startedAt`, per-case `status` / `skipReason` / sanitized `failure` / `durationMs` / `warnings`, and a summary                             |
-| `formatConformanceReport`, `conformanceReportFailed` | Plain-text report (one line per case plus a summary, no colors); true when any case failed                                                         |
-| `sanitizeConformanceMessage`                         | Best-effort message sanitizer the runner applies to non-mismatch failures (credentials and cookies redacted, JSON spans elided, capped)            |
-| `ConformanceCaseRequirements`                        | Requirements of a case type (or union); what `layer` must provide                                                                                  |
+| Export                                               | Purpose                                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runConformance(cases, options)`                     | `Effect<ConformanceReport, never, LR>`; runs allowed cases one at a time by default, each with a freshly built `options.layer(case)`                    |
+| `ConformanceRunOptions`                              | `target`, `layer`, `fixtures?`, `now?` (default `Clock`), `maxFixtureAgeDays?` (default 30), `concurrency?` (default 1)                                 |
+| `ConformanceTarget`                                  | `replay`, `in-process`, `emulated`, or `live` with `account`, `allowWrites?` (`none` default / `reversible`), and `allowIrreversible?` (exact ids)      |
+| `conformanceSkipReason`                              | The safety policy: `undefined` (runs), `writes-not-allowed`, or `manual-only`                                                                           |
+| `conformanceCaseWarnings`, `ConformanceWarning`      | `unverified-case`, `stale-observation`, `unverified-fixture`, `stale-fixture`, `missing-fixture`                                                        |
+| `ConformanceReport`, `ConformanceCaseResult`         | Target, `startedAt`, per-case `status` / `skipReason` / sanitized `failure` / `durationMs` / `warnings`, and a summary                                  |
+| `formatConformanceReport`, `conformanceReportFailed` | Plain-text report (one line per case plus a summary, no colors); true when any case failed                                                              |
+| `sanitizeConformanceMessage`                         | Best-effort message sanitizer the runner applies to non-mismatch failures (credentials and credential header lines redacted, JSON spans elided, capped) |
+| `ConformanceCaseRequirements`                        | Requirements of a case type (or union); what `layer` must provide                                                                                       |
 
 | Target                             | `read` | `write-reversible`                                                    | `write-irreversible`                                                    |
 | ---------------------------------- | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
@@ -152,11 +152,12 @@ instance)` reused across cases) or provided by the caller's environment is not r
 shared. Failures, layer build failures, a throwing `layer` factory, and defects become `failed`
 results; interruption still interrupts the run.
 
-Failure reports carry an identifier-like error tag (other tags are omitted) and a message, never
+Failure reports carry an identifier-like, non-credential-shaped error tag (other tags are omitted) and a message, never
 request bodies, headers, or mismatch `expected` / `actual` details. A `ConformanceMismatch` keeps
 its case-authored message with credential patterns redacted. Every other message is sanitized
 best-effort by `sanitizeConformanceMessage`: credential patterns shared with the fixture secret
-scan and `Cookie` / `Set-Cookie` fragments are redacted, JSON-looking spans become `[json]`,
+scan and credential header lines (`Cookie:`, `X-Api-Key:`, `Proxy-Authorization:`, ...) are
+redacted, JSON-looking spans become `[json]`,
 whitespace is collapsed, and the length is capped at 300 characters. Hosts should still keep
 secrets out of error messages.
 

@@ -12,7 +12,7 @@
 import { Cause, Clock, Effect, Exit, Option, Predicate, type Layer } from 'effect'
 import { ConformanceMismatch, type ConformanceCase, type ConformanceSafety } from './case.ts'
 import { fixtureAgeDays, type WireFixture } from './fixture.ts'
-import { redactCredentialText, redactedHeaderValue } from './wire-internal.ts'
+import { redactCredentialText } from './wire-internal.ts'
 
 /**
  * Where cases run. `replay`, `in-process`, and `emulated` never touch a real
@@ -148,8 +148,9 @@ type RunSettings = {
  * the factory returns the same `Layer` value. Services captured in a shared
  * value (for example one `Layer.succeed(service, instance)`) or supplied by
  * the caller's environment are not rebuilt and stay shared. Build failures
- * (`LE`) and a throwing factory are reported as failed cases. `LR` is whatever the layers still need from the caller (for example
- * a live `HttpClient`) and becomes the requirement of the whole run.
+ * (`LE`) and a throwing factory are reported as failed cases. `LR` is
+ * whatever the layers still need from the caller (for example a live
+ * `HttpClient`) and becomes the requirement of the whole run.
  */
 export type ConformanceRunOptions<C, LE = never, LR = never> = RunSettings & {
   readonly layer: (testCase: C) => Layer.Layer<ConformanceCaseRequirements<C>, LE, LR>
@@ -235,9 +236,6 @@ const maxFailureMessageLength = 300
 // dropped.
 const reportableTagPattern = /^[A-Za-z][A-Za-z0-9_]*$/
 
-// `Cookie: ...` / `Set-Cookie: ...` header-like fragments, up to the end of the line.
-const cookieHeaderRedaction = /\b(set-cookie|cookie)(\s*[:=]\s*)[^\r\n]*/gi
-
 const collapseAndCap = (message: string): string => {
   const compact = message.replace(/\s+/g, ' ').trim()
 
@@ -318,20 +316,13 @@ const elideJsonSpans = (text: string): string => {
 /**
  * Best-effort sanitizer for failure messages copied into a `ConformanceReport`. Redacts the
  * credential patterns shared with the fixture secret scan (bearer tokens, API-key prefixes, JWTs,
- * private keys, credential query/form parameters, credential field pairs), redacts `Cookie` /
- * `Set-Cookie` header fragments, replaces JSON-looking spans (balanced `{...}` / `[...]`) with
- * `[json]`, collapses whitespace, and caps the length at 300 characters. Hosts should still keep
- * secrets out of error messages.
+ * private keys, credential field pairs, credential query/form parameters, and credential header
+ * lines such as `Cookie:` or `X-Api-Key:` to the end of the line), replaces JSON-looking spans
+ * (balanced `{...}` / `[...]`) with `[json]`, collapses whitespace, and caps the length at 300
+ * characters. Hosts should still keep secrets out of error messages.
  */
 export const sanitizeConformanceMessage = (message: string): string =>
-  collapseAndCap(
-    elideJsonSpans(
-      redactCredentialText(message).replace(
-        cookieHeaderRedaction,
-        (_match, name: string, separator: string) => `${name}${separator}${redactedHeaderValue}`
-      )
-    )
-  )
+  collapseAndCap(elideJsonSpans(redactCredentialText(message)))
 
 // A `ConformanceMismatch` message is written by the case author: keep it readable (no JSON
 // elision), but still redact credential patterns.
@@ -350,7 +341,14 @@ const stringProperty = (value: unknown, key: string): string | undefined => {
 
 const describeValue = (kind: ConformanceFailure['kind'], value: unknown): ConformanceFailure => {
   const rawTag = stringProperty(value, '_tag')
-  const tag = rawTag !== undefined && reportableTagPattern.test(rawTag) ? rawTag : undefined
+
+  // Identifier-like and not credential-shaped (e.g. a `vck_...` value is never echoed).
+  const tag =
+    rawTag !== undefined &&
+    reportableTagPattern.test(rawTag) &&
+    redactCredentialText(rawTag) === rawTag
+      ? rawTag
+      : undefined
 
   const rawMessage =
     stringProperty(value, 'message') ??
@@ -400,8 +398,9 @@ const reportTarget = (target: ConformanceTarget): ConformanceReport['target'] =>
  * Run cases against a target and report. Skipped cases never build their
  * layer. Each running case gets a fresh layer and runs under `Effect.exit`:
  * failures, layer build failures, defects, and a throwing `layer` factory
- * become `failed` results and the run continues. Interruption is not captured: interrupting the run (or a case
- * interrupting itself) interrupts the whole run.
+ * become `failed` results and the run continues. Interruption is not
+ * captured: interrupting the run (or a case interrupting itself) interrupts
+ * the whole run.
  *
  * `C` is inferred as the union of the given case types, so cases with
  * different errors and requirements can share one run without annotations.

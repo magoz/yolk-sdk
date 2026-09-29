@@ -448,7 +448,13 @@ describe('report sanitization', () => {
     'synthetic-session-cookie',
     'synthetic-set-cookie',
     'synthetic-query-token',
-    'synthetic-password'
+    'synthetic-password',
+    'plain-header-secret',
+    'plainproxybasic',
+    'plain-auth-token',
+    'plain-api-key-header',
+    'alpha beta',
+    'delim;iter'
   ]
 
   const hostileMessage = [
@@ -458,7 +464,13 @@ describe('report sanitization', () => {
     'Cookie: session=synthetic-session-cookie',
     'Set-Cookie: id=synthetic-set-cookie; Path=/; HttpOnly',
     'url https://api.example.test/items?access_token=synthetic-query-token&page=2',
-    'password=synthetic-password'
+    'password=synthetic-password',
+    'X-Api-Key: plain-header-secret',
+    'Proxy-Authorization: Basic plainproxybasic',
+    'request header x-auth-token: plain-auth-token',
+    'api-key: plain-api-key-header',
+    'login failed: password="synthetic alpha beta" retry later',
+    "secret='quoted delim;iter value'"
   ].join('\n')
 
   class HostileError extends Data.TaggedError('HostileError')<{ readonly message: string }> {}
@@ -479,6 +491,28 @@ describe('report sanitization', () => {
     expect(sanitized).toContain('access_token=<redacted>&page=2')
     expect(sanitized).not.toMatch(/\s{2,}/)
     expect(sanitizeConformanceMessage('x'.repeat(1_000))).toHaveLength(300)
+  })
+
+  it('redacts credential header lines and whole quoted values with spaces', () => {
+    expect(sanitizeConformanceMessage('X-Api-Key: plain-header-secret')).toBe(
+      'X-Api-Key: <redacted>'
+    )
+    expect(sanitizeConformanceMessage('Proxy-Authorization: Basic plainproxybasic')).toBe(
+      'Proxy-Authorization: <redacted>'
+    )
+    expect(sanitizeConformanceMessage('failed with x-auth-token: plain-auth-token')).toBe(
+      'failed with x-auth-token: <redacted>'
+    )
+    expect(sanitizeConformanceMessage('password="synthetic alpha beta" retry')).toBe(
+      'password=<redacted> retry'
+    )
+    expect(sanitizeConformanceMessage("secret='quoted delim;iter value' next")).toBe(
+      'secret=<redacted> next'
+    )
+    // Ordinary colon-separated text is untouched.
+    expect(sanitizeConformanceMessage('expected status: 400, got 404')).toBe(
+      'expected status: 400, got 404'
+    )
   })
 
   it('elides nested and unbalanced JSON spans', () => {
@@ -559,6 +593,32 @@ describe('report sanitization', () => {
           expect(formatted).not.toContain(secret)
         }
       })
+  )
+})
+
+describe('report tags', () => {
+  const credentialTag = ['vck', 'synthetic0000000000000000'].join('_')
+
+  it.effect('never reports a credential-shaped tag, with or without a message', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance(
+        [
+          {
+            ...baseCase('example.tag.message'),
+            run: Effect.fail({ _tag: credentialTag, message: 'boom' })
+          },
+          { ...baseCase('example.tag.bare'), run: Effect.fail({ _tag: credentialTag }) }
+        ],
+        { target: { kind: 'replay' }, now, layer: () => Layer.empty }
+      )
+
+      expect(report.results.map(result => result.failure)).toEqual([
+        { kind: 'failure', message: 'boom' },
+        { kind: 'failure', message: 'case failed' }
+      ])
+      expect(JSON.stringify(report)).not.toContain(credentialTag)
+      expect(formatConformanceReport(report)).not.toContain(credentialTag)
+    })
   )
 })
 

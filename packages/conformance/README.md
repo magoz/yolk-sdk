@@ -248,11 +248,12 @@ A `ConformanceReport` has the `target` (kind, plus `account` for live), `started
 result per case (`id`, `safety`, `status` `passed` / `failed` / `skipped`, `skipReason`,
 `failure`, `durationMs`, `warnings`), and a `summary` count. `failure` is `{ kind, tag?, message }`
 with `kind` `failure` or `defect`. `tag` is the error's `_tag` only when it is identifier-like
-(`^[A-Za-z][A-Za-z0-9_]*$`). A `ConformanceMismatch` keeps its case-authored message with credential
+(`^[A-Za-z][A-Za-z0-9_]*$`) and not credential-shaped. A `ConformanceMismatch` keeps its case-authored message with credential
 patterns redacted; every other failure, layer failure, and defect message goes through
 `sanitizeConformanceMessage`, a best-effort sanitizer that redacts the credential patterns shared
 with the fixture secret scan (bearer tokens, API-key prefixes, JWTs, credential query/form
-parameters and field pairs) and `Cookie` / `Set-Cookie` fragments, replaces JSON-looking spans
+parameters and field pairs, and credential header lines such as `Cookie:`, `X-Api-Key:`, or
+`Proxy-Authorization:` to the end of the line), replaces JSON-looking spans
 (balanced `{...}` / `[...]`) with `[json]`, collapses whitespace, and caps the length at 300
 characters. Request bodies, headers, and mismatch `expected` / `actual` details are never copied
 into the report; still keep secrets out of error messages.
