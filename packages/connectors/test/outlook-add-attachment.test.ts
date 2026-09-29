@@ -346,12 +346,12 @@ describe('addOutlookAttachment host-only helper', () => {
     })
   )
 
-  it.effect('bounds error bodies by maxErrorBodyBytes', () =>
+  it.effect('keeps the mapped status for oversized error bodies without reading them', () =>
     Effect.gen(function* () {
       const body = JSON.stringify({ error: { message: 'x'.repeat(budget.maxErrorBodyBytes) } })
 
       const host = makeHost({
-        graph: [Effect.succeed(ConnectorHttpResponse.make({ status: 400, headers: {}, body }))]
+        graph: [Effect.succeed(ConnectorHttpResponse.make({ status: 429, headers: {}, body }))]
       })
 
       const result = yield* addOutlookAttachment(
@@ -360,7 +360,7 @@ describe('addOutlookAttachment host-only helper', () => {
         budget
       ).pipe(Effect.provide(host.layer), Effect.result)
 
-      expect(failureOf(result)).toMatchObject({ code: 'response_too_large' })
+      expect(failureOf(result)).toMatchObject({ code: 'rate_limited', status: 429 })
     })
   )
 

@@ -149,8 +149,9 @@ The helper requires `CredentialResolver` and `ConnectorHttpClient`. Both authent
 ASCII-only JSON string bodies with Bearer, JSON `accept`/`content-type` and
 `Prefer: IdType="ImmutableId"` headers, `redirect: 'manual'` and `credentials: 'omit'`. Your HTTP
 adapter must allow those Graph POSTs and a success body of `maxMetadataBytes` plus the echoed base64
-content (about 4 MiB for a file just under 3 MiB). Status codes, response bounds and code-only
-transport failures match the binary port.
+content (about 4 MiB for a file just under 3 MiB). The adapter must not log, trace or persist these request or response bodies: they carry file content and the token-bearing `uploadUrl`. Status codes map the same way as
+the binary port; success bodies are bounded after the adapter returns them, so enforce your own
+streaming cap. Error bodies are never read.
 
 Only session ranges need the optional `ConnectorBinaryWriteHttpClient.uploadSession` method; the
 helper reads that port optionally, so hosts without any binary write port can still attach files

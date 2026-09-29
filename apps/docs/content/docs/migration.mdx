@@ -39,7 +39,8 @@ Rejected/unknown HTTP classification is unchanged.
 `addOutlookAttachment` is a new host-only helper (not an action) on `@yolk-sdk/connectors/microsoft`.
 It requires `CredentialResolver` and `ConnectorHttpClient`: its Graph JSON POSTs
 (`fileAttachment` under 3 MiB and `createUploadSession`) use your existing string HTTP adapter,
-which must allow those POSTs and a success body of `maxMetadataBytes` plus the echoed base64 content.
+which must allow those POSTs and a success body of `maxMetadataBytes` plus the echoed base64 content,
+and must not log, trace or persist those bodies (file content and the token-bearing `uploadUrl`).
 Only files of 3 MiB or more need a `ConnectorBinaryWriteHttpClient` with the new optional
 `uploadSession` method; hosts without that method, or without the port at all, fail those uploads
 with `upload_session_required` before credentials or network. See

@@ -151,8 +151,9 @@ const portFailure = (error: ConnectorBinaryHttpError) =>
 /**
  * One authenticated Graph JSON POST through the regular string `ConnectorHttpClient`. The body is
  * ASCII-only JSON (non-ASCII escaped), so its string length equals its byte length on any host.
- * Responses get the same bounds, status mapping and code-only errors as the binary write port;
- * transport failures never expose their cause.
+ * Status mapping matches the binary write port. Success bodies are bounded after the adapter
+ * returns them (hosts enforce their own streaming cap); error bodies are never read, so an
+ * oversized error still keeps its mapped status. Transport failures never expose their cause.
  */
 const graphJsonPost = (input: {
   readonly http: ConnectorHttpClientApi
@@ -182,12 +183,24 @@ const graphJsonPost = (input: {
       Effect.mapError(() => new ConnectorFileTransferError({ code: 'transport_failed' })),
       Effect.flatMap(response => {
         const body: unknown = response.body
+        const success = response.status === 200 || response.status === 201
+
+        // Error bodies are never read: map the status without bounding or decoding them.
+        if (!success)
+          return checkResponse(
+            {
+              status: response.status,
+              headers: response.headers,
+              bytes: new Uint8Array(0),
+              bodyComplete: false
+            },
+            input.maxBytes,
+            input.maxErrorBodyBytes,
+            true
+          )
 
         // UTF-8 is never shorter than UTF-16 code units: reject oversized bodies before encoding.
-        if (
-          !Predicate.isString(body) ||
-          body.length > Math.max(input.maxBytes, input.maxErrorBodyBytes)
-        )
+        if (!Predicate.isString(body) || body.length > input.maxBytes)
           return failTransfer('response_too_large')
 
         return checkResponse(
