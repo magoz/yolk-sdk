@@ -370,7 +370,9 @@ scope checks or add unnecessary consent. See [Gmail submission](./integrations/c
 ### Microsoft action is unauthorized
 
 Microsoft Outlook and OneDrive actions call Microsoft Graph, so the token audience and consent must be for
-Graph rather than the retired `outlook.office.com/api` endpoint. Read actions need `Mail.Read`,
+Graph rather than the retired `outlook.office.com/api` endpoint. This applies to tokens only:
+`addOutlookAttachment` session ranges go to Graph-issued, pre-authenticated
+`outlook.office.com/api/.../AttachmentSessions(...)` URLs through `uploadSession`, without Authorization. Read actions need `Mail.Read`,
 draft actions need `Mail.ReadWrite`, and send actions need the separate `Mail.Send` permission.
 All action-scoped credential slots share the `microsoft.oauth` binding id.
 
@@ -440,7 +442,10 @@ after the first content request. Host-only create/update are supported; see [Tra
 
 New helpers use `ConnectorFileTransferError`, with code-only failures. `invalid_input` fails before
 credentials/network; `response_too_large` means a host/provider byte bound was exceeded;
-`upload_session_required` means the single-upload cap requires a session flow not implemented here.
+`upload_session_required` from other upload helpers means the file exceeds that provider's
+single-request cap and no session flow is implemented. From `addOutlookAttachment` it means a file of 3 MiB or more
+needs `ConnectorBinaryWriteHttpClient` with the optional `uploadSession` method; files under 3 MiB
+do not. See [Attach a file to an Outlook draft](./connectors/files#attach-a-file-to-an-outlook-draft).
 Never increase limits using model input. `not_downloadable` includes unsupported native exports,
 folders, and item/reference mail attachments. Drive content needs drive.file or explicitly authorized
 drive.readonly, not metadata-only consent. Notion external files require host URL policy.

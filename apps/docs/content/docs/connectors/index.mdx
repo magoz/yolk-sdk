@@ -140,7 +140,8 @@ Application hosts use `mailboxAccessMode: 'application'`. OneDrive inputs use `/
 set `driveId` for an explicit drive, `oneDriveAccessMode: 'delegated_all'` for broader delegated
 permissions, or `oneDriveAccessMode: 'application'` for application tokens. Discovery, metadata,
 same-drive move, asynchronous copy, and copy-status polling stay on `onedrive.*` actions. Original file bytes use host-only `downloadOneDriveItem` with
-`ConnectorBinaryHttpClient`; create/update use the separate binary-write port. Resumable sessions remain unimplemented. Default Microsoft
+`ConnectorBinaryHttpClient`; create/update use the separate binary-write port. OneDrive resumable sessions remain unimplemented;
+host-only `addOutlookAttachment` attaches files to Outlook drafts, with upload sessions for 3–150 MiB. Default Microsoft
 tools still need `CredentialResolver` and `ConnectorHttpClient`. The host still owns
 Entra tenant policy, OAuth callbacks, refresh, storage, consent,
 application resource scoping, Exchange grants, network policy, and file materialization.
@@ -227,7 +228,8 @@ See the [Connectors catalog](../integrations/connectors) for inputs and host con
 
 See [Transfer connector files](./files) for the full capability matrix, raw-byte download/export and
 create/update helpers, consent, provider limits, concurrency guarantees and host transport duties.
-This also covers R2, Drive, Fortnox, Notion, email, Telegram, Todoist and reuse of Afloat/Figma MCP.
+This also covers Outlook draft attachment uploads, R2, Drive, Fortnox, Notion, email, Telegram, Todoist
+and reuse of Afloat/Figma MCP.
 Bytes and write helpers are never added to generic connector action serialization.
 
 ## What the host provides
