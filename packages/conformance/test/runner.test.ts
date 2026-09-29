@@ -667,7 +667,7 @@ describe('report tags', () => {
             ...baseCase('example.mismatch.nested'),
             run: expectConformance(
               false,
-              'sent {"headers":{"x-api-key":"plain-nested-secret"},"list":[{"private-token":"plain-array-secret"}]}'
+              'sent {"headers":{"x-api-key":"plain-nested-secret"},"list":[{"x-figma-token":"plain-array-secret"}]}'
             )
           }
         ],
@@ -675,7 +675,7 @@ describe('report tags', () => {
       )
 
       expect(report.results[0]?.failure?.message).toBe(
-        'sent {"headers":{"x-api-key":<redacted>},"list":[{"private-token":<redacted>}]}'
+        'sent {"headers":{"x-api-key":<redacted>},"list":[{"x-figma-token":<redacted>}]}'
       )
       expect(JSON.stringify(report)).not.toContain('plain-nested-secret')
       expect(JSON.stringify(report)).not.toContain('plain-array-secret')

@@ -163,6 +163,8 @@ const redactQuotedCredentialHeaders = (text: string): string =>
  * (first, to the end of the line), quoted credential header keys (value only), bearer tokens,
  * API-key prefixes, JWTs, private keys, credential field pairs (`"api_key": "..."`,
  * `password="..."`), and credential query/form parameters. Best effort; used on report messages.
+ * Known gap: escaped JSON inside a quoted string value (`"body":"{\\"x-api-key\\":...}"`) is not
+ * parsed.
  * Quote-aware field redaction runs before parameter redaction so a quoted value with spaces is
  * removed whole.
  */
