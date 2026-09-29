@@ -77,21 +77,29 @@ describe('Vercel AI Gateway conformance cases', () => {
       expect(report.summary).toEqual({ passed: 4, failed: 0, skipped: 0 })
       expect(conformanceReportFailed(report)).toBe(false)
 
-      for (const [index, result] of report.results.entries()) {
-        const fixture = vercelAiGatewayConformanceFixtures[index]
+      // Expected warnings and report lines derive from the fixtures, so a verified live recording
+      // (different ids, `evidence: 'verified'`) keeps this test valid.
+      const expectedWarnings = vercelAiGatewayConformanceFixtures.map(fixture =>
+        fixture.evidence === 'unverified'
+          ? [{ kind: 'unverified-case' }, { kind: 'unverified-fixture', fixtureId: fixture.id }]
+          : [{ kind: 'unverified-case' }]
+      )
 
-        expect(result.status).toBe('passed')
-        expect(result.warnings).toEqual([
-          { kind: 'unverified-case' },
-          { kind: 'unverified-fixture', fixtureId: fixture?.id }
-        ])
-      }
+      expect(report.results.map(result => result.status)).toEqual([
+        'passed',
+        'passed',
+        'passed',
+        'passed'
+      ])
+      expect(report.results.map(result => result.warnings)).toEqual(expectedWarnings)
 
       expect(formatConformanceReport(report).split('\n')).toEqual([
-        'PASS  vercel-ai-gateway.stream.plain-text  [read]  warnings: unverified-case, unverified-fixture:vercel-ai-gateway.stream.plain-text.synthetic',
-        'PASS  vercel-ai-gateway.stream.deepseek-reasoning  [read]  warnings: unverified-case, unverified-fixture:vercel-ai-gateway.stream.deepseek-reasoning.synthetic',
-        'PASS  vercel-ai-gateway.stream.tool-call-deltas  [read]  warnings: unverified-case, unverified-fixture:vercel-ai-gateway.stream.tool-call-deltas.synthetic',
-        'PASS  vercel-ai-gateway.stream.error-envelope  [read]  warnings: unverified-case, unverified-fixture:vercel-ai-gateway.stream.error-envelope.synthetic',
+        ...vercelAiGatewayConformanceFixtures.map(fixture =>
+          [
+            `PASS  ${fixture.caseId}  [read]  warnings: unverified-case`,
+            fixture.evidence === 'unverified' ? `, unverified-fixture:${fixture.id}` : ''
+          ].join('')
+        ),
         '4 passed, 0 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
       ])
     })
@@ -199,32 +207,108 @@ describe('Vercel AI Gateway conformance cases', () => {
 })
 
 // Disagreement drills: replay a fixture that contradicts a claim and check the matching case fails
-// with a ConformanceMismatch instead of passing.
+// with a ConformanceMismatch instead of passing. Fixtures are mutated structurally (parsed SSE
+// `data:` payloads, parsed tool arguments, status codes), never by matching their text, so the
+// drills keep working when the synthetic placeholders are replaced by live recordings.
 
-const streamChunks = (fixture: WireFixture): ReadonlyArray<string> => {
+type SseEvent = { readonly data: string; readonly json: unknown }
+
+// Mutable JSON, for editing parsed SSE payloads in place.
+type Json = null | boolean | number | string | Array<Json> | JsonRecord
+
+type JsonRecord = { [key: string]: Json }
+
+const isRecord = (value: unknown): value is JsonRecord =>
+  Predicate.isObject(value) && !Array.isArray(value)
+
+const streamResponse = (fixture: WireFixture) => {
   const response = fixture.exchanges[0].response
 
-  if (!isWireStreamResponse(response)) {
-    return expect.fail(`${fixture.id} is not a stream`)
-  }
-
-  return response.chunks.map(chunk => (Predicate.isString(chunk) ? chunk : expect.fail('text')))
+  return isWireStreamResponse(response) ? response : expect.fail(`${fixture.id} is not a stream`)
 }
 
-const withChunks = (fixture: WireFixture, chunks: ReadonlyArray<string>): WireFixture => {
-  const [exchange] = fixture.exchanges
-  const response = exchange.response
-
-  if (!isWireStreamResponse(response)) {
-    return expect.fail(`${fixture.id} is not a stream`)
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
   }
+}
+
+// Every server-sent event of the recorded stream (chunks reassembled first, so events split
+// across network chunks parse whole), with its `data:` payload parsed when it is JSON.
+const sseEvents = (fixture: WireFixture): Array<SseEvent> =>
+  streamResponse(fixture)
+    .chunks.map(chunk => (Predicate.isString(chunk) ? chunk : expect.fail('text chunks only')))
+    .join('')
+    .replace(/\r\n?/g, '\n')
+    .split('\n\n')
+    .flatMap(event => {
+      const data = event
+        .split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice('data:'.length).trim())
+        .join('\n')
+
+      return data.length === 0 ? [] : [{ data, json: parseJson(data) }]
+    })
+
+// Rewrite the stream as one network chunk per event.
+const withEvents = (
+  fixture: WireFixture,
+  events: ReadonlyArray<SseEvent>,
+  suffix = 'drill'
+): WireFixture => {
+  const [exchange] = fixture.exchanges
 
   return {
     ...fixture,
-    id: `${fixture.id}.drill`,
-    exchanges: [{ request: exchange.request, response: { ...response, chunks: [...chunks] } }]
+    id: `${fixture.id}.${suffix}`,
+    exchanges: [
+      {
+        request: exchange.request,
+        response: {
+          ...streamResponse(fixture),
+          chunks: events.map(event =>
+            event.json === undefined
+              ? `data: ${event.data}\n\n`
+              : `data: ${JSON.stringify(event.json)}\n\n`
+          )
+        }
+      }
+    ]
   }
 }
+
+// Deep copy of an event's parsed JSON, so edits never touch the committed fixture.
+const cloneJson = (event: SseEvent): unknown =>
+  event.json === undefined ? undefined : structuredClone(event.json)
+
+const deltasOf = (json: unknown): Array<JsonRecord> => {
+  const choices = isRecord(json) && Array.isArray(json.choices) ? json.choices : []
+
+  return choices.flatMap(choice =>
+    isRecord(choice) && isRecord(choice.delta) ? [choice.delta] : []
+  )
+}
+
+const mapDeltas = (event: SseEvent, update: (delta: JsonRecord) => void): SseEvent => {
+  const json = cloneJson(event)
+
+  deltasOf(json).forEach(update)
+
+  return { data: event.data, json }
+}
+
+const nonEmptyString = (value: unknown): boolean => Predicate.isString(value) && value.length > 0
+
+const hasReasoning = (event: SseEvent): boolean =>
+  deltasOf(event.json).some(
+    delta => nonEmptyString(delta.reasoning_content) || nonEmptyString(delta.reasoning)
+  )
+
+const hasText = (event: SseEvent): boolean =>
+  deltasOf(event.json).some(delta => nonEmptyString(delta.content))
 
 const drill = (testCase: VercelAiGatewayConformanceCase, fixture: WireFixture) =>
   Effect.gen(function* () {
@@ -234,119 +318,291 @@ const drill = (testCase: VercelAiGatewayConformanceCase, fixture: WireFixture) =
       layer: () => Layer.mergeAll(ReplayHttpClient.layer([fixture]), configLayer)
     })
 
-    expect(conformanceReportFailed(report)).toBe(true)
-
-    return report.results[0]?.failure
+    return report.results[0]
   })
+
+const failedDrill = (testCase: VercelAiGatewayConformanceCase, fixture: WireFixture) =>
+  drill(testCase, fixture).pipe(
+    Effect.map(result => {
+      expect(result?.status).toBe('failed')
+
+      return result?.failure
+    })
+  )
+
+const mismatch = (message: string) => ({ kind: 'failure', tag: 'ConformanceMismatch', message })
+
+const withResponse = (
+  fixture: WireFixture,
+  suffix: string,
+  status: number,
+  body: string
+): WireFixture => ({
+  ...fixture,
+  id: `${fixture.id}.${suffix}`,
+  exchanges: [
+    {
+      request: fixture.exchanges[0].request,
+      response: { status, headers: { 'content-type': 'application/json' }, body }
+    }
+  ]
+})
 
 describe('Vercel AI Gateway conformance disagreement drills', () => {
   it.effect('fails the reasoning case when reasoning deltas are stripped', () =>
     Effect.gen(function* () {
-      const stripped = withChunks(
-        vercelAiGatewayDeepSeekReasoningFixture,
-        streamChunks(vercelAiGatewayDeepSeekReasoningFixture).map(chunk =>
-          chunk.replace(/"reasoning_content":"[^"]*"/, '"reasoning_content":null')
-        )
+      const events = sseEvents(vercelAiGatewayDeepSeekReasoningFixture)
+
+      expect(events.some(hasReasoning)).toBe(true)
+
+      const stripped = events.map(event =>
+        mapDeltas(event, delta => {
+          delete delta.reasoning_content
+          delete delta.reasoning
+        })
       )
 
-      expect(yield* drill(vercelAiGatewayDeepSeekReasoningCase, stripped)).toEqual({
-        kind: 'failure',
-        tag: 'ConformanceMismatch',
-        message: 'expected reasoning deltas'
-      })
+      expect(
+        yield* failedDrill(
+          vercelAiGatewayDeepSeekReasoningCase,
+          withEvents(vercelAiGatewayDeepSeekReasoningFixture, stripped)
+        )
+      ).toEqual(mismatch('expected reasoning deltas'))
     })
   )
 
   it.effect('fails the reasoning case when reasoning arrives after answer text', () =>
     Effect.gen(function* () {
-      const chunks = streamChunks(vercelAiGatewayDeepSeekReasoningFixture)
-      const firstText = chunks.findIndex(chunk => chunk.includes('"content":"Hello"'))
-      const lastReasoning = chunks.findIndex(chunk => chunk.includes('" Keep it short."'))
+      const events = sseEvents(vercelAiGatewayDeepSeekReasoningFixture)
+      const firstText = events.findIndex(hasText)
+      const lastReasoning = events.findLastIndex(hasReasoning)
 
+      expect(lastReasoning).not.toBe(-1)
       expect(lastReasoning).toBeLessThan(firstText)
 
-      const reordered = chunks.filter((_, index) => index !== lastReasoning)
-      reordered.splice(firstText, 0, chunks[lastReasoning] ?? expect.fail('chunk'))
+      const reasoningEvent = events[lastReasoning] ?? expect.fail('reasoning event')
+      const reordered = events.filter((_, index) => index !== lastReasoning)
+
+      // After removal the first text event sits at `firstText - 1`; insert right after it.
+      reordered.splice(firstText, 0, reasoningEvent)
 
       expect(
-        yield* drill(
+        yield* failedDrill(
           vercelAiGatewayDeepSeekReasoningCase,
-          withChunks(vercelAiGatewayDeepSeekReasoningFixture, reordered)
+          withEvents(vercelAiGatewayDeepSeekReasoningFixture, reordered)
         )
-      ).toEqual({
-        kind: 'failure',
-        tag: 'ConformanceMismatch',
-        message: 'expected every reasoning delta before the first text delta'
-      })
+      ).toEqual(mismatch('expected every reasoning delta before the first text delta'))
     })
   )
 
-  it.effect('fails the tool-call case when argument fragments do not assemble the claim', () =>
+  it.effect('fails the tool-call case when the assembled arguments lack the claimed key', () =>
     Effect.gen(function* () {
-      const renamed = withChunks(
-        vercelAiGatewayToolCallDeltasFixture,
-        streamChunks(vercelAiGatewayToolCallDeltasFixture).map(chunk =>
-          chunk.replace('{\\"ci', '{\\"to').replace('ty\\":\\"Spri', 'wn\\":\\"Spri')
+      const events = sseEvents(vercelAiGatewayToolCallDeltasFixture)
+
+      const argumentsOf = (delta: JsonRecord): Array<JsonRecord> =>
+        (Array.isArray(delta.tool_calls) ? delta.tool_calls : []).flatMap(call =>
+          isRecord(call) && isRecord(call.function) && Predicate.isString(call.function.arguments)
+            ? [call.function]
+            : []
         )
+
+      const assembled = events
+        .flatMap(event => deltasOf(event.json).flatMap(argumentsOf))
+        .map(fn => fn.arguments)
+        .join('')
+
+      const params = parseJson(assembled)
+
+      if (!isRecord(params) || !('city' in params)) {
+        return expect.fail('recorded tool arguments carry no `city`')
+      }
+
+      const { city, ...rest } = params
+      const renamed = JSON.stringify({ ...rest, town: city })
+      let written = false
+
+      // The whole renamed argument string goes into the first fragment; later fragments empty.
+      const rewritten = events.map(event =>
+        mapDeltas(event, delta => {
+          for (const fn of argumentsOf(delta)) {
+            fn.arguments = written ? '' : renamed
+            written = true
+          }
+        })
       )
 
-      expect(yield* drill(vercelAiGatewayToolCallDeltasCase, renamed)).toEqual({
-        kind: 'failure',
-        tag: 'ConformanceMismatch',
-        message: 'expected a non-empty string `city` argument'
-      })
+      expect(
+        yield* failedDrill(
+          vercelAiGatewayToolCallDeltasCase,
+          withEvents(vercelAiGatewayToolCallDeltasFixture, rewritten)
+        )
+      ).toEqual(mismatch('expected a non-empty string `city` argument'))
     })
   )
 
-  it.effect('fails the plain-text case when the answer arrives as a single delta', () =>
+  it.effect('passes the plain-text case when the whole answer is one content event', () =>
     Effect.gen(function* () {
-      const chunks = streamChunks(vercelAiGatewayPlainTextFixture)
+      const events = sseEvents(vercelAiGatewayPlainTextFixture)
 
-      const oneDelta = chunks
+      const text = events
+        .flatMap(event => deltasOf(event.json).map(delta => delta.content))
+        .filter(Predicate.isString)
         .join('')
-        .split('\n\n')
-        .filter(event => event.length > 0)
-        .filter(event => !event.includes('" from the') && !event.includes('" synthetic gateway."'))
-        .map(event => `${event}\n\n`)
+
+      expect(text.trim().length).toBeGreaterThan(0)
+
+      const firstText = events.findIndex(hasText)
+
+      const single = events.flatMap((event, index) => {
+        if (index === firstText) {
+          return [
+            mapDeltas(event, delta => {
+              delta.content = text
+            })
+          ]
+        }
+
+        return hasText(event) ? [] : [event]
+      })
+
+      expect(single.filter(hasText)).toHaveLength(1)
+
+      const result = yield* drill(
+        vercelAiGatewayPlainTextCase,
+        withEvents(vercelAiGatewayPlainTextFixture, single)
+      )
+
+      expect(result?.status).toBe('passed')
+    })
+  )
+
+  it.effect('fails the plain-text case when the stream reports no usage', () =>
+    Effect.gen(function* () {
+      const events = sseEvents(vercelAiGatewayPlainTextFixture)
+
+      const withoutUsage = events.map(event => {
+        const json = cloneJson(event)
+
+        if (isRecord(json)) {
+          delete json.usage
+        }
+
+        return { data: event.data, json }
+      })
 
       expect(
-        yield* drill(
+        yield* failedDrill(
           vercelAiGatewayPlainTextCase,
-          withChunks(vercelAiGatewayPlainTextFixture, oneDelta)
+          withEvents(vercelAiGatewayPlainTextFixture, withoutUsage)
         )
-      ).toEqual({
-        kind: 'failure',
-        tag: 'ConformanceMismatch',
-        message: 'expected at least two text deltas before Done (a streamed answer)'
-      })
+      ).toEqual(mismatch('expected a usage report'))
     })
   )
+
+  it.effect('fails the plain-text case when the streamed text is empty', () =>
+    Effect.gen(function* () {
+      const empty = sseEvents(vercelAiGatewayPlainTextFixture).map(event =>
+        mapDeltas(event, delta => {
+          if (Predicate.isString(delta.content)) {
+            delta.content = ''
+          }
+        })
+      )
+
+      expect(
+        yield* failedDrill(
+          vercelAiGatewayPlainTextCase,
+          withEvents(vercelAiGatewayPlainTextFixture, empty)
+        )
+      ).toEqual(mismatch('expected non-empty answer text'))
+    })
+  )
+
+  const errorEnvelope = (): JsonRecord => {
+    const response = vercelAiGatewayErrorEnvelopeFixture.exchanges[0].response
+    const body = 'body' in response && Predicate.isString(response.body) ? response.body : ''
+    const parsed = parseJson(body)
+
+    return isRecord(parsed) && isRecord(parsed.error)
+      ? structuredClone(parsed)
+      : expect.fail('error fixture has no JSON error envelope')
+  }
 
   // The provider falls back from `error.code` to `error.type`, so the drill drops both.
   it.effect('fails the error-envelope case when the envelope carries no code or type', () =>
     Effect.gen(function* () {
-      const [exchange] = vercelAiGatewayErrorEnvelopeFixture.exchanges
+      const envelope = errorEnvelope()
 
-      const codeless: WireFixture = {
-        ...vercelAiGatewayErrorEnvelopeFixture,
-        id: `${vercelAiGatewayErrorEnvelopeFixture.id}.drill`,
-        exchanges: [
-          {
-            request: exchange.request,
-            response: {
-              status: 400,
-              headers: { 'content-type': 'application/json' },
-              body: '{"error":{"message":"Synthetic placeholder."}}'
-            }
-          }
-        ]
+      if (isRecord(envelope.error)) {
+        delete envelope.error.code
+        delete envelope.error.type
       }
 
-      expect(yield* drill(vercelAiGatewayErrorEnvelopeCase, codeless)).toEqual({
-        kind: 'failure',
-        tag: 'ConformanceMismatch',
-        message: 'expected the provider error code to be preserved'
+      expect(
+        yield* failedDrill(
+          vercelAiGatewayErrorEnvelopeCase,
+          withResponse(
+            vercelAiGatewayErrorEnvelopeFixture,
+            'codeless',
+            400,
+            JSON.stringify(envelope)
+          )
+        )
+      ).toEqual(mismatch('expected the provider error code to be preserved'))
+    })
+  )
+
+  for (const status of [401, 403]) {
+    it.effect(`fails the error-envelope case for a ${status} authentication failure`, () =>
+      Effect.gen(function* () {
+        expect(
+          yield* failedDrill(
+            vercelAiGatewayErrorEnvelopeCase,
+            withResponse(
+              vercelAiGatewayErrorEnvelopeFixture,
+              `status-${status}`,
+              status,
+              JSON.stringify(errorEnvelope())
+            )
+          )
+        ).toEqual(
+          mismatch('expected a model rejection, not an authentication or permission failure')
+        )
       })
+    )
+  }
+
+  it.effect('fails the error-envelope case for a non-model-rejection 4xx status', () =>
+    Effect.gen(function* () {
+      expect(
+        yield* failedDrill(
+          vercelAiGatewayErrorEnvelopeCase,
+          withResponse(
+            vercelAiGatewayErrorEnvelopeFixture,
+            'status-402',
+            402,
+            JSON.stringify(errorEnvelope())
+          )
+        )
+      ).toEqual(mismatch('expected a 400, 404, or 422 model-rejection status'))
+    })
+  )
+
+  it.effect('accepts 400, 404, and 422 model rejections', () =>
+    Effect.gen(function* () {
+      for (const status of [400, 404, 422]) {
+        const result = yield* drill(
+          vercelAiGatewayErrorEnvelopeCase,
+          withResponse(
+            vercelAiGatewayErrorEnvelopeFixture,
+            `status-${status}`,
+            status,
+            JSON.stringify(errorEnvelope())
+          )
+        )
+
+        expect(result?.status).toBe('passed')
+      }
     })
   )
 
@@ -367,7 +623,7 @@ describe('Vercel AI Gateway conformance disagreement drills', () => {
         ]
       }
 
-      const failure = yield* drill(vercelAiGatewayPlainTextCase, throttled)
+      const failure = yield* failedDrill(vercelAiGatewayPlainTextCase, throttled)
 
       expect(failure).toEqual({
         kind: 'failure',

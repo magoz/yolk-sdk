@@ -229,14 +229,17 @@ explicitly started and applies regardless of `allowWrites`. Nothing real happens
 targets, so every case runs there.
 
 - `layer(testCase)` is called once per case that runs (never for skipped cases) and must provide
-  what that case needs. It is built with a fresh memo map in its own scope, so replay consumption,
-  ledgers, and emulator state never leak between cases, even if the factory returns the same
-  `Layer` value. Whatever the layers still need (for example a host's live `HttpClient`) becomes
-  the requirement of the run.
+  what that case needs. It is called inside the case's failure boundary and built with a fresh
+  memo map in its own scope, so state the layer allocates when it is built (replay consumption,
+  ledgers, emulator state) never leaks between cases, even if the factory returns the same `Layer`
+  value. Isolation therefore needs layers that allocate mutable state when built: a service
+  captured in a shared value (one `Layer.succeed(service, instance)` reused across cases) or
+  provided by the caller's environment is not rebuilt and stays shared. Whatever the layers still
+  need (for example a host's live `HttpClient`) becomes the requirement of the run.
 - Cases with different error and requirement types can share a run; the case type is inferred as
   their union.
-- Each case runs under `Effect.exit`: typed failures, layer build failures, and defects become
-  `failed` results and the run continues. Interruption is not captured: interrupting the run, or a
+- Each case runs under `Effect.exit`: typed failures, layer build failures, a throwing `layer`
+  factory, and defects become `failed` results and the run continues. Interruption is not captured: interrupting the run, or a
   case interrupting itself, interrupts the whole run.
 - `concurrency` defaults to 1 (live accounts are shared); results keep case order.
 - `now` defaults to the Effect `Clock`; `maxFixtureAgeDays` defaults to 30.
@@ -244,9 +247,15 @@ targets, so every case runs there.
 A `ConformanceReport` has the `target` (kind, plus `account` for live), `startedAt` (ISO), one
 result per case (`id`, `safety`, `status` `passed` / `failed` / `skipped`, `skipReason`,
 `failure`, `durationMs`, `warnings`), and a `summary` count. `failure` is `{ kind, tag?, message }`
-with `kind` `failure` or `defect`; the message is the error's own message with whitespace
-collapsed, bearer tokens masked, and length capped. Request bodies, headers, and mismatch details
-are never copied into the report, so keep secrets out of error messages.
+with `kind` `failure` or `defect`. `tag` is the error's `_tag` only when it is identifier-like
+(`^[A-Za-z][A-Za-z0-9_]*$`). A `ConformanceMismatch` keeps its case-authored message with credential
+patterns redacted; every other failure, layer failure, and defect message goes through
+`sanitizeConformanceMessage`, a best-effort sanitizer that redacts the credential patterns shared
+with the fixture secret scan (bearer tokens, API-key prefixes, JWTs, credential query/form
+parameters and field pairs) and `Cookie` / `Set-Cookie` fragments, replaces JSON-looking spans
+(balanced `{...}` / `[...]`) with `[json]`, collapses whitespace, and caps the length at 300
+characters. Request bodies, headers, and mismatch `expected` / `actual` details are never copied
+into the report; still keep secrets out of error messages.
 
 Warnings are non-fatal and listed per case:
 
@@ -258,7 +267,8 @@ Warnings are non-fatal and listed per case:
 | `stale-fixture`      | A referenced fixture is older than `maxFixtureAgeDays` (`ageDays`)                   |
 | `missing-fixture`    | A referenced fixture id is not in `fixtures` (only checked when `fixtures` is given) |
 
-Fixture warnings need `fixtures` and are not reported on a `live` target, where fixtures are not
-used; case-level warnings always are. `formatConformanceReport` prints one plain-text line per
+Live targets omit all fixture-level warnings (`unverified-fixture`, `stale-fixture`, and
+`missing-fixture`) because fixtures are not used live; elsewhere fixture warnings need `fixtures`.
+Case-level warnings always apply. `formatConformanceReport` prints one plain-text line per
 case (status, id, safety, skip reason or failure, warnings) and a summary line, without colors.
 `conformanceReportFailed` is true when any case failed; skipped cases never fail a report.

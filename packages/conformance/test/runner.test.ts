@@ -16,6 +16,7 @@ import {
   conformanceSkipReason,
   formatConformanceReport,
   runConformance,
+  sanitizeConformanceMessage,
   type ConformanceSkipReason,
   type ConformanceTarget
 } from '../src/runner.ts'
@@ -170,7 +171,7 @@ class CaseFailure extends Data.TaggedError('CaseFailure')<{ readonly message: st
 class LayerFailure extends Data.TaggedError('LayerFailure')<{ readonly message: string }> {}
 
 describe('runConformance isolation', () => {
-  it.effect('builds a fresh layer per case even when the factory reuses one Layer value', () =>
+  it.effect('rebuilds per case a layer the ambient context already built and memoized', () =>
     Effect.gen(function* () {
       const builds = yield* Ref.make(0)
 
@@ -190,14 +191,16 @@ describe('runConformance isolation', () => {
           })
         })
 
+      // The outer provide builds `shared` once and puts its memo map in the ambient context.
+      // Without `{ local: true }` each case would reuse that memoized build (and its counter).
       const report = yield* runConformance([bump('example.fresh.one'), bump('example.fresh.two')], {
         target: { kind: 'in-process' },
         now,
         layer: () => shared
-      })
+      }).pipe(Effect.provide(shared))
 
       expect(report.summary).toEqual({ passed: 2, failed: 0, skipped: 0 })
-      expect(yield* Ref.get(builds)).toBe(2)
+      expect(yield* Ref.get(builds)).toBe(3)
     })
   )
 
@@ -335,11 +338,35 @@ describe('runConformance failures', () => {
         const [bearer, capped, plain, opaque] = report.results
 
         expect(bearer?.failure?.message).toBe('sent Authorization: Bearer <redacted> then failed')
-        expect(capped?.failure?.message.length).toBe(500)
+        expect(capped?.failure?.message.length).toBe(300)
         expect(capped?.failure?.message.endsWith('...')).toBe(true)
         expect(plain?.failure).toEqual({ kind: 'failure', message: 'plain string failure' })
         expect(opaque?.failure).toEqual({ kind: 'failure', message: 'case failed' })
       })
+  )
+
+  it.effect('reports a throwing layer factory as a failed case and keeps running', () =>
+    Effect.gen(function* () {
+      const report = yield* runConformance(
+        [baseCase('example.factory.throws'), baseCase('example.factory.after')],
+        {
+          target: { kind: 'replay' },
+          now,
+          layer: testCase => {
+            if (testCase.id === 'example.factory.throws') {
+              throw new Error('factory exploded')
+            }
+
+            return Layer.empty
+          }
+        }
+      )
+
+      expect(report.results.map(result => [result.id, result.status, result.failure])).toEqual([
+        ['example.factory.throws', 'failed', { kind: 'defect', message: 'factory exploded' }],
+        ['example.factory.after', 'passed', undefined]
+      ])
+    })
   )
 
   it('requires the per-case layer to provide every case requirement', () => {
@@ -398,6 +425,140 @@ describe('runConformance failures', () => {
 
       expect(Exit.isFailure(exit) && Exit.hasInterrupts(exit)).toBe(true)
     })
+  )
+})
+
+describe('report sanitization', () => {
+  // Synthetic credential-shaped values, assembled at runtime so the source holds no key literal.
+  const openAiStyleKey = ['sk', 'synthetic0000000000000000'].join('-')
+  const gatewayStyleKey = ['vck', 'synthetic0000000000000000'].join('_')
+
+  const syntheticJwt = [
+    'eyJhbGciOiJub25lIn0',
+    'eyJzdWIiOiJzeW50aGV0aWMifQ',
+    'c2lnbmF0dXJlMDAw'
+  ].join('.')
+
+  const secrets = [
+    openAiStyleKey,
+    gatewayStyleKey,
+    syntheticJwt,
+    'synthetic-api-key-value',
+    'private-body-content',
+    'synthetic-session-cookie',
+    'synthetic-set-cookie',
+    'synthetic-query-token',
+    'synthetic-password'
+  ]
+
+  const hostileMessage = [
+    'upstream rejected the request: response={"api_key":"synthetic-api-key-value","body":"private-body-content"}',
+    `key ${openAiStyleKey} and ${gatewayStyleKey} without an auth scheme`,
+    `jwt ${syntheticJwt}`,
+    'Cookie: session=synthetic-session-cookie',
+    'Set-Cookie: id=synthetic-set-cookie; Path=/; HttpOnly',
+    'url https://api.example.test/items?access_token=synthetic-query-token&page=2',
+    'password=synthetic-password'
+  ].join('\n')
+
+  class HostileError extends Data.TaggedError('HostileError')<{ readonly message: string }> {}
+
+  const hostileTag = { _tag: 'Hostile tag {"api_key":"x"}', message: hostileMessage }
+
+  it('redacts credentials, cookies, and JSON spans, and caps the length', () => {
+    const sanitized = sanitizeConformanceMessage(hostileMessage)
+
+    for (const secret of secrets) {
+      expect(sanitized).not.toContain(secret)
+    }
+
+    expect(sanitized).toContain('upstream rejected the request: response=[json]')
+    expect(sanitized).toContain('key <redacted> and <redacted> without an auth scheme')
+    expect(sanitized).toContain('jwt <redacted>')
+    expect(sanitized).toContain('Cookie: <redacted> Set-Cookie: <redacted>')
+    expect(sanitized).toContain('access_token=<redacted>&page=2')
+    expect(sanitized).not.toMatch(/\s{2,}/)
+    expect(sanitizeConformanceMessage('x'.repeat(1_000))).toHaveLength(300)
+  })
+
+  it('elides nested and unbalanced JSON spans', () => {
+    expect(sanitizeConformanceMessage('a {"x":[1,{"y":"}"}]} b [1, 2] c')).toBe(
+      'a [json] b [json] c'
+    )
+    expect(sanitizeConformanceMessage('truncated body {"body":"private-body-content')).toBe(
+      'truncated body [json]'
+    )
+    expect(sanitizeConformanceMessage('mismatched {"a":[1}] tail')).toBe('mismatched [json]')
+  })
+
+  it('redacts credential field pairs and auth schemes outside JSON', () => {
+    expect(
+      sanitizeConformanceMessage(
+        "api_key: synthetic-api-key-value, token='synthetic-query-token' Authorization: Basic c3ludGhldGlj"
+      )
+    ).toBe('api_key: <redacted>, token=<redacted> Authorization: <redacted>')
+    // Usage counters and ordinary words are not credential fields.
+    expect(sanitizeConformanceMessage('max_tokens: 64, prompt_tokens=12 keys ok')).toBe(
+      'max_tokens: 64, prompt_tokens=12 keys ok'
+    )
+  })
+
+  it.effect(
+    'sanitizes failures, layer failures, and defects in results and the formatted report',
+    () =>
+      Effect.gen(function* () {
+        const report = yield* runConformance(
+          [
+            {
+              ...baseCase('example.hostile.failure'),
+              run: Effect.fail(new HostileError({ message: hostileMessage }))
+            },
+            { ...baseCase('example.hostile.layer'), run: Effect.void },
+            { ...baseCase('example.hostile.defect'), run: Effect.die(new Error(hostileMessage)) },
+            { ...baseCase('example.hostile.string'), run: Effect.fail(hostileMessage) },
+            { ...baseCase('example.hostile.tag'), run: Effect.fail(hostileTag) },
+            { ...baseCase('example.hostile.tag-only'), run: Effect.fail({ _tag: 'Bad Tag!' }) },
+            {
+              ...baseCase('example.hostile.mismatch'),
+              run: expectConformance(false, `claim failed for key ${openAiStyleKey}`, {
+                actual: hostileMessage
+              })
+            }
+          ],
+          {
+            target: { kind: 'replay' },
+            now,
+            layer: testCase =>
+              testCase.id === 'example.hostile.layer'
+                ? Layer.effectDiscard(Effect.fail(new LayerFailure({ message: hostileMessage })))
+                : Layer.empty
+          }
+        )
+
+        const sanitized = sanitizeConformanceMessage(hostileMessage)
+
+        expect(report.results.map(result => result.failure)).toEqual([
+          { kind: 'failure', tag: 'HostileError', message: sanitized },
+          { kind: 'failure', tag: 'LayerFailure', message: sanitized },
+          { kind: 'defect', message: sanitized },
+          { kind: 'failure', message: sanitized },
+          { kind: 'failure', message: sanitized },
+          { kind: 'failure', message: 'case failed' },
+          {
+            kind: 'failure',
+            tag: 'ConformanceMismatch',
+            message: 'claim failed for key <redacted>'
+          }
+        ])
+
+        const serialized = JSON.stringify(report)
+        const formatted = formatConformanceReport(report)
+
+        for (const secret of [...secrets, 'Hostile tag', 'Bad Tag!']) {
+          expect(serialized).not.toContain(secret)
+          expect(formatted).not.toContain(secret)
+        }
+      })
   )
 })
 

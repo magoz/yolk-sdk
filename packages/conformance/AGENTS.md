@@ -74,15 +74,24 @@ There is no root export or barrel.
   `allowWrites: 'reversible'` (else `writes-not-allowed`), and runs `write-irreversible` only for
   exact ids in `allowIrreversible` (else `manual-only`), independent of `allowWrites`. Never weaken
   a live default: `allowWrites` defaults to `none`.
-- Skipped cases never build their layer. Running cases get `options.layer(case)` built with a fresh
-  memo map (`Effect.provide(layer, { local: true })`) so state never leaks between cases.
-- Each case runs under `Effect.exit`; failures, layer build failures, and defects become `failed`
-  results. Interrupt-only causes re-interrupt the run instead of becoming results.
-- Reports carry only error `_tag` and a sanitized `message` (whitespace collapsed, bearer tokens
-  masked, capped); never copy request bodies, headers, or mismatch details into reports.
-- Fixture warnings (`unverified-fixture`, `stale-fixture`, `missing-fixture`) need supplied
-  fixtures and are omitted on `live`; case warnings (`unverified-case`, `stale-observation`) always
-  apply. `formatConformanceReport` output is plain text without ANSI colors.
+- Skipped cases never build their layer. Running cases call `options.layer(case)` inside the
+  per-case exit boundary (`Effect.suspend`) and build it with a fresh memo map
+  (`Effect.provide(layer, { local: true })`), so state allocated at build time never leaks between
+  cases. Services captured in a shared `Layer.succeed` value or provided by the caller's
+  environment stay shared; document that limit wherever isolation is promised.
+- Each case runs under `Effect.exit`; failures, layer build failures, throwing layer factories,
+  and defects become `failed` results. Interrupt-only causes re-interrupt the run instead of
+  becoming results.
+- Reports carry only an identifier-like error `_tag` and a message. `ConformanceMismatch`
+  messages keep the case-authored text with credential patterns redacted; every other message is
+  sanitized best-effort by `sanitizeConformanceMessage` (credential patterns and cookies redacted,
+  JSON spans elided, whitespace collapsed, capped at 300). Hosts should still keep secrets out of
+  error messages. Never copy request bodies, headers, or mismatch details into reports.
+- Credential patterns live once in `wire-internal.ts`; the fixture secret scan and the report
+  sanitizer both use them. Change them there, never in a copy.
+- Live targets omit all fixture-level warnings (`unverified-fixture`, `stale-fixture`,
+  `missing-fixture`) because fixtures are not used live; elsewhere they need supplied fixtures.
+  Case warnings (`unverified-case`, `stale-observation`) always apply. `formatConformanceReport` output is plain text without ANSI colors.
 - `runConformance` has a public overload inferring the case union `C` (layer must provide
   `ConformanceCaseRequirements<C>`) over a single-`<E, R>` implementation signature; keep them in
   sync.

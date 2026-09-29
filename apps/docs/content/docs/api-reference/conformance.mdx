@@ -136,6 +136,7 @@ in a later drain.
 | `conformanceCaseWarnings`, `ConformanceWarning`      | `unverified-case`, `stale-observation`, `unverified-fixture`, `stale-fixture`, `missing-fixture`                                                   |
 | `ConformanceReport`, `ConformanceCaseResult`         | Target, `startedAt`, per-case `status` / `skipReason` / sanitized `failure` / `durationMs` / `warnings`, and a summary                             |
 | `formatConformanceReport`, `conformanceReportFailed` | Plain-text report (one line per case plus a summary, no colors); true when any case failed                                                         |
+| `sanitizeConformanceMessage`                         | Best-effort message sanitizer the runner applies to non-mismatch failures (credentials and cookies redacted, JSON spans elided, capped)            |
 | `ConformanceCaseRequirements`                        | Requirements of a case type (or union); what `layer` must provide                                                                                  |
 
 | Target                             | `read` | `write-reversible`                                                    | `write-irreversible`                                                    |
@@ -143,11 +144,25 @@ in a later drain.
 | `replay`, `in-process`, `emulated` | runs   | runs                                                                  | runs                                                                    |
 | `live`                             | runs   | runs only with `allowWrites: 'reversible'`, else `writes-not-allowed` | runs only if its exact id is in `allowIrreversible`, else `manual-only` |
 
-Skipped cases never build their layer. Each running case gets a fresh layer (fresh memo map and
-scope), so replay consumption and emulator state never leak between cases. Failures, layer build
-failures, and defects become `failed` results; interruption still interrupts the run. Failure
-reports carry only the error tag and a sanitized message, never request bodies, headers, or
-mismatch details. Fixture warnings need `fixtures` and are omitted on a `live` target.
+Skipped cases never build their layer. Each running case calls `options.layer(case)` and builds
+the result fresh (fresh memo map and scope), so state a layer allocates when it is built (replay
+consumption, ledgers, emulator state) never leaks between cases. Layers must allocate their
+mutable state when built: a service captured in a shared value (one `Layer.succeed(service,
+instance)` reused across cases) or provided by the caller's environment is not rebuilt and stays
+shared. Failures, layer build failures, a throwing `layer` factory, and defects become `failed`
+results; interruption still interrupts the run.
+
+Failure reports carry an identifier-like error tag (other tags are omitted) and a message, never
+request bodies, headers, or mismatch `expected` / `actual` details. A `ConformanceMismatch` keeps
+its case-authored message with credential patterns redacted. Every other message is sanitized
+best-effort by `sanitizeConformanceMessage`: credential patterns shared with the fixture secret
+scan and `Cookie` / `Set-Cookie` fragments are redacted, JSON-looking spans become `[json]`,
+whitespace is collapsed, and the length is capped at 300 characters. Hosts should still keep
+secrets out of error messages.
+
+Live targets omit all fixture-level warnings (`unverified-fixture`, `stale-fixture`,
+`missing-fixture`) because fixtures are not used live; case-level warnings always apply. On other
+targets fixture warnings need `fixtures`.
 
 ```ts
 import { Effect } from 'effect'

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Effect, Predicate } from 'effect'
+import { Cause, Effect, Exit, Predicate } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   vercelAiGatewayConformanceCases,
@@ -26,7 +26,10 @@ import {
   parseProbeArgs,
   planGatewayProbe,
   renderFixtureModule,
-  verifyGatewayFixtures
+  verifyGatewayFixtures,
+  writeVerifiedFixtures,
+  type FixtureWriter,
+  type RecordedGatewayFixture
 } from '../record-gateway-fixtures.ts'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -196,7 +199,37 @@ describe('record-gateway-fixtures plan', () => {
   })
 })
 
-// Strip DeepSeek reasoning from every recorded chunk: a recording the reasoning case must reject.
+// Strip DeepSeek reasoning (`reasoning_content` and the Gateway-normalized `reasoning`) from every
+// parsed SSE `data:` payload: a recording the reasoning case must reject. Structural, so it holds
+// for any recorded text.
+const stripReasoningFromEvent = (event: string): string => {
+  const data = event
+    .split('\n')
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice('data:'.length).trim())
+    .join('\n')
+
+  let json: unknown
+
+  try {
+    json = JSON.parse(data)
+  } catch {
+    return `${event}\n\n`
+  }
+
+  const choices =
+    Predicate.hasProperty(json, 'choices') && Array.isArray(json.choices) ? json.choices : []
+
+  for (const choice of choices) {
+    if (Predicate.hasProperty(choice, 'delta') && Predicate.isObject(choice.delta)) {
+      Reflect.deleteProperty(choice.delta, 'reasoning_content')
+      Reflect.deleteProperty(choice.delta, 'reasoning')
+    }
+  }
+
+  return `data: ${JSON.stringify(json)}\n\n`
+}
+
 const exchangeWithoutReasoning = (exchange: WireExchange): WireExchange => {
   const response = exchange.response
 
@@ -204,19 +237,25 @@ const exchangeWithoutReasoning = (exchange: WireExchange): WireExchange => {
     return exchange
   }
 
+  const text = response.chunks
+    .map(chunk => (Predicate.isString(chunk) ? chunk : expect.fail('text chunks only')))
+    .join('')
+    .replace(/\r\n?/g, '\n')
+
   return {
     ...exchange,
     response: {
       ...response,
-      chunks: response.chunks.map(chunk =>
-        Predicate.isString(chunk) ? chunk.replaceAll('reasoning_content', 'ignored_field') : chunk
-      )
+      chunks: text
+        .split('\n\n')
+        .filter(event => event.trim().length > 0)
+        .map(stripReasoningFromEvent)
     }
   }
 }
 
 const withoutReasoning = (fixture: WireFixture): WireFixture => {
-  const [first, ...rest] = fixture.exchanges
+  const [first, ...rest] = structuredClone(fixture.exchanges)
 
   return {
     ...fixture,
@@ -246,12 +285,12 @@ describe('record-gateway-fixtures replay verification', () => {
     const report = await Effect.runPromise(verifyGatewayFixtures(tampered))
 
     expect(conformanceReportFailed(report)).toBe(true)
-    expect(report.results.map(result => [result.id, result.status])).toEqual([
-      ['vercel-ai-gateway.stream.plain-text', 'passed'],
-      ['vercel-ai-gateway.stream.deepseek-reasoning', 'failed'],
-      ['vercel-ai-gateway.stream.tool-call-deltas', 'passed'],
-      ['vercel-ai-gateway.stream.error-envelope', 'passed']
-    ])
+    expect(report.results.map(result => [result.id, result.status])).toEqual(
+      caseIds.map(caseId => [
+        caseId,
+        caseId === vercelAiGatewayDeepSeekReasoningFixture.caseId ? 'failed' : 'passed'
+      ])
+    )
     expect(report.results[1]?.failure?.message).toBe('expected reasoning deltas')
   })
 
@@ -268,6 +307,91 @@ describe('record-gateway-fixtures replay verification', () => {
       status: 'failed'
     })
     expect(casesWithoutSingleFixture(missing)).toEqual(['vercel-ai-gateway.stream.plain-text'])
+  })
+})
+
+describe('record-gateway-fixtures write gate', () => {
+  type WriterCall = { readonly kind: 'write' | 'format'; readonly paths: ReadonlyArray<string> }
+
+  const recordingWriter = () => {
+    const calls: Array<WriterCall> = []
+
+    const writer: FixtureWriter = {
+      writeFile: path => {
+        calls.push({ kind: 'write', paths: [path] })
+      },
+      formatFiles: paths => {
+        calls.push({ kind: 'format', paths: [...paths] })
+      }
+    }
+
+    return { calls, writer }
+  }
+
+  // Fake live recordings: each planned case paired with a fixture, no network involved.
+  const recordedFrom = (
+    fixtures: ReadonlyArray<WireFixture>
+  ): ReadonlyArray<RecordedGatewayFixture> =>
+    planGatewayProbe(defaultProbeOptions).flatMap(entry =>
+      fixtures.flatMap(fixture =>
+        fixture.caseId === entry.testCase.id ? [{ entry, fixture }] : []
+      )
+    )
+
+  it('writes every fixture module, then formats them, only after replay verification passes', async () => {
+    const { calls, writer } = recordingWriter()
+
+    const result = await Effect.runPromise(
+      writeVerifiedFixtures(
+        recordedFrom(vercelAiGatewayConformanceFixtures),
+        defaultProbeOptions,
+        writer
+      )
+    )
+
+    const fileNames = gatewayFixtureModules.map(fixtureModule => fixtureModule.fileName)
+
+    expect(conformanceReportFailed(result.report)).toBe(false)
+    expect(result.files.map(file => basename(file))).toEqual(fileNames)
+    expect(calls).toEqual([
+      ...result.files.map(file => ({ kind: 'write', paths: [file] })),
+      { kind: 'format', paths: result.files }
+    ])
+  })
+
+  it('writes nothing when a recording fails replay verification', async () => {
+    const { calls, writer } = recordingWriter()
+
+    const tampered = vercelAiGatewayConformanceFixtures.map(fixture =>
+      fixture.id === vercelAiGatewayDeepSeekReasoningFixture.id
+        ? withoutReasoning(fixture)
+        : fixture
+    )
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(recordedFrom(tampered), defaultProbeOptions, writer)
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'no fixture was written'
+    )
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when a case has no recording', async () => {
+    const { calls, writer } = recordingWriter()
+
+    const missing = vercelAiGatewayConformanceFixtures.filter(
+      fixture => fixture.id !== vercelAiGatewayPlainTextFixture.id
+    )
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(recordedFrom(missing), defaultProbeOptions, writer)
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(calls).toEqual([])
   })
 })
 

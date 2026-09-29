@@ -129,10 +129,10 @@ const doneReasons = (events: ReadonlyArray<LLMEvent>): Array<string> =>
 
 export const vercelAiGatewayPlainTextCase: VercelAiGatewayConformanceCase = defineConformanceCase({
   id: 'vercel-ai-gateway.stream.plain-text',
-  title: 'Streamed plain text arrives as several deltas before one stop',
+  title: 'Streamed plain text ends with one stop and a usage report',
   safety: 'read',
   docs: 'The Gateway Chat Completions endpoint is OpenAI-compatible: `stream: true` returns `chat.completion.chunk` server-sent events, and `stream_options.include_usage` adds a usage chunk.',
-  wire: 'A streamed request yields several content deltas, then a `stop` finish and a usage chunk: the provider emits two or more TextDelta events with non-empty text before exactly one Done(stop), plus Usage.',
+  wire: 'A streamed request succeeds with non-empty answer text, a `stop` finish, and a usage chunk: the provider stream completes without error, its TextDelta events join to non-empty text, and it emits exactly one Done(stop) plus Usage. How many content events carry the text is not part of the claim.',
   fixtures: [vercelAiGatewayPlainTextFixture.id],
   run: Effect.gen(function* () {
     const settings = yield* VercelAiGatewayConformanceConfig
@@ -143,15 +143,8 @@ export const vercelAiGatewayPlainTextCase: VercelAiGatewayConformanceCase = defi
     )
 
     const tags = tagsOf(events)
-    const doneIndex = tags.indexOf('Done')
-    const deltasBeforeDone = tags.slice(0, doneIndex).filter(tag => tag === 'TextDelta').length
 
     yield* expectEqual(doneReasons(events), ['stop'], 'expected exactly one Done(stop)')
-    yield* expectConformance(
-      deltasBeforeDone >= 2,
-      'expected at least two text deltas before Done (a streamed answer)',
-      { expected: '>= 2', actual: deltasBeforeDone }
-    )
     yield* expectConformance(textOf(events).trim().length > 0, 'expected non-empty answer text')
     yield* expectConformance(tags.includes('Usage'), 'expected a usage report', { actual: tags })
   })
@@ -162,8 +155,8 @@ export const vercelAiGatewayDeepSeekReasoningCase: VercelAiGatewayConformanceCas
     id: 'vercel-ai-gateway.stream.deepseek-reasoning',
     title: 'DeepSeek reasoning deltas stream before answer text',
     safety: 'read',
-    docs: 'DeepSeek-style models accept `reasoning_effort` and a `thinking` toggle through the OpenAI-compatible endpoint and stream their reasoning as `delta.reasoning_content`.',
-    wire: 'With reasoning content, the `reasoning_effort` format, and thinking enabled, every reasoning delta arrives before the first answer text delta: the provider emits ReasoningDelta events strictly before TextDelta events, then Done(stop).',
+    docs: 'DeepSeek-style models accept `reasoning_effort` and a `thinking` toggle through the OpenAI-compatible endpoint and stream their reasoning as `delta.reasoning_content` (or the Gateway-normalized `delta.reasoning`).',
+    wire: 'With reasoning content, the `reasoning_effort` format, and thinking enabled, every reasoning delta arrives before the first answer text delta: the provider emits ReasoningDelta events (from either reasoning field) strictly before TextDelta events, then Done(stop).',
     fixtures: [vercelAiGatewayDeepSeekReasoningFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* VercelAiGatewayConformanceConfig
@@ -205,10 +198,10 @@ export const vercelAiGatewayDeepSeekReasoningCase: VercelAiGatewayConformanceCas
 export const vercelAiGatewayToolCallDeltasCase: VercelAiGatewayConformanceCase =
   defineConformanceCase({
     id: 'vercel-ai-gateway.stream.tool-call-deltas',
-    title: 'Split tool-call argument deltas assemble into one call',
+    title: 'Streamed tool-call argument fragments assemble into one call',
     safety: 'read',
-    docs: 'Streamed tool calls arrive as `delta.tool_calls` entries whose `function.arguments` JSON string is split across chunks.',
-    wire: 'For a single offered tool, the argument fragments assemble into exactly one ToolCall named after the tool whose params are a JSON object with a string `city`, followed by Done(tool_use).',
+    docs: 'Streamed tool calls arrive as `delta.tool_calls` entries whose `function.arguments` JSON string is streamed in fragments.',
+    wire: 'For a single offered tool, the streamed argument fragments assemble into exactly one ToolCall named after the tool whose params are a JSON object with a string `city`, followed by Done(tool_use). Where the fragments split is not asserted (a provider/replay concern).',
     fixtures: [vercelAiGatewayToolCallDeltasFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* VercelAiGatewayConformanceConfig
@@ -244,13 +237,17 @@ export const vercelAiGatewayToolCallDeltasCase: VercelAiGatewayConformanceCase =
 
 const sanitizedStatusMessage = /^Vercel AI Gateway returned \d{3}$/
 
+// Statuses a Gateway may use to reject an unknown model. 401/403 (authentication/permission) and
+// every other 4xx are not a model rejection.
+const modelRejectionStatuses: ReadonlyArray<number> = [400, 404, 422]
+
 export const vercelAiGatewayErrorEnvelopeCase: VercelAiGatewayConformanceCase =
   defineConformanceCase({
     id: 'vercel-ai-gateway.stream.error-envelope',
     title: 'Unknown model ids fail with a sanitized non-retryable error',
     safety: 'read',
     docs: 'Errors use the OpenAI-compatible envelope `{ error: { message, type, code } }` with a non-2xx status.',
-    wire: 'An unknown model id is rejected with a 4xx JSON envelope before any stream starts: the provider fails with a non-retryable LLMError that keeps the status and provider code (`error.code`, else `error.type`) and whose message is status-only (no upstream body text).',
+    wire: 'An unknown model id is rejected as a model error (400, 404, or 422; never a 401/403 authentication or permission failure) with a JSON envelope before any stream starts: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps the status and provider code (`error.code`, else `error.type`), and whose message is status-only (no upstream body text).',
     fixtures: [vercelAiGatewayErrorEnvelopeFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* VercelAiGatewayConformanceConfig
@@ -281,9 +278,14 @@ export const vercelAiGatewayErrorEnvelopeCase: VercelAiGatewayConformanceCase =
 
       yield* expectEqual(error.retryable, false, 'expected a non-retryable error')
       yield* expectConformance(
-        status !== undefined && status >= 400 && status < 500,
-        'expected a 4xx status',
+        status !== 401 && status !== 403 && error.provider?.kind !== 'auth',
+        'expected a model rejection, not an authentication or permission failure',
         { actual: status ?? null }
+      )
+      yield* expectConformance(
+        status !== undefined && modelRejectionStatuses.includes(status),
+        'expected a 400, 404, or 422 model-rejection status',
+        { expected: [...modelRejectionStatuses], actual: status ?? null }
       )
       yield* expectConformance(
         providerCode !== undefined && providerCode.length > 0,

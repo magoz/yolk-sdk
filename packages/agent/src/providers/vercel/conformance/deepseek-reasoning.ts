@@ -1,9 +1,10 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * DeepSeek-style streamed reasoning: `delta.reasoning_content` deltas before the answer text,
- * then `stop`, a usage chunk with reasoning tokens, and `data: [DONE]`. Requested with
- * `reasoning_effort` and a `thinking` toggle.
+ * DeepSeek-style streamed reasoning (`delta.reasoning_content`, or the Gateway-normalized
+ * `delta.reasoning`) before the answer text, then `stop`, a usage chunk with reasoning tokens, and
+ * `data: [DONE]`. Requested with `reasoning_effort` and a `thinking` toggle. This placeholder uses
+ * `delta.reasoning_content`; the case asserts on provider reasoning events, so either field works.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
  * replaces it. Regenerate with `pnpm conformance:gateway --live --account <label>`.

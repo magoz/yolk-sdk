@@ -10,8 +10,9 @@
  * @experimental
  */
 import { Cause, Clock, Effect, Exit, Option, Predicate, type Layer } from 'effect'
-import type { ConformanceCase, ConformanceSafety } from './case.ts'
+import { ConformanceMismatch, type ConformanceCase, type ConformanceSafety } from './case.ts'
 import { fixtureAgeDays, type WireFixture } from './fixture.ts'
+import { redactCredentialText, redactedHeaderValue } from './wire-internal.ts'
 
 /**
  * Where cases run. `replay`, `in-process`, and `emulated` never touch a real
@@ -77,9 +78,13 @@ export type ConformanceWarning =
 export type ConformanceWarningKind = ConformanceWarning['kind']
 
 /**
- * Sanitized failure. `message` is the error's own message (whitespace
- * collapsed, bearer tokens masked, length capped); request bodies, headers,
- * and `ConformanceMismatch` details are never copied into the report.
+ * Sanitized failure. `message` is a `ConformanceMismatch`'s case-authored
+ * message (credential patterns redacted) or, for every other failure, layer
+ * failure, and defect, the error's own message passed through
+ * `sanitizeConformanceMessage` (credential patterns and cookies redacted, JSON
+ * spans elided, whitespace collapsed, length capped). `tag` is the error's
+ * `_tag` only when it is identifier-like. Request bodies, headers, and
+ * `ConformanceMismatch` `expected`/`actual` details are never copied.
  */
 export type ConformanceFailure = {
   /** `failure`: typed error (including layer build errors); `defect`: unexpected die. */
@@ -137,10 +142,13 @@ type RunSettings = {
  *
  * `layer` is called once per case that runs and must provide everything that
  * case needs (`ConformanceCaseRequirements<C>`; providing more is fine). It is
- * built with a fresh memo map in its own scope, so replay consumption,
- * ledgers, and emulator state never leak between cases, even when the factory
- * returns the same `Layer` value. Build failures (`LE`) are reported as failed
- * cases. `LR` is whatever the layers still need from the caller (for example
+ * called and built inside the case's failure boundary, with a fresh memo map
+ * in its own scope, so state the layer allocates when it is built (replay
+ * consumption, ledgers, emulator state) never leaks between cases, even when
+ * the factory returns the same `Layer` value. Services captured in a shared
+ * value (for example one `Layer.succeed(service, instance)`) or supplied by
+ * the caller's environment are not rebuilt and stay shared. Build failures
+ * (`LE`) and a throwing factory are reported as failed cases. `LR` is whatever the layers still need from the caller (for example
  * a live `HttpClient`) and becomes the requirement of the whole run.
  */
 export type ConformanceRunOptions<C, LE = never, LR = never> = RunSettings & {
@@ -221,18 +229,114 @@ export const conformanceCaseWarnings = (
   return warnings
 }
 
-const maxFailureMessageLength = 500
+const maxFailureMessageLength = 300
 
-const sanitizeMessage = (message: string): string => {
-  const compact = message
-    .replace(/\bbearer\s+\S+/gi, 'Bearer <redacted>')
-    .replace(/\s+/g, ' ')
-    .trim()
+// Only identifier-like tags are reported; anything else (spaces, punctuation, payload text) is
+// dropped.
+const reportableTagPattern = /^[A-Za-z][A-Za-z0-9_]*$/
+
+// `Cookie: ...` / `Set-Cookie: ...` header-like fragments, up to the end of the line.
+const cookieHeaderRedaction = /\b(set-cookie|cookie)(\s*[:=]\s*)[^\r\n]*/gi
+
+const collapseAndCap = (message: string): string => {
+  const compact = message.replace(/\s+/g, ' ').trim()
 
   return compact.length > maxFailureMessageLength
     ? `${compact.slice(0, maxFailureMessageLength - 3)}...`
     : compact
 }
+
+/**
+ * End index of the balanced `{...}` / `[...]` segment opening at `start` (strings respected);
+ * `undefined` when it never closes or closes with the wrong bracket.
+ */
+const balancedSegmentEnd = (text: string, start: number): number | undefined => {
+  const expected: Array<string> = []
+  let inString = false
+
+  for (let index = start; index < text.length; index++) {
+    const char = text[index]
+
+    if (inString) {
+      if (char === '\\') {
+        index++
+      } else if (char === '"') {
+        inString = false
+      }
+
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+    } else if (char === '{') {
+      expected.push('}')
+    } else if (char === '[') {
+      expected.push(']')
+    } else if (char === '}' || char === ']') {
+      if (expected.pop() !== char) {
+        return undefined
+      }
+
+      if (expected.length === 0) {
+        return index
+      }
+    }
+  }
+
+  return undefined
+}
+
+// Replace every balanced `{...}` / `[...]` segment with `[json]`. An unbalanced opening bracket
+// (for example a truncated body) elides the rest of the message.
+const elideJsonSpans = (text: string): string => {
+  let output = ''
+  let index = 0
+
+  while (index < text.length) {
+    const char = text[index]
+
+    if (char !== '{' && char !== '[') {
+      output += char
+      index++
+      continue
+    }
+
+    const end = balancedSegmentEnd(text, index)
+    output += '[json]'
+
+    if (end === undefined) {
+      return output
+    }
+
+    index = end + 1
+  }
+
+  return output
+}
+
+/**
+ * Best-effort sanitizer for failure messages copied into a `ConformanceReport`. Redacts the
+ * credential patterns shared with the fixture secret scan (bearer tokens, API-key prefixes, JWTs,
+ * private keys, credential query/form parameters, credential field pairs), redacts `Cookie` /
+ * `Set-Cookie` header fragments, replaces JSON-looking spans (balanced `{...}` / `[...]`) with
+ * `[json]`, collapses whitespace, and caps the length at 300 characters. Hosts should still keep
+ * secrets out of error messages.
+ */
+export const sanitizeConformanceMessage = (message: string): string =>
+  collapseAndCap(
+    elideJsonSpans(
+      redactCredentialText(message).replace(
+        cookieHeaderRedaction,
+        (_match, name: string, separator: string) => `${name}${separator}${redactedHeaderValue}`
+      )
+    )
+  )
+
+// A `ConformanceMismatch` message is written by the case author: keep it readable (no JSON
+// elision), but still redact credential patterns.
+const sanitizeMismatchMessage = (message: string): string =>
+  collapseAndCap(redactCredentialText(message))
 
 const stringProperty = (value: unknown, key: string): string | undefined => {
   if (!Predicate.hasProperty(value, key)) {
@@ -245,15 +349,21 @@ const stringProperty = (value: unknown, key: string): string | undefined => {
 }
 
 const describeValue = (kind: ConformanceFailure['kind'], value: unknown): ConformanceFailure => {
-  const tag = stringProperty(value, '_tag')
+  const rawTag = stringProperty(value, '_tag')
+  const tag = rawTag !== undefined && reportableTagPattern.test(rawTag) ? rawTag : undefined
+
+  const rawMessage =
+    stringProperty(value, 'message') ??
+    (Predicate.isString(value) && value.length > 0 ? value : undefined)
 
   const message =
-    stringProperty(value, 'message') ??
-    (Predicate.isString(value) && value.length > 0 ? value : undefined) ??
-    tag ??
-    (kind === 'defect' ? 'unexpected defect' : 'case failed')
+    rawMessage === undefined
+      ? (tag ?? (kind === 'defect' ? 'unexpected defect' : 'case failed'))
+      : value instanceof ConformanceMismatch
+        ? sanitizeMismatchMessage(rawMessage)
+        : sanitizeConformanceMessage(rawMessage)
 
-  const failure = { kind, message: sanitizeMessage(message) }
+  const failure = { kind, message }
 
   return tag === undefined ? failure : { ...failure, tag }
 }
@@ -289,8 +399,8 @@ const reportTarget = (target: ConformanceTarget): ConformanceReport['target'] =>
 /**
  * Run cases against a target and report. Skipped cases never build their
  * layer. Each running case gets a fresh layer and runs under `Effect.exit`:
- * failures, layer build failures, and defects become `failed` results and the
- * run continues. Interruption is not captured: interrupting the run (or a case
+ * failures, layer build failures, defects, and a throwing `layer` factory
+ * become `failed` results and the run continues. Interruption is not captured: interrupting the run (or a case
  * interrupting itself) interrupts the whole run.
  *
  * `C` is inferred as the union of the given case types, so cases with
@@ -334,10 +444,10 @@ export function runConformance<E, R, LE, LR>(
 
         const started = yield* Clock.currentTimeMillis
 
-        const exit = yield* testCase.run.pipe(
-          Effect.provide(options.layer(testCase), { local: true }),
-          Effect.exit
-        )
+        // The factory runs inside the exit boundary: a throwing factory fails this case only.
+        const exit = yield* Effect.suspend(() =>
+          testCase.run.pipe(Effect.provide(options.layer(testCase), { local: true }))
+        ).pipe(Effect.exit)
 
         const durationMs = (yield* Clock.currentTimeMillis) - started
 
