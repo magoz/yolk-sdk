@@ -54,11 +54,12 @@ There is no root export or barrel.
 - Wire shapes come from the recorded conformance fixtures (the Gateway ones are verified live
   recordings and the Gateway route is `verified`, with `test/gateway-recordings.test.ts` comparing
   the emulator's response shapes with them; the OpenAI, Anthropic, Codex, and Grok ones are
-  synthetic), copied as data, never imported. Each emulated route lists the conformance case ids it follows in its manifest
-  (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`,
-  `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`
-  (`src/route-evidence.ts`) pairs them at construction and throws `EmulatorRouteUnmapped` for a
-  manifest route without a handler or a handler without a manifest route.
+  synthetic), copied as data, never imported. Each emulated route lists the conformance case ids it
+  follows in its manifest (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`,
+  `anthropicEmulatorRoutes`, `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`). Each manifest route
+  needs its own handler: `bindRouteHandlers` (`src/route-evidence.ts`) pairs them at construction
+  and throws `EmulatorRouteUnmapped` for a manifest route without a handler or a handler without a
+  manifest route.
 - Evidence policy: unknown emulated API routes fail closed (404 JSON, written to the ledger;
   control-plane requests are never recorded); unverified routes answer but carry
   `x-emulator-evidence: unverified`, are tagged in the ledger, and are listed by the evidence

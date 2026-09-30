@@ -698,15 +698,27 @@ const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
   return lossyText(concatBytes(response.chunks.map(chunkBytes)))
     .replace(/\r\n?/g, '\n')
     .split('\n\n')
-    .map(event =>
-      event
-        .split('\n')
+    .flatMap(event => {
+      const lines = event.split('\n')
+
+      const data = lines
         .filter(line => line.startsWith('data:'))
         .map(line => line.slice('data:'.length).trim())
         .join('\n')
-    )
-    .filter(data => data.length > 0)
+
+      // Comments, unknown fields and malformed lines are ignored by the stream parser but would
+      // still be written to the public fixture, so each one is returned as its own payload: the
+      // member scanner cannot parse it and the write is refused.
+      const unparsedLines = lines.filter(
+        line => line.trim().length > 0 && !sseFieldLinePattern.test(line)
+      )
+
+      return data.length > 0 ? [data, ...unparsedLines] : unparsedLines
+    })
 }
+
+/** SSE field lines the stream parsers understand; any other non-blank line is unscannable. */
+const sseFieldLinePattern = /^(data|event|id|retry):/
 
 /**
  * The only non-JSON payloads the survivor check lets through: the `[DONE]` stream sentinel, which
@@ -913,11 +925,11 @@ export const defaultFixtureWriter: FixtureWriter = {
 }
 
 /**
- * The write gate: refuse any recording that still carries a redacted field (checked across
- * base64 and split chunks) or has a payload the survivor check cannot scan, then replay `recorded` through every case and write the fixture
- * modules only when the report passes and every case has exactly one recording. On failure
- * nothing is written (the replay report is logged when replay failed). Returns the report and the
- * written paths.
+ * The write gate: refuse any recording that still carries a redacted field (checked across base64
+ * and split chunks) or has a payload the survivor check cannot scan, then replay `recorded`
+ * through every case and write the fixture modules only when the report passes and every case has
+ * exactly one recording. On failure nothing is written (the replay report is logged when replay
+ * failed). Returns the report and the written paths.
  */
 export const writeVerifiedFixtures = (
   recorded: ReadonlyArray<RecordedResponsesFixture>,

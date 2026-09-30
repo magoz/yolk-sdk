@@ -583,6 +583,24 @@ describe('record-anthropic-fixtures signature redaction', () => {
       expect(unscannableThinkingPayloads([other]), payload).toBe(1)
     }
   })
+
+  it('refuses SSE comments, unknown fields, and malformed lines the parser would ignore', () => {
+    const [exchange] = anthropicMessagesPlainTextFixture.exchanges
+
+    for (const line of [': comment "sign\\u0061ture":"x"', 'x-trace: synthetic', 'not a field']) {
+      const withLine = withChunks(exchange, [...streamChunks(exchange), `${line}\n\n`])
+
+      expect(unscannableThinkingPayloads([withLine]), line).toBe(1)
+      expect(thinkingRedactionRefusal([withLine]), line).toBeDefined()
+    }
+
+    const known = withChunks(exchange, [
+      ...streamChunks(exchange),
+      'event: ping\nid: 7\nretry: 1000\n\n'
+    ])
+
+    expect(unscannableThinkingPayloads([known])).toBe(0)
+  })
 })
 
 // Strip every `input_json_delta` from the recorded stream: a recording the tool-use case must

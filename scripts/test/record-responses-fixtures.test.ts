@@ -513,6 +513,29 @@ describe('record-responses-fixtures redaction', () => {
       expect(unscannableResponsesPayloads([other]), payload).toBe(1)
     }
   })
+
+  it('refuses SSE comments, unknown fields, and malformed lines the parser would ignore', () => {
+    const [exchange] = openAiCodexPlainTextFixture.exchanges
+
+    for (const line of [
+      ': comment "us\\u0065r":"synthetic-private-user"',
+      'x-trace: synthetic',
+      'not a field'
+    ]) {
+      const withLine = withChunks(exchange, [...streamChunks(exchange), `${line}\n\n`])
+
+      expect(unscannableResponsesPayloads([withLine]), line).toBe(1)
+      expect(responsesRedactionRefusal([withLine]), line).toBeDefined()
+    }
+
+    // Known field lines stay allowed.
+    const known = withChunks(exchange, [
+      ...streamChunks(exchange),
+      'event: ping\nid: 7\nretry: 1000\n\n'
+    ])
+
+    expect(unscannableResponsesPayloads([known])).toBe(0)
+  })
 })
 
 type SsePayload = { readonly event: string | undefined; readonly json: unknown }
