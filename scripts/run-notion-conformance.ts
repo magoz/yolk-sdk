@@ -40,6 +40,7 @@ import {
   NotionConformanceSeeds,
   notionConformanceCases,
   notionConformanceFixtureSeeds,
+  findNotionConformanceLeftovers,
   type NotionConformanceError,
   type NotionConformanceRequirements,
   type NotionConformanceSeedKey
@@ -119,8 +120,8 @@ export const notionCaseSpecs: ReadonlyArray<CaseSpec<NotionConformanceSeedKey>> 
     caseId: 'notion.api.pinned-version-accepted',
     seeds: [],
     optionalSeeds: [],
-    fileName: 'version-header.ts',
-    exportName: 'notionVersionHeaderFixture',
+    fileName: 'pinned-version.ts',
+    exportName: 'notionPinnedVersionFixture',
     doc: '`notion.get_bot_user`: one GET /v1/users/me carrying the pinned `Notion-Version`.'
   },
   {
@@ -209,6 +210,9 @@ export const notionRunner = {
   casePorts,
   // Recordings keep the pinned API version the connector sends.
   recordedRequestHeaders: ['notion-version'],
+  // Read-only and best effort (search indexing lags): untrashed `yolk-conformance page` pages.
+  leftovers: findNotionConformanceLeftovers,
+  leftoverAdvice: 'move it to the trash by hand after checking that no run is still using it',
   nameKeys: /^(?:name|workspace_name|query|url|avatar_url)$/,
   textKeys: /^(?:plain_text|content)$/
 } satisfies ConnectorConformanceRunner<

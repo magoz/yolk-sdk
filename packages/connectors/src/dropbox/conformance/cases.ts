@@ -20,16 +20,22 @@
  * - An ambiguous outcome (a transport or decoding failure, no status, or HTTP 5xx) may or may not
  *   have created the folder, possibly later: the case makes one best-effort delete of its own path,
  *   but always fails with `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) whose advice
- *   names the exact path; one absence check is never treated as reconciliation.
- * - A success registers the created entry. The cleanup deletes it by id (falling back to the owned
- *   path when the id form is refused) and verifies that `get_metadata` of the owned path answers
- *   not-found. A returned path outside the case folder is never adopted for cleanup: the case fails
- *   with `DropboxConformanceCleanupRefused` naming it.
+ *   names the exact path; one absence check is never treated as reconciliation. The conflict
+ *   case's duplicate creates are classified the same way: after the known original is cleaned up,
+ *   an ambiguous duplicate is reported as an unknown create naming the attempted path.
+ * - A success registers the created entry. The cleanup deletes it by id and verifies that
+ *   `get_metadata` of the owned path answers not-found; a not-found answer to the id delete proves
+ *   the entry gone, and any other failure of it (a rejected `id:` form, a transport failure) falls
+ *   back to deleting the owned path. A returned path outside the case folder is never adopted for
+ *   cleanup: the case fails with `DropboxConformanceCleanupRefused` naming it.
+ * - Every later write inside the case folder (copy, move, upload, delete) is masked too, so an
+ *   aborted request cannot land after the cleanup and recreate the folder.
  *
  * A failed cleanup is reported as `DropboxConformanceRestoreFailed` naming the path (never
  * swallowed). Deleted items stay restorable in the account's deleted files for the Dropbox
- * retention period. Neither the runner nor the bridges set a request timeout, so a hanging create
- * delays an interruption until it answers.
+ * retention period. Neither the runner nor the bridges set a request timeout, so a hanging request
+ * delays an interruption until it answers. `findDropboxConformanceLeftovers` lists (read-only) the
+ * `yolk-conformance-run-*` folders earlier runs left behind, for a runner to warn about.
  */
 import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -433,14 +439,20 @@ const requireAbsent = (path: string) =>
 /**
  * Delete an owned entry that may still exist, then verify `get_metadata` of its owned path answers
  * not-found. The delete addresses the entry by id when it has one (so it removes exactly what the
- * case created) and falls back to the owned path when the id delete does not succeed; either
- * delete accepts not-found.
+ * case created). A not-found answer to the id delete proves the entry gone, so no path delete
+ * follows; any other failure of the id delete (for example a rejected `id:` form, or a transport
+ * failure) falls back to deleting the owned path, which accepts not-found.
  */
 const ensureAbsent = (entry: OwnedEntry) =>
   Effect.gen(function* () {
-    const byId = entry.id === undefined ? undefined : yield* deletePath(entry.id)
+    const byId = entry.id === undefined ? undefined : yield* Effect.exit(deletePath(entry.id))
 
-    if (byId === undefined || !Predicate.isTagged(byId, 'Success')) {
+    const idDeleted =
+      byId !== undefined &&
+      Exit.isSuccess(byId) &&
+      (Predicate.isTagged(byId.value, 'Success') || isNotFound(byId.value))
+
+    if (!idDeleted) {
       const byPath = yield* deletePath(entry.path)
 
       if (!Predicate.isTagged(byPath, 'Success') && !isNotFound(byPath)) {
@@ -464,30 +476,58 @@ type CreateOutcome =
   | { readonly kind: 'ambiguous'; readonly error: DropboxConformanceActionFailed }
   | { readonly kind: 'outside'; readonly path: string }
 
-/** Classify the create exit: 4xx is a definitive rejection; no status, 5xx, or a transport or decoding failure is ambiguous. */
-const classifyCreate = (
+type CreateExit = Exit.Exit<ActionResult<DropboxFolderMetadata>, ConnectorError>
+
+/**
+ * The unknown-outcome failure of a create whose exit is ambiguous (a transport or decoding failure,
+ * no status, or HTTP 5xx): Dropbox may still create `path`, even later. `undefined` otherwise.
+ */
+const ambiguousCreate = (
   path: string,
-  exit: Exit.Exit<ActionResult<DropboxFolderMetadata>, ConnectorError>
-): CreateOutcome => {
+  exit: CreateExit
+): DropboxConformanceActionFailed | undefined => {
   const actionId = dropboxCreateFolderAction.id
 
   if (Exit.isFailure(exit)) {
     const error = Cause.findErrorOption(exit.cause)
 
-    return {
-      kind: 'ambiguous',
-      error: new DropboxConformanceActionFailed({
-        actionId,
-        code: Option.isSome(error) ? error.value.cause : 'defect',
-        createOutcome: 'unknown',
-        path
-      })
-    }
+    return new DropboxConformanceActionFailed({
+      actionId,
+      code: Option.isSome(error) ? error.value.cause : 'defect',
+      createOutcome: 'unknown',
+      path
+    })
   }
 
   const result = exit.value
 
   if (Predicate.isTagged(result, 'Success')) {
+    return undefined
+  }
+
+  const { code, status } = result.error
+
+  if (status === undefined) {
+    return new DropboxConformanceActionFailed({ actionId, code, createOutcome: 'unknown', path })
+  }
+
+  return status >= 500
+    ? new DropboxConformanceActionFailed({ actionId, code, status, createOutcome: 'unknown', path })
+    : undefined
+}
+
+/** Classify the create exit: 4xx is a definitive rejection; no status, 5xx, or a transport or decoding failure is ambiguous. */
+const classifyCreate = (path: string, exit: CreateExit): CreateOutcome => {
+  const ambiguous = ambiguousCreate(path, exit)
+
+  if (ambiguous !== undefined) {
+    return { kind: 'ambiguous', error: ambiguous }
+  }
+
+  // Not ambiguous: the exit is a success with a success or a 4xx result.
+  const result = Exit.isSuccess(exit) ? exit.value : undefined
+
+  if (result !== undefined && Predicate.isTagged(result, 'Success')) {
     const created = result.value.pathLower ?? path
 
     return inNamespace(path, created)
@@ -495,25 +535,22 @@ const classifyCreate = (
       : { kind: 'outside', path: created }
   }
 
-  const { code, status } = result.error
+  const failure = result === undefined ? undefined : failureOf(result)
 
-  if (status === undefined || status >= 500) {
-    return {
-      kind: 'ambiguous',
-      error:
-        status === undefined
-          ? new DropboxConformanceActionFailed({ actionId, code, createOutcome: 'unknown', path })
-          : new DropboxConformanceActionFailed({
-              actionId,
-              code,
-              status,
-              createOutcome: 'unknown',
-              path
-            })
-    }
+  return {
+    kind: 'rejected',
+    error:
+      failure?.status === undefined
+        ? new DropboxConformanceActionFailed({
+            actionId: dropboxCreateFolderAction.id,
+            code: failure?.code ?? 'unknown'
+          })
+        : new DropboxConformanceActionFailed({
+            actionId: dropboxCreateFolderAction.id,
+            code: failure.code,
+            status: failure.status
+          })
   }
-
-  return { kind: 'rejected', error: new DropboxConformanceActionFailed({ actionId, code, status }) }
 }
 
 /**
@@ -820,14 +857,24 @@ export const dropboxNotFoundEnvelopeCase: DropboxConformanceCase = defineConform
 const createFolderConflictCaseId = 'dropbox.files.create-folder-conflict'
 
 /**
- * A create that must conflict. A surprising success inside the case folder is registered for
- * cleanup (by its id); one answering a path outside the case folder is refused, never adopted.
- * The create and the registration run uninterruptibly together.
+ * A create that must conflict. An ambiguous exit (a transport or decoding failure, no status, or
+ * HTTP 5xx) fails with `createOutcome: 'unknown'` naming the attempted path: Dropbox may still
+ * create it, even after the cleanup of the original folder, so it is never reported as a mere
+ * mismatch. A surprising success inside the case folder is registered for cleanup (by its id); one
+ * answering a path outside the case folder is refused, never adopted. The create and the
+ * registration run uninterruptibly together.
  */
 const conflictingCreate = (owned: string, path: string, pending: PendingEntries) =>
   Effect.uninterruptible(
     Effect.gen(function* () {
-      const result = yield* createFolder(path)
+      const exit = yield* Effect.exit(createFolder(path))
+      const ambiguous = ambiguousCreate(path, exit)
+
+      if (ambiguous !== undefined) {
+        return yield* ambiguous
+      }
+
+      const result = yield* exit
 
       if (Predicate.isTagged(result, 'Success')) {
         const created = result.value.pathLower ?? path
@@ -924,7 +971,8 @@ export const dropboxDeleteThenNotFoundCase: DropboxConformanceCase = defineConfo
     yield* withOwnFolder(deleteCaseId, path, (_folder, pending) =>
       Effect.gen(function* () {
         const deleted = yield* deletePath(path).pipe(
-          Effect.flatMap(result => successValue(dropboxDeleteAction.id, result))
+          Effect.flatMap(result => successValue(dropboxDeleteAction.id, result)),
+          Effect.uninterruptible
         )
 
         yield* expectEqual(
@@ -994,6 +1042,8 @@ export const dropboxCopyMoveMetadataCase: DropboxConformanceCase = defineConform
         const copyPath = `${path}/${dropboxConformanceMarker}-copied`
         const movePath = `${path}/${dropboxConformanceMarker}-moved`
 
+        // Every write inside the case folder is masked: an aborted request could still land after the
+        // cleanup and recreate the folder.
         const copied = yield* dropboxCopyAction
           .executeTyped({
             integration,
@@ -1003,7 +1053,10 @@ export const dropboxCopyMoveMetadataCase: DropboxConformanceCase = defineConform
               autorename: false
             })
           })
-          .pipe(Effect.flatMap(result => successValue(dropboxCopyAction.id, result)))
+          .pipe(
+            Effect.flatMap(result => successValue(dropboxCopyAction.id, result)),
+            Effect.uninterruptible
+          )
 
         if (copied.type !== 'file') {
           return yield* new ConformanceMismatch({
@@ -1036,7 +1089,10 @@ export const dropboxCopyMoveMetadataCase: DropboxConformanceCase = defineConform
               autorename: false
             })
           })
-          .pipe(Effect.flatMap(result => successValue(dropboxMoveAction.id, result)))
+          .pipe(
+            Effect.flatMap(result => successValue(dropboxMoveAction.id, result)),
+            Effect.uninterruptible
+          )
 
         if (moved.type !== 'file') {
           return yield* new ConformanceMismatch({
@@ -1079,13 +1135,14 @@ const transferFailed = (actionId: string) => (error: ConnectorFileTransferError)
     ? new DropboxConformanceActionFailed({ actionId, code: error.code })
     : new DropboxConformanceActionFailed({ actionId, code: error.code, status: error.status })
 
-/** The outcome of an upload that must be rejected: `code status`, or `success`. */
+/** The outcome of an upload that must be rejected (masked like every write): `code status`, or `success`. */
 const rejectedUpload = <A, R>(upload: Effect.Effect<A, ConnectorFileTransferError, R>) =>
   upload.pipe(
     Effect.map(() => 'success'),
     Effect.catchTag('ConnectorFileTransferError', error =>
       Effect.succeed(`${error.code} ${error.status ?? 'no-status'}`)
-    )
+    ),
+    Effect.uninterruptible
   )
 
 export const dropboxUploadRevPreconditionCase: DropboxConformanceCase = defineConformanceCase({
@@ -1107,13 +1164,13 @@ export const dropboxUploadRevPreconditionCase: DropboxConformanceCase = defineCo
           integration,
           { path: filePath, bytes: uploadBytes('v1') },
           uploadBudget
-        ).pipe(Effect.mapError(transferFailed(uploadActionIds.create)))
+        ).pipe(Effect.mapError(transferFailed(uploadActionIds.create)), Effect.uninterruptible)
 
         const updated = yield* updateDropboxFile(
           integration,
           { fileId: created.id, expectedRev: created.rev, bytes: second },
           uploadBudget
-        ).pipe(Effect.mapError(transferFailed(uploadActionIds.update)))
+        ).pipe(Effect.mapError(transferFailed(uploadActionIds.update)), Effect.uninterruptible)
 
         yield* expectEqual(updated.id, created.id, 'expected the update to keep the file id')
         yield* expectConformance(
@@ -1158,6 +1215,50 @@ export const dropboxUploadRevPreconditionCase: DropboxConformanceCase = defineCo
       })
     )
   })
+})
+
+/** Name prefix of every run-scoped case folder: `yolk-conformance-run-`. */
+export const dropboxConformanceRunFolderPrefix = `${dropboxConformanceMarker}-run-`
+
+/** Listing pages read while looking for leftovers, before giving up. */
+const leftoverPageCap = 50
+
+/**
+ * READ-ONLY: the paths of `yolk-conformance-run-*` entries directly under `workFolderPath`, which
+ * earlier runs left behind (a killed process, a failed or ambiguous cleanup). Live runners call it
+ * before any write case and warn per leftover; nothing is ever deleted automatically. Fails with a
+ * `precondition:` mismatch without the `workFolderPath` seed.
+ */
+export const findDropboxConformanceLeftovers: Effect.Effect<
+  ReadonlyArray<string>,
+  DropboxConformanceError,
+  DropboxConformanceRequirements
+> = Effect.gen(function* () {
+  const path = yield* requireSeed('workFolderPath')
+  const found: Array<string> = []
+
+  let page = yield* dropboxListFolderAction
+    .executeTyped({ integration, input: DropboxListFolderInput.make({ path, limit: 2000 }) })
+    .pipe(Effect.flatMap(result => successValue(dropboxListFolderAction.id, result)))
+
+  for (let count = 1; ; count++) {
+    for (const entry of page.entries) {
+      if (
+        entry.type !== 'deleted' &&
+        entry.name.toLowerCase().startsWith(dropboxConformanceRunFolderPrefix)
+      ) {
+        found.push(entry.pathDisplay ?? `${path}/${entry.name}`)
+      }
+    }
+
+    if (!page.hasMore || count >= leftoverPageCap) {
+      return found
+    }
+
+    page = yield* dropboxListFolderContinueAction
+      .executeTyped({ integration, input: DropboxCursorInput.make({ cursor: page.cursor }) })
+      .pipe(Effect.flatMap(result => successValue(dropboxListFolderContinueAction.id, result)))
+  }
 })
 
 /** Every Dropbox conformance case, in fixture order. */

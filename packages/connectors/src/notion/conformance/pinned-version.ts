@@ -9,7 +9,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
  * step.
  */
-export const notionVersionHeaderFixture: WireFixture = {
+export const notionPinnedVersionFixture: WireFixture = {
   id: 'notion.api.pinned-version-accepted.synthetic',
   caseId: 'notion.api.pinned-version-accepted',
   evidence: 'unverified',

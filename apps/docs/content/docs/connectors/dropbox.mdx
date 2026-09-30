@@ -27,12 +27,14 @@ claim the connector relies on. The claims are as currently understood; none is o
 | `dropbox.files.copy-move-metadata`        | `write-reversible` | `workFolderPath`, `copySourcePath`, `runId` | Single-item `copy_v2` answers `{ metadata }` for a new file; `move_v2` answers `{ metadata }` keeping the id; no async job                                       |
 | `dropbox.files.upload-rev-precondition`   | `write-reversible` | `workFolderPath`, `runId`                   | `add` never overwrites and an `update` naming a stale rev fails with HTTP 409 (`conflict`); the file keeps its current rev                                       |
 
-Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+A wire claim no live run has settled yet, marked "(unverified: ...)" in its case's `wire`:
 
 - `get_metadata` with `include_deleted` answers `deleted` metadata for a deleted **folder**, not
   only for files.
-- The cleanup's `delete_v2` accepts the created entry's `id:` form (when it does not, the cleanup
-  falls back to the owned path).
+
+A cleanup assumption, which no case asserts: the cleanup's `delete_v2` accepts the created entry's
+`id:` form. When it does not, the cleanup falls back to the owned path, so a passing run does not
+show which delete removed the folder.
 
 `DropboxConformanceConfig` holds the seed paths and the `runId`. Cases never hard-code account data, and a missing
 seed fails the case with a `precondition:` mismatch before any request. Credentials bind through
@@ -48,21 +50,31 @@ verified under these conditions:
 - Before writing, a case proves its folder path absent; an existing entry is a precondition failure,
   and nothing is written.
 - The create request, its decoding, and the registration of the created entry run together without
-  interruption. Neither the runner nor the bridges set a request timeout, so a hanging create delays
-  an interruption until it answers.
+  interruption, and so does every later write inside the case folder (copy, move, upload, delete):
+  an aborted request could otherwise land after the cleanup. Neither the runner nor the bridges set
+  a request timeout, so a hanging request delays an interruption until it answers.
 - A definitive create rejection (HTTP 4xx, such as `path/conflict` when something else created the
   folder first) proves the case created nothing: it fails and deletes **nothing**.
 - An ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) may still create the
   folder later. The case makes one best-effort delete of its own path, but always fails with
   `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) naming the exact path: check it by
-  hand.
-- After a successful create, the cleanup deletes the entry by id (falling back to the owned path),
-  also after a failed assertion or an interruption, and checks that `get_metadata` then answers
-  not-found. A failed cleanup fails with `DropboxConformanceRestoreFailed` naming the path.
+  hand. The same holds for the conflict case's two duplicate creates: the known original is cleaned
+  up as usual, then the case reports the attempted path as an unknown create.
+- After a successful create, the cleanup deletes the entry by id and checks that `get_metadata`
+  then answers not-found. A not-found answer to the id delete proves the entry gone; any other
+  failure of it (a rejected `id:` form, a transport failure) falls back to the owned path. The
+  cleanup also runs after a failed assertion or a fiber interruption. A failed cleanup fails with
+  `DropboxConformanceRestoreFailed` naming the path.
 - A create that answers a path outside the case folder is never deleted: the case fails with
   `DropboxConformanceCleanupRefused` naming it.
 
 Deleted folders stay restorable in the account's deleted files for the Dropbox retention period.
+
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, so the running
+case's cleanup still runs before the process exits (code 130); a second signal exits at once and may
+skip it, as does killing the process. Before any write case, the runner lists `workFolderPath`
+read-only and prints a WARN line for every `yolk-conformance-run-*` folder an earlier run left
+behind; it never deletes them. Check each one, and delete it by hand when no run is using it.
 
 The shipped fixtures are synthetic (`evidence: 'unverified'`). In this repository,
 `pnpm conformance:dropbox` dry-runs by default; `--live --owner-approved --account <label>` (refused

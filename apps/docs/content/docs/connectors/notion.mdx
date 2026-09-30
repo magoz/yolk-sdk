@@ -27,7 +27,7 @@ none is observed live yet.
 | `notion.blocks.children-cursor-paging` | `read`             | `blocksPageId`                  | `page_size=2` block children answer `object: "list"`, `type: "block"`, `has_more`, and `next_cursor`; following it returns the rest, ending with a null cursor |
 | `notion.pages.property-item-paging`    | `read`             | `propertyPageId`, `propertyId`  | Notion accepts a `%XX`-escaped property id percent-encoded again (unverified), and a long property pages item by item (`type: "property_item"`)                |
 | `notion.data-sources.database-split`   | `read`             | `databaseId`                    | Under 2025-09-03 a database lists its `data_sources`; the data source holds the schema, and its rows have a `data_source_id` parent (parent shapes unverified) |
-| `notion.pages.archive-in-trash`        | `write-reversible` | `parentPageId`                  | `archived: true` answers `archived: true` (`in_trash` observed, not required); `notion.get_page` still answers (not 404) with `archived: true` (unverified)    |
+| `notion.pages.archive-in-trash`        | `write-reversible` | `parentPageId`                  | `archived: true` answers `archived: true` (`in_trash` not checked); `notion.get_page` still answers (not 404) with `archived: true` (unverified)               |
 
 Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
 
@@ -50,11 +50,18 @@ registration are not interruptible, and neither the runner nor the bridges set a
 so a hanging create delays an interruption until it answers. Any response showing the page trashed
 (`archived` or `in_trash` true), or a not-found read after a successful archive, counts as trashed,
 so an unverified readback claim that turns out false fails the claim, not the cleanup. Otherwise
-the cleanup trashes the page (also after a failed assertion or an interruption) and checks that
+the cleanup trashes the page (also after a failed assertion or a fiber interruption) and checks that
 `notion.get_page` reports `archived: true`. A failed cleanup fails the case with `NotionConformanceRestoreFailed`, and an
 ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) fails with
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry manual-recovery
 advice. Trashed pages stay restorable in the workspace trash until they are deleted from there.
+
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, so the cleanup
+still runs before the process exits (code 130); a second signal exits at once and may skip it, as
+does killing the process. Before the write case, the runner searches read-only for pages titled
+`yolk-conformance page...` that are not in the trash and prints a WARN line for each (best effort:
+Notion's search index can lag behind recent writes); it never trashes them. Check each one, and
+trash it by hand when no run is using it.
 
 The shipped fixtures are synthetic (`evidence: 'unverified'`). In this repository,
 `pnpm conformance:notion` dry-runs by default; `--live --owner-approved --account <label>` (refused

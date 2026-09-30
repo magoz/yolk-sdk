@@ -43,6 +43,7 @@ import {
   DropboxConformanceSeeds,
   dropboxConformanceCases,
   dropboxConformanceFixtureSeeds,
+  findDropboxConformanceLeftovers,
   type DropboxConformanceError,
   type DropboxConformanceRequirements,
   type DropboxConformanceSeedKey
@@ -200,6 +201,9 @@ export const dropboxRunner = {
   casePorts,
   // Upload recordings keep their mode and path argument (review it: it names practice paths).
   recordedRequestHeaders: ['dropbox-api-arg'],
+  // Read-only: `yolk-conformance-run-*` folders under --work-folder that earlier runs left behind.
+  leftovers: findDropboxConformanceLeftovers,
+  leftoverAdvice: 'delete it by hand after checking that no run is still using it',
   nameKeys: /^(?:name|path_lower|path_display|path|from_path|to_path|query|highlight_str)$/,
   textKeys: /^(?:content|text)$/
 } satisfies ConnectorConformanceRunner<

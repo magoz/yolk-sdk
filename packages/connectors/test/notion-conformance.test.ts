@@ -38,6 +38,7 @@ import {
   notionConformanceCases,
   notionConformanceFixtureSeeds,
   notionConformanceFixtures,
+  findNotionConformanceLeftovers,
   notionDataSourceSplitFixture,
   notionErrorEnvelopeFixture,
   notionPropertyItemPagingCase,
@@ -45,8 +46,8 @@ import {
   notionSearchPagingCase,
   notionSearchPagingFixture,
   notionTitlePlainTextFixture,
-  notionVersionHeaderCase,
-  notionVersionHeaderFixture,
+  notionPinnedVersionCase,
+  notionPinnedVersionFixture,
   type NotionConformanceCase,
   type NotionConformanceSeeds
 } from '@yolk-sdk/connectors/notion/conformance'
@@ -163,7 +164,7 @@ describe('Notion conformance cases', () => {
       expect(cited.every(id => id !== undefined && actionIds.has(id))).toBe(true)
     }
 
-    expect(notionVersionHeaderCase.docs).toContain('it sends no request of its own')
+    expect(notionPinnedVersionCase.docs).toContain('it sends no request of its own')
   })
 
   it.effect('ship synthetic fixtures that decode and pass the secret scan', () =>
@@ -391,7 +392,7 @@ const tampers: ReadonlyArray<{ readonly fixture: WireFixture; readonly message: 
   },
   {
     fixture: replaceResponse(
-      notionVersionHeaderFixture,
+      notionPinnedVersionFixture,
       0,
       replaceInBody('"type":"bot"', '"type":"person"')
     ),
@@ -761,6 +762,84 @@ describe('Notion conformance restore', () => {
         mismatch('precondition: NotionConformanceConfig.searchQuery is not configured')
       )
       expect(entries).toEqual([])
+    })
+  )
+})
+
+describe('Notion conformance leftover detection (read-only)', () => {
+  const page = (id: string, title: string, trashed: boolean) => ({
+    object: 'page',
+    id,
+    archived: trashed,
+    in_trash: trashed,
+    properties: {
+      title: {
+        id: 'title',
+        type: 'title',
+        title: [
+          { type: 'text', text: { content: title, link: null }, plain_text: title, href: null }
+        ]
+      }
+    }
+  })
+
+  const leftoversFixture: WireFixture = {
+    id: 'notion.leftovers.synthetic',
+    caseId: 'notion.leftovers',
+    evidence: 'unverified',
+    recordedAt: '2026-09-30',
+    account: 'synthetic',
+    endpoint: 'https://api.notion.com/v1',
+    exchanges: [
+      {
+        request: {
+          method: 'POST',
+          url: 'https://api.notion.com/v1/search',
+          headers: { 'content-type': 'application/json', 'notion-version': '2025-09-03' },
+          body: {
+            query: 'yolk-conformance',
+            filter: { property: 'object', value: 'page' },
+            page_size: 100
+          }
+        },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+          body: JSON.stringify({
+            object: 'list',
+            results: [
+              page(
+                '1f0000f0-0000-4000-8000-000000000001',
+                'yolk-conformance page: safe to delete',
+                false
+              ),
+              page(
+                '1f0000f0-0000-4000-8000-000000000002',
+                'yolk-conformance page: safe to delete',
+                true
+              ),
+              page('1f0000f0-0000-4000-8000-000000000003', 'Notes about yolk-conformance', false)
+            ],
+            next_cursor: null,
+            has_more: false
+          })
+        }
+      }
+    ]
+  }
+
+  it.effect('lists untrashed case pages earlier runs left behind, and nothing else', () =>
+    Effect.gen(function* () {
+      const { client, ledger } = yield* makeReplayHttpClient([leftoversFixture])
+
+      const found = yield* findNotionConformanceLeftovers.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, client)))
+      )
+
+      expect(found).toEqual([
+        'yolk-conformance page: safe to delete (1f0000f0-0000-4000-8000-000000000001)'
+      ])
+      expect((yield* ledger.entries).map(entry => entry.method)).toEqual(['POST'])
     })
   )
 })

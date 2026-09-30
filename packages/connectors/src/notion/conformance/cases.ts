@@ -45,6 +45,7 @@ import {
   NotionGetPagePropertyInput,
   NotionQueryDataSourceInput,
   NotionSearchInput,
+  NotionProperties,
   NotionTitleProperty,
   NotionUpdatePageInput,
   notionApiTokenSlotId,
@@ -69,7 +70,7 @@ import { notionErrorEnvelopeFixture } from './error-envelope.ts'
 import { notionPropertyItemPagingFixture } from './property-item-paging.ts'
 import { notionSearchPagingFixture } from './search-paging.ts'
 import { notionTitlePlainTextFixture } from './title-plain-text.ts'
-import { notionVersionHeaderFixture } from './version-header.ts'
+import { notionPinnedVersionFixture } from './pinned-version.ts'
 
 const SeedString = Schema.Trimmed.check(Schema.isNonEmpty())
 
@@ -134,7 +135,7 @@ export const notionConformanceMarker = 'yolk-conformance'
 const restoreByHandAdvice = `trash the case-created page by hand if it is not trashed yet (title starts with ${notionConformanceMarker}, under parentPageId).`
 
 /**
- * A connector action (or the raw version-header request) failed where the case needed success.
+ * A connector action failed where the case needed success.
  * `createOutcome: 'unknown'` marks an ambiguous create of the write case's own page (a transport
  * or decoding failure, no status, or HTTP 5xx): Notion may have created it without the case
  * learning its id, so the message adds the manual-recovery advice.
@@ -424,13 +425,13 @@ const notionVersionOf = (request: ConnectorHttpRequest): string | undefined =>
     ([name]) => name.toLowerCase() === 'notion-version'
   )?.[1]
 
-export const notionVersionHeaderCase: NotionConformanceCase = defineConformanceCase({
+export const notionPinnedVersionCase: NotionConformanceCase = defineConformanceCase({
   id: 'notion.api.pinned-version-accepted',
   title: 'Action requests carry the pinned Notion-Version, and Notion accepts it',
   safety: 'read',
   docs: "Every Notion connector request sends `Notion-Version: 2025-09-03` with the bearer token (`notionAuthorizationHeaders`), and the connector's database, data source, and page-parent handling assume that version. The case observes the outgoing request at the `ConnectorHttpClient` port the host provides; it sends no request of its own.",
   wire: '`notion.get_bot_user` sends exactly one GET /v1/users/me carrying `Notion-Version: 2025-09-03`, and Notion answers it with the bot user (`object: "user"`, `type: "bot"`), not a version error.',
-  fixtures: [notionVersionHeaderFixture.id],
+  fixtures: [notionPinnedVersionFixture.id],
   run: Effect.gen(function* () {
     const http = yield* ConnectorHttpClient
     const sent = yield* Ref.make<ReadonlyArray<ConnectorHttpRequest>>([])
@@ -709,12 +710,14 @@ export const notionPropertyItemPagingCase: NotionConformanceCase = defineConform
       Effect.flatMap(result => successValue(notionGetPageAction.id, result))
     )
 
-    const ids = Object.values(owner.properties ?? {})
-      .filter(Schema.is(Schema.Struct({ id: Schema.String })))
-      .map(property => property.id)
+    const properties = owner.properties ?? {}
+
+    const ids = Schema.is(PropertyIds)(properties)
+      ? Object.values(properties).map(property => property.id)
+      : []
 
     yield* expectConformance(
-      Schema.is(PropertyIds)(owner.properties ?? {}) && ids.includes(propertyId),
+      ids.includes(propertyId),
       'precondition: propertyId must be a property id of propertyPageId exactly as the page returns it'
     )
 
@@ -1114,10 +1117,87 @@ export const notionArchiveInTrashCase: NotionConformanceCase = defineConformance
   })
 })
 
+/** Search pages read while looking for leftovers, before giving up. */
+const leftoverPageCap = 10
+
+const LeftoverCandidate = Schema.Struct({
+  object: Schema.String,
+  id: Schema.String,
+  archived: Schema.optional(Schema.Boolean),
+  in_trash: Schema.optional(Schema.Boolean),
+  properties: Schema.optional(NotionProperties)
+})
+
+/** The plain-text title of a page's `title` property, or `undefined`. */
+const pageTitle = (
+  properties: (typeof LeftoverCandidate.Type)['properties']
+): string | undefined => {
+  const title = Object.values(properties ?? {}).find(Schema.is(TitleValue))
+
+  if (title === undefined || !Schema.is(NotionTitleProperty)(title)) {
+    return undefined
+  }
+
+  return title.title.map(item => item.plain_text ?? '').join('')
+}
+
+/**
+ * READ-ONLY and best effort: pages titled `yolk-conformance page...` that are not in the trash,
+ * found through `notion.search` (whose index can lag behind recent writes). Earlier runs leave them
+ * behind when a process is killed or a cleanup fails. Live runners call it before the write case
+ * and warn per leftover (`title (id)`); nothing is ever trashed automatically.
+ */
+export const findNotionConformanceLeftovers: Effect.Effect<
+  ReadonlyArray<string>,
+  NotionConformanceError,
+  NotionConformanceRequirements
+> = Effect.gen(function* () {
+  const found: Array<string> = []
+  let startCursor: string | undefined
+
+  for (let count = 1; count <= leftoverPageCap; count++) {
+    const page = yield* notionSearchAction
+      .executeTyped({
+        integration,
+        input: NotionSearchInput.make({
+          query: notionConformanceMarker,
+          filter: { property: 'object', value: 'page' },
+          pageSize: 100,
+          startCursor
+        })
+      })
+      .pipe(Effect.flatMap(result => successValue(notionSearchAction.id, result)))
+
+    for (const result of page.results) {
+      if (
+        !Schema.is(LeftoverCandidate)(result) ||
+        result.archived === true ||
+        result.in_trash === true
+      ) {
+        continue
+      }
+
+      const title = pageTitle(result.properties)
+
+      if (title?.startsWith(`${notionConformanceMarker} page`) === true) {
+        found.push(`${title} (${result.id})`)
+      }
+    }
+
+    if (!page.hasMore || !Predicate.isString(page.nextCursor)) {
+      break
+    }
+
+    startCursor = page.nextCursor
+  }
+
+  return found
+})
+
 /** Every Notion conformance case, in fixture order. */
 export const notionConformanceCases: ReadonlyArray<NotionConformanceCase> = [
   notionSearchPagingCase,
-  notionVersionHeaderCase,
+  notionPinnedVersionCase,
   notionErrorEnvelopeCase,
   notionTitlePlainTextCase,
   notionBlockChildrenPagingCase,

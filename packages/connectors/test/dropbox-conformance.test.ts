@@ -52,6 +52,7 @@ import {
   dropboxSearchContinueFixture,
   dropboxUploadRevPreconditionCase,
   dropboxUploadRevPreconditionFixture,
+  findDropboxConformanceLeftovers,
   type DropboxConformanceCase,
   type DropboxConformanceSeeds
 } from '@yolk-sdk/connectors/dropbox/conformance'
@@ -752,18 +753,19 @@ describe('Dropbox conformance restore', () => {
     })
   )
 
-  it.effect('removes the case folder when the case is interrupted mid-flow', () =>
+  it.effect('finishes a masked in-flight copy, then removes the case folder on interruption', () =>
     Effect.gen(function* () {
       const copySent = yield* Deferred.make<void>()
+      const releaseCopy = yield* Deferred.make<void>()
 
       const { client, ledger } = yield* makeReplayHttpClient([dropboxCopyMoveMetadataFixture])
 
-      // Hold the copy response until the case fiber is interrupted.
+      // Hold the copy response until the case fiber has been asked to stop.
       const holdingCopy = HttpClient.transform(client, (response, request) =>
         request.url.endsWith('/files/copy_v2')
           ? response.pipe(
               Effect.tap(() => Deferred.succeed(copySent, undefined)),
-              Effect.andThen(Effect.never)
+              Effect.tap(() => Deferred.await(releaseCopy))
             )
           : response
       )
@@ -774,7 +776,13 @@ describe('Dropbox conformance restore', () => {
       )
 
       yield* Deferred.await(copySent)
-      yield* Fiber.interrupt(fiber)
+
+      // The copy is masked: the interruption waits for it, then no further claim (move) runs.
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseCopy, undefined)
+      yield* Fiber.join(interrupting)
 
       const exit = yield* Fiber.await(fiber)
 
@@ -974,20 +982,49 @@ describe('Dropbox conformance write ownership', () => {
       yield* atTestNow
 
       const fake = yield* makeFakeDropbox
-      const bothChecked = yield* Deferred.make<void>()
-      const lookups = yield* Ref.make(0)
+      const events = yield* Ref.make<ReadonlyArray<string>>([])
+      const lookupsAnswered = yield* Ref.make(0)
+      const createsSeen = yield* Ref.make(0)
+      const bothLookedUp = yield* Deferred.make<void>()
+      const loserConflicted = yield* Deferred.make<void>()
 
-      // Both runs pass their absence check before either create reaches the fake.
+      const note = (event: string) => Ref.update(events, list => [...list, event])
+
+      // Forced interleaving: both absence lookups are ANSWERED before either initial create is
+      // released; then the winning create is held until the losing create has received its 409.
       const gated = HttpClient.make((request, url) =>
         Effect.gen(function* () {
-          if (url.pathname.endsWith('/files/get_metadata')) {
-            if ((yield* Ref.updateAndGet(lookups, count => count + 1)) === 2) {
-              yield* Deferred.succeed(bothChecked, undefined)
+          const route = url.pathname.slice(url.pathname.lastIndexOf('/') + 1)
+
+          if (route === 'get_metadata' && (yield* Ref.get(lookupsAnswered)) < 2) {
+            const response = yield* fake.handle(request, url)
+
+            if ((yield* Ref.updateAndGet(lookupsAnswered, count => count + 1)) === 2) {
+              yield* note('both absence lookups answered')
+              yield* Deferred.succeed(bothLookedUp, undefined)
             }
+
+            return response
           }
 
-          if (url.pathname.endsWith('/files/create_folder_v2')) {
-            yield* Deferred.await(bothChecked)
+          if (
+            route === 'create_folder_v2' &&
+            (yield* Ref.updateAndGet(createsSeen, n => n + 1)) <= 2
+          ) {
+            yield* Deferred.await(bothLookedUp)
+
+            const response = yield* fake.handle(request, url)
+
+            if (response.status === 200) {
+              yield* note('winner create answered 200')
+              yield* Deferred.await(loserConflicted)
+              yield* note('winner released')
+            } else {
+              yield* note(`loser create answered ${response.status}`)
+              yield* Deferred.succeed(loserConflicted, undefined)
+            }
+
+            return response
           }
 
           return yield* fake.handle(request, url)
@@ -1002,7 +1039,18 @@ describe('Dropbox conformance write ownership', () => {
 
       const exits = yield* Effect.all([runOnce, runOnce], { concurrency: 2 })
       const failures = exits.filter(Exit.isFailure)
+      const order = yield* Ref.get(events)
 
+      expect(order[0]).toBe('both absence lookups answered')
+      expect([...order].sort()).toEqual([
+        'both absence lookups answered',
+        'loser create answered 409',
+        'winner create answered 200',
+        'winner released'
+      ])
+      expect(order.indexOf('loser create answered 409')).toBeLessThan(
+        order.indexOf('winner released')
+      )
       expect(exits.filter(Exit.isSuccess)).toHaveLength(1)
       expect(failures).toHaveLength(1)
       expect(String(failures[0]?.cause)).toContain(
@@ -1029,16 +1077,7 @@ describe('Dropbox conformance write ownership', () => {
       const dropping = HttpClient.make((request, url) =>
         url.pathname.endsWith('/files/create_folder_v2')
           ? Ref.update(deferred, paths => [...paths, requestPath(request)]).pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new HttpClientError.HttpClientError({
-                    reason: new HttpClientError.TransportError({
-                      request,
-                      description: 'connection reset'
-                    })
-                  })
-                )
-              )
+              Effect.andThen(Effect.fail(connectionReset(request)))
             )
           : fake.handle(request, url)
       )
@@ -1066,7 +1105,125 @@ describe('Dropbox conformance write ownership', () => {
       )
     })
   )
+
+  const upperConflictFolder = '/Conformance/Work/YOLK-CONFORMANCE-RUN-SYNTHETIC-FOLDER'
+
+  for (const [attempt, attemptedPath] of [
+    [2, conflictFolder],
+    [3, upperConflictFolder]
+  ] as const) {
+    it.effect(
+      `a duplicate create (attempt ${attempt}) that lands after the verified cleanup is reported as ambiguous`,
+      () =>
+        Effect.gen(function* () {
+          const fake = yield* makeFakeDropbox
+          const creates = yield* Ref.make(0)
+          const deferred = yield* Ref.make<ReadonlyArray<string>>([])
+
+          // Only this create attempt drops its connection; Dropbox completes it later.
+          const dropping = HttpClient.make((request, url) =>
+            Effect.gen(function* () {
+              if (
+                url.pathname.endsWith('/files/create_folder_v2') &&
+                (yield* Ref.updateAndGet(creates, n => n + 1)) === attempt
+              ) {
+                yield* Ref.update(deferred, paths => [...paths, requestPath(request)])
+
+                return yield* Effect.fail(connectionReset(request))
+              }
+
+              return yield* fake.handle(request, url)
+            })
+          )
+
+          const exit = yield* dropboxCreateFolderConflictCase.run.pipe(
+            Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, dropping))),
+            Effect.exit
+          )
+
+          // The known original was cleaned up by id and verified absent...
+          const log = yield* Ref.get(fake.log)
+
+          expect(log.slice(-2)).toEqual([
+            'delete_v2 id:SyntheticFake0001',
+            `get_metadata ${conflictFolder}`
+          ])
+          expect((yield* Ref.get(fake.entries)).size).toBe(0)
+
+          // ...and then the dropped duplicate lands, which the report already warned about.
+          for (const path of yield* Ref.get(deferred)) {
+            yield* fake.create(path)
+          }
+
+          expect((yield* Ref.get(fake.entries)).size).toBe(1)
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(String(Exit.isFailure(exit) ? exit.cause : '')).toContain(
+            `dropbox.create_folder failed: transport_failed; create outcome unknown: delete ${attemptedPath} by hand if it exists`
+          )
+        })
+    )
+  }
+
+  it.effect('skips the path fallback when the id delete answers not-found', () =>
+    Effect.gen(function* () {
+      yield* atTestNow
+
+      const gone = replaceResponse(
+        dropboxCreateFolderConflictFixture,
+        4,
+        withStatus(
+          409,
+          '{"error_summary": "path_lookup/not_found/.", "error": {".tag": "path_lookup", "path_lookup": {".tag": "not_found"}}}'
+        )
+      )
+
+      const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
+
+      const report = yield* runConformance([dropboxCreateFolderConflictCase], {
+        target: { kind: 'replay' },
+        now,
+        layer: ledgerCaseLayer(ledgers, [gone])
+      })
+
+      const { entries, remaining } = yield* ledgerOf(ledgers, dropboxCreateFolderConflictCase.id)
+
+      expect(report.summary.passed).toBe(1)
+      expect(deleteBodies(entries)).toEqual([{ path: 'id:SyntheticConflictFolder1' }])
+      expect(remaining).toEqual([])
+    })
+  )
+
+  it.effect('falls back to the owned path when the id delete fails in transport', () =>
+    Effect.gen(function* () {
+      yield* atTestNow
+
+      const { client, ledger } = yield* makeReplayHttpClient([dropboxCreateFolderConflictFixture])
+      const deletes = yield* Ref.make(0)
+
+      // The first delete (by id) never reaches Dropbox; the path fallback takes its exchange.
+      const dropsFirstDelete = HttpClient.transform(client, (response, request) =>
+        request.url.endsWith('/files/delete_v2')
+          ? Ref.updateAndGet(deletes, n => n + 1).pipe(
+              Effect.flatMap(n => (n === 1 ? Effect.fail(connectionReset(request)) : response))
+            )
+          : response
+      )
+
+      const exit = yield* dropboxCreateFolderConflictCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, dropsFirstDelete))),
+        Effect.exit
+      )
+
+      expect(Exit.isSuccess(exit)).toBe(true)
+      expect(deleteBodies(yield* ledger.entries)).toEqual([{ path: conflictFolder }])
+    })
+  )
 })
+
+const connectionReset = (request: HttpClientRequest.HttpClientRequest) =>
+  new HttpClientError.HttpClientError({
+    reason: new HttpClientError.TransportError({ request, description: 'connection reset' })
+  })
 
 // A minimal in-memory Dropbox (folders only) for the ownership drills.
 
@@ -1185,4 +1342,62 @@ const makeFakeDropbox = Effect.gen(function* () {
     })
 
   return { entries, log, create, handle }
+})
+
+describe('Dropbox conformance leftover detection (read-only)', () => {
+  const listing = (body: string, cursor?: string): WireExchange => ({
+    request: {
+      method: 'POST',
+      url:
+        cursor === undefined
+          ? 'https://api.dropboxapi.com/2/files/list_folder'
+          : 'https://api.dropboxapi.com/2/files/list_folder/continue',
+      headers: { 'content-type': 'application/json' },
+      body: cursor === undefined ? { path: '/Conformance/Work', limit: 2000 } : { cursor }
+    },
+    response: { status: 200, headers: { 'content-type': 'application/json' }, body }
+  })
+
+  const folder = (name: string) =>
+    `{".tag":"folder","name":"${name}","path_lower":"/conformance/work/${name.toLowerCase()}","path_display":"/Conformance/Work/${name}","id":"id:Synthetic${name.length}"}`
+
+  const leftoversFixture: WireFixture = {
+    id: 'dropbox.leftovers.synthetic',
+    caseId: 'dropbox.leftovers',
+    evidence: 'unverified',
+    recordedAt: '2026-09-30',
+    account: 'synthetic',
+    endpoint: 'https://api.dropboxapi.com/2',
+    exchanges: [
+      listing(
+        `{"entries":[${folder('yolk-conformance-run-0000beef-copy')},${folder('Keep Me')},{".tag":"deleted","name":"yolk-conformance-run-0000dead-folder"}],"cursor":"AAHsyntheticLeftoverCursor","has_more":true}`
+      ),
+      listing(
+        `{"entries":[${folder('yolk-conformance-run-0000cafe-upload')},${folder('yolk-conformance-absent')}],"cursor":"AAHsyntheticLeftoverCursor2","has_more":false}`,
+        'AAHsyntheticLeftoverCursor'
+      )
+    ]
+  }
+
+  it.effect(
+    'lists run-scoped folders earlier runs left under the work folder, and nothing else',
+    () =>
+      Effect.gen(function* () {
+        const { client, ledger } = yield* makeReplayHttpClient([leftoversFixture])
+
+        const found = yield* findDropboxConformanceLeftovers.pipe(
+          Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, client)))
+        )
+
+        expect(found).toEqual([
+          '/Conformance/Work/yolk-conformance-run-0000beef-copy',
+          '/Conformance/Work/yolk-conformance-run-0000cafe-upload'
+        ])
+        // Read-only: only listing requests were sent.
+        expect((yield* ledger.entries).map(entry => entry.url)).toEqual([
+          'https://api.dropboxapi.com/2/files/list_folder',
+          'https://api.dropboxapi.com/2/files/list_folder/continue'
+        ])
+      })
+  )
 })

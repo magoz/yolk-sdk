@@ -2,8 +2,8 @@
  * Notion conformance cases for `@yolk-sdk/conformance/runner` and the wire fixtures that back
  * their replay (`@yolk-sdk/conformance/replay`).
  *
- * Every case runs the real connector actions over the connector ports, except one raw GET without
- * `Notion-Version` that no action can send (the version-header case). The current fixtures are
+ * Every case runs the real connector actions over the connector ports; the pinned-version case
+ * observes the outgoing `Notion-Version` at the `ConnectorHttpClient` port. The current fixtures are
  * synthetic placeholders (`evidence: 'unverified'`) shaped like the Notion wire at API version
  * 2025-09-03. `pnpm conformance:notion --live --owner-approved --account <label> --record` stages
  * verified recordings from a practice workspace in a gitignored directory; a person scrubs them
@@ -20,7 +20,7 @@ import { notionErrorEnvelopeFixture } from './error-envelope.ts'
 import { notionPropertyItemPagingFixture } from './property-item-paging.ts'
 import { notionSearchPagingFixture } from './search-paging.ts'
 import { notionTitlePlainTextFixture } from './title-plain-text.ts'
-import { notionVersionHeaderFixture } from './version-header.ts'
+import { notionPinnedVersionFixture } from './pinned-version.ts'
 
 export {
   NotionConformanceActionFailed,
@@ -38,7 +38,8 @@ export {
   notionPropertyItemPagingCase,
   notionSearchPagingCase,
   notionTitlePlainTextCase,
-  notionVersionHeaderCase,
+  notionPinnedVersionCase,
+  findNotionConformanceLeftovers,
   type NotionConformanceCase,
   type NotionConformanceError,
   type NotionConformanceRequirements,
@@ -55,13 +56,13 @@ export {
   notionPropertyItemPagingFixture,
   notionSearchPagingFixture,
   notionTitlePlainTextFixture,
-  notionVersionHeaderFixture
+  notionPinnedVersionFixture
 }
 
 /** Every Notion wire fixture, in case order, for replaying the whole suite at once. */
 export const notionConformanceFixtures: ReadonlyArray<WireFixture> = [
   notionSearchPagingFixture,
-  notionVersionHeaderFixture,
+  notionPinnedVersionFixture,
   notionErrorEnvelopeFixture,
   notionTitlePlainTextFixture,
   notionBlockChildrenPagingFixture,

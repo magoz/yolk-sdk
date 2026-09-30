@@ -16,7 +16,7 @@ import {
   notionConformanceFixtureSeeds,
   notionSearchPagingFixture,
   notionTitlePlainTextFixture,
-  notionVersionHeaderFixture
+  notionPinnedVersionFixture
 } from '../../packages/connectors/src/notion/conformance/index.ts'
 import {
   accessTokenRequiredMessage,
@@ -238,7 +238,8 @@ const memoryWriter = () => {
     rm: path => {
       operations.push(`rm ${path}`)
     },
-    realpath: path => path
+    realpath: path => path,
+    inspect: path => ({ kind: 'present', realpath: path })
   }
 
   return { writer, files, operations }
@@ -265,7 +266,7 @@ describe('run-notion-conformance --record staging (offline)', () => {
 
     const result = await stage(
       new Map([
-        [notionVersionHeaderFixture.caseId, recorderOf(notionVersionHeaderFixture.exchanges)],
+        [notionPinnedVersionFixture.caseId, recorderOf(notionPinnedVersionFixture.exchanges)],
         [notionTitlePlainTextFixture.caseId, recorderOf(notionTitlePlainTextFixture.exchanges)]
       ]),
       writer
@@ -279,7 +280,7 @@ describe('run-notion-conformance --record staging (offline)', () => {
       [
         join(stagingDir, 'seeds.ts'),
         join(stagingDir, 'title-plain-text.ts'),
-        join(stagingDir, 'version-header.ts')
+        join(stagingDir, 'pinned-version.ts')
       ].sort()
     )
     expect(files.get(join(stagingDir, 'seeds.ts'))).toBe(
@@ -297,19 +298,19 @@ describe('run-notion-conformance --record staging (offline)', () => {
     const { writer, operations } = memoryWriter()
 
     // The pinned version is rejected: the claim no longer holds.
-    const contradicted = notionVersionHeaderFixture.exchanges.map(exchange =>
+    const contradicted = notionPinnedVersionFixture.exchanges.map(exchange =>
       !isWireStreamResponse(exchange.response) && !isWireBase64BodyResponse(exchange.response)
         ? { ...exchange, response: { ...exchange.response, status: 400 } }
         : exchange
     )
 
     const result = await stage(
-      new Map([[notionVersionHeaderFixture.caseId, recorderOf(contradicted)]]),
+      new Map([[notionPinnedVersionFixture.caseId, recorderOf(contradicted)]]),
       writer
     )
 
     expect(Result.isFailure(result) ? result.failure.message : '').toBe(
-      `${notionVersionHeaderFixture.caseId} did not pass on replay of its recording; nothing was written`
+      `${notionPinnedVersionFixture.caseId} did not pass on replay of its recording; nothing was written`
     )
     expect(operations).toEqual([])
   })

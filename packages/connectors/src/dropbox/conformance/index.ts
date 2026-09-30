@@ -23,6 +23,7 @@ import { dropboxUploadRevPreconditionFixture } from './upload-rev-precondition.t
 
 export {
   DropboxConformanceActionFailed,
+  DropboxConformanceCleanupRefused,
   DropboxConformanceConfig,
   DropboxConformanceRestoreFailed,
   DropboxConformanceSeeds,
@@ -30,6 +31,7 @@ export {
   dropboxConformanceCredentialRef,
   dropboxConformanceIntegration,
   dropboxConformanceMarker,
+  dropboxConformanceRunFolderPrefix,
   dropboxCopyMoveMetadataCase,
   dropboxCreateFolderConflictCase,
   dropboxDeleteThenNotFoundCase,
@@ -38,6 +40,7 @@ export {
   dropboxPathLowerLookupCase,
   dropboxSearchContinueCase,
   dropboxUploadRevPreconditionCase,
+  findDropboxConformanceLeftovers,
   type DropboxConformanceCase,
   type DropboxConformanceError,
   type DropboxConformanceRequirements,

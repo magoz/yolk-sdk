@@ -6,12 +6,13 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync
+  symlinkSync,
+  existsSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Effect, Result } from 'effect'
+import { Deferred, Effect, Result } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   isWireBase64BodyResponse,
@@ -20,6 +21,7 @@ import {
   type WireFixture
 } from '../../packages/conformance/src/fixture.ts'
 import type { WireRecorderApi } from '../../packages/conformance/src/record.ts'
+import { ReplayHttpClient } from '../../packages/conformance/src/replay.ts'
 import type { ConformanceReport } from '../../packages/conformance/src/runner.ts'
 import {
   dropboxConformanceCases,
@@ -48,8 +50,13 @@ import {
   renderSeedsModule,
   stageRecordings,
   staleSharedSeeds,
+  leftoverWarnings,
+  runInterruptibly,
+  type CliIo,
+  type CliSignal,
   type LiveInputs,
-  type RecordingWriter
+  type RecordingWriter,
+  type SignalSource
 } from '../connector-conformance-internal.ts'
 import {
   dropboxCaseSpecs,
@@ -319,16 +326,28 @@ describe('run-dropbox-conformance rendering', () => {
           'dropbox.files.copy-move-metadata',
           'dropbox.files.upload-rev-precondition'
         ]
-      },
-      {
-        key: 'runId',
-        cases: [
-          'dropbox.files.delete-then-not-found',
-          'dropbox.files.copy-move-metadata',
-          'dropbox.files.upload-rev-precondition'
-        ]
       }
     ])
+  })
+
+  it('advises rewriting a generated run id to the committed synthetic one, not keeping it', () => {
+    const spec =
+      dropboxCaseSpecs.find(entry => entry.caseId === dropboxCreateFolderConflictFixture.caseId) ??
+      expect.fail('missing conflict spec')
+
+    const checklist = recordingReviewChecklist(
+      dropboxRunner,
+      [{ spec, fixture: dropboxCreateFolderConflictFixture }],
+      { ...dropboxConformanceFixtureSeeds, runId: 'run-0000beef' }
+    ).join('\n')
+
+    expect(checklist).toContain(
+      'runId="run-0000beef" is generated per run, not account data: rewrite it to "run-synthetic" in the staged fixtures and seeds.ts before promoting'
+    )
+    expect(checklist).toContain(
+      'seeds.ts: every account seed names practice-account data; replace each with a synthetic value'
+    )
+    expect(checklist).not.toContain('runId="run-0000beef",')
   })
 
   it('renders a fixture module typed with the conformance fixture type', () => {
@@ -422,7 +441,8 @@ const memoryWriter = (
       for (const file of [...files.keys()].filter(file => isUnder(file, path))) files.delete(file)
     },
     // No symlinks in memory: every path is its own canonical location.
-    realpath: path => path
+    realpath: path => path,
+    inspect: path => ({ kind: 'present', realpath: path })
   }
 
   const entriesUnderRoot = () =>
@@ -506,7 +526,7 @@ describe('run-dropbox-conformance --record staging (offline)', () => {
     expect(result.success.files).toEqual(staged)
     expect(result.success.checklist.join('\n')).toContain('names: "/Conformance/Paging"')
     expect(result.success.checklist.join('\n')).toContain(
-      '  seeds.ts: every value names practice-account data; replace each with a synthetic value'
+      '  seeds.ts: every account seed names practice-account data; replace each with a synthetic value'
     )
     expect(result.success.checklist.join('\n')).toContain('pagingFolderPath="/Conformance/Paging"')
     expect(result.success.checklist.join('\n')).not.toContain('SHARED SEED')
@@ -734,14 +754,278 @@ describe('run-dropbox-conformance --record containment (real filesystem)', () =>
     }
   })
 
+  it('refuses a dangling symlinked recordings directory and creates nothing through it', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'yolk-recordings-')))
+
+    try {
+      // The recordings directory is a symlink to a target that does not exist yet.
+      const target = join(base, 'packages-like-target')
+
+      symlinkSync(target, join(base, '.conformance-recordings'))
+
+      const root = join(base, '.conformance-recordings', 'dropbox')
+
+      const result = await Effect.runPromise(
+        stageRecordings(dropboxRunner, passedReport([pagingId]), pagingRecorders(), recordInputs, {
+          writer: nodeRecordingWriter,
+          recordingsRoot: root,
+          containmentRoot: base,
+          stagingDir: join(root, runId),
+          recordedAt: '2026-09-30'
+        }).pipe(Effect.result)
+      )
+
+      expect(failureMessage(result)).toBe(
+        `Refusing recordings under a symlinked or redirected directory (${root}); nothing was written`
+      )
+      expect(existsSync(target)).toBe(false)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
   it('checks physical containment component by component', () => {
     const redirect = (from: string, to: string) => ({
-      realpath: (path: string) => (path.startsWith(from) ? to + path.slice(from.length) : path)
+      realpath: (path: string) => path,
+      inspect: (path: string) =>
+        ({
+          kind: 'present',
+          realpath: path.startsWith(from) ? to + path.slice(from.length) : path
+        }) as const
+    })
+
+    const symlinkAt = (link: string) => ({
+      realpath: (path: string) => path,
+      inspect: (path: string) =>
+        path === link
+          ? ({ kind: 'refused' } as const)
+          : ({ kind: 'present', realpath: path } as const)
     })
 
     expect(physicallyContained(redirect('/x', '/x'), '/w', ['/w/a/b'])).toBe(true)
     expect(physicallyContained(redirect('/w/a', '/w/elsewhere'), '/w', ['/w/a/b'])).toBe(false)
     expect(physicallyContained(redirect('/x', '/x'), '/w', ['/outside/a'])).toBe(false)
+    expect(physicallyContained(symlinkAt('/w/a'), '/w', ['/w/a/b'])).toBe(false)
+  })
+
+  it('re-checks containment immediately before publishing, and publishes nothing when it moved', async () => {
+    const { writer, operations, entriesUnderRoot } = memoryWriter()
+    let renames = 0
+
+    // The temp directory becomes a symlink after its files were written, before the rename.
+    const swapping: RecordingWriter = {
+      ...writer,
+      inspect: path =>
+        path === tempDir && operations.some(operation => operation.startsWith('write '))
+          ? { kind: 'refused' }
+          : writer.inspect(path),
+      rename: (from, to) => {
+        renames += 1
+        writer.rename(from, to)
+      }
+    }
+
+    expect(failureMessage(await stage(pagingRecorders(), swapping))).toBe(
+      `Writing the staged recordings failed; nothing was staged in ${stagingDir}`
+    )
+    expect(renames).toBe(0)
+    expect(entriesUnderRoot().filter(path => path.startsWith(stagingDir))).toEqual([])
+  })
+})
+
+// Live-run signal handling: an injected signal source, never real process signals.
+
+const fakeSignals = () => {
+  const handlers = new Map<CliSignal, Array<() => void>>()
+
+  const source: SignalSource = {
+    on: (signal, handler) => {
+      handlers.set(signal, [...(handlers.get(signal) ?? []), handler])
+    },
+    off: (signal, handler) => {
+      handlers.set(
+        signal,
+        (handlers.get(signal) ?? []).filter(registered => registered !== handler)
+      )
+    }
+  }
+
+  const emit = (signal: CliSignal) => {
+    for (const handler of handlers.get(signal) ?? []) handler()
+  }
+
+  const registered = () => [...handlers.values()].reduce((total, list) => total + list.length, 0)
+
+  return { source, emit, registered }
+}
+
+const fakeIo = () => {
+  const errors: Array<string> = []
+  const exitCodes: Array<number> = []
+  const forcedExits: Array<number> = []
+
+  const io: CliIo = {
+    error: message => {
+      errors.push(message)
+    },
+    setExitCode: code => {
+      exitCodes.push(code)
+    },
+    forceExit: code => {
+      forcedExits.push(code)
+    }
+  }
+
+  return { io, errors, exitCodes, forcedExits }
+}
+
+/** A program that starts, then waits; its uninterruptible cleanup waits for `releaseCleanup`. */
+const runningProgram = () => {
+  const started = Effect.runSync(Deferred.make<void>())
+  const releaseCleanup = Effect.runSync(Deferred.make<void>())
+  const cleaned: Array<string> = []
+
+  const program = Deferred.succeed(started, undefined).pipe(
+    Effect.andThen(Deferred.await(Effect.runSync(Deferred.make<void>()))),
+    Effect.ensuring(
+      Deferred.await(releaseCleanup).pipe(
+        Effect.andThen(Effect.sync(() => cleaned.push('cleaned')))
+      )
+    )
+  )
+
+  return {
+    program,
+    cleaned,
+    started: Effect.runPromise(Deferred.await(started)),
+    releaseCleanup: () => Effect.runSync(Deferred.succeed(releaseCleanup, undefined))
+  }
+}
+
+describe('connector conformance live runs are interruptible', () => {
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    it(`interrupts the run on ${signal}, lets the cleanup finish, and exits 130`, async () => {
+      const signals = fakeSignals()
+      const { io, errors, exitCodes, forcedExits } = fakeIo()
+      const running = runningProgram()
+      const done = runInterruptibly(running.program, signals.source, io)
+
+      await running.started
+      signals.emit(signal)
+      running.releaseCleanup()
+      await done
+
+      expect(running.cleaned).toEqual(['cleaned'])
+      expect(errors[0]).toBe(
+        `${signal}: interrupting the run; cleanup of case-created items still runs. Send ${signal} again to exit without waiting.`
+      )
+      expect(errors.at(-1)).toBe(
+        'Interrupted: the run stopped after the cleanups of the running case.'
+      )
+      expect(exitCodes).toEqual([130])
+      expect(forcedExits).toEqual([])
+      expect(signals.registered()).toBe(0)
+    })
+  }
+
+  it('force-exits on a second signal while the cleanup is still running', async () => {
+    const signals = fakeSignals()
+    const { io, errors, forcedExits } = fakeIo()
+    const running = runningProgram()
+    const done = runInterruptibly(running.program, signals.source, io)
+
+    await running.started
+    signals.emit('SIGINT')
+    signals.emit('SIGINT')
+
+    expect(forcedExits).toEqual([130])
+    expect(errors[1]).toContain(
+      'Second SIGINT: exiting now. Cleanup of case-created items may not have run'
+    )
+
+    // Let the fiber finish so the test leaves nothing running.
+    running.releaseCleanup()
+    await done
+  })
+
+  it('reports a failed run with exit code 1 and no signal handlers left behind', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes } = fakeIo()
+
+    await runInterruptibly(Effect.fail(new Error('synthetic live failure')), signals.source, io)
+
+    expect(errors).toEqual(['synthetic live failure'])
+    expect(exitCodes).toEqual([1])
+    expect(signals.registered()).toBe(0)
+  })
+})
+
+describe('connector conformance leftover warnings (read-only)', () => {
+  const leftoverListing: WireFixture = {
+    id: 'dropbox.leftovers.synthetic',
+    caseId: 'dropbox.leftovers',
+    evidence: 'unverified',
+    recordedAt: '2026-09-30',
+    account: 'synthetic',
+    endpoint: 'https://api.dropboxapi.com/2',
+    exchanges: [
+      {
+        request: {
+          method: 'POST',
+          url: 'https://api.dropboxapi.com/2/files/list_folder',
+          headers: { 'content-type': 'application/json' },
+          body: { path: '/Conformance/Work', limit: 2000 }
+        },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: '{"entries":[{".tag":"folder","name":"yolk-conformance-run-0000beef-copy","path_lower":"/conformance/work/yolk-conformance-run-0000beef-copy","path_display":"/Conformance/Work/yolk-conformance-run-0000beef-copy","id":"id:SyntheticLeftover01"}],"cursor":"AAHsyntheticLeftoverCursor","has_more":false}'
+        }
+      }
+    ]
+  }
+
+  const writesOptions = parse([
+    '--live',
+    '--owner-approved',
+    '--account',
+    'practice',
+    '--allow-writes',
+    'reversible'
+  ])
+
+  it('warns once per leftover before any write case and never deletes', async () => {
+    const lines = await Effect.runPromise(
+      leftoverWarnings(
+        dropboxRunner,
+        writesOptions,
+        recordInputs,
+        ReplayHttpClient.layer([leftoverListing])
+      )
+    )
+
+    expect(lines).toEqual([
+      'WARN leftover from an earlier run: /Conformance/Work/yolk-conformance-run-0000beef-copy; delete it by hand after checking that no run is still using it (nothing is deleted automatically)'
+    ])
+  })
+
+  it('does not look when no write case would run', async () => {
+    // An empty replay would fail closed on any request: none is sent.
+    const lines = await Effect.runPromise(
+      leftoverWarnings(dropboxRunner, live(), recordInputs, ReplayHttpClient.layer([]))
+    )
+
+    expect(lines).toEqual([])
+  })
+
+  it('warns, without stopping the run, when the lookup fails', async () => {
+    const lines = await Effect.runPromise(
+      leftoverWarnings(dropboxRunner, writesOptions, recordInputs, ReplayHttpClient.layer([]))
+    )
+
+    expect(lines).toEqual([
+      'WARN could not look for leftovers of earlier runs (lookup failed); check for them by hand'
+    ])
   })
 })
 

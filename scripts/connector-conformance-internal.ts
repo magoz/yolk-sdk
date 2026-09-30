@@ -19,17 +19,33 @@
  *   recorded case verified and passed the secret scan does it write them, all or nothing, to a NEW
  *   run directory under the GITIGNORED root `.conformance-recordings/<provider>/<run>/` (a sibling
  *   temp directory published with one rename; an existing destination is refused). It never writes
- *   committed sources, and it prints a review checklist.
+ *   committed sources, and it prints a review checklist. The staging containment check (lstat per
+ *   component; symlinks, dangling ones included, are refused; re-checked before the rename) guards
+ *   against accidental misconfiguration such as a symlinked recordings directory, NOT against a
+ *   concurrent local process that can already write the workspace: plain Node has no per-component
+ *   `openat`/`O_NOFOLLOW`, so a check-then-write window remains.
+ * - Live runs are interruptible: the first SIGINT/SIGTERM interrupts the run fiber, so the cases'
+ *   uninterruptible cleanups still run; a second signal force-exits (cleanup may be skipped). Before
+ *   any write case, a runner's read-only `leftovers` lookup warns about items earlier runs left
+ *   behind; nothing is deleted automatically.
  *
  * Promotion is manual: scrub the staged files of practice-account data, copy them into
  * `packages/connectors/src/<provider>/conformance/`, run `pnpm format:fix`, and update the
  * provider's conformance tests (package and runner) in the same change.
  */
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import process from 'node:process'
-import { Effect, Layer, Option, Predicate, Ref } from 'effect'
+import { Cause, Effect, Exit, Fiber, Layer, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
 import type { ConformanceCase, ConformanceSafety } from '../packages/conformance/src/case.ts'
@@ -129,6 +145,14 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   ) => Layer.Layer<R>
   /** Extra request headers the recorder keeps (credential headers are always dropped). */
   readonly recordedRequestHeaders: ReadonlyArray<string>
+  /**
+   * READ-ONLY lookup of items earlier runs left behind (for example `yolk-conformance-run-*`
+   * folders), run over the case ports before any write case; each result becomes one WARN line.
+   * Never deletes anything.
+   */
+  readonly leftovers?: Effect.Effect<ReadonlyArray<string>, E, R>
+  /** What to do about a leftover, appended to each WARN line. */
+  readonly leftoverAdvice?: string
   /** JSON keys whose string values usually name a person, a file, or a page. */
   readonly nameKeys: RegExp
   /** JSON keys whose string values hold document or message text. */
@@ -138,7 +162,7 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
 /** A runner of any error and requirement type (only its data is read). */
 type RunnerData<K extends string, S extends SeedRecord<K>> = Omit<
   ConnectorConformanceRunner<K, S, unknown, never>,
-  'cases' | 'casePorts'
+  'cases' | 'casePorts' | 'leftovers'
 > & {
   readonly cases: ReadonlyArray<Pick<ConformanceCase<unknown, never>, 'id' | 'safety'>>
 }
@@ -550,7 +574,8 @@ export const staleSharedSeeds = <K extends string, S extends SeedRecord<K>>(
   merged: SeedRecord<K>,
   recorded: ReadonlyArray<string>
 ): ReadonlyArray<{ readonly key: K; readonly cases: ReadonlyArray<string> }> =>
-  allSeedKeys(runner).flatMap(key => {
+  runner.seedSources.flatMap(({ key }) => {
+    // Generated seeds (a run id) are rewritten to the committed value instead; see the checklist.
     if (current[key] === merged[key]) {
       return []
     }
@@ -579,7 +604,20 @@ export type RecordingWriter = {
   readonly rm: (path: string) => void
   /** The canonical physical path (symlinks resolved) of an existing path; `undefined` when absent. */
   readonly realpath: (path: string) => string | undefined
+  /**
+   * What is at `path` WITHOUT following it (lstat): nothing, something refused (a symbolic link,
+   * dangling ones included, or an entry that cannot be inspected), or an entry and its canonical path.
+   */
+  readonly inspect: (path: string) => PathInspection
 }
+
+export type PathInspection =
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'refused' }
+  | { readonly kind: 'present'; readonly realpath: string }
+
+const errnoCode = (error: unknown): unknown =>
+  Predicate.hasProperty(error, 'code') ? error.code : undefined
 
 export const nodeRecordingWriter: RecordingWriter = {
   exists: path => existsSync(path),
@@ -595,7 +633,16 @@ export const nodeRecordingWriter: RecordingWriter = {
   rm: path => {
     rmSync(path, { recursive: true, force: true })
   },
-  realpath: path => (existsSync(path) ? realpathSync(path) : undefined)
+  realpath: path => (existsSync(path) ? realpathSync(path) : undefined),
+  inspect: path => {
+    try {
+      return lstatSync(path).isSymbolicLink()
+        ? { kind: 'refused' }
+        : { kind: 'present', realpath: realpathSync(path) }
+    } catch (error) {
+      return errnoCode(error) === 'ENOENT' ? { kind: 'missing' } : { kind: 'refused' }
+    }
+  }
 }
 
 /** A unique run directory name, `<YYYY-MM-DD>T<HHMMSS>Z-<suffix>` (UTC). */
@@ -732,15 +779,28 @@ export const recordingReviewChecklist = <K extends string, S extends SeedRecord<
   }
 
   if (seeds !== undefined) {
-    const values = allSeedKeys(runner).flatMap(key => {
+    const values = runner.seedSources.flatMap(({ key }) => {
       const value = seeds[key]
 
       return value === undefined ? [] : [`${key}=${JSON.stringify(value)}`]
     })
 
+    // Generated seeds (a run id) are random, not account data: rewrite them to the committed value.
+    const generated = generatedKeys(runner).flatMap(key => {
+      const value = seeds[key]
+      const committed = runner.fixtureSeeds[key]
+
+      return value === undefined || committed === undefined || value === committed
+        ? []
+        : [
+            `    - ${key}=${JSON.stringify(value)} is generated per run, not account data: rewrite it to ${JSON.stringify(committed)} in the staged fixtures and seeds.ts before promoting`
+          ]
+    })
+
     lines.push(
-      `  seeds.ts: ${values.length === 0 ? 'no seeds' : 'every value names practice-account data; replace each with a synthetic value'}`,
-      ...(values.length === 0 ? [] : [`    - seeds: ${values.join(', ')}`])
+      `  seeds.ts: ${values.length === 0 ? 'no account seeds' : 'every account seed names practice-account data; replace each with a synthetic value'}`,
+      ...(values.length === 0 ? [] : [`    - seeds: ${values.join(', ')}`]),
+      ...generated
     )
   }
 
@@ -828,11 +888,13 @@ export type StageRecordingsOptions = {
 }
 
 /**
- * True when every existing component of each path, from `base` down, resolves (symlinks followed)
- * to exactly its lexical location under the canonical `base`. A path outside `base` never is.
+ * True when every existing component of each path below `base` is a real entry (never a symbolic
+ * link, dangling ones included) whose canonical path is exactly its lexical location under the
+ * canonical `base`. A path outside `base` never is. This guards against accidental
+ * misconfiguration, not a concurrent local process that can already write the workspace.
  */
 export const physicallyContained = (
-  writer: Pick<RecordingWriter, 'realpath'>,
+  writer: Pick<RecordingWriter, 'realpath' | 'inspect'>,
   base: string,
   paths: ReadonlyArray<string>
 ): boolean => {
@@ -854,13 +916,16 @@ export const physicallyContained = (
     for (const part of rest.split(/[\\/]/).filter(segment => segment.length > 0)) {
       current = join(current, part)
 
-      const physical = writer.realpath(current)
+      const inspected = writer.inspect(current)
 
-      if (physical === undefined) {
+      if (inspected.kind === 'missing') {
         return true
       }
 
-      if (physical !== join(canonicalBase, relative(base, current))) {
+      if (
+        inspected.kind === 'refused' ||
+        inspected.realpath !== join(canonicalBase, relative(base, current))
+      ) {
         return false
       }
     }
@@ -980,6 +1045,11 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
           writer.writeFile(join(tempDir, file.name), file.contents)
         }
 
+        // Re-check the temp and target directories immediately before publishing.
+        if (!physicallyContained(writer, base, [tempDir, stagingDir])) {
+          throw new Error('recordings directory redirected')
+        }
+
         // Publish the complete batch in one step, only after every file is written.
         writer.rename(tempDir, stagingDir)
       },
@@ -1010,6 +1080,45 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
       ]
     }
   })
+
+/**
+ * WARN lines for items earlier runs left behind, from the runner's READ-ONLY `leftovers` lookup.
+ * Runs only when a write case would run under these flags; a failed lookup becomes one WARN line
+ * (it never stops the run), and nothing is ever deleted.
+ */
+export const leftoverWarnings = <K extends string, S extends SeedRecord<K>, E, R>(
+  runner: ConnectorConformanceRunner<K, S, E, R>,
+  options: RunOptions<K>,
+  inputs: LiveInputs<S>,
+  http: Layer.Layer<HttpClient.HttpClient>
+): Effect.Effect<ReadonlyArray<string>> => {
+  const lookup = runner.leftovers
+
+  const writes = planRun(runner, options).some(
+    entry => entry.skipReason === undefined && entry.safety !== 'read'
+  )
+
+  if (lookup === undefined || !writes) {
+    return Effect.succeed([])
+  }
+
+  const advice = runner.leftoverAdvice ?? 'check it and remove it by hand'
+
+  return lookup.pipe(
+    Effect.provide(runner.casePorts(http, inputs.accessToken, inputs.seeds)),
+    Effect.exit,
+    Effect.map(exit =>
+      Exit.isSuccess(exit)
+        ? exit.value.map(
+            item =>
+              `WARN leftover from an earlier run: ${item}; ${advice} (nothing is deleted automatically)`
+          )
+        : [
+            'WARN could not look for leftovers of earlier runs (lookup failed); check for them by hand'
+          ]
+    )
+  )
+}
 
 const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
   runner: ConnectorConformanceRunner<K, S, E, R>,
@@ -1043,6 +1152,10 @@ const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
             })
           ).pipe(Layer.provide(FetchHttpClient.layer))
         : FetchHttpClient.layer
+
+    for (const line of yield* leftoverWarnings(runner, options, inputs, FetchHttpClient.layer)) {
+      console.log(line)
+    }
 
     const report = yield* runConformance(runner.cases, {
       target: liveTarget(options),
@@ -1098,9 +1211,100 @@ export const runConnectorConformanceCli = <K extends string, S extends SeedRecor
   } else if (!options.live) {
     console.log(dryRunReport(runner, options))
   } else {
-    Effect.runPromise(runLive(runner, options, process.env)).catch(error => {
-      console.error(error instanceof Error ? error.message : error)
-      process.exitCode = 1
-    })
+    void runInterruptibly(runLive(runner, options, process.env), processSignals, processCliIo)
   }
+}
+
+export type CliSignal = 'SIGINT' | 'SIGTERM'
+
+/** Where termination signals come from; injectable so tests never send real signals. */
+export type SignalSource = {
+  readonly on: (signal: CliSignal, handler: () => void) => void
+  readonly off: (signal: CliSignal, handler: () => void) => void
+}
+
+/** Console output and process exit; injectable for tests. */
+export type CliIo = {
+  readonly error: (message: string) => void
+  readonly setExitCode: (code: number) => void
+  readonly forceExit: (code: number) => void
+}
+
+const processSignals: SignalSource = {
+  on: (signal, handler) => {
+    process.on(signal, handler)
+  },
+  off: (signal, handler) => {
+    process.off(signal, handler)
+  }
+}
+
+const processCliIo: CliIo = {
+  error: message => console.error(message),
+  setExitCode: code => {
+    process.exitCode = code
+  },
+  forceExit: code => process.exit(code)
+}
+
+const cliSignals: ReadonlyArray<CliSignal> = ['SIGINT', 'SIGTERM']
+
+/**
+ * Run `program` so that the first SIGINT/SIGTERM INTERRUPTS its fiber (the cases' uninterruptible
+ * cleanups then still run, and the run waits for them) instead of killing the process, and a second
+ * signal force-exits with a message that cleanup may have been skipped. Resolves when the program
+ * ends: an interruption sets exit code 130, a failure prints its message and sets exit code 1.
+ */
+export const runInterruptibly = <E>(
+  program: Effect.Effect<void, E>,
+  signals: SignalSource,
+  io: CliIo
+): Promise<void> => {
+  const fiber = Effect.runFork(program)
+  let interrupting = false
+
+  const handlers = cliSignals.map(signal => {
+    const handler = () => {
+      if (interrupting) {
+        io.error(
+          `Second ${signal}: exiting now. Cleanup of case-created items may not have run; the next live run warns about leftovers, or check for yolk-conformance items by hand.`
+        )
+        io.forceExit(130)
+
+        return
+      }
+
+      interrupting = true
+      io.error(
+        `${signal}: interrupting the run; cleanup of case-created items still runs. Send ${signal} again to exit without waiting.`
+      )
+      Effect.runFork(Fiber.interrupt(fiber))
+    }
+
+    signals.on(signal, handler)
+
+    return { signal, handler }
+  })
+
+  return Effect.runPromise(Fiber.await(fiber)).then(exit => {
+    for (const { signal, handler } of handlers) {
+      signals.off(signal, handler)
+    }
+
+    if (Exit.isSuccess(exit)) {
+      return
+    }
+
+    if (Cause.hasInterruptsOnly(exit.cause)) {
+      io.error('Interrupted: the run stopped after the cleanups of the running case.')
+      io.setExitCode(130)
+
+      return
+    }
+
+    const error = Cause.squash(exit.cause)
+
+    io.error(error instanceof Error ? error.message : String(error))
+    io.setExitCode(1)
+  })
 }

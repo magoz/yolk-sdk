@@ -865,12 +865,17 @@ writing, and registers the created entry together with the create (uninterruptib
 create rejection (HTTP 4xx, such as `path/conflict`) deletes nothing. An ambiguous create (a
 transport or decoding failure, no status, or HTTP 5xx) gets one best-effort delete of the owned path
 but always fails with `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) naming the
-exact path to check by hand. After a successful create, the cleanup deletes the entry by id
-(falling back to the owned path), also after a failed assertion or an interruption, then checks that
-`get_metadata` answers not-found; a failed cleanup fails with `DropboxConformanceRestoreFailed`
-naming the path, and a create answering a path outside the case folder is never deleted
-(`DropboxConformanceCleanupRefused`). Neither the runner nor the bridges set a request timeout, so a
-hanging create delays an interruption. `pnpm conformance:dropbox` in this repository dry-runs by default;
+exact path to check by hand; so do the conflict case's duplicate creates, after the known original
+is cleaned up. Every later write inside the case folder is masked too, so no aborted request lands
+after the cleanup. After a successful create, the cleanup deletes the entry by id (a not-found answer
+proves it gone; any other failure falls back to the owned path), also after a failed assertion or a
+fiber interruption, then checks that `get_metadata` answers not-found; a failed cleanup fails with
+`DropboxConformanceRestoreFailed` naming the path, and a create answering a path outside the case
+folder is never deleted (`DropboxConformanceCleanupRefused`). Neither the runner nor the bridges set
+a request timeout, so a hanging request delays an interruption. The live runner turns the first
+SIGINT/SIGTERM into a fiber interruption (so the cleanup runs; a second signal or a kill skips it)
+and, before any write case, warns read-only about `yolk-conformance-run-*` folders earlier runs left
+under `workFolderPath` (`findDropboxConformanceLeftovers`); it never deletes them. `pnpm conformance:dropbox` in this repository dry-runs by default;
 `--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; needs
 `DROPBOX_ACCESS_TOKEN` and the seeds) is for owners running a practice account by hand,
 `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or
@@ -1279,7 +1284,10 @@ hanging create delays an interruption). Any response showing the page trashed (`
 `in_trash`), or a not-found read after a successful archive, counts as trashed; otherwise the cleanup
 trashes the page and checks that `notion.get_page` reports `archived: true`. A failed cleanup fails
 with `NotionConformanceRestoreFailed`, and an ambiguous create fails with
-`NotionConformanceActionFailed` (`createOutcome: 'unknown'`) with manual-recovery advice.
+`NotionConformanceActionFailed` (`createOutcome: 'unknown'`) with manual-recovery advice. The live
+runner turns the first SIGINT/SIGTERM into a fiber interruption (so the cleanup runs; a second signal
+or a kill skips it) and, before the write case, warns about untrashed `yolk-conformance page` pages
+found by a read-only, best-effort search (`findNotionConformanceLeftovers`); it never trashes them.
 `pnpm conformance:notion` in this repository dry-runs by default; `--live --owner-approved --account
 <label>` (refused whenever `CI` is non-empty; needs `NOTION_API_TOKEN` and the seeds) is for owners
 running a practice workspace by hand, `--allow-writes reversible` adds the write case, and
