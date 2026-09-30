@@ -1,14 +1,17 @@
 /**
- * Wire fixture data model: recorded HTTP exchanges with outside services.
+ * Fixture data models: recorded HTTP exchanges with outside services (`WireFixture`) and recorded
+ * calls through a host-provided port that is not HTTP (`PortFixture`, for example an email client
+ * port).
  *
  * Fixtures are plain, serializable data. They must contain synthetic or
  * scrubbed content only: never credentials, cookies, or customer data. Use
- * `scanFixtureForSecrets` before committing a fixture.
+ * `scanFixtureForSecrets` / `scanPortFixtureForSecrets` before committing a fixture.
  *
  * @experimental
  */
 import { Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
+import { ConformanceObservation } from './case.ts'
 import {
   apiKeyPatterns,
   bearerPattern,
@@ -401,6 +404,194 @@ export const scanFixtureForSecrets = (fixture: WireFixture): ReadonlyArray<Fixtu
       scanPayload(response.body, `${base}.response.body`, issues)
     }
   })
+
+  return uniqueIssues(issues)
+}
+
+// Port fixtures: one recorded call through a host-provided port that is not HTTP.
+
+/**
+ * A failure a port answered instead of a value. `expected` is the port's value-level failure (for
+ * example a connector `ActionResult.failure`); `error` is the port's typed error channel. `code`
+ * is a sanitized classification, never raw provider text.
+ */
+export const PortFailure = Schema.Struct({
+  kind: Schema.Literals(['expected', 'error']),
+  code: Schema.NonEmptyString,
+  message: Schema.String,
+  status: Schema.optionalKey(Schema.Int)
+})
+
+export type PortFailure = typeof PortFailure.Type
+
+const portFixtureFields = {
+  id: Schema.NonEmptyString,
+  /** Port name, for example `EmailClient`. */
+  port: Schema.NonEmptyString,
+  /** Port method, for example `listMessages`. */
+  method: Schema.NonEmptyString,
+  /** The request as plain JSON, with every credential field removed (`redactPortPayload`). */
+  request: Schema.Json,
+  /**
+   * The live observation this call was recorded from. Absent means a synthetic placeholder
+   * (`unverified`); present means `verified` as of `observed.date`.
+   */
+  observed: Schema.optionalKey(ConformanceObservation),
+  note: Schema.optionalKey(Schema.String)
+}
+
+/** A port call answered with a value (`response`, plain JSON). */
+export const PortValueFixture = Schema.Struct({
+  ...portFixtureFields,
+  response: Schema.Json,
+  failure: absent
+})
+
+export type PortValueFixture = typeof PortValueFixture.Type
+
+/** A port call answered with a failure. */
+export const PortFailureFixture = Schema.Struct({
+  ...portFixtureFields,
+  failure: PortFailure,
+  response: absent
+})
+
+export type PortFailureFixture = typeof PortFailureFixture.Type
+
+/**
+ * One recorded call through a host-provided port: the port, the method, the credential-free JSON
+ * request, and exactly one of `response` or `failure`. Plain JSON only, so one fixture backs
+ * replay, an emulator, and parity checks alike.
+ */
+export const PortFixture = Schema.Union([PortValueFixture, PortFailureFixture])
+
+export type PortFixture = typeof PortFixture.Type
+
+/** Decode unknown input (for example a JSON file) into a `PortFixture`. */
+export const decodePortFixture = Schema.decodeUnknownEffect(PortFixture)
+
+/** Any fixture a conformance case may cite: an HTTP `WireFixture` or a `PortFixture`. */
+export type ConformanceFixture = WireFixture | PortFixture
+
+export const isPortFixture = (fixture: ConformanceFixture): fixture is PortFixture =>
+  !Predicate.hasProperty(fixture, 'exchanges')
+
+export const isPortFailureFixture = (fixture: PortFixture): fixture is PortFailureFixture =>
+  Predicate.hasProperty(fixture, 'failure') && fixture.failure !== undefined
+
+/** Evidence and (when known) date of a fixture. */
+export type ConformanceFixtureEvidence = {
+  readonly evidence: WireFixtureEvidence
+  readonly date?: string
+}
+
+/**
+ * Evidence and date of any fixture: a `WireFixture`'s `evidence` and `recordedAt`; a
+ * `PortFixture` is `verified` as of `observed.date` when observed, else `unverified` without a
+ * date.
+ */
+export const conformanceFixtureEvidence = (
+  fixture: ConformanceFixture
+): ConformanceFixtureEvidence => {
+  if (!isPortFixture(fixture)) {
+    return { evidence: fixture.evidence, date: fixture.recordedAt }
+  }
+
+  return fixture.observed === undefined
+    ? { evidence: 'unverified' }
+    : { evidence: 'verified', date: fixture.observed.date }
+}
+
+const portCredentialKeyPattern = /^credentials?$/i
+
+const isJsonRecord = (value: Schema.Json): value is Schema.JsonObject =>
+  value !== null && Predicate.isObject(value) && !Array.isArray(value)
+
+/** True for a port payload key that holds a credential (`credential`, `password`, `token`, ...). */
+export const isPortCredentialKey = (key: string): boolean =>
+  portCredentialKeyPattern.test(key) || credentialFieldPattern.test(key)
+
+/**
+ * A copy of a port payload without credential fields (see `isPortCredentialKey`), at any depth.
+ * Port requests often carry the resolved credential; record and compare requests only after this.
+ */
+export const redactPortPayload = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) {
+    return value.map(redactPortPayload)
+  }
+
+  if (!isJsonRecord(value)) {
+    return value
+  }
+
+  const copy: Record<string, Schema.Json> = {}
+
+  for (const [key, item] of Object.entries(value)) {
+    if (!isPortCredentialKey(key)) {
+      copy[key] = redactPortPayload(item)
+    }
+  }
+
+  return copy
+}
+
+const scanPortJson = (value: Schema.Json, location: string, issues: IssueSink): void => {
+  scanJson(value, location, issues)
+
+  const visit = (item: Schema.Json, itemLocation: string): void => {
+    if (Array.isArray(item)) {
+      item.forEach((entry, index) => visit(entry, `${itemLocation}[${index}]`))
+
+      return
+    }
+
+    if (!isJsonRecord(item)) {
+      return
+    }
+
+    for (const [key, entry] of Object.entries(item)) {
+      if (portCredentialKeyPattern.test(key) && entry !== null) {
+        issues.push({ kind: 'credential_field', location: `${itemLocation}.${key}` })
+      }
+
+      visit(entry, `${itemLocation}.${key}`)
+    }
+  }
+
+  visit(value, location)
+}
+
+/**
+ * Pure secret scan of a `PortFixture`: the same token patterns and credential JSON fields as
+ * `scanFixtureForSecrets`, plus any non-null `credential` / `credentials` field (port requests must
+ * be recorded through `redactPortPayload`). Covers metadata, the request, the response, and the
+ * failure. Issues name locations only. Returns an empty array when clean.
+ */
+export const scanPortFixtureForSecrets = (
+  fixture: PortFixture
+): ReadonlyArray<FixtureSecretIssue> => {
+  const issues: IssueSink = []
+
+  scanText(fixture.id, 'id', issues)
+  scanText(fixture.port, 'port', issues)
+  scanText(fixture.method, 'method', issues)
+
+  if (fixture.observed !== undefined) {
+    scanText(fixture.observed.account, 'observed.account', issues)
+  }
+
+  if (fixture.note !== undefined) {
+    scanText(fixture.note, 'note', issues)
+  }
+
+  scanPortJson(fixture.request, 'request', issues)
+
+  if (isPortFailureFixture(fixture)) {
+    scanText(fixture.failure.code, 'failure.code', issues)
+    scanText(fixture.failure.message, 'failure.message', issues)
+  } else {
+    scanPortJson(fixture.response, 'response', issues)
+  }
 
   return uniqueIssues(issues)
 }

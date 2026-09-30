@@ -1,0 +1,61 @@
+{
+  "note": "Time-bounded allowlist for unverified connector write routes (see scripts/AGENTS.md). Each entry downgrades one route's evidence failure to a PENDING warning until 'expires' (inclusive, UTC); after that date pnpm packages:evidence fails again. Remove an entry once an owner-approved live run verifies its route.",
+  "entries": [
+    {
+      "manifest": "email",
+      "method": "PORT",
+      "path": "EmailClient.createDraft",
+      "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "email",
+      "method": "PORT",
+      "path": "EmailClient.sendMessage",
+      "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "email",
+      "method": "PORT",
+      "path": "EmailClient.setRead",
+      "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "email",
+      "method": "PORT",
+      "path": "EmailClient.setFlag",
+      "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "email",
+      "method": "PORT",
+      "path": "EmailClient.trash",
+      "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "email",
+      "method": "PORT",
+      "path": "EmailClient.untrash",
+      "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "email",
+      "method": "PORT",
+      "path": "EmailClient.move",
+      "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "email",
+      "method": "PORT",
+      "path": "EmailClient.deletePermanently",
+      "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    }
+  ]
+}

@@ -371,6 +371,28 @@ describe('emulators import rules', () => {
     ])
   })
 
+  it('forbids @yolk-sdk/emulators anywhere in connector sources, conformance directories included', () => {
+    const root = fixtureDirectory()
+
+    scaffoldEmulators(root)
+    write(root, 'packages/emulators/src/email.ts', `export const email = 1\n`)
+
+    const importEmulator = `import { email } from '@yolk-sdk/emulators/email'\n\nexport const probe = email\n`
+
+    write(root, 'packages/connectors/src/email/index.ts', importEmulator)
+    write(root, 'packages/connectors/src/email/conformance/backend.ts', importEmulator)
+
+    for (const rel of [
+      'packages/connectors/src/email/index.ts',
+      'packages/connectors/src/email/conformance/backend.ts'
+    ]) {
+      expect(
+        violationsFor(root, rel).map(violation => violation.forbidden),
+        rel
+      ).toEqual(['@yolk-sdk/emulators'])
+    }
+  })
+
   it('allows node: builtins only in src/node.ts', () => {
     const root = fixtureDirectory()
 

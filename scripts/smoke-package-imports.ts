@@ -63,6 +63,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './conformance',
       './dropbox',
       './email',
+      './email/conformance',
       './figma',
       './fortnox',
       './fortnox/conformance',
@@ -128,6 +129,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './codex',
       './xai',
       './opencode',
+      './email',
       './node'
     ]
   }
@@ -272,6 +274,9 @@ const main = async () => {
           'if (microsoftConformance.microsoftConformanceCases.length !== 11 || microsoftConformance.microsoftConformanceFixtures.length !== 11) throw new Error("Missing Microsoft conformance cases/fixtures")',
           'if (microsoftConformance.microsoftConformanceCases.filter(testCase => testCase.safety === "read").length !== 5 || microsoftConformance.microsoftConformanceCases.some(testCase => testCase.safety === "write-irreversible")) throw new Error("Microsoft conformance safety mismatch")',
           'if ((await import("@yolk-sdk/connectors/microsoft")).MicrosoftConnector.actions.some(action => /calendar|event/.test(action.id))) throw new Error("Microsoft conformance calendar helpers leaked into connector actions")',
+          'const emailConformance = await import("@yolk-sdk/connectors/email/conformance")',
+          'if (emailConformance.emailConformanceCases.length !== 10 || emailConformance.emailConformanceFixtures.length !== 32 || typeof emailConformance.emailClientLayerFromBackend !== "function" || typeof emailConformance.makeEmailReplayBackend !== "function") throw new Error("Missing email conformance cases/fixtures/bridge")',
+          'if (emailConformance.emailConformanceCases.filter(testCase => testCase.safety === "write-irreversible").length !== 3 || emailConformance.emailConformanceCases.filter(testCase => testCase.safety === "read").length !== 3) throw new Error("Email conformance safety mismatch")',
           'await import("@yolk-sdk/emulators").then(() => { throw new Error("@yolk-sdk/emulators must not expose a root export") }, error => { if (error?.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw error })',
           'const emulatorRouter = await import("@yolk-sdk/emulators/router")',
           'if (typeof emulatorRouter.EmulatedHttpClient.layer !== "function" || typeof emulatorRouter.InProcessHttpClient.layer !== "function" || typeof emulatorRouter.EmulatorRoute.url !== "function") throw new Error("Missing emulator router exports")',
@@ -305,6 +310,11 @@ const main = async () => {
           'const goConformance = await import("@yolk-sdk/agent/providers/opencode/conformance")',
           'if (goConformance.openCodeGoConformanceCases.length !== 5 || goConformance.openCodeGoConformanceFixtures.length !== 5 || !goConformance.openCodeGoConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing OpenCode Go conformance cases/fixtures")',
           'if (anthropicConformance.anthropicClaudeUsageConformanceCases.length !== 1 || openAiConformance.openAiCodexUsageConformanceCases.length !== 1 || grokConformance.xAiGrokUsageConformanceCases.length !== 1 || grokConformance.xAiGrokUsageConformanceFixtures.length !== 1) throw new Error("Missing subscription-usage conformance cases/fixtures")',
+          'const emailEmulator = (await import("@yolk-sdk/emulators/email")).makeEmailEmulator()',
+          'const emailFixture = emailConformance.emailConformanceFixtures[0]',
+          'const emailReply = emailEmulator.call(emailFixture.method, emailFixture.request)',
+          'const emailRefused = emailEmulator.call("listMessages", { limit: 1 })',
+          'if (JSON.stringify(emailReply) !== JSON.stringify({ response: emailFixture.response }) || !("notEmulated" in emailRefused) || emailEmulator.ledger.entries().length !== 2 || emailEmulator.coverage().notEmulatedCalls !== 1) throw new Error("Email emulator smoke failed")',
           'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")'
         ].join('\n')
     )

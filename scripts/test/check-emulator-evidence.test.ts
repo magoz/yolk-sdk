@@ -4,17 +4,24 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { vercelAiGatewayConformanceFixtures } from '../../packages/agent/src/providers/vercel/conformance/index.ts'
 import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
+import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
+import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
 import type { EmulatorRouteEvidence } from '../../packages/emulators/src/route-evidence.ts'
 import {
   checkEmulatorEvidence,
-  conformanceFixtureEvidence,
+  cliNow,
+  repoFixtureEvidenceByCase,
+  defaultMaxPendingDays,
   emulatorManifests,
   evidenceAgeDays,
   evidenceReportFailed,
   fixtureEvidenceByCase,
   formatEvidenceReport,
   knownConformanceCaseIds,
-  type EvidenceManifest
+  loadPendingEvidence,
+  parsePendingEvidence,
+  type EvidenceManifest,
+  type PendingEvidenceEntry
 } from '../check-emulator-evidence.ts'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -197,7 +204,7 @@ describe('checkEmulatorEvidence', () => {
       manifests: [{ name: 'example', routes }],
       caseIds: knownConformanceCaseIds,
       now,
-      fixtureEvidence: conformanceFixtureEvidence
+      fixtureEvidence: repoFixtureEvidenceByCase
     })
 
   it('passes a verified route whose cited cases all have verified repo fixtures (Gateway)', () => {
@@ -211,7 +218,7 @@ describe('checkEmulatorEvidence', () => {
     expect(verifiedCaseIds).toEqual(gatewayCaseIds)
 
     for (const caseId of verifiedCaseIds) {
-      expect(conformanceFixtureEvidence.get(caseId)).toContain('verified')
+      expect(repoFixtureEvidenceByCase.get(caseId)).toContain('verified')
     }
 
     const recordedAt = vercelAiGatewayConformanceFixtures
@@ -242,7 +249,7 @@ describe('checkEmulatorEvidence', () => {
     expect(unverifiedCaseIds).not.toEqual([])
 
     for (const caseId of unverifiedCaseIds) {
-      expect(conformanceFixtureEvidence.get(caseId)).not.toContain('verified')
+      expect(repoFixtureEvidenceByCase.get(caseId)).not.toContain('verified')
     }
 
     const report = repoCrossCheck([
@@ -285,15 +292,195 @@ describe('checkEmulatorEvidence', () => {
   })
 })
 
-describe('repo emulator manifests', () => {
-  it('cite only known case ids and have no failures', () => {
+const unverifiedWrite = route({
+  method: 'PUT',
+  path: '/v1/items/{id}',
+  write: true,
+  caseIds: ['example.write.create'],
+  evidence: 'unverified',
+  observedAt: undefined
+})
+
+const pendingEntry = (overrides: Partial<PendingEvidenceEntry> = {}): PendingEvidenceEntry => ({
+  manifest: 'example',
+  method: 'PUT',
+  path: '/v1/items/{id}',
+  reason: 'awaiting the live run',
+  expires: '2026-10-31',
+  ...overrides
+})
+
+const checkPending = (
+  routes: ReadonlyArray<EmulatorRouteEvidence>,
+  pending: ReadonlyArray<PendingEvidenceEntry>,
+  at: Date = now
+) => checkEmulatorEvidence({ manifests: [{ name: 'example', routes }], caseIds, now: at, pending })
+
+const findingKinds = (report: ReturnType<typeof checkEmulatorEvidence>) =>
+  report.findings.map(finding => `${finding.severity}:${finding.kind}`)
+
+describe('pending evidence allowlist', () => {
+  it('downgrades a listed unverified write route to a pending warning until it expires', () => {
+    const report = checkPending([unverifiedWrite], [pendingEntry()])
+
+    expect(findingKinds(report)).toEqual(['warn:pending-write', 'warn:unverified'])
+    expect(report.findings[0]?.detail).toBe(
+      'PENDING until 2026-10-31 (31 day(s) left): connector write route has unverified evidence; awaiting the live run'
+    )
+    expect(evidenceReportFailed(report)).toBe(false)
+
+    // The expiry day itself is still allowed.
+    const lastDay = checkPending(
+      [unverifiedWrite],
+      [pendingEntry()],
+      new Date('2026-10-31T23:59:59Z')
+    )
+
+    expect(evidenceReportFailed(lastDay)).toBe(false)
+  })
+
+  it(`fails an entry whose expiry is more than ${defaultMaxPendingDays} days away`, () => {
+    // 2026-09-30 + 60 days = 2026-11-29 (still allowed); one day later fails.
+    expect(
+      evidenceReportFailed(
+        checkPending([unverifiedWrite], [pendingEntry({ expires: '2026-11-29' })])
+      )
+    ).toBe(false)
+
+    const report = checkPending([unverifiedWrite], [pendingEntry({ expires: '2026-11-30' })])
+
+    expect(findingKinds(report)).toEqual(['fail:pending-too-long', 'warn:unverified'])
+    expect(report.findings[0]?.detail).toContain('expires 2026-11-30, more than 60 days away')
+    expect(evidenceReportFailed(report)).toBe(true)
+  })
+
+  it('fails a listed route after its expiry date', () => {
+    const report = checkPending(
+      [unverifiedWrite],
+      [pendingEntry()],
+      new Date('2026-11-01T00:00:00.000Z')
+    )
+
+    expect(findingKinds(report)).toEqual(['fail:pending-expired', 'warn:unverified'])
+    expect(report.findings[0]?.detail).toContain('expired on 2026-10-31')
+    expect(evidenceReportFailed(report)).toBe(true)
+  })
+
+  it('still fails unlisted unverified write routes (other manifest, method, or path)', () => {
+    for (const entry of [
+      pendingEntry({ manifest: 'other' }),
+      pendingEntry({ method: 'POST' }),
+      pendingEntry({ path: '/v1/items' })
+    ]) {
+      const report = checkPending([unverifiedWrite], [entry])
+
+      expect(findingKinds(report)).toEqual([
+        'fail:unverified-write',
+        'warn:unverified',
+        'warn:stale-pending'
+      ])
+      expect(evidenceReportFailed(report)).toBe(true)
+    }
+  })
+
+  it('warns that an entry is stale once its route is verified', () => {
+    const report = checkPending(
+      [{ ...unverifiedWrite, evidence: 'verified', observedAt: '2026-09-29' }],
+      [pendingEntry()]
+    )
+
+    expect(report.findings).toEqual([
+      {
+        severity: 'warn',
+        kind: 'stale-pending',
+        manifest: 'example',
+        route: 'PUT /v1/items/{id}',
+        detail:
+          'route is now verified; remove its stale scripts/emulator-evidence-pending.json entry'
+      }
+    ])
+    expect(evidenceReportFailed(report)).toBe(false)
+  })
+
+  it('validates the pending file shape and fails on problems', () => {
+    expect(parsePendingEvidence({ note: 'x', entries: [pendingEntry()] })).toEqual({
+      entries: [pendingEntry()],
+      problems: []
+    })
+    expect(parsePendingEvidence([]).problems).toEqual([
+      'the pending file must be an object with an "entries" array'
+    ])
+
+    const problems = parsePendingEvidence({
+      entries: [
+        pendingEntry({ expires: '2026-02-30' }),
+        pendingEntry({ reason: ' ' }),
+        { ...pendingEntry(), owner: 'someone' },
+        'nope',
+        pendingEntry(),
+        pendingEntry({ method: 'put' })
+      ]
+    }).problems
+
+    expect(problems).toHaveLength(5)
+    expect(problems[0]).toBe('entry 0 expires 2026-02-30 is not a YYYY-MM-DD date')
+
+    for (const [index, problem] of problems.slice(1, 4).entries()) {
+      expect(problem.startsWith(`entry ${index + 1} is invalid: `), problem).toBe(true)
+    }
+
+    expect(problems[2]).toContain('owner')
+    expect(problems[4]).toBe('entry 5 lists example PUT /v1/items/{id} twice')
+
     const report = checkEmulatorEvidence({
-      manifests: emulatorManifests,
-      caseIds: knownConformanceCaseIds,
+      manifests: [],
+      caseIds,
       now,
-      fixtureEvidence: conformanceFixtureEvidence
+      pendingProblems: ['entry 0 is not an object']
     })
 
+    expect(findingKinds(report)).toEqual(['fail:invalid-pending'])
+  })
+
+  it('reports pending routes first and counts them', () => {
+    const text = formatEvidenceReport(
+      checkPending([route(), unverifiedWrite], [pendingEntry()])
+    ).split('\n')
+
+    expect(text[1]).toBe(
+      'PENDING: 1 unverified connector write route(s) allowed by scripts/emulator-evidence-pending.json; each FAILS after its expiry date. Verify them with an owner-approved live run.'
+    )
+    expect(text[2]).toMatch(
+      /^WARN {2}example {2}PUT \/v1\/items\/\{id\} {2}PENDING until 2026-10-31/
+    )
+    expect(text.at(-1)).toBe('0 failure(s), 2 warning(s) (1 pending)')
+  })
+})
+
+describe('repo emulator manifests', () => {
+  const repoPending = loadPendingEvidence()
+
+  const emailWriteRoutes = emailEmulatorRoutes
+    .filter(emailRoute => emailRoute.write)
+    .map(emailRoute => `${emailRoute.method} ${emailRoute.path}`)
+
+  const repoCheck = (
+    at: Date,
+    pending: ReadonlyArray<PendingEvidenceEntry> = repoPending.entries
+  ) =>
+    checkEmulatorEvidence({
+      manifests: emulatorManifests,
+      caseIds: knownConformanceCaseIds,
+      now: at,
+      fixtureEvidence: repoFixtureEvidenceByCase,
+      pending,
+      pendingProblems: repoPending.problems
+    })
+
+  it('cite only known case ids and have no failures while the pending file holds', () => {
+    const report = repoCheck(now)
+
+    expect(repoPending.problems).toEqual([])
     expect(evidenceReportFailed(report)).toBe(false)
     expect(knownConformanceCaseIds.has('vercel-ai-gateway.stream.plain-text')).toBe(true)
     expect(knownConformanceCaseIds.has('fortnox.invoice.list-populated')).toBe(true)
@@ -315,24 +502,20 @@ describe('repo emulator manifests', () => {
       'anthropic-usage',
       'codex-usage',
       'xai-usage',
-      'opencode'
+      'opencode',
+      'email'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
       ['verified', '2026-09-30']
     ])
-    expect(
-      emulatorManifests[0]?.routes.flatMap(route =>
-        route.caseIds.map(caseId => conformanceFixtureEvidence.get(caseId))
-      )
-    ).toEqual([['verified'], ['verified'], ['verified'], ['verified']])
     expect(report.findings.filter(finding => finding.manifest === 'gateway')).toEqual([])
-    expect(conformanceFixtureEvidence.get('openai.chat.stream.plain-text')).toEqual(['unverified'])
-    expect(conformanceFixtureEvidence.get('anthropic.messages.stream.plain-text')).toEqual([
+    expect(repoFixtureEvidenceByCase.get('openai.chat.stream.plain-text')).toEqual(['unverified'])
+    expect(repoFixtureEvidenceByCase.get('anthropic.messages.stream.plain-text')).toEqual([
       'unverified'
     ])
-    expect(conformanceFixtureEvidence.get('openai.codex.stream.plain-text')).toEqual(['unverified'])
-    expect(conformanceFixtureEvidence.get('xai.grok.stream.plain-text')).toEqual(['unverified'])
+    expect(repoFixtureEvidenceByCase.get('openai.codex.stream.plain-text')).toEqual(['unverified'])
+    expect(repoFixtureEvidenceByCase.get('xai.grok.stream.plain-text')).toEqual(['unverified'])
 
     // Every new route (usage and OpenCode Go) is unverified and backed by unverified fixtures.
     for (const name of ['anthropic-usage', 'codex-usage', 'xai-usage', 'opencode']) {
@@ -343,23 +526,95 @@ describe('repo emulator manifests', () => {
       for (const route of routes) {
         expect(route.evidence, `${name} ${route.path}`).toBe('unverified')
         expect(
-          route.caseIds.map(caseId => conformanceFixtureEvidence.get(caseId)),
+          route.caseIds.map(caseId => repoFixtureEvidenceByCase.get(caseId)),
           `${name} ${route.path}`
         ).toEqual(route.caseIds.map(() => ['unverified']))
       }
     }
+
+    for (const testCase of emailConformanceCases) {
+      expect(knownConformanceCaseIds.has(testCase.id)).toBe(true)
+      // Synthetic port fixtures: unverified, derived through the cases that cite them.
+      expect(repoFixtureEvidenceByCase.get(testCase.id)).toEqual(
+        testCase.fixtures.map(() => 'unverified')
+      )
+    }
+
+    expect(
+      report.findings
+        .filter(finding => finding.kind === 'pending-write')
+        .map(finding => finding.route)
+    ).toEqual(emailWriteRoutes)
   })
 
-  it('runs as a CLI that prints the report and exits 0', async () => {
-    const result = await new Promise<{ failed: boolean; stdout: string }>(resolvePromise => {
-      execFile(process.execPath, [tsxCli, checker], { cwd: repoRoot }, (error, stdout) => {
-        resolvePromise({ failed: error !== null, stdout: String(stdout) })
-      })
+  it('ships one pending entry per email write route, at most 60 days out, naming the live run', () => {
+    expect(
+      repoPending.entries
+        .filter(entry => entry.manifest === 'email')
+        .map(entry => `${entry.method} ${entry.path}`)
+    ).toEqual(emailWriteRoutes)
+
+    for (const entry of repoPending.entries.filter(item => item.manifest === 'email')) {
+      // At most 60 days from 2026-09-30.
+      expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+      expect(entry.reason).toContain('owner-approved live run against a practice mailbox')
+      expect(entry.reason).toContain('tracking #115')
+    }
+  })
+
+  it('fails the unverified email write routes without the pending file or after it expires', () => {
+    for (const report of [repoCheck(now, []), repoCheck(new Date('2026-11-30T00:00:00.000Z'))]) {
+      expect(evidenceReportFailed(report)).toBe(true)
+      expect(
+        report.findings.filter(finding => finding.severity === 'fail').map(finding => finding.route)
+      ).toEqual(emailWriteRoutes)
+    }
+  })
+
+  it('the CLI clock is today unless the test-only --now flag sets it', () => {
+    const today = new Date('2026-09-30T08:00:00.000Z')
+
+    expect(cliNow([], today)).toBe(today)
+    expect(cliNow(['--now', '2026-11-01'], today)).toEqual(new Date('2026-11-01T12:00:00.000Z'))
+
+    for (const args of [['--now'], ['--now', '2026-02-30'], ['--today', '2026-11-01']]) {
+      expect(cliNow(args, today), args.join(' ')).toContain('usage:')
+    }
+  })
+
+  // The CLI runs at explicit dates, never the wall clock, so this test does not start failing on
+  // its own when the entries expire: the passing run is pinned to 2026-09-30 (when the email
+  // entries were written) and the failing run to the day after the latest expiry.
+  const cliToday = '2026-09-30'
+  const expiries = repoPending.entries.map(entry => entry.expires).toSorted()
+  const latestExpiry = expiries.at(-1) ?? cliToday
+
+  const dayAfter = (date: string) =>
+    new Date(Date.parse(`${date}T00:00:00.000Z`) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+  const runCli = (date: string) =>
+    new Promise<{ failed: boolean; stdout: string; stderr: string }>(resolvePromise => {
+      execFile(
+        process.execPath,
+        [tsxCli, checker, '--now', date],
+        { cwd: repoRoot },
+        (error, stdout, stderr) => {
+          resolvePromise({ failed: error !== null, stdout: String(stdout), stderr: String(stderr) })
+        }
+      )
     })
 
+  it('runs as a CLI that prints the report and exits 0 before the pending entries expire', async () => {
+    const pendingRoutes = repoCheck(new Date(`${cliToday}T12:00:00.000Z`)).findings.filter(
+      finding => finding.kind === 'pending-write'
+    ).length
+
+    const result = await runCli(cliToday)
+
+    expect(pendingRoutes).toBe(repoPending.entries.length)
     expect(result.failed).toBe(false)
     expect(result.stdout).toContain('Emulator evidence:')
-    // Verified now; a stale-evidence warning may appear once the observation is over 30 days old.
+    // The Gateway route is verified; a stale-evidence warning may appear, never an unverified one.
     expect(result.stdout).not.toContain(
       'WARN  gateway  POST /v1/chat/completions  unverified evidence'
     )
@@ -380,5 +635,25 @@ describe('repo emulator manifests', () => {
     expect(result.stdout).toContain(
       'WARN  opencode  POST /zen/go/v1/responses  unverified evidence (2 case(s))'
     )
+    expect(result.stdout).toContain(
+      'WARN  email  PORT EmailClient.createDraft  PENDING until 2026-11-29'
+    )
+    expect(result.stdout).toContain('WARN  email  PORT EmailClient.getMessage  unverified evidence')
+
+    // The PENDING count comes from the pending file, not a hard-coded number.
+    const pendingLine = result.stdout.split('\n').find(line => line.startsWith('PENDING: '))
+
+    expect(pendingLine === undefined ? 0 : Number(pendingLine.split(' ')[1])).toBe(pendingRoutes)
   }, 120000)
+
+  it.runIf(repoPending.entries.length > 0)(
+    'runs as a CLI that exits 1 after the pending entries expire',
+    async () => {
+      const result = await runCli(dayAfter(latestExpiry))
+
+      expect(result.failed).toBe(true)
+      expect(result.stderr).toContain(`expired on ${latestExpiry}`)
+    },
+    120000
+  )
 })

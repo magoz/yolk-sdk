@@ -36,7 +36,7 @@ Rules of thumb:
 - `knowledge`, `connectors`, and `sandbox` expose optional agent adapters behind explicit subpaths.
 - `vercel-workflows` stays generic over serializable `unknown` payloads and does not import agent protocol.
 - `harness` owns run lifecycle (claims, inbox, drains). It is not the agent loop and does not add a Workflow driver.
-- `conformance` (experimental) depends only on `effect`: it records, replays, and fault-injects HTTP wire fixtures for tests, defines conformance cases, and runs them behind a safety policy; it never performs network I/O itself. Provider fixture and case modules such as `agent/providers/vercel/conformance` import it; runtime code does not.
-- `emulators` (experimental) depends only on `effect` and never imports other Yolk packages: emulators follow the recorded fixture wire shapes and name the conformance cases behind each route. `router` swaps `HttpClient` layers to reach them; only `node` uses Node builtins.
+- `conformance` (experimental) depends only on `effect`: it records, replays, and fault-injects HTTP wire fixtures for tests, defines port fixtures for non-HTTP host ports (such as `EmailClient`), defines conformance cases, and runs them behind a safety policy; it never performs network I/O itself. Provider fixture and case modules such as `agent/providers/vercel/conformance` import it; runtime code does not.
+- `emulators` (experimental) depends only on `effect` and never imports other Yolk packages: emulators follow the recorded fixture wire shapes and name the conformance cases behind each route. `router` swaps `HttpClient` layers to reach them; `email` is a plain-JSON fake `EmailClient` backend that connectors bridge structurally (connectors never import emulators); only `node` uses Node builtins.
 
 Strict boundaries let the packages fit many hosts: Next.js, Workers, Durable Objects, Workflows, CLIs, and tests.

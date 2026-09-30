@@ -8,7 +8,7 @@ import {
   type ConformanceCase,
   type ConformanceSafety
 } from '../src/case.ts'
-import type { WireFixture } from '../src/fixture.ts'
+import type { PortFixture, WireFixture } from '../src/fixture.ts'
 import { ReplayHttpClient } from '../src/replay.ts'
 import {
   conformanceCaseWarnings,
@@ -820,6 +820,47 @@ describe('conformance warnings', () => {
         { target: { kind: 'live', account: 'synthetic' }, now, fixtures }
       )
     ).toEqual([])
+  })
+
+  it('accepts port fixtures next to wire fixtures: unverified without observed, stale by observed date', () => {
+    const port = (id: string, observed?: PortFixture['observed']): PortFixture => {
+      const synthetic: PortFixture = {
+        id,
+        port: 'ExampleClient',
+        method: 'listItems',
+        request: { folder: 'INBOX' },
+        response: { items: [] }
+      }
+
+      return observed === undefined ? synthetic : { ...synthetic, observed }
+    }
+
+    const mixed = [
+      fixture('example.warn.fresh-verified', 'verified', '2026-09-28'),
+      port('example.port.synthetic'),
+      port('example.port.fresh', { account: 'practice', date: '2026-09-28' }),
+      port('example.port.stale', { account: 'practice', date: '2026-08-01' })
+    ]
+
+    expect(
+      conformanceCaseWarnings(
+        {
+          observed: { account: 'synthetic', date: '2026-09-28' },
+          fixtures: [
+            'example.warn.fresh-verified',
+            'example.port.synthetic',
+            'example.port.fresh',
+            'example.port.stale',
+            'example.port.absent'
+          ]
+        },
+        { target: { kind: 'replay' }, now, fixtures: mixed }
+      )
+    ).toEqual([
+      { kind: 'unverified-fixture', fixtureId: 'example.port.synthetic' },
+      { kind: 'stale-fixture', fixtureId: 'example.port.stale', ageDays: 59 },
+      { kind: 'missing-fixture', fixtureId: 'example.port.absent' }
+    ])
   })
 
   it.effect('attaches warnings to results, including skipped ones', () =>

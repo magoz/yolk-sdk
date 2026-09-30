@@ -61,7 +61,7 @@ export type ConformanceCase<E = never, R = never> = {
   readonly wire: string
   /** Last live observation. Absent means the claim is unverified against the real service. */
   readonly observed?: ConformanceObservation
-  /** Ids of the `WireFixture`s that back replay of this case. */
+  /** Ids of the fixtures (`WireFixture`s or `PortFixture`s) that back replay of this case. */
   readonly fixtures: ReadonlyArray<string>
   readonly run: Effect.Effect<void, E, R>
 }

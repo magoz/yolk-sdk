@@ -161,6 +161,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './conformance',
       './dropbox',
       './email',
+      './email/conformance',
       './figma',
       './fortnox',
       './fortnox/conformance',
@@ -222,6 +223,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './codex',
       './xai',
       './opencode',
+      './email',
       './node'
     ],
     root: 'none'

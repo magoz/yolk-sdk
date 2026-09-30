@@ -8,7 +8,7 @@ conformance cases (one wire claim each) and the runner that gates them by safety
 
 | Subpath                         | Source                 | Role                                                                           |
 | ------------------------------- | ---------------------- | ------------------------------------------------------------------------------ |
-| `@yolk-sdk/conformance/fixture` | `src/fixture.ts`       | Fixture/exchange schemas and types, decode, staleness, `scanFixtureForSecrets` |
+| `@yolk-sdk/conformance/fixture` | `src/fixture.ts`       | Wire and port fixture schemas, decode, staleness, secret scans, port redaction |
 | `@yolk-sdk/conformance/replay`  | `src/replay.ts`        | Replay `HttpClient` layer, `ReplayLedger`, `WireFault`                         |
 | `@yolk-sdk/conformance/record`  | `src/record.ts`        | Recording wrapper over a host `HttpClient`, `WireRecorder`, `makeWireFixture`  |
 | `@yolk-sdk/conformance/case`    | `src/case.ts`          | `ConformanceCase`, `defineConformanceCase`, safety, assertion helpers          |
@@ -37,6 +37,15 @@ There is no root export or barrel.
   URLs, headers, request/response bodies (JSON field scan and form-parameter scan), each chunk, and
   the reassembled stream (JSON field scan per SSE `data:` payload). Credential field names are
   singular; plural/numeric usage fields such as `max_tokens` must stay unflagged.
+- `PortFixture` is the minimal non-HTTP fixture: one call through a host port (`id`, `port`,
+  `method`, a credential-free JSON `request`, exactly one of `response` or `failure`
+  (`expected` = value-level failure, `error` = typed error), optional `observed` and `note`). No
+  `observed` means synthetic (`unverified`, no date); `observed.date` makes it `verified` and ages
+  it. Record requests through `redactPortPayload` (drops `credential(s)` and every credential field
+  name at any depth); `scanPortFixtureForSecrets` flags the token patterns, credential fields, and
+  any non-null `credential(s)` field. Replaying port fixtures belongs to the port owner (for
+  example the connectors email bridge), not this package. `WireFixture` and HTTP replay are
+  unchanged.
 - Recording is lossless: `body` (valid UTF-8) or `bodyBase64`; stream `chunks` entries are strings
   when valid UTF-8 on their own (empty chunks `""`), else `{ base64 }`. Decode each chunk standalone
   with a fatal decoder; never carry decoder state across chunks.
@@ -90,6 +99,8 @@ There is no root export or barrel.
   mismatch details into reports.
 - Credential patterns live once in `wire-internal.ts`; the fixture secret scan and the report
   sanitizer both use them. Change them there, never in a copy.
+- The runner's `fixtures` accept `WireFixture`s and `PortFixture`s (`ConformanceFixture`); both use
+  `conformanceFixtureEvidence` for the unverified/stale warnings.
 - Live targets omit all fixture-level warnings (`unverified-fixture`, `stale-fixture`,
   `missing-fixture`) because fixtures are not used live; elsewhere they need supplied fixtures.
   Case warnings (`unverified-case`, `stale-observation`) always apply. `formatConformanceReport`
@@ -100,6 +111,6 @@ There is no root export or barrel.
 
 ## Tests
 
-`test/fixture.test.ts`, `test/replay.test.ts`, `test/record.test.ts`, `test/case.test.ts`,
-`test/runner.test.ts`. Use synthetic hosts such as
+`test/fixture.test.ts`, `test/port-fixture.test.ts`, `test/replay.test.ts`, `test/record.test.ts`,
+`test/case.test.ts`, `test/runner.test.ts`. Use synthetic hosts such as
 `api.example.test`; never call real services.

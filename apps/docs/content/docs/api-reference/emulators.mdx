@@ -7,7 +7,8 @@ description: Experimental service emulators, HttpClient routing to them, and a l
 > `0.1.0-canary.95`; keep it on the same lockstep version as the other public packages.
 
 `@yolk-sdk/emulators` runs stand-ins for outside services in tests and local development, and
-routes an Effect `HttpClient` to them instead of the real service. Emulators never import other
+routes an Effect `HttpClient` to them instead of the real service. The email emulator is a
+port-level fake instead: a plain-JSON `EmailClient` backend. Emulators never import other
 `@yolk-sdk/*` code: their wire shapes follow the conformance fixtures (verified recordings for the
 Gateway, synthetic placeholders elsewhere), and each emulated route names the conformance cases it
 follows. The package depends only on `effect`.
@@ -288,6 +289,42 @@ those headers, `accept: application/json`, and exactly the recorded query; anyth
 not-emulated. Credential and account values are never recorded, and are not checked except Grok's
 fixed `X-XAI-Token-Auth: xai-grok-cli`.
 
+## Email emulator
+
+`@yolk-sdk/emulators/email`
+
+| Export                                                                                          | Purpose                                                                                                   |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `makeEmailEmulator({ seed? })`                                                                  | `{ call, state, seed, ledger, reset, faults, coverage }`: a fixture-driven fake `EmailClient` backend     |
+| `emailEmulatorRoutes`                                                                           | Route evidence manifest: one `PORT EmailClient.<method>` route per emulated method, linked to email cases |
+| `emailEmulatorPort`, `emailEmulatorRouteMethod`                                                 | Helpers: `EmailClient` and `PORT`, the port name and pseudo method of the manifest routes                 |
+| `EmailEmulatorSpecialUse`, `EmailEmulatorFolder`, `EmailEmulatorMessage`                        | Seed schemas: SPECIAL-USE attributes, folders, and messages                                               |
+| `emailEmulatorDefaultSeed`, `EmailEmulatorSeed`                                                 | The synthetic practice mailbox the fixtures describe (folders, SPECIAL-USE attributes, messages)          |
+| `EmailEmulatorFault`, `EmailEmulatorLedgerEntry`, `EmailEmulatorReply`, `EmailEmulatorCoverage` | Fault schema, ledger entry, reply, and coverage types                                                     |
+| `emailEmulatorFixtures`                                                                         | The email conformance `PortFixture`s, copied as data                                                      |
+| `EmailEmulatorInputInvalid`                                                                     | Thrown for an invalid seed or fault                                                                       |
+
+Yolk never speaks IMAP, POP3, or SMTP, and neither does this emulator: no socket, TLS, MIME, or
+mail library, no Node builtin, and no SDK import. `call(method, request)` takes one `EmailClient`
+call as plain JSON (without credential fields) and answers `{ response }`, `{ failure }`, or
+`{ notEmulated: { reason } }`. `emailClientLayerFromBackend(emulator)` from
+`@yolk-sdk/connectors/email/conformance` turns it into the `EmailClient` layer.
+
+Responses come only from the email conformance fixtures. The in-memory mailbox only selects the
+first matching fixture consistent with it (preferring fixtures unused since the last reset) and
+records what that fixture says happened (flags set, a draft appended, a message moved to the
+destination id the fixture names, a message deleted, a Sent copy saved); it never invents an id,
+flag, or response.
+
+- Request-shape latitude: credential fields are never compared or recorded, and `connection.host`
+  is not compared. Every other connection field (`protocol`, `port`, `security`) and everything
+  else must equal a fixture request.
+
+Anything else fails closed with a ledgered `notEmulated` answer, the port analogue of HTTP 400:
+`unknown-method`, `invalid-request`, `no-matching-fixture`, or `state-conflict`. Faults
+(`{ kind: 'failure', method, match?, count?, failure }`, `match` a deep subset of the request)
+change no state. `reset()` restores the seed and clears the ledger, faults, and fixture use.
+
 ## Node server
 
 `@yolk-sdk/emulators/node`
@@ -304,8 +341,13 @@ delivery survives the socket; a body stream error drops the connection.
 ## Evidence
 
 Emulated routes carry evidence: `verified` routes follow a live observation dated by
-`observedAt`; `unverified` routes follow synthetic placeholders and tag every response with
-`x-emulator-evidence: unverified`. The Gateway route is verified (`observedAt: '2026-09-30'`): the
+`observedAt`; `unverified` routes follow synthetic placeholders. Fetch-handler emulators tag every
+response from an unverified route with `x-emulator-evidence: unverified`; the email emulator's
+plain-JSON replies carry no header, so it records the evidence on each ledger entry instead. The Gateway route is verified (`observedAt: '2026-09-30'`): the
 emulator follows the verified live Gateway recordings, and the Yolk repository checks its response
-shapes against each recording. The OpenAI, Anthropic, Codex, Grok, OpenCode Go, and
-subscription-usage routes are unverified, like the synthetic fixtures they follow.
+shapes against each recording. The OpenAI, Anthropic, Codex, Grok, OpenCode Go, subscription-usage, and email routes are unverified,
+like the synthetic fixtures they follow. The email write routes are connector writes: until an
+owner-approved live run against a practice mailbox, through a host `EmailClient` implementation,
+verifies them, the repository lists them in a time-bounded allowlist
+(`scripts/emulator-evidence-pending.json`), and the evidence check reports them as PENDING
+warnings until each entry's expiry date and fails again after it.

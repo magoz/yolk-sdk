@@ -14,6 +14,7 @@ Effect `HttpClient` routing that points code at them.
 | `@yolk-sdk/emulators/codex`     | `src/codex.ts`              | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
 | `@yolk-sdk/emulators/xai`       | `src/xai.ts`                | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
 | `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`           | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                              |
+| `@yolk-sdk/emulators/email`     | `src/email.ts`              | Fixture-driven fake `EmailClient` backend (plain JSON `call`), its seed, faults, ledger, and manifest                                    |
 | `@yolk-sdk/emulators/node`      | `src/node.ts`               | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
 | (internal)                      | `src/emulator-kernel.ts`    | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
 | (internal)                      | `src/chat-completions.ts`   | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
@@ -25,17 +26,20 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                      | `src/emulator-compose.ts`   | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                  |
 | (internal)                      | `src/emulator-http.ts`      | Fault/scripted-error status and header validators                                                                                        |
 | (internal)                      | `src/route-evidence.ts`     | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
+| (internal)                      | `src/email-fixtures.ts`     | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                      |
 
 There is no root export or barrel.
 
 ## Boundaries
 
 - Dependencies: `effect` only. `src` never imports `@yolk-sdk/*`, React, or Next
-  (`scripts/check-package-boundaries.ts` enforces this). Tests may import `@yolk-sdk/agent` and
-  `@yolk-sdk/conformance` (workspace devDependencies).
+  (`scripts/check-package-boundaries.ts` enforces this). Tests may import `@yolk-sdk/agent`,
+  `@yolk-sdk/conformance`, and `@yolk-sdk/connectors` (workspace devDependencies); connectors never
+  import emulators.
 - `node:` builtins are allowed only in `src/node.ts` (also enforced).
-- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain Web fetch
-  handlers (no Effect runtime needed, no Node builtins); `node` is the only Node boundary.
+- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain
+  Web fetch handlers (no Effect runtime needed, no Node builtins); `email` is a plain structural
+  object (no HTTP, socket, TLS, MIME, or mail library); `node` is the only Node boundary.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
 - Does not use `@emulators/core` yet; stateful connector emulators may later.
@@ -80,10 +84,11 @@ There is no root export or barrel.
   must keep the recorded JSON shape. A recordings-parity test per fixture
   (`test/fixture-recordings.test.ts`) compares status, event kinds and order, field names, and
   content. Scope: the four `/opencode` routes and the three subscription-usage routes (Claude,
-  Codex, Grok) today, on `src/fixture-route.ts`. The earlier model routes (`/gateway`, `/openai`,
+  Codex, Grok) today, on `src/fixture-route.ts`, and the `/email` port emulator (its own
+  latitude and not-emulated answer, below). The earlier model routes (`/gateway`, `/openai`,
   `/anthropic`, `/codex`, `/xai` Messages and Responses) predate the rule and keep their synthetic
   behaviour and 404 fallback unchanged; do not copy that behaviour into new routes.
-- Request-shape latitude (fixture-only routes, the only accepted deviations): any credential value
+- Request-shape latitude (fixture-only HTTP routes, the only accepted deviations): any credential value
   (never checked or stored); extra request headers; JSON key order; any string value except the
   discriminators `model`, `role`, `type`, and `phase`; any positive integer where the recording has
   a number (the output-token limit); for `anthropic-beta` (Claude usage), a comma-separated list
@@ -97,18 +102,26 @@ There is no root export or barrel.
   and `ChatGPT-Account-Id`; Grok usage: Bearer, `X-XAI-Token-Auth: xai-grok-cli`, `x-userid`,
   `x-grok-client-version`, and `x-grok-client-mode: headless`). Fault and scripted-error statuses on
   fixture-only routes are 400-599 only.
-- Evidence policy: unknown API routes fail closed and are written to the ledger (404 JSON on the
-  earlier model-route emulators, 400 not-emulated on fixture-only routes; control-plane requests
-  are never recorded); unverified routes answer but carry
-  `x-emulator-evidence: unverified`, are tagged in the ledger, and are listed by the evidence
-  check; evidence older than 30 days warns; connector write routes need `verified` evidence with a
-  readable, not-future `observedAt`, and a verified route fails when none of its cited cases has a
-  `verified` fixture (the check fails otherwise).
+- Evidence policy: unknown emulated API routes fail closed and are written to the ledger (404 JSON
+  on the earlier model-route emulators, 400 not-emulated on fixture-only routes; control-plane
+  requests are never recorded); unverified routes answer but carry
+  `x-emulator-evidence: unverified` (the `/email` port emulator has no headers: its ledger entries
+  carry `evidence`), are tagged in the ledger, and are listed by the evidence check; evidence older
+  than 30 days warns; connector write routes need `verified` evidence with a readable, not-future
+  `observedAt` and at least one cited case, and a verified route fails when none of its cited cases
+  has a `verified` fixture (the check fails otherwise, except for pending entries below).
+- Pending evidence: `scripts/emulator-evidence-pending.json` is the only way to keep an unverified
+  connector write route from failing the check, and only until its `expires` date (a PENDING
+  warning, reported first). Never weaken the rule, extend an expiry silently, or add an entry
+  without a reason; verify the route with an owner-approved live run and delete the entry (the
+  check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
+  write routes are pending (tracking #115; expiry dates live only in that file).
 - Emulators never redirect and always send a body: fault and scripted-error statuses exclude 1xx,
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
   turn is added. Build a response before consuming its fault; a response that cannot be built
   answers an evidence-tagged 500 recorded in the ledger (`responseError`).
-- Every emulator is built on `src/emulator-kernel.ts`: fault and scripted-turn state (strict
+- Every fetch-handler emulator is built on `src/emulator-kernel.ts` (the `/email` port emulator is
+  not; see below): fault and scripted-turn state (strict
   decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
   status-fault and scripted-error responses, the `/_emulate/*` control plane, coverage, evidence
   tagging, and route binding (`serve` throws `EmulatorRouteUnmapped`). Wire cores add only request
@@ -184,10 +197,33 @@ There is no root export or barrel.
   manifest `*SubscriptionUsageEmulatorRoutes`); `/opencode` includes it as a part. All four take a
   `subscriptionUsage` option (a replacement body with the recorded shape). Credential and account
   headers (`ChatGPT-Account-Id`, `x-userid`, `X-XAI-Token-Auth`) are required but never recorded.
+- `/email` is a port emulator, not a fetch handler, and does not use the kernel: `call(method,
+request)` answers one `EmailClient` call as plain JSON (`{ response }`, `{ failure }`, or
+  `{ notEmulated }`), and `emailClientLayerFromBackend` in `@yolk-sdk/connectors/email/conformance`
+  bridges it to the port. Response behaviour comes ONLY from the fixtures in
+  `src/email-fixtures.ts`, a verbatim copy of the connector `emailConformanceFixtures`
+  (`test/email-conformance.test.ts` fails on drift; update both together). The in-memory mailbox
+  (seeded with `emailEmulatorDefaultSeed`, or `seed`) only selects the first matching fixture that
+  is consistent with it (preferring fixtures unused since reset) and records what that fixture says
+  happened; it never invents ids, flags, or responses. Its manifest routes are
+  `PORT EmailClient.<method>`; write methods are unverified connector writes that need a pending
+  entry (`{ manifest: 'email', method: 'PORT', path: 'EmailClient.<method>' }`) in
+  `scripts/emulator-evidence-pending.json` until an owner-approved live run against a practice
+  mailbox verifies them. Keep ledger, faults (`failure` with an optional deep-subset
+  `match`), `reset`, `state`, and `coverage`.
+- Request-shape latitude (`/email`, the only one): credential fields are never compared or
+  recorded, and `connection.host` is not compared (the practice host comes from seeds); every other
+  connection field (`protocol`, `port`, `security`) is. Everything else fails closed with a
+  ledgered `notEmulated` answer (`unknown-method`, `invalid-request`, `no-matching-fixture`,
+  `state-conflict`), the port analogue of 400. Faults apply only after a matching, state-consistent
+  fixture is chosen. The bullet has four copies that change together with `test/email.test.ts`:
+  this one, the `src/email.ts` header, `README.md` (Email emulator), and
+  `apps/docs/content/docs/api-reference/emulators.mdx` (Email emulator).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
-  `XAiGrokEmulatorInputInvalid` / `OpenCodeGoEmulatorInputInvalid` for invalid input.
+  `XAiGrokEmulatorInputInvalid` / `OpenCodeGoEmulatorInputInvalid` for invalid input
+  (`EmailEmulatorInputInvalid` for an invalid email seed or fault).
 - Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over
   (network chunks; a Gateway chunk may pack several SSE events); chunk faults that cannot take
   effect answer 500 and are not consumed, never a silent no-op.
@@ -228,6 +264,11 @@ manifest), `test/opencode-conformance.test.ts` (the Go cases in-process and over
 the commentary replay's recorded text answer, drills, and 429 / truncation / scripted-error /
 not-emulated outcomes through the real Go provider), `test/subscription-usage.test.ts` (the Claude,
 Codex, and Grok usage routes: recorded bodies, not-emulated rejections, shape-checked scripted and
-default bodies, faults, control plane, and untouched model-route manifests), and
+default bodies, faults, control plane, and untouched model-route manifests),
 `test/subscription-usage-conformance.test.ts` (the four usage cases in-process and over a loopback
-socket, drills, and 401 / 429 / dropped / truncated faults through the real fetchers). Loopback sockets only; never call real services.
+socket, drills, and 401 / 429 / dropped / truncated faults through the real fetchers), `test/email.test.ts` (answers only from fixtures, the latitude,
+every fail-closed reason, state transitions, faults, reset, coverage, and seed validation), and
+`test/email-conformance.test.ts` (cross-check A: every email case against one shared in-process
+emulator and each case alone, ending as seeded plus the documented Sent copy; one drill fault per
+case failing exactly that case; a failed restore reported; fixture and manifest parity). Loopback
+sockets only; never call real services.
