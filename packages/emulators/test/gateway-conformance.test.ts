@@ -1,7 +1,8 @@
 /**
  * Cross-checks: the Gateway emulator must satisfy the same conformance cases the replayed
  * fixtures satisfy, through the real Gateway provider, both in-process and over a loopback
- * socket. Tests may import SDK packages; the emulator source never does.
+ * socket. `gateway-recordings.test.ts` compares its wire shapes with the recordings themselves.
+ * Tests may import SDK packages; the emulator source never does.
  */
 import { Effect, Layer, Redacted, Ref, Stream } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/unstable/http'
@@ -81,7 +82,7 @@ describe('cross-check A: in-process emulator', () => {
 
 describe('cross-check B: emulated over a loopback socket', () => {
   it.effect(
-    'passes every Gateway conformance case, with streamed bodies sent as several chunks',
+    'passes every Gateway conformance case, with streamed bodies sent as several packed chunks',
     () =>
       Effect.gen(function* () {
         const emulators = yield* Ref.make(new Map<string, GatewayEmulator>())
@@ -116,11 +117,12 @@ describe('cross-check B: emulated over a loopback socket', () => {
           expect(entries, testCase.id).toHaveLength(1)
           expect(entries[0]?.path).toBe('/v1/chat/completions')
           expect(entries[0]?.stream).toBe(true)
-          expect(entries[0]?.evidence).toBe('unverified')
+          expect(entries[0]?.evidence).toBe('verified')
         }
 
-        // Streamed cases: the emulator produced several body chunks, one per pull. This does not
-        // prove client-side timing; `node.test.ts` covers progressive delivery over the socket.
+        // Streamed cases: the emulator produced several body chunks (each packing up to two SSE
+        // events, as the live Gateway does), one per pull. This does not prove client-side
+        // timing; `node.test.ts` covers progressive delivery over the socket.
         for (const id of [
           'vercel-ai-gateway.stream.plain-text',
           'vercel-ai-gateway.stream.deepseek-reasoning',
@@ -135,7 +137,7 @@ describe('cross-check B: emulated over a loopback socket', () => {
         const [errorEntry] =
           ledgers.get('vercel-ai-gateway.stream.error-envelope')?.ledger.entries() ?? []
 
-        expect(errorEntry?.status).toBe(400)
+        expect(errorEntry?.status).toBe(404)
       })
   )
 })
@@ -169,7 +171,7 @@ describe('disagreement drill', () => {
     })
   )
 
-  it.effect('fails the plain-text case when the usage chunk is dropped', () =>
+  it.effect('fails the plain-text case when usage is dropped from the finish event', () =>
     Effect.gen(function* () {
       const result = yield* drill(vercelAiGatewayPlainTextCase, {
         text: ['Hello', ' there.'],

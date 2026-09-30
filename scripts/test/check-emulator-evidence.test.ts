@@ -304,6 +304,16 @@ describe('repo emulator manifests', () => {
       'openai',
       'anthropic'
     ])
+    // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
+    expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
+      ['verified', '2026-09-30']
+    ])
+    expect(
+      emulatorManifests[0]?.routes.flatMap(route =>
+        route.caseIds.map(caseId => conformanceFixtureEvidence.get(caseId))
+      )
+    ).toEqual([['verified'], ['verified'], ['verified'], ['verified']])
+    expect(report.findings.filter(finding => finding.manifest === 'gateway')).toEqual([])
     expect(conformanceFixtureEvidence.get('openai.chat.stream.plain-text')).toEqual(['unverified'])
     expect(conformanceFixtureEvidence.get('anthropic.messages.stream.plain-text')).toEqual([
       'unverified'
@@ -319,7 +329,10 @@ describe('repo emulator manifests', () => {
 
     expect(result.failed).toBe(false)
     expect(result.stdout).toContain('Emulator evidence:')
-    expect(result.stdout).toContain('WARN  gateway  POST /v1/chat/completions  unverified evidence')
+    // Verified now; a stale-evidence warning may appear once the observation is over 30 days old.
+    expect(result.stdout).not.toContain(
+      'WARN  gateway  POST /v1/chat/completions  unverified evidence'
+    )
     expect(result.stdout).toContain('WARN  openai  POST /v1/chat/completions  unverified evidence')
     expect(result.stdout).toContain('WARN  anthropic  POST /v1/messages  unverified evidence')
   }, 120000)

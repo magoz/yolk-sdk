@@ -17,6 +17,7 @@ import { vercelAiGatewayChatCompletionsUrl } from '../../../src/providers/vercel
 import {
   VercelAiGatewayConformanceConfig,
   vercelAiGatewayConformanceCases,
+  vercelAiGatewayConformanceDefaultModels,
   vercelAiGatewayConformanceFixtures,
   vercelAiGatewayDeepSeekReasoningCase,
   vercelAiGatewayDeepSeekReasoningFixture,
@@ -40,8 +41,8 @@ import {
 const now = new Date('2026-09-30T12:00:00.000Z')
 
 // Replay-only settings: every model, limit, and effort comes from the recorded request bodies,
-// so each case sends the request its fixture recorded (the DeepSeek fixture, for example, was
-// recorded with a reasoning-model override rather than the public default models).
+// so each case sends the request its fixture recorded (the public default models match them; a
+// test below checks that).
 const settings: VercelAiGatewayConformanceSettings = {
   apiKey: Redacted.make('synthetic-gateway-key'),
   maxCompletionTokens: recordedNumber(vercelAiGatewayPlainTextFixture, 'max_tokens'),
@@ -112,6 +113,11 @@ describe('Vercel AI Gateway conformance cases', () => {
         expect(testCase.observed).toEqual({ account: fixture.account, date: fixture.recordedAt })
       }
     }
+  })
+
+  it('default to the model ids the committed fixtures recorded', () => {
+    expect(vercelAiGatewayConformanceDefaultModels).toEqual(settings.models)
+    expect(vercelAiGatewayConformanceDefaultModels.reasoning).toBe('deepseek/deepseek-v4.1-flash')
   })
 
   it.effect(

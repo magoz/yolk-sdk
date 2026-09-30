@@ -65,32 +65,42 @@ Provide `httpLayer` below the code under test, for example a Gateway provider la
 
 `@yolk-sdk/emulators/gateway`
 
-| Export                                  | Purpose                                                                                         |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `makeGatewayEmulator(options?)`         | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/chat/completions`            |
-| `gatewayEmulatorRoutes`                 | Route evidence manifest: `method`, `path`, `kind`, `write`, `caseIds`, `evidence`, `observedAt` |
-| `GatewayFault`, `GatewayScriptedTurn`   | Schemas and types for wire faults and scripted turns                                            |
-| `GatewayLedgerEntry`, `GatewayCoverage` | Ledger entry and coverage report types                                                          |
-| `gatewayEmulatorDefaultModels`          | Synthetic-safe default model ids (includes `openai/gpt-4.1-nano` and `deepseek/deepseek-v3.2`)  |
-| `emulatorEvidenceHeader`                | `x-emulator-evidence`, set to `unverified` on every response from an unverified route           |
-| `GatewayEmulatorInputInvalid`           | Thrown by `faults.add` / `script.enqueue` for invalid input                                     |
+| Export                                  | Purpose                                                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `makeGatewayEmulator(options?)`         | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/chat/completions`             |
+| `gatewayEmulatorRoutes`                 | Route evidence manifest: `method`, `path`, `kind`, `write`, `caseIds`, `evidence`, `observedAt`  |
+| `GatewayFault`, `GatewayScriptedTurn`   | Schemas and types for wire faults and scripted turns                                             |
+| `GatewayLedgerEntry`, `GatewayCoverage` | Ledger entry and coverage report types                                                           |
+| `gatewayEmulatorDefaultModels`          | Synthetic-safe default model ids (includes `openai/gpt-4.1-nano` and the DeepSeek ids)           |
+| `gatewayEmulatorDefaultReasoningModels` | `deepseek/deepseek-v3.2` and `deepseek/deepseek-v4.1-flash`                                      |
+| `gatewayEmulatorDefaultEventsPerChunk`  | `2`: SSE events per network chunk by default                                                     |
+| `emulatorEvidenceHeader`                | `x-emulator-evidence`, set to `unverified` on every response from an unverified route            |
+| `GatewayEmulatorInputInvalid`           | Thrown by `faults.add` / `script.enqueue` for invalid input, and for an invalid `eventsPerChunk` |
 
-Without a script, a known model gets synthetic output: `stream: true` streams
-`chat.completion.chunk` events (several text deltas, a finish chunk, a usage chunk when
-`stream_options.include_usage` is set, then `data: [DONE]`); `stream: false` returns one JSON
-completion. Reasoning models asked for reasoning (`reasoning_effort`, or `thinking` enabled) stream
-`delta.reasoning_content` first. A request with `tools` gets one tool call whose arguments are
-synthesized from the tool's JSON Schema and streamed in several fragments, finishing with
-`tool_calls`; a `tool_choice` naming an offered function picks that tool (otherwise the first), and
-`tool_choice: 'none'` answers with text. Unknown models get the Gateway error envelope (400, `model_not_found`), a missing
-bearer credential gets 401, and unknown routes get a 404 JSON error. The credential is never
-checked or stored.
+The Gateway route is `verified`: its wire shapes follow the verified live recordings of
+2026-09-30 in `@yolk-sdk/agent/providers/vercel/conformance`, with synthetic ids, costs, and
+routing metadata. Without a script, a known model gets synthetic output. `stream: true` streams
+`chat.completion.chunk` events as recorded: a `{ role: 'assistant' }` opening delta, several text
+deltas, then one finish event whose `delta` carries `provider_metadata` and which carries `usage`
+(when `stream_options.include_usage` is set), `system_fingerprint`, `service_tier` (`openai/*`
+models only), and `generationId`, followed only by `data: [DONE]`. Events are packed
+`eventsPerChunk` per network chunk (option, default 2; counted from the end, so the finish event
+and `data: [DONE]` share the last chunk). `stream: false` returns one JSON completion (not covered
+by a recording). Reasoning models asked for reasoning (`reasoning_effort`, or `thinking` enabled)
+stream `delta.reasoning` with `delta.reasoning_details` first. A request with `tools` gets one tool
+call whose arguments are synthesized from the tool's JSON Schema and streamed in several
+fragments, finishing with `tool_calls`; a `tool_choice` naming an offered function picks that tool
+(otherwise the first), and `tool_choice: 'none'` answers with text. Unknown models get the
+recorded 404 envelope `{ error: { message, type: 'model_not_found', param: { modelId } } }` (no
+`code`), a missing bearer credential gets 401, and unknown routes get a 404 JSON error. The
+credential is never checked or stored.
 
-`script.enqueue(turn)` queues a completion (`text`, `reasoning`, `order`, `toolCalls`, `usage`,
-`finishReason`; `usage: null` drops usage) or an error (`{ error: { status, body, headers? } }`)
-for the next request. `faults.add` injects `status` (for example 429 with `retry-after`),
-`error-after-chunks`, or `truncate-after-chunks`, each with an optional `match: { path?, model? }`
-and `count`. Emulators never redirect and always send a body: fault and scripted-error statuses
+`script.enqueue(turn)` queues a completion (`text`, `reasoning`, `reasoningField`, `order`,
+`toolCalls`, `usage`, `finishReason`; `usage: null` drops usage, `reasoningField` defaults to
+`reasoning`) or an error (`{ error: { status, body, headers? } }`) for the next request.
+`faults.add` injects `status` (for example 429 with `retry-after`), `error-after-chunks`, or
+`truncate-after-chunks`, each with an optional `match: { path?, model? }` and `count`; chunk faults
+count network chunks, each packing up to `eventsPerChunk` events. Emulators never redirect and always send a body: fault and scripted-error statuses
 exclude 1xx, 204, 205, and every 3xx (including 304), header names and values must be valid, and a
 `location` header is rejected.
 
@@ -124,8 +134,9 @@ planned response cannot be built, the emulator answers an evidence-tagged 500, r
 | `OpenAiEmulatorInputInvalid`          | Thrown by `faults.add` / `script.enqueue` for invalid input                          |
 
 It stands in for OpenAI Chat Completions at `https://api.openai.com` and shares the Gateway
-emulator's Chat Completions core, so streaming, JSON mode, tool-call fragments, scripted turns,
-faults, the ledger, and the control plane behave the same. Errors use the OpenAI envelope
+emulator's Chat Completions core, so JSON mode, tool-call fragments, scripted turns, faults, the
+ledger, and the control plane behave the same. Streaming uses the plain OpenAI framing (one event
+per network chunk, usage in a trailing chunk, none of the Gateway's metadata fields). Errors use the OpenAI envelope
 `{ error: { message, type, param, code } }`: an unknown model gets 404 `model_not_found`, and a
 missing bearer credential gets 401 `invalid_api_key` (the credential is never checked or stored).
 The ledger records `max_completion_tokens` as `maxCompletionTokens`. Reasoning models are not
@@ -192,7 +203,7 @@ delivery survives the socket; a body stream error drops the connection.
 
 Emulated routes carry evidence: `verified` routes follow a live observation dated by
 `observedAt`; `unverified` routes follow synthetic placeholders and tag every response with
-`x-emulator-evidence: unverified`. The Gateway conformance fixtures are verified live recordings,
-but the Gateway route is still unverified: it follows the earlier synthetic wire shapes and stays
-unverified until the emulator is aligned with the recordings (a tracked follow-up). The OpenAI and
-Anthropic routes are unverified, like the synthetic fixtures they follow.
+`x-emulator-evidence: unverified`. The Gateway route is verified (`observedAt: '2026-09-30'`): the
+emulator follows the verified live Gateway recordings, and the Yolk repository checks its response
+shapes against each recording. The OpenAI and Anthropic routes are unverified, like the synthetic
+fixtures they follow.

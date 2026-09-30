@@ -48,9 +48,10 @@ There is no root export or barrel.
   it sends with `redirect: 'manual'`, merging `RequestInit` defaults visible at build and request
   time; `followRedirects` belongs on top, never underneath; any other underlying client must not
   follow redirects by itself (documented for hosts). `test/router-redirects.test.ts` guards this.
-- Wire shapes come from the recorded conformance fixtures (the Gateway ones are now verified live
-  recordings the emulator is not yet aligned with, so the Gateway route stays `unverified` until
-  aligned; the OpenAI ones are synthetic), copied as data,
+- Wire shapes come from the recorded conformance fixtures (the Gateway ones are verified live
+  recordings and the Gateway route is `verified`, with `test/gateway-recordings.test.ts` comparing
+  the emulator's response shapes with them; the OpenAI and Anthropic ones are synthetic), copied as
+  data,
   never imported. Each emulated route lists the conformance case ids it follows in its manifest
   (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`
   (`src/route-evidence.ts`) pairs them at construction and throws `EmulatorRouteUnmapped` for a
@@ -73,10 +74,19 @@ There is no root export or barrel.
   pieces in a core.
 - OpenAI-compatible Chat Completions emulators share `src/chat-completions.ts`: request parsing,
   SSE framing, JSON mode, and scripted completions on top of the kernel. Each subpath supplies only its path and manifest, model lists, error envelope
-  and unknown-model status, 401 error, completion-token field (recorded in the ledger as
-  `maxCompletionTokens`, never validated), whether reasoning is emulated, its turn schema, and its
-  input-invalid error. Keep the Gateway's public API and wire behaviour unchanged when editing the
-  core; `test/gateway.test.ts` is the guard. `/openai` does not emulate reasoning yet: its turn
+  and unknown-model status and error (or whole body), 401 error, completion-token field (recorded in the ledger as
+  `maxCompletionTokens`, never validated), whether reasoning is emulated, its turn schema, its
+  input-invalid error, and its wire profile (`ChatWireProfile`; omitted is the plain OpenAI wire).
+  The Gateway profile follows the recordings: `eventsPerChunk` SSE events per network chunk
+  (default 2, packed from the end so the finish event and `data: [DONE]` share the last chunk;
+  chunk faults count network chunks), usage on the finish event, a `{ role }` opening delta,
+  `logprobs: null`, `system_fingerprint` on every chunk, `provider_metadata` in the finish delta,
+  `service_tier` (for `openai/*` models) and `generationId` on the finish event, and
+  `delta.reasoning` with `reasoning_details`. Its unknown-model answer is the recorded 404
+  `{ error: { message, type: 'model_not_found', param: { modelId } } }` (no `code`). Any core
+  change is a profile or config parameter: keep the OpenAI wire unchanged (`test/openai.test.ts`
+  and `test/openai-conformance.test.ts` are the guards) and the Gateway matching its recordings
+  (`test/gateway.test.ts`, `test/gateway-recordings.test.ts`). `/openai` does not emulate reasoning yet: its turn
   schema rejects reasoning fields and `/_emulate/state` omits `reasoningModels`.
 - `/anthropic` uses `src/messages.ts`: Messages request parsing (`model`, a positive integer
   `max_tokens` or 400, `system`, `messages`, `tools`, `tool_choice`, `thinking`, `stream`), SSE in
@@ -101,8 +111,9 @@ There is no root export or barrel.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` for invalid input.
-- Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over;
-  chunk faults that cannot take effect answer 500 and are not consumed, never a silent no-op.
+- Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over
+  (network chunks; a Gateway chunk may pack several SSE events); chunk faults that cannot take
+  effect answer 500 and are not consumed, never a silent no-op.
 - Credential headers are never recorded; bearer and `x-api-key` values are never checked or
   stored.
 - The Node server binds to `127.0.0.1` only, writes body chunks as they arrive (honoring
@@ -113,10 +124,13 @@ There is no root export or barrel.
 
 `test/router.test.ts`, `test/router-redirects.test.ts` (redirects and `mapRequest` never escape
 the route table, with a second unrouted loopback server), `test/gateway.test.ts`,
-`test/openai.test.ts`, `test/chat-completions.test.ts` (shared core parity and per-emulator
-parameters), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
+`test/openai.test.ts`, `test/chat-completions.test.ts` (shared core and per-emulator parameters,
+including each emulator's streamed framing), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
 cases in-process and over a loopback socket, a disagreement drill, and faults through the real
-provider, including 429 `retry-after` over the socket), `test/openai-conformance.test.ts` (the
+provider, including 429 `retry-after` over the socket), `test/gateway-recordings.test.ts` (each
+verified Gateway fixture's recorded request sent to the emulator, with the response's status,
+event kinds and field names, finish/usage placement, chunk packing, and error envelope keys
+compared with the recording, plus disagreement drills), `test/openai-conformance.test.ts` (the
 same for the OpenAI chat cases through the generic OpenAI-compatible provider), `test/anthropic.test.ts`
 (Messages framing, blocks, stops, auth, ledger, faults, control plane), and
 `test/anthropic-conformance.test.ts` (the Anthropic Messages cases in-process and over a loopback

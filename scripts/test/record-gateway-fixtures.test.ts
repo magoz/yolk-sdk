@@ -48,18 +48,18 @@ const probeScript = join(repoRoot, 'scripts/record-gateway-fixtures.ts')
 
 const caseIds = vercelAiGatewayConformanceCases.map(testCase => testCase.id)
 
-// Probe options matching the committed recordings (the DeepSeek one used a `--reasoning-model`
-// override), so replay verification sends the requests that were actually recorded.
-const recordedOptions = parseProbeArgs([
-  '--reasoning-model',
-  String(
-    vercelAiGatewayConformanceFixtures.find(
-      fixture => fixture.caseId === 'vercel-ai-gateway.stream.deepseek-reasoning'
-    )?.model ?? expect.fail('missing DeepSeek fixture')
-  )
-])
+// The default probe options match the committed recordings (every fixture's model is the default
+// model of its case), so replay verification sends the requests that were actually recorded.
+const recordedOptions = defaultProbeOptions
 
 describe('record-gateway-fixtures arguments', () => {
+  it('defaults to the model each committed recording used', () => {
+    expect(
+      planGatewayProbe(defaultProbeOptions).map(entry => [entry.testCase.id, entry.model])
+    ).toEqual(vercelAiGatewayConformanceFixtures.map(fixture => [fixture.caseId, fixture.model]))
+    expect(defaultProbeOptions.models.reasoning).toBe('deepseek/deepseek-v4.1-flash')
+  })
+
   it('defaults to a dry run with the conformance default models and no account label', () => {
     expect(parseProbeArgs([])).toEqual(defaultProbeOptions)
     expect(defaultProbeOptions).toMatchObject({

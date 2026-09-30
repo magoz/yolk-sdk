@@ -5,7 +5,8 @@
  * The fixtures are verified live recordings (`evidence: 'verified'`, recorded 2026-09-30 with the
  * synthetic account label `synthetic` and synthetic prompts) of the OpenAI-compatible Gateway Chat
  * Completions wire, written by `pnpm conformance:gateway --live --account <label>`. The DeepSeek
- * fixture was recorded with `--reasoning-model deepseek/deepseek-v4.1-flash`.
+ * fixture was recorded with `deepseek/deepseek-v4.1-flash`, now the default reasoning model, so
+ * `vercelAiGatewayConformanceDefaultModels` names the model of every committed fixture.
  */
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 import {

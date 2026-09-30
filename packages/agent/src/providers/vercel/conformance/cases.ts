@@ -47,13 +47,12 @@ export type VercelAiGatewayConformanceModels = {
 }
 
 /**
- * Live probe default model ids. The committed plain-text, tool-call, and error-envelope fixtures use
- * these; the committed DeepSeek fixture was recorded with the
- * `--reasoning-model deepseek/deepseek-v4.1-flash` override.
+ * Live probe default model ids. They name the model of every committed fixture: the DeepSeek
+ * fixture was recorded with `deepseek/deepseek-v4.1-flash`, the default reasoning model.
  */
 export const vercelAiGatewayConformanceDefaultModels: VercelAiGatewayConformanceModels = {
   plainText: 'openai/gpt-4.1-nano',
-  reasoning: 'deepseek/deepseek-v3.2',
+  reasoning: 'deepseek/deepseek-v4.1-flash',
   toolCall: 'openai/gpt-4.1-nano',
   invalid: 'yolk-conformance/model-does-not-exist'
 }

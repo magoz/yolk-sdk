@@ -194,9 +194,11 @@ The same subpath exports four `read` conformance cases backed by those fixtures
 `vercelAiGatewayToolCallDeltasCase`, `vercelAiGatewayErrorEnvelopeCase`, and
 `vercelAiGatewayConformanceCases`). They require only an `HttpClient` and the
 `VercelAiGatewayConformanceConfig` service (API key, output limits, reasoning effort, and model ids;
-`vercelAiGatewayConformanceDefaultModels` holds the live probe's default model ids; the DeepSeek
-fixture was recorded with `--reasoning-model deepseek/deepseek-v4.1-flash`), so they run against
-replay or a host's live client. Each case records the live observation that produced its fixture
+`vercelAiGatewayConformanceDefaultModels` holds the live probe's default model ids, which are the
+models every fixture was recorded with, including the reasoning model
+`deepseek/deepseek-v4.1-flash`), so they run against replay, the Gateway emulator in
+`@yolk-sdk/emulators/gateway` (whose route is verified against these recordings), or a host's live
+client. Each case records the live observation that produced its fixture
 (`observed: { account: 'synthetic', date: '2026-09-30' }`), so reports do not warn
 `unverified-case`.
 
