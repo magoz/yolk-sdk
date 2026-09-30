@@ -5,11 +5,16 @@
  * truth: this script defines no requests of its own.
  *
  * Default: DRY RUN. Prints, per conformance case, the model, token limit, and reasoning effort it
- * would use, and exits without any network call.
+ * would use, and exits without any network call or credential read.
  *
- * `--live`: requires `AI_GATEWAY_API_KEY` and an explicit `--account <label>` (a synthetic,
- * non-identifying label such as `synthetic`; never a real team, project, or person name: it is
- * committed in public fixtures). Runs each conformance case with `runConformance` on a live target
+ * `--live`: the credential is the owner's Gateway key (`AI_GATEWAY_API_KEY`), so a live run spends
+ * the owner's Gateway credits. **Live runs need the repository owner's explicit approval**,
+ * confirmed with `--owner-approved`; never run them in CI (`--live` is refused whenever the `CI`
+ * environment variable is set to any non-empty value, `0` and `false` included). Both gates are
+ * checked when the arguments are parsed and again right before the credential is read. A live run
+ * also needs an explicit `--account <label>` (a synthetic, non-identifying label such as
+ * `synthetic`; never a real team, project, or person name: it is committed in public fixtures).
+ * Runs each conformance case with `runConformance` on a live target
  * against the real Gateway, through the conformance recorder wrapped around a real fetch
  * `HttpClient` (failures are reported with the runner's sanitizer), turns each single recorded
  * exchange into a `verified` fixture dated today, then replays the new fixtures through the same
@@ -18,8 +23,7 @@
  * before anything is written. Nothing is written unless every case passes live, records cleanly,
  * is fully redacted, passes the secret scan, and passes again on replay; only then are the
  * fixture modules under
- * `packages/agent/src/providers/vercel/conformance/` rewritten. Live runs spend Gateway credits:
- * never run in CI.
+ * `packages/agent/src/providers/vercel/conformance/` rewritten.
  *
  * Model ids are CLI flags defaulting to `vercelAiGatewayConformanceDefaultModels`; confirm they
  * are still available on the Gateway before a live probe.
@@ -59,10 +63,13 @@ import {
   runConformance,
   type ConformanceReport
 } from '../packages/conformance/src/runner.ts'
+import { isCiEnvironment, type ProbeEnv } from './fixture-probe-internal.ts'
 
 export type ProbeOptions = {
   readonly live: boolean
   readonly help: boolean
+  /** Explicit confirmation that the repository owner approved this live run. */
+  readonly ownerApproved: boolean
   /** Model ids per case; default `vercelAiGatewayConformanceDefaultModels`. */
   readonly models: VercelAiGatewayConformanceModels
   readonly maxTokens: number
@@ -77,6 +84,7 @@ type MutableProbeOptions = { -readonly [Key in keyof ProbeOptions]: ProbeOptions
 export const defaultProbeOptions: ProbeOptions = {
   live: false,
   help: false,
+  ownerApproved: false,
   models: vercelAiGatewayConformanceDefaultModels,
   maxTokens: 64,
   reasoningMaxTokens: 512,
@@ -94,14 +102,25 @@ const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = [
 
 const defaultModels = defaultProbeOptions.models
 
-const usage = `Usage: pnpm conformance:gateway [--live --account <label>] [options]
+/** The credential environment variable `--live` reads. */
+export const gatewayApiKeyEnv = 'AI_GATEWAY_API_KEY'
 
-Dry run by default: lists the Gateway conformance cases it would run and performs no network I/O.
---live runs each conformance case against the Gateway through the wire recorder, replays the new
-fixtures through the same cases, and writes the fixture modules only if every case passes.
+const usage = `Usage: pnpm conformance:gateway [--live --owner-approved --account <label>] [options]
+
+Dry run by default: lists the Gateway conformance cases it would run and performs no network I/O
+and no credential read. --live runs each conformance case against the Gateway through the wire
+recorder, replays the new fixtures through the same cases, and writes the fixture modules only if
+every case passes.
+
+The credential is the owner's Gateway key (${gatewayApiKeyEnv}): live runs spend the owner's
+Gateway credits and need the repository owner's explicit approval (--owner-approved). Never run
+them in CI: --live is refused whenever the CI environment variable is set to any non-empty value
+(0 and false included).
 
 Options:
-  --live                          Record against the real Gateway (needs AI_GATEWAY_API_KEY and --account)
+  --live                          Record against the real Gateway (needs --owner-approved,
+                                  --account, and ${gatewayApiKeyEnv})
+  --owner-approved                confirm the repository owner approved this live run
   --plain-model <id>              default ${defaultModels.plainText}
   --reasoning-model <id>          default ${defaultModels.reasoning} (DeepSeek-style streamed reasoning)
   --tool-model <id>               default ${defaultModels.toolCall}
@@ -130,11 +149,18 @@ const positiveInteger = (flag: string, value: string): number => {
 export const liveAccountRequiredMessage =
   '--live requires --account <label>: a synthetic, non-identifying label (for example synthetic) that is committed in public fixtures'
 
+export const ownerApprovalRequiredMessage =
+  "--live requires --owner-approved: live runs spend the owner's Vercel AI Gateway credits and need the repository owner's explicit approval"
+
+export const liveInCiMessage =
+  "--live is refused in CI (the CI environment variable is set to a non-empty value): live runs spend the owner's Vercel AI Gateway credits and must be run by hand with the repository owner's approval"
+
 /**
- * Parse CLI arguments (without the node/script prefix). Throws on unknown
- * flags, and on `--live` without an explicit `--account`.
+ * Parse CLI arguments (without the node/script prefix). Throws on unknown flags, on `--live` in CI
+ * (`env.CI` set to any non-empty value), and on `--live` without `--owner-approved` or an explicit
+ * `--account`.
  */
-export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
+export const parseProbeArgs = (argv: ReadonlyArray<string>, env: ProbeEnv = {}): ProbeOptions => {
   const options: MutableProbeOptions = { ...defaultProbeOptions }
 
   const setModel = (key: keyof VercelAiGatewayConformanceModels, model: string) => {
@@ -160,6 +186,9 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
     switch (flag) {
       case '--live':
         options.live = true
+        break
+      case '--owner-approved':
+        options.ownerApproved = true
         break
       case '--help':
       case '-h':
@@ -203,9 +232,13 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
     }
   }
 
-  if (options.live && !options.help && options.account === undefined) {
-    throw new Error(liveAccountRequiredMessage)
-  }
+  if (options.help) return options
+
+  if (options.live && isCiEnvironment(env)) throw new Error(liveInCiMessage)
+
+  if (options.live && !options.ownerApproved) throw new Error(ownerApprovalRequiredMessage)
+
+  if (options.live && options.account === undefined) throw new Error(liveAccountRequiredMessage)
 
   return options
 }
@@ -308,8 +341,9 @@ export const gatewayConformanceSettings = (
 
 export const dryRunReport = (options: ProbeOptions): string =>
   [
-    'DRY RUN: no network request was made. Pass --live --account <label> to record (needs AI_GATEWAY_API_KEY).',
+    `DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to record (needs ${gatewayApiKeyEnv}).`,
     `Endpoint: ${vercelAiGatewayChatCompletionsUrl}`,
+    "Live runs spend the owner's Gateway credits and need the repository owner's explicit approval; never run them in CI.",
     'Conformance cases:',
     ...planGatewayProbe(options).map(entry =>
       [
@@ -624,7 +658,7 @@ export const renderFixtureModule = (
     ` * ${fixtureModule.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}). Regenerate with`,
-    ' * `pnpm conformance:gateway --live --account <label>`.',
+    ' * `pnpm conformance:gateway --live --owner-approved --account <label>`.',
     ' */',
     `export const ${fixtureModule.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''
@@ -706,20 +740,47 @@ export const writeVerifiedFixtures = (
     return { report, files }
   })
 
-const live = (options: ProbeOptions, writer: FixtureWriter = defaultFixtureWriter) =>
+/** What a live run reads and writes; injectable so the gates are testable without credentials. */
+export type LiveProbeIo = {
+  /** The environment the CI gate reads (only `CI`). */
+  readonly env: ProbeEnv
+  /** Reads the credential variable; called only after every gate passes. */
+  readonly readCredential: (name: string) => string | undefined
+  readonly writer: FixtureWriter
+}
+
+export const defaultLiveProbeIo: LiveProbeIo = {
+  env: process.env,
+  readCredential: name => process.env[name],
+  writer: defaultFixtureWriter
+}
+
+/**
+ * The live run. Re-checks the CI and owner-approval gates (and the account label) before the
+ * credential is read or any request is made, whatever the options were built by.
+ */
+export const runLive = (options: ProbeOptions, io: LiveProbeIo = defaultLiveProbeIo) =>
   Effect.gen(function* () {
     const account = options.account
+
+    if (isCiEnvironment(io.env)) {
+      return yield* new ProbeFailed({ caseId: '*', message: liveInCiMessage })
+    }
+
+    if (!options.ownerApproved) {
+      return yield* new ProbeFailed({ caseId: '*', message: ownerApprovalRequiredMessage })
+    }
 
     if (account === undefined) {
       return yield* new ProbeFailed({ caseId: '*', message: liveAccountRequiredMessage })
     }
 
-    const key = process.env.AI_GATEWAY_API_KEY
+    const key = io.readCredential(gatewayApiKeyEnv)
 
     if (key === undefined || key.trim().length === 0) {
       return yield* new ProbeFailed({
         caseId: '*',
-        message: 'AI_GATEWAY_API_KEY is required for --live'
+        message: `${gatewayApiKeyEnv} is required for --live`
       })
     }
 
@@ -744,7 +805,7 @@ const live = (options: ProbeOptions, writer: FixtureWriter = defaultFixtureWrite
       recordCase(entry, settings, account).pipe(Effect.map(fixture => ({ entry, fixture })))
     )
 
-    const { report, files } = yield* writeVerifiedFixtures(recorded, options, writer)
+    const { report, files } = yield* writeVerifiedFixtures(recorded, options, io.writer)
 
     console.log(formatConformanceReport(report))
     console.log(`Wrote ${files.length} verified fixtures. Review them before committing.`)
@@ -758,7 +819,7 @@ const invokedAsCli = (): boolean => {
 
 const parseCliArgs = (): ProbeOptions | undefined => {
   try {
-    return parseProbeArgs(process.argv.slice(2))
+    return parseProbeArgs(process.argv.slice(2), process.env)
   } catch (error) {
     console.error(error instanceof Error ? error.message : error)
     process.exitCode = 1
@@ -773,7 +834,7 @@ const runCli = (options: ProbeOptions): void => {
   } else if (!options.live) {
     console.log(dryRunReport(options))
   } else {
-    Effect.runPromise(live(options)).catch(error => {
+    Effect.runPromise(runLive(options)).catch(error => {
       const scope = error instanceof ProbeFailed && error.caseId !== '*' ? `${error.caseId}: ` : ''
 
       console.error(`${scope}${error instanceof Error ? error.message : error}`)

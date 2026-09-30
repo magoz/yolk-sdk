@@ -2,7 +2,8 @@
  * Shared pieces of the OpenCode Go and subscription-usage fixture probes
  * (`record-opencode-fixtures.ts`, `record-usage-fixtures.ts`; not a CLI):
  *
- * - the strict CI refusal (`CI` set to any non-empty value, `0` and `false` included);
+ * - the strict CI refusal (`CI` set to any non-empty value, `0` and `false` included), also used
+ *   by the Gateway, OpenAI, and Anthropic probes;
  * - value-only JSON string redaction in recorded text (stream chunks one by one, or a text body),
  *   never re-chunking and never touching `{ base64 }` chunks or base64 bodies;
  * - the fail-closed survivor check: every SSE `data:` payload of the reassembled stream (text and

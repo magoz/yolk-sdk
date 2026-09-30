@@ -6,7 +6,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * the text block, `stop_reason: end_turn`, and `message_stop`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:anthropic --live --account <label>`.
+ * replaces it. Regenerate with
+ * `pnpm conformance:anthropic --live --owner-approved --account <label>`.
  */
 export const anthropicMessagesThinkingBeforeTextFixture: WireFixture = {
   id: 'anthropic.messages.stream.thinking-before-text.synthetic',
@@ -16,7 +17,7 @@ export const anthropicMessagesThinkingBeforeTextFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://api.anthropic.com/v1/messages',
   model: 'claude-haiku-4-5',
-  note: 'Synthetic placeholder shaped like Anthropic Messages SSE with a thinking block. Not recorded from a live service; replace with a verified recording from pnpm conformance:anthropic --live --account <label>.',
+  note: 'Synthetic placeholder shaped like Anthropic Messages SSE with a thinking block. Not recorded from a live service; replace with a verified recording from pnpm conformance:anthropic --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

@@ -6,7 +6,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * several chunks), finishing with `tool_calls`, a usage chunk, and `data: [DONE]`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:openai --live --account <label>`.
+ * replaces it. Regenerate with `pnpm conformance:openai --live --owner-approved --account <label>`.
  */
 export const openAiChatToolCallDeltasFixture: WireFixture = {
   id: 'openai.chat.stream.tool-call-deltas.synthetic',
@@ -16,7 +16,7 @@ export const openAiChatToolCallDeltasFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://api.openai.com/v1/chat/completions',
   model: 'gpt-4.1-nano',
-  note: 'Synthetic placeholder shaped like OpenAI chat.completion.chunk SSE. Not recorded from a live service; replace with a verified recording from pnpm conformance:openai --live --account <label>.',
+  note: 'Synthetic placeholder shaped like OpenAI chat.completion.chunk SSE. Not recorded from a live service; replace with a verified recording from pnpm conformance:openai --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

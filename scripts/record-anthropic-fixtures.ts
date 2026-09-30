@@ -5,12 +5,17 @@
  * truth: this script defines no requests of its own.
  *
  * Default: DRY RUN. Prints, per conformance case, the model and `max_tokens` it would use, and
- * exits without any network call.
+ * exits without any network call or credential read.
  *
- * `--live`: requires `ANTHROPIC_API_KEY` (a native Anthropic API key, sent as `x-api-key`; the
- * cases use native Messages, not a Claude subscription OAuth token) and an explicit
- * `--account <label>` (a synthetic, non-identifying label such as `synthetic`; never a real
- * organization, workspace, or person name: it is committed in public fixtures). Runs each
+ * `--live`: the credential is the owner's `ANTHROPIC_API_KEY` (a native Anthropic API key, sent as
+ * `x-api-key`; the cases use native Messages, not a Claude subscription OAuth token), so a live run
+ * spends the owner's Anthropic credits. **Live runs need the repository owner's explicit
+ * approval**, confirmed with `--owner-approved`; never run them in CI (`--live` is refused
+ * whenever the `CI` environment variable is set to any non-empty value, `0` and `false` included).
+ * Both gates are checked when the arguments are parsed and again right before the credential is
+ * read. A live run also needs an explicit `--account <label>` (a synthetic, non-identifying label
+ * such as `synthetic`; never a real organization, workspace, or person name: it is committed in
+ * public fixtures). Runs each
  * conformance case with `runConformance` on a live target against the real Anthropic API, through
  * the conformance recorder wrapped around a real fetch `HttpClient` (response headers limited to
  * `content-type`; failures are reported with the runner's sanitizer), redacts thinking-block
@@ -23,8 +28,7 @@
  * then replays the new fixtures through the same cases. Nothing is written unless every case
  * passes live, records cleanly, is fully redacted, passes the secret scan, and passes again on
  * replay; only then are the fixture modules under
- * `packages/agent/src/providers/anthropic/conformance/` rewritten. Live runs spend Anthropic
- * credits: never run in CI.
+ * `packages/agent/src/providers/anthropic/conformance/` rewritten.
  *
  * Model ids are CLI flags defaulting to `anthropicConformanceDefaultModels`; confirm they are
  * still available (and that the thinking model supports extended thinking) before a live probe.
@@ -63,11 +67,14 @@ import {
   runConformance,
   type ConformanceReport
 } from '../packages/conformance/src/runner.ts'
+import { isCiEnvironment, type ProbeEnv } from './fixture-probe-internal.ts'
 import { isAllowedMember, scanJsonObjects, type JsonMember } from './json-members.ts'
 
 export type ProbeOptions = {
   readonly live: boolean
   readonly help: boolean
+  /** Explicit confirmation that the repository owner approved this live run. */
+  readonly ownerApproved: boolean
   /** Model ids per case; default `anthropicConformanceDefaultModels`. */
   readonly models: AnthropicConformanceModels
   /** `max_tokens` of the plain-text, tool-use, and error cases. */
@@ -83,6 +90,7 @@ type MutableProbeOptions = { -readonly [Key in keyof ProbeOptions]: ProbeOptions
 export const defaultProbeOptions: ProbeOptions = {
   live: false,
   help: false,
+  ownerApproved: false,
   models: anthropicConformanceDefaultModels,
   maxTokens: 64,
   thinkingBudgetTokens: 1024,
@@ -94,15 +102,22 @@ const defaultModels = defaultProbeOptions.models
 /** The credential environment variable `--live` reads (a native Anthropic API key). */
 export const anthropicApiKeyEnv = 'ANTHROPIC_API_KEY'
 
-const usage = `Usage: pnpm conformance:anthropic [--live --account <label>] [options]
+const usage = `Usage: pnpm conformance:anthropic [--live --owner-approved --account <label>] [options]
 
 Dry run by default: lists the Anthropic Messages conformance cases it would run and performs no
-network I/O. --live runs each conformance case against the Anthropic API through the wire
-recorder, replays the new fixtures through the same cases, and writes the fixture modules only if
-every case passes.
+network I/O and no credential read. --live runs each conformance case against the Anthropic API
+through the wire recorder, replays the new fixtures through the same cases, and writes the fixture
+modules only if every case passes.
+
+The credential is the owner's Anthropic API key (${anthropicApiKeyEnv}): live runs spend the owner's
+Anthropic credits and need the repository owner's explicit approval (--owner-approved). Never run
+them in CI: --live is refused whenever the CI environment variable is set to any non-empty value
+(0 and false included).
 
 Options:
-  --live                          Record against the real Anthropic API (needs ${anthropicApiKeyEnv} and --account)
+  --live                          Record against the real Anthropic API (needs --owner-approved,
+                                  --account, and ${anthropicApiKeyEnv})
+  --owner-approved                confirm the repository owner approved this live run
   --plain-model <id>              default ${defaultModels.plainText} (plain text and max_tokens)
   --tool-model <id>               default ${defaultModels.toolUse}
   --thinking-model <id>           default ${defaultModels.thinking} (must support extended thinking)
@@ -135,11 +150,18 @@ const positiveInteger = (flag: string, value: string, minimum = 1): number => {
 export const liveAccountRequiredMessage =
   '--live requires --account <label>: a synthetic, non-identifying label (for example synthetic) that is committed in public fixtures'
 
+export const ownerApprovalRequiredMessage =
+  "--live requires --owner-approved: live runs spend the owner's Anthropic API credits and need the repository owner's explicit approval"
+
+export const liveInCiMessage =
+  "--live is refused in CI (the CI environment variable is set to a non-empty value): live runs spend the owner's Anthropic API credits and must be run by hand with the repository owner's approval"
+
 /**
- * Parse CLI arguments (without the node/script prefix). Throws on unknown
- * flags, and on `--live` without an explicit `--account`.
+ * Parse CLI arguments (without the node/script prefix). Throws on unknown flags, on `--live` in CI
+ * (`env.CI` set to any non-empty value), and on `--live` without `--owner-approved` or an explicit
+ * `--account`.
  */
-export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
+export const parseProbeArgs = (argv: ReadonlyArray<string>, env: ProbeEnv = {}): ProbeOptions => {
   const options: MutableProbeOptions = { ...defaultProbeOptions }
 
   const setModel = (key: keyof AnthropicConformanceModels, model: string) => {
@@ -165,6 +187,9 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
     switch (flag) {
       case '--live':
         options.live = true
+        break
+      case '--owner-approved':
+        options.ownerApproved = true
         break
       case '--help':
       case '-h':
@@ -196,9 +221,13 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
     }
   }
 
-  if (options.live && !options.help && options.account === undefined) {
-    throw new Error(liveAccountRequiredMessage)
-  }
+  if (options.help) return options
+
+  if (options.live && isCiEnvironment(env)) throw new Error(liveInCiMessage)
+
+  if (options.live && !options.ownerApproved) throw new Error(ownerApprovalRequiredMessage)
+
+  if (options.live && options.account === undefined) throw new Error(liveAccountRequiredMessage)
 
   return options
 }
@@ -317,8 +346,9 @@ export const anthropicConformanceSettings = (
 
 export const dryRunReport = (options: ProbeOptions): string =>
   [
-    `DRY RUN: no network request was made. Pass --live --account <label> to record (needs ${anthropicApiKeyEnv}).`,
+    `DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to record (needs ${anthropicApiKeyEnv}).`,
     `Endpoint: ${anthropicConformanceMessagesUrl} (native Messages, x-api-key)`,
+    "Live runs spend the owner's Anthropic credits and need the repository owner's explicit approval; never run them in CI.",
     'Conformance cases:',
     ...planAnthropicProbe(options).map(entry =>
       [
@@ -735,7 +765,7 @@ export const renderFixtureModule = (
     ` * ${fixtureModule.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}). Regenerate with`,
-    ' * `pnpm conformance:anthropic --live --account <label>`.',
+    ' * `pnpm conformance:anthropic --live --owner-approved --account <label>`.',
     ' */',
     `export const ${fixtureModule.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''
@@ -818,15 +848,42 @@ export const writeVerifiedFixtures = (
     return { report, files }
   })
 
-const live = (options: ProbeOptions, writer: FixtureWriter = defaultFixtureWriter) =>
+/** What a live run reads and writes; injectable so the gates are testable without credentials. */
+export type LiveProbeIo = {
+  /** The environment the CI gate reads (only `CI`). */
+  readonly env: ProbeEnv
+  /** Reads the credential variable; called only after every gate passes. */
+  readonly readCredential: (name: string) => string | undefined
+  readonly writer: FixtureWriter
+}
+
+export const defaultLiveProbeIo: LiveProbeIo = {
+  env: process.env,
+  readCredential: name => process.env[name],
+  writer: defaultFixtureWriter
+}
+
+/**
+ * The live run. Re-checks the CI and owner-approval gates (and the account label) before the
+ * credential is read or any request is made, whatever the options were built by.
+ */
+export const runLive = (options: ProbeOptions, io: LiveProbeIo = defaultLiveProbeIo) =>
   Effect.gen(function* () {
     const account = options.account
+
+    if (isCiEnvironment(io.env)) {
+      return yield* new ProbeFailed({ caseId: '*', message: liveInCiMessage })
+    }
+
+    if (!options.ownerApproved) {
+      return yield* new ProbeFailed({ caseId: '*', message: ownerApprovalRequiredMessage })
+    }
 
     if (account === undefined) {
       return yield* new ProbeFailed({ caseId: '*', message: liveAccountRequiredMessage })
     }
 
-    const key = process.env[anthropicApiKeyEnv]
+    const key = io.readCredential(anthropicApiKeyEnv)
 
     if (key === undefined || key.trim().length === 0) {
       return yield* new ProbeFailed({
@@ -856,7 +913,7 @@ const live = (options: ProbeOptions, writer: FixtureWriter = defaultFixtureWrite
       recordCase(entry, settings, account).pipe(Effect.map(fixture => ({ entry, fixture })))
     )
 
-    const { report, files } = yield* writeVerifiedFixtures(recorded, options, writer)
+    const { report, files } = yield* writeVerifiedFixtures(recorded, options, io.writer)
 
     console.log(formatConformanceReport(report))
     console.log(`Wrote ${files.length} verified fixtures. Review them before committing.`)
@@ -870,7 +927,7 @@ const invokedAsCli = (): boolean => {
 
 const parseCliArgs = (): ProbeOptions | undefined => {
   try {
-    return parseProbeArgs(process.argv.slice(2))
+    return parseProbeArgs(process.argv.slice(2), process.env)
   } catch (error) {
     console.error(error instanceof Error ? error.message : error)
     process.exitCode = 1
@@ -885,7 +942,7 @@ const runCli = (options: ProbeOptions): void => {
   } else if (!options.live) {
     console.log(dryRunReport(options))
   } else {
-    Effect.runPromise(live(options)).catch(error => {
+    Effect.runPromise(runLive(options)).catch(error => {
       const scope = error instanceof ProbeFailed && error.caseId !== '*' ? `${error.caseId}: ` : ''
 
       console.error(`${scope}${error instanceof Error ? error.message : error}`)

@@ -5,7 +5,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * `stop_reason: max_tokens` and `message_stop`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:anthropic --live --account <label>`.
+ * replaces it. Regenerate with
+ * `pnpm conformance:anthropic --live --owner-approved --account <label>`.
  */
 export const anthropicMessagesMaxTokensFixture: WireFixture = {
   id: 'anthropic.messages.stream.max-tokens.synthetic',
@@ -15,7 +16,7 @@ export const anthropicMessagesMaxTokensFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://api.anthropic.com/v1/messages',
   model: 'claude-haiku-4-5',
-  note: 'Synthetic placeholder shaped like Anthropic Messages SSE stopped by max_tokens. Not recorded from a live service; replace with a verified recording from pnpm conformance:anthropic --live --account <label>.',
+  note: 'Synthetic placeholder shaped like Anthropic Messages SSE stopped by max_tokens. Not recorded from a live service; replace with a verified recording from pnpm conformance:anthropic --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

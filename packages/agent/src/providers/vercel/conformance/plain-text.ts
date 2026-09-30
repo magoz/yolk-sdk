@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Streamed plain-text answer: text deltas, a `stop` finish with usage (`stream_options.include_usage`), and `data: [DONE]`.
  *
  * Verified recording (2026-09-30). Regenerate with
- * `pnpm conformance:gateway --live --account <label>`.
+ * `pnpm conformance:gateway --live --owner-approved --account <label>`.
  */
 export const vercelAiGatewayPlainTextFixture: WireFixture = {
   id: 'vercel-ai-gateway.stream.plain-text.recorded',

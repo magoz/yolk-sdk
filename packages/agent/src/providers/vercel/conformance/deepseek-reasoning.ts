@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * DeepSeek-style streamed reasoning (the Gateway-normalized `delta.reasoning`, or `delta.reasoning_content`) before the answer text, requested with `reasoning_effort` and a `thinking` toggle.
  *
  * Verified recording (2026-09-30). Regenerate with
- * `pnpm conformance:gateway --live --account <label>`.
+ * `pnpm conformance:gateway --live --owner-approved --account <label>`.
  */
 export const vercelAiGatewayDeepSeekReasoningFixture: WireFixture = {
   id: 'vercel-ai-gateway.stream.deepseek-reasoning.recorded',
