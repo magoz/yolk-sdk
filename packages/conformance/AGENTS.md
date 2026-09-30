@@ -42,8 +42,14 @@ There is no root export or barrel.
   (`expected` = value-level failure, `error` = typed error), optional `observed` and `note`). No
   `observed` means synthetic (`unverified`, no date); `observed.date` makes it `verified` and ages
   it. Record requests through `redactPortPayload` (drops `credential(s)` and every credential field
-  name at any depth); `scanPortFixtureForSecrets` flags the token patterns, credential fields, and
-  any non-null `credential(s)` field. Replaying port fixtures belongs to the port owner (for
+  name at any depth, AWS-style `accessKeyId` / `secretAccessKey` / `sessionToken` included);
+  `scanPortFixtureForSecrets` flags the token patterns, credential fields, any non-null
+  `credential(s)` field, and credential query/form parameters inside every JSON string value, the
+  note, and the failure message (signed URLs). The only exemption, in both scans, is a parameter
+  value starting with `syntheticCredentialMarker` (`yolk-synthetic`), reserved for documented
+  synthetic placeholders; never widen it. Escaped parameters (`&amp;`, percent-encoded names) are
+  not found by the shared scans; port owners that can meet them add their own check (R2:
+  `findR2PortFixtureSecrets`). Replaying port fixtures belongs to the port owner (for
   example the connectors email bridge), not this package. `WireFixture` and HTTP replay are
   unchanged.
 - Recording is lossless: `body` (valid UTF-8) or `bodyBase64`; stream `chunks` entries are strings

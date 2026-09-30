@@ -19,15 +19,15 @@ checks one wire claim the connector relies on. Where an action reads only part o
 port the host provides; it sends no request of its own. The claims are as currently understood;
 none is observed live yet.
 
-| Case id                             | Safety               | Seeds                                           | Claim (as currently understood)                                                                                                                            |
-| ----------------------------------- | -------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github.labels.list-link-paging`    | `read`               | `owner`, `repo`                                 | `per_page=2` label pages carry `Link` `rel="next"` while labels remain; `page` numbers continue the list without repeats; the page after the last is empty |
-| `github.errors.not-found-envelope`  | `read`               | `owner`, `repo`                                 | An unused issue number maps to `github_not_found` with a JSON `message` (ending the connector message) and `documentation_url` (status unverified)         |
-| `github.errors.validation-envelope` | `read`               | `owner`, `repo`                                 | A search over 256 characters maps to `github_validation` with a `message` and `errors` entries the connector reads (the trigger is unverified)             |
-| `github.contents.base64-file`       | `read`               | `owner`, `repo`, `filePath`                     | A text file answers base64 broken into lines (unverified) that decodes to exactly `size` UTF-8 bytes                                                       |
-| `github.comments.create-delete`     | `write-reversible`   | `owner`, `repo`, `workIssueNumber`, `runId`     | A run-scoped comment is listed `since` its `created_at`, deleted by id, then no longer listed; a second delete answers not found (both unverified)         |
-| `github.labels.add-remove`          | `write-reversible`   | `owner`, `repo`, `workIssueNumber`, `labelName` | Adding and removing the seeded label answer the issue's label names with and without it, and `get_issue` agrees; a second remove answers not found         |
-| `github.issues.lifecycle-close`     | `write-irreversible` | `owner`, `repo`, `runId`                        | A run-scoped issue is created open, read, renamed, and closed as `completed`, and reads back closed; the closed issue stays                                |
+| Case id                             | Safety               | Seeds                                           | Claim (as currently understood)                                                                                                                                                                             |
+| ----------------------------------- | -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github.labels.list-link-paging`    | `read`               | `owner`, `repo`                                 | `per_page=2` label pages carry `Link` `rel="next"` while labels remain; `page` numbers continue the list with no repeat within or across pages; the page after the last is empty                            |
+| `github.errors.not-found-envelope`  | `read`               | `owner`, `repo`                                 | An unused issue number maps to `github_not_found`; the JSON `message` follows the connector's message prefix and `documentation_url` reaches `underlying` (status unverified)                               |
+| `github.errors.validation-envelope` | `read`               | `owner`, `repo`                                 | A search over 256 characters maps to `github_validation` with a `message` and `errors` entries the connector reads (the trigger is unverified)                                                              |
+| `github.contents.base64-file`       | `read`               | `owner`, `repo`, `filePath`                     | A text file answers base64 broken into lines (unverified) that decodes to exactly `size` UTF-8 bytes                                                                                                        |
+| `github.comments.create-delete`     | `write-reversible`   | `owner`, `repo`, `workIssueNumber`, `runId`     | A run-scoped comment is listed `since` its `created_at`, deleted by id, then no longer listed; a second delete answers not found (both unverified); residue: a notification to the work issue's subscribers |
+| `github.labels.add-remove`          | `write-reversible`   | `owner`, `repo`, `workIssueNumber`, `labelName` | Adding and removing the seeded label answer the issue's label names with and without it, and `get_issue` agrees; a second remove answers not found; residue: two timeline events                            |
+| `github.issues.lifecycle-close`     | `write-irreversible` | `owner`, `repo`, `runId`                        | A run-scoped issue is created open, read, renamed, and closed as `completed`, and reads back closed; the closed issue stays                                                                                 |
 
 Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
 
@@ -46,17 +46,20 @@ Claims no live run has settled yet, marked "(unverified: ...)" in each case's `w
   answers 404. Both cleanups rely on it: a not-found answer to the undo counts as undone.
 
 Claims are narrowed to what the connector reads. The error cases check the status class the
-connector maps, the body `message`, `documentation_url`, and that the `errors` entries have a shape
-the connector can turn into details (a string, or an object with a string `resource`, `field`,
-`code`, or `message`); they do not pin GitHub's exact wording or the body `status` field, which the
-connector ignores. The paging case checks `rel="next"` only: the connector never follows the `Link`
-URL, it asks for the next `page` number.
+connector maps, that the connector message starts with the body `message`, that
+`documentation_url` reaches `underlying`, and (validation case only) that the `errors` entries have
+a shape the connector can turn into details (a string, or an object with a string `resource`,
+`field`, `code`, or `message`); they do not pin GitHub's exact wording, the not-found `errors`, or
+the body `status` field. The paging case checks `rel="next"` only (the connector never follows the
+`Link` URL, it asks for the next `page` number) and requires each page to list every label once.
 
 `GithubConformanceConfig` holds the seeds: `owner` and `repo` (the practice repository, as
-integration config), `workIssueNumber` (an open issue, not a pull request, the comment and label
-cases write to), `labelName` (an existing repository label that is not on the work issue),
-`filePath` (a UTF-8 text file in the default branch, more than 45 bytes, with at least one
-non-ASCII character), and `runId`. Use a repository with more than two labels. Cases never hard-code
+integration config; it must have 3 to 20 labels, since the paging case pages by two and gives up
+after ten pages), `workIssueNumber` (an open practice issue, not a pull request, that **nobody else
+watches**, which the comment and label cases write to), `labelName` (an existing repository label
+that is not on the work issue), `filePath` (a UTF-8 text file in the default branch, more than 45
+bytes, with at least one non-ASCII character, and under 100,000 characters, beyond which the
+connector truncates the content), and `runId`. Cases never hard-code
 account data, and a missing seed fails the case with a `precondition:` mismatch before any request.
 Credentials bind through `githubConformanceIntegration(owner, repo)` (`github.token`, credential ref
 `github.conformance`).
@@ -91,11 +94,26 @@ and issue title a case writes starts with `yolk-conformance <runId>`.
   seeded label on the same seeded issue, so **concurrent runs of the label case are not supported**:
   a second run refuses to start while the first holds the label.
 
+### What the reversible cases leave behind
+
+The comment and label cases undo the **state** they change: the comment is deleted, and the label
+is off the issue again. They cannot undo what that state change triggered:
+
+- **Notifications.** Creating the comment notifies the work issue's subscribers (web, email, and
+  mobile); deleting it does not recall them.
+- **Timeline events.** Adding and removing the label leave permanent `labeled` and `unlabeled`
+  events on the issue timeline.
+
+This residue is why the work issue must be a practice issue **nobody else watches**. The cases stay
+`write-reversible` because nothing they create outlives the run; the lifecycle case is
+`write-irreversible` because it leaves state behind (a closed issue), not only notifications or
+timeline events.
+
 ### The issue lifecycle is irreversible
 
 **GitHub issues cannot be deleted through the REST API**, and the connector has no delete action:
-closing is the only undo, and the closed issue stays in the repository (with its notifications to
-watchers). `github.issues.lifecycle-close` is therefore `write-irreversible`: it never runs under
+closing is the only undo, and the closed issue stays in the repository: state, not only a
+notification or a timeline event. `github.issues.lifecycle-close` is therefore `write-irreversible`: it never runs under
 `allowWrites: 'reversible'`, and a runner starts it only when a person names its exact id
 (`allowIrreversible: ['github.issues.lifecycle-close']`; the live runner's
 `--allow-irreversible github.issues.lifecycle-close`). Every run leaves one closed issue titled

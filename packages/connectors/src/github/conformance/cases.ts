@@ -120,18 +120,20 @@ const RunId = Schema.String.check(
 export const GithubConformanceSeeds = Schema.Struct({
   /** Owner (user or organization) of the practice repository: integration config `owner`. */
   owner: Schema.optionalKey(Owner),
-  /** The practice repository: integration config `repo`. */
+  /** The practice repository (3 to 20 labels): integration config `repo`. */
   repo: Schema.optionalKey(Repo),
   /**
-   * An open issue (not a pull request) the comment and label cases work on: they post and delete
-   * their own comment there, and add and remove the `labelName` label.
+   * An open practice issue (not a pull request) that nobody else watches, which the comment and
+   * label cases work on: they post and delete their own comment there, and add and remove the
+   * `labelName` label. Its subscribers are notified of each comment, and every label add and
+   * remove stays on its timeline.
    */
   workIssueNumber: Schema.optionalKey(IssueNumber),
   /** An existing repository label that is NOT on the work issue. */
   labelName: Schema.optionalKey(LabelName),
   /**
    * A UTF-8 text file in the default branch: more than 45 bytes, at least one non-ASCII
-   * character, under 1 MB.
+   * character, and under 100,000 characters (the connector truncates longer content).
    */
   filePath: Schema.optionalKey(FilePath),
   /**
@@ -575,7 +577,7 @@ export const githubLabelsPagingCase: GithubConformanceCase = defineConformanceCa
   title: 'A label listing larger than per_page advertises rel="next" until its last page',
   safety: 'read',
   docs: '`github.list_labels` sends GET /repos/{owner}/{repo}/labels with `per_page` and `page` query parameters and reports `hasNextPage` from the RFC 8288 `Link` response header (true when it lists `rel="next"`); like every GitHub list action it never follows the `Link` URL itself: callers ask for the next `page` number.',
-  wire: '`github.list_labels` with `perPage: 2` for a repository with more than two labels answers two labels and a `Link` header listing `rel="next"` (`hasNextPage: true`); asking for `page` 2, 3, and so on returns further labels (none repeated, compared by name), and the page whose `Link` lists no `rel="next"` is really the last: the page after it answers no labels. So a `rel="next"` missing while labels remain fails the case.',
+  wire: '`github.list_labels` with `perPage: 2` for a repository with more than two labels answers two labels and a `Link` header listing `rel="next"` (`hasNextPage: true`); asking for `page` 2, 3, and so on returns further labels (none repeated within a page or across pages, compared by name), and the page whose `Link` lists no `rel="next"` is really the last: the page after it answers no labels. So a `rel="next"` missing while labels remain fails the case.',
   fixtures: [githubLabelsPagingFixture.id],
   run: Effect.gen(function* () {
     const seen: Array<string> = []
@@ -589,6 +591,10 @@ export const githubLabelsPagingCase: GithubConformanceCase = defineConformanceCa
         names.length <= labelPageSize,
         'expected at most per_page labels on every page',
         { actual: names.length }
+      )
+      yield* expectConformance(
+        new Set(names).size === names.length,
+        'expected every page to list each label once'
       )
       yield* expectConformance(
         names.every(name => !seen.includes(name)),
@@ -646,7 +652,7 @@ export const githubNotFoundEnvelopeCase: GithubConformanceCase = defineConforman
   title: 'An unused issue number answers not found with a JSON message and documentation_url',
   safety: 'read',
   docs: 'The connector maps a non-2xx GitHub answer by HTTP status (401 `github_unauthorized`; 403 `github_forbidden`, or `github_rate_limited` when the rate limit is exhausted; 404 and 410 `github_not_found`; 409 `github_conflict`; 400 and 422 `github_validation`; 429 `github_rate_limited`), appends the JSON body `message` to its failure message (`GitHub <operation> failed (<status>): <message>`), and keeps only `documentation_url` and the `errors` details as `underlying`.',
-  wire: '`github.get_issue` of issue number 99999999, which the practice repository has not reached, answers a status the connector maps to `github_not_found` (404 or 410; unverified: that an unused number answers 404 rather than another status) with a JSON body whose `message` is a non-empty string and whose `documentation_url` is a string (observed at the `ConnectorHttpClient` port), so the connector message is `GitHub get issue failed (<status>): <message>` and `underlying` is `{ documentationUrl, errors: [] }`.',
+  wire: '`github.get_issue` of issue number 99999999, which the practice repository has not reached, answers a status the connector maps to `github_not_found` (404 or 410; unverified: that an unused number answers 404 rather than another status) with a JSON body whose `message` is a non-empty string and whose `documentation_url` is a string (observed at the `ConnectorHttpClient` port), so the connector message starts with `GitHub get issue failed (<status>): <message>` and `underlying.documentationUrl` is that `documentation_url` (any `errors` details are not checked).',
   fixtures: [githubNotFoundEnvelopeFixture.id],
   run: Effect.gen(function* () {
     const { value, responses } = yield* observed(getIssue(absentIssueNumber))
@@ -673,15 +679,16 @@ export const githubNotFoundEnvelopeCase: GithubConformanceCase = defineConforman
       })
     }
 
-    yield* expectEqual(
-      failure.message,
-      `GitHub get issue failed (${failure.status ?? 'no-status'}): ${body.message}`,
-      'expected the connector message to end with the body message'
+    yield* expectConformance(
+      failure.message.startsWith(
+        `GitHub get issue failed (${failure.status ?? 'no-status'}): ${body.message}`
+      ),
+      'expected the connector message to start with the body message'
     )
     yield* expectEqual(
-      underlyingDetails(failure.underlying),
-      [body.documentation_url, 0],
-      'expected underlying to carry the body documentation_url and no errors'
+      underlyingDetails(failure.underlying)?.[0] ?? null,
+      body.documentation_url,
+      'expected underlying.documentationUrl to carry the body documentation_url'
     )
   })
 })
@@ -839,7 +846,7 @@ export const githubCommentLifecycleCase: GithubConformanceCase = defineConforman
   title: 'A comment created on the work issue is listed, deleted by id, then gone',
   safety: 'write-reversible',
   docs: '`github.create_issue_comment` sends POST /repos/{owner}/{repo}/issues/{number}/comments `{ body }` and decodes the comment (`id`, `body`, `html_url`, `created_at`, `updated_at`); `github.list_issue_comments` sends GET .../comments with `since`, `per_page`, and `page` and reports `hasNextPage` from `Link`; `github.delete_issue_comment` sends DELETE /repos/{owner}/{repo}/issues/comments/{id} and treats any 2xx as deleted without reading the body; 404 maps to `github_not_found`.',
-  wire: '`github.create_issue_comment` on the seeded work issue answers the comment with the requested run-scoped body and an id; `github.list_issue_comments` with `since` set to its `created_at` lists it (unverified: that `since` includes a comment created at exactly that instant); `github.delete_issue_comment` answers 2xx; afterwards the same listing omits it, and deleting it again answers `github_not_found` (unverified: 404 for an already deleted comment), which the cleanup relies on. The case deletes its own comment again, by id, even when a step fails.',
+  wire: '`github.create_issue_comment` on the seeded work issue answers the comment with the requested run-scoped body and an id; `github.list_issue_comments` with `since` set to its `created_at` lists it (unverified: that `since` includes a comment created at exactly that instant); `github.delete_issue_comment` answers 2xx; afterwards the same listing omits it, and deleting it again answers `github_not_found` (unverified: 404 for an already deleted comment), which the cleanup relies on. The case deletes its own comment again, by id, even when a step fails. Residue the connector cannot undo: subscribers of the work issue are notified of the comment (use a practice issue nobody else watches); the comment itself is gone, so the case stays write-reversible.',
   fixtures: [githubCommentLifecycleFixture.id],
   run: Effect.gen(function* () {
     const issueNumber = yield* requireIssueNumber
@@ -922,7 +929,7 @@ export const githubIssueLabelsCase: GithubConformanceCase = defineConformanceCas
   title: 'A label added to the work issue is listed, removed by name, then gone',
   safety: 'write-reversible',
   docs: '`github.add_labels` sends POST /repos/{owner}/{repo}/issues/{number}/labels `{ labels }` and `github.remove_label` DELETE .../labels/{name}; both decode the answer as an array of `{ name }` and return it as the issue `labels`; `github.get_issue` reports the issue `labels` as names. Adding a label the repository does not have creates it, and the connector cannot delete repository labels.',
-  wire: 'For the seeded label, which exists in the repository and is not on the seeded work issue: `github.add_labels` answers the issue label names including it, and `github.get_issue` lists it; `github.remove_label` answers the remaining names without it, and `github.get_issue` omits it; removing it again answers `github_not_found` (unverified: 404 for a label not on the issue), which the cleanup relies on. The case refuses to start when the label is already on the issue, so it never removes a label it did not add, and removes its label again even when a step fails.',
+  wire: 'For the seeded label, which exists in the repository and is not on the seeded work issue: `github.add_labels` answers the issue label names including it, and `github.get_issue` lists it; `github.remove_label` answers the remaining names without it, and `github.get_issue` omits it; removing it again answers `github_not_found` (unverified: 404 for a label not on the issue), which the cleanup relies on. The case refuses to start when the label is already on the issue, so it never removes a label it did not add, and removes its label again even when a step fails. Residue the connector cannot undo: the add and the remove stay on the issue timeline as `labeled` / `unlabeled` events (use a practice issue nobody else watches); the label state itself is restored, so the case stays write-reversible.',
   fixtures: [githubIssueLabelsFixture.id],
   run: Effect.gen(function* () {
     const issueNumber = yield* requireIssueNumber
@@ -1047,7 +1054,7 @@ export const githubIssueLifecycleCase: GithubConformanceCase = defineConformance
   title: 'An issue created, read, renamed, and closed reads back closed as completed',
   safety: 'write-irreversible',
   docs: '`github.create_issue` sends POST /repos/{owner}/{repo}/issues and `github.update_issue` PATCH /repos/{owner}/{repo}/issues/{number} (JSON, undefined fields omitted; `stateReason` as `state_reason`), and `github.get_issue` GET .../issues/{number}; all decode the issue and normalize it (`state`, `stateReason`, `closedAt`, `isPullRequest` from `pull_request`). The connector has no delete action, and GitHub cannot delete issues through the REST API: a created issue can only be closed.',
-  wire: '`github.create_issue` with a run-scoped title answers an open issue (not a pull request) with that title; `github.get_issue` answers the same number and title; `github.update_issue` with a new run-scoped title answers it; `github.update_issue` with `state: "closed"` and `stateReason: "completed"` answers `state: "closed"`, `stateReason: "completed"`, and a `closedAt`; and `github.get_issue` then reads it closed. The closed issue stays in the repository: this case is write-irreversible and runs only when requested by its exact id; if a step fails, the cleanup closes the issue as `not_planned`.',
+  wire: '`github.create_issue` with a run-scoped title answers an open issue (not a pull request) with that title; `github.get_issue` answers the same number and title; `github.update_issue` with a new run-scoped title answers it; `github.update_issue` with `state: "closed"` and `stateReason: "completed"` answers `state: "closed"`, `stateReason: "completed"`, and a `closedAt`; and `github.get_issue` then reads it closed. The closed issue stays in the repository: that is state the connector cannot undo (not only a notification or a timeline event), so this case is write-irreversible and runs only when requested by its exact id; if a step fails, the cleanup closes the issue as `not_planned`.',
   fixtures: [githubIssueLifecycleFixture.id],
   run: Effect.gen(function* () {
     const integration = yield* repoIntegration

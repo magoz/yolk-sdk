@@ -79,10 +79,38 @@ const credentialParamNames =
  */
 export const credentialParamPattern = new RegExp(`(?:^|[?&])(${credentialParamNames})=[^&#]+`, 'i')
 
-// Singular credential field names (snake, kebab, or camel case). Plural usage
+const credentialParamValues = new RegExp(`(?:^|[?&])(?:${credentialParamNames})=([^&#]+)`, 'gi')
+
+/**
+ * Reserved marker of a documented synthetic credential placeholder. A credential query or form
+ * parameter whose (percent-decoded) value starts with it, for example a synthetic presigned-URL
+ * `X-Amz-Signature=yolk-synthetic-signature`, is not a secret, so the fixture scan does not flag
+ * it. Real provider-issued credentials never start with it.
+ */
+export const syntheticCredentialMarker = 'yolk-synthetic'
+
+const percentDecodedValue = (value: string): string => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+/**
+ * True when `text` carries a credential query or form parameter (see `credentialParamPattern`)
+ * whose value is not a synthetic placeholder (see `syntheticCredentialMarker`).
+ */
+export const hasCredentialParam = (text: string): boolean =>
+  [...text.matchAll(credentialParamValues)].some(
+    match => !percentDecodedValue(match[1] ?? '').startsWith(syntheticCredentialMarker)
+  )
+
+// Singular credential field names (snake, kebab, or camel case), including the AWS-style
+// `accessKeyId` / `secretAccessKey` / `sessionToken` of S3-compatible signing inputs. Plural usage
 // counters such as `max_tokens` or `prompt_tokens` never match.
 const credentialFieldNames =
-  '(?:access|refresh|id|auth|api|session|private|bearer|oauth)[_-]?token|token|client[_-]?secret|secret(?:[_-]?key)?|private[_-]?key|password|passwd|api[_-]?key|authorization'
+  '(?:access|refresh|id|auth|api|session|private|bearer|oauth)[_-]?token|token|client[_-]?secret|secret(?:[_-]?key)?|private[_-]?key|password|passwd|api[_-]?key|access[_-]?key[_-]?id|secret[_-]?access[_-]?key|authorization'
 
 /** A JSON object key (or similar field name) that holds a credential. */
 export const credentialFieldPattern = new RegExp(`^(${credentialFieldNames})$`, 'i')

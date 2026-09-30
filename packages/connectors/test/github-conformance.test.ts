@@ -529,6 +529,15 @@ describe('GitHub conformance drills (one per case)', () => {
       'expected a later page to repeat no label from an earlier page'
     ],
     [
+      'the same label twice on one page',
+      replaceResponse(
+        githubLabelsPagingFixture,
+        1,
+        replaceInBody('"name":"question"', '"name":"enhancement"')
+      ),
+      'expected every page to list each label once'
+    ],
+    [
       'a Link rel="next" dropped from the middle page',
       replaceResponse(
         githubLabelsPagingFixture,
@@ -576,6 +585,22 @@ describe('GitHub conformance drills (one per case)', () => {
       })
     )
   }
+
+  it.effect('a not-found body that also carries errors details still passes', () =>
+    Effect.gen(function* () {
+      // The connector reads errors details when present: the case pins neither them nor the rest.
+      const withErrors = replaceResponse(
+        githubNotFoundEnvelopeFixture,
+        0,
+        withStatus(
+          404,
+          '{"message":"Not Found","errors":[{"resource":"Issue","code":"missing"}],"documentation_url":"https://docs.github.com/rest/issues/issues#get-an-issue","status":"404"}'
+        )
+      )
+
+      expect(yield* suiteFailures(withReplaced(withErrors))).toEqual([])
+    })
+  )
 
   for (const [caseId] of caseIds) {
     it.effect(`a dropped fixture fails exactly ${caseId}`, () =>

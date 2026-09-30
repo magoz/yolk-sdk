@@ -8,6 +8,7 @@ import {
   isPortFixture,
   redactPortPayload,
   scanPortFixtureForSecrets,
+  syntheticCredentialMarker,
   type PortFixture,
   type WireFixture
 } from '../src/fixture.ts'
@@ -130,6 +131,41 @@ describe('port payload redaction', () => {
       expect(isPortCredentialKey(key)).toBe(false)
     }
   })
+
+  it('drops AWS-style signing credentials in camelCase and snake_case', () => {
+    const keys = [
+      'accessKeyId',
+      'AccessKeyId',
+      'access_key_id',
+      'secretAccessKey',
+      'SecretAccessKey',
+      'secret_access_key',
+      'sessionToken',
+      'SessionToken',
+      'session_token'
+    ]
+
+    for (const key of keys) {
+      expect(isPortCredentialKey(key)).toBe(true)
+    }
+
+    expect(
+      redactPortPayload({
+        endpoint: 'https://storage.example.test',
+        ...Object.fromEntries(keys.map(key => [key, 'synthetic-value'])),
+        bucket: 'kept',
+        nested: [{ secret_access_key: 'x', key: 'kept/object.txt' }]
+      })
+    ).toEqual({
+      endpoint: 'https://storage.example.test',
+      bucket: 'kept',
+      nested: [{ key: 'kept/object.txt' }]
+    })
+
+    for (const key of ['accessKey', 'bucket', 'key', 'contentType', 'etag']) {
+      expect(isPortCredentialKey(key)).toBe(false)
+    }
+  })
 })
 
 describe('scanPortFixtureForSecrets', () => {
@@ -164,6 +200,58 @@ describe('scanPortFixtureForSecrets', () => {
     )
     expect(JSON.stringify(issues)).not.toContain('hunter2')
     expect(JSON.stringify(issues)).not.toContain('abcdefghijklmnop')
+  })
+
+  it('flags credential query parameters inside JSON strings, notes, and failure messages', () => {
+    const signed =
+      'https://storage.example.test/bucket/key.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=LIVEKEYID%2F20260930%2Fauto%2Fs3%2Faws4_request&X-Amz-Signature=a1b2c3d4e5f6'
+
+    expect(
+      scanPortFixtureForSecrets({
+        ...valueFixture,
+        note: `recorded from ${signed}`,
+        request: { links: [`?token=live-token-value`] },
+        response: { uploadUrl: signed }
+      })
+    ).toEqual([
+      { kind: 'credential_query_param', location: 'note' },
+      { kind: 'credential_query_param', location: 'request.links[0]' },
+      { kind: 'credential_query_param', location: 'response.uploadUrl' }
+    ])
+    expect(
+      scanPortFixtureForSecrets({
+        ...failureFixture,
+        failure: { kind: 'error', code: 'transport_failed', message: `redirected to ${signed}` }
+      })
+    ).toEqual([{ kind: 'credential_query_param', location: 'failure.message' }])
+    expect(
+      scanPortFixtureForSecrets({
+        ...valueFixture,
+        response: { uploadUrl: signed.replace('&X-Amz-Signature', '&X-Amz-Security-Token=live&x') }
+      })
+    ).toEqual([{ kind: 'credential_query_param', location: 'response.uploadUrl' }])
+  })
+
+  it('accepts documented synthetic placeholders, and nothing that merely looks synthetic', () => {
+    const placeholder = `https://storage.example.test/bucket/key.txt?X-Amz-Credential=${syntheticCredentialMarker}-key-id%2F20260930%2Fauto%2Fs3%2Faws4_request&X-Amz-Signature=${syntheticCredentialMarker}-signature`
+
+    expect(syntheticCredentialMarker).toBe('yolk-synthetic')
+    expect(
+      scanPortFixtureForSecrets({ ...valueFixture, response: { uploadUrl: placeholder } })
+    ).toEqual([])
+    expect(
+      scanPortFixtureForSecrets({
+        ...valueFixture,
+        response: { uploadUrl: `${placeholder}&api_key=synthetic` }
+      })
+    ).toEqual([{ kind: 'credential_query_param', location: 'response.uploadUrl' }])
+    // Prose that mentions a parameter without a query boundary is not a parameter.
+    expect(
+      scanPortFixtureForSecrets({
+        ...valueFixture,
+        response: { text: 'set the token= value in settings' }
+      })
+    ).toEqual([])
   })
 
   it('scans failure messages and observation labels', () => {

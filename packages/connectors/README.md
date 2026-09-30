@@ -1423,7 +1423,9 @@ decoding failure, no status, HTTP 408, or HTTP 5xx) fails with `GithubConformanc
 (`writeOutcome: 'unknown'`) naming the exact item; an answer outside the run namespace is never
 adopted (`GithubConformanceCleanupRefused`). The comment and label cases are write-reversible: the
 cleanup deletes the comment by id or removes the label, verifies it, and fails with
-`GithubConformanceRestoreFailed` when that fails. **The issue lifecycle case is
+`GithubConformanceRestoreFailed` when that fails. They cannot undo what they trigger (the comment
+notifies the work issue's subscribers; the label add and remove stay on its timeline), so the work
+issue must be a practice issue nobody else watches. **The issue lifecycle case is
 write-irreversible:** GitHub issues cannot be deleted through the REST API, so the issue it opens
 stays in the repository, closed; it runs only when a person names its exact id
 (`--allow-irreversible github.issues.lifecycle-close`). Before any write case, and again after an
@@ -1444,13 +1446,16 @@ replay with (`r2ConformanceFixtureSeeds`). The connector never talks to R2 itsel
 `r2_storage.upload_url` over the host `R2Presigner` and `getR2Object` / `createR2Object` /
 `updateR2Object` over the host `R2ObjectClient`, plus `CredentialResolver` and
 `R2ConformanceConfig`. They cover the presigned PUT URL (bucket and key, SigV4 parameters, an expiry
-within the SigV4 limit, the signed content type), `maxBytes` and `expectedEtag` on get, a missing
+within the SigV4 limit, the signed content type, and a credential for the access key id the
+connector passed), `maxBytes` and `expectedEtag` on get, a missing
 key, an absent-only create, and an `If-Match` update. `r2PortsLayerFromBackend` bridges a plain-JSON
 backend to both ports without ever handing it the credentials, and `makeR2ReplayBackend` replays the
 fixtures. The two write cases are **write-irreversible** (the connector cannot delete R2 objects):
 they write only under `yolk-conformance/<runId>/` and report an ambiguous put with the exact bucket
-and key. Presigned URLs in fixtures carry only synthetic credential placeholders
-(`findR2PortFixtureSecrets` refuses live ones; `scrubR2PortFixture` rewrites them). Live
+and key; a live host must generate a fresh `run-<hex>` per invocation. Presigned URLs in fixtures
+carry only synthetic credential placeholders: run both `scanPortFixtureForSecrets` and
+`findR2PortFixtureSecrets` (escaped and percent-encoded parameters, exact placeholders);
+`scrubR2PortFixture` rewrites live ones except escaped URLs, so rerun both scans after it. Live
 verification needs a host implementation of both ports; no live R2 runner ships. The case table
 lives in the
 [R2 conformance guide](../../apps/docs/content/docs/connectors/r2-storage.mdx#conformance-cases).

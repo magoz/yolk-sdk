@@ -10,9 +10,11 @@
  * connectors package ships no SigV4 signer or S3 client); no live runner ships here.
  *
  * The current fixtures are synthetic placeholders (no `observed`, so `unverified`). Presigned URLs
- * in them carry only `r2ConformanceSyntheticSignature` and `r2ConformanceSyntheticAccessKeyId`;
- * `findR2PortFixtureSecrets` refuses anything else, and `scrubR2PortFixture` rewrites a fixture
- * recorded from a live host to those placeholders before a person promotes it.
+ * in them carry only `r2ConformanceSyntheticSignature` and `r2ConformanceSyntheticAccessKeyId`
+ * (shared `syntheticCredentialMarker` values). Run both `scanPortFixtureForSecrets` and
+ * `findR2PortFixtureSecrets` (escaped and percent-encoded parameters, exact placeholders) on every
+ * fixture; `scrubR2PortFixture` rewrites a fixture recorded from a live host, except escaped URLs,
+ * before a person promotes it.
  *
  * @experimental
  */

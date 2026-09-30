@@ -47,8 +47,6 @@ export {
 
 export { githubConformanceFixtureSeeds } from './seeds.ts'
 
-export { githubConformanceLongSearchQuery } from './synthetic.ts'
-
 export {
   githubCommentLifecycleFixture,
   githubFileContentsFixture,

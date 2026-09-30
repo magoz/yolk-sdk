@@ -13,7 +13,10 @@
  * refused before any request (never printed). Read cases always run. `--allow-writes reversible`
  * adds the write-reversible cases: a `yolk-conformance <runId> comment` on `--work-issue`, deleted
  * again by id, and `--label` added to `--work-issue` and removed again (that case refuses to start
- * while the label is already there, so concurrent runs of it are not supported). The one
+ * while the label is already there, so concurrent runs of it are not supported). Both undo their
+ * state, but not everything they cause: the comment notifies the work issue's subscribers, and the
+ * label add and remove stay on its timeline, so `--work-issue` must be a practice issue nobody else
+ * watches. The one
  * write-irreversible case, `github.issues.lifecycle-close`, opens a real issue titled with the run
  * id and closes it; GitHub issues cannot be deleted through the REST API, so the closed issue stays
  * in the repository, and the case runs only when named with
@@ -86,13 +89,14 @@ export const githubSeedSources: ReadonlyArray<SeedSource<GithubConformanceSeedKe
     key: 'repo',
     flag: '--repo',
     env: 'GITHUB_CONFORMANCE_REPO',
-    description: 'the practice repository (more than two labels)'
+    description: 'the practice repository (3 to 20 labels)'
   },
   {
     key: 'workIssueNumber',
     flag: '--work-issue',
     env: 'GITHUB_CONFORMANCE_WORK_ISSUE',
-    description: 'open issue the comment and label cases write to'
+    description:
+      'open practice issue nobody else watches (comments notify its subscribers; label changes stay on its timeline)'
   },
   {
     key: 'labelName',
@@ -104,7 +108,7 @@ export const githubSeedSources: ReadonlyArray<SeedSource<GithubConformanceSeedKe
     key: 'filePath',
     flag: '--file-path',
     env: 'GITHUB_CONFORMANCE_FILE_PATH',
-    description: 'UTF-8 text file (over 45 bytes, a non-ASCII character)'
+    description: 'UTF-8 text file (over 45 bytes, a non-ASCII character, under 100,000 characters)'
   }
 ]
 
@@ -197,7 +201,7 @@ export const githubRunner = {
     'a token for the practice repository only (fine-grained: Issues read/write and Contents read)',
   endpoint: githubApiBaseUrl,
   writeNote:
-    'post a yolk-conformance <run id> comment on --work-issue and delete it again by id (a fresh random run id per invocation), and add --label to --work-issue and remove it again (refused while the label is already there)',
+    'post a yolk-conformance <run id> comment on --work-issue and delete it again by id (a fresh random run id per invocation), and add --label to --work-issue and remove it again (refused while the label is already there); the comment notifies the issue subscribers and the label changes stay on its timeline, so use a practice issue nobody else watches',
   irreversibleNote:
     'The write-irreversible github.issues.lifecycle-close case opens a real issue titled with a fresh run id and closes it; GitHub issues cannot be deleted through the REST API, so the closed issue stays in the repository; it runs only with --allow-irreversible github.issues.lifecycle-close',
   cases: githubConformanceCases,

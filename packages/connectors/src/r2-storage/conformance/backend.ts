@@ -8,9 +8,9 @@
  * real connector action and host-only helpers against replayed `PortFixture`s
  * (`makeR2ReplayBackend`) or any structural backend.
  *
- * Request JSON never carries a credential: the presigner request drops `accessKeyId` and
- * `secretAccessKey` (they are not caught by the generic `redactPortPayload` names), and object
- * requests drop the `integration`. Bytes travel as standard base64 (`bodyBase64`).
+ * Request JSON never carries a credential: the presigner request is built without `accessKeyId`
+ * and `secretAccessKey` (and `redactPortPayload` strips those names too), and object requests drop
+ * the `integration`. Bytes travel as standard base64 (`bodyBase64`).
  *
  * For conformance and tests only: it signs nothing, speaks no S3, and is never a production host
  * adapter. Hosts implement `R2Presigner` and `R2ObjectClient` themselves.
@@ -21,6 +21,7 @@ import { Effect, Equal, Layer, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   redactPortPayload,
+  syntheticCredentialMarker,
   type PortFailure,
   type PortFixture
 } from '@yolk-sdk/conformance/fixture'
@@ -350,24 +351,26 @@ export const makeR2ReplayBackend = (fixtures: ReadonlyArray<PortFixture>): R2Rep
 }
 
 // Presigned URLs carry their credential in the query string. Committed fixtures may only hold the
-// synthetic placeholders below; `findR2PortFixtureSecrets` refuses anything else, and
-// `scrubR2PortFixture` rewrites a recorded fixture to them.
+// synthetic placeholders below. The shared `scanPortFixtureForSecrets` already refuses any other
+// credential query parameter and any `accessKeyId` / `secretAccessKey` / `sessionToken` field;
+// `findR2PortFixtureSecrets` adds what it cannot see (escaped and percent-encoded parameters) and
+// requires these exact placeholders. `scrubR2PortFixture` rewrites a recorded fixture to them.
 
-/** The only `X-Amz-Signature` value a committed fixture may carry. */
-export const r2ConformanceSyntheticSignature = '0'.repeat(64)
+/** The only `X-Amz-Signature` value a committed fixture may carry (a shared synthetic marker). */
+export const r2ConformanceSyntheticSignature = `${syntheticCredentialMarker}-signature`
 
-/** The only access key id a committed fixture's `X-Amz-Credential` may name. */
-export const r2ConformanceSyntheticAccessKeyId = 'SYNTHETICR2ACCESSKEYID'
+/**
+ * The only access key id a committed fixture's `X-Amz-Credential` may name (a shared synthetic
+ * marker). Replay resolves the `r2-storage.access_key_id` credential to it, so a replayed presigned
+ * URL is signed for the credential the connector passed.
+ */
+export const r2ConformanceSyntheticAccessKeyId = `${syntheticCredentialMarker}-r2-access-key-id`
 
 const signatureParam = 'x-amz-signature'
 
 const credentialParam = 'x-amz-credential'
 
 const sessionTokenParam = 'x-amz-security-token'
-
-/** Keys that hold an R2 credential in a port payload, whatever their case. */
-const credentialKeyPattern =
-  /^(?:access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)$/i
 
 const percentDecoded = (text: string): string => {
   let current = text
@@ -381,14 +384,17 @@ const percentDecoded = (text: string): string => {
   return current
 }
 
-/** `name=value` query parameters in `text` (percent-decoded first), names lower-cased. */
+/**
+ * `name=value` `X-Amz-*` parameters in `text` (percent-decoded first), names lower-cased. A name
+ * counts wherever no name character precedes it, so escaped forms such as `&amp;X-Amz-Credential=`
+ * (an S3 XML error echoed in a message) are found too.
+ */
 const queryParams = (text: string): ReadonlyArray<readonly [string, string]> =>
-  [...percentDecoded(text).matchAll(/(?:^|[?&\s"'])(x-amz-[a-z-]+)=([^&#\s"']*)/gi)].map(
+  [...percentDecoded(text).matchAll(/(?<![A-Za-z0-9_-])(x-amz-[a-z-]+)=([^&#\s"'<]*)/gi)].map(
     match => [(match[1] ?? '').toLowerCase(), match[2] ?? ''] as const
   )
 
 const isSyntheticCredential = (value: string) =>
-  value === r2ConformanceSyntheticAccessKeyId ||
   value.startsWith(`${r2ConformanceSyntheticAccessKeyId}/`)
 
 /** Why a string may not be committed: one finding per live credential parameter it carries. */
@@ -425,37 +431,27 @@ const findingsIn = (value: Schema.Json, location: string): ReadonlyArray<string>
     return []
   }
 
-  return Object.entries(value).flatMap(([key, item]) => [
-    ...(credentialKeyPattern.test(key) && item !== null
-      ? [`${location}.${key}: a credential`]
-      : []),
-    ...findingsIn(item, `${location}.${key}`)
-  ])
+  return Object.entries(value).flatMap(([key, item]) => findingsIn(item, `${location}.${key}`))
 }
 
 /**
- * Why an R2 `PortFixture` may not be committed: every live presigned-URL credential it carries (an
+ * Why an R2 `PortFixture` may not be committed, beyond the shared `scanPortFixtureForSecrets` (run
+ * both): every presigned-URL credential that is not the exact synthetic placeholder (an
  * `X-Amz-Signature` other than `r2ConformanceSyntheticSignature`, an `X-Amz-Credential` for another
- * access key id than `r2ConformanceSyntheticAccessKeyId`, any `X-Amz-Security-Token`, raw or
- * percent-encoded, anywhere in a string) and every credential key (`accessKeyId`,
- * `secretAccessKey`, `sessionToken`), as `location: finding` lines that never echo the value.
- * Empty when the fixture is safe to commit. The generic `scanPortFixtureForSecrets` does not look
- * for credential query parameters inside JSON strings, so R2 fixtures need both.
+ * access key id than `r2ConformanceSyntheticAccessKeyId`, any `X-Amz-Security-Token`), raw,
+ * percent-encoded, or HTML-escaped (`&amp;`), anywhere in the request, the response, the note, or
+ * the failure message, as `location: finding` lines that never echo the value. Empty when clean.
  */
 export const findR2PortFixtureSecrets = (fixture: PortFixture): ReadonlyArray<string> => [
   ...findingsIn(fixture.request, 'request'),
   ...(fixture.failure === undefined
     ? findingsIn(fixture.response, 'response')
-    : findingsIn(fixture.failure.message, 'failure.message'))
+    : findingsIn(fixture.failure.message, 'failure.message')),
+  ...(fixture.note === undefined ? [] : findingsIn(fixture.note, 'note'))
 ]
 
-/**
- * A presigned URL with its credential replaced by the synthetic placeholders: `X-Amz-Signature`
- * becomes `r2ConformanceSyntheticSignature`, the access key id in `X-Amz-Credential` becomes
- * `r2ConformanceSyntheticAccessKeyId` (the date, region, and service scope are kept), and
- * `X-Amz-Security-Token` is removed. Other text is returned unchanged.
- */
-export const scrubR2PresignedUrl = (text: string): string => {
+/** One presigned URL with its credential replaced by the synthetic placeholders. */
+const scrubUrl = (text: string): string => {
   let url: URL
 
   try {
@@ -488,6 +484,18 @@ export const scrubR2PresignedUrl = (text: string): string => {
   return url.toString()
 }
 
+/**
+ * `text` with every presigned URL in it (the whole string, or an `http(s)://` URL embedded in a
+ * message, up to whitespace or a quote) scrubbed: `X-Amz-Signature` becomes
+ * `r2ConformanceSyntheticSignature`, the access key id in `X-Amz-Credential` becomes
+ * `r2ConformanceSyntheticAccessKeyId` (the date, region, and service scope are kept), and
+ * `X-Amz-Security-Token` is removed. Percent-encoded or `&amp;`-escaped URLs are NOT rewritten:
+ * rerun `scanPortFixtureForSecrets` and `findR2PortFixtureSecrets` after scrubbing and remove what
+ * they still find by hand.
+ */
+export const scrubR2PresignedUrl = (text: string): string =>
+  text.replace(/https?:\/\/[^\s"'<>]+/g, scrubUrl)
+
 const scrubJson = (value: Schema.Json): Schema.Json => {
   if (Predicate.isString(value)) {
     return scrubR2PresignedUrl(value)
@@ -497,27 +505,33 @@ const scrubJson = (value: Schema.Json): Schema.Json => {
     return value.map(scrubJson)
   }
 
-  if (!isJsonRecord(value)) {
-    return value
-  }
-
-  const copy: Record<string, Schema.Json> = {}
-
-  for (const [key, item] of Object.entries(value)) {
-    if (!credentialKeyPattern.test(key)) {
-      copy[key] = scrubJson(item)
-    }
-  }
-
-  return copy
+  return isJsonRecord(value)
+    ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, scrubJson(item)]))
+    : value
 }
 
 /**
- * An R2 `PortFixture` with every presigned URL scrubbed (`scrubR2PresignedUrl`) and every
- * credential key removed, for promoting a fixture recorded from a live host by hand. Review the
- * result anyway, and check it with `findR2PortFixtureSecrets`.
+ * An R2 `PortFixture` with every presigned URL scrubbed (`scrubR2PresignedUrl`) in the request,
+ * the response, the note, and the failure message, and every credential field removed
+ * (`redactPortPayload`), for promoting a fixture recorded from a live host by hand. Escaped URLs
+ * are not rewritten: rerun both `scanPortFixtureForSecrets` and `findR2PortFixtureSecrets` on the
+ * result, and review it.
  */
-export const scrubR2PortFixture = (fixture: PortFixture): PortFixture =>
-  fixture.failure === undefined
-    ? { ...fixture, request: scrubJson(fixture.request), response: scrubJson(fixture.response) }
-    : { ...fixture, request: scrubJson(fixture.request) }
+export const scrubR2PortFixture = (fixture: PortFixture): PortFixture => {
+  const scrubbed: PortFixture =
+    fixture.failure === undefined
+      ? {
+          ...fixture,
+          request: scrubJson(redactPortPayload(fixture.request)),
+          response: scrubJson(redactPortPayload(fixture.response))
+        }
+      : {
+          ...fixture,
+          request: scrubJson(redactPortPayload(fixture.request)),
+          failure: { ...fixture.failure, message: scrubR2PresignedUrl(fixture.failure.message) }
+        }
+
+  return fixture.note === undefined
+    ? scrubbed
+    : { ...scrubbed, note: scrubR2PresignedUrl(fixture.note) }
+}

@@ -1,5 +1,5 @@
 /**
- * Shared synthetic shapes of the GitHub fixtures (internal, except the long search query): the
+ * Shared synthetic shapes of the GitHub fixtures (internal): the
  * practice repository, request headers the connector sends, and issue, comment, and label answers
  * shaped like the GitHub REST API. Synthetic data only; never recorded from a live repository.
  */

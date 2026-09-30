@@ -104,7 +104,10 @@ export const R2ConformanceSeeds = Schema.Struct({
   objectKey: Schema.optionalKey(ObjectKey),
   /**
    * Invocation-unique segment of every key a case presigns, reads as absent, or writes
-   * (`yolk-conformance/<runId>/...`). Replay uses the fixed synthetic id of the fixtures.
+   * (`yolk-conformance/<runId>/...`). Replay uses the fixed synthetic id of the fixtures. No R2
+   * runner ships, so a host running the cases live must generate a fresh `run-<hex>` for every
+   * invocation (never from a flag, never reused): a reused id makes the absent-only create answer
+   * `conflict`, so the write cases fail without writing.
    */
   runId: Schema.optionalKey(RunId)
 })
@@ -247,10 +250,15 @@ const failureCode = <A>(exit: Exit.Exit<A, ConnectorFileTransferError>): string 
     : 'defect'
 }
 
-const outcomeText = failureCode
-
-/** The host's `R2ObjectClient`, observed: every call and its outcome are recorded, unchanged. */
-const observingObjects = (calls: Ref.Ref<ReadonlyArray<R2ObservedCall>>) =>
+/**
+ * The host's `R2ObjectClient`, observed: every call and its outcome are recorded, unchanged, and
+ * every put is counted in `started` BEFORE it is delegated, so a host `put` that throws or dies
+ * when invoked still counts as a call that reached the port.
+ */
+const observingObjects = (
+  calls: Ref.Ref<ReadonlyArray<R2ObservedCall>>,
+  started: Ref.Ref<number>
+) =>
   Effect.map(R2ObjectClient, objects =>
     R2ObjectClient.of({
       get: request =>
@@ -262,21 +270,22 @@ const observingObjects = (calls: Ref.Ref<ReadonlyArray<R2ObservedCall>>) =>
                     method: 'get',
                     key: request.key,
                     maxBytes: request.maxBytes,
-                    outcome: outcomeText(exit)
+                    outcome: failureCode(exit)
                   }
                 : {
                     method: 'get',
                     key: request.key,
                     maxBytes: request.maxBytes,
                     expectedEtag: request.expectedEtag,
-                    outcome: outcomeText(exit)
+                    outcome: failureCode(exit)
                   }
 
             return Ref.update(calls, list => [...list, call])
           })
         ),
       put: request =>
-        objects.put(request).pipe(
+        Ref.update(started, count => count + 1).pipe(
+          Effect.andThen(Effect.suspend(() => objects.put(request))),
           Effect.onExit(exit =>
             Ref.update(calls, (list): ReadonlyArray<R2ObservedCall> => [
               ...list,
@@ -284,7 +293,7 @@ const observingObjects = (calls: Ref.Ref<ReadonlyArray<R2ObservedCall>>) =>
                 method: 'put',
                 key: request.key,
                 condition: conditionText(request.condition),
-                outcome: outcomeText(exit)
+                outcome: failureCode(exit)
               }
             ])
           )
@@ -292,14 +301,18 @@ const observingObjects = (calls: Ref.Ref<ReadonlyArray<R2ObservedCall>>) =>
     })
   )
 
-/** Run `effect` over the observed object client; answer its exit and the calls it made. */
+/**
+ * Run `effect` over the observed object client; answer its exit, the calls it made, and how many
+ * puts reached the port.
+ */
 const observedObjects = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<R2ObservedCall>>([])
-    const objects = yield* observingObjects(calls)
+    const started = yield* Ref.make(0)
+    const objects = yield* observingObjects(calls, started)
     const exit = yield* Effect.exit(effect.pipe(Effect.provideService(R2ObjectClient, objects)))
 
-    return { exit, calls: yield* Ref.get(calls) }
+    return { exit, calls: yield* Ref.get(calls), putsStarted: yield* Ref.get(started) }
   })
 
 const getObject = (
@@ -329,20 +342,26 @@ const readObject = (input: { readonly key: string; readonly expectedEtag?: strin
     return { file: exit.value, calls }
   })
 
-const textOf = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
+/** True when `left` and `right` hold exactly the same bytes (no text decoding). */
+const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index])
 
 // Read cases.
 
 /** Longest presigned-URL expiry SigV4 allows, in seconds (7 days). */
 const sigV4MaxExpirySeconds = 604_800
 
-/** A presign call as the case observes it (the credentials only as present or not). */
+/**
+ * A presign call as the case observes it. Credentials are never kept: only whether both were
+ * passed, and whether the answered URL's `X-Amz-Credential` names the access key id passed.
+ */
 type ObservedPresign = {
   readonly endpoint: string
   readonly bucket: string
   readonly key: string
   readonly contentType: string
   readonly credentials: boolean
+  readonly signedWithPassedKey: boolean
 }
 
 const parsedUrl = (text: string): URL | undefined => {
@@ -358,7 +377,7 @@ export const r2PresignUploadUrlCase: R2ConformanceCase = defineConformanceCase({
   title: 'The presigner answers a SigV4 PUT URL for the bucket and key, within the SigV4 expiry',
   safety: 'read',
   docs: "`r2_storage.upload_url` reads integration config `endpoint`, `bucket`, and optional `publicUrl`, resolves the `r2-storage.access_key_id` and `r2-storage.secret_access_key` credentials, strips leading slashes from `filename` to form the object key, and calls the host `R2Presigner.presignPutObject` once with `{ endpoint, accessKeyId, secretAccessKey, bucket, key, contentType }`; it returns the port's `uploadUrl` unchanged, the `key`, and `publicUrl` joined with the key. It reads nothing inside the URL, and the port takes no expiry: the host chooses it.",
-  wire: "For `filename` `/yolk-conformance/<runId>/presign.txt` and `contentType` `text/plain`, the connector calls `presignPutObject` once with the configured endpoint and bucket, the key without its leading slash, `text/plain`, and both credentials (observed at the `R2Presigner` port: the port has only this PUT method, and a query-signed URL does not name its HTTP method, which only a PUT through it would prove). The host answers an `https` `uploadUrl` for that bucket and key on the endpoint's host (path-style `/<bucket>/<key>`, or the bucket as a subdomain; unverified: which style an R2 host signs) carrying `X-Amz-Algorithm=AWS4-HMAC-SHA256`, `X-Amz-Credential`, `X-Amz-Signature`, and `X-Amz-Expires` from 1 to 604800 seconds (the SigV4 maximum), with `X-Amz-SignedHeaders` listing `host` and `content-type` (unverified: that the host signs the content type, so an upload with another type is refused). The connector returns that URL unchanged with the key and `publicUrl` joined with it. Presigning is local signing: nothing is sent to R2.",
+  wire: "For `filename` `/yolk-conformance/<runId>/presign.txt` and `contentType` `text/plain`, the connector calls `presignPutObject` once with the configured endpoint and bucket, the key without its leading slash, `text/plain`, and both credentials (observed at the `R2Presigner` port: the port has only this PUT method, and a query-signed URL does not name its HTTP method, which only a PUT through it would prove). The host answers an `https` `uploadUrl` for that bucket and key on the endpoint's host (path-style `/<bucket>/<key>`, or the bucket as a subdomain; unverified: which style an R2 host signs) carrying `X-Amz-Algorithm=AWS4-HMAC-SHA256`, an `X-Amz-Credential` that starts with the access key id the connector passed (so a host signing with its own or another tenant's keys fails; the case keeps no credential, only that comparison), `X-Amz-Signature`, and `X-Amz-Expires` from 1 to 604800 seconds (the SigV4 maximum), with `X-Amz-SignedHeaders` listing `host` and `content-type` (unverified: that the host signs the content type, so an upload with another type is refused). The connector returns that URL unchanged with the key and `publicUrl` joined with it. Presigning is local signing: nothing is sent to R2.",
   fixtures: r2PresignUploadUrlFixtures.map(fixture => fixture.id),
   run: Effect.gen(function* () {
     const endpoint = yield* requireSeed('endpoint')
@@ -368,20 +387,26 @@ export const r2PresignUploadUrlCase: R2ConformanceCase = defineConformanceCase({
     const calls = yield* Ref.make<ReadonlyArray<ObservedPresign>>([])
     const answers = yield* Ref.make<ReadonlyArray<string>>([])
 
-    // The host's own presigner, observed: the credentials are recorded only as present.
+    // The host's own presigner, observed. No credential is kept: after the host answers, only
+    // whether its URL's `X-Amz-Credential` names the access key id the connector passed.
     const observing = R2Presigner.of({
       presignPutObject: input =>
-        Ref.update(calls, list => [
-          ...list,
-          {
-            endpoint: input.endpoint,
-            bucket: input.bucket,
-            key: input.key,
-            contentType: input.contentType,
-            credentials: input.accessKeyId.length > 0 && input.secretAccessKey.length > 0
-          }
-        ]).pipe(
-          Effect.andThen(presigner.presignPutObject(input)),
+        presigner.presignPutObject(input).pipe(
+          Effect.tap(output =>
+            Ref.update(calls, list => [
+              ...list,
+              {
+                endpoint: input.endpoint,
+                bucket: input.bucket,
+                key: input.key,
+                contentType: input.contentType,
+                credentials: input.accessKeyId.length > 0 && input.secretAccessKey.length > 0,
+                signedWithPassedKey: (
+                  parsedUrl(output.uploadUrl)?.searchParams.get('X-Amz-Credential') ?? ''
+                ).startsWith(`${input.accessKeyId}/`)
+              }
+            ])
+          ),
           Effect.tap(output => Ref.update(answers, list => [...list, output.uploadUrl]))
         )
     })
@@ -400,10 +425,18 @@ export const r2PresignUploadUrlCase: R2ConformanceCase = defineConformanceCase({
       })
     }
 
+    const [call, ...more] = yield* Ref.get(calls)
+
     yield* expectEqual(
-      yield* Ref.get(calls),
-      [{ endpoint, bucket, key, contentType: 'text/plain', credentials: true }],
+      call === undefined || more.length > 0
+        ? null
+        : [call.endpoint, call.bucket, call.key, call.contentType, call.credentials],
+      [endpoint, bucket, key, 'text/plain', true],
       'expected one presignPutObject call with the configured endpoint and bucket, the key without its leading slash, the content type, and both credentials'
+    )
+    yield* expectConformance(
+      call?.signedWithPassedKey === true,
+      'expected the uploadUrl X-Amz-Credential to name the access key id the connector passed'
     )
 
     const [answer] = yield* Ref.get(answers)
@@ -495,7 +528,7 @@ export const r2GetExpectedEtagCase: R2ConformanceCase = defineConformanceCase({
   title: 'A get with a stale expectedEtag fails conflict at the port, never an answer',
   safety: 'read',
   docs: '`getR2Object` passes an optional `expectedEtag` to `R2ObjectClient.get` unchanged (quotes preserved) and requires the answered `etag` to equal it (else `invalid_metadata`); the port contract says a failed condition fails `conflict`, never an empty success.',
-  wire: 'For the seeded `objectKey`, `getR2Object` with `expectedEtag` set to the etag a plain get answered calls `get` with it and answers the same bytes; with a different, well-formed etag the host port itself fails `conflict` (observed at the `R2ObjectClient` port) rather than answering the object or an empty body, as for HTTP `If-Match` answering 412 or a binding `onlyIf` answering no body.',
+  wire: 'For the seeded `objectKey`, `getR2Object` with `expectedEtag` set to the etag a plain get answered calls `get` with it and answers exactly the same bytes (length and every byte, never compared as text); with a different, well-formed etag the host port itself fails `conflict` (observed at the `R2ObjectClient` port) rather than answering the object or an empty body, as for HTTP `If-Match` answering 412 or a binding `onlyIf` answering no body.',
   fixtures: r2GetExpectedEtagFixtures.map(fixture => fixture.id),
   run: Effect.gen(function* () {
     const key = yield* requireSeed('objectKey')
@@ -506,7 +539,7 @@ export const r2GetExpectedEtagCase: R2ConformanceCase = defineConformanceCase({
     yield* expectEqual(
       [
         matching.calls.map(call => [call.expectedEtag ?? null, call.outcome]),
-        textOf(matching.file.bytes) === textOf(plain.file.bytes)
+        sameBytes(matching.file.bytes, plain.file.bytes)
       ],
       [[[etag, 'success']], true],
       'expected a get with the current etag to pass it to the port and answer the same bytes'
@@ -538,7 +571,7 @@ export const r2GetMissingCase: R2ConformanceCase = defineConformanceCase({
     const { exit, calls } = yield* getObject({ key })
 
     yield* expectEqual(
-      [calls.map(call => call.outcome), outcomeText(exit)],
+      [calls.map(call => call.outcome), failureCode(exit)],
       [['not_found'], 'not_found'],
       'expected the port get of a missing key to fail not_found'
     )
@@ -547,29 +580,46 @@ export const r2GetMissingCase: R2ConformanceCase = defineConformanceCase({
 
 // Irreversible write cases.
 
-/** The put classification (see the module doc) and its failure, when not a success. */
+/**
+ * A put's exit as the connector action result `classifyWriteExit` reads. Port failures carry no
+ * HTTP status (the connector keeps only the code), so this supplies the status each outcome
+ * stands for:
+ *
+ * - no put reached the port: the connector refused the input, nothing was written (400);
+ * - the port answered `conflict`: the condition failed, nothing was written (412);
+ * - any other port failure: no status, so it stays ambiguous (the object may have been written).
+ */
+const portPutAsResult = (
+  exit: Exit.Exit<R2ObjectMetadata, ConnectorFileTransferError>,
+  portCalled: boolean
+): ActionResult<R2ObjectMetadata> => {
+  if (Exit.isSuccess(exit)) {
+    return ActionResult.success(exit.value)
+  }
+
+  const code = failureCode(exit)
+
+  if (!portCalled) {
+    return ActionResult.failure({ code, message: 'refused before the port', status: 400 })
+  }
+
+  if (code === 'conflict') {
+    return ActionResult.failure({ code, message: 'condition failed', status: 412 })
+  }
+
+  return ActionResult.failure({ code, message: 'port failure' })
+}
+
+/** The put classification (see `portPutAsResult`) and its failure, when not a success. */
 const classifyPut = (
   actionId: string,
   target: string,
   exit: Exit.Exit<R2ObjectMetadata, ConnectorFileTransferError>,
   portCalled: boolean
 ) => {
-  // Port failures carry no HTTP status, so the case supplies the analogue `classifyWriteExit`
-  // reads: a refusal before the port and a port `conflict` are definitive (no write happened);
-  // any other port failure has no status, so it stays ambiguous.
-  const asAction: Exit.Exit<ActionResult<R2ObjectMetadata>, ConnectorError> = Exit.isSuccess(exit)
-    ? Exit.succeed(ActionResult.success(exit.value))
-    : Exit.succeed(
-        (() => {
-          const code = outcomeText(exit)
-
-          return !portCalled
-            ? ActionResult.failure({ code, message: 'refused before the port', status: 400 })
-            : code === 'conflict'
-              ? ActionResult.failure({ code, message: 'condition failed', status: 412 })
-              : ActionResult.failure({ code, message: 'port failure' })
-        })()
-      )
+  const asAction: Exit.Exit<ActionResult<R2ObjectMetadata>, ConnectorError> = Exit.succeed(
+    portPutAsResult(exit, portCalled)
+  )
 
   const outcome = classifyWriteExit(asAction)
 
@@ -609,13 +659,13 @@ const maskedPut = (
 
     return yield* Effect.uninterruptibleMask(unmask =>
       Effect.gen(function* () {
-        const { exit, calls } = yield* observedObjects(put)
+        const { exit, calls, putsStarted } = yield* observedObjects(put)
 
         const classified = classifyPut(
           actionId,
           `object ${key} in bucket ${bucket}`,
           exit,
-          calls.length > 0
+          putsStarted > 0
         )
 
         if (classified.kind === 'ambiguous') {
@@ -686,9 +736,8 @@ export const r2CreateIfAbsentCase: R2ConformanceCase = defineConformanceCase({
 
     const read = yield* readObject({ key, expectedEtag: metadata.etag })
 
-    yield* expectEqual(
-      textOf(read.file.bytes),
-      first,
+    yield* expectConformance(
+      sameBytes(read.file.bytes, encoded(first)),
       'expected the object to keep the first bytes after the refused second create'
     )
   })
@@ -756,9 +805,8 @@ export const r2UpdateIfMatchCase: R2ConformanceCase = defineConformanceCase({
 
     const read = yield* readObject({ key, expectedEtag: updated.etag })
 
-    yield* expectEqual(
-      textOf(read.file.bytes),
-      replacement,
+    yield* expectConformance(
+      sameBytes(read.file.bytes, encoded(replacement)),
       'expected a get with the new etag to answer the updated bytes'
     )
   })

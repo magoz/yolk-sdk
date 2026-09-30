@@ -16,10 +16,12 @@ import {
   apiKeyPatterns,
   bearerPattern,
   credentialFieldPattern,
-  credentialParamPattern,
   decodeBase64Bytes,
+  hasCredentialParam,
   isCredentialHeaderName
 } from './wire-internal.ts'
+
+export { syntheticCredentialMarker } from './wire-internal.ts'
 
 /** `verified` = recorded from a live service; `unverified` = synthetic placeholder. */
 export const WireFixtureEvidence = Schema.Literals(['verified', 'unverified'])
@@ -221,7 +223,7 @@ const scanHeaders = (
 }
 
 const scanUrl = (url: string, location: string, issues: IssueSink): void => {
-  if (credentialParamPattern.test(url)) {
+  if (hasCredentialParam(url)) {
     issues.push({ kind: 'credential_query_param', location })
   }
 
@@ -280,7 +282,7 @@ const sseDataPayloads = (text: string): ReadonlyArray<string> =>
 const scanPayload = (text: string, location: string, issues: IssueSink): void => {
   scanText(text, location, issues)
 
-  if (credentialParamPattern.test(text)) {
+  if (hasCredentialParam(text)) {
     issues.push({ kind: 'credential_query_param', location })
   }
 
@@ -352,7 +354,8 @@ const uniqueIssues = (issues: IssueSink): ReadonlyArray<FixtureSecretIssue> => {
 
 /**
  * Pure secret scan. Flags credential headers, bearer tokens, common API-key
- * prefixes, JWTs, private keys, credential query/form parameters, and
+ * prefixes, JWTs, private keys, credential query/form parameters (except
+ * documented synthetic placeholders, see `syntheticCredentialMarker`), and
  * credential JSON fields anywhere in the fixture: metadata, URLs, headers,
  * request bodies, response bodies (text or decodable base64), each stream
  * chunk, and the reassembled stream (so a secret split across chunks is still
@@ -512,7 +515,9 @@ export const isPortCredentialKey = (key: string): boolean =>
   portCredentialKeyPattern.test(key) || credentialFieldPattern.test(key)
 
 /**
- * A copy of a port payload without credential fields (see `isPortCredentialKey`), at any depth.
+ * A copy of a port payload without credential fields (see `isPortCredentialKey`: `credential(s)`
+ * plus the credential field names, AWS-style `accessKeyId` / `secretAccessKey` / `sessionToken`
+ * and their snake_case forms included), at any depth.
  * Port requests often carry the resolved credential; record and compare requests only after this.
  */
 export const redactPortPayload = (value: Schema.Json): Schema.Json => {
@@ -535,10 +540,27 @@ export const redactPortPayload = (value: Schema.Json): Schema.Json => {
   return copy
 }
 
+/** A port string: the token patterns plus credential query or form parameters (a signed URL). */
+const scanPortText = (text: string, location: string, issues: IssueSink): void => {
+  scanText(text, location, issues)
+
+  if (hasCredentialParam(text)) {
+    issues.push({ kind: 'credential_query_param', location })
+  }
+}
+
 const scanPortJson = (value: Schema.Json, location: string, issues: IssueSink): void => {
   scanJson(value, location, issues)
 
   const visit = (item: Schema.Json, itemLocation: string): void => {
+    if (Predicate.isString(item)) {
+      if (hasCredentialParam(item)) {
+        issues.push({ kind: 'credential_query_param', location: itemLocation })
+      }
+
+      return
+    }
+
     if (Array.isArray(item)) {
       item.forEach((entry, index) => visit(entry, `${itemLocation}[${index}]`))
 
@@ -564,8 +586,12 @@ const scanPortJson = (value: Schema.Json, location: string, issues: IssueSink): 
 /**
  * Pure secret scan of a `PortFixture`: the same token patterns and credential JSON fields as
  * `scanFixtureForSecrets`, plus any non-null `credential` / `credentials` field (port requests must
- * be recorded through `redactPortPayload`). Covers metadata, the request, the response, and the
- * failure. Issues name locations only. Returns an empty array when clean.
+ * be recorded through `redactPortPayload`), plus credential query or form parameters inside every
+ * JSON string value, `note`, and `failure.message` (a signed URL a port answered, such as an S3
+ * presigned URL's `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token`), except
+ * documented synthetic placeholders (`syntheticCredentialMarker`). Parameters escaped inside the
+ * string (`&amp;`, percent-encoded names) are not found. Covers metadata, the request, the
+ * response, and the failure. Issues name locations only. Returns an empty array when clean.
  */
 export const scanPortFixtureForSecrets = (
   fixture: PortFixture
@@ -581,14 +607,14 @@ export const scanPortFixtureForSecrets = (
   }
 
   if (fixture.note !== undefined) {
-    scanText(fixture.note, 'note', issues)
+    scanPortText(fixture.note, 'note', issues)
   }
 
   scanPortJson(fixture.request, 'request', issues)
 
   if (isPortFailureFixture(fixture)) {
     scanText(fixture.failure.code, 'failure.code', issues)
-    scanText(fixture.failure.message, 'failure.message', issues)
+    scanPortText(fixture.failure.message, 'failure.message', issues)
   } else {
     scanPortJson(fixture.response, 'response', issues)
   }

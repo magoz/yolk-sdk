@@ -45,7 +45,8 @@ import {
 
 const now = new Date('2026-09-30T12:00:00.000Z')
 
-const syntheticAccessKey = 'synthetic-r2-access-key-id'
+/** Replay signs with the placeholder key id the committed presigned URLs name. */
+const syntheticAccessKey = r2ConformanceSyntheticAccessKeyId
 
 const syntheticSecret = 'synthetic-r2-secret-access-key'
 
@@ -430,6 +431,11 @@ describe('R2 conformance drills (one per case)', () => {
       "expected uploadUrl to address the bucket and key over https on the endpoint's host"
     ],
     [
+      'another access key id (the host signed with its own keys)',
+      withParam('X-Amz-Credential', 'yolk-synthetic-other-key-id/20260930/auto/s3/aws4_request'),
+      'expected the uploadUrl X-Amz-Credential to name the access key id the connector passed'
+    ],
+    [
       'a zero expiry',
       withParam('X-Amz-Expires', '0'),
       'expected X-Amz-Expires from 1 to 604800 seconds'
@@ -443,6 +449,40 @@ describe('R2 conformance drills (one per case)', () => {
       })
     )
   }
+
+  it.effect('bytes that differ but decode to the same text fail exactly the etag case', () =>
+    Effect.gen(function* () {
+      // [0xff, 0x00] and [0xfe, 0x00] both decode to the same replacement text: compare bytes.
+      const object = (bytes: ReadonlyArray<number>) => ({
+        etag: '"a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5"',
+        size: bytes.length,
+        bodyBase64: btoa(String.fromCharCode(...bytes))
+      })
+
+      const answers = new Map<string, ReadonlyArray<number>>([
+        ['r2.objects.get-expected-etag.plain.synthetic', [0xff, 0x00]],
+        ['r2.objects.get-expected-etag.current.synthetic', [0xfe, 0x00]]
+      ])
+
+      const tampered = r2ConformanceFixtures.map(fixture => {
+        const bytes = answers.get(fixture.id)
+
+        return bytes === undefined ? fixture : answering(object(bytes))(fixture)
+      })
+
+      expect(new TextDecoder().decode(new Uint8Array([0xff, 0x00]))).toBe(
+        new TextDecoder().decode(new Uint8Array([0xfe, 0x00]))
+      )
+      expect(yield* suiteFailures(tampered)).toEqual([
+        {
+          id: 'r2.objects.get-expected-etag',
+          failure: mismatch(
+            'expected a get with the current etag to pass it to the port and answer the same bytes'
+          )
+        }
+      ])
+    })
+  )
 
   it.effect('a virtual-hosted presigned URL (the bucket as a subdomain) passes', () =>
     Effect.gen(function* () {
@@ -602,6 +642,42 @@ describe('R2 conformance write classification', () => {
     })
   )
 
+  it.effect('a host put that dies when invoked still reached the port: ambiguous', () =>
+    Effect.gen(function* () {
+      const replay = makeR2ReplayBackend(createFixtures)
+      const ports = r2PortsFromBackend(replay.backend)
+
+      const exit = yield* r2CreateIfAbsentCase.run.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(R2Storage.R2Presigner, R2Storage.R2Presigner.of(ports.presigner)),
+            Layer.succeed(
+              R2Storage.R2ObjectClient,
+              R2Storage.R2ObjectClient.of({
+                get: ports.objects.get,
+                put: () => {
+                  throw new Error('host adapter bug')
+                }
+              })
+            ),
+            credentialLayer,
+            Layer.succeed(R2ConformanceConfig, r2ConformanceFixtureSeeds)
+          )
+        ),
+        Effect.exit
+      )
+
+      if (Exit.isSuccess(exit)) {
+        return expect.fail('expected the create case to fail')
+      }
+
+      expect(Cause.squash(exit.cause)).toMatchObject({
+        _tag: 'R2ConformanceActionFailed',
+        message: `createR2Object failed: defect; write outcome unknown: ${createTarget} may have been written; check it by hand (the connector cannot delete it)`
+      })
+    })
+  )
+
   it('requires the run- prefix in every run id and valid bucket seeds', () => {
     const decode = Schema.decodeUnknownOption(R2ConformanceSeedsSchema)
 
@@ -635,8 +711,10 @@ describe('R2 presigned URL guard', () => {
 
   const livePresign = answering({ uploadUrl: liveUrl })(fixtureById(presignId))
 
-  it('refuses a live signature, credential, or session token, which the generic scan misses', () => {
-    expect(scanPortFixtureForSecrets(livePresign)).toEqual([])
+  it('refuses a live signature, credential, or session token in the shared and the R2 scan', () => {
+    expect(scanPortFixtureForSecrets(livePresign)).toEqual([
+      { kind: 'credential_query_param', location: 'response.uploadUrl' }
+    ])
     expect(findR2PortFixtureSecrets(livePresign)).toEqual([
       'response.uploadUrl: a live X-Amz-Credential',
       'response.uploadUrl: a live X-Amz-Signature',
@@ -649,7 +727,9 @@ describe('R2 presigned URL guard', () => {
         'X-Amz-Credential',
         '0123456789abcdef0123456789abcdef/20260930/auto/s3/aws4_request',
         'a live X-Amz-Credential'
-      ]
+      ],
+      // A shared-marker value that is not the exact R2 placeholder is still refused.
+      ['X-Amz-Signature', 'yolk-synthetic-other', 'a live X-Amz-Signature']
     ] as const) {
       const fixture = answering({ uploadUrl: withParam(name, value) })(fixtureById(presignId))
 
@@ -658,32 +738,45 @@ describe('R2 presigned URL guard', () => {
     }
   })
 
-  it('finds a live signature percent-encoded inside any string, and credential keys', () => {
-    const missing = fixtureById('r2.objects.get-missing-not-found.get.synthetic')
+  const missing = fixtureById('r2.objects.get-missing-not-found.get.synthetic')
 
-    const encoded: PortFixture = {
-      id: missing.id,
-      port: missing.port,
-      method: missing.method,
-      request: missing.request,
-      failure: {
-        kind: 'error',
-        code: 'not_found',
-        message: `redirected from ${encodeURIComponent(withParam('X-Amz-Signature', liveSignature))}`
-      }
-    }
+  const failingWith = (message: string): PortFixture => ({
+    id: missing.id,
+    port: missing.port,
+    method: missing.method,
+    request: missing.request,
+    failure: { kind: 'error', code: 'not_found', message }
+  })
 
+  it('finds escaped and percent-encoded parameters the shared scan cannot see', () => {
+    // An S3 XML error echoing the request URL, `&` escaped as `&amp;`.
+    const escaped = failingWith(
+      '<Error><Code>AccessDenied</Code><Url>https://synthetic-account.r2.example.test/b/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Credential=0123456789abcdef0123456789abcdef%2F20260930%2Fauto%2Fs3%2Faws4_request&amp;X-Amz-Date=20260930T120000Z</Url></Error>'
+    )
+
+    expect(scanPortFixtureForSecrets(escaped)).toEqual([])
+    expect(findR2PortFixtureSecrets(escaped)).toEqual(['failure.message: a live X-Amz-Credential'])
+
+    const encoded = failingWith(
+      `redirected from ${encodeURIComponent(withParam('X-Amz-Signature', liveSignature))}`
+    )
+
+    expect(scanPortFixtureForSecrets(encoded)).toEqual([])
     expect(findR2PortFixtureSecrets(encoded)).toEqual(['failure.message: a live X-Amz-Signature'])
+  })
 
+  it('leaves credential fields to the shared scan and redaction', () => {
     const withKeys: PortFixture = {
       ...fixtureById(presignId),
-      request: { accessKeyId: syntheticAccessKey, secretAccessKey: syntheticSecret }
+      request: { accessKeyId: 'live-key-id', secretAccessKey: 'live-secret', sessionToken: 'x' }
     }
 
-    expect(findR2PortFixtureSecrets(withKeys)).toEqual([
-      'request.accessKeyId: a credential',
-      'request.secretAccessKey: a credential'
+    expect(scanPortFixtureForSecrets(withKeys)).toEqual([
+      { kind: 'credential_field', location: 'request.accessKeyId' },
+      { kind: 'credential_field', location: 'request.secretAccessKey' },
+      { kind: 'credential_field', location: 'request.sessionToken' }
     ])
+    expect(scrubR2PortFixture(withKeys).request).toEqual({})
   })
 
   it.effect('scrubs a live presigned URL to the placeholders, and the case still passes', () =>
@@ -691,6 +784,7 @@ describe('R2 presigned URL guard', () => {
       const scrubbed = scrubR2PortFixture(livePresign)
 
       expect(findR2PortFixtureSecrets(scrubbed)).toEqual([])
+      expect(scanPortFixtureForSecrets(scrubbed)).toEqual([])
       expect(JSON.stringify(scrubbed)).not.toContain(liveSignature)
       expect(JSON.stringify(scrubbed)).not.toContain('0123456789abcdef0123456789abcdef')
 
@@ -705,6 +799,22 @@ describe('R2 presigned URL guard', () => {
       expect(yield* suiteFailures(withFixture(presignId, () => scrubbed))).toEqual([])
     })
   )
+
+  it('scrubs presigned URLs embedded in failure messages and notes, but not escaped ones', () => {
+    const embedded = scrubR2PortFixture({
+      ...failingWith(`redirected to ${liveUrl} (then failed)`),
+      note: `recorded from ${liveUrl}`
+    })
+
+    expect(findR2PortFixtureSecrets(embedded)).toEqual([])
+    expect(scanPortFixtureForSecrets(embedded)).toEqual([])
+    expect(embedded.failure?.message).toMatch(/^redirected to https:\/\/.* \(then failed\)$/)
+
+    // Percent-encoded URLs are left alone: both scans must be rerun after scrubbing.
+    const encoded = scrubR2PortFixture(failingWith(`from ${encodeURIComponent(liveUrl)}`))
+
+    expect(findR2PortFixtureSecrets(encoded)).not.toEqual([])
+  })
 
   it('leaves text without presigned-URL parameters unchanged', () => {
     expect(scrubR2PresignedUrl('https://files.example.test/a.txt')).toBe(

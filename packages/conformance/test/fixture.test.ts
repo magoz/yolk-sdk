@@ -367,6 +367,33 @@ describe('scanFixtureForSecrets', () => {
     noSecretValues(issues)
   })
 
+  it('accepts only documented synthetic placeholders in credential parameters', () => {
+    const url = (query: string) => ({
+      request: { method: 'PUT', url: `https://storage.example.test/bucket/key.txt?${query}` },
+      response: { status: 200, headers: {}, body: '' }
+    })
+
+    expect(
+      scanFixtureForSecrets(
+        withExchange(
+          url(
+            'X-Amz-Credential=yolk-synthetic-key-id%2F20260930%2Fauto%2Fs3%2Faws4_request&X-Amz-Signature=yolk-synthetic-signature'
+          )
+        )
+      )
+    ).toEqual([])
+
+    for (const query of [
+      'X-Amz-Signature=synthetic-signature',
+      'X-Amz-Signature=yolk-synthetic-signature&X-Amz-Credential=LIVEKEYID%2F20260930',
+      'token=Yolk-Synthetic-but-capitalized'
+    ]) {
+      expect(scanFixtureForSecrets(withExchange(url(query)))).toEqual([
+        { kind: 'credential_query_param', location: 'exchanges[0].request.url' }
+      ])
+    }
+  })
+
   it('scans fixture metadata strings with the token patterns', () => {
     const issues = scanFixtureForSecrets({
       ...cleanFixture,
