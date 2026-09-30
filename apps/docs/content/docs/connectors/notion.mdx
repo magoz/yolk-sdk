@@ -52,7 +52,7 @@ so a hanging create delays an interruption until it answers. Any response showin
 so an unverified readback claim that turns out false fails the claim, not the cleanup. Otherwise
 the cleanup trashes the page (also after a failed assertion or a fiber interruption) and checks that
 `notion.get_page` reports `archived: true`. A failed cleanup fails the case with `NotionConformanceRestoreFailed`, and an
-ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) fails with
+ambiguous create (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry manual-recovery
 advice. Trashed pages stay restorable in the workspace trash until they are deleted from there.
 
