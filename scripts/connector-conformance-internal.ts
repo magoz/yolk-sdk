@@ -4,7 +4,9 @@
  * `run-telegram-conformance.ts`, `run-github-conformance.ts`, `run-google-conformance.ts`; not a
  * CLI). Each runner supplies a
  * `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential, and ports)
- * and gets the same behaviour as the Microsoft runner, plus the owner-approval and CI gates:
+ * and gets the same behaviour as the Microsoft runner, plus the owner-approval and CI gates. The
+ * Fortnox runner (`run-fortnox-conformance.ts`) keeps its own module and reuses the gate messages,
+ * `physicallyContained`, `nodeRecordingWriter`, and `runInterruptibly` from here:
  *
  * - DRY RUN by default: prints every case id, its safety, whether it would run under the chosen
  *   flags, and the seeds it still needs; no network call and no credential read.
@@ -1956,7 +1958,8 @@ export type CliIo = {
   readonly forceExit: (code: number) => void
 }
 
-const processSignals: SignalSource = {
+/** The process's own SIGINT/SIGTERM (also used by the Fortnox and Microsoft runners). */
+export const processSignals: SignalSource = {
   on: (signal, handler) => {
     process.on(signal, handler)
   },
@@ -1965,7 +1968,8 @@ const processSignals: SignalSource = {
   }
 }
 
-const processCliIo: CliIo = {
+/** Console output and exit code of the running process. */
+export const processCliIo: CliIo = {
   error: message => console.error(message),
   setExitCode: code => {
     process.exitCode = code

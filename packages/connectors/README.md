@@ -712,7 +712,9 @@ live unless its exact id is allowed. Neither the rejection case nor the email se
 
 `fortnoxConformanceFixtures` are synthetic placeholders (`evidence: 'unverified'`) that replay with
 `fortnoxConformanceFixtureSeeds`. `pnpm conformance:fortnox` in this repository dry-runs by default;
-its `--live --account <label>` mode is for owners running a practice account by hand. `--record`
+its `--live --owner-approved --account <label>` mode (refused whenever `CI` is non-empty) is for
+owners running a practice account by hand, and a first Ctrl-C interrupts the run so a running write
+case still restores. `--record`
 stages verified recordings all or nothing in a new gitignored run directory,
 `.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`, and never writes committed
 sources. Promotion is manual: scrub, copy into `src/fortnox/conformance/`, and update the tests in
