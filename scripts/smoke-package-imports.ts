@@ -25,6 +25,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './providers/anthropic/claude',
       './providers/anthropic/claude-provider',
       './providers/anthropic/usage',
+      './providers/anthropic/conformance',
       './providers/openai',
       './providers/openai/codex',
       './providers/openai/conformance',
@@ -117,7 +118,7 @@ const packages: ReadonlyArray<PackageManifest> = [
   },
   {
     name: '@yolk-sdk/emulators',
-    exports: ['./router', './gateway', './openai', './node']
+    exports: ['./router', './gateway', './openai', './anthropic', './node']
   }
 ]
 
@@ -244,6 +245,8 @@ const main = async () => {
           'if (gatewayFixtures.vercelAiGatewayConformanceCases.length !== 4 || !gatewayFixtures.vercelAiGatewayConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Gateway conformance cases")',
           'const openAiConformance = await import("@yolk-sdk/agent/providers/openai/conformance")',
           'if (openAiConformance.openAiConformanceFixtures.length !== 4 || openAiConformance.openAiConformanceCases.length !== 4 || !openAiConformance.openAiConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing OpenAI conformance cases/fixtures")',
+          'const anthropicConformance = await import("@yolk-sdk/agent/providers/anthropic/conformance")',
+          'if (anthropicConformance.anthropicConformanceFixtures.length !== 5 || anthropicConformance.anthropicConformanceCases.length !== 5 || !anthropicConformance.anthropicConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Anthropic conformance cases/fixtures")',
           'const connectorBridges = await import("@yolk-sdk/connectors/conformance")',
           'for (const symbol of ["connectorHttpClientFromEffectHttpClientLayer", "connectorBinaryHttpClientFromEffectHttpClientLayer", "connectorBinaryWriteHttpClientFromEffectHttpClientLayer", "connectorHttpClientsFromEffectHttpClientLayer"]) { if (connectorBridges[symbol] === undefined) throw new Error(`Missing connector conformance export: ${symbol}`) }',
           'if (typeof connectorBridges.staticCredentialResolverLayer !== "function") throw new Error("Missing staticCredentialResolverLayer")',
@@ -264,6 +267,9 @@ const main = async () => {
           'const openAiEmulator = (await import("@yolk-sdk/emulators/openai")).makeOpenAiEmulator()',
           'const emulatedOpenAi = await openAiEmulator.fetch(new Request("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { authorization: "Bearer synthetic", "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-4.1-nano", messages: [], stream: false, max_completion_tokens: 16 }) }))',
           'if (emulatedOpenAi.status !== 200 || emulatedOpenAi.headers.get("x-emulator-evidence") !== "unverified" || (await emulatedOpenAi.json()).object !== "chat.completion" || openAiEmulator.ledger.entries()[0]?.maxCompletionTokens !== 16) throw new Error("OpenAI emulator smoke failed")',
+          'const anthropicEmulator = (await import("@yolk-sdk/emulators/anthropic")).makeAnthropicEmulator()',
+          'const emulatedAnthropic = await anthropicEmulator.fetch(new Request("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": "synthetic", "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 16, messages: [], stream: false }) }))',
+          'if (emulatedAnthropic.status !== 200 || emulatedAnthropic.headers.get("x-emulator-evidence") !== "unverified" || (await emulatedAnthropic.json()).type !== "message" || anthropicEmulator.ledger.entries()[0]?.credentialHeader !== "x-api-key") throw new Error("Anthropic emulator smoke failed")',
           'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")'
         ].join('\n')
     )

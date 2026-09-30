@@ -84,6 +84,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './providers/anthropic/claude',
       './providers/anthropic/claude-provider',
       './providers/anthropic/usage',
+      './providers/anthropic/conformance',
       './providers/openai',
       './providers/openai/codex',
       './providers/openai/conformance',
@@ -210,7 +211,14 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/emulators',
     packageName: '@yolk-sdk/emulators',
-    expectedExports: ['./package.json', './router', './gateway', './openai', './node'],
+    expectedExports: [
+      './package.json',
+      './router',
+      './gateway',
+      './openai',
+      './anthropic',
+      './node'
+    ],
     root: 'none'
   }
 ]

@@ -131,6 +131,10 @@
       "types": "./src/providers/anthropic/claude-provider.ts",
       "default": "./src/providers/anthropic/claude-provider.ts"
     },
+    "./providers/anthropic/conformance": {
+      "types": "./src/providers/anthropic/conformance/index.ts",
+      "default": "./src/providers/anthropic/conformance/index.ts"
+    },
     "./providers/xai": {
       "types": "./src/providers/xai/index.ts",
       "default": "./src/providers/xai/index.ts"
@@ -309,6 +313,11 @@
         "types": "./dist/providers/anthropic/claude-provider.d.mts",
         "import": "./dist/providers/anthropic/claude-provider.mjs",
         "default": "./dist/providers/anthropic/claude-provider.mjs"
+      },
+      "./providers/anthropic/conformance": {
+        "types": "./dist/providers/anthropic/conformance/index.d.mts",
+        "import": "./dist/providers/anthropic/conformance/index.mjs",
+        "default": "./dist/providers/anthropic/conformance/index.mjs"
       },
       "./providers/xai": {
         "types": "./dist/providers/xai/index.d.mts",

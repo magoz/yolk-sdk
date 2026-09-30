@@ -131,6 +131,47 @@ missing bearer credential gets 401 `invalid_api_key` (the credential is never ch
 The ledger records `max_completion_tokens` as `maxCompletionTokens`. Reasoning models are not
 emulated for `/openai` yet: scripted turns reject reasoning fields.
 
+## Anthropic emulator
+
+`@yolk-sdk/emulators/anthropic`
+
+| Export                                      | Purpose                                                                            |
+| ------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `makeAnthropicEmulator(options?)`           | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/messages`       |
+| `anthropicEmulatorRoutes`                   | Route evidence manifest linked to the Anthropic Messages conformance cases         |
+| `AnthropicFault`, `AnthropicScriptedTurn`   | Schemas and types for wire faults (including a mid-stream `error` event) and turns |
+| `AnthropicLedgerEntry`, `AnthropicCoverage` | Ledger entry and coverage report types                                             |
+| `anthropicEmulatorDefaultModels`            | Synthetic-safe default model ids (`claude-haiku-4-5`, `claude-sonnet-4-5`)         |
+| `AnthropicEmulatorInputInvalid`             | Thrown by `faults.add` / `script.enqueue` for invalid input                        |
+
+It stands in for Anthropic Messages at `https://api.anthropic.com`. `stream: true` streams the
+events in the order the API sends them: `message_start` (input usage), then per content block
+`content_block_start`, its deltas, and `content_block_stop` (a `ping` follows the first block
+start), then `message_delta` (`stop_reason` and output usage) and `message_stop`; `stream: false`
+returns one `message` JSON body. A request with `thinking` enabled (`enabled` or `adaptive`) gets a
+`thinking` block (`thinking_delta` events, then a `signature_delta`) before the text. A request
+with `tools` gets one `tool_use` block whose input is synthesized from the tool's `input_schema`
+and streamed as `input_json_delta` fragments, stopping with `tool_use`; `tool_choice: { type:
+'tool', name }` picks that tool and `tool_choice: { type: 'none' }` answers with text. An answer
+that would not fit `max_tokens` is cut and stops with `max_tokens`.
+
+Errors use the Anthropic envelope `{ type: 'error', error: { type, message } }`: an unknown model
+gets 404 `not_found_error`, a missing or non-positive `max_tokens` gets 400
+`invalid_request_error`, and a request with neither a non-empty `x-api-key` (native API keys) nor
+an `Authorization: Bearer` credential (Claude OAuth) gets 401 `authentication_error`. Neither
+credential is checked or stored; the ledger records which header carried it
+(`credentialHeader`), `anthropic-version`, `anthropic-beta`, `max_tokens` (`maxTokens`),
+`thinking`, `tool_choice`, and tool names.
+
+Scripted turns are messages (`thinking`, `text`, `toolUses` with `inputFragments`, `order`,
+`usage`, `stopReason`; `usage: null` drops usage, `order: 'text-first'` sends thinking after the
+text) or errors. Faults are `status` (the default body is the envelope for the status, for
+example `rate_limit_error` for 429 and `overloaded_error` for 529), `error-after-chunks`,
+`truncate-after-chunks` (for example before `message_stop`), and `error-event-after-chunks`
+(N events, then an `event: error` with `overloaded_error` by default; streamed responses only,
+and only before `message_stop`). Faults, the ledger, and the control plane are shared with the
+Chat Completions emulators.
+
 ## Node server
 
 `@yolk-sdk/emulators/node`
@@ -150,5 +191,5 @@ Emulated routes carry evidence: `verified` routes follow a live observation date
 `observedAt`; `unverified` routes follow synthetic placeholders and tag every response with
 `x-emulator-evidence: unverified`. The Gateway conformance fixtures are verified live recordings,
 but the Gateway route is still unverified: it follows the earlier synthetic wire shapes and stays
-unverified until the emulator is aligned with the recordings (a tracked follow-up). The OpenAI route
-is unverified, like the synthetic fixtures it follows.
+unverified until the emulator is aligned with the recordings (a tracked follow-up). The OpenAI and
+Anthropic routes are unverified, like the synthetic fixtures they follow.

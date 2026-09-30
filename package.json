@@ -45,6 +45,7 @@
     "changeset:canary:exit": "changeset pre exit",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "codex-ws:smoke": "tsx scripts/codex-ws-smoke.ts",
+    "conformance:anthropic": "tsx scripts/record-anthropic-fixtures.ts",
     "conformance:fortnox": "tsx scripts/run-fortnox-conformance.ts",
     "conformance:gateway": "tsx scripts/record-gateway-fixtures.ts",
     "conformance:openai": "tsx scripts/record-openai-fixtures.ts",
