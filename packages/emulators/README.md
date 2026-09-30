@@ -5,8 +5,9 @@
 
 Emulators for outside services, for tests and local development. A route table sends an Effect
 `HttpClient` to an emulator instead of the real service. Two emulators speak the OpenAI-compatible
-Chat Completions wire: the Vercel AI Gateway and OpenAI itself. A third emulates Anthropic Messages.
-Emulators never import other `@yolk-sdk/*` code:
+Chat Completions wire: the Vercel AI Gateway and OpenAI itself. A third emulates Anthropic Messages,
+and two more speak the OpenAI Responses wire of the subscription providers: the ChatGPT Codex
+endpoint and the xAI Grok CLI proxy. Emulators never import other `@yolk-sdk/*` code:
 their wire shapes follow recorded conformance fixtures, and each emulated route names the
 conformance cases behind it.
 
@@ -28,6 +29,8 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/gateway`   | `makeGatewayEmulator`, `gatewayEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)       |
 | `@yolk-sdk/emulators/openai`    | `makeOpenAiEmulator`, `openAiEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)         |
 | `@yolk-sdk/emulators/anthropic` | `makeAnthropicEmulator`, `anthropicEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)   |
+| `@yolk-sdk/emulators/codex`     | `makeCodexEmulator`, `codexEmulatorRoutes`, fault and scripted-turn schemas (ChatGPT Codex Responses)       |
+| `@yolk-sdk/emulators/xai`       | `makeXAiGrokEmulator`, `xAiGrokEmulatorRoutes`, fault and scripted-turn schemas (Grok CLI proxy Responses)  |
 | `@yolk-sdk/emulators/node`      | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
 
 ## Routing
@@ -273,9 +276,85 @@ const httpLayer = InProcessHttpClient.layer([
 `anthropicEmulatorRoutes` links the route to the Anthropic Messages conformance cases in
 `@yolk-sdk/agent/providers/anthropic/conformance`.
 
+## Responses emulators (Codex, xAI Grok)
+
+`makeCodexEmulator(options?)` (`@yolk-sdk/emulators/codex`) and `makeXAiGrokEmulator(options?)`
+(`@yolk-sdk/emulators/xai`) return the same `{ fetch, ledger, reset, faults, script, coverage }`
+shape for the OpenAI Responses wire the subscription providers use:
+
+| Subpath  | Origin and route                                           | Default models           |
+| -------- | ---------------------------------------------------------- | ------------------------ |
+| `/codex` | `https://chatgpt.com`, `POST /backend-api/codex/responses` | `gpt-5.4`, `gpt-5.5`     |
+| `/xai`   | `https://cli-chat-proxy.grok.com`, `POST /v1/responses`    | `grok-build`, `grok-4.6` |
+
+Both share one internal Responses core on the emulator kernel, so faults, the ledger, the control
+plane, evidence tagging, and route binding behave as for the other emulators. The Responses wire:
+
+- Requests carry `model`, an `input` string or array (400 without one), `instructions`, `tools`,
+  `tool_choice`, `reasoning`, `stream`, `store`, and `max_output_tokens`.
+- `stream: true` streams server-sent events with typed `event:` names and a `sequence_number`, in
+  the API's order: `response.created`, `response.in_progress`, then per output item
+  `response.output_item.added`, its parts and deltas, and `response.output_item.done`, then
+  `response.completed` with the full `response` (output items and `usage`). `stream: false`
+  returns one completed `response` JSON body.
+- A request whose `reasoning` asks for a `summary` gets a `reasoning` item first
+  (`response.reasoning_summary_part.added`, `response.reasoning_summary_text.delta` / `.done`,
+  `response.reasoning_summary_part.done`). Answers are a `message` item
+  (`response.content_part.added`, `response.output_text.delta` / `.done`,
+  `response.content_part.done`).
+- A request with function `tools` gets one `function_call` item whose arguments are synthesized
+  from the tool's JSON Schema and streamed as `response.function_call_arguments.delta` fragments,
+  then `response.function_call_arguments.done`. `tool_choice: { type: 'function', name }` picks
+  that tool (otherwise the first); `tool_choice: 'none'` answers with text.
+- Errors use the envelope `{ error: { message, type, param, code } }`; an unknown model gets 400
+  `model_not_found`, and a request without `Authorization: Bearer <non-empty>` gets 401
+  `invalid_api_key`. The bearer is never checked or stored.
+- `/codex`: `max_output_tokens` gets 400 `unsupported_parameter` (the Codex endpoint takes no output
+  limit); the ledger records the `originator` header. `ChatGPT-Account-Id` is neither required nor
+  recorded.
+- `/xai`: after the bearer, a missing `X-XAI-Token-Auth` gets 401, a missing
+  `x-grok-client-version` gets 426 (the proxy version-gates requests), and a missing
+  `x-grok-model-override` gets 400. The ledger records the client version and model override, never
+  the token-auth value. `max_output_tokens` must be a positive integer (or 400) and is recorded as
+  `maxOutputTokens`, not enforced.
+- Not enforced (unverified leniency): `store: false`, `stream: true`, `instructions`, that the model
+  override matches `model`, the client version value, and output limits.
+
+`script.enqueue(turn)` queues a response `{ reasoning?, text?, functionCalls?, order?, usage?,
+format? }` (each function call is `{ name, argumentFragments, callId? }`; an item is sent only when
+its field is present; `usage: null` drops usage from `response.completed`; `order: 'text-first'`
+sends reasoning after the text; `format: 'json'` answers a JSON body even for `stream: true`, as
+the JSON fallback the providers accept) or an error `{ error: { status, body, headers? } }`.
+
+`faults.add(fault)` takes the shared `status`, `error-after-chunks`, and `truncate-after-chunks`
+kinds (for example 429 with `retry-after`, or truncation before `response.completed`), plus
+`error-event-after-chunks`: send N events, then one `error` event (default) or, with
+`event: 'response.failed'`, a `response.failed` event, carrying `error: { code, message }`
+(default `server_error`), and close without `response.completed`. It applies to streamed responses
+only and must come before `response.completed`; otherwise the request answers 500 and the fault is
+kept. Invalid faults or turns throw `CodexEmulatorInputInvalid` / `XAiGrokEmulatorInputInvalid`.
+
+```ts
+import { makeXAiGrokEmulator } from '@yolk-sdk/emulators/xai'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const grok = makeXAiGrokEmulator()
+
+grok.faults.add({ kind: 'truncate-after-chunks', chunks: 5, count: 1 })
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://cli-chat-proxy.grok.com', grok.fetch)
+])
+```
+
+`codexEmulatorRoutes` and `xAiGrokEmulatorRoutes` link each route to the Responses conformance
+cases in `@yolk-sdk/agent/providers/openai/conformance` (Codex) and
+`@yolk-sdk/agent/providers/xai/conformance` (Grok). OpenCode Go Responses are not emulated yet.
+
 ## Evidence
 
-`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, and `anthropicEmulatorRoutes` list every emulated route with `method`, `path`,
+`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`, and
+`xAiGrokEmulatorRoutes` list every emulated route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route carries `x-emulator-evidence: unverified`.
 The Gateway route is `verified` (`observedAt: '2026-09-30'`): its wire shapes are checked against

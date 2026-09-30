@@ -11,10 +11,13 @@ Effect `HttpClient` routing that points code at them.
 | `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`          | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                 |
 | `@yolk-sdk/emulators/openai`    | `src/openai.ts`           | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                          |
 | `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`        | Anthropic Messages fetch-handler emulator and its manifest                                                                               |
+| `@yolk-sdk/emulators/codex`     | `src/codex.ts`            | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
+| `@yolk-sdk/emulators/xai`       | `src/xai.ts`              | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
 | `@yolk-sdk/emulators/node`      | `src/node.ts`             | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
 | (internal)                      | `src/emulator-kernel.ts`  | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
 | (internal)                      | `src/chat-completions.ts` | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
 | (internal)                      | `src/messages.ts`         | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
+| (internal)                      | `src/responses.ts`        | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai`                                                            |
 | (internal)                      | `src/emulator-http.ts`    | Fault/scripted-error status and header validators                                                                                        |
 | (internal)                      | `src/route-evidence.ts`   | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
 
@@ -26,8 +29,8 @@ There is no root export or barrel.
   (`scripts/check-package-boundaries.ts` enforces this). Tests may import `@yolk-sdk/agent` and
   `@yolk-sdk/conformance` (workspace devDependencies).
 - `node:` builtins are allowed only in `src/node.ts` (also enforced).
-- `router` is Effect code; `gateway`, `openai`, and `anthropic` are plain Web fetch handlers (no Effect runtime
-  needed, no Node builtins); `node` is the only Node boundary.
+- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, and `xai` are plain Web fetch
+  handlers (no Effect runtime needed, no Node builtins); `node` is the only Node boundary.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
 - Does not use `@emulators/core` yet; stateful connector emulators may later.
@@ -53,7 +56,8 @@ There is no root export or barrel.
   the emulator's response shapes with them; the OpenAI and Anthropic ones are synthetic), copied as
   data,
   never imported. Each emulated route lists the conformance case ids it follows in its manifest
-  (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`
+  (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`,
+  `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`
   (`src/route-evidence.ts`) pairs them at construction and throws `EmulatorRouteUnmapped` for a
   manifest route without a handler or a handler without a manifest route.
 - Evidence policy: unknown emulated API routes fail closed (404 JSON, written to the ledger;
@@ -103,9 +107,31 @@ There is no root export or barrel.
   pass here. Its extra fault `error-event-after-chunks` (a mid-stream
   `event: error`) applies only to streamed responses and before `message_stop`; otherwise it
   answers 500 and is kept (never a silent no-op).
+- `/codex` and `/xai` use `src/responses.ts`: Responses request parsing (`model`, an `input` string
+  or array or 400, `instructions`, `tools`, `tool_choice`, `reasoning`, `stream`, `store`,
+  `max_output_tokens`), SSE with typed `event:` names and `sequence_number`s in the real order
+  (`response.created`, `response.in_progress`; per output item `response.output_item.added`, its
+  parts and deltas, `response.output_item.done`; `response.completed` with the whole `response` and
+  `usage`), `reasoning` (summary part events, only when the request asks for a `summary`),
+  `message` (`output_text` deltas), and `function_call` (`function_call_arguments` deltas) items,
+  the completed `response` JSON body, scripted turns (including `format: 'json'` for the providers'
+  JSON fallback), and the extra fault `error-event-after-chunks` (a mid-stream `error` or
+  `response.failed` event; streamed responses only and before `response.completed`, otherwise 500
+  and kept). Each subpath supplies only its path and manifest, model list, error envelope and
+  unknown-model status, the 401 error for a missing bearer, header rules (required headers with
+  their status and error; which non-credential header values the ledger records), the
+  `max_output_tokens` policy (`rejected` for Codex, `optional` for Grok), and its input-invalid
+  error. `/xai` requires, in order, `X-XAI-Token-Auth` (401), `x-grok-client-version` (426), and
+  `x-grok-model-override` (400); it records the version and override, never the token-auth value.
+  `/codex` records `originator` and never records `ChatGPT-Account-Id`. Known leniency (unverified):
+  `store`, `stream`, `instructions`, the model override matching `model`, the client version value,
+  and output limits are not enforced. The Codex and Grok error envelopes and unknown-model status
+  (400 `model_not_found`) are synthetic until a live recording. OpenCode Go Responses are not
+  emulated yet.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
-  `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` for invalid input.
+  `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
+  `XAiGrokEmulatorInputInvalid` for invalid input.
 - Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over
   (network chunks; a Gateway chunk may pack several SSE events); chunk faults that cannot take
   effect answer 500 and are not consumed, never a silent no-op.
@@ -130,4 +156,11 @@ same for the OpenAI chat cases through the generic OpenAI-compatible provider), 
 (Messages framing, blocks, stops, auth, ledger, faults, control plane), and
 `test/anthropic-conformance.test.ts` (the Anthropic Messages cases in-process and over a loopback
 socket, disagreement drills, and 429 / 529 / mid-stream `error` event / truncation faults through
-both the native Messages provider and the Claude subscription provider). Loopback sockets only; never call real services.
+both the native Messages provider and the Claude subscription provider), `test/responses.test.ts`
+(Responses framing, items, auth and Grok header rules, output-limit policy, ledger, scripted turns,
+faults, control plane, and manifests for `/codex` and `/xai`), and
+`test/responses-conformance.test.ts` (the Codex and Grok Responses cases in-process and over a
+loopback socket, disagreement drills, and 429 `retry-after` / mid-stream `error` and
+`response.failed` events / dropped connection / truncation faults through the real Codex and Grok
+providers, pinning Grok's required terminal event, Codex's EOF-completion compatibility, and the
+426 for a missing client version). Loopback sockets only; never call real services.

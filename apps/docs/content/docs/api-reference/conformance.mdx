@@ -234,6 +234,29 @@ case requires a 404 that is not an `auth` failure and whose body, read at the ca
 boundary, is `{ type: 'error', error: { type: 'not_found_error', message } }`; the max-tokens case
 requires `stop_reason: max_tokens` to fail as a non-retryable `invalid_response` without `Done`.
 
+The Responses-based subscription providers share one case shape. `@yolk-sdk/agent/providers/openai/conformance`
+also covers the ChatGPT Codex endpoint (`https://chatgpt.com/backend-api/codex/responses`) through
+the public Codex provider, and `@yolk-sdk/agent/providers/xai/conformance` covers the Grok CLI proxy
+(`https://cli-chat-proxy.grok.com/v1/responses`) through the public Grok provider. Each exports four
+synthetic fixtures and four `read` cases: streamed plain text (non-empty text, one `Done(stop)`, and
+usage from `response.completed`), `function_call` argument assembly (at least one call, every call
+named `lookup_weather` with distinct call ids and a non-empty string `city`, then one
+`Done(tool_use)`; the providers send no `tool_choice`), the unknown-model error envelope (a
+non-retryable 400 or 404 that is not an `auth` failure, a status-only message, and a JSON error body
+with a message read at the case's `HttpClient` boundary), and the terminal event (the body, teed
+chunk for chunk at the case's `HttpClient` boundary, ends with exactly one `response.completed` whose
+`response.status` is `completed`). Codex exports `openAiCodexPlainTextCase`,
+`openAiCodexFunctionCallArgumentsCase`, `openAiCodexErrorEnvelopeCase`,
+`openAiCodexTerminalEventCase`, `openAiCodexConformanceCases`, the matching `openAiCodex*Fixture`s,
+`openAiCodexConformanceFixtures`, and `OpenAiCodexConformanceConfig` (OAuth token and model ids).
+Grok exports the same with the `xAiGrok` prefix and `XAiGrokConformanceConfig` (OAuth token,
+host-owned `clientVersion`, `maxOutputTokens`, and model ids). The terminal-event case pins each
+provider's behaviour: Grok fails a stream without `response.completed` as a non-retryable
+`invalid_response`, while Codex keeps EOF-completion compatibility, so only the body check catches
+it. `pnpm conformance:codex` and `pnpm conformance:grok` are dry-run probes; live runs use
+subscription OAuth tokens (`OPENAI_CODEX_ACCESS_TOKEN`, `XAI_GROK_ACCESS_TOKEN`) and need the
+repository owner's approval (`--owner-approved`).
+
 ## Connector conformance
 
 > **Experimental.** Conformance/testing only.
