@@ -61,28 +61,28 @@
       "manifest": "fortnox",
       "method": "PUT",
       "path": "/3/customers/{CustomerNumber}",
-      "reason": "Fortnox emulator (M3b) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.customer.empty-string-keeps-value.",
+      "reason": "Fortnox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.customer.empty-string-keeps-value.",
       "expires": "2026-10-31"
     },
     {
       "manifest": "fortnox",
       "method": "POST",
       "path": "/3/invoices",
-      "reason": "Fortnox emulator (M3b) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.write.rejection-error-information.",
+      "reason": "Fortnox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.write.rejection-error-information.",
       "expires": "2026-10-31"
     },
     {
       "manifest": "fortnox",
       "method": "PUT",
       "path": "/3/invoices/{DocumentNumber}",
-      "reason": "Fortnox emulator (M3b) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.invoice.row-discount-sticky.",
+      "reason": "Fortnox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.invoice.row-discount-sticky.",
       "expires": "2026-10-31"
     },
     {
       "manifest": "fortnox",
       "method": "GET",
       "path": "/3/invoices/{DocumentNumber}/email",
-      "reason": "Fortnox emulator (M3b) follows synthetic fixtures; awaiting an owner-approved manual live run of fortnox.invoice.send-email.",
+      "reason": "Fortnox emulator (tracking #115) follows synthetic fixtures; awaiting an owner-approved manual live run of fortnox.invoice.send-email.",
       "expires": "2026-10-31"
     }
   ]
