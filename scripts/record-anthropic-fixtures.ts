@@ -17,14 +17,14 @@
  * signatures and `redacted_thinking` data (text chunks only, never re-chunked; a value left in a
  * base64 chunk or split across chunks, a non-string value, or a repeated key refuses the write,
  * checked on every occurrence in the reassembled wire text; so does any SSE `data:` payload or
- * body the member scanner cannot fully scan, except a `[DONE]` `data:` sentinel, any SSE line the
- * stream parser ignores, even one that parses as JSON, and any base64 that does not decode),
- * turns each single
- * recorded exchange into a `verified` fixture dated today, then replays the new fixtures through
- * the same cases. Nothing is written unless every case passes live, records cleanly, is fully
- * redacted, passes the secret scan, and passes again on replay; only then are the
- * fixture modules under `packages/agent/src/providers/anthropic/conformance/` rewritten. Live
- * runs spend Anthropic credits: never run in CI.
+ * body the member scanner cannot fully scan, except a `[DONE]` `data:` sentinel; any SSE line the
+ * stream parser ignores, even one that parses as JSON, and any base64 that does not decode also
+ * refuse the write), turns each single recorded exchange into a `verified` fixture dated today,
+ * then replays the new fixtures through the same cases. Nothing is written unless every case
+ * passes live, records cleanly, is fully redacted, passes the secret scan, and passes again on
+ * replay; only then are the fixture modules under
+ * `packages/agent/src/providers/anthropic/conformance/` rewritten. Live runs spend Anthropic
+ * credits: never run in CI.
  *
  * Model ids are CLI flags defaulting to `anthropicConformanceDefaultModels`; confirm they are
  * still available (and that the thinking model supports extended thinking) before a live probe.
@@ -445,10 +445,10 @@ export const redactThinkingSignatures = (exchange: WireExchange): WireExchange =
   return body === response.body ? exchange : { ...exchange, response: { ...response, body } }
 }
 
-// Exact bytes of base64 text; undecodable base64 yields no bytes (the recorder never writes it).
-// Undefined when the base64 does not decode: the payload is then unscannable, never read as empty.
+// Exact bytes of base64 text, or undefined when it does not decode (the payload is then
+// unscannable, never read as empty).
 const base64Bytes = (base64: string): Uint8Array | undefined =>
-  Result.getOrElse(Encoding.decodeBase64(base64), (): Uint8Array | undefined => undefined)
+  Result.getOrUndefined(Encoding.decodeBase64(base64))
 
 const chunkBytes = (chunk: WireChunk): Uint8Array | undefined =>
   Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)
@@ -470,34 +470,34 @@ const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
 // What a survivor check reads from one response: every SSE event's `data:` payload of the whole
 // stream (all chunks, text and `{ base64 }`, reassembled as bytes and decoded, so a value inside a
-// base64 chunk or split across chunks, even mid-character, is seen), or the whole decoded body,
-// plus how many parts are unscannable outright. An empty or whitespace-only body carries nothing
-// to scan and yields no payload.
+// base64 chunk or split across chunks, even mid-character, is seen), or the whole body (a text
+// body unchanged, never re-decoded; a base64 body decoded), plus how many parts are unscannable
+// outright. An empty or whitespace-only body carries nothing to scan and yields no payload.
+// The `anthropicPermittedNonJsonPayloads` sentinels are dropped here, as SSE `data:` payloads
+// only: a body equal to one is scanned like any other body and refused.
 type ResponsePayloads = { readonly payloads: ReadonlyArray<string>; readonly unscannable: number }
 
 const responsePayloads = (response: WireResponse): ResponsePayloads => {
   if (!isWireStreamResponse(response)) {
-    const body = isWireBase64BodyResponse(response)
-      ? base64Bytes(response.bodyBase64)
-      : new TextEncoder().encode(response.body)
+    if (!isWireBase64BodyResponse(response)) {
+      return { payloads: response.body.trim().length > 0 ? [response.body] : [], unscannable: 0 }
+    }
 
-    if (body === undefined) return { payloads: [], unscannable: 1 }
+    const bytes = base64Bytes(response.bodyBase64)
 
-    const text = lossyText(body)
+    if (bytes === undefined) return { payloads: [], unscannable: 1 }
+
+    const text = lossyText(bytes)
 
     return { payloads: text.trim().length > 0 ? [text] : [], unscannable: 0 }
   }
 
+  // A chunk whose base64 does not decode cannot be scanned: it is counted, never read as empty,
+  // and the rest of the stream is still scanned so real survivors are reported too.
   const chunks = response.chunks.map(chunkBytes)
   const decoded = chunks.filter(Predicate.isNotUndefined)
-
-  // A chunk whose base64 does not decode cannot be scanned: refuse rather than read it as empty.
-  if (decoded.length !== chunks.length) {
-    return { payloads: [], unscannable: chunks.length - decoded.length }
-  }
-
   const payloads: Array<string> = []
-  let unscannable = 0
+  let unscannable = chunks.length - decoded.length
 
   for (const event of lossyText(concatBytes(decoded)).replace(/\r\n?/g, '\n').split('\n\n')) {
     const lines = event.split('\n')
@@ -507,11 +507,11 @@ const responsePayloads = (response: WireResponse): ResponsePayloads => {
       .map(line => line.slice('data:'.length).trim())
       .join('\n')
 
-    if (data.length > 0) payloads.push(data)
+    if (data.length > 0 && !anthropicPermittedNonJsonPayloads.includes(data)) payloads.push(data)
 
     // Comments, unknown fields and malformed lines are ignored by the stream parser but would
     // still be written to the public fixture. Each one is unscannable outright, even when it
-    // parses as JSON, and the `[DONE]` exemption applies only to a `data:` payload.
+    // parses as JSON or is a bare `[DONE]`.
     unscannable += lines.filter(
       line => line.trim().length > 0 && !sseFieldLinePattern.test(line)
     ).length
@@ -566,8 +566,6 @@ type PayloadScan = { readonly fields: Set<ThinkingRedactionField>; unscannable: 
 // cannot fully scan (invalid JSON, nesting past the depth limit) is counted as unscannable, never
 // guessed at.
 const scanPayload = (payload: string, scan: PayloadScan): void => {
-  if (anthropicPermittedNonJsonPayloads.includes(payload)) return
-
   const found = new Set<ThinkingRedactionField>()
   const scanned = scanJsonObjects(payload, members => objectSurvivors(members, found))
 
@@ -616,7 +614,9 @@ export const unredactedThinkingFields = (
 /**
  * How many SSE `data:` payloads (or bodies) of the recorded responses the member scanner cannot
  * fully scan: invalid JSON, JSON nested past the scanner's depth limit, or any other scan failure.
- * Only `anthropicPermittedNonJsonPayloads` are exempt. Any count above zero refuses the write,
+ * Also counted: every SSE line the stream parser ignores (even valid JSON or a bare `[DONE]`) and
+ * every base64 chunk or body that does not decode. Only `anthropicPermittedNonJsonPayloads`, as SSE
+ * `data:` payloads, are exempt. Any count above zero refuses the write,
  * since an unscanned payload may hide a redacted field (for example under an escaped key).
  */
 export const unscannableThinkingPayloads = (exchanges: ReadonlyArray<WireExchange>): number =>
@@ -628,7 +628,7 @@ export const unredactedThinkingMessage = (fields: ReadonlyArray<ThinkingRedactio
 
 /** Why the probe refuses to write a recording with payloads the survivor check cannot scan. */
 export const unscannableThinkingMessage = (count: number): string =>
-  `could not check ${count} response payload(s) for thinking signatures or redacted_thinking data: not valid JSON, nested past the scanner's depth limit, or otherwise unscannable (only ${anthropicPermittedNonJsonPayloads.join(', ')} may be non-JSON); refusing to write, re-record instead`
+  `could not check ${count} response payload(s) for thinking signatures or redacted_thinking data: not valid JSON, nested past the scanner's depth limit, an SSE line the stream parser ignores, undecodable base64, or otherwise unscannable (only ${anthropicPermittedNonJsonPayloads.join(', ')} may be non-JSON, and only as an SSE data: payload); refusing to write, re-record instead`
 
 /**
  * Why the recorded exchanges must not be written, or undefined when every payload was scanned and

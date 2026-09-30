@@ -600,6 +600,35 @@ describe('record-anthropic-fixtures signature redaction', () => {
     }
   })
 
+  it('exempts [DONE] only as an SSE data: payload, never as a whole body', () => {
+    const [exchange] = anthropicMessagesPlainTextFixture.exchanges
+
+    const body = (response: WireExchange['response']): WireExchange => ({
+      request: exchange.request,
+      response
+    })
+
+    for (const done of [
+      body({ status: 200, headers: exchange.response.headers, body: '[DONE]' }),
+      body({ status: 200, headers: exchange.response.headers, bodyBase64: 'W0RPTkVd' })
+    ]) {
+      expect(unscannableThinkingPayloads([done])).toBe(1)
+      expect(thinkingRedactionRefusal([done])).toContain('could not check 1 response payload')
+    }
+  })
+
+  it('scans a text body unchanged, so a leading byte-order mark stays unscannable', () => {
+    const [exchange] = anthropicMessagesPlainTextFixture.exchanges
+
+    const bom: WireExchange = {
+      request: exchange.request,
+      response: { status: 200, headers: exchange.response.headers, body: '\uFEFF{}' }
+    }
+
+    expect(unscannableThinkingPayloads([bom])).toBe(1)
+    expect(thinkingRedactionRefusal([bom])).toContain('could not check 1 response payload')
+  })
+
   it('refuses base64 chunks and bodies that do not decode', () => {
     const [exchange] = anthropicMessagesPlainTextFixture.exchanges
     const badChunk = withChunks(exchange, [...streamChunks(exchange), { base64: '%%%' }])
