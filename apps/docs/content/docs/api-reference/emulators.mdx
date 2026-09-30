@@ -1,0 +1,117 @@
+---
+title: Emulator APIs
+description: Experimental service emulators, HttpClient routing to them, and a loopback server.
+---
+
+> **Experimental.** `@yolk-sdk/emulators` may change in any canary release. It is new after
+> `0.1.0-canary.95`; keep it on the same lockstep version as the other public packages.
+
+`@yolk-sdk/emulators` runs stand-ins for outside services in tests and local development, and
+routes an Effect `HttpClient` to them instead of the real service. Emulators never import other
+`@yolk-sdk/*` code: their wire shapes follow the recorded conformance fixtures, and each emulated
+route names the conformance cases it follows. The package depends only on `effect`.
+
+There is no root export. Import an explicit subpath.
+
+## Router
+
+`@yolk-sdk/emulators/router`
+
+| Export                              | Purpose                                                                                                           |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `EmulatorRoute`                     | `{ origin, target }`; `EmulatorRoute.url(origin, baseUrl)` and `EmulatorRoute.handler(origin, fetch)` build one   |
+| `EmulatedHttpClient.layer(routes)`  | Rewrites each routed origin to a loopback base URL (path and query kept) over the `HttpClient` already in context |
+| `InProcessHttpClient.layer(routes)` | Calls the route's fetch handler directly with a web `Request`; returns `HttpClientResponse.fromWeb`               |
+| `EmulatorRouteInvalid`              | Build error: malformed or duplicate origin, wrong target kind, or a base URL that is not http(s) on loopback      |
+| `EmulatorEnvironmentRefused`        | Build error: `NODE_ENV` is `production` (a missing `NODE_ENV` is allowed)                                         |
+
+Pick the transport by swapping layers; the code under test keeps calling the real origin:
+
+| Transport | Layer                                                        |
+| --------- | ------------------------------------------------------------ |
+| Replay    | `ReplayHttpClient.layer` from `@yolk-sdk/conformance/replay` |
+| InProcess | `InProcessHttpClient.layer`                                  |
+| Emulated  | `EmulatedHttpClient.layer` over your `HttpClient`            |
+| Live      | your own `HttpClient`                                        |
+
+Both layers fail closed: a request to an origin without a route fails with an `HttpClientError`
+whose message names only the origin (never the path, query, headers, or body). Emulated base URLs
+must be `http(s)` on `127.0.0.0/8`, `::1`, or `localhost`. The in-process client sends `Empty`,
+`Uint8Array`, and string `Raw` bodies; other body kinds fail with an `EncodeError`.
+
+```ts
+import { Layer } from 'effect'
+import { makeGatewayEmulator } from '@yolk-sdk/emulators/gateway'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const gateway = makeGatewayEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://ai-gateway.vercel.sh', gateway.fetch)
+])
+```
+
+Provide `httpLayer` below the code under test, for example a Gateway provider layer.
+
+## Gateway emulator
+
+`@yolk-sdk/emulators/gateway`
+
+| Export                                  | Purpose                                                                                         |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `makeGatewayEmulator(options?)`         | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/chat/completions`            |
+| `gatewayEmulatorRoutes`                 | Route evidence manifest: `method`, `path`, `kind`, `write`, `caseIds`, `evidence`, `observedAt` |
+| `GatewayFault`, `GatewayScriptedTurn`   | Schemas and types for wire faults and scripted turns                                            |
+| `GatewayLedgerEntry`, `GatewayCoverage` | Ledger entry and coverage report types                                                          |
+| `gatewayEmulatorDefaultModels`          | Synthetic-safe default model ids (includes `openai/gpt-4.1-nano` and `deepseek/deepseek-v3.2`)  |
+| `emulatorEvidenceHeader`                | `x-emulator-evidence`, set to `unverified` on every response from an unverified route           |
+| `GatewayEmulatorInputInvalid`           | Thrown by `faults.add` / `script.enqueue` for invalid input                                     |
+
+Without a script, a known model gets synthetic output: `stream: true` streams
+`chat.completion.chunk` events (several text deltas, a finish chunk, a usage chunk when
+`stream_options.include_usage` is set, then `data: [DONE]`); `stream: false` returns one JSON
+completion. Reasoning models asked for reasoning (`reasoning_effort`, or `thinking` enabled) stream
+`delta.reasoning_content` first. A request with `tools` gets one tool call whose arguments are
+synthesized from the tool's JSON Schema and streamed in several fragments, finishing with
+`tool_calls`. Unknown models get the Gateway error envelope (400, `model_not_found`), a missing
+bearer credential gets 401, and unknown routes get a 404 JSON error. The credential is never
+checked or stored.
+
+`script.enqueue(turn)` queues a completion (`text`, `reasoning`, `order`, `toolCalls`, `usage`,
+`finishReason`; `usage: null` drops usage) or an error (`{ error: { status, body, headers? } }`)
+for the next request. `faults.add` injects `status` (for example 429 with `retry-after`),
+`error-after-chunks`, or `truncate-after-chunks`, each with an optional `match: { path?, model? }`
+and `count`.
+
+The ledger records method, path, parsed body, model, `stream`, `reasoning_effort`, `thinking`, tool
+names, the applied fault, the evidence tag, the status, and body chunks sent; never credential
+headers. The same fetch handler serves the control plane:
+
+| Route                | Methods                 |
+| -------------------- | ----------------------- |
+| `/_emulate/ledger`   | `GET`, `DELETE`         |
+| `/_emulate/faults`   | `GET`, `POST`, `DELETE` |
+| `/_emulate/script`   | `POST`                  |
+| `/_emulate/reset`    | `POST`                  |
+| `/_emulate/state`    | `GET`                   |
+| `/_emulate/coverage` | `GET`                   |
+
+## Node server
+
+`@yolk-sdk/emulators/node`
+
+| Export                                    | Purpose                                                                           |
+| ----------------------------------------- | --------------------------------------------------------------------------------- |
+| `serveFetchHandler(handler, { port? })`   | Scoped Effect resource `{ url, close }` serving on `127.0.0.1` (port `0` default) |
+| `startFetchHandlerServer(handler, opts?)` | The same server as a Promise `{ url, close }`                                     |
+| `EmulatorServeError`                      | Refused host, invalid port, or listen failure                                     |
+
+Only `127.0.0.1` is accepted as a host. Streamed bodies are written chunk by chunk, so progressive
+delivery survives the socket; a body stream error drops the connection.
+
+## Evidence
+
+Emulated routes carry evidence: `verified` routes follow a live observation dated by
+`observedAt`; `unverified` routes follow synthetic placeholders and tag every response with
+`x-emulator-evidence: unverified`. The Gateway route is currently unverified, like the Gateway
+fixtures it follows.

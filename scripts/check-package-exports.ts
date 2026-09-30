@@ -204,6 +204,12 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
     packageName: '@yolk-sdk/conformance',
     expectedExports: ['./package.json', './fixture', './replay', './record', './case', './runner'],
     root: 'none'
+  },
+  {
+    packageDir: 'packages/emulators',
+    packageName: '@yolk-sdk/emulators',
+    expectedExports: ['./package.json', './router', './gateway', './node'],
+    root: 'none'
   }
 ]
 

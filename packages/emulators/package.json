@@ -1,0 +1,84 @@
+{
+  "name": "@yolk-sdk/emulators",
+  "version": "0.1.0-canary.95",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, a Vercel AI Gateway fetch-handler emulator, and a loopback Node server.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk-sdk.git",
+    "directory": "packages/emulators"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk-sdk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk-sdk#readme",
+  "keywords": [
+    "emulators",
+    "conformance",
+    "testing",
+    "http",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./router": {
+      "types": "./src/router.ts",
+      "default": "./src/router.ts"
+    },
+    "./gateway": {
+      "types": "./src/gateway.ts",
+      "default": "./src/gateway.ts"
+    },
+    "./node": {
+      "types": "./src/node.ts",
+      "default": "./src/node.ts"
+    }
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      "./router": {
+        "types": "./dist/router.d.mts",
+        "import": "./dist/router.mjs",
+        "default": "./dist/router.mjs"
+      },
+      "./gateway": {
+        "types": "./dist/gateway.d.mts",
+        "import": "./dist/gateway.mjs",
+        "default": "./dist/gateway.mjs"
+      },
+      "./node": {
+        "types": "./dist/node.d.mts",
+        "import": "./dist/node.mjs",
+        "default": "./dist/node.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@yolk-sdk/agent": "workspace:^",
+    "@yolk-sdk/conformance": "workspace:^"
+  }
+}
