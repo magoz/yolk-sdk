@@ -158,11 +158,16 @@ const routeFindings = (
     }
   }
 
-  if (route.caseIds.length === 0) {
-    finding('warn', 'no-case-ids', 'cites no conformance case ids')
-  }
-
   const connectorWrite = route.kind === 'connector' && route.write
+
+  // A verified connector write route must be backed by at least one conformance case.
+  if (route.caseIds.length === 0) {
+    if (connectorWrite && route.evidence === 'verified') {
+      finding('fail', 'no-case-ids', 'verified connector write route cites no conformance case ids')
+    } else {
+      finding('warn', 'no-case-ids', 'cites no conformance case ids')
+    }
+  }
 
   if (connectorWrite && route.evidence !== 'verified') {
     finding('fail', 'unverified-write', `connector write route has ${route.evidence} evidence`)

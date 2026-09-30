@@ -80,9 +80,12 @@ bodies; other body kinds fail with an `EncodeError`.
 Redirects never leave the route table. `EmulatedHttpClient` checks and rewrites each request at the
 send step, so redirect follow-ups (`HttpClient.followRedirects` on top) and requests changed by
 your own `HttpClient.mapRequest` are routed or fail closed too. With `FetchHttpClient` underneath,
-routed requests are sent with `redirect: 'manual'` (overriding any `FetchHttpClient.RequestInit`
-default), so a 3xx comes back to the caller as a 3xx. **Any other underlying client must not follow
-redirects by itself**: a redirect it follows internally never passes through the route table.
+routed requests are sent with `redirect: 'manual'`, so a 3xx comes back to the caller as a 3xx.
+Other `FetchHttpClient.RequestInit` defaults are kept when provided around the whole client stack
+(or where the request runs); defaults provided only to `FetchHttpClient.layer` itself are replaced.
+Put `HttpClient.followRedirects` on top of `EmulatedHttpClient`, never underneath it. **Any other
+underlying client must not follow redirects by itself**: a redirect it follows internally never
+passes through the route table.
 
 ## Gateway emulator
 

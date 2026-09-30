@@ -581,7 +581,7 @@ describe('gateway emulator faults', () => {
     }
   })
 
-  it('rejects location headers and invalid header names or values, for faults and turns', () => {
+  it('rejects location, framing, and invalid headers, for faults and turns', () => {
     const emulator = makeGatewayEmulator()
 
     const invalidHeaders: ReadonlyArray<Record<string, string>> = [
@@ -591,7 +591,10 @@ describe('gateway emulator faults', () => {
       { '': 'x' },
       { 'x-split': 'a\r\nset-cookie: injected=1' },
       { 'x-control': 'a\u0001b' },
-      { 'x-wide': 'snowman \u2603' }
+      { 'x-wide': 'snowman \u2603' },
+      { 'content-length': '999' },
+      { 'Transfer-Encoding': 'chunked' },
+      { connection: 'close' }
     ]
 
     for (const headers of invalidHeaders) {

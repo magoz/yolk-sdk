@@ -127,15 +127,24 @@ describe('checkEmulatorEvidence', () => {
     expect(kinds([write('2026-08-01')])).toEqual(['warn:stale'])
   })
 
-  it('warns when a verified route cites no case ids', () => {
-    const report = check([
+  it('fails a verified connector write route that cites no case ids; warns for other routes', () => {
+    const writeReport = check([
       route({ method: 'POST', write: true, caseIds: [], observedAt: '2026-09-29' })
     ])
 
-    expect(report.findings.map(finding => `${finding.severity}:${finding.kind}`)).toEqual([
+    expect(writeReport.findings.map(finding => `${finding.severity}:${finding.kind}`)).toEqual([
+      'fail:no-case-ids'
+    ])
+    expect(evidenceReportFailed(writeReport)).toBe(true)
+
+    const readReport = check([
+      route({ method: 'GET', write: false, caseIds: [], observedAt: '2026-09-29' })
+    ])
+
+    expect(readReport.findings.map(finding => `${finding.severity}:${finding.kind}`)).toEqual([
       'warn:no-case-ids'
     ])
-    expect(evidenceReportFailed(report)).toBe(false)
+    expect(evidenceReportFailed(readReport)).toBe(false)
   })
 
   it('fails a verified route when no cited case has a verified fixture (optional cross-check)', () => {

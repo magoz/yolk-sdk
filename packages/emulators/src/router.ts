@@ -251,17 +251,43 @@ const rewriteToBase = (requestUrl: string, base: URL): string => {
 }
 
 /**
- * Run `effect` with native fetch told not to follow redirects
- * (`redirect: 'manual'`), keeping any other `RequestInit` defaults the host
- * provided. Only the `FetchHttpClient` transport reads this service.
+ * Merge `RequestInit` values (later wins; `headers` are merged, not replaced).
  */
-const withManualRedirects = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-  Effect.flatMap(Effect.serviceOption(FetchHttpClient.RequestInit), init =>
-    Effect.provideService(effect, FetchHttpClient.RequestInit, {
-      ...Option.getOrUndefined(init),
-      redirect: 'manual'
-    })
-  )
+const mergeRequestInit = (
+  ...inits: ReadonlyArray<globalThis.RequestInit | undefined>
+): globalThis.RequestInit => {
+  const merged: globalThis.RequestInit = {}
+  const headers = new Headers()
+
+  for (const init of inits) {
+    if (init === undefined) continue
+
+    Object.assign(merged, init)
+    new Headers(init.headers).forEach((value, name) => headers.set(name, value))
+  }
+
+  return [...headers.keys()].length === 0 ? merged : { ...merged, headers }
+}
+
+/**
+ * Run `effect` with native fetch told not to follow redirects
+ * (`redirect: 'manual'`). The `RequestInit` supplied here replaces the one the
+ * underlying `FetchHttpClient` layer captured when it was built (Effect merges
+ * the request-time context over the captured one), so the defaults visible
+ * where the emulated layer is built and where the request runs are merged in
+ * and only `redirect` is overridden. Only the `FetchHttpClient` transport reads
+ * this service.
+ */
+const withManualRedirects =
+  (buildInit: globalThis.RequestInit | undefined) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Effect.flatMap(Effect.serviceOption(FetchHttpClient.RequestInit), init =>
+      Effect.provideService(
+        effect,
+        FetchHttpClient.RequestInit,
+        mergeRequestInit(buildInit, Option.getOrUndefined(init), { redirect: 'manual' })
+      )
+    )
 
 export const EmulatedHttpClient = {
   /**
@@ -275,9 +301,14 @@ export const EmulatedHttpClient = {
    * changed by a host's `HttpClient.mapRequest` are routed or refused too.
    * With `FetchHttpClient` underneath, requests are sent with
    * `redirect: 'manual'`: a 3xx from an emulator comes back to the caller as
-   * a 3xx and native fetch never follows it. Any other underlying client must
-   * not follow redirects by itself, because a redirect it follows internally
-   * never passes through the route table.
+   * a 3xx and native fetch never follows it. Other `RequestInit` defaults are
+   * kept when they are provided where this layer is built or where the request
+   * runs; defaults provided only to the underlying `FetchHttpClient.layer`
+   * itself are replaced, so provide them around the whole client stack. Put
+   * `HttpClient.followRedirects` on top of this layer, never underneath it: a
+   * redirect loop below the route check sends follow-ups without it. Any
+   * other underlying client must not follow redirects by itself, because a
+   * redirect it follows internally never passes through the route table.
    *
    * Building fails with `EmulatorRouteInvalid` when a route is malformed,
    * duplicated, not a `url` target, or not on loopback, and with
@@ -297,6 +328,12 @@ export const EmulatedHttpClient = {
 
         const underlying = yield* HttpClient.HttpClient
 
+        // `RequestInit` defaults visible where this layer is built (for example provided around the
+        // whole client stack) are kept for routed requests.
+        const manualRedirects = withManualRedirects(
+          Option.getOrUndefined(yield* Effect.serviceOption(FetchHttpClient.RequestInit))
+        )
+
         const route = (request: HttpClientRequest.HttpClientRequest) => {
           const origin = requestOrigin(request.url)
           const base = origin === undefined ? undefined : table.get(origin)
@@ -309,7 +346,7 @@ export const EmulatedHttpClient = {
         // Route in postprocess, not preprocess: every request sent goes through postprocess, while
         // `followRedirects` skips preprocess for follow-ups and `mapRequest` runs after it.
         return HttpClient.makeWith(
-          request => withManualRedirects(underlying.postprocess(Effect.flatMap(request, route))),
+          request => manualRedirects(underlying.postprocess(Effect.flatMap(request, route))),
           underlying.preprocess
         )
       })

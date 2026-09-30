@@ -100,6 +100,44 @@ describe('EmulatedHttpClient redirects', () => {
     }).pipe(Effect.scoped)
   )
 
+  it.effect(
+    'keeps RequestInit defaults provided around the stack while forcing manual redirects',
+    () =>
+      Effect.gen(function* () {
+        const seen: Array<string | null> = []
+
+        const echo = yield* serveFetchHandler(async request => {
+          seen.push(request.headers.get('x-synthetic-default'))
+          await request.text()
+
+          return new Response(null, {
+            status: 307,
+            headers: { location: 'https://api.example.test/x' }
+          })
+        })
+
+        const client = yield* HttpClient.HttpClient.pipe(
+          Effect.provide(
+            EmulatedHttpClient.layer([EmulatorRoute.url(realOrigin, echo.url)]).pipe(
+              Layer.provide(FetchHttpClient.layer),
+              Layer.provide(testEnv),
+              Layer.provide(
+                Layer.succeed(FetchHttpClient.RequestInit, {
+                  headers: { 'x-synthetic-default': 'kept' },
+                  redirect: 'follow'
+                })
+              )
+            )
+          )
+        )
+
+        const response = yield* client.execute(secretPost)
+
+        expect(response.status).toBe(307)
+        expect(seen).toEqual(['kept'])
+      }).pipe(Effect.scoped)
+  )
+
   it.effect('fails closed when followRedirects on top follows the 307 to an unrouted origin', () =>
     Effect.gen(function* () {
       const { unroutedHits, routedUrl } = yield* redirectingServers

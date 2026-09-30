@@ -88,6 +88,14 @@ const headerNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
 // Visible ASCII, space, tab, and obs-text: what both web `Headers` and Node's HTTP server accept.
 const headerValuePattern = /^[\t\x20-\x7e\x80-\xff]*$/
 
+const framingHeaders: ReadonlySet<string> = new Set([
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'keep-alive',
+  'upgrade'
+])
+
 const headerRecordProblem = (headers: Readonly<Record<string, string>>): string | undefined => {
   for (const [name, value] of Object.entries(headers)) {
     if (!headerNamePattern.test(name)) {
@@ -96,6 +104,11 @@ const headerRecordProblem = (headers: Readonly<Record<string, string>>): string 
 
     if (name.toLowerCase() === 'location') {
       return 'emulators never redirect: a location header is not allowed'
+    }
+
+    // The server frames the body itself; a hand-set framing header would corrupt the response.
+    if (framingHeaders.has(name.toLowerCase())) {
+      return `header ${name} is set by the server and cannot be scripted`
     }
 
     if (!headerValuePattern.test(value)) {
@@ -1182,6 +1195,8 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
       return response
     }
 
+    // A scripted turn is used up when its request arrives. Header and status validation at
+    // `script.enqueue` time means its response can always be built.
     const turn = turns.shift()
 
     if (turn !== undefined && 'error' in turn) {

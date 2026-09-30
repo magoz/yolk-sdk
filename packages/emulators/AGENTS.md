@@ -39,8 +39,9 @@ There is no root export or barrel.
   without credentials, query, or hash.
 - `EmulatedHttpClient` routes in the client's postprocess (the send step), never in preprocess, so
   redirect follow-ups and a host's `mapRequest` go through the route table. Over `FetchHttpClient`
-  it sends with `redirect: 'manual'`; any other underlying client must not follow redirects by
-  itself (documented for hosts). `test/router-redirects.test.ts` guards this.
+  it sends with `redirect: 'manual'`, merging `RequestInit` defaults visible at build and request
+  time; `followRedirects` belongs on top, never underneath; any other underlying client must not
+  follow redirects by itself (documented for hosts). `test/router-redirects.test.ts` guards this.
 - Wire shapes come from the recorded (currently synthetic) conformance fixtures, copied as data,
   never imported. Each emulated route lists the conformance case ids it follows in its manifest
   (`gatewayEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`

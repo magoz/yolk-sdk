@@ -42,8 +42,10 @@ must be `http(s)` on `127.0.0.0/8`, `::1`, or `localhost` (IPv4-mapped forms suc
 
 `EmulatedHttpClient` routes at the send step, so redirect follow-ups (`HttpClient.followRedirects`
 on top) and URLs changed by your `HttpClient.mapRequest` are routed or fail closed too. Over
-`FetchHttpClient`, routed requests use `redirect: 'manual'`, so a 3xx reaches the caller as a 3xx.
-Any other underlying client must not follow redirects by itself.
+`FetchHttpClient`, routed requests use `redirect: 'manual'`, so a 3xx reaches the caller as a 3xx;
+other `RequestInit` defaults are kept when provided around the whole client stack. Put
+`HttpClient.followRedirects` on top of `EmulatedHttpClient`, never underneath it. Any other
+underlying client must not follow redirects by itself.
 
 ```ts
 import { Layer } from 'effect'
