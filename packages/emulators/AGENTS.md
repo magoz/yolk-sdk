@@ -63,7 +63,7 @@ There is no root export or barrel.
 - OpenAI-compatible Chat Completions emulators share `src/chat-completions.ts`: request parsing,
   SSE framing, JSON mode, scripted turns, faults, the ledger, the control plane, evidence tagging,
   and route binding. Each subpath supplies only its path and manifest, model lists, error envelope
-  and unknown-model status, auth scheme, completion-token field (recorded in the ledger as
+  and unknown-model status, 401 error, completion-token field (recorded in the ledger as
   `maxCompletionTokens`, never validated), whether reasoning is emulated, its turn schema, and its
   input-invalid error. Keep the Gateway's public API and wire behaviour unchanged when editing the
   core; `test/gateway.test.ts` is the guard. `/openai` does not emulate reasoning yet: its turn

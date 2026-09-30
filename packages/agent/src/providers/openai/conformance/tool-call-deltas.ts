@@ -1,8 +1,8 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * Streamed OpenAI tool call whose JSON arguments arrive as `delta.tool_calls` fragments that
- * assemble into one call (this placeholder splits them across several chunks), finishing with
+ * Streamed OpenAI tool call, forced with `tool_choice`, whose JSON arguments arrive as
+ * `delta.tool_calls` fragments that assemble into one call (this placeholder splits them across several chunks), finishing with
  * `tool_calls`, a usage chunk, and `data: [DONE]`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
@@ -27,6 +27,12 @@ export const openAiChatToolCallDeltasFixture: WireFixture = {
           'content-type': 'application/json'
         },
         body: {
+          tool_choice: {
+            type: 'function',
+            function: {
+              name: 'lookup_weather'
+            }
+          },
           model: 'gpt-4.1-nano',
           messages: [
             {

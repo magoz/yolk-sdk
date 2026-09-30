@@ -7,7 +7,7 @@
  * request ledger, the `/_emulate/*` control plane, evidence tagging, and route binding.
  *
  * Each emulator subpath (`gateway`, `openai`) supplies what differs: the path and route evidence
- * manifest, model lists, the error envelope and the unknown-model status, the auth scheme, the
+ * manifest, model lists, the error envelope and the unknown-model status, the 401 error, the
  * completion-token request field, whether reasoning is emulated, and its scripted-turn schema.
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
@@ -120,14 +120,15 @@ export const chatScriptedReasoningFields = {
 }
 
 /**
- * A scripted completion with reasoning. Every field is exact (nothing is
+ * The reasoning variant of a scripted completion (the Gateway's shape; `/openai` uses the
+ * reasoning-free `OpenAiScriptedCompletion`). Every field is exact (nothing is
  * filled in) except: `usage` omitted is synthesized when the request asks for
  * usage, and `null` drops it; `finishReason` omitted is `tool_calls` with tool
  * calls, else `stop`. `order` defaults to `reasoning-first`; `reasoningField`
  * defaults to `reasoning_content` (the Gateway-normalized alternative is
  * `reasoning`).
  */
-export const ChatScriptedCompletion = Schema.Struct({
+export const ChatScriptedReasoningCompletion = Schema.Struct({
   text: chatScriptedCompletionFields.text,
   reasoning: chatScriptedReasoningFields.reasoning,
   reasoningField: chatScriptedReasoningFields.reasoningField,
@@ -137,7 +138,7 @@ export const ChatScriptedCompletion = Schema.Struct({
   finishReason: chatScriptedCompletionFields.finishReason
 })
 
-export type ChatScriptedCompletion = typeof ChatScriptedCompletion.Type
+export type ChatScriptedReasoningCompletion = typeof ChatScriptedReasoningCompletion.Type
 
 /** A scripted error response: status, body (a string is sent as is), and optional headers. */
 export const ChatScriptedError = Schema.Struct({
@@ -150,10 +151,16 @@ export const ChatScriptedError = Schema.Struct({
 
 export type ChatScriptedError = typeof ChatScriptedError.Type
 
-/** A turn with reasoning, queued for the next chat completion request. */
-export const ChatScriptedTurn = Schema.Union([ChatScriptedError, ChatScriptedCompletion])
+/**
+ * The reasoning variant of a scripted turn, queued for the next chat completion request. It is
+ * also the widest turn shape, so it bounds every emulator's turn type.
+ */
+export const ChatScriptedReasoningTurn = Schema.Union([
+  ChatScriptedError,
+  ChatScriptedReasoningCompletion
+])
 
-export type ChatScriptedTurn = typeof ChatScriptedTurn.Type
+export type ChatScriptedReasoningTurn = typeof ChatScriptedReasoningTurn.Type
 
 export type ChatLedgerEntry = {
   /** 1-based arrival order since the last ledger clear or reset. */
@@ -244,7 +251,7 @@ export type ChatWireError = {
  * What differs between Chat Completions emulators. The core owns everything else (framing,
  * faults, scripting, ledger, control plane, evidence).
  */
-export type ChatCompletionsEmulatorConfig<Turn extends ChatScriptedTurn> = {
+export type ChatCompletionsEmulatorConfig<Turn extends ChatScriptedReasoningTurn> = {
   /** The chat completions path, for example `/v1/chat/completions`. */
   readonly path: string
   /** Route evidence manifest; must list exactly the chat completions route. */
@@ -261,10 +268,10 @@ export type ChatCompletionsEmulatorConfig<Turn extends ChatScriptedTurn> = {
   /** Status and error for an unknown model id. */
   readonly unknownModel: { readonly status: number; readonly error: ChatWireError }
   /**
-   * How requests authenticate. `bearer`: a non-empty `Authorization: Bearer` credential, never
-   * checked or stored; anything else answers 401 with `unauthorized`.
+   * Requests authenticate with a non-empty `Authorization: Bearer` credential, never checked or
+   * stored; anything else answers 401 with `unauthorized`.
    */
-  readonly auth: { readonly scheme: 'bearer'; readonly unauthorized: ChatWireError }
+  readonly auth: { readonly unauthorized: ChatWireError }
   /** Request field carrying the output-token limit, recorded in the ledger. */
   readonly completionTokenField: 'max_tokens' | 'max_completion_tokens'
   /** Response id prefix; ids are `${prefix}-${seq}`. */
@@ -545,7 +552,7 @@ const defaultPlan = (
   }
 }
 
-const scriptedPlan = (turn: ChatScriptedCompletion, seq: number): CompletionPlan => {
+const scriptedPlan = (turn: ChatScriptedReasoningCompletion, seq: number): CompletionPlan => {
   const toolCalls = (turn.toolCalls ?? []).map((call, index) => ({
     id: call.id ?? `call_synthetic_${seq}_${index}`,
     name: call.name,
@@ -904,7 +911,7 @@ const parseJson = (text: string): Schema.Json | undefined => {
  * applies. Credential headers are never recorded, and the bearer value is
  * never checked or stored.
  */
-export const makeChatCompletionsEmulator = <Turn extends ChatScriptedTurn>(
+export const makeChatCompletionsEmulator = <Turn extends ChatScriptedReasoningTurn>(
   config: ChatCompletionsEmulatorConfig<Turn>
 ): ChatCompletionsEmulator<Turn> => {
   const knownModels = [...config.knownModels]

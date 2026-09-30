@@ -21,10 +21,10 @@ import type * as Schema from 'effect/Schema'
 import {
   ChatFault,
   ChatFaultMatch,
-  ChatScriptedCompletion,
+  ChatScriptedReasoningCompletion,
   ChatScriptedError,
   ChatScriptedToolCall,
-  ChatScriptedTurn,
+  ChatScriptedReasoningTurn,
   ChatScriptedUsage,
   makeChatCompletionsEmulator,
   type ChatCompletionsEmulator,
@@ -122,9 +122,9 @@ export type GatewayScriptedToolCall = ChatScriptedToolCall
  * `stop`. `order` defaults to `reasoning-first`; `reasoningField` defaults to
  * `reasoning_content` (the Gateway-normalized alternative is `reasoning`).
  */
-export const GatewayScriptedCompletion = ChatScriptedCompletion
+export const GatewayScriptedCompletion = ChatScriptedReasoningCompletion
 
-export type GatewayScriptedCompletion = ChatScriptedCompletion
+export type GatewayScriptedCompletion = ChatScriptedReasoningCompletion
 
 /** A scripted error response: status, body (a string is sent as is), and optional headers. */
 export const GatewayScriptedError = ChatScriptedError
@@ -132,9 +132,9 @@ export const GatewayScriptedError = ChatScriptedError
 export type GatewayScriptedError = ChatScriptedError
 
 /** A turn queued for the next chat completion request. */
-export const GatewayScriptedTurn = ChatScriptedTurn
+export const GatewayScriptedTurn = ChatScriptedReasoningTurn
 
-export type GatewayScriptedTurn = ChatScriptedTurn
+export type GatewayScriptedTurn = ChatScriptedReasoningTurn
 
 /** Thrown by the JS API (`faults.add`, `script.enqueue`) for invalid input; a programmer error. */
 export class GatewayEmulatorInputInvalid extends Data.TaggedError('GatewayEmulatorInputInvalid')<{
@@ -163,7 +163,6 @@ export type GatewayEmulatorOptions = {
 
 export type GatewayEmulator = ChatCompletionsEmulator<GatewayScriptedTurn>
 
-// The Gateway error envelope: `{ error: { message, type, code } }`.
 const gatewayErrorEnvelope = (error: ChatWireError): Schema.Json => ({
   error: { message: error.message, type: error.type, code: error.code }
 })
@@ -207,7 +206,6 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
       }
     },
     auth: {
-      scheme: 'bearer',
       unauthorized: {
         message: 'Synthetic: missing or invalid authorization.',
         type: 'authentication_error',

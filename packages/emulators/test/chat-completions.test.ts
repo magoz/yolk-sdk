@@ -6,7 +6,7 @@
 import type * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vitest'
 import {
-  ChatScriptedTurn,
+  ChatScriptedReasoningTurn,
   makeChatCompletionsEmulator,
   type ChatCompletionsEmulator
 } from '../src/chat-completions.ts'
@@ -129,11 +129,11 @@ describe('shared chat completions core', () => {
         reasoningModels: undefined,
         errorEnvelope: error => ({ error: { ...error } }),
         unknownModel: { status: 404, error: { message: 'x', type: 'x', code: 'x' } },
-        auth: { scheme: 'bearer', unauthorized: { message: 'x', type: 'x', code: 'x' } },
+        auth: { unauthorized: { message: 'x', type: 'x', code: 'x' } },
         completionTokenField: 'max_tokens',
         responseIdPrefix: 'synthetic',
         defaultText: ['x'],
-        turnSchema: ChatScriptedTurn,
+        turnSchema: ChatScriptedReasoningTurn,
         inputInvalid: (input, reason) => new Error(`${input}: ${reason}`)
       })
     ).toThrow(EmulatorRouteUnmapped)

@@ -203,13 +203,20 @@ describe('OpenAI chat conformance cases', () => {
         model: settings.models.toolCall,
         stream: true,
         max_completion_tokens: settings.maxCompletionTokens,
-        tools: [{ type: 'function', function: { name: 'lookup_weather' } }]
+        tools: [{ type: 'function', function: { name: 'lookup_weather' } }],
+        tool_choice: { type: 'function', function: { name: 'lookup_weather' } },
+        parallel_tool_calls: true
       })
 
-      expect(yield* entriesOf(openAiChatErrorEnvelopeCase, 'text/event-stream')).toMatchObject({
+      const errorBody = yield* entriesOf(openAiChatErrorEnvelopeCase, 'text/event-stream')
+
+      expect(errorBody).toMatchObject({
         model: settings.models.invalid,
         stream: true
       })
+      expect(errorBody).not.toHaveProperty('tool_choice')
+
+      expect(plainBody).not.toHaveProperty('tool_choice')
 
       const jsonBody = yield* entriesOf(openAiChatJsonPlainTextCase, 'application/json')
 
@@ -612,7 +619,34 @@ describe('OpenAI chat conformance disagreement drills', () => {
             JSON.stringify(envelope)
           )
         )
-      ).toEqual(mismatch('expected the provider error code to be preserved'))
+      ).toEqual(mismatch('expected the provider code `model_not_found`'))
+    })
+  )
+
+  it.effect('fails the error-envelope case for an unrelated request error code', () =>
+    Effect.gen(function* () {
+      const envelope = errorEnvelope()
+
+      if (!isRecord(envelope.error)) {
+        return expect.fail('error fixture has no error object')
+      }
+
+      envelope.error.code = 'unsupported_parameter'
+
+      // Checked at both accepted statuses, so only the code can fail the case.
+      for (const status of [400, 404]) {
+        expect(
+          yield* failedDrill(
+            openAiChatErrorEnvelopeCase,
+            withResponse(
+              openAiChatErrorEnvelopeFixture,
+              `unsupported-parameter-${status}`,
+              status,
+              JSON.stringify(envelope)
+            )
+          )
+        ).toEqual(mismatch('expected the provider code `model_not_found`'))
+      }
     })
   )
 
@@ -638,23 +672,25 @@ describe('OpenAI chat conformance disagreement drills', () => {
 
   it.effect('fails the error-envelope case for a non-model-rejection 4xx status', () =>
     Effect.gen(function* () {
-      expect(
-        yield* failedDrill(
-          openAiChatErrorEnvelopeCase,
-          withResponse(
-            openAiChatErrorEnvelopeFixture,
-            'status-402',
-            402,
-            JSON.stringify(errorEnvelope())
+      for (const status of [402, 422]) {
+        expect(
+          yield* failedDrill(
+            openAiChatErrorEnvelopeCase,
+            withResponse(
+              openAiChatErrorEnvelopeFixture,
+              `status-${status}`,
+              status,
+              JSON.stringify(errorEnvelope())
+            )
           )
-        )
-      ).toEqual(mismatch('expected a 400, 404, or 422 model-rejection status'))
+        ).toEqual(mismatch('expected a 404 or 400 model-rejection status'))
+      }
     })
   )
 
-  it.effect('accepts 400, 404, and 422 model rejections', () =>
+  it.effect('accepts 404 and 400 model_not_found rejections', () =>
     Effect.gen(function* () {
-      for (const status of [400, 404, 422]) {
+      for (const status of [404, 400]) {
         const result = yield* drill(
           openAiChatErrorEnvelopeCase,
           withResponse(

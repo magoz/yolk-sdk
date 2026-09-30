@@ -104,7 +104,9 @@ Defaults (no script):
   streams `delta.reasoning_content` before the text.
 - A request with `tools` gets one tool call whose arguments are synthesized from the tool's JSON
   Schema (required string properties get non-empty synthetic values), streamed as several
-  `delta.tool_calls[].function.arguments` fragments, finishing with `tool_calls`.
+  `delta.tool_calls[].function.arguments` fragments, finishing with `tool_calls`. A `tool_choice`
+  naming an offered function picks that tool (otherwise the first); `tool_choice: 'none'` answers
+  with text.
 - An unknown model gets the Gateway error envelope `{ error: { message, type, code } }` with
   status 400 and code `model_not_found`.
 - A missing `Authorization: Bearer <non-empty>` header gets a 401 envelope. The token is never

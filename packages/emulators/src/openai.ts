@@ -142,7 +142,6 @@ export type OpenAiEmulatorOptions = {
 
 export type OpenAiEmulator = ChatCompletionsEmulator<OpenAiScriptedTurn>
 
-// The OpenAI error envelope: `{ error: { message, type, param, code } }`.
 const openAiErrorEnvelope = (error: ChatWireError): Schema.Json => ({
   error: { message: error.message, type: error.type, param: null, code: error.code }
 })
@@ -185,7 +184,6 @@ export const makeOpenAiEmulator = (options: OpenAiEmulatorOptions = {}): OpenAiE
       }
     },
     auth: {
-      scheme: 'bearer',
       unauthorized: {
         message: 'Synthetic: missing or invalid API key.',
         type: 'invalid_request_error',

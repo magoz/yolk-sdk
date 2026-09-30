@@ -27,6 +27,8 @@ type ChatBody = {
     readonly type: 'function'
     readonly function: { readonly name: string; readonly parameters?: Schema.Json }
   }>
+  readonly tool_choice?: Schema.Json
+  readonly parallel_tool_calls?: boolean
 }
 
 const chat = (
@@ -66,7 +68,9 @@ type Delta = {
   readonly content?: string | null
   readonly reasoning_content?: string
   readonly reasoning?: string
-  readonly tool_calls?: ReadonlyArray<{ readonly function?: { readonly arguments?: string } }>
+  readonly tool_calls?: ReadonlyArray<{
+    readonly function?: { readonly name?: string; readonly arguments?: string }
+  }>
 }
 
 type ChunkPayload = {
@@ -187,6 +191,42 @@ describe('openai emulator defaults', () => {
 
     expect(fragments.length).toBeGreaterThan(1)
     expect(JSON.parse(fragments.join(''))).toEqual({ city: expect.any(String) })
+  })
+
+  it('answers a forced tool_choice with the named offered tool', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    const cityParameters = {
+      type: 'object',
+      properties: { city: { type: 'string' } },
+      required: ['city']
+    }
+
+    // The forced tool is offered second, so the default first-tool pick cannot pass this.
+    const response = await chat(
+      emulator,
+      plainRequest({
+        tools: [
+          { type: 'function', function: { name: 'lookup_time', parameters: cityParameters } },
+          { type: 'function', function: { name: 'lookup_weather', parameters: cityParameters } }
+        ],
+        tool_choice: { type: 'function', function: { name: 'lookup_weather' } },
+        parallel_tool_calls: true
+      })
+    )
+
+    expect(response.status).toBe(200)
+
+    const events = sseEvents(await response.text())
+
+    const names = deltas(events)
+      .flatMap(delta => delta.tool_calls ?? [])
+      .flatMap(call => (call.function?.name ? [call.function.name] : []))
+
+    expect(names).toEqual(['lookup_weather'])
+    expect(
+      payloads(events).flatMap(payload => payload.choices.map(choice => choice.finish_reason))
+    ).toContain('tool_calls')
   })
 
   it('rejects unknown models with a 404 OpenAI error envelope', async () => {

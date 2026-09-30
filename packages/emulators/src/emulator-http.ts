@@ -6,12 +6,12 @@
  * every 3xx (including 304) are rejected when the fault or turn is added, as are invalid header
  * names or values, a `location` header, and the framing headers the server sets itself.
  *
- * Runtime-portable (no Node builtins): the Gateway emulator is a plain Web fetch handler.
+ * Runtime-portable (no Node builtins): the emulators are plain Web fetch handlers.
  */
 import * as Schema from 'effect/Schema'
 
 /** Why a status cannot answer an emulated request, or `undefined` when it can. */
-export const emulatorStatusProblem = (status: number): string | undefined =>
+const emulatorStatusProblem = (status: number): string | undefined =>
   status >= 300 && status <= 399
     ? 'emulators never redirect: 3xx statuses are not allowed'
     : status === 204 || status === 205
@@ -39,7 +39,7 @@ const framingHeaders: ReadonlySet<string> = new Set([
 ])
 
 /** Why a header record cannot be sent by an emulator, or `undefined` when it can. */
-export const emulatorHeaderRecordProblem = (
+const emulatorHeaderRecordProblem = (
   headers: Readonly<Record<string, string>>
 ): string | undefined => {
   for (const [name, value] of Object.entries(headers)) {

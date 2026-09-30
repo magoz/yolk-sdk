@@ -204,9 +204,10 @@ provider against OpenAI Chat Completions (`https://api.openai.com/v1/chat/comple
 (`openAiChatPlainTextCase`, `openAiChatToolCallDeltasCase`, `openAiChatErrorEnvelopeCase`,
 `openAiChatJsonPlainTextCase`, and `openAiConformanceCases`). They require an `HttpClient` and the
 `OpenAiConformanceConfig` service (API key, `maxCompletionTokens`, and model ids;
-`openAiConformanceDefaultModels` holds the fixture model ids). The error-envelope case accepts a
-400, 404, or 422 model rejection and fails a 401/403 or `auth` failure; the JSON case covers
-`stream: false`.
+`openAiConformanceDefaultModels` holds the fixture model ids). The tool-call case forces its one
+tool with `tool_choice`. The error-envelope case requires provider code `model_not_found` with
+status 404 (or 400, which OpenAI has also used) and fails any other code, a 401/403, or an `auth`
+failure; the JSON case covers `stream: false`.
 
 ## Connector conformance
 

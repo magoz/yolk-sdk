@@ -95,6 +95,16 @@ const providerConfig = (
   streaming
 })
 
+/**
+ * Forces the offered tool so the one-call claim rests on the request, not on the model choosing
+ * to call it. Sent through the provider's `extraBody`; `parallel_tool_calls` stays as the provider
+ * sends it.
+ */
+const forcedToolChoice = {
+  type: 'function',
+  function: { name: lookupWeatherTool.name }
+} as const
+
 const collectEvents = (
   config: OpenAiProviderConfig,
   request: LLMRequest
@@ -153,16 +163,22 @@ export const openAiChatToolCallDeltasCase: OpenAiConformanceCase = defineConform
   id: 'openai.chat.stream.tool-call-deltas',
   title: 'Streamed tool-call argument fragments assemble into one call',
   safety: 'read',
-  docs: 'Streamed OpenAI tool calls arrive as `delta.tool_calls` entries keyed by `index`; the first carries the call `id` and `function.name`, and the `function.arguments` JSON string is streamed in fragments, finishing with `tool_calls`.',
-  wire: 'For a single offered tool, the streamed argument fragments assemble into exactly one ToolCall named after the tool whose params are a JSON object with a non-empty string `city`, followed by Done(tool_use). Where the fragments split is not asserted.',
+  docs: 'Streamed OpenAI tool calls arrive as `delta.tool_calls` entries keyed by `index`; the first carries the call `id` and `function.name`, and the `function.arguments` JSON string is streamed in fragments, finishing with `tool_calls`. A `tool_choice` naming a function forces the model to call it.',
+  wire: 'For a single offered tool forced with `tool_choice: { type: "function", function: { name } }`, the streamed argument fragments assemble into exactly one ToolCall named after the tool whose params are a JSON object with a non-empty string `city`, followed by Done(tool_use). Where the fragments split is not asserted.',
   fixtures: [openAiChatToolCallDeltasFixture.id],
   run: Effect.gen(function* () {
     const settings = yield* OpenAiConformanceConfig
 
-    const events = yield* collectEvents(providerConfig(settings, true), {
-      ...userRequest(settings.models.toolCall, 'What is the weather in Springfield? Use the tool.'),
-      tools: [lookupWeatherTool]
-    })
+    const events = yield* collectEvents(
+      { ...providerConfig(settings, true), extraBody: { tool_choice: forcedToolChoice } },
+      {
+        ...userRequest(
+          settings.models.toolCall,
+          'What is the weather in Springfield? Use the tool.'
+        ),
+        tools: [lookupWeatherTool]
+      }
+    )
 
     const calls = events.flatMap(event => (event instanceof LLMToolCall ? [event.call] : []))
 
@@ -187,16 +203,18 @@ export const openAiChatToolCallDeltasCase: OpenAiConformanceCase = defineConform
 
 const sanitizedStatusMessage = /^OpenAI returned \d{3}$/
 
-// Statuses an OpenAI-compatible API may use to reject an unknown model. 401/403
-// (authentication/permission) and every other 4xx are not a model rejection.
-const modelRejectionStatuses: ReadonlyArray<number> = [400, 404, 422]
+// OpenAI rejects an unknown model with 404 today but has also answered 400 for it, so both count.
+// 401/403 (authentication/permission) and every other status are not a model rejection.
+const modelRejectionStatuses: ReadonlyArray<number> = [404, 400]
+
+const modelRejectionCode = 'model_not_found'
 
 export const openAiChatErrorEnvelopeCase: OpenAiConformanceCase = defineConformanceCase({
   id: 'openai.chat.stream.error-envelope',
-  title: 'Unknown model ids fail with a sanitized non-retryable error',
+  title: 'Unknown model ids fail with a sanitized non-retryable model_not_found error',
   safety: 'read',
-  docs: 'OpenAI errors use the envelope `{ error: { message, type, param, code } }` with a non-2xx status; an unknown model id is rejected with code `model_not_found`.',
-  wire: 'An unknown model id is rejected as a model error (400, 404, or 422; never a 401/403 authentication or permission failure) with a JSON envelope before any stream starts: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps the status and provider code (`error.code`, else `error.type`), and whose message is status-only (no upstream body text).',
+  docs: 'OpenAI errors use the envelope `{ error: { message, type, param, code } }` with a non-2xx status; an unknown model id is rejected with status 404 (400 has also been used) and code `model_not_found`.',
+  wire: 'An unknown model id is rejected with a JSON envelope before any stream starts, as a 404 (or 400) with provider code `model_not_found` and never a 401/403 authentication or permission failure: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps the status and the `model_not_found` provider code, and whose message is status-only (no upstream body text). Any other code, such as an unsupported-parameter rejection, fails the case.',
   fixtures: [openAiChatErrorEnvelopeFixture.id],
   run: Effect.gen(function* () {
     const settings = yield* OpenAiConformanceConfig
@@ -229,12 +247,13 @@ export const openAiChatErrorEnvelopeCase: OpenAiConformanceCase = defineConforma
     )
     yield* expectConformance(
       status !== undefined && modelRejectionStatuses.includes(status),
-      'expected a 400, 404, or 422 model-rejection status',
+      'expected a 404 or 400 model-rejection status',
       { expected: [...modelRejectionStatuses], actual: status ?? null }
     )
-    yield* expectConformance(
-      providerCode !== undefined && providerCode.length > 0,
-      'expected the provider error code to be preserved'
+    yield* expectEqual(
+      providerCode ?? null,
+      modelRejectionCode,
+      'expected the provider code `model_not_found`'
     )
     yield* expectConformance(
       sanitizedStatusMessage.test(error.message),

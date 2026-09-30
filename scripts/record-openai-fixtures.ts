@@ -191,14 +191,14 @@ export const openAiFixtureModules: ReadonlyArray<OpenAiFixtureModule> = [
     caseId: 'openai.chat.stream.tool-call-deltas',
     fileName: 'tool-call-deltas.ts',
     exportName: 'openAiChatToolCallDeltasFixture',
-    doc: 'Streamed OpenAI tool call whose JSON arguments arrive as `delta.tool_calls` fragments that assemble into one call.',
+    doc: 'Streamed OpenAI tool call, forced with `tool_choice`, whose JSON arguments arrive as `delta.tool_calls` fragments that assemble into one call.',
     model: 'toolCall'
   },
   {
     caseId: 'openai.chat.stream.error-envelope',
     fileName: 'error-envelope.ts',
     exportName: 'openAiChatErrorEnvelopeFixture',
-    doc: 'Non-2xx OpenAI JSON error envelope for a request with an unknown model id.',
+    doc: 'Non-2xx OpenAI JSON error envelope (`model_not_found`) for a request with an unknown model id.',
     model: 'invalid'
   },
   {
