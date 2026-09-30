@@ -341,6 +341,10 @@ export const casesWithoutSingleFixture = (
     .map(testCase => testCase.id)
     .filter(caseId => fixtures.filter(fixture => fixture.caseId === caseId).length !== 1)
 
+/** The note written into every recorded fixture (names the owner-approved live command). */
+export const openAiFixtureNote =
+  'Recorded from the live OpenAI Chat Completions API by running its conformance case through pnpm conformance:openai --live --owner-approved. Prompts and outputs are synthetic.'
+
 export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
   readonly caseId: string
   readonly message: string
@@ -399,7 +403,7 @@ const recordCase = (
       account,
       endpoint: openAiConformanceChatCompletionsUrl,
       model: entry.model,
-      note: 'Recorded from the live OpenAI Chat Completions API by running its conformance case through pnpm conformance:openai --live. Prompts and outputs are synthetic.',
+      note: openAiFixtureNote,
       exchanges
     }).pipe(Effect.mapError(error => new ProbeFailed({ caseId, message: error.message })))
   }).pipe(

@@ -45,7 +45,9 @@ import {
   type FixtureWriter,
   type LiveProbeIo,
   type ProbeOptions,
-  type RecordedAnthropicFixture
+  type RecordedAnthropicFixture,
+  anthropicFixtureNote,
+  defaultLiveProbeIo
 } from '../record-anthropic-fixtures.ts'
 import type { ProbeEnv } from '../fixture-probe-internal.ts'
 
@@ -175,7 +177,7 @@ describe('record-anthropic-fixtures live gates', () => {
       readCredential: name => {
         reads.push(name)
 
-        if (credential === undefined) throw new Error(`credential $anthropic was read`)
+        if (credential === undefined) throw new Error('credential was read')
 
         return credential
       },
@@ -1133,5 +1135,15 @@ describe('record-anthropic-fixtures CLI', () => {
     expect(result.stdout).toContain(
       'DRY RUN: no network request was made and no credential was read'
     )
+  })
+})
+
+describe('generated fixture note', () => {
+  it('names the owner-approved live command', () => {
+    expect(anthropicFixtureNote).toContain('pnpm conformance:anthropic --live --owner-approved')
+  })
+
+  it('keeps the CLI and live defaults on the real environment', () => {
+    expect(defaultLiveProbeIo.env).toBe(process.env)
   })
 })

@@ -35,7 +35,9 @@ import {
   type FixtureWriter,
   type LiveProbeIo,
   type ProbeOptions,
-  type RecordedOpenAiFixture
+  type RecordedOpenAiFixture,
+  openAiFixtureNote,
+  defaultLiveProbeIo
 } from '../record-openai-fixtures.ts'
 import type { ProbeEnv } from '../fixture-probe-internal.ts'
 
@@ -161,7 +163,7 @@ describe('record-openai-fixtures live gates', () => {
       readCredential: name => {
         reads.push(name)
 
-        if (credential === undefined) throw new Error(`credential $openai was read`)
+        if (credential === undefined) throw new Error('credential was read')
 
         return credential
       },
@@ -532,5 +534,15 @@ describe('record-openai-fixtures CLI', () => {
     expect(result.stdout).toContain(
       'DRY RUN: no network request was made and no credential was read'
     )
+  })
+})
+
+describe('generated fixture note', () => {
+  it('names the owner-approved live command', () => {
+    expect(openAiFixtureNote).toContain('pnpm conformance:openai --live --owner-approved')
+  })
+
+  it('keeps the CLI and live defaults on the real environment', () => {
+    expect(defaultLiveProbeIo.env).toBe(process.env)
   })
 })

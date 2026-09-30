@@ -571,7 +571,7 @@ export const unredactedRecordingMessage = (fields: ReadonlyArray<string>): strin
 /** The note written into every recorded fixture, naming the fields redacted from it. */
 export const gatewayFixtureNote = (redactedFields: ReadonlyArray<string>): string =>
   [
-    'Recorded from the live Vercel AI Gateway by running its conformance case through pnpm conformance:gateway --live. Prompts and outputs are synthetic.',
+    'Recorded from the live Vercel AI Gateway by running its conformance case through pnpm conformance:gateway --live --owner-approved. Prompts and outputs are synthetic.',
     ...redactedFields.map(field => `${field} redacted after recording.`)
   ].join(' ')
 

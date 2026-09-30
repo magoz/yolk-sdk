@@ -678,6 +678,10 @@ export const thinkingRedactionRefusal = (
   return reasons.length === 0 ? undefined : reasons.join('; ')
 }
 
+/** The note written into every recorded fixture (names the owner-approved live command). */
+export const anthropicFixtureNote =
+  'Recorded from the live Anthropic Messages API by running its conformance case through pnpm conformance:anthropic --live --owner-approved. Prompts and outputs are synthetic; thinking signatures and redacted_thinking data are redacted.'
+
 export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
   readonly caseId: string
   readonly message: string
@@ -743,7 +747,7 @@ const recordCase = (
       account,
       endpoint: anthropicConformanceMessagesUrl,
       model: entry.model,
-      note: 'Recorded from the live Anthropic Messages API by running its conformance case through pnpm conformance:anthropic --live. Prompts and outputs are synthetic; thinking signatures and redacted_thinking data are redacted.',
+      note: anthropicFixtureNote,
       exchanges: redacted
     }).pipe(Effect.mapError(error => new ProbeFailed({ caseId, message: error.message })))
   }).pipe(

@@ -43,7 +43,8 @@ import {
   type FixtureWriter,
   type LiveProbeIo,
   type ProbeOptions,
-  type RecordedGatewayFixture
+  type RecordedGatewayFixture,
+  defaultLiveProbeIo
 } from '../record-gateway-fixtures.ts'
 import type { ProbeEnv } from '../fixture-probe-internal.ts'
 
@@ -196,7 +197,7 @@ describe('record-gateway-fixtures live gates', () => {
       readCredential: name => {
         reads.push(name)
 
-        if (credential === undefined) throw new Error(`credential $gateway was read`)
+        if (credential === undefined) throw new Error('credential was read')
 
         return credential
       },
@@ -499,9 +500,14 @@ describe('record-gateway-fixtures redaction', () => {
     )
     expect(withSession.length).toBeGreaterThan(0)
 
+    // The committed recordings predate --owner-approved: their notes record the command actually
+    // run, so they match the generated note without the flag.
     for (const fixture of vercelAiGatewayConformanceFixtures) {
       expect(fixture.note).toBe(
-        gatewayFixtureNote(withSession.includes(fixture) ? ['clientSessionId'] : [])
+        gatewayFixtureNote(withSession.includes(fixture) ? ['clientSessionId'] : []).replace(
+          ' --live --owner-approved.',
+          ' --live.'
+        )
       )
     }
 
@@ -846,5 +852,15 @@ describe('record-gateway-fixtures CLI', () => {
     expect(result.stdout).toContain(
       'DRY RUN: no network request was made and no credential was read'
     )
+  })
+})
+
+describe('generated fixture note', () => {
+  it('names the owner-approved live command', () => {
+    expect(gatewayFixtureNote([])).toContain('pnpm conformance:gateway --live --owner-approved')
+  })
+
+  it('keeps the CLI and live defaults on the real environment', () => {
+    expect(defaultLiveProbeIo.env).toBe(process.env)
   })
 })
