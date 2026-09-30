@@ -30,7 +30,12 @@ import {
   makeCodexEmulator
 } from '../src/codex.ts'
 import { emulatorEvidenceHeader } from '../src/route-evidence.ts'
-import type { SubscriptionUsageEmulator } from '../src/subscription-usage.ts'
+import { EmulatorRouteUnmapped } from '../src/route-evidence.ts'
+import {
+  makeSubscriptionUsageEmulator,
+  type SubscriptionUsageEmulator
+} from '../src/subscription-usage.ts'
+import { xAiGrokUsageRecording } from '../src/subscription-usage-recordings.ts'
 import {
   makeXAiGrokEmulator,
   xAiGrokEmulatorRoutes,
@@ -382,6 +387,83 @@ describe.each(families)('$name subscription-usage route', family => {
     host.reset()
 
     expect(host.usage.script.pending()).toBe(0)
+  })
+})
+
+describe('fixture-only usage route rules', () => {
+  const grokUrl = `https://cli-chat-proxy.grok.com${xAiGrokSubscriptionUsagePath}?format=credits`
+
+  it('Grok pins X-XAI-Token-Auth and x-grok-client-mode to the SDK values', async () => {
+    for (const headers of [
+      { ...grokHeaders, 'x-grok-client-mode': 'interactive' },
+      { ...grokHeaders, 'x-xai-token-auth': 'other-client' }
+    ]) {
+      const host = makeXAiGrokEmulator()
+
+      armed(host)
+      await expectNotEmulated(await get(host, grokUrl, headers))
+      expectUntouched(host)
+    }
+  })
+
+  it('Grok accepts any non-empty x-userid and x-grok-client-version (documented latitude)', async () => {
+    const host = makeXAiGrokEmulator()
+
+    const response = await get(host, grokUrl, {
+      ...grokHeaders,
+      'x-userid': 'synthetic-other-user',
+      'x-grok-client-version': '9.9.9-synthetic'
+    })
+
+    expect(response.status).toBe(200)
+  })
+
+  it('matches the recorded query string byte for byte', async () => {
+    for (const query of ['?format=cred%69ts', '?format=credits&', '?&format=credits']) {
+      const host = makeXAiGrokEmulator()
+
+      armed(host)
+      await expectNotEmulated(
+        await get(host, grokUrl.replace('?format=credits', query), grokHeaders)
+      )
+      expectUntouched(host)
+    }
+
+    const host = makeAnthropicEmulator()
+
+    await expectNotEmulated(
+      await get(
+        host,
+        `https://api.anthropic.com${anthropicSubscriptionUsagePath}?&&`,
+        claudeHeaders
+      )
+    )
+  })
+
+  it('refuses success statuses for faults and scripted errors', () => {
+    const host = makeXAiGrokEmulator()
+
+    expect(() => host.usage.faults.add({ kind: 'status', status: 200 })).toThrow(
+      XAiGrokEmulatorInputInvalid
+    )
+    expect(() => host.usage.script.enqueue({ error: { status: 299, body: {} } })).toThrow(
+      XAiGrokEmulatorInputInvalid
+    )
+    expect(host.usage.faults.list()).toEqual([])
+    expect(host.usage.script.pending()).toBe(0)
+  })
+
+  it('throws EmulatorRouteUnmapped when the manifest does not list the usage path', () => {
+    expect(() =>
+      makeSubscriptionUsageEmulator({
+        path: '/v1/other-usage',
+        routes: xAiGrokSubscriptionUsageEmulatorRoutes,
+        recording: xAiGrokUsageRecording,
+        headers: [],
+        subscriptionUsage: undefined,
+        inputInvalid: (input, reason) => new XAiGrokEmulatorInputInvalid({ input, reason })
+      })
+    ).toThrow(EmulatorRouteUnmapped)
   })
 })
 

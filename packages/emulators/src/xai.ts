@@ -244,8 +244,10 @@ const errorEnvelope = (error: ResponsesWireError): Schema.Json => ({
  * version value, and the output limit itself (recorded as `maxOutputTokens`).
  *
  * `GET /v1/billing?format=credits` is fixture-only: a request with the headers the SDK fetcher
- * sends (a non-empty bearer, `X-XAI-Token-Auth`, `x-userid`, `x-grok-client-version`, and
- * `x-grok-client-mode`; values never checked, and the user id and token-auth never recorded),
+ * sends (a non-empty bearer, `X-XAI-Token-Auth: xai-grok-cli`, a non-empty `x-userid`, a
+ * non-empty `x-grok-client-version`, and `x-grok-client-mode: headless`; the bearer, user id, and
+ * client-version values are request-shape latitude, and the user id and token-auth are never
+ * recorded),
  * `accept: application/json`, and exactly the recorded `format=credits` query gets the recorded
  * body (`xAiGrokSubscriptionUsageDefault`, or a same-shaped `options.subscriptionUsage` / scripted
  * `{ usage }`); anything else answers 400 not-emulated. The client version and mode are recorded.
@@ -265,10 +267,10 @@ const makeXAiGrokUsageEmulator = (options: XAiGrokEmulatorOptions): XAiGrokUsage
     routes: xAiGrokSubscriptionUsageEmulatorRoutes,
     recording: xAiGrokUsageRecording,
     headers: [
-      { name: 'x-xai-token-auth', record: false },
+      { name: 'x-xai-token-auth', record: false, accepts: value => value === 'xai-grok-cli' },
       { name: 'x-userid', record: false },
       { name: 'x-grok-client-version', record: true },
-      { name: 'x-grok-client-mode', record: true }
+      { name: 'x-grok-client-mode', record: true, accepts: value => value === 'headless' }
     ],
     subscriptionUsage: options.subscriptionUsage,
     inputInvalid: (input, reason) => new XAiGrokEmulatorInputInvalid({ input, reason })

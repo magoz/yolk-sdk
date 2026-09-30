@@ -378,9 +378,11 @@ only from the committed conformance fixtures.
   stored); extra request headers; JSON key order; any string value except the discriminators
   `model`, `role`, `type`, and `phase`; any positive integer where the recording has a number (the
   output-token limit); an `anthropic-beta` list that includes `oauth-2025-04-20` (Claude usage);
-  `content-type` parameters. Object keys, array lengths, booleans (`stream`, `store`,
-  `include_usage`, `parallel_tool_calls`, `additionalProperties`), `accept`, the query string, and
-  the method must equal the recording.
+  any non-empty `x-userid` and `x-grok-client-version` (Grok usage); `content-type` parameters. Object keys, array lengths, booleans (`stream`, `store`,
+  `include_usage`, `parallel_tool_calls`, `additionalProperties`), `accept`, the query string (byte
+  for byte), the method, `X-XAI-Token-Auth: xai-grok-cli`, and `x-grok-client-mode: headless` must
+  equal the recording or the SDK's fixed value. Faults and scripted errors on these routes take
+  statuses of 400-599 only.
 
 All fixtures behind these routes are synthetic and the routes are `unverified`.
 

@@ -14,15 +14,18 @@
  * - Test controls, as far as the other emulators allow them: the shared kernel faults (`status`,
  *   `error-after-chunks`, `truncate-after-chunks`) and scripted error turns; a route with a
  *   replaceable JSON body (the usage routes) also takes a scripted `{ usage }` body (or a default
- *   override) whose JSON shape (object keys and value kinds) equals the recording's. No control
- *   can produce a success shape no fixture records.
+ *   override) whose JSON shape (object keys and value kinds) equals the recording's. Fault and
+ *   scripted-error statuses must be 400 or above, so no control can produce a success status or
+ *   shape no fixture records.
  *
  * Request-shape latitude (accepted, harmless): any credential value (never checked or stored);
  * extra request headers; key order; every string value except the discriminators `model`, `role`,
  * `type`, and `phase` (which must equal the recording); any positive integer where the recording
  * has a number (the output-token limit). Array lengths, object keys, booleans (`stream`, `store`,
  * `include_usage`, `parallel_tool_calls`, `additionalProperties`), the recorded `accept` value,
- * the `content-type` media type, and the query string must equal the recording.
+ * the `content-type` media type, and the query string (exactly, byte for byte) must equal the
+ * recording. Route-specific header values (for example Grok's `x-grok-client-version`) are
+ * documented by the route that declares them.
  *
  * Runtime-portable Web APIs only; no Node builtins and no SDK imports.
  */
@@ -71,12 +74,35 @@ export type FixtureRecording = {
   }
 }
 
+// Fault and scripted-error statuses on fixture-only routes: errors only (400-599), so no control
+// answers a success that no fixture records.
+const FixtureRouteErrorStatus = EmulatorStatusFault.fields.status.check(
+  Schema.makeFilter(status =>
+    status >= 400
+      ? true
+      : 'fixture-only routes take fault and scripted-error statuses of 400 or above'
+  )
+)
+
+const FixtureRouteStatusFault = Schema.Struct({
+  ...EmulatorStatusFault.fields,
+  status: FixtureRouteErrorStatus
+})
+
+const FixtureRouteScriptedError = Schema.Struct({
+  error: Schema.Struct({
+    ...EmulatorScriptedError.fields.error.fields,
+    status: FixtureRouteErrorStatus
+  })
+})
+
 /**
- * Faults: the shared kernel kinds only. `status` without a `body` answers an emulator-fault body
- * (`{ error: { type: 'emulator_fault', message } }`), never a guessed provider envelope.
+ * Faults: the shared kernel kinds only, with `status` limited to 400-599. `status` without a
+ * `body` answers an emulator-fault body (`{ error: { type: 'emulator_fault', message } }`), never
+ * a guessed provider envelope.
  */
 export const FixtureRouteFault = Schema.Union([
-  EmulatorStatusFault,
+  FixtureRouteStatusFault,
   EmulatorErrorAfterChunksFault,
   EmulatorTruncateAfterChunksFault
 ])
@@ -308,14 +334,6 @@ const bearerPattern = /^bearer\s+\S+/i
 const mediaType = (value: string | null): string | undefined =>
   value?.split(';')[0]?.trim().toLowerCase()
 
-const sortedQuery = (search: string): string => {
-  const params = new URLSearchParams(search)
-
-  params.sort()
-
-  return params.toString()
-}
-
 type MutableLedgerEntry = KernelLedgerEntry<FixtureRouteFaultKind> & {
   query?: string
   body?: Schema.Json
@@ -378,8 +396,8 @@ export const makeFixtureRouteEmulator = (config: FixtureRouteConfig): FixtureRou
 
   const turnSchema: Schema.Decoder<FixtureRouteScriptedTurn> =
     config.replaceableBody === undefined
-      ? EmulatorScriptedError
-      : Schema.Union([EmulatorScriptedError, ScriptedBody])
+      ? FixtureRouteScriptedError
+      : Schema.Union([FixtureRouteScriptedError, ScriptedBody])
 
   const models = config.recordings.flatMap(recording => {
     const model = stringField(recording.request.body, 'model')
@@ -421,7 +439,7 @@ export const makeFixtureRouteEmulator = (config: FixtureRouteConfig): FixtureRou
       if (!matches) return `the ${name} header is not the recorded ${value}`
     }
 
-    if (sortedQuery(url.search) !== sortedQuery(recording.request.query)) {
+    if (url.search !== recording.request.query) {
       return recording.request.query.length === 0
         ? 'the recording has no query parameters'
         : `the query is not the recorded ${recording.request.query}`

@@ -87,13 +87,16 @@ There is no root export or barrel.
   (never checked or stored); extra request headers; JSON key order; any string value except the
   discriminators `model`, `role`, `type`, and `phase`; any positive integer where the recording has
   a number (the output-token limit); for `anthropic-beta` (Claude usage), a comma-separated list
-  that includes `oauth-2025-04-20`; for `content-type`, media-type parameters. Everything else must
+  that includes `oauth-2025-04-20`; any non-empty `x-userid` and `x-grok-client-version` (Grok
+  usage); for `content-type`, media-type parameters. Everything else must
   equal the recording: object keys, array lengths, booleans (`stream`, `store`, `include_usage`,
-  `parallel_tool_calls`, `additionalProperties`), the `accept` value, the query string, the method,
+  `parallel_tool_calls`, `additionalProperties`), the `accept` value, the query string (byte for
+  byte), the method,
   and the headers the SDK sends (Go chat, Responses, usage: Bearer; Go Messages: `x-api-key` and
   `anthropic-version: 2023-06-01`; Claude usage: Bearer and `anthropic-beta`; Codex usage: Bearer
-  and `ChatGPT-Account-Id`; Grok usage: Bearer, `X-XAI-Token-Auth`, `x-userid`,
-  `x-grok-client-version`, and `x-grok-client-mode`).
+  and `ChatGPT-Account-Id`; Grok usage: Bearer, `X-XAI-Token-Auth: xai-grok-cli`, `x-userid`,
+  `x-grok-client-version`, and `x-grok-client-mode: headless`). Fault and scripted-error statuses on
+  fixture-only routes are 400-599 only.
 - Evidence policy: unknown API routes fail closed and are written to the ledger (404 JSON on the
   earlier model-route emulators, 400 not-emulated on fixture-only routes; control-plane requests
   are never recorded); unverified routes answer but carry

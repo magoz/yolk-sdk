@@ -61,7 +61,14 @@ export const openCodeGoUsagePath = '/zen/go/v1/usage'
 const recordingsFor = (path: string): ReadonlyArray<FixtureRecording> =>
   openCodeGoRecordings.filter(recording => recording.request.path === path)
 
-const [usageRecording] = recordingsFor(openCodeGoUsagePath)
+const usageRecording: FixtureRecording = (() => {
+  const [recording] = recordingsFor(openCodeGoUsagePath)
+
+  // Packaging-data invariant: the Go usage fixture is copied into this package.
+  if (recording === undefined) throw new Error('the Go usage recording is missing')
+
+  return recording
+})()
 
 /**
  * The model ids the Go fixtures record, one per protocol (synthetic placeholders). A protocol
@@ -127,8 +134,7 @@ export const openCodeGoEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
  * The recorded Go usage body (the synthetic `opencode.go.usage.snapshot` fixture, copied as
  * data): `usage.rolling`, `usage.weekly`, and `usage.monthly` as `{ percent, resetsAt }`.
  */
-export const openCodeGoUsageDefault: Schema.Json =
-  usageRecording === undefined ? null : recordedUsageBody(usageRecording)
+export const openCodeGoUsageDefault: Schema.Json = recordedUsageBody(usageRecording)
 
 /** Thrown by the JS API (`faults.add`, `script.enqueue`) and at construction for invalid input. */
 export class OpenCodeGoEmulatorInputInvalid extends Data.TaggedError(
@@ -224,10 +230,6 @@ export const makeOpenCodeGoEmulator = (
     headers: [],
     inputInvalid: inputInvalid('responses')
   })
-
-  if (usageRecording === undefined) {
-    throw inputInvalid('usage')('turn', 'no recorded Go usage fixture')
-  }
 
   const usage = makeSubscriptionUsageEmulator({
     path: openCodeGoUsagePath,

@@ -240,9 +240,12 @@ modes, tools, reasoning, and extra fields. No provider status or error envelope 
 
 Accepted request-shape latitude: any credential value; extra headers; key order; any string value
 except `model`, `role`, `type`, and `phase`; any positive integer where the recording has a number
-(the output-token limit); an `anthropic-beta` list that includes `oauth-2025-04-20`; and
-`content-type` parameters. Test controls are the shared faults, scripted error turns, and, on usage
-routes, a scripted `{ usage }` body or `subscriptionUsage` option with the recorded JSON shape. All
+(the output-token limit); an `anthropic-beta` list that includes `oauth-2025-04-20`; any
+non-empty Grok `x-userid` and `x-grok-client-version`; and `content-type` parameters. The query
+string must match byte for byte, and Grok's `X-XAI-Token-Auth` (`xai-grok-cli`) and
+`x-grok-client-mode` (`headless`) must be the SDK's fixed values. Test controls are the shared faults, scripted error turns, and, on usage
+routes, a scripted `{ usage }` body or `subscriptionUsage` option with the recorded JSON shape;
+fault and scripted-error statuses are 400-599 only. All
 of these routes are `unverified` (synthetic fixtures).
 
 ## OpenCode Go emulator
