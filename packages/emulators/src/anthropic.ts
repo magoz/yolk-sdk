@@ -169,22 +169,22 @@ export type AnthropicEmulator = MessagesEmulator
  * Create an Anthropic Messages emulator. Each call has independent ledger, fault, and script
  * state.
  *
- * Without a script, `POST /v1/messages` answers a known model with synthetic content:
- * `stream: true` streams `message_start`, the content blocks (`content_block_start`, deltas,
- * `content_block_stop`, with a `ping` after the first block starts), `message_delta` (stop
- * reason and usage), and `message_stop`; `stream: false` returns one `message` JSON body. A
- * request with `thinking` enabled (`enabled` or `adaptive`) gets a thinking block before the
- * answer. A request with `tools` gets one `tool_use` block whose input is synthesized from the
- * tool's `input_schema` and streamed as `input_json_delta` fragments, stopping with `tool_use`;
- * `tool_choice: { type: 'tool', name }` picks that tool (otherwise the first) and
- * `tool_choice: { type: 'none' }` answers with text. An answer that would exceed `max_tokens`
- * is cut and stops with `max_tokens`. Unknown models get 404 `not_found_error`; a request with
- * neither a non-empty `x-api-key` nor a bearer credential gets 401 `authentication_error`; a
- * missing or unsupported `anthropic-version` (only `2023-06-01` is accepted), a missing or
- * non-positive `max_tokens`, or `thinking` with a forced `tool_choice` (`tool` or `any`) gets 400
- * `invalid_request_error`; unknown routes get a 404 envelope. The OAuth `anthropic-beta` header
- * and `budget_tokens` limits are not enforced. The ledger records which header carried the credential, `anthropic-version`,
- * and `anthropic-beta`, never a credential value.
+ * Without a script, `POST /v1/messages` answers a known model with synthetic content: `stream:
+ * true` streams `message_start`, the content blocks (`content_block_start`, deltas,
+ * `content_block_stop`, with a `ping` after the first block starts), `message_delta` (stop reason
+ * and usage), and `message_stop`; `stream: false` returns one `message` JSON body. A request with
+ * `thinking` enabled (`enabled` or `adaptive`) gets a thinking block before the answer. A request
+ * with `tools` gets one `tool_use` block whose input is synthesized from the tool's `input_schema`
+ * and streamed as `input_json_delta` fragments, stopping with `tool_use`; `tool_choice: { type:
+ * 'tool', name }` picks that tool (otherwise the first) and `tool_choice: { type: 'none' }`
+ * answers with text. An answer that would exceed `max_tokens` is cut and stops with `max_tokens`.
+ * Unknown models get 404 `not_found_error`; a request with neither a non-empty `x-api-key` nor a
+ * bearer credential gets 401 `authentication_error`; a missing or unsupported `anthropic-version`
+ * (only `2023-06-01` is accepted), a missing or non-positive `max_tokens`, or `thinking` with a
+ * forced `tool_choice` (`tool` or `any`) gets 400 `invalid_request_error`; unknown routes get a
+ * 404 envelope. The OAuth `anthropic-beta` header and `budget_tokens` limits are not enforced. The
+ * ledger records which header carried the credential, `anthropic-version`, and `anthropic-beta`,
+ * never a credential value.
  */
 export const makeAnthropicEmulator = (options: AnthropicEmulatorOptions = {}): AnthropicEmulator =>
   makeMessagesEmulator({

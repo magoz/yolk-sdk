@@ -204,7 +204,7 @@ const decodeMessagesRequest = Schema.decodeUnknownResult(MessagesRequest)
 // A non-empty bearer credential. The value is never checked or stored.
 const bearerPattern = /^bearer\s+\S+/i
 
-/** `anthropic-version` values the emulator accepts; the SDK providers send `2023-06-01`. */
+/** `anthropic-version` values the emulator accepts; the SDK providers send `2023-06-01` by default. */
 const supportedAnthropicVersions: ReadonlyArray<string> = ['2023-06-01']
 
 const defaultText = ['Hello', ' from the', ' synthetic Anthropic emulator.']
@@ -325,7 +325,7 @@ const defaultPlan = (request: MessagesRequest, seq: number, maxTokens: number): 
           type: 'tool_use',
           id: `toolu_synthetic_${seq}_0`,
           name: tool.name,
-          // The real API opens the input with an empty `partial_json` fragment.
+          // Emulator choice (unverified): open the input with an empty `partial_json` fragment.
           fragments: ['', ...splitFragments(input, 3)]
         }
       ],

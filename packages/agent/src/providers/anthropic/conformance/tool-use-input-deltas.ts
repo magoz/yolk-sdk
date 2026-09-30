@@ -1,9 +1,10 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * Streamed Anthropic `tool_use` block, forced with
- * `tool_choice: { type: 'tool', name, disable_parallel_tool_use: true }`, whose JSON input arrives as `input_json_delta` fragments (the first one empty) that assemble into one
- * call, followed by `message_delta` with `stop_reason: tool_use` and `message_stop`.
+ * Streamed Anthropic `tool_use` block, forced with `tool_choice: { type: 'tool', name,
+ * disable_parallel_tool_use: true }`, whose JSON input arrives as `input_json_delta` fragments
+ * (the first one empty) that assemble into one call, followed by `message_delta` with
+ * `stop_reason: tool_use` and `message_stop`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
  * replaces it. Regenerate with `pnpm conformance:anthropic --live --account <label>`.

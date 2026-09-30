@@ -214,10 +214,10 @@ status 404 (or 400, which OpenAI has also used) and fails any other code, a 401/
 failure; the JSON case covers `stream: false`.
 
 `@yolk-sdk/agent/providers/anthropic/conformance` covers Anthropic Messages
-(`https://api.anthropic.com/v1/messages`) through the native Messages provider path OpenCode Go
-uses (`x-api-key`, `anthropic-version: 2023-06-01`, native `system` and tool names, `message_stop`
-required), not the Claude subscription provider, which only accepts a Claude OAuth token. It
-exports five synthetic fixtures (`anthropicMessagesPlainTextFixture`,
+(`https://api.anthropic.com/v1/messages`) through the native Messages provider path OpenCode Go uses
+(`x-api-key`, `anthropic-version: 2023-06-01`, native `system` and tool names, `message_stop`
+required), not the Claude subscription provider, which only accepts a Claude OAuth token. It exports
+five synthetic fixtures (`anthropicMessagesPlainTextFixture`,
 `anthropicMessagesToolUseInputDeltasFixture`, `anthropicMessagesThinkingBeforeTextFixture`,
 `anthropicMessagesErrorEnvelopeFixture`, `anthropicMessagesMaxTokensFixture`, and
 `anthropicConformanceFixtures`) and five `read` cases (`anthropicMessagesPlainTextCase`,
@@ -229,8 +229,8 @@ service (API key, `maxTokens`, `thinkingBudgetTokens`, and model ids;
 with `tool_choice: { type: 'tool', name, disable_parallel_tool_use: true }`; the thinking case
 enables `thinking` and sends `max_tokens` = `maxTokens + thinkingBudgetTokens`; the error-envelope
 case requires a 404 that is not an `auth` failure and whose body, read at the case's `HttpClient`
-boundary, is `{ type: 'error', error: { type: 'not_found_error', message } }`; the max-tokens case requires `stop_reason: max_tokens` to fail as a
-non-retryable `invalid_response` without `Done`.
+boundary, is `{ type: 'error', error: { type: 'not_found_error', message } }`; the max-tokens case
+requires `stop_reason: max_tokens` to fail as a non-retryable `invalid_response` without `Done`.
 
 ## Connector conformance
 
