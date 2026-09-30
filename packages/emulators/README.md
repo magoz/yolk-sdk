@@ -4,8 +4,8 @@
 > usual canary instability.
 
 Emulators for outside services, for tests and local development. A route table sends an Effect
-`HttpClient` to an emulator instead of the real service; the first emulator speaks the Vercel AI
-Gateway OpenAI-compatible Chat Completions wire. Emulators never import other `@yolk-sdk/*` code:
+`HttpClient` to an emulator instead of the real service. Two emulators speak the OpenAI-compatible
+Chat Completions wire: the Vercel AI Gateway and OpenAI itself. Emulators never import other `@yolk-sdk/*` code:
 their wire shapes follow recorded conformance fixtures, and each emulated route names the
 conformance cases behind it.
 
@@ -25,6 +25,7 @@ There is no root export. Import an explicit subpath:
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/emulators/router`  | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` (Effect; no Node builtins)         |
 | `@yolk-sdk/emulators/gateway` | `makeGatewayEmulator`, `gatewayEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)       |
+| `@yolk-sdk/emulators/openai`  | `makeOpenAiEmulator`, `openAiEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)         |
 | `@yolk-sdk/emulators/node`    | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
 
 ## Routing
@@ -136,8 +137,8 @@ emulator cannot build a planned response, it answers an evidence-tagged 500, the
 500 with `responseError`, and the matching fault is not used up.
 
 `ledger.entries()` records every emulated API request (control-plane requests are not recorded):
-method, path, parsed JSON body, model, `stream`, `reasoning_effort`, `thinking`, tool names, the
-fault applied, the route's evidence tag, the status actually sent, and the body chunks handed over
+method, path, parsed JSON body, model, `stream`, the `max_tokens` limit (as `maxCompletionTokens`;
+recorded, never validated), `reasoning_effort`, `thinking`, tool names, the fault applied, the route's evidence tag, the status actually sent, and the body chunks handed over
 so far. Credential headers are never recorded.
 
 Control plane (same fetch handler):
@@ -151,16 +152,47 @@ Control plane (same fetch handler):
 | `/_emulate/state`    | `GET`                                                            |
 | `/_emulate/coverage` | `GET` (the route evidence manifest with request counts)          |
 
+## OpenAI emulator
+
+`makeOpenAiEmulator(options?)` returns the same `{ fetch, ledger, reset, faults, script, coverage }`
+shape for OpenAI Chat Completions: `POST /v1/chat/completions`, routed from
+`https://api.openai.com`. It shares the Gateway emulator's Chat Completions core, so framing,
+tool-call fragments, JSON mode, faults, scripted turns, the ledger, and the control plane behave
+the same. What differs:
+
+- `knownModels` defaults to `openAiEmulatorDefaultModels` (`gpt-4.1-nano`, `gpt-4.1-mini`).
+- Errors use the OpenAI envelope `{ error: { message, type, param, code } }`; an unknown model gets
+  404 with code `model_not_found`, and a missing `Authorization: Bearer <non-empty>` header gets
+  401 with code `invalid_api_key`. The token is never checked or stored.
+- The ledger records `max_completion_tokens` as `maxCompletionTokens` (never validated).
+- Reasoning models are not emulated yet: no default output streams reasoning, scripted turns
+  reject `reasoning`, `reasoningField`, and `order`, and `/_emulate/state` has no `reasoningModels`.
+- Invalid faults or turns throw `OpenAiEmulatorInputInvalid`.
+
+```ts
+import { makeOpenAiEmulator } from '@yolk-sdk/emulators/openai'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const openai = makeOpenAiEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://api.openai.com', openai.fetch)
+])
+```
+
+`openAiEmulatorRoutes` links the route to the OpenAI chat conformance cases in
+`@yolk-sdk/agent/providers/openai/conformance`.
+
 ## Evidence
 
-`gatewayEmulatorRoutes` lists every emulated route with `method`, `path`, `kind`, `write`, the
-conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and `observedAt`. Every
-response from an unverified route carries `x-emulator-evidence: unverified`. Each manifest route
-maps to its own handler; an emulator whose manifest has a route without a handler throws when it is
-constructed. The Yolk repository checks these manifests: unknown case ids, duplicate routes,
-connector write routes without verified evidence, verified connector write routes whose
-`observedAt` is missing, unreadable, or in the future, and verified routes whose cited cases have
-no verified fixture fail, as do verified connector write routes citing no cases; unverified or
+`gatewayEmulatorRoutes` and `openAiEmulatorRoutes` list every emulated route with `method`, `path`,
+`kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
+`observedAt`. Every response from an unverified route carries `x-emulator-evidence: unverified`.
+Each manifest route maps to its own handler; an emulator whose manifest has a route without a
+handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
+duplicate routes, connector write routes without verified evidence, verified connector write routes
+whose `observedAt` is missing, unreadable, or in the future, and verified routes whose cited cases
+have no verified fixture fail, as do verified connector write routes citing no cases; unverified or
 stale (over 30 days) evidence and other routes citing no cases warn.
 
 ## Node server

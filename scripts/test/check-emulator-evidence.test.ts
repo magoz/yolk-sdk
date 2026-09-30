@@ -254,6 +254,9 @@ describe('repo emulator manifests', () => {
     expect(evidenceReportFailed(report)).toBe(false)
     expect(knownConformanceCaseIds.has('vercel-ai-gateway.stream.plain-text')).toBe(true)
     expect(knownConformanceCaseIds.has('fortnox.invoice.list-populated')).toBe(true)
+    expect(knownConformanceCaseIds.has('openai.chat.json.plain-text')).toBe(true)
+    expect(emulatorManifests.map(manifest => manifest.name)).toEqual(['gateway', 'openai'])
+    expect(conformanceFixtureEvidence.get('openai.chat.stream.plain-text')).toEqual(['unverified'])
   })
 
   it('runs as a CLI that prints the report and exits 0', async () => {
@@ -266,5 +269,6 @@ describe('repo emulator manifests', () => {
     expect(result.failed).toBe(false)
     expect(result.stdout).toContain('Emulator evidence:')
     expect(result.stdout).toContain('WARN  gateway  POST /v1/chat/completions  unverified evidence')
+    expect(result.stdout).toContain('WARN  openai  POST /v1/chat/completions  unverified evidence')
   }, 120000)
 })

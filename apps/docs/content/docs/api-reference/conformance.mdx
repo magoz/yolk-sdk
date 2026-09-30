@@ -196,6 +196,18 @@ The same subpath exports four `read` conformance cases backed by those fixtures
 `vercelAiGatewayConformanceDefaultModels` holds the fixture model ids), so they run against replay
 or a host's live client. None is observed live yet, so reports warn `unverified-case`.
 
+`@yolk-sdk/agent/providers/openai/conformance` does the same for the generic OpenAI-compatible chat
+provider against OpenAI Chat Completions (`https://api.openai.com/v1/chat/completions`,
+`max_completion_tokens`): four synthetic fixtures (`openAiChatPlainTextFixture`,
+`openAiChatToolCallDeltasFixture`, `openAiChatErrorEnvelopeFixture`,
+`openAiChatJsonPlainTextFixture`, and `openAiConformanceFixtures`) and four `read` cases
+(`openAiChatPlainTextCase`, `openAiChatToolCallDeltasCase`, `openAiChatErrorEnvelopeCase`,
+`openAiChatJsonPlainTextCase`, and `openAiConformanceCases`). They require an `HttpClient` and the
+`OpenAiConformanceConfig` service (API key, `maxCompletionTokens`, and model ids;
+`openAiConformanceDefaultModels` holds the fixture model ids). The error-envelope case accepts a
+400, 404, or 422 model rejection and fails a 401/403 or `auth` failure; the JSON case covers
+`stream: false`.
+
 ## Connector conformance
 
 > **Experimental.** Conformance/testing only.

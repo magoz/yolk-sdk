@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, a Vercel AI Gateway fetch-handler emulator, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway and OpenAI Chat Completions fetch-handler emulators, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -34,6 +34,10 @@
       "types": "./src/gateway.ts",
       "default": "./src/gateway.ts"
     },
+    "./openai": {
+      "types": "./src/openai.ts",
+      "default": "./src/openai.ts"
+    },
     "./node": {
       "types": "./src/node.ts",
       "default": "./src/node.ts"
@@ -60,6 +64,11 @@
         "types": "./dist/gateway.d.mts",
         "import": "./dist/gateway.mjs",
         "default": "./dist/gateway.mjs"
+      },
+      "./openai": {
+        "types": "./dist/openai.d.mts",
+        "import": "./dist/openai.mjs",
+        "default": "./dist/openai.mjs"
       },
       "./node": {
         "types": "./dist/node.d.mts",

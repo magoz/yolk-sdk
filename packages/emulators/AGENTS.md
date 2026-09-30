@@ -5,12 +5,15 @@ Effect `HttpClient` routing that points code at them.
 
 ## Subpaths
 
-| Subpath                       | Source                  | Role                                                                     |
-| ----------------------------- | ----------------------- | ------------------------------------------------------------------------ |
-| `@yolk-sdk/emulators/router`  | `src/router.ts`         | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` |
-| `@yolk-sdk/emulators/gateway` | `src/gateway.ts`        | Vercel AI Gateway fetch-handler emulator and its route evidence manifest |
-| `@yolk-sdk/emulators/node`    | `src/node.ts`           | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`           |
-| (internal)                    | `src/route-evidence.ts` | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`        |
+| Subpath                       | Source                    | Role                                                                           |
+| ----------------------------- | ------------------------- | ------------------------------------------------------------------------------ |
+| `@yolk-sdk/emulators/router`  | `src/router.ts`           | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`       |
+| `@yolk-sdk/emulators/gateway` | `src/gateway.ts`          | Vercel AI Gateway fetch-handler emulator and its route evidence manifest       |
+| `@yolk-sdk/emulators/openai`  | `src/openai.ts`           | OpenAI Chat Completions fetch-handler emulator and its manifest                |
+| `@yolk-sdk/emulators/node`    | `src/node.ts`             | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                 |
+| (internal)                    | `src/chat-completions.ts` | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`) |
+| (internal)                    | `src/emulator-http.ts`    | Fault/scripted-error status and header validators                              |
+| (internal)                    | `src/route-evidence.ts`   | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`              |
 
 There is no root export or barrel.
 
@@ -20,8 +23,8 @@ There is no root export or barrel.
   (`scripts/check-package-boundaries.ts` enforces this). Tests may import `@yolk-sdk/agent` and
   `@yolk-sdk/conformance` (workspace devDependencies).
 - `node:` builtins are allowed only in `src/node.ts` (also enforced).
-- `router` is Effect code; `gateway` is a plain Web fetch handler (no Effect runtime needed, no
-  Node builtins); `node` is the only Node boundary.
+- `router` is Effect code; `gateway` and `openai` are plain Web fetch handlers (no Effect runtime
+  needed, no Node builtins); `node` is the only Node boundary.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
 - Does not use `@emulators/core` yet; stateful connector emulators may later.
@@ -44,7 +47,7 @@ There is no root export or barrel.
   follow redirects by itself (documented for hosts). `test/router-redirects.test.ts` guards this.
 - Wire shapes come from the recorded (currently synthetic) conformance fixtures, copied as data,
   never imported. Each emulated route lists the conformance case ids it follows in its manifest
-  (`gatewayEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`
+  (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`
   (`src/route-evidence.ts`) pairs them at construction and throws `EmulatorRouteUnmapped` for a
   manifest route without a handler or a handler without a manifest route.
 - Evidence policy: unknown emulated API routes fail closed (404 JSON, written to the ledger;
@@ -57,8 +60,17 @@ There is no root export or barrel.
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
   turn is added. Build a response before consuming its fault; a response that cannot be built
   answers an evidence-tagged 500 recorded in the ledger (`responseError`).
+- OpenAI-compatible Chat Completions emulators share `src/chat-completions.ts`: request parsing,
+  SSE framing, JSON mode, scripted turns, faults, the ledger, the control plane, evidence tagging,
+  and route binding. Each subpath supplies only its path and manifest, model lists, error envelope
+  and unknown-model status, auth scheme, completion-token field (recorded in the ledger as
+  `maxCompletionTokens`, never validated), whether reasoning is emulated, its turn schema, and its
+  input-invalid error. Keep the Gateway's public API and wire behaviour unchanged when editing the
+  core; `test/gateway.test.ts` is the guard. `/openai` does not emulate reasoning yet: its turn
+  schema rejects reasoning fields and `/_emulate/state` omits `reasoningModels`.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
-  (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` for invalid input.
+  (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
+  `OpenAiEmulatorInputInvalid` for invalid input.
 - Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over;
   chunk faults that cannot take effect answer 500 and are not consumed, never a silent no-op.
 - Credential headers are never recorded; the bearer value is never checked or stored.
@@ -70,6 +82,8 @@ There is no root export or barrel.
 
 `test/router.test.ts`, `test/router-redirects.test.ts` (redirects and `mapRequest` never escape
 the route table, with a second unrouted loopback server), `test/gateway.test.ts`,
-`test/node.test.ts`, and `test/gateway-conformance.test.ts` (the Gateway conformance cases
-in-process and over a loopback socket, a disagreement drill, and faults through the real provider,
-including 429 `retry-after` over the socket). Loopback sockets only; never call real services.
+`test/openai.test.ts`, `test/chat-completions.test.ts` (shared core parity and per-emulator
+parameters), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
+cases in-process and over a loopback socket, a disagreement drill, and faults through the real
+provider, including 429 `retry-after` over the socket), and `test/openai-conformance.test.ts` (the
+same for the OpenAI chat cases through the generic OpenAI-compatible provider). Loopback sockets only; never call real services.

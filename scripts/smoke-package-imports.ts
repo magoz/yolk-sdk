@@ -27,6 +27,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './providers/anthropic/usage',
       './providers/openai',
       './providers/openai/codex',
+      './providers/openai/conformance',
       './providers/openai/codex-provider',
       './providers/openai/codex-usage',
       './providers/openai/provider',
@@ -115,7 +116,7 @@ const packages: ReadonlyArray<PackageManifest> = [
   },
   {
     name: '@yolk-sdk/emulators',
-    exports: ['./router', './gateway', './node']
+    exports: ['./router', './gateway', './openai', './node']
   }
 ]
 
@@ -240,6 +241,8 @@ const main = async () => {
           'if (typeof conformanceCase.defineConformanceCase !== "function" || typeof conformanceCase.expectEqual !== "function" || typeof runner.runConformance !== "function" || typeof runner.formatConformanceReport !== "function") throw new Error("Missing conformance case/runner exports")',
           'if (runner.conformanceSkipReason({ kind: "live", account: "synthetic" }, { id: "example.case.write", safety: "write-reversible" }) !== "writes-not-allowed") throw new Error("Conformance safety policy mismatch")',
           'if (gatewayFixtures.vercelAiGatewayConformanceCases.length !== 4 || !gatewayFixtures.vercelAiGatewayConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Gateway conformance cases")',
+          'const openAiConformance = await import("@yolk-sdk/agent/providers/openai/conformance")',
+          'if (openAiConformance.openAiConformanceFixtures.length !== 4 || openAiConformance.openAiConformanceCases.length !== 4 || !openAiConformance.openAiConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing OpenAI conformance cases/fixtures")',
           'const connectorBridges = await import("@yolk-sdk/connectors/conformance")',
           'for (const symbol of ["connectorHttpClientFromEffectHttpClientLayer", "connectorBinaryHttpClientFromEffectHttpClientLayer", "connectorHttpClientsFromEffectHttpClientLayer"]) { if (connectorBridges[symbol] === undefined) throw new Error(`Missing connector conformance export: ${symbol}`) }',
           'if (typeof connectorBridges.staticCredentialResolverLayer !== "function") throw new Error("Missing staticCredentialResolverLayer")',
@@ -253,6 +256,9 @@ const main = async () => {
           'const gatewayEmulator = (await import("@yolk-sdk/emulators/gateway")).makeGatewayEmulator()',
           'const emulated = await gatewayEmulator.fetch(new Request("https://ai-gateway.vercel.sh/v1/chat/completions", { method: "POST", headers: { authorization: "Bearer synthetic", "content-type": "application/json" }, body: JSON.stringify({ model: "openai/gpt-4.1-nano", messages: [], stream: false }) }))',
           'if (emulated.status !== 200 || emulated.headers.get("x-emulator-evidence") !== "unverified" || (await emulated.json()).object !== "chat.completion") throw new Error("Gateway emulator smoke failed")',
+          'const openAiEmulator = (await import("@yolk-sdk/emulators/openai")).makeOpenAiEmulator()',
+          'const emulatedOpenAi = await openAiEmulator.fetch(new Request("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { authorization: "Bearer synthetic", "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-4.1-nano", messages: [], stream: false, max_completion_tokens: 16 }) }))',
+          'if (emulatedOpenAi.status !== 200 || emulatedOpenAi.headers.get("x-emulator-evidence") !== "unverified" || (await emulatedOpenAi.json()).object !== "chat.completion" || openAiEmulator.ledger.entries()[0]?.maxCompletionTokens !== 16) throw new Error("OpenAI emulator smoke failed")',
           'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")'
         ].join('\n')
     )
