@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * One calendar view page over the seeded range: two events with seven-digit fractional UTC times.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:microsoft --live --account <label> --record` stages a replacement in a
+ * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a replacement in a
  * gitignored directory; see the script header for the manual scrub-and-promote step.
  */
 export const microsoftCalendarListRangeFixture: WireFixture = {

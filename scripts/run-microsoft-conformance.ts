@@ -635,7 +635,7 @@ export const renderFixtureModule = (spec: MicrosoftCaseSpec, fixture: WireFixtur
     ` * ${spec.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}), scrubbed and promoted by hand from`,
-    ' * `pnpm conformance:microsoft --live --account <label> --record`.',
+    ' * `pnpm conformance:microsoft --live --owner-approved --account <label> --record`.',
     ' */',
     `export const ${spec.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''

@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Draft create, two concurrent PATCHes (200, then 409 with a Graph error envelope), then the permanent-delete batch.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:microsoft --live --account <label> --record` stages a replacement in a
+ * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a replacement in a
  * gitignored directory; see the script header for the manual scrub-and-promote step.
  */
 export const microsoftOutlookConcurrentWritesFixture: WireFixture = {

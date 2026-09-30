@@ -7,7 +7,7 @@
  * pin expected Graph behaviour (unverified until a live run) for hosts and the upcoming emulator.
  *
  * The current fixtures are synthetic placeholders (`evidence: 'unverified'`) shaped like the
- * Microsoft Graph wire. `pnpm conformance:microsoft --live --account <label> --record` stages
+ * Microsoft Graph wire. `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages
  * verified recordings from a practice tenant in a gitignored directory; a person scrubs them and
  * promotes them here, updating the tests together with them (fixture ids, `evidence`, and `account`
  * change).

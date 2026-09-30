@@ -302,7 +302,9 @@ describe('run-microsoft-conformance rendering', () => {
 
     expect(source).toContain("import type { WireFixture } from '@yolk-sdk/conformance/fixture'")
     expect(source).toContain('export const microsoftOutlookPagingNextLinkFixture: WireFixture = {')
-    expect(source).toContain('pnpm conformance:microsoft --live --account <label> --record')
+    expect(source).toContain(
+      'pnpm conformance:microsoft --live --owner-approved --account <label> --record'
+    )
   })
 })
 
