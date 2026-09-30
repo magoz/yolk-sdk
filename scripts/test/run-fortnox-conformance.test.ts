@@ -322,7 +322,9 @@ describe('run-fortnox-conformance rendering', () => {
 
     expect(source).toContain("import type { WireFixture } from '@yolk-sdk/conformance/fixture'")
     expect(source).toContain('export const fortnoxInvoicePreviewPdfFixture: WireFixture = {')
-    expect(source).toContain('pnpm conformance:fortnox --live --account <label> --record')
+    expect(source).toContain(
+      'pnpm conformance:fortnox --live --owner-approved --account <label> --record'
+    )
   })
 })
 

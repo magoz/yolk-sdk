@@ -582,7 +582,7 @@ export const renderFixtureModule = (spec: FortnoxCaseSpec, fixture: WireFixture)
     ` * ${spec.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}), scrubbed and promoted by hand from`,
-    ' * `pnpm conformance:fortnox --live --account <label> --record`.',
+    ' * `pnpm conformance:fortnox --live --owner-approved --account <label> --record`.',
     ' */',
     `export const ${spec.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''
