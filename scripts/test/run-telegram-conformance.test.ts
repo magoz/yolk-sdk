@@ -307,6 +307,25 @@ describe('run-telegram-conformance token scrubbing', () => {
     expect(textContainsAccessToken('{"from":{"id":987654321}}', liveToken)).toBe(false)
     expect(textContainsAccessToken('https://x.test/other', liveToken)).toBe(false)
   })
+
+  it('finds an escaped token whose escape a rendered module escaped again', () => {
+    const opaque = 'opaque7c1d9e2b4a6f8e0d3c5b'
+    const rest = opaque.slice('opaque7'.length)
+
+    // A recorded JSON body with an interior escape (`\u0037` is `7`), JSON.stringify'd into a
+    // fixture module, which escapes the escape again (`\\u0037`).
+    const recorded = `{"note":"opaque\\u0037${rest}"}`
+    const rendered = JSON.stringify({ body: recorded })
+
+    expect(rendered).toContain(`opaque\\\\u0037${rest}`)
+    expect(textContainsAccessToken(recorded, opaque)).toBe(true)
+    expect(textContainsAccessToken(rendered, opaque)).toBe(true)
+    // Rendered twice (three escape layers), and the `\x37` form.
+    expect(textContainsAccessToken(JSON.stringify(rendered), opaque)).toBe(true)
+    expect(textContainsAccessToken(`opaque\\\\x37${rest}`, opaque)).toBe(true)
+    // An escaped backslash stays one backslash: it never becomes part of the token.
+    expect(textContainsAccessToken(`opaque\\\\7${rest}`, opaque)).toBe(false)
+  })
 })
 
 const recorderOf = (exchanges: ReadonlyArray<WireExchange>): WireRecorderApi => ({
