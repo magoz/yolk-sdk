@@ -80,60 +80,63 @@ describe('cross-check A: in-process emulator', () => {
 })
 
 describe('cross-check B: emulated over a loopback socket', () => {
-  it.effect('passes every Gateway conformance case with progressive delivery', () =>
-    Effect.gen(function* () {
-      const emulators = yield* Ref.make(new Map<string, GatewayEmulator>())
+  it.effect(
+    'passes every Gateway conformance case, with streamed bodies sent as several chunks',
+    () =>
+      Effect.gen(function* () {
+        const emulators = yield* Ref.make(new Map<string, GatewayEmulator>())
 
-      const report = yield* runConformance(vercelAiGatewayConformanceCases, {
-        target: { kind: 'emulated' },
-        now,
-        layer: testCase => {
-          const emulator = makeGatewayEmulator()
+        const report = yield* runConformance(vercelAiGatewayConformanceCases, {
+          target: { kind: 'emulated' },
+          now,
+          layer: testCase => {
+            const emulator = makeGatewayEmulator()
 
-          return Layer.mergeAll(
-            emulatedLayer(emulator),
-            configLayer,
-            Layer.effectDiscard(
-              Ref.update(emulators, current => new Map(current).set(testCase.id, emulator))
+            return Layer.mergeAll(
+              emulatedLayer(emulator),
+              configLayer,
+              Layer.effectDiscard(
+                Ref.update(emulators, current => new Map(current).set(testCase.id, emulator))
+              )
             )
-          )
+          }
+        })
+
+        expect(report.summary, formatConformanceReport(report)).toEqual({
+          passed: 4,
+          failed: 0,
+          skipped: 0
+        })
+
+        const ledgers = yield* Ref.get(emulators)
+
+        for (const testCase of vercelAiGatewayConformanceCases) {
+          const entries = ledgers.get(testCase.id)?.ledger.entries() ?? []
+
+          expect(entries, testCase.id).toHaveLength(1)
+          expect(entries[0]?.path).toBe('/v1/chat/completions')
+          expect(entries[0]?.stream).toBe(true)
+          expect(entries[0]?.evidence).toBe('unverified')
         }
+
+        // Streamed cases: the emulator produced several body chunks, one per pull. This does not
+        // prove client-side timing; `node.test.ts` covers progressive delivery over the socket.
+        for (const id of [
+          'vercel-ai-gateway.stream.plain-text',
+          'vercel-ai-gateway.stream.deepseek-reasoning',
+          'vercel-ai-gateway.stream.tool-call-deltas'
+        ]) {
+          const [entry] = ledgers.get(id)?.ledger.entries() ?? []
+
+          expect(entry?.status, id).toBe(200)
+          expect(entry?.bodyChunks, id).toBeGreaterThan(1)
+        }
+
+        const [errorEntry] =
+          ledgers.get('vercel-ai-gateway.stream.error-envelope')?.ledger.entries() ?? []
+
+        expect(errorEntry?.status).toBe(400)
       })
-
-      expect(report.summary, formatConformanceReport(report)).toEqual({
-        passed: 4,
-        failed: 0,
-        skipped: 0
-      })
-
-      const ledgers = yield* Ref.get(emulators)
-
-      for (const testCase of vercelAiGatewayConformanceCases) {
-        const entries = ledgers.get(testCase.id)?.ledger.entries() ?? []
-
-        expect(entries, testCase.id).toHaveLength(1)
-        expect(entries[0]?.path).toBe('/v1/chat/completions')
-        expect(entries[0]?.stream).toBe(true)
-        expect(entries[0]?.evidence).toBe('unverified')
-      }
-
-      // Streamed cases: the served body left the emulator as several chunks, one per pull.
-      for (const id of [
-        'vercel-ai-gateway.stream.plain-text',
-        'vercel-ai-gateway.stream.deepseek-reasoning',
-        'vercel-ai-gateway.stream.tool-call-deltas'
-      ]) {
-        const [entry] = ledgers.get(id)?.ledger.entries() ?? []
-
-        expect(entry?.status, id).toBe(200)
-        expect(entry?.bodyChunks, id).toBeGreaterThan(1)
-      }
-
-      const [errorEntry] =
-        ledgers.get('vercel-ai-gateway.stream.error-envelope')?.ledger.entries() ?? []
-
-      expect(errorEntry?.status).toBe(400)
-    })
   )
 })
 
@@ -230,8 +233,20 @@ const streamThroughProvider = <E>(
   )
 
 describe('faults through the Gateway provider', () => {
+  const expectRateLimit = (error: unknown) => {
+    expect(error).toBeInstanceOf(LLMError)
+
+    if (error instanceof LLMError) {
+      expect(error.retryable).toBe(true)
+      expect(error.cause).toBe('rate_limit')
+      expect(error.provider?.kind).toBe('rate_limit')
+      expect(error.provider?.status).toBe(429)
+      expect(error.provider?.retryAfterMs).toBe(2000)
+    }
+  }
+
   it.effect(
-    'a 429 with retry-after becomes a retryable rate-limit LLMError with retryAfterMs',
+    'a 429 with retry-after becomes a retryable rate-limit LLMError with retryAfterMs (in-process)',
     () =>
       Effect.gen(function* () {
         const error = yield* streamThroughProvider(
@@ -239,15 +254,20 @@ describe('faults through the Gateway provider', () => {
           inProcessLayer
         ).pipe(Effect.flip)
 
-        expect(error).toBeInstanceOf(LLMError)
+        expectRateLimit(error)
+      })
+  )
 
-        if (error instanceof LLMError) {
-          expect(error.retryable).toBe(true)
-          expect(error.cause).toBe('rate_limit')
-          expect(error.provider?.kind).toBe('rate_limit')
-          expect(error.provider?.status).toBe(429)
-          expect(error.provider?.retryAfterMs).toBe(2000)
-        }
+  it.effect(
+    'a 429 with retry-after becomes a retryable rate-limit LLMError with retryAfterMs (loopback socket)',
+    () =>
+      Effect.gen(function* () {
+        const error = yield* streamThroughProvider(
+          [{ kind: 'status', status: 429, headers: { 'retry-after': '2' } }],
+          emulatedLayer
+        ).pipe(Effect.flip, Effect.scoped)
+
+        expectRateLimit(error)
       })
   )
 

@@ -10,7 +10,7 @@ Effect `HttpClient` routing that points code at them.
 | `@yolk-sdk/emulators/router`  | `src/router.ts`         | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` |
 | `@yolk-sdk/emulators/gateway` | `src/gateway.ts`        | Vercel AI Gateway fetch-handler emulator and its route evidence manifest |
 | `@yolk-sdk/emulators/node`    | `src/node.ts`           | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`           |
-| (internal)                    | `src/route-evidence.ts` | `EmulatorRouteEvidence` type and the evidence header name; re-exported   |
+| (internal)                    | `src/route-evidence.ts` | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`        |
 
 There is no root export or barrel.
 
@@ -35,14 +35,27 @@ There is no root export or barrel.
   request and message carry only the method and origin, never path, query, headers, or body.
   Both refuse to build when `NODE_ENV` is `production` (missing is allowed; unreadable fails).
 - `EmulatedHttpClient` validates at build time that every base URL is http(s) on loopback
-  (`127.0.0.0/8`, `::1`, `localhost`) without credentials, query, or hash.
+  (`127.0.0.0/8`, `::1`, `localhost`; IPv4-mapped IPv6 such as `[::ffff:127.0.0.1]` is rejected)
+  without credentials, query, or hash.
+- `EmulatedHttpClient` routes in the client's postprocess (the send step), never in preprocess, so
+  redirect follow-ups and a host's `mapRequest` go through the route table. Over `FetchHttpClient`
+  it sends with `redirect: 'manual'`; any other underlying client must not follow redirects by
+  itself (documented for hosts). `test/router-redirects.test.ts` guards this.
 - Wire shapes come from the recorded (currently synthetic) conformance fixtures, copied as data,
   never imported. Each emulated route lists the conformance case ids it follows in its manifest
-  (`gatewayEmulatorRoutes`). Keep the manifest and the handler's route table in sync.
-- Evidence policy: unknown routes fail closed (404 JSON, written to the ledger); unverified
-  routes answer but carry `x-emulator-evidence: unverified`, are tagged in the ledger, and are
-  listed by the evidence check; evidence older than 30 days warns; connector write routes need
-  `verified` evidence (the check fails otherwise).
+  (`gatewayEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`
+  (`src/route-evidence.ts`) pairs them at construction and throws `EmulatorRouteUnmapped` for a
+  manifest route without a handler or a handler without a manifest route.
+- Evidence policy: unknown emulated API routes fail closed (404 JSON, written to the ledger;
+  control-plane requests are never recorded); unverified routes answer but carry
+  `x-emulator-evidence: unverified`, are tagged in the ledger, and are listed by the evidence
+  check; evidence older than 30 days warns; connector write routes need `verified` evidence with a
+  readable, not-future `observedAt`, and a verified route fails when none of its cited cases has a
+  `verified` fixture (the check fails otherwise).
+- Emulators never redirect and always send a body: fault and scripted-error statuses exclude 1xx,
+  204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
+  turn is added. Build a response before consuming its fault; a response that cannot be built
+  answers an evidence-tagged 500 recorded in the ledger (`responseError`).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` for invalid input.
 - Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over;
@@ -54,7 +67,8 @@ There is no root export or barrel.
 
 ## Tests
 
-`test/router.test.ts`, `test/gateway.test.ts`, `test/node.test.ts`, and
-`test/gateway-conformance.test.ts` (the Gateway conformance cases in-process and over a loopback
-socket, a disagreement drill, and faults through the real provider). Loopback sockets only; never
-call real services.
+`test/router.test.ts`, `test/router-redirects.test.ts` (redirects and `mapRequest` never escape
+the route table, with a second unrouted loopback server), `test/gateway.test.ts`,
+`test/node.test.ts`, and `test/gateway-conformance.test.ts` (the Gateway conformance cases
+in-process and over a loopback socket, a disagreement drill, and faults through the real provider,
+including 429 `retry-after` over the socket). Loopback sockets only; never call real services.

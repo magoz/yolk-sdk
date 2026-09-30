@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest'
 import type { EmulatorRouteEvidence } from '../../packages/emulators/src/route-evidence.ts'
 import {
   checkEmulatorEvidence,
+  conformanceFixtureEvidence,
   emulatorManifests,
   evidenceAgeDays,
   evidenceReportFailed,
+  fixtureEvidenceByCase,
   formatEvidenceReport,
   knownConformanceCaseIds,
   type EvidenceManifest
@@ -97,7 +99,7 @@ describe('checkEmulatorEvidence', () => {
     ])
   })
 
-  it('warns on stale, unreadable, or missing observedAt without failing', () => {
+  it('warns on stale, unreadable, future, or missing observedAt on routes that are not connector writes', () => {
     const stale = check([route({ observedAt: '2026-08-30' })])
 
     expect(stale.findings.map(finding => finding.detail)).toEqual([
@@ -105,15 +107,108 @@ describe('checkEmulatorEvidence', () => {
     ])
     expect(evidenceReportFailed(stale)).toBe(false)
     expect(kinds([route({ observedAt: '2026-08-31' })])).toEqual([])
-    expect(kinds([route({ observedAt: 'yesterday' })])).toEqual(['warn:stale'])
+    expect(kinds([route({ observedAt: 'yesterday' })])).toEqual(['warn:unreadable-observed-at'])
+    expect(kinds([route({ observedAt: '2026-10-01' })])).toEqual(['warn:future-observed-at'])
     expect(kinds([route({ observedAt: undefined })])).toEqual(['warn:missing-observed-at'])
     expect(kinds([route({ caseIds: [] })])).toEqual(['warn:no-case-ids'])
+  })
+
+  it('fails a verified connector write route whose observedAt is missing, unreadable, or in the future', () => {
+    const write = (observedAt: string | undefined) =>
+      route({ method: 'POST', write: true, caseIds: ['example.write.create'], observedAt })
+
+    expect(kinds([write(undefined)])).toEqual(['fail:missing-observed-at'])
+    expect(kinds([write('yesterday')])).toEqual(['fail:unreadable-observed-at'])
+    expect(kinds([write('2026-02-30')])).toEqual(['fail:unreadable-observed-at'])
+    expect(kinds([write('2026-10-01')])).toEqual(['fail:future-observed-at'])
+    expect(evidenceReportFailed(check([write('2026-10-01')]))).toBe(true)
+    expect(kinds([write('2026-09-30')])).toEqual([])
+    // Stale is still only a warning.
+    expect(kinds([write('2026-08-01')])).toEqual(['warn:stale'])
+  })
+
+  it('warns when a verified route cites no case ids', () => {
+    const report = check([
+      route({ method: 'POST', write: true, caseIds: [], observedAt: '2026-09-29' })
+    ])
+
+    expect(report.findings.map(finding => `${finding.severity}:${finding.kind}`)).toEqual([
+      'warn:no-case-ids'
+    ])
+    expect(evidenceReportFailed(report)).toBe(false)
+  })
+
+  it('fails a verified route when no cited case has a verified fixture (optional cross-check)', () => {
+    const writeRoute = route({
+      method: 'POST',
+      write: true,
+      caseIds: ['example.read.list', 'example.write.create'],
+      observedAt: '2026-09-29'
+    })
+
+    const crossCheck = (fixtureEvidence: ReturnType<typeof fixtureEvidenceByCase>) =>
+      checkEmulatorEvidence({
+        manifests: [{ name: 'example', routes: [writeRoute] }],
+        caseIds,
+        now,
+        fixtureEvidence
+      }).findings.map(finding => `${finding.severity}:${finding.kind}`)
+
+    const allUnverified = fixtureEvidenceByCase([
+      { caseId: 'example.read.list', evidence: 'unverified' },
+      { caseId: 'example.write.create', evidence: 'unverified' },
+      { caseId: 'example.write.create', evidence: 'unverified' }
+    ])
+
+    expect(crossCheck(allUnverified)).toEqual(['fail:unbacked-verified'])
+    expect(crossCheck(new Map())).toEqual(['fail:unbacked-verified'])
+
+    const oneVerified = fixtureEvidenceByCase([
+      { caseId: 'example.read.list', evidence: 'unverified' },
+      { caseId: 'example.write.create', evidence: 'unverified' },
+      { caseId: 'example.write.create', evidence: 'verified' }
+    ])
+
+    expect(crossCheck(oneVerified)).toEqual([])
+    // Without the hook, only the route's own label is checked.
+    expect(kinds([writeRoute])).toEqual([])
+  })
+
+  it('the repo fixtures are all unverified, so a verified route citing them fails', () => {
+    const report = checkEmulatorEvidence({
+      manifests: [
+        {
+          name: 'example',
+          routes: [
+            route({
+              method: 'POST',
+              write: true,
+              caseIds: ['fortnox.invoice.send-email'],
+              observedAt: '2026-09-29'
+            })
+          ]
+        }
+      ],
+      caseIds: knownConformanceCaseIds,
+      now,
+      fixtureEvidence: conformanceFixtureEvidence
+    })
+
+    expect(conformanceFixtureEvidence.get('fortnox.invoice.send-email')).toEqual(['unverified'])
+    expect(conformanceFixtureEvidence.get('vercel-ai-gateway.stream.plain-text')).toEqual([
+      'unverified'
+    ])
+    expect(report.findings.map(finding => `${finding.severity}:${finding.kind}`)).toEqual([
+      'fail:unbacked-verified'
+    ])
   })
 
   it('computes whole UTC days', () => {
     expect(evidenceAgeDays('2026-09-30', now)).toBe(0)
     expect(evidenceAgeDays('2026-09-01', now)).toBe(29)
+    expect(evidenceAgeDays('2026-10-02', now)).toBe(-2)
     expect(evidenceAgeDays('2026-13-45', now)).toBeUndefined()
+    expect(evidenceAgeDays('2026-02-30', now)).toBeUndefined()
   })
 
   it('formats a compact report', () => {
@@ -143,7 +238,8 @@ describe('repo emulator manifests', () => {
     const report = checkEmulatorEvidence({
       manifests: emulatorManifests,
       caseIds: knownConformanceCaseIds,
-      now
+      now,
+      fixtureEvidence: conformanceFixtureEvidence
     })
 
     expect(evidenceReportFailed(report)).toBe(false)

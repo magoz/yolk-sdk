@@ -1,12 +1,15 @@
 import type * as Schema from 'effect/Schema'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   GatewayEmulatorInputInvalid,
   emulatorEvidenceHeader,
   gatewayEmulatorRoutes,
   makeGatewayEmulator,
-  type GatewayEmulator
+  type GatewayEmulator,
+  type GatewayFault,
+  type GatewayScriptedTurn
 } from '../src/gateway.ts'
+import { EmulatorRouteUnmapped, bindRouteHandlers } from '../src/route-evidence.ts'
 
 const base = 'https://ai-gateway.vercel.sh'
 
@@ -556,6 +559,163 @@ describe('gateway emulator faults', () => {
       GatewayEmulatorInputInvalid
     )
   })
+
+  it('rejects statuses that cannot carry a body, and redirects, for faults and turns', () => {
+    const emulator = makeGatewayEmulator()
+
+    for (const status of [101, 204, 205, 301, 302, 304, 307, 308]) {
+      expect(() => emulator.faults.add({ kind: 'status', status }), String(status)).toThrow(
+        GatewayEmulatorInputInvalid
+      )
+      expect(
+        () => emulator.script.enqueue({ error: { status, body: 'x' } }),
+        String(status)
+      ).toThrow(GatewayEmulatorInputInvalid)
+    }
+
+    expect(emulator.faults.list()).toEqual([])
+    expect(emulator.script.pending()).toBe(0)
+
+    for (const status of [200, 206, 400, 429, 503]) {
+      expect(() => emulator.faults.add({ kind: 'status', status, count: 1 })).not.toThrow()
+    }
+  })
+
+  it('rejects location headers and invalid header names or values, for faults and turns', () => {
+    const emulator = makeGatewayEmulator()
+
+    const invalidHeaders: ReadonlyArray<Record<string, string>> = [
+      { location: 'http://127.0.0.1:1/elsewhere' },
+      { Location: '/relative' },
+      { 'bad header': 'x' },
+      { '': 'x' },
+      { 'x-split': 'a\r\nset-cookie: injected=1' },
+      { 'x-control': 'a\u0001b' },
+      { 'x-wide': 'snowman \u2603' }
+    ]
+
+    for (const headers of invalidHeaders) {
+      const label = JSON.stringify(headers)
+
+      expect(() => emulator.faults.add({ kind: 'status', status: 429, headers }), label).toThrow(
+        GatewayEmulatorInputInvalid
+      )
+      expect(
+        () => emulator.script.enqueue({ error: { status: 503, body: 'x', headers } }),
+        label
+      ).toThrow(GatewayEmulatorInputInvalid)
+    }
+
+    expect(emulator.faults.list()).toEqual([])
+    expect(emulator.script.pending()).toBe(0)
+  })
+
+  it('rejects bodyless and redirect faults through the control plane', async () => {
+    const emulator = makeGatewayEmulator()
+
+    const rejected: ReadonlyArray<Schema.Json> = [
+      { kind: 'status', status: 204 },
+      { kind: 'status', status: 429, headers: { location: 'http://127.0.0.1:1/' } }
+    ]
+
+    for (const fault of rejected) {
+      expect((await control(emulator, 'POST', '/_emulate/faults', fault)).status).toBe(400)
+    }
+
+    expect(
+      (
+        await control(emulator, 'POST', '/_emulate/script', {
+          error: { status: 302, body: 'x' }
+        })
+      ).status
+    ).toBe(400)
+    expect(emulator.faults.list()).toEqual([])
+    expect(emulator.script.pending()).toBe(0)
+  })
+})
+
+/**
+ * Run `body` while `new Response(..., { status })` throws for one status, standing in for any
+ * response the emulator cannot build.
+ */
+const withUnbuildableStatus = async <A>(status: number, body: () => Promise<A>): Promise<A> => {
+  const RealResponse = globalThis.Response
+
+  class UnbuildableResponse extends RealResponse {
+    constructor(bodyInit?: BodyInit | null, init?: ResponseInit) {
+      if (init?.status === status) {
+        throw new TypeError(`synthetic: cannot build a ${status} response`)
+      }
+
+      super(bodyInit, init)
+    }
+  }
+
+  vi.stubGlobal('Response', UnbuildableResponse)
+
+  try {
+    return await body()
+  } finally {
+    vi.unstubAllGlobals()
+  }
+}
+
+describe('gateway emulator error recovery', () => {
+  const recoveryCases: ReadonlyArray<{
+    readonly name: string
+    readonly fault: GatewayFault
+    readonly turn?: GatewayScriptedTurn
+  }> = [
+    { name: 'a status fault', fault: { kind: 'status', status: 503, count: 1 } },
+    {
+      name: 'a chunk fault on a scripted error',
+      fault: { kind: 'truncate-after-chunks', chunks: 0, count: 1 },
+      turn: { error: { status: 503, body: 'down' } }
+    }
+  ]
+
+  for (const { name, fault, turn } of recoveryCases) {
+    it(`answers a tagged, ledgered 500 and keeps ${name} when its response cannot be built`, async () => {
+      const emulator = makeGatewayEmulator()
+
+      emulator.faults.add(fault)
+
+      if (turn !== undefined) emulator.script.enqueue(turn)
+
+      const response = await withUnbuildableStatus(503, () => chat(emulator, plainRequest()))
+
+      expect(response.status).toBe(500)
+      expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect((await response.json()).error.type).toBe('emulator_error')
+
+      const [entry] = emulator.ledger.entries()
+
+      expect(entry).toMatchObject({
+        status: 500,
+        evidence: 'unverified',
+        responseError: expect.any(String)
+      })
+      expect(entry?.fault).toBeUndefined()
+      expect(emulator.faults.list()[0]).toMatchObject({ remaining: 1, applied: 0 })
+    })
+  }
+
+  it('the kept status fault applies to the next request once its response can be built', async () => {
+    const emulator = makeGatewayEmulator()
+
+    emulator.faults.add({ kind: 'status', status: 503, count: 1 })
+
+    await withUnbuildableStatus(503, () => chat(emulator, plainRequest()))
+
+    const next = await chat(emulator, plainRequest())
+
+    expect(next.status).toBe(503)
+    expect(emulator.ledger.entries().map(entry => [entry.status, entry.fault])).toEqual([
+      [500, undefined],
+      [503, 'status']
+    ])
+    expect(emulator.faults.list()[0]).toMatchObject({ remaining: 0, applied: 1 })
+  })
 })
 
 describe('gateway emulator control plane', () => {
@@ -669,6 +829,52 @@ describe('gateway emulator control plane', () => {
     expect(wrong.headers.get('allow')).toBe('GET, DELETE')
     expect((await control(emulator, 'GET', '/_emulate/unknown')).status).toBe(404)
     expect(emulator.ledger.entries()).toEqual([])
+  })
+})
+
+describe('route handler binding', () => {
+  const manifestRoute = gatewayEmulatorRoutes[0]
+
+  it('maps every Gateway manifest route to its own handler', () => {
+    expect(() => makeGatewayEmulator()).not.toThrow()
+  })
+
+  it('throws when a manifest route has no handler', () => {
+    if (manifestRoute === undefined) throw new Error('expected a Gateway manifest route')
+
+    const unmapped = { ...manifestRoute, path: '/v1/embeddings' }
+
+    expect(() =>
+      bindRouteHandlers(
+        [manifestRoute, unmapped],
+        new Map([['POST /v1/chat/completions', 'chat-handler']])
+      )
+    ).toThrow(EmulatorRouteUnmapped)
+    expect(() => bindRouteHandlers([unmapped], new Map())).toThrow(
+      'Emulator manifest route POST /v1/embeddings has no handler'
+    )
+  })
+
+  it('throws when a handler has no manifest route', () => {
+    expect(() =>
+      bindRouteHandlers([], new Map([['POST /v1/embeddings', 'orphan-handler']]))
+    ).toThrow('Emulator handler POST /v1/embeddings has no manifest route')
+  })
+
+  it('pairs each manifest route with the handler under its own key', () => {
+    if (manifestRoute === undefined) throw new Error('expected a Gateway manifest route')
+
+    const second = { ...manifestRoute, method: 'get', path: '/v1/models' }
+
+    expect(
+      bindRouteHandlers(
+        [manifestRoute, second],
+        new Map([
+          ['GET /v1/models', 'models-handler'],
+          ['POST /v1/chat/completions', 'chat-handler']
+        ])
+      ).map(bound => bound.handler)
+    ).toEqual(['chat-handler', 'models-handler'])
   })
 })
 

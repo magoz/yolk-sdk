@@ -23,7 +23,7 @@ There is no root export. Import an explicit subpath.
 | `EmulatedHttpClient.layer(routes)`  | Rewrites each routed origin to a loopback base URL (path and query kept) over the `HttpClient` already in context |
 | `InProcessHttpClient.layer(routes)` | Calls the route's fetch handler directly with a web `Request`; returns `HttpClientResponse.fromWeb`               |
 | `EmulatorRouteInvalid`              | Build error: malformed or duplicate origin, wrong target kind, or a base URL that is not http(s) on loopback      |
-| `EmulatorEnvironmentRefused`        | Build error: `NODE_ENV` is `production` (a missing `NODE_ENV` is allowed)                                         |
+| `EmulatorEnvironmentRefused`        | Build error: `NODE_ENV` is `production` or cannot be read (a missing `NODE_ENV` is allowed)                       |
 
 Pick the transport by swapping layers; the code under test keeps calling the real origin:
 
@@ -36,8 +36,14 @@ Pick the transport by swapping layers; the code under test keeps calling the rea
 
 Both layers fail closed: a request to an origin without a route fails with an `HttpClientError`
 whose message names only the origin (never the path, query, headers, or body). Emulated base URLs
-must be `http(s)` on `127.0.0.0/8`, `::1`, or `localhost`. The in-process client sends `Empty`,
-`Uint8Array`, and string `Raw` bodies; other body kinds fail with an `EncodeError`.
+must be `http(s)` on `127.0.0.0/8`, `::1`, or `localhost` (IPv4-mapped forms such as
+`[::ffff:127.0.0.1]` are rejected). The in-process client sends `Empty`, `Uint8Array`, and string
+`Raw` bodies; other body kinds fail with an `EncodeError`.
+
+`EmulatedHttpClient` routes at the send step, so redirect follow-ups (`HttpClient.followRedirects`
+on top) and URLs changed by your `HttpClient.mapRequest` are routed or fail closed too. Over
+`FetchHttpClient`, routed requests use `redirect: 'manual'`, so a 3xx reaches the caller as a 3xx.
+Any other underlying client must not follow redirects by itself.
 
 ```ts
 import { Layer } from 'effect'
@@ -81,11 +87,15 @@ checked or stored.
 `finishReason`; `usage: null` drops usage) or an error (`{ error: { status, body, headers? } }`)
 for the next request. `faults.add` injects `status` (for example 429 with `retry-after`),
 `error-after-chunks`, or `truncate-after-chunks`, each with an optional `match: { path?, model? }`
-and `count`.
+and `count`. Emulators never redirect and always send a body: fault and scripted-error statuses
+exclude 1xx, 204, 205, and every 3xx (including 304), header names and values must be valid, and a
+`location` header is rejected.
 
-The ledger records method, path, parsed body, model, `stream`, `reasoning_effort`, `thinking`, tool
-names, the applied fault, the evidence tag, the status, and body chunks sent; never credential
-headers. The same fetch handler serves the control plane:
+The ledger records every emulated API request (control-plane requests are not recorded): method,
+path, parsed body, model, `stream`, `reasoning_effort`, `thinking`, tool names, the applied fault,
+the evidence tag, the status actually sent, and body chunks sent; never credential headers. When a
+planned response cannot be built, the emulator answers an evidence-tagged 500, records it with
+`responseError`, and does not use up the fault. The same fetch handler serves the control plane:
 
 | Route                | Methods                 |
 | -------------------- | ----------------------- |
@@ -103,7 +113,7 @@ headers. The same fetch handler serves the control plane:
 | Export                                    | Purpose                                                                           |
 | ----------------------------------------- | --------------------------------------------------------------------------------- |
 | `serveFetchHandler(handler, { port? })`   | Scoped Effect resource `{ url, close }` serving on `127.0.0.1` (port `0` default) |
-| `startFetchHandlerServer(handler, opts?)` | The same server as a Promise `{ url, close }`                                     |
+| `startFetchHandlerServer(handler, opts?)` | The same server as a Promise `{ url, close }`, for non-Effect test runners        |
 | `EmulatorServeError`                      | Refused host, invalid port, or listen failure                                     |
 
 Only `127.0.0.1` is accepted as a host. Streamed bodies are written chunk by chunk, so progressive

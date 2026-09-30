@@ -69,12 +69,20 @@ Both layers:
 - keep the request path and query, and fail closed on any origin without a route with an
   `HttpClientError` whose message names only the origin;
 - reject malformed or duplicate origins at build time (`EmulatorRouteInvalid`);
-- refuse to build when `NODE_ENV` is `production` (`EmulatorEnvironmentRefused`); a missing
-  `NODE_ENV` is allowed.
+- refuse to build when `NODE_ENV` is `production` or cannot be read (`EmulatorEnvironmentRefused`);
+  a missing `NODE_ENV` is allowed.
 
 `EmulatedHttpClient` also requires every `baseUrl` to be `http(s)` on loopback (`127.0.0.0/8`,
-`::1`, or `localhost`) and needs your real `HttpClient` underneath. `InProcessHttpClient` sends
-`Empty`, `Uint8Array`, and string `Raw` bodies; other body kinds fail with an `EncodeError`.
+`::1`, or `localhost`; IPv4-mapped forms such as `[::ffff:127.0.0.1]` are rejected) and needs your
+real `HttpClient` underneath. `InProcessHttpClient` sends `Empty`, `Uint8Array`, and string `Raw`
+bodies; other body kinds fail with an `EncodeError`.
+
+Redirects never leave the route table. `EmulatedHttpClient` checks and rewrites each request at the
+send step, so redirect follow-ups (`HttpClient.followRedirects` on top) and requests changed by
+your own `HttpClient.mapRequest` are routed or fail closed too. With `FetchHttpClient` underneath,
+routed requests are sent with `redirect: 'manual'` (overriding any `FetchHttpClient.RequestInit`
+default), so a 3xx comes back to the caller as a 3xx. **Any other underlying client must not follow
+redirects by itself**: a redirect it follows internally never passes through the route table.
 
 ## Gateway emulator
 
@@ -106,6 +114,11 @@ Defaults (no script):
   `order: 'text-first'` sends reasoning after the text;
 - an error: `{ error: { status, body, headers? } }`.
 
+Emulators never redirect, and every emulated response carries a body. Fault and scripted-error
+statuses must be 200–599 without 204, 205, or any 3xx (including 304); header names must be HTTP
+tokens, values must not contain control characters, and `location` is rejected. Invalid input
+throws `GatewayEmulatorInputInvalid` (the control plane answers 400).
+
 `faults.add(fault)` adds a wire fault with an optional `match: { path?, model? }` (`path` ending in
 `*` is a prefix) and an optional `count`:
 
@@ -115,11 +128,14 @@ Defaults (no script):
 | `error-after-chunks`    | Send N body chunks, then error the body stream (a dropped connection)     |
 | `truncate-after-chunks` | Send N body chunks, then close cleanly (no `data: [DONE]`)                |
 
-A chunk fault that cannot take effect answers 500 instead of silently doing nothing.
+A chunk fault that cannot take effect answers 500 instead of silently doing nothing. If the
+emulator cannot build a planned response, it answers an evidence-tagged 500, the ledger records
+500 with `responseError`, and the matching fault is not used up.
 
-`ledger.entries()` records every request: method, path, parsed JSON body, model, `stream`,
-`reasoning_effort`, `thinking`, tool names, the fault applied, the route's evidence tag, the
-response status, and the body chunks handed over so far. Credential headers are never recorded.
+`ledger.entries()` records every emulated API request (control-plane requests are not recorded):
+method, path, parsed JSON body, model, `stream`, `reasoning_effort`, `thinking`, tool names, the
+fault applied, the route's evidence tag, the status actually sent, and the body chunks handed over
+so far. Credential headers are never recorded.
 
 Control plane (same fetch handler):
 
@@ -136,13 +152,27 @@ Control plane (same fetch handler):
 
 `gatewayEmulatorRoutes` lists every emulated route with `method`, `path`, `kind`, `write`, the
 conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and `observedAt`. Every
-response from an unverified route carries `x-emulator-evidence: unverified`. The Yolk repository
-checks these manifests: unknown case ids, duplicate routes, and connector write routes without
-verified evidence fail; unverified or stale (over 30 days) evidence warns.
+response from an unverified route carries `x-emulator-evidence: unverified`. Each manifest route
+maps to its own handler; an emulator whose manifest has a route without a handler throws when it is
+constructed. The Yolk repository checks these manifests: unknown case ids, duplicate routes,
+connector write routes without verified evidence, verified connector write routes whose
+`observedAt` is missing, unreadable, or in the future, and verified routes whose cited cases have
+no verified fixture fail; unverified or stale (over 30 days) evidence and routes citing no cases
+warn.
 
 ## Node server
 
 `serveFetchHandler(handler, { port = 0 })` serves on `127.0.0.1` only (any other `host` is
 refused) as a scoped Effect resource returning `{ url, close }`. Streamed bodies are written chunk
 by chunk, so progressive delivery survives the socket; a body stream error drops the connection.
-`startFetchHandlerServer` is the same server as a Promise for hosts without an Effect runtime.
+`startFetchHandlerServer(handler, { port = 0 })` is the same server as a Promise, for
+non-Effect test runners and hosts without an Effect runtime:
+
+```ts
+import { makeGatewayEmulator } from '@yolk-sdk/emulators/gateway'
+import { startFetchHandlerServer } from '@yolk-sdk/emulators/node'
+
+const server = await startFetchHandlerServer(makeGatewayEmulator().fetch)
+// ... point the code under test at server.url ...
+await server.close()
+```

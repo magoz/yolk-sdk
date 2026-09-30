@@ -5,13 +5,17 @@
  * rewrites real origins to loopback emulator processes over the host's own
  * client, and `InProcessHttpClient` calls emulator fetch handlers directly.
  * Both fail closed on unknown origins and refuse to build when `NODE_ENV` is
- * `production`. Replay lives in `@yolk-sdk/conformance/replay`; live traffic is
- * the host's own client.
+ * `production`. The route check runs at the send step, so every request that
+ * is actually sent (including redirect follow-ups and requests a host changes
+ * with `HttpClient.mapRequest` on top) goes through the route table. Replay
+ * lives in `@yolk-sdk/conformance/replay`; live traffic is the host's own
+ * client.
  *
  * @experimental
  */
 import { Config, Data, Effect, Layer, Match, Option, Predicate } from 'effect'
 import {
+  FetchHttpClient,
   HttpClient,
   HttpClientError,
   HttpClientRequest,
@@ -103,6 +107,8 @@ const ipv4LoopbackPattern = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/
 /**
  * True for `http:`/`https:` URLs whose host is loopback: `localhost`, `::1`,
  * or an IPv4 address in 127.0.0.0/8 (after WHATWG URL normalization).
+ * IPv4-mapped IPv6 forms such as `[::ffff:127.0.0.1]` are rejected: the
+ * allowlist stays minimal, and `127.0.0.1` says the same thing.
  */
 const isLoopbackUrl = (input: string): boolean => {
   if (!URL.canParse(input)) {
@@ -244,6 +250,19 @@ const rewriteToBase = (requestUrl: string, base: URL): string => {
   return target.toString()
 }
 
+/**
+ * Run `effect` with native fetch told not to follow redirects
+ * (`redirect: 'manual'`), keeping any other `RequestInit` defaults the host
+ * provided. Only the `FetchHttpClient` transport reads this service.
+ */
+const withManualRedirects = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.flatMap(Effect.serviceOption(FetchHttpClient.RequestInit), init =>
+    Effect.provideService(effect, FetchHttpClient.RequestInit, {
+      ...Option.getOrUndefined(init),
+      redirect: 'manual'
+    })
+  )
+
 export const EmulatedHttpClient = {
   /**
    * `HttpClient` that rewrites each routed origin to its loopback emulator
@@ -251,9 +270,18 @@ export const EmulatedHttpClient = {
    * `HttpClient` underneath. Requests to any other origin fail closed with an
    * `HttpClientError` that names only the origin.
    *
+   * The check and rewrite run at the send step (the client's postprocess), so
+   * redirect follow-ups (`HttpClient.followRedirects` on top) and requests
+   * changed by a host's `HttpClient.mapRequest` are routed or refused too.
+   * With `FetchHttpClient` underneath, requests are sent with
+   * `redirect: 'manual'`: a 3xx from an emulator comes back to the caller as
+   * a 3xx and native fetch never follows it. Any other underlying client must
+   * not follow redirects by itself, because a redirect it follows internally
+   * never passes through the route table.
+   *
    * Building fails with `EmulatorRouteInvalid` when a route is malformed,
    * duplicated, not a `url` target, or not on loopback, and with
-   * `EmulatorEnvironmentRefused` when `NODE_ENV` is `production`.
+   * `EmulatorEnvironmentRefused` when `NODE_ENV` is `production` or cannot be read.
    */
   layer: (
     routes: ReadonlyArray<EmulatorRoute<EmulatorUrlTarget>>
@@ -269,14 +297,21 @@ export const EmulatedHttpClient = {
 
         const underlying = yield* HttpClient.HttpClient
 
-        return HttpClient.mapRequestEffect(underlying, request => {
+        const route = (request: HttpClientRequest.HttpClientRequest) => {
           const origin = requestOrigin(request.url)
           const base = origin === undefined ? undefined : table.get(origin)
 
           return base === undefined
             ? Effect.fail(unroutedOriginError(request, origin))
             : Effect.succeed(HttpClientRequest.setUrl(request, rewriteToBase(request.url, base)))
-        })
+        }
+
+        // Route in postprocess, not preprocess: every request sent goes through postprocess, while
+        // `followRedirects` skips preprocess for follow-ups and `mapRequest` runs after it.
+        return HttpClient.makeWith(
+          request => withManualRedirects(underlying.postprocess(Effect.flatMap(request, route))),
+          underlying.preprocess
+        )
       })
     )
 } as const
@@ -324,7 +359,7 @@ export const InProcessHttpClient = {
    *
    * Building fails with `EmulatorRouteInvalid` for malformed, duplicated, or
    * non-`handler` routes and with `EmulatorEnvironmentRefused` when
-   * `NODE_ENV` is `production`.
+   * `NODE_ENV` is `production` or cannot be read.
    */
   layer: (
     routes: ReadonlyArray<EmulatorRoute<EmulatorHandlerTarget>>

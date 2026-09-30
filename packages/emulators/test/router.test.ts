@@ -22,6 +22,13 @@ const envLayer = (env: Record<string, string>) =>
 
 const testEnv = envLayer({ NODE_ENV: 'test' })
 
+/** A config source that cannot be read at all (not merely missing NODE_ENV). */
+const unreadableEnv = ConfigProvider.layer(
+  ConfigProvider.make(() =>
+    Effect.fail(new ConfigProvider.SourceError({ message: 'synthetic unreadable config source' }))
+  )
+)
+
 /** Underlying "real" client that records every URL it is asked to send. */
 const recordingClientLayer = (seen: Array<string>) =>
   Layer.succeed(
@@ -137,6 +144,9 @@ describe('EmulatedHttpClient', () => {
         'http://192.168.1.10',
         'http://api.example.test',
         'http://127.0.0.1.example.test',
+        'http://localhost.evil.test',
+        // IPv4-mapped IPv6 loopback is rejected on purpose; only `::1` is accepted for IPv6.
+        'http://[::ffff:127.0.0.1]:1',
         'ftp://127.0.0.1',
         'http://[::2]',
         'http://user:pass@127.0.0.1',
@@ -187,6 +197,52 @@ describe('EmulatedHttpClient', () => {
 
         expect(Exit.isSuccess(exit)).toBe(true)
       }
+    })
+  )
+
+  it.effect('refuses to build when NODE_ENV cannot be read', () =>
+    Effect.gen(function* () {
+      const routes = [EmulatorRoute.url(gatewayOrigin, 'http://127.0.0.1:1')]
+
+      const error = yield* Layer.build(emulated(routes, [], unreadableEnv)).pipe(
+        Effect.scoped,
+        Effect.flip
+      )
+
+      expect(error).toBeInstanceOf(EmulatorEnvironmentRefused)
+      expect(error).toMatchObject({ reason: 'unreadable' })
+    })
+  )
+})
+
+describe('route target kinds', () => {
+  const handler = () => Promise.resolve(new Response())
+
+  it.effect('EmulatedHttpClient rejects a handler target with EmulatorRouteInvalid', () =>
+    Effect.gen(function* () {
+      const error = yield* Layer.build(
+        EmulatedHttpClient.layer([
+          // @ts-expect-error A handler target is not accepted by the Emulated layer.
+          EmulatorRoute.handler(gatewayOrigin, handler)
+        ]).pipe(Layer.provide(recordingClientLayer([])), Layer.provide(testEnv))
+      ).pipe(Effect.scoped, Effect.flip)
+
+      expect(error).toBeInstanceOf(EmulatorRouteInvalid)
+      expect(error.message).toContain('needs a url target')
+    })
+  )
+
+  it.effect('InProcessHttpClient rejects a url target with EmulatorRouteInvalid', () =>
+    Effect.gen(function* () {
+      const error = yield* Layer.build(
+        InProcessHttpClient.layer([
+          // @ts-expect-error A url target is not accepted by the InProcess layer.
+          EmulatorRoute.url(gatewayOrigin, 'http://127.0.0.1:1')
+        ]).pipe(Layer.provide(testEnv))
+      ).pipe(Effect.scoped, Effect.flip)
+
+      expect(error).toBeInstanceOf(EmulatorRouteInvalid)
+      expect(error.message).toContain('needs a handler target')
     })
   )
 })
@@ -319,30 +375,41 @@ describe('InProcessHttpClient', () => {
     })
   )
 
-  it.effect('refuses production and rejects url targets or duplicates', () =>
-    Effect.gen(function* () {
-      const refused = yield* Layer.build(inProcess([], envLayer({ NODE_ENV: 'production' }))).pipe(
-        Effect.scoped,
-        Effect.flip
-      )
-
-      expect(refused).toBeInstanceOf(EmulatorEnvironmentRefused)
-
-      const handler = () => Promise.resolve(new Response())
-
-      for (const routes of [
-        [
-          { origin: gatewayOrigin, target: { kind: 'handler' as const, fetch: handler } },
-          EmulatorRoute.handler(gatewayOrigin, handler)
-        ],
-        [EmulatorRoute.handler('not an origin', handler)]
-      ]) {
-        const error = yield* Layer.build(
-          InProcessHttpClient.layer(routes).pipe(Layer.provide(testEnv))
+  it.effect(
+    'refuses production or unreadable NODE_ENV, and rejects duplicate or malformed origins',
+    () =>
+      Effect.gen(function* () {
+        const refused = yield* Layer.build(
+          inProcess([], envLayer({ NODE_ENV: 'production' }))
         ).pipe(Effect.scoped, Effect.flip)
 
-        expect(error).toBeInstanceOf(EmulatorRouteInvalid)
-      }
-    })
+        expect(refused).toBeInstanceOf(EmulatorEnvironmentRefused)
+
+        const unreadable = yield* Layer.build(inProcess([], unreadableEnv)).pipe(
+          Effect.scoped,
+          Effect.flip
+        )
+
+        expect(unreadable).toMatchObject({
+          _tag: 'EmulatorEnvironmentRefused',
+          reason: 'unreadable'
+        })
+
+        const handler = () => Promise.resolve(new Response())
+
+        for (const routes of [
+          [
+            { origin: gatewayOrigin, target: { kind: 'handler' as const, fetch: handler } },
+            EmulatorRoute.handler(gatewayOrigin, handler)
+          ],
+          [EmulatorRoute.handler('not an origin', handler)]
+        ]) {
+          const error = yield* Layer.build(
+            InProcessHttpClient.layer(routes).pipe(Layer.provide(testEnv))
+          ).pipe(Effect.scoped, Effect.flip)
+
+          expect(error).toBeInstanceOf(EmulatorRouteInvalid)
+        }
+      })
   )
 })

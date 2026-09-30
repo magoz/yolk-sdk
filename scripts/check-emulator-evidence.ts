@@ -6,20 +6,31 @@
  * - FAIL: a route cites an unknown case id.
  * - FAIL: a manifest lists the same method + path twice.
  * - FAIL: a connector route with `write: true` has evidence other than `verified`.
+ * - FAIL: a verified connector write route has a missing, unreadable, or future `observedAt`.
+ * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
+ *   (only checked when fixture evidence is supplied; the CLI loads the Gateway and Fortnox
+ *   fixtures).
  * - WARN: a route's evidence is `unverified` (the emulator tags its responses
  *   `x-emulator-evidence: unverified`).
- * - WARN: `observedAt` is more than 30 days old, unreadable, or missing on verified evidence.
- * - WARN: a route cites no case ids.
+ * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
+ *   the future, or missing on verified evidence.
+ * - WARN: a route (verified or not) cites no case ids.
  *
  * Prints a compact report and exits 1 on any failure. No network I/O.
  */
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import type { WireFixture } from '../packages/conformance/src/fixture.ts'
 import { vercelAiGatewayConformanceCases } from '../packages/agent/src/providers/vercel/conformance/cases.ts'
+import { vercelAiGatewayConformanceFixtures } from '../packages/agent/src/providers/vercel/conformance/index.ts'
 import { fortnoxConformanceCases } from '../packages/connectors/src/fortnox/conformance/cases.ts'
+import { fortnoxConformanceFixtures } from '../packages/connectors/src/fortnox/conformance/index.ts'
 import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
-import type { EmulatorRouteEvidence } from '../packages/emulators/src/route-evidence.ts'
+import type {
+  EmulatorEvidence,
+  EmulatorRouteEvidence
+} from '../packages/emulators/src/route-evidence.ts'
 
 export type EvidenceManifest = {
   readonly name: string
@@ -33,6 +44,9 @@ export type EvidenceFindingKind =
   | 'unverified'
   | 'stale'
   | 'missing-observed-at'
+  | 'unreadable-observed-at'
+  | 'future-observed-at'
+  | 'unbacked-verified'
   | 'no-case-ids'
 
 export type EvidenceFinding = {
@@ -56,6 +70,12 @@ export type EvidenceCheckInput = {
   readonly caseIds: ReadonlySet<string>
   readonly now: Date
   readonly maxAgeDays?: number
+  /**
+   * Optional fixture cross-check: the evidence of every fixture backing each case id. When
+   * supplied, a verified route that cites case ids fails unless at least one cited case has a
+   * `verified` fixture.
+   */
+  readonly fixtureEvidence?: ReadonlyMap<string, ReadonlyArray<EmulatorEvidence>>
 }
 
 /** Every emulator manifest the repo ships. Add new emulators here. */
@@ -69,11 +89,36 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...fortnoxConformanceCases.map(testCase => testCase.id)
 ])
 
+/** Group fixture evidence by the case id each fixture backs. */
+export const fixtureEvidenceByCase = (
+  fixtures: ReadonlyArray<Pick<WireFixture, 'caseId' | 'evidence'>>
+): ReadonlyMap<string, ReadonlyArray<EmulatorEvidence>> => {
+  const byCase = new Map<string, Array<EmulatorEvidence>>()
+
+  for (const fixture of fixtures) {
+    const evidence = byCase.get(fixture.caseId) ?? []
+
+    evidence.push(fixture.evidence)
+    byCase.set(fixture.caseId, evidence)
+  }
+
+  return byCase
+}
+
+/** Evidence of every committed Gateway and Fortnox fixture, by case id. */
+export const conformanceFixtureEvidence: ReadonlyMap<
+  string,
+  ReadonlyArray<EmulatorEvidence>
+> = fixtureEvidenceByCase([...vercelAiGatewayConformanceFixtures, ...fortnoxConformanceFixtures])
+
 const dayMs = 24 * 60 * 60 * 1000
 
 const calendarDatePattern = /^\d{4}-\d{2}-\d{2}$/
 
-/** Whole UTC days since a `YYYY-MM-DD` date; `undefined` when unreadable. */
+/**
+ * Whole UTC days since a `YYYY-MM-DD` date (negative in the future); `undefined` when unreadable,
+ * including dates that do not exist such as `2026-02-30`.
+ */
 export const evidenceAgeDays = (observedAt: string, now: Date): number | undefined => {
   if (!calendarDatePattern.test(observedAt)) {
     return undefined
@@ -81,7 +126,7 @@ export const evidenceAgeDays = (observedAt: string, now: Date): number | undefin
 
   const observed = Date.parse(`${observedAt}T00:00:00.000Z`)
 
-  if (Number.isNaN(observed)) {
+  if (Number.isNaN(observed) || new Date(observed).toISOString().slice(0, 10) !== observedAt) {
     return undefined
   }
 
@@ -117,7 +162,9 @@ const routeFindings = (
     finding('warn', 'no-case-ids', 'cites no conformance case ids')
   }
 
-  if (route.kind === 'connector' && route.write && route.evidence !== 'verified') {
+  const connectorWrite = route.kind === 'connector' && route.write
+
+  if (connectorWrite && route.evidence !== 'verified') {
     finding('fail', 'unverified-write', `connector write route has ${route.evidence} evidence`)
   }
 
@@ -125,9 +172,33 @@ const routeFindings = (
     finding('warn', 'unverified', `unverified evidence (${route.caseIds.length} case(s))`)
   }
 
+  if (
+    route.evidence === 'verified' &&
+    input.fixtureEvidence !== undefined &&
+    route.caseIds.length > 0
+  ) {
+    const fixtureEvidence = input.fixtureEvidence
+
+    const backed = route.caseIds.some(caseId =>
+      (fixtureEvidence.get(caseId) ?? []).includes('verified')
+    )
+
+    if (!backed) {
+      finding(
+        'fail',
+        'unbacked-verified',
+        'verified evidence, but no cited case has a verified fixture'
+      )
+    }
+  }
+
+  // A verified connector write route must carry a readable observation date that is not in the
+  // future; other routes only warn.
+  const observedAtSeverity = connectorWrite && route.evidence === 'verified' ? 'fail' : 'warn'
+
   if (route.observedAt === undefined) {
     if (route.evidence === 'verified') {
-      finding('warn', 'missing-observed-at', 'verified evidence has no observedAt')
+      finding(observedAtSeverity, 'missing-observed-at', 'verified evidence has no observedAt')
     }
 
     return findings
@@ -136,7 +207,17 @@ const routeFindings = (
   const age = evidenceAgeDays(route.observedAt, input.now)
 
   if (age === undefined) {
-    finding('warn', 'stale', `observedAt ${route.observedAt} is unreadable`)
+    finding(
+      observedAtSeverity,
+      'unreadable-observed-at',
+      `observedAt ${route.observedAt} is unreadable`
+    )
+  } else if (age < 0) {
+    finding(
+      observedAtSeverity,
+      'future-observed-at',
+      `observedAt ${route.observedAt} is in the future`
+    )
   } else if (age > maxAgeDays) {
     finding(
       'warn',
@@ -218,7 +299,8 @@ if (invokedAsCli()) {
   const report = checkEmulatorEvidence({
     manifests: emulatorManifests,
     caseIds: knownConformanceCaseIds,
-    now: new Date()
+    now: new Date(),
+    fixtureEvidence: conformanceFixtureEvidence
   })
 
   const text = formatEvidenceReport(report)

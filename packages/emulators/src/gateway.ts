@@ -16,7 +16,9 @@
 import { Data, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  bindRouteHandlers,
   emulatorEvidenceHeader,
+  emulatorRouteKey,
   type EmulatorEvidence,
   type EmulatorRouteEvidence
 } from './route-evidence.ts'
@@ -60,13 +62,54 @@ export const gatewayEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
   }
 ]
 
-const Status = Schema.Int.check(Schema.isBetween({ minimum: 200, maximum: 599 }))
+/**
+ * Statuses a fault or scripted error may answer with. Every emulated response
+ * carries a body and emulators never redirect, so 1xx, 204, 205, and every
+ * 3xx (including 304) are rejected when the fault or turn is added.
+ */
+const Status = Schema.Int.check(
+  Schema.isBetween({ minimum: 200, maximum: 599 }),
+  Schema.makeFilter((status: number) =>
+    status >= 300 && status <= 399
+      ? 'emulators never redirect: 3xx statuses are not allowed'
+      : status === 204 || status === 205
+        ? 'a 204 or 205 response cannot carry a body'
+        : undefined
+  )
+)
 
 const ChunkCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 const FaultCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
-const HeaderRecord = Schema.Record(Schema.String, Schema.String)
+// RFC 9110 token characters for header names.
+const headerNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+
+// Visible ASCII, space, tab, and obs-text: what both web `Headers` and Node's HTTP server accept.
+const headerValuePattern = /^[\t\x20-\x7e\x80-\xff]*$/
+
+const headerRecordProblem = (headers: Readonly<Record<string, string>>): string | undefined => {
+  for (const [name, value] of Object.entries(headers)) {
+    if (!headerNamePattern.test(name)) {
+      return `header name ${JSON.stringify(name)} is not a valid HTTP token`
+    }
+
+    if (name.toLowerCase() === 'location') {
+      return 'emulators never redirect: a location header is not allowed'
+    }
+
+    if (!headerValuePattern.test(value)) {
+      return `header ${name} has a value with control or non-Latin-1 characters`
+    }
+  }
+
+  return undefined
+}
+
+/** Response headers for a fault or scripted error: valid names and values, and no `location`. */
+const HeaderRecord = Schema.Record(Schema.String, Schema.String).check(
+  Schema.makeFilter(headerRecordProblem)
+)
 
 /** Optional fault filter; an omitted field matches every request. `path` ending in `*` is a prefix. */
 export const GatewayFaultMatch = Schema.Struct({
@@ -87,7 +130,9 @@ const faultFields = {
  *
  * - `status`: answer with this status, headers, and body instead of a
  *   completion (for example 429 with `retry-after`). The body defaults to a
- *   Gateway error envelope.
+ *   Gateway error envelope. Statuses that cannot carry a body (1xx, 204, 205,
+ *   304) and redirects (3xx) are rejected, as are invalid header names or
+ *   values and a `location` header; scripted errors follow the same rules.
  * - `error-after-chunks`: send `chunks` body chunks, then error the body
  *   stream (a dropped connection).
  * - `truncate-after-chunks`: send `chunks` body chunks, then close the body
@@ -203,6 +248,11 @@ export type GatewayLedgerEntry = {
   readonly fault?: GatewayFaultKind
   /** Why a matching fault could not take effect (the response was a 500 emulator error). */
   readonly faultError?: string
+  /**
+   * Set when the emulator could not build the planned response; the request was
+   * answered with a 500 emulator error (still evidence-tagged) and no fault was used up.
+   */
+  readonly responseError?: string
   /** Set when a scripted turn answered the request. */
   readonly scripted?: 'completion' | 'error'
   /** Evidence of the matched route; `unknown-route` for requests that failed closed. */
@@ -837,6 +887,7 @@ type MutableLedgerEntry = {
   toolNames: ReadonlyArray<string>
   fault?: GatewayFaultKind
   faultError?: string
+  responseError?: string
   scripted?: 'completion' | 'error'
   evidence: EmulatorEvidence | 'unknown-route'
   status: number
@@ -1036,7 +1087,7 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
     const chunkFault =
       fault === undefined || fault.fault.kind === 'status' ? undefined : fault.fault
 
-    if (chunkFault !== undefined && fault !== undefined) {
+    if (chunkFault !== undefined) {
       const problem = chunkFaultProblem(chunkFault, chunks.length)
 
       if (problem !== undefined) {
@@ -1045,14 +1096,20 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
 
         return controlError(500, `emulator fault cannot apply: ${problem}`)
       }
+    }
 
+    // Build the response before using up the fault: a response that cannot be built must not
+    // consume it.
+    const response = new Response(chunkedBody(chunks, chunkFault, entry), { status, headers })
+
+    if (chunkFault !== undefined && fault !== undefined) {
       consumeFault(fault)
       entry.fault = chunkFault.kind
     }
 
-    entry.status = status
+    entry.status = response.status
 
-    return new Response(chunkedBody(chunks, chunkFault, entry), { status, headers })
+    return response
   }
 
   const chatCompletion = async (
@@ -1105,10 +1162,6 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
     const fault = takeFault(path, chat.model)
 
     if (fault !== undefined && fault.fault.kind === 'status') {
-      consumeFault(fault)
-      entry.fault = 'status'
-      entry.status = fault.fault.status
-
       const headers = new Headers(fault.fault.headers ?? {})
       const faultBody = fault.fault.body ?? defaultFaultBody(fault.fault.status)
 
@@ -1119,7 +1172,14 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
         )
       }
 
-      return new Response(bodyText(faultBody), { status: fault.fault.status, headers })
+      // Built first: a status fault whose response cannot be built is not used up.
+      const response = new Response(bodyText(faultBody), { status: fault.fault.status, headers })
+
+      consumeFault(fault)
+      entry.fault = 'status'
+      entry.status = response.status
+
+      return response
     }
 
     const turn = turns.shift()
@@ -1173,9 +1233,16 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
     )
   }
 
+  // Every manifest route maps to its own handler; construction throws `EmulatorRouteUnmapped`
+  // when a manifest route has no handler (or a handler has no manifest route).
+  const routes = bindRouteHandlers(
+    gatewayEmulatorRoutes,
+    new Map([[emulatorRouteKey('POST', gatewayChatCompletionsPath), chatCompletion]])
+  )
+
   const emulatedApi = async (request: Request, path: string): Promise<Response> => {
-    const route = gatewayEmulatorRoutes.find(
-      candidate => candidate.method === request.method && candidate.path === path
+    const bound = routes.find(
+      candidate => candidate.route.method === request.method && candidate.route.path === path
     )
 
     const entry: MutableLedgerEntry = {
@@ -1183,20 +1250,29 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
       method: request.method,
       path,
       toolNames: [],
-      evidence: route?.evidence ?? 'unknown-route',
+      evidence: bound?.route.evidence ?? 'unknown-route',
       status: 0,
       bodyChunks: 0
     }
 
     entries.push(entry)
 
-    if (route === undefined) {
+    if (bound === undefined) {
       entry.status = 404
 
       return unknownRoute()
     }
 
-    return withEvidence(await chatCompletion(request, entry, path), route.evidence)
+    // Error recovery still answers through the route: the fallback 500 is evidence-tagged and
+    // the ledger records the status actually sent.
+    const response = await bound.handler(request, entry, path).catch(() => {
+      entry.status = 500
+      entry.responseError = 'the emulator could not build the planned response'
+
+      return controlError(500, 'emulator could not build the response')
+    })
+
+    return withEvidence(response, bound.route.evidence)
   }
 
   const controlPlane = async (request: Request, path: string): Promise<Response> => {
