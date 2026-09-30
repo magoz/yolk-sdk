@@ -432,6 +432,24 @@ const discountId = fortnoxInvoiceRowDiscountFixture.caseId
 const listRecorders = () =>
   new Map([[listId, recorderOf(fortnoxInvoiceListPopulatedFixture.exchanges)]])
 
+const previewId = fortnoxInvoicePreviewPdfFixture.caseId
+
+/** An opaque live token: no Bearer prefix, not JWT-shaped, no known API-key prefix. */
+const opaqueToken = 'opaque7c1d9e2b4a6f8e0d3c5b'
+
+const tokenRefusal =
+  'The staged files or the review checklist would contain the live access token; nothing was written'
+
+const stageWithToken = (recorders: ReadonlyMap<string, WireRecorderApi>, writer: RecordingWriter) =>
+  Effect.runPromise(
+    stageRecordings(
+      passedReport([...recorders.keys()]),
+      recorders,
+      { ...recordInputs, accessToken: opaqueToken },
+      { writer, stagingDir, recordedAt: '2026-09-29' }
+    ).pipe(Effect.result)
+  )
+
 const stage = (
   recorders: ReadonlyMap<string, WireRecorderApi>,
   writer: RecordingWriter,
@@ -627,6 +645,78 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
       `${listId}: recording rejected (WireFixtureSecretsFound); nothing was written`
     )
     expect(operations).toEqual([])
+  })
+
+  it('writes nothing when a JSON body field echoes the live access token', async () => {
+    const { writer, operations } = memoryWriter()
+    const [first, ...rest] = fortnoxInvoiceListPopulatedFixture.exchanges
+
+    if (isWireStreamResponse(first.response) || isWireBase64BodyResponse(first.response)) {
+      return expect.fail('expected a text list response')
+    }
+
+    // An opaque (not JWT-shaped) token in an innocuous field: the secret scan cannot see it.
+    expect(first.response.body).toContain('"ExternalInvoiceReference1":""')
+
+    const echoed: ReadonlyArray<WireExchange> = [
+      {
+        ...first,
+        response: {
+          ...first.response,
+          body: first.response.body.replace(
+            '"ExternalInvoiceReference1":""',
+            `"ExternalInvoiceReference1":"${opaqueToken}"`
+          )
+        }
+      },
+      ...rest
+    ]
+
+    const result = await stageWithToken(new Map([[listId, recorderOf(echoed)]]), writer)
+
+    expect(failureMessage(result)).toBe(tokenRefusal)
+    expect(operations).toEqual([])
+  })
+
+  it('writes nothing when the preview PDF bytes carry the live access token', async () => {
+    const { writer, operations } = memoryWriter()
+    const [first, ...rest] = fortnoxInvoicePreviewPdfFixture.exchanges
+
+    if (!isWireBase64BodyResponse(first.response)) {
+      return expect.fail('expected a base64 PDF response')
+    }
+
+    // A PDF comment line carrying the token, after the header: still a complete PDF on replay.
+    const pdf = Buffer.from(first.response.bodyBase64, 'base64')
+    const header = pdf.indexOf(0x0a) + 1
+
+    const leaky = Buffer.concat([
+      pdf.subarray(0, header),
+      Buffer.from(`%${opaqueToken}\n`),
+      pdf.subarray(header)
+    ])
+
+    const echoed: ReadonlyArray<WireExchange> = [
+      { ...first, response: { ...first.response, bodyBase64: leaky.toString('base64') } },
+      ...rest
+    ]
+
+    const result = await stageWithToken(new Map([[previewId, recorderOf(echoed)]]), writer)
+
+    expect(failureMessage(result)).toBe(tokenRefusal)
+    expect(operations).toEqual([])
+  })
+
+  it('stages a preview PDF recording that does not carry the token', async () => {
+    const { writer, files } = memoryWriter()
+
+    const result = await stageWithToken(
+      new Map([[previewId, recorderOf(fortnoxInvoicePreviewPdfFixture.exchanges)]]),
+      writer
+    )
+
+    expect(Result.isSuccess(result)).toBe(true)
+    expect(files.get(join(stagingDir, 'invoice-preview-pdf.ts'))).toContain('"bodyBase64"')
   })
 
   it('refuses a staging directory that is not a direct child of the recordings root', async () => {
