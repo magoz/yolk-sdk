@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer, Ref } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { TestClock } from 'effect/testing'
 import { HttpClient } from 'effect/unstable/http'
 import type { ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
@@ -41,6 +42,8 @@ import {
   fortnoxInvoicePreviewPdfFixture,
   fortnoxInvoiceRowDiscountCase,
   fortnoxInvoiceRowDiscountFixture,
+  fortnoxInvoiceSendEmailCase,
+  fortnoxInvoiceSendEmailFixture,
   fortnoxWriteRejectionCase,
   fortnoxWriteRejectionFixture,
   type FortnoxConformanceCase,
@@ -48,6 +51,12 @@ import {
 } from '@yolk-sdk/connectors/fortnox/conformance'
 
 const now = new Date('2026-09-29T12:00:00.000Z')
+
+/**
+ * Pin the Effect `Clock` (a `TestClock` under `it.effect`) to `now`: the payment-filter case reads
+ * "today" from it, and the synthetic overdue invoice is due 2026-09-15.
+ */
+const atTestNow = TestClock.setTime(now.getTime())
 
 const credentialLayer = staticCredentialResolverLayer(
   OAuthCredential.make({
@@ -107,6 +116,12 @@ const ledgerOf = (ledgers: Ref.Ref<Map<string, ReplayLedgerApi>>, caseId: string
 const methodsAndUrls = (entries: ReadonlyArray<ReplayLedgerEntry>) =>
   entries.map(entry => `${entry.method} ${entry.url}`)
 
+/** `METHOD exchangeIndex` per ledger entry: which recorded exchange answered each request. */
+const exchangeIndices = (entries: ReadonlyArray<ReplayLedgerEntry>) =>
+  entries.map(entry =>
+    entry.match.outcome === 'matched' ? `${entry.method} ${entry.match.exchangeIndex}` : 'unmatched'
+  )
+
 const bodiesOf = (entries: ReadonlyArray<ReplayLedgerEntry>, method: string) =>
   entries.flatMap(entry => (entry.method === method ? [entry.bodyJson] : []))
 
@@ -154,6 +169,8 @@ describe('Fortnox conformance cases', () => {
 
   it.effect('all pass on replay with unverified warnings', () =>
     Effect.gen(function* () {
+      yield* atTestNow
+
       const report = yield* runConformance(fortnoxConformanceCases, {
         target: { kind: 'replay' },
         now,
@@ -180,6 +197,8 @@ describe('Fortnox conformance cases', () => {
 
   it.effect('consume every recorded exchange and send the recorded requests', () =>
     Effect.gen(function* () {
+      yield* atTestNow
+
       const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
 
       const report = yield* runConformance(fortnoxConformanceCases, {
@@ -231,7 +250,7 @@ describe('Fortnox conformance cases', () => {
       const puts = bodiesOf(discount.entries, 'PUT')
 
       expect(puts).toHaveLength(4)
-      // Last write restores the original rows with explicit discounts.
+      // Last write restores the original rows with their explicit discounts (first row: 5).
       expect(puts[3]).toEqual({
         Invoice: {
           InvoiceRows: [
@@ -242,7 +261,7 @@ describe('Fortnox conformance cases', () => {
               Unit: 'h',
               Price: 500,
               VAT: 25,
-              Discount: 0,
+              Discount: 5,
               DiscountType: 'PERCENT'
             },
             {
@@ -257,6 +276,20 @@ describe('Fortnox conformance cases', () => {
           ]
         }
       })
+      // The restore request differs from the explicit Discount 0 step before it.
+      expect(puts[3]).not.toEqual(puts[2])
+      // The restore PUT and its read-back were answered by the recorded restore exchanges (7, 8).
+      expect(exchangeIndices(discount.entries)).toEqual([
+        'GET 0',
+        'PUT 1',
+        'GET 2',
+        'PUT 3',
+        'GET 4',
+        'PUT 5',
+        'GET 6',
+        'PUT 7',
+        'GET 8'
+      ])
       // The omitted-discount write sends the first row without Discount/DiscountType or RowId.
       expect(puts[1]).toEqual({
         Invoice: {
@@ -281,7 +314,6 @@ describe('Fortnox conformance cases', () => {
           ]
         }
       })
-      expect(discount.entries.at(-1)?.method).toBe('GET')
 
       const customer = yield* ledgerOf(ledgers, fortnoxCustomerEmptyStringCase.id)
 
@@ -293,12 +325,35 @@ describe('Fortnox conformance cases', () => {
       expect(customer.entries.at(-1)?.method).toBe('GET')
     })
   )
+
+  it.effect('read the email invoice recipient before sending (ledger)', () =>
+    Effect.gen(function* () {
+      const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
+
+      const report = yield* runConformance([fortnoxInvoiceSendEmailCase], {
+        target: { kind: 'replay' },
+        now,
+        layer: ledgerCaseLayer(ledgers)
+      })
+
+      expect(report.summary.passed).toBe(1)
+      expect(
+        methodsAndUrls((yield* ledgerOf(ledgers, fortnoxInvoiceSendEmailCase.id)).entries)
+      ).toEqual([
+        'GET https://api.fortnox.se/3/invoices/104',
+        'GET https://api.fortnox.se/3/invoices/104/email'
+      ])
+    })
+  )
 })
 
 describe('Fortnox conformance safety on a live target', () => {
   // A replay layer under a `live` target proves the policy without any network.
   const statuses = (target: ConformanceTarget) =>
-    runConformance(fortnoxConformanceCases, { target, now, layer: replayCaseLayer }).pipe(
+    atTestNow.pipe(
+      Effect.andThen(
+        runConformance(fortnoxConformanceCases, { target, now, layer: replayCaseLayer })
+      ),
       Effect.map(report =>
         report.results.map(result => [result.id, result.status, result.skipReason ?? null])
       )
@@ -369,54 +424,212 @@ const withBody = (response: WireResponse, body: string): WireResponse => ({
   body
 })
 
-const drill = (testCase: FortnoxConformanceCase, fixture: WireFixture) =>
+/** A copy of `fixture` (same id) with only the exchanges at `indices`, in that order. */
+const pickExchanges = (
+  fixture: WireFixture,
+  indices: readonly [number, ...Array<number>]
+): WireFixture => {
+  const at = (index: number): WireExchange =>
+    fixture.exchanges[index] ?? expect.fail(`no exchange ${index} in ${fixture.id}`)
+
+  const [first, ...rest] = indices
+
+  return { ...fixture, exchanges: [at(first), ...rest.map(at)] }
+}
+
+const jsonResponse = (response: WireResponse, status: number, body: string): WireResponse => ({
+  status,
+  headers: response.headers,
+  body
+})
+
+/** Replace the first occurrence of `from` in a text body, failing if it is not there. */
+const replaceInBody =
+  (from: string, to: string) =>
+  (response: WireResponse): WireResponse => {
+    const body = textBody(response)
+
+    expect(body).toContain(from)
+
+    return withBody(response, body.replace(from, to))
+  }
+
+const replayRun = (
+  testCase: FortnoxConformanceCase,
+  fixture: WireFixture,
+  seeds: FortnoxConformanceSeeds = fortnoxConformanceFixtureSeeds
+) =>
   Effect.gen(function* () {
     const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
 
     const report = yield* runConformance([testCase], {
       target: { kind: 'replay' },
       now,
-      layer: ledgerCaseLayer(ledgers, [fixture])
+      layer: caseUnderTest =>
+        portsOver(
+          Layer.unwrap(
+            makeReplayHttpClient(fixturesFor(caseUnderTest, [fixture])).pipe(
+              Effect.tap(({ ledger }) =>
+                Ref.update(ledgers, current => new Map(current).set(caseUnderTest.id, ledger))
+              ),
+              Effect.map(({ client }) => Layer.succeed(HttpClient.HttpClient, client))
+            )
+          ),
+          seeds
+        )
     })
 
-    expect(conformanceReportFailed(report)).toBe(true)
-
-    return { failure: report.results[0]?.failure, ...(yield* ledgerOf(ledgers, testCase.id)) }
+    return {
+      report,
+      failure: report.results[0]?.failure,
+      ...(yield* ledgerOf(ledgers, testCase.id))
+    }
   })
+
+const drill = (
+  testCase: FortnoxConformanceCase,
+  fixture: WireFixture,
+  seeds: FortnoxConformanceSeeds = fortnoxConformanceFixtureSeeds
+) =>
+  Effect.gen(function* () {
+    const run = yield* replayRun(testCase, fixture, seeds)
+
+    expect(conformanceReportFailed(run.report)).toBe(true)
+
+    return run
+  })
+
+const discountFixture = fortnoxInvoiceRowDiscountFixture
+
+const restorePut = discountFixture.exchanges[7]?.request.body
 
 describe('Fortnox conformance disagreement drills', () => {
   it.effect(
     'fails the sticky-discount case when an omitted discount resets to 0, and still restores',
     () =>
       Effect.gen(function* () {
-        // Exchange 4 is the read-back after the update that omitted the first row's Discount.
-        const tampered = replaceResponse(fortnoxInvoiceRowDiscountFixture, 4, response =>
-          withBody(response, textBody(response).replace('"Discount":10,', '"Discount":0,'))
+        // Failure path: after the failing read-back (4) only the restore exchanges (7, 8) remain,
+        // so the ledger proves the restore requests were answered by them.
+        const failurePath = replaceResponse(
+          pickExchanges(discountFixture, [0, 1, 2, 3, 4, 7, 8]),
+          4,
+          replaceInBody('"Discount":10,', '"Discount":0,')
         )
 
-        const { failure, entries } = yield* drill(fortnoxInvoiceRowDiscountCase, tampered)
+        const { failure, entries, remaining } = yield* drill(
+          fortnoxInvoiceRowDiscountCase,
+          failurePath
+        )
 
         expect(failure).toEqual({
           kind: 'failure',
           tag: 'ConformanceMismatch',
           message: 'expected the omitted Discount to keep its previous value (10)'
         })
-
-        // Restore-on-failure: after the failed middle assertion the original rows are still sent,
-        // then read back.
-        expect(methodsAndUrls(entries).slice(-2)).toEqual([
-          'PUT https://api.fortnox.se/3/invoices/103',
-          'GET https://api.fortnox.se/3/invoices/103'
+        expect(exchangeIndices(entries)).toEqual([
+          'GET 0',
+          'PUT 1',
+          'GET 2',
+          'PUT 3',
+          'GET 4',
+          'PUT 5',
+          'GET 6'
         ])
-        expect(bodiesOf(entries, 'PUT').at(-1)).toEqual(
-          fortnoxInvoiceRowDiscountFixture.exchanges[7]?.request.body
-        )
-        expect(bodiesOf(entries, 'PUT')).toHaveLength(3)
+        expect(failurePath.exchanges[5]?.request.body).toEqual(restorePut)
+        expect(bodiesOf(entries, 'PUT').at(-1)).toEqual(restorePut)
+        expect(remaining).toEqual([])
       })
+  )
+
+  it.effect('restores after the case fiber is interrupted mid-flow, then stays interrupted', () =>
+    Effect.gen(function* () {
+      // The case hangs after the first write (PUT 1); the restore exchanges (7, 8) follow it.
+      const fixture = pickExchanges(discountFixture, [0, 1, 7, 8])
+      const { client, ledger } = yield* makeReplayHttpClient([fixture])
+      const reached = yield* Deferred.make<void>()
+      const answered = yield* Ref.make(0)
+
+      const hangingClient = HttpClient.make(request =>
+        Effect.gen(function* () {
+          const response = yield* client.execute(request)
+          const count = yield* Ref.updateAndGet(answered, current => current + 1)
+
+          if (count === 2) {
+            yield* Deferred.succeed(reached, undefined)
+
+            return yield* Effect.never
+          }
+
+          return response
+        })
+      )
+
+      const fiber = yield* fortnoxInvoiceRowDiscountCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, hangingClient))),
+        Effect.forkChild
+      )
+
+      yield* Deferred.await(reached)
+      yield* Fiber.interrupt(fiber)
+
+      const exit = yield* Fiber.await(fiber)
+      const entries = yield* ledger.entries
+
+      expect(Exit.hasInterrupts(exit)).toBe(true)
+      expect(exchangeIndices(entries)).toEqual(['GET 0', 'PUT 1', 'PUT 2', 'GET 3'])
+      expect(bodiesOf(entries, 'PUT').at(-1)).toEqual(restorePut)
+      expect(yield* ledger.remaining).toEqual([])
+    })
+  )
+
+  it.effect(
+    'reports only the rejected first write, with no restore by hand, when nothing changed',
+    () =>
+      Effect.gen(function* () {
+        const failurePath = replaceResponse(
+          pickExchanges(discountFixture, [0, 1, 7, 8]),
+          1,
+          response =>
+            jsonResponse(
+              response,
+              400,
+              '{"ErrorInformation":{"error":1,"message":"Synthetic placeholder: invalid row.","code":2000359}}'
+            )
+        )
+
+        const { failure, entries } = yield* drill(fortnoxInvoiceRowDiscountCase, failurePath)
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'FortnoxConformanceActionFailed',
+          message: 'fortnox.update_invoice failed: fortnox_request_failed (HTTP 400)'
+        })
+        expect(exchangeIndices(entries)).toEqual(['GET 0', 'PUT 1', 'PUT 2', 'GET 3'])
+      })
+  )
+
+  it.effect('aborts the sticky-discount case before any write without explicit discounts', () =>
+    Effect.gen(function* () {
+      for (const [from, to] of [
+        ['"Discount":5,', '"Discount":null,'],
+        ['"Discount":5,', ''],
+        ['"DiscountType":"PERCENT"', '"DiscountType":null']
+      ] as const) {
+        const tampered = replaceResponse(discountFixture, 0, replaceInBody(from, to))
+        const { failure, entries } = yield* drill(fortnoxInvoiceRowDiscountCase, tampered)
+
+        expect(failure?.message).toBe(
+          'precondition: every discount invoice row needs an explicit Discount and DiscountType PERCENT, so the restore can write them back exactly; nothing was written'
+        )
+        expect(methodsAndUrls(entries)).toEqual(['GET https://api.fortnox.se/3/invoices/103'])
+      }
+    })
   )
 
   it.effect('fails the payment-filter case when the unbooked invoice is in the unpaid list', () =>
     Effect.gen(function* () {
+      yield* atTestNow
+
       const unbookedList = fortnoxInvoicePaymentFiltersFixture.exchanges[0].response
 
       const tampered = replaceResponse(fortnoxInvoicePaymentFiltersFixture, 1, () => unbookedList)
@@ -429,6 +642,65 @@ describe('Fortnox conformance disagreement drills', () => {
         message: 'expected the unbooked invoice to be absent from filter=unpaid'
       })
     })
+  )
+
+  it.effect(
+    'fails the payment-filter case when the overdue unbooked invoice is unpaidoverdue',
+    () =>
+      Effect.gen(function* () {
+        yield* atTestNow
+
+        const unbookedList = fortnoxInvoicePaymentFiltersFixture.exchanges[0].response
+
+        const tampered = replaceResponse(fortnoxInvoicePaymentFiltersFixture, 2, () => unbookedList)
+
+        const { failure } = yield* drill(fortnoxInvoicePaymentFiltersCase, tampered)
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'ConformanceMismatch',
+          message: 'expected the overdue unbooked invoice to be absent from filter=unpaidoverdue'
+        })
+      })
+  )
+
+  it.effect('aborts the payment-filter case unless the unbooked invoice is overdue today', () =>
+    Effect.gen(function* () {
+      // On its due date (2026-09-15) the synthetic invoice is not overdue yet.
+      yield* TestClock.setTime(Date.parse('2026-09-15T12:00:00.000Z'))
+
+      const { failure, entries } = yield* drill(
+        fortnoxInvoicePaymentFiltersCase,
+        fortnoxInvoicePaymentFiltersFixture
+      )
+
+      expect(failure?.message).toBe(
+        'precondition: the practice company needs an unbooked, uncancelled invoice with a positive balance and a DueDate before today (2026-09-15)'
+      )
+      expect(methodsAndUrls(entries)).toEqual([
+        'GET https://api.fortnox.se/3/invoices?filter=unbooked&limit=500&page=1'
+      ])
+    })
+  )
+
+  it.effect(
+    'aborts the payment-filter case without an unbooked invoice with a positive balance',
+    () =>
+      Effect.gen(function* () {
+        yield* atTestNow
+
+        const tampered = replaceResponse(
+          fortnoxInvoicePaymentFiltersFixture,
+          0,
+          replaceInBody('"Balance":1250,', '"Balance":0,')
+        )
+
+        const { failure } = yield* drill(fortnoxInvoicePaymentFiltersCase, tampered)
+
+        expect(failure?.message).toBe(
+          'precondition: the practice company needs an unbooked, uncancelled invoice with a positive balance'
+        )
+      })
   )
 
   it.effect('fails the empty-string case when "" clears the field, and still restores', () =>
@@ -490,47 +762,185 @@ describe('Fortnox conformance disagreement drills', () => {
     })
   )
 
+  it.effect('treats a 4xx customer-not-found ErrorInformation code as absent', () =>
+    Effect.gen(function* () {
+      for (const code of ['2000433', '"2000204"']) {
+        const tampered = replaceResponse(fortnoxWriteRejectionFixture, 0, response =>
+          jsonResponse(
+            response,
+            400,
+            `{"ErrorInformation":{"Error":1,"Message":"Synthetic placeholder: customer not found.","Code":${code}}}`
+          )
+        )
+
+        const { report, entries } = yield* replayRun(fortnoxWriteRejectionCase, tampered)
+
+        expect(conformanceReportFailed(report)).toBe(false)
+        expect(methodsAndUrls(entries)).toEqual([
+          'GET https://api.fortnox.se/3/customers/99999',
+          'POST https://api.fortnox.se/3/invoices'
+        ])
+      }
+    })
+  )
+
+  it.effect('aborts the rejection case before writing unless the lookup proves absence', () =>
+    Effect.gen(function* () {
+      const notFound =
+        '{"ErrorInformation":{"error":1,"message":"Synthetic placeholder: customer not found.","code":2000204}}'
+
+      for (const [status, body] of [
+        [401, notFound],
+        [403, notFound],
+        [400, '{"ErrorInformation":{"error":1,"message":"Synthetic placeholder.","code":2000359}}'],
+        [400, '{"message":"Bad Request"}'],
+        [500, notFound]
+      ] as const) {
+        const tampered = replaceResponse(fortnoxWriteRejectionFixture, 0, response =>
+          jsonResponse(response, status, body)
+        )
+
+        const { failure, entries } = yield* drill(fortnoxWriteRejectionCase, tampered)
+
+        expect(failure?.message).toBe(
+          'precondition: could not confirm that missingCustomerNumber is absent (expected 404, or a 4xx with a customer-not-found ErrorInformation code); nothing was written'
+        )
+        expect(methodsAndUrls(entries)).toEqual(['GET https://api.fortnox.se/3/customers/99999'])
+      }
+    })
+  )
+
+  it.effect('aborts the email case before sending unless the recipient is the seed', () =>
+    Effect.gen(function* () {
+      for (const [from, to, message] of [
+        [
+          '"EmailAddressTo":"billing@example.test"',
+          '"EmailAddressTo":"Billing@example.test"',
+          'precondition: the email invoice EmailInformation.EmailAddressTo does not equal FortnoxConformanceConfig.emailRecipient exactly; nothing was sent'
+        ],
+        [
+          '"EmailAddressTo":"billing@example.test",',
+          '',
+          'precondition: the email invoice EmailInformation.EmailAddressTo does not equal FortnoxConformanceConfig.emailRecipient exactly; nothing was sent'
+        ],
+        [
+          '"EmailAddressCC":""',
+          '"EmailAddressCC":"copy@example.test"',
+          'precondition: the email invoice has an EmailAddressCC or EmailAddressBCC; clear them so only emailRecipient is addressed; nothing was sent'
+        ],
+        [
+          '"EmailAddressBCC":""',
+          '"EmailAddressBCC":"hidden@example.test"',
+          'precondition: the email invoice has an EmailAddressCC or EmailAddressBCC; clear them so only emailRecipient is addressed; nothing was sent'
+        ]
+      ] as const) {
+        const tampered = replaceResponse(fortnoxInvoiceSendEmailFixture, 0, replaceInBody(from, to))
+
+        const { failure, entries } = yield* drill(fortnoxInvoiceSendEmailCase, tampered)
+
+        expect(failure?.message).toBe(message)
+        expect(failure?.message).not.toContain('example.test')
+        expect(methodsAndUrls(entries)).toEqual(['GET https://api.fortnox.se/3/invoices/104'])
+      }
+    })
+  )
+
+  it.effect('aborts the email case before any request without an emailRecipient seed', () =>
+    Effect.gen(function* () {
+      const { emailRecipient: _omitted, ...seeds } = fortnoxConformanceFixtureSeeds
+
+      const { failure, entries } = yield* drill(
+        fortnoxInvoiceSendEmailCase,
+        fortnoxInvoiceSendEmailFixture,
+        seeds
+      )
+
+      expect(failure?.message).toBe(
+        'precondition: FortnoxConformanceConfig.emailRecipient is not configured'
+      )
+      expect(entries).toEqual([])
+    })
+  )
+
   it.effect('reports a failed restore instead of swallowing it', () =>
     Effect.gen(function* () {
-      // Exchange 8 verifies the restore; pretend the discount did not come back.
-      const tampered = replaceResponse(fortnoxInvoiceRowDiscountFixture, 8, response =>
-        withBody(response, textBody(response).replace('"Discount":0,', '"Discount":10,'))
+      // Exchange 8 verifies the restore: each tampering leaves a written field or a total unrestored.
+      for (const [from, to, reason] of [
+        [
+          '"Discount":5,',
+          '"Discount":0,',
+          'expected the original invoice rows back after restoring'
+        ],
+        [
+          '"AccountNumber":3001,',
+          '"AccountNumber":3010,',
+          'expected the original invoice rows back after restoring'
+        ],
+        [
+          '"VATCode":"MP1"',
+          '"VATCode":"MP2"',
+          'expected the original invoice rows back after restoring'
+        ],
+        ['"Unit":"h"', '"Unit":null', 'expected the original invoice rows back after restoring'],
+        [
+          '"Total":1500,"TotalToPay"',
+          '"Total":1501,"TotalToPay"',
+          'expected the original invoice totals back after restoring'
+        ],
+        [
+          '"Gross":1200,',
+          '"Gross":1250,',
+          'expected the original invoice totals back after restoring'
+        ]
+      ] as const) {
+        const tampered = replaceResponse(discountFixture, 8, replaceInBody(from, to))
+
+        const { failure, entries } = yield* drill(fortnoxInvoiceRowDiscountCase, tampered)
+
+        expect(failure?.tag).toBe('FortnoxConformanceRestoreFailed')
+        expect(failure?.message).toBe(
+          `fortnox.invoice.row-discount-sticky: restore failed (${reason}). The claim held before the restore. Restore the account by hand if it still differs from its original state.`
+        )
+        expect(exchangeIndices(entries).slice(-2)).toEqual(['PUT 7', 'GET 8'])
+      }
+    })
+  )
+
+  it.effect('summarizes the failed claim when the restore also fails', () =>
+    Effect.gen(function* () {
+      // Full fixture: after the failing read-back (4) the restore is answered by the Discount 0
+      // exchanges (5, 6), so its read-back does not show the original rows.
+      const tampered = replaceResponse(
+        discountFixture,
+        4,
+        replaceInBody('"Discount":10,', '"Discount":0,')
       )
 
       const { failure } = yield* drill(fortnoxInvoiceRowDiscountCase, tampered)
 
-      expect(failure?.tag).toBe('FortnoxConformanceRestoreFailed')
-      expect(failure?.message).toContain('claim held before the restore')
-      expect(failure?.message).toContain('expected the original invoice rows back after restoring')
+      expect(failure).toEqual({
+        kind: 'failure',
+        tag: 'FortnoxConformanceRestoreFailed',
+        message:
+          'fortnox.invoice.row-discount-sticky: restore failed (expected the original invoice rows back after restoring). The claim failed before the restore (expected the omitted Discount to keep its previous value (10)). Restore the account by hand if it still differs from its original state.'
+      })
     })
   )
 
   it.effect('fails with a precondition before any request when a seed is missing', () =>
     Effect.gen(function* () {
-      const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
       const { discountInvoiceDocumentNumber: _omitted, ...seeds } = fortnoxConformanceFixtureSeeds
 
-      const report = yield* runConformance([fortnoxInvoiceRowDiscountCase], {
-        target: { kind: 'replay' },
-        now,
-        layer: testCase =>
-          portsOver(
-            Layer.unwrap(
-              makeReplayHttpClient(fixturesFor(testCase)).pipe(
-                Effect.tap(({ ledger }) =>
-                  Ref.update(ledgers, current => new Map(current).set(testCase.id, ledger))
-                ),
-                Effect.map(({ client }) => Layer.succeed(HttpClient.HttpClient, client))
-              )
-            ),
-            seeds
-          )
-      })
+      const { failure, entries } = yield* drill(
+        fortnoxInvoiceRowDiscountCase,
+        discountFixture,
+        seeds
+      )
 
-      expect(report.results[0]?.failure?.message).toBe(
+      expect(failure?.message).toBe(
         'precondition: FortnoxConformanceConfig.discountInvoiceDocumentNumber is not configured'
       )
-      expect((yield* ledgerOf(ledgers, fortnoxInvoiceRowDiscountCase.id)).entries).toEqual([])
+      expect(entries).toEqual([])
     })
   )
 })

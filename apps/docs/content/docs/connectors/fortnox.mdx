@@ -253,26 +253,43 @@ See [Add connector tools](../integrations/connector-tool) for tool execution and
 > **Experimental.** For tests and hand-run checks against a Fortnox developer test company.
 
 `@yolk-sdk/connectors/fortnox/conformance` exports conformance cases for
-`@yolk-sdk/conformance/runner`. Each proves one observed Fortnox behavior through the real connector
-actions (claims as currently understood; none is observed live yet):
+`@yolk-sdk/conformance/runner`. Each checks one claimed Fortnox behavior through the real connector
+actions. The claims are as currently understood; none is observed live yet. This table is the
+canonical list of cases:
 
-- **Invoice lists** carry `MetaInformation`, and numeric-string amounts such as `CurrencyRate: "1"`
-  decode to numbers (`read`).
-- **Invoice preview** returns a complete PDF whatever content type it declares (`read`).
-- **Payment-status filters** `unpaid` and `unpaidoverdue` leave out an unbooked invoice with a
-  balance (`read`).
-- **Invoice rows**: a positional row update without `Discount` keeps the previous discount; only
-  `Discount: 0` clears it (`write-reversible`, restores the original rows).
-- **Customer fields**: updating `Comments` to `""` keeps the stored value; how to clear a value is
-  not established (`write-reversible`, restores the original value).
-- **Rejected writes** return `ErrorInformation` with a code and message, surfaced as
-  `underlying.providerCode` and the provider message (`write-reversible`: the write is rejected).
-- **Invoice email** (`GET /3/invoices/{DocumentNumber}/email`) answers with the invoice; whether a
-  test company delivers the email is not established (`write-irreversible`, never automated).
+| Case id                                            | Safety               | Seeds                                          | Claim (as currently understood)                                                                                                                                                     |
+| -------------------------------------------------- | -------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fortnox.invoice.list-populated`                   | `read`               | none                                           | Invoice lists carry `MetaInformation`; amounts decode to finite numbers or are unset, whether sent as numbers or as numeric strings (such as `CurrencyRate: "1"`)                   |
+| `fortnox.invoice.preview-pdf`                      | `read`               | `previewInvoiceDocumentNumber`                 | `/preview` returns a complete PDF (`%PDF-` ... `%%EOF`) whatever content type it declares                                                                                           |
+| `fortnox.invoice.payment-filters-exclude-unbooked` | `read`               | none                                           | `unpaid` leaves out an unbooked invoice with a positive balance; `unpaidoverdue` leaves out one whose `DueDate` is before today (Effect `Clock`). Aborts without such an invoice    |
+| `fortnox.invoice.row-discount-sticky`              | `write-reversible`   | `discountInvoiceDocumentNumber`                | A positional row update without `Discount` keeps the previous discount; only `Discount: 0` clears it. Every row needs an explicit `Discount` and `DiscountType: PERCENT` beforehand |
+| `fortnox.customer.empty-string-keeps-value`        | `write-reversible`   | `customerNumber`                               | Updating `Comments` to `""` keeps the stored value; how to clear a value is not established. The customer needs a non-empty `Comments`                                              |
+| `fortnox.write.rejection-error-information`        | `write-reversible`   | `missingCustomerNumber`                        | Rejected writes return `ErrorInformation` with a code and message, surfaced as `underlying.providerCode` and the provider message                                                   |
+| `fortnox.invoice.send-email`                       | `write-irreversible` | `emailInvoiceDocumentNumber`, `emailRecipient` | `GET /3/invoices/{DocumentNumber}/email` answers 2xx with the invoice; whether a test company delivers the email is not established                                                 |
 
 The cases need `FortnoxConformanceConfig` seed identities (never hard-coded account data) and the
 connector ports; `@yolk-sdk/connectors/conformance` bridges an Effect `HttpClient` to those ports for
-tests only. See [Conformance APIs](../api-reference/conformance#connector-conformance).
+tests only. A missing seed fails the case with a `precondition:` mismatch before any request.
+
+What the write cases guarantee differs:
+
+- **Row and customer cases** read the original state first, always restore it afterwards (also after
+  a failed assertion or an interruption), and verify the restore by reading back. The row case
+  compares every written row field plus `VATCode`, and the invoice `Total`, `TotalVAT`, `Net`, and
+  `Gross`, exactly. A failed restore fails the case with `FortnoxConformanceRestoreFailed`, which
+  summarizes the original failure; check the account and restore it by hand if it still differs.
+- **The rejection case** does not restore anything. It first confirms that the customer is absent: a
+  404, or another 4xx with a customer-not-found `ErrorInformation` code (`2000204`, `2000433`).
+  401, 403, and every other failure abort before the write. If Fortnox unexpectedly accepted the
+  create, the case fails and names the invoice to cancel by hand.
+- **The email case** reads the invoice first and aborts unless `EmailInformation.EmailAddressTo`
+  equals the `emailRecipient` seed exactly and no CC or BCC address is set. It is never automated.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`). The repository's
+`pnpm conformance:fortnox --live --record` stages verified recordings in a gitignored directory and
+never writes committed sources. Promoted recordings change the fixture ids (`.recorded`), `evidence`,
+`account`, and the recorded exchanges, so update the Fortnox conformance tests together with them.
+See [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
 
 ## Official Fortnox references
 

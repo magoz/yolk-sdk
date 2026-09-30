@@ -61,6 +61,7 @@
     "app/.well-known/workflow/v1/**",
     "examples/next/app/.well-known/workflow/v1/**",
     ".repos/**",
+    ".conformance-recordings/**",
     ".agents/**",
     "**/next-env.d.ts",
     "tools/oxlint/anti-slop/**"

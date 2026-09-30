@@ -1,16 +1,19 @@
 /**
  * Fortnox conformance cases for `@yolk-sdk/conformance/runner`.
  *
- * Each case proves one claim about how the real Fortnox API behaves where it differs from (or
+ * Each case checks one claim about how the real Fortnox API behaves where it differs from (or
  * goes beyond) its documentation, and runs through the REAL connector actions and helpers over
  * the connector ports (`ConnectorHttpClient`, `ConnectorBinaryHttpClient`, `CredentialResolver`)
  * plus the host-supplied `FortnoxConformanceConfig` seed identities. The same cases run on replay
  * fixtures, an emulator, or by hand against a Fortnox developer test company ("practice
  * account"). None is observed live yet (`observed` absent = unverified).
  *
- * Write cases restore what they change and report (never swallow) a failed restore.
+ * The row and customer mutation cases restore what they change, verify the restore by reading
+ * back, and report (never swallow) a failed restore. The rejection case writes nothing when Fortnox
+ * behaves as claimed: it first confirms the customer is absent and names any invoice Fortnox
+ * unexpectedly creates for manual cancellation.
  */
-import { Cause, Chunk, Context, Data, Effect, Exit, Option, Predicate } from 'effect'
+import { Cause, Chunk, Clock, Context, Data, Effect, Exit, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ConformanceMismatch,
@@ -19,15 +22,12 @@ import {
   expectEqual,
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
+import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
 import type { ConnectorBinaryHttpClient } from '../../binary-http.ts'
-import {
-  makeCredentialBinding,
-  resolveCredential,
-  type CredentialResolver
-} from '../../credential.ts'
-import { ConnectorError } from '../../error.ts'
+import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
+import type { ConnectorError } from '../../error.ts'
 import type { ConnectorFileTransferError } from '../../file-transfer.ts'
-import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../../http.ts'
+import { decodeJsonResponse, type ConnectorHttpClient } from '../../http.ts'
 import { makeIntegration } from '../../integration.ts'
 import type { ActionResult } from '../../result.ts'
 import { downloadFortnoxInvoicePreview } from '../files.ts'
@@ -56,7 +56,7 @@ import {
   type FortnoxCustomer,
   type FortnoxInvoice
 } from '../schemas.ts'
-import { fortnoxApiBaseUrl } from '../shared.ts'
+import { getFortnoxResponse, readFortnox } from '../shared.ts'
 import { FortnoxInvoiceApi, invoiceFromApi } from '../wire.ts'
 import { fortnoxCustomerEmptyStringFixture } from './customer-empty-string.ts'
 import { fortnoxInvoiceListPopulatedFixture } from './invoice-list-populated.ts'
@@ -81,7 +81,14 @@ export const FortnoxConformanceSeeds = Schema.Struct({
   /** A customer number that does NOT exist in the practice company. */
   missingCustomerNumber: Schema.optionalKey(FortnoxCustomerNumber),
   /** Invoice to send by email (irreversible; manual runs only). */
-  emailInvoiceDocumentNumber: Schema.optionalKey(FortnoxDocumentNumber)
+  emailInvoiceDocumentNumber: Schema.optionalKey(FortnoxDocumentNumber),
+  /**
+   * The only address the email case may send to. The case aborts before sending unless the email
+   * invoice's `EmailInformation.EmailAddressTo` equals it exactly (and no copy address is set).
+   */
+  emailRecipient: Schema.optionalKey(
+    Schema.Trimmed.check(Schema.isPattern(/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/))
+  )
 })
 
 export type FortnoxConformanceSeeds = typeof FortnoxConformanceSeeds.Type
@@ -128,8 +135,10 @@ export class FortnoxConformanceActionFailed extends Data.TaggedError(
 }
 
 /**
- * Restoring the practice account after a write case failed. The account may be left changed and
- * must be restored by hand. `caseOutcome` says whether the claim itself held before restoring.
+ * Restoring the practice account after a write case failed. `caseOutcome` says whether the claim
+ * itself held before restoring; `claimFailure` is a sanitized summary of why it failed. The account
+ * may or may not still differ from its original state (for example, nothing changed when the first
+ * write was rejected): check it, and restore it by hand only if it differs.
  */
 export class FortnoxConformanceRestoreFailed extends Data.TaggedError(
   'FortnoxConformanceRestoreFailed'
@@ -137,9 +146,16 @@ export class FortnoxConformanceRestoreFailed extends Data.TaggedError(
   readonly caseId: string
   readonly reason: string
   readonly caseOutcome: 'claim held' | 'claim failed'
+  readonly claimFailure?: string
 }> {
   override get message(): string {
-    return `${this.caseId}: restoring the practice account failed (${this.reason}); ${this.caseOutcome} before the restore. Restore the account by hand.`
+    const claim =
+      this.claimFailure === undefined
+        ? `The ${this.caseOutcome} before the restore.`
+        : `The ${this.caseOutcome} before the restore (${this.claimFailure}).`
+
+    // Kept short: conformance reports cap failure messages at 300 characters.
+    return `${this.caseId}: restore failed (${this.reason}). ${claim} Restore the account by hand if it still differs from its original state.`
   }
 }
 
@@ -254,19 +270,40 @@ const listAllInvoices = (filter: InvoiceListFilter) =>
     }
   })
 
+/** Longest failure summary embedded in a `FortnoxConformanceRestoreFailed` message. */
+const failureSummaryLength = 80
+
+/** Short, sanitized `Tag: message` summary of a failure (credential patterns redacted). */
 const failureSummary = (cause: Cause.Cause<unknown>): string => {
+  if (Cause.hasInterruptsOnly(cause)) {
+    return 'interrupted'
+  }
+
   const error = Cause.findErrorOption(cause)
   const value = Option.isSome(error) ? error.value : Cause.squash(cause)
   const tag = Predicate.hasProperty(value, '_tag') ? String(value._tag) : 'defect'
   const message = Predicate.hasProperty(value, 'message') ? String(value.message) : ''
 
-  return message.length > 0 ? `${tag}: ${message}` : tag
+  // A mismatch message is case-authored and self-explanatory; other failures keep their tag.
+  const raw =
+    message.length === 0
+      ? tag
+      : value instanceof ConformanceMismatch
+        ? message
+        : `${tag}: ${message}`
+
+  const summary = sanitizeConformanceMessage(raw)
+
+  return summary.length > failureSummaryLength
+    ? `${summary.slice(0, failureSummaryLength - 3)}...`
+    : summary
 }
 
 /**
  * Run `use`, then ALWAYS run `restore` (also after a failure or interruption, uninterruptibly).
  * A failed restore fails the case with `FortnoxConformanceRestoreFailed`, which says whether the
- * claim itself held; otherwise the outcome of `use` is returned unchanged.
+ * claim itself held and, if not, summarizes why; otherwise the outcome of `use` (including an
+ * interruption) is returned unchanged.
  */
 const withRestore = <A, E, R, E2, R2>(
   caseId: string,
@@ -279,11 +316,18 @@ const withRestore = <A, E, R, E2, R2>(
       const restored = yield* Effect.exit(restore)
 
       if (Exit.isFailure(restored)) {
-        return yield* new FortnoxConformanceRestoreFailed({
-          caseId,
-          reason: failureSummary(restored.cause),
-          caseOutcome: Exit.isSuccess(outcome) ? 'claim held' : 'claim failed'
-        })
+        return yield* Exit.isSuccess(outcome)
+          ? new FortnoxConformanceRestoreFailed({
+              caseId,
+              reason: failureSummary(restored.cause),
+              caseOutcome: 'claim held'
+            })
+          : new FortnoxConformanceRestoreFailed({
+              caseId,
+              reason: failureSummary(restored.cause),
+              caseOutcome: 'claim failed',
+              claimFailure: failureSummary(outcome.cause)
+            })
       }
 
       return yield* outcome
@@ -308,7 +352,7 @@ export const fortnoxInvoiceListPopulatedCase: FortnoxConformanceCase = defineCon
   title: 'Invoice lists decode with pagination metadata and wire-typed amounts',
   safety: 'read',
   docs: 'GET /3/invoices returns `Invoices` plus `MetaInformation` (`@CurrentPage`, `@TotalPages`, `@TotalResources`); the OpenAPI invoice-list wrapper omits `MetaInformation`, and invoice amounts are documented as numbers.',
-  wire: 'A populated company returns at least one invoice together with `MetaInformation`, and list rows can send amounts as numeric strings (for example `CurrencyRate: "1"`) next to JSON numbers: `fortnox.list_invoices` decodes every row, reports pagination, and every amount is a finite number or unset.',
+  wire: 'A populated company returns at least one invoice together with `MetaInformation`: `fortnox.list_invoices` decodes every row and reports pagination, and every invoice amount decodes to a finite number or is unset, whether Fortnox sends it as a JSON number or as a numeric string (for example `CurrencyRate: "1"`).',
   fixtures: [fortnoxInvoiceListPopulatedFixture.id],
   run: Effect.gen(function* () {
     const listed = yield* fortnoxListInvoicesAction
@@ -368,41 +412,63 @@ export const fortnoxInvoicePreviewPdfCase: FortnoxConformanceCase = defineConfor
   })
 })
 
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/
+
+/** `date` is a `YYYY-MM-DD` date strictly before the `YYYY-MM-DD` date `today`. */
+const isDateBefore = (date: string | null | undefined, today: string): boolean =>
+  Predicate.isString(date) && isoDatePattern.test(date) && date < today
+
 export const fortnoxInvoicePaymentFiltersCase: FortnoxConformanceCase = defineConformanceCase({
   id: 'fortnox.invoice.payment-filters-exclude-unbooked',
   title: 'Payment-status invoice filters leave out unbooked invoices',
   safety: 'read',
   docs: 'GET /3/invoices accepts `filter` values `cancelled`, `fullypaid`, `unpaid`, `unpaidoverdue`, and `unbooked`; the docs do not say how the payment-status filters treat unbooked invoices.',
-  wire: 'An unbooked invoice with an outstanding balance appears under `filter=unbooked` but not under `filter=unpaid` or `filter=unpaidoverdue`, so an empty payment-status result does not prove nothing is outstanding.',
+  wire: 'An unbooked, uncancelled invoice with a positive balance appears under `filter=unbooked` but not under `filter=unpaid`; an unbooked, uncancelled invoice with a positive balance whose `DueDate` is before today (Effect `Clock`, UTC date) is also absent from `filter=unpaidoverdue`. So an empty payment-status result does not prove nothing is outstanding. The case needs such an overdue unbooked invoice and aborts with a precondition otherwise.',
   fixtures: [fortnoxInvoicePaymentFiltersFixture.id],
   run: Effect.gen(function* () {
+    const today = new Date(yield* Clock.currentTimeMillis).toISOString().slice(0, 10)
     const unbooked = yield* listAllInvoices('unbooked')
 
-    const outstanding = unbooked.find(
+    const outstanding = unbooked.filter(
       invoice =>
         invoice.Booked !== true &&
         invoice.Cancelled !== true &&
-        invoice.Balance !== null &&
-        invoice.Balance !== undefined &&
-        invoice.Balance !== 0
+        Predicate.isNumber(invoice.Balance) &&
+        invoice.Balance > 0
     )
 
-    if (outstanding === undefined) {
+    const unpaidCandidate = outstanding[0]
+
+    if (unpaidCandidate === undefined) {
       return yield* new ConformanceMismatch({
         message:
-          'precondition: the practice company needs an unbooked, uncancelled invoice with a non-zero balance'
+          'precondition: the practice company needs an unbooked, uncancelled invoice with a positive balance'
       })
     }
 
-    for (const filter of ['unpaid', 'unpaidoverdue'] as const) {
-      const listed = yield* listAllInvoices(filter)
+    const overdueCandidate = outstanding.find(invoice => isDateBefore(invoice.DueDate, today))
 
-      yield* expectConformance(
-        !listed.some(invoice => invoice.DocumentNumber === outstanding.DocumentNumber),
-        `expected the unbooked invoice to be absent from filter=${filter}`,
-        { expected: 'absent', actual: 'present' }
-      )
+    if (overdueCandidate === undefined) {
+      return yield* new ConformanceMismatch({
+        message: `precondition: the practice company needs an unbooked, uncancelled invoice with a positive balance and a DueDate before today (${today})`
+      })
     }
+
+    const unpaid = yield* listAllInvoices('unpaid')
+
+    yield* expectConformance(
+      !unpaid.some(invoice => invoice.DocumentNumber === unpaidCandidate.DocumentNumber),
+      'expected the unbooked invoice to be absent from filter=unpaid',
+      { expected: 'absent', actual: unpaidCandidate.DocumentNumber }
+    )
+
+    const unpaidOverdue = yield* listAllInvoices('unpaidoverdue')
+
+    yield* expectConformance(
+      !unpaidOverdue.some(invoice => invoice.DocumentNumber === overdueCandidate.DocumentNumber),
+      'expected the overdue unbooked invoice to be absent from filter=unpaidoverdue',
+      { expected: 'absent', actual: overdueCandidate.DocumentNumber }
+    )
   })
 })
 
@@ -436,12 +502,12 @@ type RowDiscount =
   | { readonly kind: 'set'; readonly discount: number }
   | { readonly kind: 'omit' }
 
-const originalDiscount = (row: FortnoxInvoiceRow): number => row.Discount ?? 0
-
 /**
  * Writable fields of a read row, without `RowId` (positional matching) and without read-only
- * totals. `discount` controls the pricing fields: the original values sent explicitly, a set
- * percent discount, or both `Discount` and `DiscountType` omitted.
+ * totals. `discount` controls the pricing fields: the original values sent explicitly (the case
+ * precondition guarantees both are set), a set percent discount, or both `Discount` and
+ * `DiscountType` omitted. `VATCode` is never sent (the row's `VAT` is), but the restore check
+ * compares it.
  */
 const writableRow = (row: FortnoxInvoiceRow, discount: RowDiscount): FortnoxInvoiceRow => {
   const out: WritableInvoiceRow = {}
@@ -458,7 +524,7 @@ const writableRow = (row: FortnoxInvoiceRow, discount: RowDiscount): FortnoxInvo
 
   switch (discount.kind) {
     case 'original':
-      out.Discount = originalDiscount(row)
+      setWritable(out, 'Discount', row.Discount)
       setWritable(out, 'DiscountType', row.DiscountType)
       break
     case 'set':
@@ -471,6 +537,10 @@ const writableRow = (row: FortnoxInvoiceRow, discount: RowDiscount): FortnoxInvo
 
   return FortnoxInvoiceRow.make(out)
 }
+
+/** Rows the restore can write back exactly: an explicit numeric `Discount` and a PERCENT type. */
+const hasRestorableDiscount = (row: FortnoxInvoiceRow): boolean =>
+  Predicate.isNumber(row.Discount) && row.DiscountType === 'PERCENT'
 
 const invoiceRows = (invoice: FortnoxInvoice): ReadonlyArray<FortnoxInvoiceRow> =>
   Chunk.toReadonlyArray(invoice.InvoiceRows ?? Chunk.empty())
@@ -500,22 +570,51 @@ const updateRows = (
 const firstRowDiscount = (documentNumber: FortnoxDocumentNumber) =>
   getInvoice(documentNumber).pipe(Effect.map(invoice => invoiceRows(invoice)[0]?.Discount ?? null))
 
-// What a restore must bring back, per row. RowIds are regenerated on every update.
-const rowSignature = (row: FortnoxInvoiceRow) => ({
-  ArticleNumber: row.ArticleNumber ?? null,
-  Description: row.Description ?? null,
-  DeliveredQuantity: row.DeliveredQuantity ?? null,
-  Price: row.Price ?? null,
-  Discount: originalDiscount(row),
-  DiscountType: row.DiscountType ?? null
-})
+/**
+ * Every row field the case writes, plus `VATCode`. RowIds are regenerated on every update and
+ * derived row totals follow from these fields, so neither is compared per row.
+ */
+const restoredRowFields = [
+  'ArticleNumber',
+  'AccountNumber',
+  'Description',
+  'DeliveredQuantity',
+  'Unit',
+  'Price',
+  'VAT',
+  'VATCode',
+  'CostCenter',
+  'Project',
+  'Discount',
+  'DiscountType'
+] as const
 
-/** Send the original rows with explicit discounts, then verify them by reading back. */
-const restoreInvoiceRows = (
-  documentNumber: FortnoxDocumentNumber,
-  rows: ReadonlyArray<FortnoxInvoiceRow>
-) =>
+/** Invoice-level totals a restore must bring back. */
+const restoredInvoiceTotals = ['Total', 'TotalVAT', 'Net', 'Gross'] as const
+
+/**
+ * Fields exactly as read: `null` stays `null`, and an absent field stays absent (it is left out
+ * rather than normalized), so a restore that changes either is caught.
+ */
+const exactFields = (fields: ReadonlyArray<readonly [string, Schema.Json | undefined]>) =>
+  Object.fromEntries(
+    fields.flatMap(([key, value]) => (value === undefined ? [] : [[key, value] as const]))
+  )
+
+const rowSignature = (row: FortnoxInvoiceRow) =>
+  exactFields(restoredRowFields.map(key => [key, row[key]] as const))
+
+const invoiceTotals = (invoice: FortnoxInvoice) =>
+  exactFields(restoredInvoiceTotals.map(key => [key, invoice[key]] as const))
+
+/**
+ * Send the original rows with their explicit discounts, then verify by reading back that every
+ * written row field (plus `VATCode`) and the invoice totals equal the original read exactly.
+ */
+const restoreInvoiceRows = (documentNumber: FortnoxDocumentNumber, original: FortnoxInvoice) =>
   Effect.gen(function* () {
+    const rows = invoiceRows(original)
+
     yield* putInvoiceRows(
       documentNumber,
       rows.map(row => writableRow(row, { kind: 'original' }))
@@ -528,6 +627,11 @@ const restoreInvoiceRows = (
       rows.map(rowSignature),
       'expected the original invoice rows back after restoring'
     )
+    yield* expectEqual(
+      invoiceTotals(restored),
+      invoiceTotals(original),
+      'expected the original invoice totals back after restoring'
+    )
   })
 
 const rowDiscountCaseId = 'fortnox.invoice.row-discount-sticky'
@@ -537,7 +641,7 @@ export const fortnoxInvoiceRowDiscountCase: FortnoxConformanceCase = defineConfo
   title: 'An omitted row Discount keeps its previous value on positional row updates',
   safety: 'write-reversible',
   docs: 'PUT /3/invoices/{DocumentNumber} with `InvoiceRows` replaces the row list; without `RowId`, rows are matched to existing rows by position. The docs do not say what happens to pricing fields left out of a matched row.',
-  wire: 'On an unbooked invoice, a positionally matched row sent WITHOUT `Discount` keeps its previous discount (10 stays 10); only an explicit `Discount: 0` clears it. The case restores the original rows (with explicit discounts) afterwards and verifies them.',
+  wire: 'On an unbooked invoice, a positionally matched row sent WITHOUT `Discount` keeps its previous discount (10 stays 10); only an explicit `Discount: 0` clears it. The case needs every row to have an explicit `Discount` and `DiscountType: PERCENT` before any write, then restores the original rows (with their explicit discounts) and verifies every written row field, `VATCode`, and the invoice totals against the original read.',
   fixtures: [fortnoxInvoiceRowDiscountFixture.id],
   run: Effect.gen(function* () {
     const documentNumber = yield* requireSeed('discountInvoiceDocumentNumber')
@@ -552,10 +656,11 @@ export const fortnoxInvoiceRowDiscountCase: FortnoxConformanceCase = defineConfo
       rows.length > 0,
       'precondition: the discount invoice needs at least one row'
     )
-    // The case writes `DiscountType: PERCENT`; an unset original type could not be restored.
+    // The restore writes each row's original Discount and DiscountType back explicitly; an unset
+    // (null or absent) value could not be written back, so the restore would not be exact.
     yield* expectConformance(
-      rows.every(row => row.DiscountType === 'PERCENT'),
-      'precondition: every discount invoice row must already have DiscountType PERCENT, so restoring the rows cannot change it'
+      rows.every(hasRestorableDiscount),
+      'precondition: every discount invoice row needs an explicit Discount and DiscountType PERCENT, so the restore can write them back exactly; nothing was written'
     )
 
     yield* withRestore(
@@ -582,7 +687,7 @@ export const fortnoxInvoiceRowDiscountCase: FortnoxConformanceCase = defineConfo
           'expected an explicit Discount 0 to clear the discount'
         )
       }),
-      restoreInvoiceRows(documentNumber, rows)
+      restoreInvoiceRows(documentNumber, original)
     )
   })
 })
@@ -660,12 +765,41 @@ const providerCodeOf = (underlying: unknown): number | string | undefined => {
     : undefined
 }
 
+/**
+ * Fortnox `ErrorInformation` codes documented as "Customer not found" (see the Fortnox error-code
+ * guide). A 4xx lookup failure carrying one of them confirms the customer is absent like a 404.
+ */
+const customerNotFoundProviderCodes: ReadonlyArray<string> = ['2000204', '2000433']
+
+/**
+ * A failed customer lookup confirms absence only on 404, or on another 4xx (never 401 or 403)
+ * whose `ErrorInformation` code means "customer not found". Anything else is not proof of absence.
+ */
+const confirmsCustomerAbsent = (error: {
+  readonly status?: number | undefined
+  readonly underlying?: unknown
+}): boolean => {
+  const { status } = error
+
+  if (status === 404) {
+    return true
+  }
+
+  if (status === undefined || status < 400 || status >= 500 || status === 401 || status === 403) {
+    return false
+  }
+
+  const code = providerCodeOf(error.underlying)
+
+  return code !== undefined && customerNotFoundProviderCodes.includes(String(code).trim())
+}
+
 export const fortnoxWriteRejectionCase: FortnoxConformanceCase = defineConformanceCase({
   id: 'fortnox.write.rejection-error-information',
   title: 'Rejected writes carry ErrorInformation with a code and message',
   safety: 'write-reversible',
   docs: 'Errors return a non-2xx status with an `ErrorInformation` envelope; the responses guide spells its fields `error`/`message`/`code` while the OpenAPI schema uses `Error`/`Message`/`Code`.',
-  wire: 'Creating an invoice for a customer number that does not exist is rejected with a 4xx status and an `ErrorInformation` code and message: `fortnox.create_invoice` returns an `ActionResult` failure with `underlying.providerCode` and the provider message instead of the generic fallback. A rejected write changes nothing. The case first confirms the customer is missing (404) and aborts otherwise; the residual risk is that if Fortnox unexpectedly accepted the write, an invoice would be created (the case then fails and names it for manual clean-up).',
+  wire: 'Creating an invoice for a customer number that does not exist is rejected with a 4xx status and an `ErrorInformation` code and message: `fortnox.create_invoice` returns an `ActionResult` failure with `underlying.providerCode` and the provider message instead of the generic fallback. A rejected write changes nothing. The case first confirms the customer is absent (404, or another 4xx with a customer-not-found `ErrorInformation` code; 401, 403, and other failures abort before the write). It does not restore anything: if Fortnox unexpectedly accepted the write, an invoice would be created, and the case fails and names it for manual cancellation.',
   fixtures: [fortnoxWriteRejectionFixture.id],
   run: Effect.gen(function* () {
     const customerNumber = yield* requireSeed('missingCustomerNumber')
@@ -682,10 +816,10 @@ export const fortnoxWriteRejectionCase: FortnoxConformanceCase = defineConforman
       })
     }
 
-    yield* expectEqual(
-      lookup.error.status ?? null,
-      404,
-      'precondition: could not confirm that missingCustomerNumber is absent (expected 404); nothing was written'
+    yield* expectConformance(
+      confirmsCustomerAbsent(lookup.error),
+      'precondition: could not confirm that missingCustomerNumber is absent (expected 404, or a 4xx with a customer-not-found ErrorInformation code); nothing was written',
+      { actual: lookup.error.status ?? null }
     )
 
     const result = yield* fortnoxCreateInvoiceAction.executeTyped({
@@ -722,46 +856,69 @@ export const fortnoxWriteRejectionCase: FortnoxConformanceCase = defineConforman
 
 const InvoiceEnvelope = Schema.Struct({ Invoice: FortnoxInvoiceApi })
 
-// Same credential rules as the connector's own Fortnox requests.
-const fortnoxAccessToken = Effect.gen(function* () {
-  const credential = yield* resolveCredential(integration, FortnoxInvoiceOAuthCredentialSlot)
+const OptionalEmailAddress = Schema.optional(Schema.NullOr(Schema.String))
 
-  if (
-    !Predicate.isTagged(credential, 'OAuthCredential') ||
-    credential.provider !== 'fortnox' ||
-    !/^[\x21-\x7e]+$/.test(credential.accessToken)
-  ) {
-    return yield* new ConnectorError({
-      cause: 'credential_invalid',
-      message: 'Fortnox requires a Fortnox OAuth credential with a non-empty access token',
-      connectorId: integration.connectorId,
-      slotId: FortnoxInvoiceOAuthCredentialSlot.id
-    })
-  }
-
-  return credential.accessToken
+/** The recipients of an invoice email as `GET /3/invoices/{DocumentNumber}` reports them. */
+const InvoiceEmailRecipientsEnvelope = Schema.Struct({
+  Invoice: Schema.Struct({
+    DocumentNumber: FortnoxDocumentNumber,
+    EmailInformation: Schema.optional(
+      Schema.NullOr(
+        Schema.Struct({
+          EmailAddressTo: OptionalEmailAddress,
+          EmailAddressCC: OptionalEmailAddress,
+          EmailAddressBCC: OptionalEmailAddress
+        })
+      )
+    )
+  })
 })
+
+type InvoiceEmailRecipients = (typeof InvoiceEmailRecipientsEnvelope.Type)['Invoice']
+
+const emailInvoiceReadId = 'fortnox.conformance.read_invoice_email_information'
+
+const invoicePath = (documentNumber: FortnoxDocumentNumber) =>
+  `invoices/${encodeURIComponent(documentNumber)}`
+
+const isUnsetAddress = (value: string | null | undefined): boolean =>
+  value === null || value === undefined || value.trim().length === 0
 
 export const fortnoxInvoiceSendEmailCase: FortnoxConformanceCase = defineConformanceCase({
   id: 'fortnox.invoice.send-email',
   title: 'Sending an invoice by email answers with the invoice',
   safety: 'write-irreversible',
   docs: 'GET /3/invoices/{DocumentNumber}/email sends the invoice by email to the customer invoice address and returns the invoice.',
-  wire: 'The send request answers 2xx with an `Invoice` envelope for the same DocumentNumber. Whether a test (practice) company actually delivers the email is not established: record delivery evidence by hand. The connector has no send action, so this case uses the raw ConnectorHttpClient and never runs live unless a person allows its exact id.',
+  wire: 'The send request answers 2xx with an `Invoice` envelope for the same DocumentNumber. Whether a test (practice) company actually delivers the email is not established: record delivery evidence by hand. Before sending, the case reads the invoice and aborts unless `EmailInformation.EmailAddressTo` equals the host-supplied `emailRecipient` seed exactly and no CC/BCC address is set. The connector has no send action, so the send is a raw GET through the shared Fortnox request helper, and the case never runs live unless a person allows its exact id.',
   fixtures: [fortnoxInvoiceSendEmailFixture.id],
   run: Effect.gen(function* () {
     const documentNumber = yield* requireSeed('emailInvoiceDocumentNumber')
-    const token = yield* fortnoxAccessToken
-    const http = yield* ConnectorHttpClient
+    const recipient = yield* requireSeed('emailRecipient')
 
-    const response = yield* http.request(
-      ConnectorHttpRequest.make({
-        method: 'GET',
-        url: `${fortnoxApiBaseUrl}/invoices/${encodeURIComponent(documentNumber)}/email`,
-        headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
-        redirect: 'manual',
-        credentials: 'omit'
-      })
+    const recipients: InvoiceEmailRecipients = yield* readFortnox(
+      integration,
+      FortnoxInvoiceOAuthCredentialSlot,
+      invoicePath(documentNumber),
+      InvoiceEmailRecipientsEnvelope,
+      envelope => envelope.Invoice
+    ).pipe(Effect.flatMap(result => successValue(emailInvoiceReadId, result)))
+
+    const email = recipients.EmailInformation ?? undefined
+
+    // Addresses are never echoed: they may be personal data.
+    yield* expectConformance(
+      email?.EmailAddressTo === recipient,
+      'precondition: the email invoice EmailInformation.EmailAddressTo does not equal FortnoxConformanceConfig.emailRecipient exactly; nothing was sent'
+    )
+    yield* expectConformance(
+      isUnsetAddress(email?.EmailAddressCC) && isUnsetAddress(email?.EmailAddressBCC),
+      'precondition: the email invoice has an EmailAddressCC or EmailAddressBCC; clear them so only emailRecipient is addressed; nothing was sent'
+    )
+
+    const response = yield* getFortnoxResponse(
+      integration,
+      FortnoxInvoiceOAuthCredentialSlot,
+      `${invoicePath(documentNumber)}/email`
     )
 
     yield* expectConformance(

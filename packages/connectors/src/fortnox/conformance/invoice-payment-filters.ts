@@ -2,11 +2,12 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
  * Invoice lists for `filter=unbooked`, `filter=unpaid`, and `filter=unpaidoverdue`: the unbooked
- * invoice with a balance is absent from both payment-status lists.
+ * invoice with a positive balance, due 2026-09-15 (overdue on the 2026-09-29 test clock), is absent
+ * from both payment-status lists.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * Regenerate with `pnpm conformance:fortnox --live --account <label> --record` (see the
- * script for the required flags).
+ * `pnpm conformance:fortnox --live --account <label> --record` stages a replacement in a gitignored
+ * directory; see the script header for the manual scrub-and-promote step.
  */
 export const fortnoxInvoicePaymentFiltersFixture: WireFixture = {
   id: 'fortnox.invoice.payment-filters-exclude-unbooked.synthetic',
@@ -30,7 +31,7 @@ export const fortnoxInvoicePaymentFiltersFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"Invoices":[{"@url":"https://api.fortnox.se/3/invoices/105","Balance":1250,"Booked":false,"Cancelled":false,"CostCenter":"","Currency":"SEK","CurrencyRate":"1","CurrencyUnit":1,"CustomerName":"Example Customer AB","CustomerNumber":"1001","DocumentNumber":"105","DueDate":"2026-10-31","ExternalInvoiceReference1":"","ExternalInvoiceReference2":"","FinalPayDate":null,"InvoiceDate":"2026-09-30","InvoiceType":"INVOICE","NoxFinans":false,"OCR":"","VoucherNumber":null,"VoucherSeries":null,"VoucherYear":null,"WayOfDelivery":"","TermsOfPayment":"30","Project":"","Sent":false,"Total":1250}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":1}}'
+        body: '{"Invoices":[{"@url":"https://api.fortnox.se/3/invoices/105","Balance":1250,"Booked":false,"Cancelled":false,"CostCenter":"","Currency":"SEK","CurrencyRate":"1","CurrencyUnit":1,"CustomerName":"Example Customer AB","CustomerNumber":"1001","DocumentNumber":"105","DueDate":"2026-09-15","ExternalInvoiceReference1":"","ExternalInvoiceReference2":"","FinalPayDate":null,"InvoiceDate":"2026-08-16","InvoiceType":"INVOICE","NoxFinans":false,"OCR":"","VoucherNumber":null,"VoucherSeries":null,"VoucherYear":null,"WayOfDelivery":"","TermsOfPayment":"30","Project":"","Sent":false,"Total":1250}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":1}}'
       }
     },
     {

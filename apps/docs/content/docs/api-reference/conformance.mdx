@@ -219,19 +219,13 @@ scopes and never refreshes; hosts own real credential storage.
 `@yolk-sdk/connectors/fortnox/conformance` exports seven Fortnox cases (`fortnoxConformanceCases`),
 their synthetic fixtures (`fortnoxConformanceFixtures`, `evidence: 'unverified'`), and the seeds they
 replay with (`fortnoxConformanceFixtureSeeds`). Cases need the connector ports plus
-`FortnoxConformanceConfig`, which holds seed identities in a Fortnox developer test company:
+`FortnoxConformanceConfig`, which holds seed identities in a Fortnox developer test company. A
+missing seed fails the case with a `precondition:` mismatch before any request. None of the cases is
+observed live yet, so reports warn `unverified-case`.
 
-| Case id                                            | Safety               | Seed                            |
-| -------------------------------------------------- | -------------------- | ------------------------------- |
-| `fortnox.invoice.list-populated`                   | `read`               | none                            |
-| `fortnox.invoice.preview-pdf`                      | `read`               | `previewInvoiceDocumentNumber`  |
-| `fortnox.invoice.payment-filters-exclude-unbooked` | `read`               | none                            |
-| `fortnox.invoice.row-discount-sticky`              | `write-reversible`   | `discountInvoiceDocumentNumber` |
-| `fortnox.customer.empty-string-keeps-value`        | `write-reversible`   | `customerNumber`                |
-| `fortnox.write.rejection-error-information`        | `write-reversible`   | `missingCustomerNumber`         |
-| `fortnox.invoice.send-email`                       | `write-irreversible` | `emailInvoiceDocumentNumber`    |
-
-Write-reversible cases always restore what they change, verify the restore by reading back, and
-fail with `FortnoxConformanceRestoreFailed` instead of hiding a failed restore. A missing seed fails
-the case with a `precondition:` mismatch before any request. None of the cases is observed live yet,
-so reports warn `unverified-case`. See [Fortnox](../connectors/fortnox#conformance-cases) for the claims.
+The row and customer mutation cases restore what they change, verify the restore by reading back,
+and fail with `FortnoxConformanceRestoreFailed` instead of hiding a failed restore. The rejection
+case restores nothing: it only confirms that the customer is absent before its write, and reports
+any invoice Fortnox unexpectedly creates for manual cancellation. See
+[Fortnox conformance cases](../connectors/fortnox#conformance-cases) for the case table, seeds, and
+claims.

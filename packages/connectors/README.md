@@ -647,36 +647,31 @@ See the [official API reference](https://apps.fortnox.se/apidocs),
 ### Fortnox conformance cases (experimental)
 
 `@yolk-sdk/connectors/fortnox/conformance` exports conformance cases for
-`@yolk-sdk/conformance/runner` that prove how the real Fortnox API behaves where it differs from, or
-goes beyond, its docs. Each case runs the real connector actions and helpers over
+`@yolk-sdk/conformance/runner`, each checking one claim about how the real Fortnox API behaves where
+it differs from, or goes beyond, its docs. Each case runs the real connector actions and helpers over
 `ConnectorHttpClient`, `ConnectorBinaryHttpClient`, and `CredentialResolver`, plus the
 `FortnoxConformanceConfig` service, which holds host-supplied seed identities in a Fortnox developer
 test company (practice account). Cases never hard-code account data; a missing seed fails the case
 with a `precondition:` mismatch before any request. Credentials bind through
-`fortnoxConformanceIntegration` (`fortnox.oauth`, credential ref `fortnox.conformance`).
+`fortnoxConformanceIntegration` (`fortnox.oauth`, credential ref `fortnox.conformance`). The case
+table, seeds, and claims live in the
+[Fortnox guide](../../apps/docs/content/docs/connectors/fortnox.mdx#conformance-cases).
 
-| Case id                                            | Safety               | Claim (as currently understood)                                                     |
-| -------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------- |
-| `fortnox.invoice.list-populated`                   | `read`               | Invoice lists carry `MetaInformation`; numeric-string amounts decode to numbers     |
-| `fortnox.invoice.preview-pdf`                      | `read`               | `/preview` returns a complete PDF (`%PDF-` ... `%%EOF`) whatever its content type   |
-| `fortnox.invoice.payment-filters-exclude-unbooked` | `read`               | `unpaid`/`unpaidoverdue` leave out an unbooked invoice with a balance               |
-| `fortnox.invoice.row-discount-sticky`              | `write-reversible`   | A positional row update without `Discount` keeps it; only `Discount: 0` clears it   |
-| `fortnox.customer.empty-string-keeps-value`        | `write-reversible`   | Updating customer `Comments` to `""` keeps the stored value                         |
-| `fortnox.write.rejection-error-information`        | `write-reversible`   | Rejected writes carry an `ErrorInformation` code and message; nothing is written    |
-| `fortnox.invoice.send-email`                       | `write-irreversible` | `GET /invoices/{n}/email` answers 2xx with the invoice; delivery is not established |
-
-Write-reversible cases read the original state first and always restore it afterwards (also after a
-failed assertion or interruption), verify the restore by reading back, and fail with
-`FortnoxConformanceRestoreFailed` when the restore fails: the practice account must then be restored
-by hand. The rejection case first confirms the missing customer returns 404 and aborts otherwise;
-if Fortnox unexpectedly accepted the write, an invoice would be created and the case names it. The
-email case uses the raw `ConnectorHttpClient` because the connector intentionally has no send
-action; the runner never runs it live unless its exact id is allowed.
+The row and customer mutation cases read the original state first, always restore it afterwards
+(also after a failed assertion or interruption), verify the restore by reading back, and fail with
+`FortnoxConformanceRestoreFailed` when the restore fails (check the account and restore it by hand
+if it still differs). The rejection case restores nothing: it only confirms the customer is absent
+before its write and names any invoice Fortnox unexpectedly creates for manual cancellation. The
+email case aborts unless the invoice's `EmailInformation.EmailAddressTo` equals the `emailRecipient`
+seed exactly; the runner never runs it live unless its exact id is allowed.
 
 `fortnoxConformanceFixtures` are synthetic placeholders (`evidence: 'unverified'`) that replay with
 `fortnoxConformanceFixtureSeeds`. `pnpm conformance:fortnox` in this repository dry-runs by default;
-its `--live --account <label>` mode is for owners running a practice account by hand, and `--record`
-replaces the fixtures of passed cases with verified recordings after replaying them.
+its `--live --account <label>` mode is for owners running a practice account by hand. `--record`
+stages verified recordings in the gitignored `.conformance-recordings/fortnox/<date>/` and never
+writes committed sources. Promotion is manual: scrub, copy into `src/fortnox/conformance/`, and
+update the tests in the same change, because promoted fixtures change fixture ids, `evidence`, and
+`account`.
 
 `@yolk-sdk/connectors/conformance` supplies the ports for such runs:
 `connectorHttpClientFromEffectHttpClientLayer`, `connectorBinaryHttpClientFromEffectHttpClientLayer`

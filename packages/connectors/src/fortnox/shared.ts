@@ -198,6 +198,17 @@ const requestFortnox = (
     )
   })
 
+/**
+ * The raw response to an authenticated Fortnox GET (same credential rules and headers as every
+ * connector request), without status mapping or decoding. For conformance cases that must inspect
+ * a request the connector deliberately has no action for.
+ */
+export const getFortnoxResponse = (
+  integration: ConnectorIntegration,
+  slot: CredentialSlot,
+  path: string
+) => requestFortnox(integration, slot, 'GET', path)
+
 export const readFortnox = <A, B>(
   integration: ConnectorIntegration,
   slot: CredentialSlot,
