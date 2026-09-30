@@ -53,9 +53,9 @@ verified under these conditions:
   interruption, and so does every later write inside the case folder (copy, move, upload, delete):
   an aborted request could otherwise land after the cleanup. Neither the runner nor the bridges set
   a request timeout, so a hanging request delays an interruption until it answers.
-- A definitive create rejection (HTTP 4xx, such as `path/conflict` when something else created the
+- A definitive create rejection (HTTP 4xx other than 408, such as `path/conflict` when something else created the
   folder first) proves the case created nothing: it fails and deletes **nothing**.
-- An ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) may still create the
+- An ambiguous create (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) may still create the
   folder later. The case makes one best-effort delete of its own path, but always fails with
   `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) naming the exact path: check it by
   hand. The same holds for the conflict case's two duplicate creates: the known original is cleaned

@@ -119,14 +119,14 @@ export const todoistDueDatesFixture: WireFixture = {
         method: 'POST',
         url: `${base}/tasks/${taskId}`,
         headers: { 'content-type': 'application/json' },
-        body: { due_datetime: '2030-01-15T09:30:00Z' }
+        body: { due_datetime: '2030-01-15T12:00:00Z' }
       },
       response: json(
         200,
         task({
-          date: '2030-01-15T09:30:00Z',
+          date: '2030-01-15T12:00:00Z',
           timezone: 'UTC',
-          string: 'Jan 15 2030 09:30',
+          string: 'Jan 15 2030 12:00',
           lang: 'en',
           is_recurring: false
         })

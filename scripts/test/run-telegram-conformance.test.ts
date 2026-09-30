@@ -11,6 +11,7 @@ import type { ConformanceReport } from '../../packages/conformance/src/runner.ts
 import {
   telegramConformanceCases,
   telegramConformanceFixtureSeeds,
+  telegramConformanceFixtures,
   telegramConformanceReplayBotToken,
   telegramErrorEnvelopeFixture,
   telegramGetFilePathFixture,
@@ -20,6 +21,7 @@ import {
 import {
   inspectRecordingForAccessToken,
   runInterruptibly,
+  interruptOptionsFor,
   textContainsAccessToken,
   type CliIo,
   type SignalSource,
@@ -49,6 +51,10 @@ import {
   telegramCaseSpecs,
   telegramRunner
 } from '../run-telegram-conformance.ts'
+import { todoistRunner } from '../run-todoist-conformance.ts'
+import { dropboxConformanceFixtures } from '../../packages/connectors/src/dropbox/conformance/index.ts'
+import { notionConformanceFixtures } from '../../packages/connectors/src/notion/conformance/index.ts'
+import { todoistConformanceFixtures } from '../../packages/connectors/src/todoist/conformance/index.ts'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -444,7 +450,23 @@ describe('run-telegram-conformance --record staging (offline)', () => {
 
   const refusal = `${validateCaseId}: the recording still contains the live access token; nothing was written`
 
-  const uninspectable = `${validateCaseId}: the recording holds a body the token guard cannot fully inspect (undecodable base64 or a compressed payload); nothing was written`
+  const uninspectable = `${validateCaseId}: the recording holds a body the token guard cannot inspect (only strict UTF-8 text without NUL characters is inspectable); nothing was written`
+
+  const binary = (bytes: ReadonlyArray<number>): WireResponse => ({
+    status: 200,
+    headers: { 'content-type': 'application/octet-stream' },
+    bodyBase64: Buffer.from(bytes).toString('base64')
+  })
+
+  /** Base64 of the token behind `offset` filler bytes, as a JSON body carrying it as a blob. */
+  const base64Blob = (offset: number, urlSafe: boolean) => {
+    const encoded = Buffer.concat([
+      Buffer.alloc(offset, 0x41),
+      Buffer.from(`${liveToken}!`)
+    ]).toString(urlSafe ? 'base64url' : 'base64')
+
+    return json(`{"ok":true,"result":{"blob":"${encoded}"}}`)
+  }
 
   for (const [label, exchanges, message] of [
     [
@@ -504,15 +526,44 @@ describe('run-telegram-conformance --record staging (offline)', () => {
       leakyValidate({ status: 200, headers: {}, bodyBase64: 'not base64!' }),
       uninspectable
     ],
+    ['a gzip body', leakyValidate(binary([0x1f, 0x8b, 0x08, 0x00, 0x01, 0x02])), uninspectable],
     [
-      'a compressed body',
-      leakyValidate({
-        status: 200,
-        headers: { 'content-type': 'application/octet-stream' },
-        bodyBase64: Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x01, 0x02]).toString('base64')
-      }),
+      'an xz body (no magic-byte list: not strict UTF-8)',
+      leakyValidate(binary([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00, 0x00, 0x04, 0xe6, 0xd6])),
       uninspectable
-    ]
+    ],
+    [
+      'a PNG-like body',
+      leakyValidate(
+        binary([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d])
+      ),
+      uninspectable
+    ],
+    [
+      'a UTF-16 body with a byte-order mark',
+      leakyValidate(binary([0xff, 0xfe, ...Buffer.from('plain synthetic text', 'utf16le')])),
+      uninspectable
+    ],
+    [
+      'a UTF-16 body without a byte-order mark (ASCII, so valid UTF-8, but NUL-laden)',
+      leakyValidate(binary([...Buffer.from('plain synthetic text', 'utf16le')])),
+      uninspectable
+    ],
+    [
+      'a text body carrying NUL characters',
+      leakyValidate(json(`{"ok":true,"result":{"title":"a${String.fromCharCode(0)}b"}}`)),
+      uninspectable
+    ],
+    ...[0, 1, 2].flatMap(offset =>
+      [false, true].map(
+        urlSafe =>
+          [
+            `a base64${urlSafe ? 'url' : ''}-embedded token at byte offset ${offset}`,
+            leakyValidate(base64Blob(offset, urlSafe)),
+            refusal
+          ] as const
+      )
+    )
   ] as const) {
     it(`writes and prints nothing for ${label}`, async () => {
       const { writer, operations } = memoryWriter()
@@ -625,9 +676,11 @@ describe('run-telegram-conformance live run wiring', () => {
     expect((await runOver(['--allow-writes', 'reversible'])).split('\n')[0]).toBe(
       'SKIP  telegram.messages.send-message  [write-irreversible]  manual-only  warnings: unverified-case'
     )
-    expect((await runOver(['--allow-irreversible', sendCaseId])).split('\n')[0]).toBe(
+    // With the irreversible send enabled, the run id is printed first, before any case runs.
+    expect((await runOver(['--allow-irreversible', sendCaseId])).split('\n').slice(0, 2)).toEqual([
+      'runId for this run: run-synthetic (write-irreversible cases name it in what they leave behind)',
       'PASS  telegram.messages.send-message  [write-irreversible]  warnings: unverified-case'
-    )
+    ])
   })
 })
 
@@ -658,7 +711,7 @@ describe('run-telegram-conformance interruption advice', () => {
     const done = runInterruptibly(Effect.never, signals, io, {
       now: () => clock,
       pid: 4242,
-      recoveryAdvice: telegramRunner.recoveryAdvice
+      ...interruptOptionsFor(telegramRunner)
     })
 
     await new Promise(resolvePromise => setTimeout(resolvePromise, 0))
@@ -675,7 +728,41 @@ describe('run-telegram-conformance interruption advice', () => {
     )
     expect(errors.at(-1)).toBe(`Interrupted. Read the WARN lines. ${telegramRunner.recoveryAdvice}`)
     expect(errors.join('\n')).not.toContain('--allow-writes')
+    expect(telegramRunner.recoveryAdvice).toContain(
+      'messages starting with `yolk-conformance run-`'
+    )
   })
+
+  it('words the first signal from whether the runner cleans up, not from its advice', () => {
+    expect(interruptOptionsFor(telegramRunner)).toEqual({
+      recoveryAdvice: telegramRunner.recoveryAdvice,
+      hasCleanups: false
+    })
+    expect(interruptOptionsFor(todoistRunner)).toEqual({
+      recoveryAdvice: undefined,
+      hasCleanups: true
+    })
+    expect(interruptOptionsFor({ ...todoistRunner, recoveryAdvice: 'custom advice' })).toEqual({
+      recoveryAdvice: 'custom advice',
+      hasCleanups: true
+    })
+  })
+})
+
+describe('connector conformance token guard allowlist', () => {
+  // Every committed fixture is strict UTF-8 text, so every runner's recordings stay stageable.
+  for (const [provider, fixtures] of [
+    ['dropbox', dropboxConformanceFixtures],
+    ['notion', notionConformanceFixtures],
+    ['todoist', todoistConformanceFixtures],
+    ['telegram', telegramConformanceFixtures]
+  ] as const) {
+    it(`inspects every ${provider} fixture as clean`, () => {
+      for (const fixture of fixtures) {
+        expect(inspectRecordingForAccessToken(fixture.exchanges, liveToken)).toBe('clean')
+      }
+    })
+  }
 })
 
 const runCli = (argv: ReadonlyArray<string>, env: Record<string, string>) =>

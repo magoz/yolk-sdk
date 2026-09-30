@@ -398,8 +398,8 @@ connector actions. Write cases each create their own invocation-unique
 `yolk-conformance-<runId>-<case>` project under `workProjectId` and delete it again by id, failing
 with `TodoistConformanceRestoreFailed` when that fails. A definitive create rejection deletes
 nothing; an ambiguous create fails with `TodoistConformanceActionFailed` (`createOutcome: 'unknown'`)
-naming the exact project or task; and a created project without the requested name, under another
-parent, or with a seeded project's id, or a task outside the case project, is never deleted
+naming the exact project or task; and a created project without the requested name or with a
+seeded project's id, or a task outside the case project, is never deleted
 (`TodoistConformanceCleanupRefused`). No write is interruptible, and the runner has no request
 timeout. The cleanup verifies that the project is gone; that its tasks go with it is checked only
 by the delete case. `findTodoistConformanceLeftovers` lists,

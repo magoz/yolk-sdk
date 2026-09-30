@@ -5,9 +5,9 @@
  * actions (and the host-only `downloadTelegramFile` helper) over the connector ports
  * (`ConnectorHttpClient`, `ConnectorBinaryHttpClient`, `CredentialResolver`) plus the host-supplied
  * `TelegramConformanceConfig` seeds. The Telegram actions (`telegram.validate`,
- * `telegram.send_message`) read only the HTTP status of Bot API answers, never the `{ ok }` body, so
- * claims about that body are observed at the port the host provides (the cases send no request of
- * their own); the host-only `downloadTelegramFile` does decode the `getFile` result. The
+ * `telegram.send_message`) read only the HTTP status of Bot API answers, never the `{ ok }`
+ * body, so claims about that body are observed at the port the host provides (the cases send no
+ * request of their own); the host-only `downloadTelegramFile` does decode the `getFile` result. The
  * same cases run on replay fixtures, an emulator, or by hand against a practice bot. None is
  * observed live yet (`observed` absent = unverified); sub-claims no live run has settled are marked
  * "(unverified: ...)" in their `wire`.
@@ -19,10 +19,10 @@
  * delete (it has no delete action), so the send case is `write-irreversible`: a runner starts it
  * only when a person names its exact id. Its text names the `runId` seed, a per-invocation
  * `run-<hex>` value, so the message can be told apart. The send, the decoding of its observed
- * answer, and its classification run uninterruptibly together. A definitive rejection (HTTP 4xx,
- * including 429) sent nothing. An ambiguous outcome (a transport or decoding failure, no status,
- * HTTP 5xx, or a 2xx whose body is not `{ ok: true }`) may have delivered the message anyway: the
- * case fails with `TelegramConformanceActionFailed`
+ * answer, and its classification run uninterruptibly together. A definitive rejection (HTTP 4xx
+ * other than 408, including 429) sent nothing. An ambiguous outcome (a transport or decoding
+ * failure, no status, HTTP 408 or 5xx, or a 2xx whose body is not `{ ok: true }`) may have
+ * delivered the message anyway: the case fails with `TelegramConformanceActionFailed`
  * (`sendOutcome: 'unknown'`) naming the text to look for in the seeded chat, and hands that message
  * to the `ConformanceCleanupReporter` when the case is being interrupted. There is nothing to clean
  * up, and no leftover lookup: the Bot API cannot list the messages a bot sent.
@@ -91,7 +91,10 @@ export const TelegramConformanceSeeds = Schema.Struct({
    * a real message there.
    */
   chatId: Schema.optionalKey(ChatId),
-  /** A small file (at most 1 MB) the bot received, by its Bot API `file_id`. */
+  /**
+   * A small plain UTF-8 text file (at most 1 MB) the bot received, by its Bot API `file_id`. Its
+   * `getFile` answer must report `file_size`; recording refuses any other kind of file.
+   */
   fileId: Schema.optionalKey(FileId),
   /**
    * Invocation-unique segment of the send case's message text. Replay uses the fixed synthetic id
@@ -147,9 +150,10 @@ export const telegramConformanceMarker = 'yolk-conformance'
  * underlying classification (a `ConnectorError` cause such as `transport_failed`, a provider
  * failure code, or a `ConnectorFileTransferError` code).
  *
- * `sendOutcome: 'unknown'` marks an ambiguous send (a transport or decoding failure, no status, or
- * HTTP 5xx): the message may have been delivered anyway, so the message names the text to look for
- * in the seeded chat. A sent message cannot be deleted through the connector.
+ * `sendOutcome: 'unknown'` marks an ambiguous send (a transport or decoding failure, no status,
+ * HTTP 408 or 5xx, or a 2xx whose observed body is not `{ ok: true }`: codes `undecodable_answer`
+ * and `unobserved_answer`): the message may have been delivered anyway, so the message names the
+ * text to look for in the seeded chat. A sent message cannot be deleted through the connector.
  */
 export class TelegramConformanceActionFailed extends Data.TaggedError(
   'TelegramConformanceActionFailed'
@@ -481,7 +485,7 @@ const sendText = (runId: string) =>
 
 /**
  * Classify a send from its exit and its observed answer. A transport or decoding failure, no
- * status, a 5xx, or a 2xx whose observed body is not `{ ok: true }` is ambiguous (the message may
+ * status, a 408 or 5xx, or a 2xx whose observed body is not `{ ok: true }` is ambiguous (the message may
  * have been delivered: `sendOutcome: 'unknown'`); a 4xx is a definitive rejection (nothing was
  * sent); `undefined` for a success with an `ok: true` body.
  */

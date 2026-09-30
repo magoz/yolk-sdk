@@ -51,9 +51,10 @@ answer reports `file_size`, so the byte-count check is exercised; a size-less an
 problem, not a claim failure.
 
 `TelegramConformanceConfig` holds the seeds: `chatId` (an integer chat id or `@username` of a
-practice chat the bot is a member of), `fileId` (the `file_id` of a small plain file, at most 1 MB,
-the bot received, whose `getFile` answer reports its size), and `runId`. Cases never hard-code account data, and a missing seed fails the case
-with a `precondition:` mismatch before any request. Credentials bind through
+practice chat the bot is a member of), `fileId` (the `file_id` of a small plain UTF-8 text file, at
+most 1 MB, the bot received, whose `getFile` answer reports its size), and `runId`. Cases never
+hard-code account data, and a missing seed fails the case with a `precondition:` mismatch before any
+request. Credentials bind through
 `telegramConformanceIntegration(chatId)` (`telegram.bot_token`, credential ref
 `telegram.conformance`, integration config `chatId`). The bot token is part of every Bot API URL:
 hosts must never log those URLs, and case failures never carry one.
@@ -73,10 +74,11 @@ under `allowWrites: 'reversible'`, and a runner starts it only when a person nam
 - The send, the decoding of its observed answer, and its classification run together without
   interruption; an interruption waits for the answer. Neither the runner nor the bridges set a
   request timeout.
-- A definitive rejection (HTTP 4xx, 429 included) sent nothing: the case fails without advice.
-- An ambiguous outcome (a transport or decoding failure, no status, HTTP 5xx, or a 2xx whose body
-  does not carry `ok: true`, which the connector itself would report as sent) may have delivered
-  the message anyway: the case fails with `TelegramConformanceActionFailed`
+- A definitive rejection (HTTP 4xx other than 408; 429 included) sent nothing: the case fails
+  without advice. A 408 (request timeout) counts as ambiguous.
+- An ambiguous outcome (a transport or decoding failure, no status, HTTP 408 or 5xx, or a 2xx
+  whose body does not carry `ok: true`, which the connector itself would report as sent) may have
+  delivered the message anyway: the case fails with `TelegramConformanceActionFailed`
   (`sendOutcome: 'unknown'`) naming the exact text to look for in the chat. When that happens while
   the case is being interrupted, the message is also handed to `ConformanceCleanupReporter`, which
   the live runner prints as a WARN line.
@@ -86,8 +88,11 @@ to clean up.
 
 In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber; a send already in
 flight completes first, and no further case starts. The interruption messages point at the chat:
-a message the send case posted stays there, and nothing else is created (there is no leftover
-advice). Further signals within a second count as the same keypress; a later one exits at once. Run live runs as `pnpm conformance:telegram …` or
+a message the send case posted stays there, starting with `yolk-conformance run-`, and nothing
+else is created (there is no leftover advice). When the send is enabled, the runner prints the run
+id before any case runs, so the message can be found even after a forced exit. Further signals
+within a second count as the same keypress; a later one exits at once. Run live runs as
+`pnpm conformance:telegram …` or
 `./node_modules/.bin/tsx scripts/run-telegram-conformance.ts …`, not `pnpm exec tsx …`, which returns
 to the prompt at once on Ctrl-C.
 
@@ -99,10 +104,17 @@ it has the `<bot id>:<secret>` shape) and the seeds, and
 `--allow-irreversible telegram.messages.send-message` adds the send (`--allow-writes` never does).
 `--record` replaces the live bot token with the replay token in every recorded URL, then refuses to
 stage, or print a review checklist for, any recording in which the token or its secret part
-survives anywhere: URLs, request and response headers, decoded base64 bodies, stream chunks
-reassembled as bytes (read raw and as UTF-8), and every JSON string value after parsing (so
-`\u` escapes are undone), raw, percent-encoded, or escaped. A body it cannot fully inspect
-(undecodable base64, or a compressed payload such as a zip or gzip file) is refused too, so seed a
-plain file. It stages verified recordings only in the gitignored `.conformance-recordings/telegram/`
-for manual scrubbing and promotion. See
+survives anywhere: URLs, request and response headers, request bodies, text bodies, decoded base64
+bodies, stream chunks reassembled as bytes, and every JSON string value after parsing (so `\u`
+escapes are undone). It looks for each raw, percent-encoded, `\u`/`\x`/HTML-escaped, and
+base64-encoded (standard and URL-safe, at every byte alignment).
+
+What the guard can inspect is an allowlist: **strict UTF-8 text without NUL characters**. Any body,
+decoded `bodyBase64`, or reassembled chunk stream that does not decode as strict UTF-8 (a
+`TextDecoder` with `fatal: true`), or that contains a NUL, is refused as uninspectable whatever it
+contains: binary files, compressed files of any format, images, and UTF-16 text alike, as well as
+undecodable base64. **The `fileId` seed must therefore name a plain UTF-8 text file**; any other
+download refuses the recording (the case itself still runs and reports normally). Recordings that
+pass are staged only in the gitignored `.conformance-recordings/telegram/` for manual scrubbing and
+promotion. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

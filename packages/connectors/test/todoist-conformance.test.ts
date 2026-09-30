@@ -42,6 +42,7 @@ import {
   todoistDueDatesFixture,
   todoistNotFoundEnvelopeFixture,
   todoistProjectDeleteFixture,
+  todoistProjectParentIdCase,
   todoistProjectParentIdFixture,
   todoistTaskLabelsFixture,
   todoistTaskLifecycleCase,
@@ -177,6 +178,7 @@ describe('Todoist conformance cases', () => {
     ).toEqual([
       'todoist.errors.not-found-envelope',
       'todoist.errors.not-found-envelope',
+      'todoist.tasks.due-dates',
       'todoist.projects.delete-then-not-found',
       'todoist.projects.delete-then-not-found'
     ])
@@ -461,7 +463,8 @@ const tampers: ReadonlyArray<{
       headers: { 'content-type': 'application/json' },
       body: textBody(exchangeAt(todoistProjectDeleteFixture, 1).response)
     })),
-    message: 'expected get_task of a task in the deleted project to answer todoist_not_found'
+    message:
+      'expected get_task of task 6XSynDeleteTask1, which was in the deleted project, to answer todoist_not_found; check it by hand'
   }
 ]
 
@@ -483,6 +486,32 @@ describe('Todoist conformance drills (one per case)', () => {
     )
   }
 
+  for (const [index, message] of [
+    [1, 'expected the created task to answer a due whose date starts with 2030-01-15'],
+    [2, 'expected the updated task to answer a due whose date starts with 2030-01-15']
+  ] as const) {
+    it.effect(
+      `a due field Todoist ignores (due: null, exchange ${index}) fails exactly the due case`,
+      () =>
+        Effect.gen(function* () {
+          const ignored = replaceResponse(
+            todoistDueDatesFixture,
+            index,
+            replaceInBody(
+              textBody(exchangeAt(todoistDueDatesFixture, index).response).match(
+                /"due":\{[^}]*\}/
+              )?.[0] ?? expect.fail('no due in the fixture'),
+              '"due":null'
+            )
+          )
+
+          expect(yield* suiteFailures(withReplaced(ignored))).toEqual([
+            { id: 'todoist.tasks.due-dates', failure: mismatch(message) }
+          ])
+        })
+    )
+  }
+
   it.effect('the due case accepts any due representation Todoist answers', () =>
     Effect.gen(function* () {
       // The connector passes `due` through untyped: neither is_recurring nor the timed form matter.
@@ -497,8 +526,8 @@ describe('Todoist conformance drills (one per case)', () => {
         ),
         2,
         replaceInBody(
-          '"due":{"date":"2030-01-15T09:30:00Z","timezone":"UTC","string":"Jan 15 2030 09:30","lang":"en","is_recurring":false}',
-          '"due":{"date":"2030-01-15T09:30:00.000000Z","datetime":"2030-01-15T09:30:00.000000Z"}'
+          '"due":{"date":"2030-01-15T12:00:00Z","timezone":"UTC","string":"Jan 15 2030 12:00","lang":"en","is_recurring":false}',
+          '"due":{"date":"2030-01-15T12:00:00.000000Z","datetime":"2030-01-15T12:00:00.000000Z"}'
         )
       )
 
@@ -832,6 +861,54 @@ describe('Todoist conformance write ownership', () => {
     })
   )
 
+  it.effect('reports a 408 project create as ambiguous (the request may still land)', () =>
+    Effect.gen(function* () {
+      const timedOut = withoutExchanges(
+        replaceResponse(
+          todoistTaskLifecycleFixture,
+          0,
+          withStatus(
+            408,
+            '{"error":"Request timeout","error_code":0,"error_tag":"TIMEOUT","http_code":408}'
+          )
+        ),
+        [1, 2, 3, 4, 5, 6, 7]
+      )
+
+      const { failure, entries } = yield* drill(todoistTaskLifecycleCase, timedOut)
+
+      expect(failure).toEqual({
+        kind: 'failure',
+        tag: 'TodoistConformanceActionFailed',
+        message: `todoist.create_project failed: todoist_create_project_failed (HTTP 408); create outcome unknown: delete ${lifecycleCreateTarget} by hand if it exists`
+      })
+      expect(deleteCalls(entries)).toEqual([])
+    })
+  )
+
+  it.effect(
+    'a created project under another parent fails the parent claim and is still deleted',
+    () =>
+      Effect.gen(function* () {
+        const orphaned = withoutExchanges(
+          replaceResponse(
+            todoistProjectParentIdFixture,
+            0,
+            replaceInBody('"parent_id":"6XSyntheticWork0"', '"parent_id":null')
+          ),
+          [1]
+        )
+
+        const { failure, entries, remaining } = yield* drill(todoistProjectParentIdCase, orphaned)
+
+        expect(failure).toEqual(
+          mismatch('expected create_project to answer parent_id naming the work project')
+        )
+        expect(deleteCalls(entries)).toEqual(['projects/6XSynParentProj1'])
+        expect(remaining).toEqual([])
+      })
+  )
+
   it.effect('reports a project create that fails in transport as ambiguous', () =>
     Effect.gen(function* () {
       const dropping = HttpClient.make(request => Effect.fail(connectionReset(request)))
@@ -870,7 +947,7 @@ describe('Todoist conformance write ownership', () => {
         kind: 'failure',
         tag: 'TodoistConformanceCleanupRefused',
         message:
-          'todoist.tasks.lifecycle-close: cleanup refused; a create answered project Someone else project (id 6XSynLifecycle01) with parent 6XSyntheticWork0, outside the run namespace, so nothing was deleted there; check it by hand.'
+          'todoist.tasks.lifecycle-close: cleanup refused; a create answered project Someone else project (id 6XSynLifecycle01), outside the run namespace, so nothing was deleted there; check it by hand.'
       })
       expect(deleteCalls(entries)).toEqual([])
     })
@@ -878,16 +955,16 @@ describe('Todoist conformance write ownership', () => {
 
   for (const [label, from, to, item] of [
     [
-      'another parent',
-      '"parent_id":"6XSyntheticWork0"',
-      '"parent_id":null',
-      'project yolk-conformance-run-synthetic-lifecycle (id 6XSynLifecycle01) with parent none'
-    ],
-    [
-      "a seeded project's id",
+      "the work project's id",
       '"id":"6XSynLifecycle01"',
       '"id":"6XSyntheticWork0"',
-      'project yolk-conformance-run-synthetic-lifecycle (id 6XSyntheticWork0) with parent 6XSyntheticWork0'
+      'project yolk-conformance-run-synthetic-lifecycle (id 6XSyntheticWork0)'
+    ],
+    [
+      "the paging project's id",
+      '"id":"6XSynLifecycle01"',
+      '"id":"6XSyntheticPage0"',
+      'project yolk-conformance-run-synthetic-lifecycle (id 6XSyntheticPage0)'
     ]
   ] as const) {
     it.effect(`refuses to adopt a created project answered with ${label}`, () =>

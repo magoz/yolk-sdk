@@ -22,8 +22,8 @@ connector relies on. The claims are as currently understood; none is observed li
 | `todoist.errors.not-found-envelope`      | `read`             | none                     | An unknown task id answers HTTP 404 (`todoist_not_found`) with a JSON `error` string that ends the connector message (both unverified)                  |
 | `todoist.labels.task-labels-are-names`   | `read`             | `labeledTaskId`          | A task's `labels` are label names, each the `name` of a personal label `todoist.list_labels` returns                                                    |
 | `todoist.tasks.lifecycle-close`          | `write-reversible` | `workProjectId`, `runId` | Create, get, and update answer the task; `close_task` answers 2xx; `list_tasks` then omits the closed task (active tasks only)                          |
-| `todoist.tasks.due-dates`                | `write-reversible` | `workProjectId`, `runId` | The connector sends `dueDate` as `due_date` and `dueDatetime` as `due_datetime`, and Todoist accepts both (2xx with a task, not a validation error)     |
-| `todoist.projects.parent-id`             | `write-reversible` | `workProjectId`, `runId` | `create_project` with a parent answers `parent_id` (else the project is refused for cleanup), and `get_project` reads it back                           |
+| `todoist.tasks.due-dates`                | `write-reversible` | `workProjectId`, `runId` | `due_date` and `due_datetime`, as the connector sends them, answer a task whose `due.date` starts with `2030-01-15` (timed form unverified)             |
+| `todoist.projects.parent-id`             | `write-reversible` | `workProjectId`, `runId` | `create_project` with a parent answers `parent_id`, and `get_project` reads it back                                                                     |
 | `todoist.projects.delete-then-not-found` | `write-reversible` | `workProjectId`, `runId` | After `delete_project`, `get_project` answers 404 and a task that was in it answers not found (both unverified)                                         |
 
 Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
@@ -31,11 +31,15 @@ Claims no live run has settled yet, marked "(unverified: ...)" in each case's `w
 - An unknown, well-formed task id answers HTTP 404, not 400.
 - The API v1 error body is `{ error, error_code, error_extra, error_tag, http_code }`; the connector
   uses the first non-empty string of `error`, `message`, `error_description`, `error_tag`.
+- A timed due (`due_datetime` `2030-01-15T12:00:00Z`) keeps its day at the start of `due.date` in the
+  account's time zone (noon UTC stays on that day from UTC-11 to UTC+11).
 - A deleted project answers 404 rather than a body marked `is_deleted`.
 - Deleting a project deletes its tasks.
 
-The due-dates case checks acceptance only. `TodoistTask.due` reaches hosts untyped and the connector
-reads nothing inside it, so the case does not claim how Todoist represents a due in its answer
+The due-dates case checks that the due was applied, and nothing more: after each call the answer's
+`due` must be an object whose `date` starts with `2030-01-15`, so a due field Todoist ignored (for
+example an answer with `due: null`) fails it. `TodoistTask.due` reaches hosts untyped and the
+connector reads nothing inside it, so the case does not claim how Todoist represents a due
 (`is_recurring`, or where a timed due keeps its time).
 
 The last two claims matter to the write cases' own cleanup, in different ways:
@@ -44,11 +48,12 @@ The last two claims matter to the write cases' own cleanup, in different ways:
   then requires `todoist.get_project` to answer not found. If a deleted project answered anything
   else, every write case would report `TodoistConformanceRestoreFailed` (check by hand) rather than
   pass silently.
-- **Task removal is not.** The cleanup never looks for the tasks a case created: it relies, unverified,
-  on Todoist deleting a project's tasks with it. Only the delete case checks that, by looking up its
+- **Task removal is not.** The cleanup never looks for the tasks a case created: it relies,
+  unverified, on Todoist deleting a project's tasks with it. Only the delete case checks that, by looking up its
   task after deleting the project; if the task survived, that case fails its claim (a mismatch, not a
   restore failure), and the other write cases' cleanups would still pass while leaving their tasks
-  behind. Look for `yolk-conformance task` tasks by hand if the delete case ever fails that way.
+  behind. The delete case's failure names the surviving task's id; look for `yolk-conformance task`
+  tasks by hand if it ever fails that way.
 
 `TodoistConformanceConfig` holds the seed ids and the `runId`. Cases never hard-code account data,
 and a missing seed fails the case with a `precondition:` mismatch before any request. Credentials
@@ -66,10 +71,10 @@ a flag). The cleanup is attempted and verified under these conditions:
   project delete): an aborted request could otherwise land after the cleanup. Neither the runner
   nor the bridges set a request timeout, so a hanging request delays an interruption until it
   answers.
-- A definitive create rejection (HTTP 4xx, for example the account's project limit) proves the case
-  created nothing: it fails and deletes **nothing**.
-- An ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) may still have
-  created the project, and the case never learned its id: it fails with
+- A definitive create rejection (HTTP 4xx other than 408, for example the account's project limit)
+  proves the case created nothing: it fails and deletes **nothing**.
+- An ambiguous create (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) may still
+  have created the project, and the case never learned its id: it fails with
   `TodoistConformanceActionFailed` (`createOutcome: 'unknown'`) naming the exact project to check by
   hand. Project names are not unique, so the case never deletes by name. An ambiguous task create
   names the task the same way; it would sit inside the case project, which the cleanup deletes.
@@ -77,9 +82,11 @@ a flag). The cleanup is attempted and verified under these conditions:
   gone) and checks that `todoist.get_project` then answers not found. It also runs after a failed
   assertion or a fiber interruption. A failed cleanup fails with `TodoistConformanceRestoreFailed`
   naming the project and its id.
-- A create that answers a project without the requested run-scoped name, with a `parent_id` other
-  than `workProjectId`, or with the id of a seeded project, or a task outside the case project, is
-  never deleted: the case fails with `TodoistConformanceCleanupRefused` naming it.
+- A create that answers a project without the requested run-scoped name or with the id of a seeded
+  project, or a task outside the case project, is never deleted: the case fails with
+  `TodoistConformanceCleanupRefused` naming it. The project's `parent_id` is not an ownership rule:
+  a fresh project answered under another parent fails the parent-id claim and is still deleted by
+  id.
 
 Todoist's free plan limits the number of active projects; each write case holds one extra project
 while it runs.

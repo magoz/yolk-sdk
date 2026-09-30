@@ -15,13 +15,13 @@
  * writing, a case proves its folder path absent. The folder create, its decoding, and the
  * registration of the created entry's id run uninterruptibly together. Then:
  *
- * - A definitive rejection (HTTP 4xx, for example `path/conflict`) proves the case created nothing:
- *   it fails with `DropboxConformanceActionFailed` and deletes NOTHING.
- * - An ambiguous outcome (a transport or decoding failure, no status, or HTTP 5xx) may or may not
- *   have created the folder, possibly later: the case makes one best-effort delete of its own path,
- *   but always fails with `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) whose advice
- *   names the exact path; one absence check is never treated as reconciliation. The conflict
- *   case's duplicate creates are classified the same way: after the known original is cleaned up,
+ * - A definitive rejection (HTTP 4xx other than 408, for example `path/conflict`) proves the case
+ *   created nothing: it fails with `DropboxConformanceActionFailed` and deletes NOTHING.
+ * - An ambiguous outcome (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) may
+ *   or may not have created the folder, possibly later: the case makes one best-effort delete of
+ *   its own path, but always fails with `DropboxConformanceActionFailed` (`createOutcome:
+ *   'unknown'`) whose advice names the exact path; one absence check is never treated as
+ *   reconciliation. The conflict case's duplicate creates are classified the same way: after the known original is cleaned up,
  *   an ambiguous duplicate is reported as an unknown create naming the attempted path.
  * - A success registers the created entry. The cleanup deletes it by id and verifies that
  *   `get_metadata` of the owned path answers not-found; a not-found answer to the id delete proves
@@ -172,8 +172,8 @@ export const dropboxConformanceMarker = 'yolk-conformance'
  * `ConnectorFileTransferError` code).
  *
  * `createOutcome: 'unknown'` marks an ambiguous create of a write case's own folder (a transport or
- * decoding failure, no status, or HTTP 5xx): Dropbox may have created the folder, even after the
- * case gave up, so the message names the exact `path` to check by hand.
+ * decoding failure, no status, HTTP 408, or HTTP 5xx): Dropbox may have created the folder, even
+ * after the case gave up, so the message names the exact `path` to check by hand.
  */
 export class DropboxConformanceActionFailed extends Data.TaggedError(
   'DropboxConformanceActionFailed'
@@ -482,18 +482,18 @@ type CreateOutcome =
   | { readonly kind: 'created'; readonly folder: DropboxFolderMetadata }
   /** Created, but the response names a path outside the case folder. */
   | { readonly kind: 'outside'; readonly path: string }
-  /** A definitive HTTP 4xx rejection: nothing was created. `result` is the provider failure. */
+  /** A definitive HTTP 4xx rejection (not 408): nothing was created. `result` is the failure. */
   | {
       readonly kind: 'rejected'
       readonly result: ActionResult<DropboxFolderMetadata>
       readonly error: DropboxConformanceActionFailed
     }
-  /** A transport or decoding failure, no status, or HTTP 5xx: Dropbox may still create it, even later. */
+  /** A transport/decoding failure, no status, HTTP 408, or 5xx: Dropbox may still create it later. */
   | { readonly kind: 'ambiguous'; readonly error: DropboxConformanceActionFailed }
 
 /**
  * Classify a create of `attempted` for the case folder `owned`: a 4xx is a definitive rejection; no
- * status, a 5xx, or a transport or decoding failure is ambiguous (its error names `attempted` for
+ * status, a 408 or 5xx, or a transport or decoding failure is ambiguous (its error names `attempted` for
  * manual recovery); a success is inside or outside the case folder.
  */
 const classifyCreate = (owned: string, attempted: string, exit: CreateExit): CreateOutcome => {

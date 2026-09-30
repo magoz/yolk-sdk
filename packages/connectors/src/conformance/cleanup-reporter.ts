@@ -66,10 +66,10 @@ export type WriteFailure =
  * What one create (or other one-shot write) established, from the exit of its connector action.
  *
  * - `success`: the provider answered 2xx and the answer decoded.
- * - `rejected`: a definitive HTTP 4xx rejection; nothing was written, so nothing may be deleted.
- *   `result` is the provider failure.
+ * - `rejected`: a definitive HTTP 4xx rejection other than 408; nothing was written, so nothing
+ *   may be deleted. `result` is the provider failure.
  * - `ambiguous`: a transport or decoding failure (the `ConnectorError` cause, or `defect`), no
- *   status, or HTTP 5xx; the provider may still have written, even later.
+ *   status, HTTP 408, or HTTP 5xx; the provider may still have written, even later.
  */
 export type WriteOutcome<A> =
   | { readonly kind: 'success'; readonly value: A }
@@ -105,7 +105,8 @@ export const classifyWriteExit = <A>(
     return { kind: 'ambiguous', failure: { code } }
   }
 
-  return status >= 500
+  // A 408 is a timeout: the provider may still have processed the write, as after a 5xx.
+  return status === 408 || status >= 500
     ? { kind: 'ambiguous', failure: { code, status } }
     : { kind: 'rejected', result, failure: { code, status } }
 }

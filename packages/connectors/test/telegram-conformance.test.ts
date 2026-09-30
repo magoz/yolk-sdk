@@ -603,6 +603,24 @@ describe('Telegram conformance irreversible send safety', () => {
     })
   )
 
+  it.effect('a 408 send is ambiguous, not a definitive rejection (it may still be delivered)', () =>
+    Effect.gen(function* () {
+      const { failure } = yield* sendDrill(
+        replaceResponse(
+          telegramSendMessageFixture,
+          0,
+          withStatus(408, okFalse(408, 'Request Timeout'))
+        )
+      )
+
+      expect(failure).toEqual({
+        kind: 'failure',
+        tag: 'TelegramConformanceActionFailed',
+        message: `telegram.send_message failed: telegram_send_failed (HTTP 408); ${unknownSendAdvice}`
+      })
+    })
+  )
+
   it.effect('an ambiguous 5xx send is reported with the exact text to look for', () =>
     Effect.gen(function* () {
       const { failure } = yield* sendDrill(

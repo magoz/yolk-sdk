@@ -20,10 +20,12 @@
  * synthetic `telegramConformanceReplayBotToken` in every recorded URL before the fixture is built,
  * verifies on replay with that token, and refuses to stage any recording in which the live token, or
  * its secret part, survives anywhere (URLs, headers, decoded bodies, reassembled stream chunks,
- * unescaped JSON strings) or that holds a body the guard cannot fully inspect (for example a
- * compressed file: seed a small plain-text file). A live token that is not `<bot id>:<secret>` is
- * refused before any request. `--record` stages verified recordings all or nothing in a new run directory under the
- * gitignored `.conformance-recordings/telegram/`. Promotion is manual: scrub the staged files of
+ * unescaped JSON strings; raw, percent-encoded, escaped, or base64-encoded) or that holds a body
+ * outside the guard's inspectable allowlist, strict UTF-8 text without NUL characters (binary,
+ * compressed, and UTF-16 bodies are refused, so seed a small plain UTF-8 text file). A live token
+ * that is not `<bot id>:<secret>` is refused before any request. When the send is enabled, the run
+ * id is printed before any case runs. `--record` stages verified recordings all or nothing in a new
+ * run directory under the gitignored `.conformance-recordings/telegram/`. Promotion is manual: scrub the staged files of
  * practice-account data (chat ids and titles, bot and user names, file ids and paths, message
  * text, file bytes), copy them into `packages/connectors/src/telegram/conformance/`, run
  * `pnpm format:fix`, and update `packages/connectors/test/telegram-conformance.test.ts` and
@@ -76,7 +78,7 @@ export const telegramSeedSources: ReadonlyArray<SeedSource<TelegramConformanceSe
     key: 'fileId',
     flag: '--file-id',
     env: 'TELEGRAM_CONFORMANCE_FILE_ID',
-    description: 'file_id of a small file (at most 1 MB) the bot received'
+    description: 'file_id of a small plain UTF-8 text file (at most 1 MB) the bot received'
   }
 ]
 
@@ -183,7 +185,7 @@ export const telegramRunner = {
   },
   // No cleanup exists, and there is no leftover lookup: only the chat itself shows what was sent.
   recoveryAdvice:
-    'A message the send case posted stays in --chat (the connector cannot delete it): look there for yolk-conformance <run id> messages by hand; nothing else is created.',
+    'A message the send case posted stays in --chat (the connector cannot delete it): look there by hand for messages starting with `yolk-conformance run-` (the run id is printed when the run starts); nothing else is created.',
   // The bot token is in every URL path: recordings carry the synthetic replay token instead.
   scrubRecording: scrubTelegramRecording,
   replayAccessToken: telegramConformanceReplayBotToken,

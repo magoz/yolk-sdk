@@ -22,7 +22,9 @@
  *   For every runner, staging then refuses (before any fixture or checklist is built) a recording
  *   in which the live access token, or a long `:`-separated part of it, survives anywhere it could
  *   be written or printed (see `inspectRecordingForAccessToken`), or that holds a body the guard
- *   cannot fully inspect; a last check refuses rendered files or checklist lines carrying it.
+ *   cannot inspect (only strict UTF-8 text without NUL characters is inspectable: an allowlist,
+ *   not a list of refused formats); a last check refuses rendered files or checklist lines carrying
+ *   it.
  * - `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After
  *   the run it builds `verified` fixtures for the cases that passed, re-runs each case on replay
  *   against its new fixture, and renders every fixture module plus the seeds module. Only if every
@@ -950,11 +952,33 @@ type RecordedFixture<K extends string> = {
 /** A `:`-separated part of a token this long is a secret on its own (a bot token's secret part). */
 const secretPartMinLength = 16
 
+/** Shortest base64 run searched: shorter runs would match unrelated text by chance. */
+const base64CoreMinLength = 12
+
+/**
+ * The base64 characters that encode `form` whatever bytes surround it: standard and URL-safe, at
+ * each of the 3 byte alignments it can start at inside a larger encoded value. The groups shared
+ * with the surrounding bytes (the first after a misaligned start, and a trailing partial one) are
+ * left out.
+ */
+const base64Cores = (form: string): ReadonlyArray<string> =>
+  [0, 1, 2].flatMap(offset => {
+    const bytes = Buffer.concat([Buffer.alloc(offset), Buffer.from(form, 'utf8')])
+    const encoded = bytes.toString('base64')
+    const start = offset === 0 ? 0 : 4
+    const end = bytes.byteLength % 3 === 0 ? encoded.length : encoded.length - 4
+    const core = encoded.slice(start, end)
+
+    return core.length < base64CoreMinLength
+      ? []
+      : [core, core.replaceAll('+', '-').replaceAll('/', '_')]
+  })
+
 /**
  * What the guard looks for: the token, and every `:`-separated part of it long enough to be a
  * secret on its own (Telegram's `<bot id>:<secret>`: the secret; the bot id is public and appears
- * in every `sendMessage` answer as `from.id`, so it alone is not searched), each verbatim and
- * percent-encoded.
+ * in every `sendMessage` answer as `from.id`, so it alone is not searched), each verbatim,
+ * percent-encoded, and base64-encoded (standard and URL-safe, at every byte alignment).
  */
 export const accessTokenForms = (accessToken: string): ReadonlyArray<string> => {
   const parts = accessToken.split(':')
@@ -962,7 +986,13 @@ export const accessTokenForms = (accessToken: string): ReadonlyArray<string> => 
   const secrets = parts.length > 1 ? parts.filter(part => part.length >= secretPartMinLength) : []
 
   return [
-    ...new Set([accessToken, ...secrets].flatMap(form => [form, encodeURIComponent(form)]))
+    ...new Set(
+      [accessToken, ...secrets].flatMap(form => [
+        form,
+        encodeURIComponent(form),
+        ...base64Cores(form)
+      ])
+    )
   ].filter(form => form.length > 0)
 }
 
@@ -1035,13 +1065,25 @@ const parsedJson = (text: string): { readonly value: unknown } | undefined => {
   }
 }
 
-/** Compressed payloads the guard cannot look inside: gzip, zlib, zip. */
-const looksCompressed = (bytes: Uint8Array): boolean =>
-  (bytes[0] === 0x1f && bytes[1] === 0x8b) ||
-  (bytes[0] === 0x78 && [0x01, 0x5e, 0x9c, 0xda].includes(bytes[1] ?? -1)) ||
-  (bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04)
-
 type TokenVerdict = 'clean' | 'token' | 'uninspectable'
+
+/**
+ * The inspectable-text allowlist: text without NUL characters. A NUL marks binary data or a
+ * wide encoding (UTF-16 text is valid UTF-8 byte for byte when it is ASCII), which substring
+ * searches cannot read.
+ */
+const isPlainText = (text: string): boolean => !text.includes('\u0000')
+
+/** Bytes as text when they are strict UTF-8 plain text (see `isPlainText`), else `undefined`. */
+const strictUtf8Text = (bytes: Uint8Array): string | undefined => {
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+
+    return isPlainText(text) ? text : undefined
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Inspect text: raw and escape-decoded, every `data:` line of an event stream, and every JSON string
@@ -1049,6 +1091,8 @@ type TokenVerdict = 'clean' | 'token' | 'uninspectable'
  */
 const inspectText = (text: string, forms: ReadonlyArray<string>): TokenVerdict => {
   if (textHasToken(text, forms)) return 'token'
+
+  if (!isPlainText(text)) return 'uninspectable'
 
   const payloads = [
     text,
@@ -1066,17 +1110,20 @@ const inspectText = (text: string, forms: ReadonlyArray<string>): TokenVerdict =
   return 'clean'
 }
 
-/** Inspect bytes decoded raw (one character per byte) and lossily as UTF-8. */
+/**
+ * Inspect bytes. Allowlist: only strict UTF-8 plain text can be inspected; anything else (binary,
+ * compressed, UTF-16, ...) is `uninspectable`, whatever its magic bytes. The raw bytes (one
+ * character per byte) are searched first, so a token in bytes that are refused anyway still reports
+ * `token`.
+ */
 const inspectBytes = (bytes: Uint8Array, forms: ReadonlyArray<string>): TokenVerdict => {
-  if (looksCompressed(bytes)) return 'uninspectable'
-
   const raw = Array.from(bytes, byte => String.fromCharCode(byte)).join('')
-  const lossy = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
 
-  return [raw, lossy].reduce<TokenVerdict>(
-    (verdict, text) => (verdict === 'clean' ? inspectText(text, forms) : verdict),
-    'clean'
-  )
+  if (textHasToken(raw, forms)) return 'token'
+
+  const text = strictUtf8Text(bytes)
+
+  return text === undefined ? 'uninspectable' : inspectText(text, forms)
 }
 
 const worst = (verdicts: ReadonlyArray<TokenVerdict>): TokenVerdict =>
@@ -1127,9 +1174,11 @@ const inspectResponse = (response: WireResponse, forms: ReadonlyArray<string>): 
 /**
  * Look for the live access token everywhere a staged fixture or the review checklist could carry
  * it: request URLs, header names and values, request bodies (every JSON string value), and response
- * headers and bodies (text, decoded `bodyBase64`, and reassembled stream chunks, as raw bytes and as
- * lossy UTF-8). `token` when any form of it is found; `uninspectable` when a body cannot be fully
- * inspected (undecodable base64, or a compressed payload); otherwise `clean`.
+ * headers and bodies (text, decoded `bodyBase64`, and reassembled stream chunks). `token` when any
+ * form of it is found (see `accessTokenForms`); `uninspectable` when a body is outside the
+ * allowlist of what the guard can read, strict UTF-8 text without NUL characters (so binary,
+ * compressed, and UTF-16 bodies, and undecodable base64, are refused whatever they contain);
+ * otherwise `clean`.
  */
 export const inspectRecordingForAccessToken = (
   exchanges: ReadonlyArray<WireExchange>,
@@ -1179,7 +1228,7 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
         : runner.scrubRecording(drained, inputs.accessToken)
 
     // Before anything printable is built from the recording: refuse any trace of the live token,
-    // and any body the guard cannot fully inspect.
+    // and any body outside the guard's inspectable allowlist.
     switch (inspectRecordingForAccessToken(exchanges, inputs.accessToken)) {
       case 'token':
         return yield* new ConnectorRunFailed({
@@ -1187,7 +1236,7 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
         })
       case 'uninspectable':
         return yield* new ConnectorRunFailed({
-          message: `${testCase.id}: the recording holds a body the token guard cannot fully inspect (undecodable base64 or a compressed payload); nothing was written`
+          message: `${testCase.id}: the recording holds a body the token guard cannot inspect (only strict UTF-8 text without NUL characters is inspectable); nothing was written`
         })
       case 'clean':
         break
@@ -1524,6 +1573,32 @@ export const leftoverWarnings = <K extends string, S extends SeedRecord<K>, E, R
   )
 }
 
+/**
+ * When a write-irreversible case will run, the generated seeds it names in what it leaves behind
+ * (the run id), printed before any case so the owner can find its traces even after a forced exit.
+ */
+export const generatedSeedLines = <K extends string, S extends SeedRecord<K>>(
+  runner: RunnerData<K, S>,
+  options: RunOptions<K>,
+  inputs: LiveInputs<S>
+): ReadonlyArray<string> => {
+  const irreversible = planRun(runner, options).some(
+    entry => entry.skipReason === undefined && entry.safety === 'write-irreversible'
+  )
+
+  return irreversible
+    ? generatedKeys(runner).flatMap(key => {
+        const value = inputs.seeds[key]
+
+        return value === undefined
+          ? []
+          : [
+              `${key} for this run: ${value} (write-irreversible cases name it in what they leave behind)`
+            ]
+      })
+    : []
+}
+
 /** Where a live run talks to the provider and prints; injectable so tests need no network. */
 export type LiveRunIo = {
   readonly http: Layer.Layer<HttpClient.HttpClient>
@@ -1576,6 +1651,10 @@ export const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
             })
           ).pipe(Layer.provide(io.http))
         : io.http
+
+    for (const line of generatedSeedLines(runner, options, inputs)) {
+      io.out(line)
+    }
 
     for (const line of yield* leftoverWarnings(runner, options, inputs, io.http)) {
       io.out(line)
@@ -1652,10 +1731,21 @@ export const runConnectorConformanceCli = <K extends string, S extends SeedRecor
         FetchHttpClient.layer,
         'after-interrupt'
       ),
-      recoveryAdvice: runner.recoveryAdvice
+      ...interruptOptionsFor(runner)
     })
   }
 }
+
+/**
+ * The runner-specific parts of `runInterruptibly`'s messages: its `recoveryAdvice`, and whether its
+ * cases clean up (write-reversible cases or a leftover lookup) rather than only complete writes.
+ */
+export const interruptOptionsFor = <K extends string, S extends SeedRecord<K>, E, R>(
+  runner: ConnectorConformanceRunner<K, S, E, R>
+): Pick<RunInterruptiblyOptions, 'recoveryAdvice' | 'hasCleanups'> => ({
+  recoveryAdvice: runner.recoveryAdvice,
+  hasCleanups: hasReversibleCases(runner) || runner.leftovers !== undefined
+})
 
 export type CliSignal = 'SIGINT' | 'SIGTERM'
 
@@ -1710,6 +1800,12 @@ export type RunInterruptiblyOptions = {
    * leftover lookup warns about.
    */
   readonly recoveryAdvice?: string | undefined
+  /**
+   * Whether the runner's cases clean up after themselves (write-reversible cases or a leftover
+   * lookup), which decides the first-signal wording: cleanups attempted, or writes in flight
+   * completing. Default `true`.
+   */
+  readonly hasCleanups?: boolean
 }
 
 /**
@@ -1733,6 +1829,7 @@ export const runInterruptibly = <E>(
   const now = options.now ?? Date.now
   const pid = options.pid ?? process.pid
   const advice = options.recoveryAdvice
+  const hasCleanups = options.hasCleanups ?? true
   const fiber = Effect.runFork(program)
   let firstSignalAt: number | undefined
 
@@ -1759,7 +1856,7 @@ export const runInterruptibly = <E>(
       firstSignalAt = at
       io.error(
         `${signal}: interrupting the run (pid ${pid}); ${
-          advice === undefined
+          hasCleanups
             ? "the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line"
             : 'a write already in flight completes before exit, and a problem it leaves prints a WARN line'
         }. Send ${signal} again, at least a second later, to exit without waiting; if the prompt has returned, stop it with \`kill -TERM ${pid}\` (at least 1s later).`

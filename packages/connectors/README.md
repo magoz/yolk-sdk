@@ -864,8 +864,8 @@ Every write case works only inside its own `yolk-conformance-<runId>-<case>` fol
 replay with `run-synthetic`; the live runner generates a fresh random id every time), so concurrent
 runs are supported only through distinct run ids. A case proves its folder path absent before
 writing, and registers the created entry together with the create (uninterruptibly). A definitive
-create rejection (HTTP 4xx, such as `path/conflict`) deletes nothing. An ambiguous create (a
-transport or decoding failure, no status, or HTTP 5xx) gets one best-effort delete of the owned path
+create rejection (HTTP 4xx other than 408, such as `path/conflict`) deletes nothing. An ambiguous create (a
+transport or decoding failure, no status, HTTP 408, or HTTP 5xx) gets one best-effort delete of the owned path
 but always fails with `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) naming the
 exact path to check by hand; so do the conflict case's duplicate creates, after the known original
 is cleaned up. Every later write inside the case folder is masked too, so no aborted request lands
@@ -1318,26 +1318,27 @@ running a practice workspace by hand, `--allow-writes reversible` adds the write
 `ConnectorHttpClient` and `CredentialResolver` plus `TodoistConformanceConfig`, which holds
 host-supplied seed ids in a practice Todoist account. They cover filtered task list cursor paging,
 the HTTP 404 error body, task labels as label names, the create/get/update/close task lifecycle
-(a closed task leaves the active list), acceptance of `due_date` / `due_datetime` as the connector
-sends them, project `parent_id`, and delete then not-found. Credentials bind through `todoistConformanceIntegration`
-(`todoist.api_token`, credential ref `todoist.conformance`). The case table, seeds, and claims live
-in the
+(a closed task leaves the active list), `due_date` / `due_datetime` as the connector sends them
+answering a due dated 2030-01-15 (its representation unchecked), project `parent_id`, and delete then
+not-found. Credentials bind through `todoistConformanceIntegration` (`todoist.api_token`, credential
+ref `todoist.conformance`). The case table, seeds, and claims live in the
 [Todoist conformance guide](../../apps/docs/content/docs/connectors/todoist.mdx#conformance-cases).
 
 Every write case creates its own `yolk-conformance-<runId>-<case>` project under the
 `workProjectId` seed and works only inside it. The `runId` seed makes that namespace unique per
 invocation (the fixtures replay with `run-synthetic`; the live runner generates a fresh random id
 every time). The project create, its decoding, and the id registration are not interruptible, and
-neither is any later write. A definitive create rejection (HTTP 4xx) deletes nothing; an ambiguous
-create (a transport or decoding failure, no status, or HTTP 5xx) fails with
+neither is any later write. A definitive create rejection (HTTP 4xx other than 408) deletes
+nothing; an ambiguous create (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx)
+fails with
 `TodoistConformanceActionFailed` (`createOutcome: 'unknown'`) naming the exact project or task to
 check by hand, and nothing is deleted by name. After a successful create, the cleanup deletes the
 project by id (also after a failed assertion or an interruption) and checks that
 `todoist.get_project` answers not found; a failed cleanup fails with
 `TodoistConformanceRestoreFailed` naming the project and id, and a project without the requested
-name, under another parent, or with a seeded project's id, or a task outside the case project, is
-never deleted (`TodoistConformanceCleanupRefused`). The cleanup verifies only that the project is
-gone; that its tasks go with it is the delete case's unverified claim.
+name or with a seeded project's id, or a task outside the case project, is never deleted
+(`TodoistConformanceCleanupRefused`). The cleanup verifies only that the project is gone; that its
+tasks go with it is the delete case's unverified claim.
 Before any write case, and again after an interrupt-only exit (130), the runner warns read-only
 about `yolk-conformance-run-*` projects earlier runs left behind
 (`findTodoistConformanceLeftovers`, bounded to 20 listing pages); it never deletes them.
@@ -1369,17 +1370,21 @@ live in the
 chat, and the connector cannot delete it. It never runs under `allowWrites: 'reversible'`; a runner
 starts it only when a person names its exact id (`allowIrreversible`, or the live runner's
 `--allow-irreversible telegram.messages.send-message`). The send is not interruptible; a definitive
-rejection (4xx, 429 included) sent nothing, and an ambiguous send (a transport or decoding failure,
-no status, HTTP 5xx, or a 2xx whose body lacks `ok: true`) fails with `TelegramConformanceActionFailed` (`sendOutcome: 'unknown'`)
-naming the exact text to look for in the chat, also through `ConformanceCleanupReporter` when the
-case is being interrupted. There is nothing to clean up and no leftover lookup.
+rejection (4xx other than 408; 429 included) sent nothing, and an ambiguous send (a transport or
+decoding failure, no status, HTTP 408 or 5xx, or a 2xx whose body lacks `ok: true`) fails with
+`TelegramConformanceActionFailed` (`sendOutcome: 'unknown'`) naming the exact text to look for in
+the chat, also through `ConformanceCleanupReporter` when the case is being interrupted. There is
+nothing to clean up and no leftover lookup; the live runner prints the run id when the send is
+enabled.
 `pnpm conformance:telegram` in this repository dry-runs by default; `--live --owner-approved
 --account <label>` (refused whenever `CI` is non-empty; needs `TELEGRAM_BOT_TOKEN` and the seeds) is
 for owners running a practice bot by hand, and `--record` replaces the live bot token with the
 replay token in every recorded URL, then refuses to stage or print a checklist for any recording in
 which the token or its secret part survives anywhere (URLs, headers, decoded base64 bodies,
-reassembled stream chunks, unescaped JSON strings; raw, percent-encoded, or escaped) or that holds a
-body it cannot fully inspect, and stages verified recordings all or nothing in
+reassembled stream chunks, unescaped JSON strings; raw, percent-encoded, escaped, or
+base64-encoded) or that holds a body outside the inspectable allowlist (strict UTF-8 text without NUL
+characters: binary, compressed, and UTF-16 bodies are refused, so the `fileId` seed must be a plain
+UTF-8 text file), and stages verified recordings all or nothing in
 `.conformance-recordings/telegram/<run>/` (gitignored) for manual scrubbing and promotion.
 
 ## Host-only file capabilities
