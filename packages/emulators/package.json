@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, and Anthropic Messages fetch-handler emulators, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, and OpenAI Responses (Codex, xAI Grok) fetch-handler emulators, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -42,6 +42,14 @@
       "types": "./src/anthropic.ts",
       "default": "./src/anthropic.ts"
     },
+    "./codex": {
+      "types": "./src/codex.ts",
+      "default": "./src/codex.ts"
+    },
+    "./xai": {
+      "types": "./src/xai.ts",
+      "default": "./src/xai.ts"
+    },
     "./node": {
       "types": "./src/node.ts",
       "default": "./src/node.ts"
@@ -78,6 +86,16 @@
         "types": "./dist/anthropic.d.mts",
         "import": "./dist/anthropic.mjs",
         "default": "./dist/anthropic.mjs"
+      },
+      "./codex": {
+        "types": "./dist/codex.d.mts",
+        "import": "./dist/codex.mjs",
+        "default": "./dist/codex.mjs"
+      },
+      "./xai": {
+        "types": "./dist/xai.d.mts",
+        "import": "./dist/xai.mjs",
+        "default": "./dist/xai.mjs"
       },
       "./node": {
         "types": "./dist/node.d.mts",

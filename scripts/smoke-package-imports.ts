@@ -43,6 +43,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './providers/xai/grok',
       './providers/xai/grok-provider',
       './providers/xai/usage',
+      './providers/xai/conformance',
       './react',
       './runtime',
       './skillset',
@@ -118,7 +119,7 @@ const packages: ReadonlyArray<PackageManifest> = [
   },
   {
     name: '@yolk-sdk/emulators',
-    exports: ['./router', './gateway', './openai', './anthropic', './node']
+    exports: ['./router', './gateway', './openai', './anthropic', './codex', './xai', './node']
   }
 ]
 
@@ -247,6 +248,9 @@ const main = async () => {
           'if (openAiConformance.openAiConformanceFixtures.length !== 4 || openAiConformance.openAiConformanceCases.length !== 4 || !openAiConformance.openAiConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing OpenAI conformance cases/fixtures")',
           'const anthropicConformance = await import("@yolk-sdk/agent/providers/anthropic/conformance")',
           'if (anthropicConformance.anthropicConformanceFixtures.length !== 5 || anthropicConformance.anthropicConformanceCases.length !== 5 || !anthropicConformance.anthropicConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Anthropic conformance cases/fixtures")',
+          'if (openAiConformance.openAiCodexConformanceFixtures.length !== 4 || openAiConformance.openAiCodexConformanceCases.length !== 4 || !openAiConformance.openAiCodexConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Codex conformance cases/fixtures")',
+          'const grokConformance = await import("@yolk-sdk/agent/providers/xai/conformance")',
+          'if (grokConformance.xAiGrokConformanceFixtures.length !== 4 || grokConformance.xAiGrokConformanceCases.length !== 4 || !grokConformance.xAiGrokConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Grok conformance cases/fixtures")',
           'const connectorBridges = await import("@yolk-sdk/connectors/conformance")',
           'for (const symbol of ["connectorHttpClientFromEffectHttpClientLayer", "connectorBinaryHttpClientFromEffectHttpClientLayer", "connectorBinaryWriteHttpClientFromEffectHttpClientLayer", "connectorHttpClientsFromEffectHttpClientLayer"]) { if (connectorBridges[symbol] === undefined) throw new Error(`Missing connector conformance export: ${symbol}`) }',
           'if (typeof connectorBridges.staticCredentialResolverLayer !== "function") throw new Error("Missing staticCredentialResolverLayer")',
@@ -270,6 +274,15 @@ const main = async () => {
           'const anthropicEmulator = (await import("@yolk-sdk/emulators/anthropic")).makeAnthropicEmulator()',
           'const emulatedAnthropic = await anthropicEmulator.fetch(new Request("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": "synthetic", "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 16, messages: [], stream: false }) }))',
           'if (emulatedAnthropic.status !== 200 || emulatedAnthropic.headers.get("x-emulator-evidence") !== "unverified" || (await emulatedAnthropic.json()).type !== "message" || anthropicEmulator.ledger.entries()[0]?.credentialHeader !== "x-api-key") throw new Error("Anthropic emulator smoke failed")',
+          'const codexEmulator = (await import("@yolk-sdk/emulators/codex")).makeCodexEmulator()',
+          'const emulatedCodex = await codexEmulator.fetch(new Request("https://chatgpt.com/backend-api/codex/responses", { method: "POST", headers: { authorization: "Bearer synthetic", originator: "opencode", "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-5.4", input: "Hi", stream: false }) }))',
+          'if (emulatedCodex.status !== 200 || emulatedCodex.headers.get("x-emulator-evidence") !== "unverified" || (await emulatedCodex.json()).status !== "completed" || codexEmulator.ledger.entries()[0]?.headers.originator !== "opencode") throw new Error("Codex emulator smoke failed")',
+          'const grokEmulator = (await import("@yolk-sdk/emulators/xai")).makeXAiGrokEmulator()',
+          'const grokUrl = "https://cli-chat-proxy.grok.com/v1/responses"',
+          'const grokBody = JSON.stringify({ model: "grok-build", input: "Hi", stream: false, max_output_tokens: 16 })',
+          'const unversionedGrok = await grokEmulator.fetch(new Request(grokUrl, { method: "POST", headers: { authorization: "Bearer synthetic", "x-xai-token-auth": "synthetic", "x-grok-model-override": "grok-build", "content-type": "application/json" }, body: grokBody }))',
+          'const emulatedGrok = await grokEmulator.fetch(new Request(grokUrl, { method: "POST", headers: { authorization: "Bearer synthetic", "x-xai-token-auth": "synthetic", "x-grok-model-override": "grok-build", "x-grok-client-version": "0.0.0-synthetic", "content-type": "application/json" }, body: grokBody }))',
+          'if (unversionedGrok.status !== 426 || emulatedGrok.status !== 200 || (await emulatedGrok.json()).status !== "completed" || grokEmulator.ledger.entries()[1]?.maxOutputTokens !== 16) throw new Error("Grok emulator smoke failed")',
           'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")'
         ].join('\n')
     )

@@ -186,6 +186,47 @@ example `rate_limit_error` for 429 and `overloaded_error` for 529), `error-after
 and only before `message_stop`). Faults, the ledger, and the control plane are shared with the
 Chat Completions emulators.
 
+## Responses emulators
+
+`@yolk-sdk/emulators/codex` and `@yolk-sdk/emulators/xai`
+
+| Export                                                       | Purpose                                                                                      |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `makeCodexEmulator(options?)`                                | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /backend-api/codex/responses` |
+| `makeXAiGrokEmulator(options?)`                              | The same for `POST /v1/responses` on the Grok CLI proxy                                      |
+| `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`               | Route evidence manifests linked to the Codex and Grok Responses conformance cases            |
+| `CodexFault`, `CodexScriptedTurn`, `XAiGrok*`                | Schemas and types for wire faults (including mid-stream error events) and turns              |
+| `CodexLedgerEntry`, `XAiGrokLedgerEntry`                     | Ledger entry types                                                                           |
+| `codexEmulatorDefaultModels`, `xAiGrokEmulatorDefaultModels` | Synthetic-safe default model ids                                                             |
+| `CodexEmulatorInputInvalid`, `XAiGrokEmulatorInputInvalid`   | Thrown by `faults.add` / `script.enqueue` for invalid input                                  |
+
+They stand in for the ChatGPT Codex endpoint at `https://chatgpt.com` and the xAI Grok CLI proxy
+at `https://cli-chat-proxy.grok.com`, on one shared OpenAI Responses core. `stream: true` streams
+server-sent events with typed `event:` names and a `sequence_number`, in the API's order:
+`response.created`, `response.in_progress`, then per output item `response.output_item.added`, its
+parts and deltas, and `response.output_item.done`, then `response.completed` with the full
+`response` and `usage`; `stream: false` returns one completed `response` JSON body. A request whose
+`reasoning` asks for a `summary` gets a `reasoning` item (summary part and
+`response.reasoning_summary_text.delta` events) first; answers are a `message` item
+(`response.output_text.delta`); a request with function `tools` gets one `function_call` item whose
+arguments are synthesized from the tool's JSON Schema and streamed as
+`response.function_call_arguments.delta` fragments.
+
+Errors use `{ error: { message, type, param, code } }`: an unknown model gets 400
+`model_not_found`, and a request without a non-empty `Authorization: Bearer` credential gets 401
+`invalid_api_key` (never checked or stored). `/codex` answers `max_output_tokens` with 400
+`unsupported_parameter` (the endpoint takes no output limit) and records `originator`. `/xai`
+requires, in order, `X-XAI-Token-Auth` (401), `x-grok-client-version` (426), and
+`x-grok-model-override` (400); it records the client version and model override (never the
+token-auth value) and records `max_output_tokens` as `maxOutputTokens`.
+
+Scripted turns are responses (`reasoning`, `text`, `functionCalls` with `argumentFragments`,
+`order`, `usage`, and `format: 'json'` for a JSON body even on `stream: true`) or errors. Faults are
+`status` (for example 429 with `retry-after`), `error-after-chunks`, `truncate-after-chunks` (for
+example before `response.completed`), and `error-event-after-chunks` (N events, then an `error`
+event, or a `response.failed` event with `event: 'response.failed'`; streamed responses only, and
+only before `response.completed`). OpenCode Go Responses are not emulated yet.
+
 ## Node server
 
 `@yolk-sdk/emulators/node`
@@ -205,5 +246,5 @@ Emulated routes carry evidence: `verified` routes follow a live observation date
 `observedAt`; `unverified` routes follow synthetic placeholders and tag every response with
 `x-emulator-evidence: unverified`. The Gateway route is verified (`observedAt: '2026-09-30'`): the
 emulator follows the verified live Gateway recordings, and the Yolk repository checks its response
-shapes against each recording. The OpenAI and Anthropic routes are unverified, like the synthetic
-fixtures they follow.
+shapes against each recording. The OpenAI, Anthropic, Codex, and Grok routes are unverified, like
+the synthetic fixtures they follow.

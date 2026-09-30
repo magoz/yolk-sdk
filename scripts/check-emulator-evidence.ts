@@ -9,7 +9,7 @@
  * - FAIL: a verified connector write route has a missing, unreadable, or future `observedAt`.
  * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
  *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat,
- *   Anthropic Messages, and Fortnox fixtures).
+ *   Codex Responses, Anthropic Messages, Grok Responses, and Fortnox fixtures).
  * - WARN: a route's evidence is `unverified` (the emulator tags its responses
  *   `x-emulator-evidence: unverified`).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
@@ -25,14 +25,22 @@ import type { WireFixture } from '../packages/conformance/src/fixture.ts'
 import { anthropicConformanceCases } from '../packages/agent/src/providers/anthropic/conformance/cases.ts'
 import { anthropicConformanceFixtures } from '../packages/agent/src/providers/anthropic/conformance/index.ts'
 import { openAiConformanceCases } from '../packages/agent/src/providers/openai/conformance/cases.ts'
-import { openAiConformanceFixtures } from '../packages/agent/src/providers/openai/conformance/index.ts'
+import { openAiCodexConformanceCases } from '../packages/agent/src/providers/openai/conformance/codex-cases.ts'
+import {
+  openAiCodexConformanceFixtures,
+  openAiConformanceFixtures
+} from '../packages/agent/src/providers/openai/conformance/index.ts'
 import { vercelAiGatewayConformanceCases } from '../packages/agent/src/providers/vercel/conformance/cases.ts'
 import { vercelAiGatewayConformanceFixtures } from '../packages/agent/src/providers/vercel/conformance/index.ts'
+import { xAiGrokConformanceCases } from '../packages/agent/src/providers/xai/conformance/cases.ts'
+import { xAiGrokConformanceFixtures } from '../packages/agent/src/providers/xai/conformance/index.ts'
 import { fortnoxConformanceCases } from '../packages/connectors/src/fortnox/conformance/cases.ts'
 import { fortnoxConformanceFixtures } from '../packages/connectors/src/fortnox/conformance/index.ts'
 import { anthropicEmulatorRoutes } from '../packages/emulators/src/anthropic.ts'
+import { codexEmulatorRoutes } from '../packages/emulators/src/codex.ts'
 import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
 import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
+import { xAiGrokEmulatorRoutes } from '../packages/emulators/src/xai.ts'
 import type {
   EmulatorEvidence,
   EmulatorRouteEvidence
@@ -88,7 +96,9 @@ export type EvidenceCheckInput = {
 export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'gateway', routes: gatewayEmulatorRoutes },
   { name: 'openai', routes: openAiEmulatorRoutes },
-  { name: 'anthropic', routes: anthropicEmulatorRoutes }
+  { name: 'anthropic', routes: anthropicEmulatorRoutes },
+  { name: 'codex', routes: codexEmulatorRoutes },
+  { name: 'xai', routes: xAiGrokEmulatorRoutes }
 ]
 
 /** Every conformance case id the manifests may cite. */
@@ -96,6 +106,8 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...vercelAiGatewayConformanceCases.map(testCase => testCase.id),
   ...openAiConformanceCases.map(testCase => testCase.id),
   ...anthropicConformanceCases.map(testCase => testCase.id),
+  ...openAiCodexConformanceCases.map(testCase => testCase.id),
+  ...xAiGrokConformanceCases.map(testCase => testCase.id),
   ...fortnoxConformanceCases.map(testCase => testCase.id)
 ])
 
@@ -115,7 +127,10 @@ export const fixtureEvidenceByCase = (
   return byCase
 }
 
-/** Evidence of every committed Gateway, OpenAI chat, Anthropic Messages, and Fortnox fixture, by case id. */
+/**
+ * Evidence of every committed Gateway, OpenAI chat, Codex Responses, Anthropic Messages, Grok
+ * Responses, and Fortnox fixture, by case id.
+ */
 export const conformanceFixtureEvidence: ReadonlyMap<
   string,
   ReadonlyArray<EmulatorEvidence>
@@ -123,6 +138,8 @@ export const conformanceFixtureEvidence: ReadonlyMap<
   ...vercelAiGatewayConformanceFixtures,
   ...openAiConformanceFixtures,
   ...anthropicConformanceFixtures,
+  ...openAiCodexConformanceFixtures,
+  ...xAiGrokConformanceFixtures,
   ...fortnoxConformanceFixtures
 ])
 

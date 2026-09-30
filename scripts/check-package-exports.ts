@@ -102,6 +102,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './providers/xai/grok',
       './providers/xai/grok-provider',
       './providers/xai/usage',
+      './providers/xai/conformance',
       './react',
       './runtime',
       './skillset',
@@ -217,6 +218,8 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './gateway',
       './openai',
       './anthropic',
+      './codex',
+      './xai',
       './node'
     ],
     root: 'none'

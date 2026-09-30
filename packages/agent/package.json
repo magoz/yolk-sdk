@@ -151,6 +151,10 @@
       "types": "./src/providers/xai/usage.ts",
       "default": "./src/providers/xai/usage.ts"
     },
+    "./providers/xai/conformance": {
+      "types": "./src/providers/xai/conformance/index.ts",
+      "default": "./src/providers/xai/conformance/index.ts"
+    },
     "./providers/subscription-usage": {
       "types": "./src/providers/subscription-usage.ts",
       "default": "./src/providers/subscription-usage.ts"
@@ -338,6 +342,11 @@
         "types": "./dist/providers/xai/usage.d.mts",
         "import": "./dist/providers/xai/usage.mjs",
         "default": "./dist/providers/xai/usage.mjs"
+      },
+      "./providers/xai/conformance": {
+        "types": "./dist/providers/xai/conformance/index.d.mts",
+        "import": "./dist/providers/xai/conformance/index.mjs",
+        "default": "./dist/providers/xai/conformance/index.mjs"
       },
       "./providers/subscription-usage": {
         "types": "./dist/providers/subscription-usage.d.mts",

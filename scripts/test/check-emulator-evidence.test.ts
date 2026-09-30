@@ -299,10 +299,14 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('fortnox.invoice.list-populated')).toBe(true)
     expect(knownConformanceCaseIds.has('openai.chat.json.plain-text')).toBe(true)
     expect(knownConformanceCaseIds.has('anthropic.messages.stream.max-tokens')).toBe(true)
+    expect(knownConformanceCaseIds.has('openai.codex.stream.terminal-event')).toBe(true)
+    expect(knownConformanceCaseIds.has('xai.grok.stream.terminal-event')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
       'openai',
-      'anthropic'
+      'anthropic',
+      'codex',
+      'xai'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -318,6 +322,8 @@ describe('repo emulator manifests', () => {
     expect(conformanceFixtureEvidence.get('anthropic.messages.stream.plain-text')).toEqual([
       'unverified'
     ])
+    expect(conformanceFixtureEvidence.get('openai.codex.stream.plain-text')).toEqual(['unverified'])
+    expect(conformanceFixtureEvidence.get('xai.grok.stream.plain-text')).toEqual(['unverified'])
   })
 
   it('runs as a CLI that prints the report and exits 0', async () => {
@@ -335,5 +341,9 @@ describe('repo emulator manifests', () => {
     )
     expect(result.stdout).toContain('WARN  openai  POST /v1/chat/completions  unverified evidence')
     expect(result.stdout).toContain('WARN  anthropic  POST /v1/messages  unverified evidence')
+    expect(result.stdout).toContain(
+      'WARN  codex  POST /backend-api/codex/responses  unverified evidence'
+    )
+    expect(result.stdout).toContain('WARN  xai  POST /v1/responses  unverified evidence')
   }, 120000)
 })
