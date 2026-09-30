@@ -844,7 +844,7 @@ const dueCaseId = 'todoist.tasks.due-dates'
 /** A fixed synthetic day far in the future. */
 const dueDate = '2030-01-15'
 
-/** Noon UTC, so the instant stays on 2030-01-15 in every time zone from UTC-11 to UTC+11. */
+/** Noon UTC: the instant stays on 2030-01-15 in time zones from UTC-12 to UTC+11 (not +12 to +14). */
 const dueDatetime = '2030-01-15T12:00:00Z'
 
 /** A due the answer carries: an object with a `date` string (its other fields are unchecked). */

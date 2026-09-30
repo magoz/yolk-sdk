@@ -19,6 +19,7 @@ import {
   telegramValidateGetChatFixture
 } from '../../packages/connectors/src/telegram/conformance/index.ts'
 import {
+  accessTokenForms,
   inspectRecordingForAccessToken,
   runInterruptibly,
   interruptOptionsFor,
@@ -285,6 +286,22 @@ describe('run-telegram-conformance token scrubbing', () => {
     ]) {
       expect(textContainsAccessToken(text, liveToken)).toBe(true)
     }
+
+    // Folded (MIME-style, 76 columns) base64 whose fold falls inside the encoded token.
+    const encoded = Buffer.from(`${'A'.repeat(40)}${liveToken}${'B'.repeat(40)}`).toString('base64')
+    const folded = encoded.match(/.{1,76}/g)?.join('\r\n') ?? expect.fail('fold')
+
+    // No contiguous form survives the fold, so only the unfolded search can find it.
+    expect(accessTokenForms(liveToken).some(form => folded.includes(form))).toBe(false)
+    expect(textContainsAccessToken(folded, liveToken)).toBe(true)
+    expect(textContainsAccessToken(folded.replaceAll('\r\n', '\\r\\n'), liveToken)).toBe(true)
+
+    // A clean folded payload is not flagged.
+    const clean = Buffer.from('plain synthetic attachment text '.repeat(8)).toString('base64')
+
+    expect(textContainsAccessToken(clean.match(/.{1,76}/g)?.join('\n') ?? '', liveToken)).toBe(
+      false
+    )
 
     // The public bot id alone is not a secret: every sendMessage answer carries it as from.id.
     expect(textContainsAccessToken('{"from":{"id":987654321}}', liveToken)).toBe(false)
@@ -553,6 +570,19 @@ describe('run-telegram-conformance --record staging (offline)', () => {
       'a text body carrying NUL characters',
       leakyValidate(json(`{"ok":true,"result":{"title":"a${String.fromCharCode(0)}b"}}`)),
       uninspectable
+    ],
+    [
+      'a MIME-folded base64 token in a text body',
+      leakyValidate({
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+        body: (
+          Buffer.from(`${'A'.repeat(40)}${liveToken}${'B'.repeat(40)}`)
+            .toString('base64')
+            .match(/.{1,76}/g) ?? []
+        ).join('\r\n')
+      }),
+      refusal
     ],
     ...[0, 1, 2].flatMap(offset =>
       [false, true].map(

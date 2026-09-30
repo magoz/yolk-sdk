@@ -978,7 +978,8 @@ const base64Cores = (form: string): ReadonlyArray<string> =>
  * What the guard looks for: the token, and every `:`-separated part of it long enough to be a
  * secret on its own (Telegram's `<bot id>:<secret>`: the secret; the bot id is public and appears
  * in every `sendMessage` answer as `from.id`, so it alone is not searched), each verbatim,
- * percent-encoded, and base64-encoded (standard and URL-safe, at every byte alignment).
+ * percent-encoded, and base64-encoded (standard and URL-safe, at every byte alignment, and
+ * whitespace-folded as MIME folds it).
  */
 export const accessTokenForms = (accessToken: string): ReadonlyArray<string> => {
   const parts = accessToken.split(':')
@@ -1027,15 +1028,24 @@ const escapesDecoded = (text: string): string =>
       String.fromCodePoint(Math.min(Number.parseInt(decimal, 10), 0x10ffff))
     )
 
-/** True when `text`, raw or with its escapes decoded, contains any form of the token. */
+// Whitespace and JSON whitespace escapes (`\r`, `\n`, `\t`): MIME-style base64 is folded at 76
+// columns, so a fold can fall inside the encoded token.
+const unfolded = (text: string): string => text.replace(/\s+|\\[rnt]/g, '')
+
+/**
+ * True when `text`, raw or with its escapes decoded, contains any form of the token. Each variant
+ * is also searched with whitespace removed, so folded (MIME-style) base64 is found too.
+ */
 const textHasToken = (text: string, forms: ReadonlyArray<string>): boolean => {
-  const variants = [
+  const decoded = [
     text,
     percentDecoded(text),
     escapesDecoded(text),
     percentDecoded(escapesDecoded(text)),
     escapesDecoded(percentDecoded(text))
   ]
+
+  const variants = decoded.flatMap(variant => [variant, unfolded(variant)])
 
   return variants.some(variant => forms.some(form => variant.includes(form)))
 }

@@ -107,7 +107,8 @@ stage, or print a review checklist for, any recording in which the token or its 
 survives anywhere: URLs, request and response headers, request bodies, text bodies, decoded base64
 bodies, stream chunks reassembled as bytes, and every JSON string value after parsing (so `\u`
 escapes are undone). It looks for each raw, percent-encoded, `\u`/`\x`/HTML-escaped, and
-base64-encoded (standard and URL-safe, at every byte alignment).
+base64-encoded (standard and URL-safe, at every byte alignment, including MIME-style
+folded base64).
 
 What the guard can inspect is an allowlist: **strict UTF-8 text without NUL characters**. Any body,
 decoded `bodyBase64`, or reassembled chunk stream that does not decode as strict UTF-8 (a

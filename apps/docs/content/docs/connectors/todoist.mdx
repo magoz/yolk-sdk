@@ -32,7 +32,9 @@ Claims no live run has settled yet, marked "(unverified: ...)" in each case's `w
 - The API v1 error body is `{ error, error_code, error_extra, error_tag, http_code }`; the connector
   uses the first non-empty string of `error`, `message`, `error_description`, `error_tag`.
 - A timed due (`due_datetime` `2030-01-15T12:00:00Z`) keeps its day at the start of `due.date` in the
-  account's time zone (noon UTC stays on that day from UTC-11 to UTC+11).
+  account's time zone (noon UTC stays on that day from UTC-12 to UTC+11). Use a practice account
+  whose time zone is in that range: in UTC+12 to UTC+14 the timed due can land on the 16th and the
+  case fails without any connector fault.
 - A deleted project answers 404 rather than a body marked `is_deleted`.
 - Deleting a project deletes its tasks.
 
