@@ -655,17 +655,17 @@ route needs `Prefer: IdType="ImmutableId"`, and every calendar route
 
 | Route (`/v1.0` prefix)                                        | Behavior                                                                                                    |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `GET /users/{userId}/calendars/{calendarId}/calendarView`     | Events overlapping `[startDateTime, endDateTime)`, by start; `$select`, `$top` (required; one page)         |
+| `GET /users/{userId}/calendars/{calendarId}/calendarView`     | Events overlapping `[startDateTime, endDateTime)`, by start; `$select`, `$top` (required, ≤ 50; one page)   |
 | `POST /users/{userId}/calendars/{calendarId}/events`          | 201 with the new event and its `id`; attendee-free, single-instance, UTC only                               |
 | `GET`, `PATCH`, `DELETE /users/{userId}/events/{eventId}`     | Read (`$select`), update `subject`, delete (204; later reads 404)                                           |
 | `POST /users/{userId}/events/{eventId}/cancel`                | 202 with an empty body; the event is removed, so a later GET or DELETE is a 404                             |
-| `GET /users/{userId}/mailFolders/{folderId}/messages`         | Newest first; `$select`, `$top`, `$skip`; opaque `@odata.nextLink`                                          |
+| `GET /users/{userId}/mailFolders/{folderId}/messages`         | Folder by id; newest first; `$select`, `$top` (required, ≤ 2), `$skip`; opaque `@odata.nextLink`            |
 | `POST /users/{userId}/messages`                               | 201 draft in Drafts (never sent): `subject`, text `body`, `toRecipients`, the owner as `from`               |
 | `PATCH /users/{userId}/messages/{messageId}`                  | A draft's `subject` and `isRead`                                                                            |
-| `POST /users/{userId}/messages/{messageId}/move`              | 201 with the moved draft (`destinationId` is a folder id or `inbox`/`drafts`/`deleteditems`)                |
+| `POST /users/{userId}/messages/{messageId}/move`              | 201 with the draft moved to Deleted Items (`destinationId: "deleteditems"` only)                            |
 | `GET /users/{userId}/messages/{messageId}/attachments[/{id}]` | Listing (`$select` only) includes inline ones, never `contentId`; retrieval has `contentId`, `contentBytes` |
 | `POST /$batch`                                                | Up to 20 `permanentDelete` subrequests of drafts that can all run (204 each); else the whole batch is 400   |
-| `GET /drives/{driveId}/items/{itemId}` and `/children`        | Item read (`$select`) and children by name (`$select`, `$top` required; one page)                           |
+| `GET /drives/{driveId}/items/{itemId}` and `/children`        | Item read (`$select`) and children by name (`$select`, `$top` required, ≤ 200; one page)                    |
 | `POST /drives/{driveId}/items/{itemId}/children`              | 201 folder with a free name; `@microsoft.graph.conflictBehavior` `fail` only                                |
 | `DELETE /drives/{driveId}/items/{itemId}`                     | 204; the item and its subtree are removed (no recycle bin), later reads 404                                 |
 | `POST /drives/{driveId}/items/{itemId}/copy`                  | A file to `parentReference { driveId, id }` on the drive, same name; 202 with one monitor `Location`        |
@@ -698,8 +698,9 @@ Wire behavior the cases claim:
   only emulator-generated values (change keys and etags, draft conversation and internet message
   ids, created ids, and `innerError` request ids and dates).
 
-Emulator extrapolations (no fixture). The cases need each of these to run, except the last,
-which is opt-in and off by default:
+Emulator extrapolations (no fixture). The cases need each of these to run, except request-shape
+latitude (accepted request variations; no invented wire behaviour) and the last, which is opt-in
+and off by default:
 
 - **Concurrency window.** The first write (update or move) to reach the handler holds the message
   for `conflictWindowMs` (default 25); an overlapping write gets 409; non-overlapping writes both
@@ -712,6 +713,15 @@ which is opt-in and off by default:
 - **Seed values.** Entities no fixture shows (the inbox, the attachment message itself, the drive
   root and `Sources` folder) are synthesized; `hasAttachments` is answered as seeded (`false` for
   new drafts), never derived from the attachments.
+- **Request-shape latitude.** Requests that vary harmlessly from the fixtures' are answered like
+  them: `$select` may be omitted or name any fields the emulator renders, in any order; `$top` may
+  be below the fixture value (1 to 2, 50, or 200) and `$skip` any offset on folder messages; the
+  user segment may be the user's id, mail, or user principal name, case-insensitive; write bodies
+  may send any subset of the fixture keys (for example a draft with only `subject`), any `showAs`
+  free/busy status, either boolean for `isRead` and `isReminderOn`, and non-empty `toRecipients`
+  with or without names; and `calendarView` accepts any valid range, including UTC offsets. A
+  missing message or attachment answers 404 `ErrorItemNotFound`, the documented Graph code, which
+  no fixture records for them.
 - **In-progress copies (opt-in).** `copyInProgressPolls` (default 0, so no case sees it) makes the
   monitor answer `{ "@odata.context", "percentageComplete": 0, "status": "inProgress" }` (202)
   that many times before the copy runs; no fixture records an in-progress poll.
@@ -724,15 +734,19 @@ route does not emulate get 400 before the route runs (so a rejected write writes
 `emailAddress`, `start`/`end`, and `parentReference`), and values it does not emulate. That covers
 Outlook requests without the immutable-id preference, `If-Match` conditional requests, conflict
 behaviors other than `fail` (or none), name conflicts, HTML bodies, attendees, non-UTC times,
-send-as `from`, calendar requests without `Prefer: outlook.timezone="UTC"`, calendar views and
-children listings without `$top` or with more results than `$top`, `$skip` anywhere but folder
-messages, updates, moves, and permanent deletes of messages that are not drafts, permanently
+send-as `from`, calendar requests without `Prefer: outlook.timezone="UTC"`, collection listings
+without `$top` or with `$top` above the largest value a fixture sends (2 for folder messages, 50
+for calendar views, 200 for children), calendar views and children listings with more results than
+`$top`, `$skip` anywhere but folder messages, folder message listings by well-known name or an
+unknown folder id, moves to any destination but `deleteditems` (including `inbox`, `drafts`, and
+folder ids), updates, moves, and permanent deletes of messages that are not drafts, permanently
 deleting a message with attachments, copies of folders, with a new `name`, without
 `parentReference.driveId`, or to another drive, file creation, a `$batch` subrequest that could
 not answer 204, and a copy that can no longer run when its monitor is polled (400 at the monitor;
 no fixture records a failed copy). A route handler that throws answers a 500 Graph error
 envelope, recorded in the ledger with `responseError` (if the injected clock throws too, its
-`innerError.date` is the fixed `1970-01-01T00:00:00`). `microsoftEmulatorErrorCodes` lists the
+`innerError.date` is the fixed `1970-01-01T00:00:00`; unknown routes still answer, and ledger,
+their 404, and a closed emulator its 503, with that date). `microsoftEmulatorErrorCodes` lists the
 codes: `ErrorItemNotFound`, `itemNotFound`, and `ErrorIrresolvableConflict` come from the
 fixtures; `InvalidAuthenticationToken`, `ErrorInvalidUser`, and `TooManyRequests` (the default 429
 fault body) are documented Graph codes no fixture records; the `Synthetic*` ones are emulator
@@ -752,9 +766,10 @@ by method and raw path, `count`) answer before the route runs and follow the sha
 header rules; the default body is a Graph error envelope (`TooManyRequests` for 429, so a 429 with
 `retry-after: 2` reaches the connector as `microsoft_rate_limited` with `retryAfterMs: 2000`). The
 ledger records method, raw path, route template, query (credential-named keys such as
-`access_token` are redacted), parsed body (credential-named keys at any depth, such as a `$batch`
-subrequest's `Authorization`, are redacted), the `Prefer` header, status, evidence, the applied
-fault, and any `responseError`. Control plane: `/_emulate/ledger`, `faults`,
+`access_token`, and the conformance scan's credential query parameters such as `X-Amz-Signature`
+and `X-Amz-Credential`, are redacted), parsed body (credential-named keys at any depth, such as a
+`$batch` subrequest's `Authorization`, are redacted), the `Prefer` header, status, evidence, the
+applied fault, and any `responseError`. Control plane: `/_emulate/ledger`, `faults`,
 `reset`, `state`, `seed`, and `coverage`.
 
 **Drill knobs (tests only).** `drills: { calendarRangeEmpty: true }` (empty calendar views),

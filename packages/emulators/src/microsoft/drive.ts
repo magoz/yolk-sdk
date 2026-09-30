@@ -201,7 +201,13 @@ const byName = (left: MicrosoftEmulatorDriveItem, right: MicrosoftEmulatorDriveI
   left.name.localeCompare(right.name, 'en', { sensitivity: 'base' }) ||
   left.id.localeCompare(right.id)
 
-/** `GET /drives/{driveId}/items/{itemId}/children`: by name, at most `$top` (one page only). */
+/** The largest children `$top` a fixture sends (`$top=200`, create-folder and copy cases). */
+const childrenMaxTop = 200
+
+/**
+ * `GET /drives/{driveId}/items/{itemId}/children`: by name, at most `$top` (one page only;
+ * `$top` required, at most `childrenMaxTop`).
+ */
 export const listChildren: RouteHandler = (state, request, env) => {
   const drive = driveProblem(state, request)
 
@@ -217,7 +223,7 @@ export const listChildren: RouteHandler = (state, request, env) => {
 
   if (parent.kind !== 'folder') return notEmulated(request, 'children of a file are not emulated.')
 
-  const page = singlePage([...childrenOf(state, parent.id)].sort(byName), request, 999)
+  const page = singlePage([...childrenOf(state, parent.id)].sort(byName), request, childrenMaxTop)
 
   if (page instanceof Response) return page
 

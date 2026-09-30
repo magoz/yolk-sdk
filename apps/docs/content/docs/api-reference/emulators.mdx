@@ -423,16 +423,17 @@ const httpLayer = InProcessHttpClient.layer([
 
 It serves, under `/v1.0`: `calendarView` (events overlapping `[startDateTime, endDateTime)`), event
 create, get, update, delete, and `cancel` (202; the event is removed, so later reads and deletes are
-404); folder message listing with `$top`/`$skip` and an opaque `@odata.nextLink`; draft create,
-update, and move; attachment listing (inline included, never `contentId`) and retrieval (with
-`contentId`); `$batch` with draft `permanentDelete` subrequests only; and OneDrive item read,
-children listing, folder create, delete, and file copy (202 with one monitor `Location`). Calendar
-views and children listings need `$top` and answer one page. The monitor
-URL needs no credential; its first poll answers `completed` with a `resourceId`, as the copy
-fixture records (`copyInProgressPolls`, default 0, adds `inProgress` answers first). Graph routes
-need `Authorization: Bearer <non-empty>`; the token is never stored or ledgered, and
-credential-named keys in ledgered bodies and queries are redacted. Responses carry the fixtures'
-`@odata.context` envelopes.
+404); folder message listing (by folder id) with `$top`/`$skip` and an opaque `@odata.nextLink`;
+draft create, update, and move to Deleted Items; attachment listing (inline included, never
+`contentId`) and retrieval (with `contentId`); `$batch` with draft `permanentDelete` subrequests
+only; and OneDrive item read, children listing, folder create, delete, and file copy (202 with one
+monitor `Location`). Folder message listings, calendar views, and children listings need `$top`, at
+most the largest value a fixture sends (2, 50, and 200); calendar views and children listings
+answer one page. The monitor URL needs no credential; its first poll answers `completed` with a
+`resourceId`, as the copy fixture records (`copyInProgressPolls`, default 0, adds `inProgress`
+answers first). Graph routes need `Authorization: Bearer <non-empty>`; the token is never stored or
+ledgered, and credential-named keys in ledgered bodies and queries are redacted. Responses carry
+the fixtures' `@odata.context` envelopes.
 
 Behaviour comes only from the conformance fixtures. Everything they do not show fails closed with
 the Graph error envelope `{ error: { code, message, innerError } }`: `/me` paths and other unknown
@@ -440,12 +441,13 @@ routes get 404; query keys, `$select` fields, body properties (including unknown
 values the emulator does not emulate get a 400 before anything is written. That includes Outlook
 requests without `Prefer: IdType="ImmutableId"` and calendar requests without
 `Prefer: outlook.timezone="UTC"` (every fixture of theirs sends it), writes to messages that are
-not drafts, `If-Match`, conflict behaviors other than `fail`, name conflicts, folder or renamed
-copies, and failed copies. A route handler that
-throws answers a 500 envelope recorded in the ledger. The few behaviours the cases need without a
-fixture (the concurrency window, advancing id counters, removal on delete, synthesized seed values)
-and the opt-in in-progress copy polls are listed in the package README under "Emulator
-extrapolations (no fixture)".
+not drafts, moves to any destination but `deleteditems`, folder listings by well-known name,
+`If-Match`, conflict behaviors other than `fail`, name conflicts, folder or renamed copies, and
+failed copies. A route handler that throws answers a 500 envelope recorded in the ledger. The few
+behaviours the cases need without a fixture (the concurrency window, advancing id counters, removal
+on delete, synthesized seed values), the request-shape latitude it accepts (optional `$select`,
+smaller `$top`, user aliases, subsets of the fixture body keys), and the opt-in in-progress copy
+polls are listed in the package README under "Emulator extrapolations (no fixture)".
 
 `microsoftEmulatorErrorCodes` groups:
 

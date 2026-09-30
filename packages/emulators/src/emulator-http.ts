@@ -1,7 +1,7 @@
 /**
  * HTTP rules shared by the emulators (internal): which statuses and headers a fault or scripted
- * error may answer with, which request header names carry credentials, and the marker a stateful
- * core route uses to report a handler that threw.
+ * error may answer with, which request header and query parameter names carry credentials, and the
+ * marker a stateful core route uses to report a handler that threw.
  *
  * Faults and scripted errors always carry a body and never redirect, so 1xx, 204, 205, and every
  * 3xx (including 304) are rejected when the fault or turn is added, as are invalid header names or
@@ -129,15 +129,30 @@ export const redactCredentialFields = (value: Schema.Json): Schema.Json => {
   )
 }
 
+// Query parameter names that carry credentials: the same list as the conformance fixture scan
+// (`credentialParamPattern` in `@yolk-sdk/conformance`, reported as `credential_query_param`),
+// copied because emulator source never imports SDK packages. It adds the presigned-URL
+// `x-amz-signature` and `x-amz-credential`, which the header rule does not cover.
+const credentialQueryParamPattern =
+  /^(api[_-]?key|key|token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth|secret|password|client[_-]?secret|x-amz-signature|x-amz-credential|x-amz-security-token)$/i
+
 /**
- * Query parameters safe to keep in a ledger: the value of every key that `isCredentialHeaderName`
- * accepts (for example `access_token` or `api_key`) is replaced by `<redacted>`.
+ * True for query parameter names that carry credentials: every name the conformance fixture scan
+ * reports as a credential query parameter, plus every name `isCredentialHeaderName` accepts.
+ */
+export const isCredentialQueryKey = (name: string): boolean =>
+  credentialQueryParamPattern.test(name) || isCredentialHeaderName(name)
+
+/**
+ * Query parameters safe to keep in a ledger: the value of every key that `isCredentialQueryKey`
+ * accepts (for example `access_token`, `api_key`, or `X-Amz-Signature`) is replaced by
+ * `<redacted>`.
  */
 export const redactCredentialQuery = (query: URLSearchParams): Readonly<Record<string, string>> =>
   Object.fromEntries(
     [...query].map(([key, value]) => [
       key,
-      isCredentialHeaderName(key) ? redactedCredentialValue : value
+      isCredentialQueryKey(key) ? redactedCredentialValue : value
     ])
   )
 

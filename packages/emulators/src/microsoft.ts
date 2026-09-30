@@ -411,7 +411,8 @@ const monitorState = (monitor: CopyMonitor): MicrosoftCopyMonitorState => {
  * error envelope), authorization, JSON body parsing, then the first matching fault (answered
  * before the route runs, so nothing is written), then the stateful route (whose query allowlist
  * and `If-Match` refusal are checked before its handler). A handler that throws answers a 500
- * Graph error envelope with `responseError` in the ledger, even when the clock throws. Every
+ * Graph error envelope with `responseError` in the ledger, even when the clock throws; unknown
+ * routes (404) and a closed emulator (503) keep their status when the clock throws too. Every
  * response from an unverified route carries `x-emulator-evidence: unverified`. Ledgered bodies and
  * query parameters have credential-named keys redacted.
  */
@@ -731,8 +732,9 @@ export const makeMicrosoftEmulator = async (
     if (matched === undefined) {
       entry.status = 404
 
+      // Clock-independent (see `recoveryNow`), so the answer is the 404 the ledger records.
       return graphError(
-        contextOf(request, entry.seq),
+        errorContext(recoveryNow(), entry.seq, request.headers.get('client-request-id')),
         404,
         codes.unknownRoute,
         'Synthetic: no emulated Microsoft Graph route.'
@@ -882,8 +884,9 @@ export const makeMicrosoftEmulator = async (
 
   const handle = async (request: Request): Promise<Response> => {
     if (closed) {
+      // Clock-independent (see `recoveryNow`): a closed emulator always answers 503.
       return graphError(
-        contextOf(request, 0),
+        errorContext(recoveryNow(), 0, request.headers.get('client-request-id')),
         503,
         codes.upstreamError,
         'Synthetic: the emulator is closed.'

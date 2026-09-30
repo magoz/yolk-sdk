@@ -48,6 +48,9 @@ const user = `/v1.0/users/${encodeURIComponent('ada@example.test')}`
 
 const drive = `/v1.0/drives/${encodeURIComponent('b!synthetic-drive-0001')}`
 
+// The paging fixture's folder, the only folder a fixture lists (by id).
+const pagingFolder = `${user}/mailFolders/${encodeURIComponent(seeds.pagingFolderId ?? '')}/messages`
+
 const open: Array<MicrosoftEmulator> = []
 
 afterEach(async () => {
@@ -328,14 +331,9 @@ describe('fail closed', () => {
           undefined,
           immutable
         ],
-        [
-          'GET',
-          `${user}/mailFolders/inbox/messages?$select=id,internetMessageHeaders`,
-          undefined,
-          immutable
-        ],
-        ['GET', `${user}/mailFolders/inbox/messages?$top=0`, undefined, immutable],
-        ['GET', `${user}/mailFolders/inbox/messages?$top=abc`, undefined, immutable],
+        ['GET', `${pagingFolder}?$select=id,internetMessageHeaders&$top=2`, undefined, immutable],
+        ['GET', `${pagingFolder}?$top=0`, undefined, immutable],
+        ['GET', `${pagingFolder}?$top=abc`, undefined, immutable],
         [
           'GET',
           calendarViewPath('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z'),
@@ -407,7 +405,7 @@ describe('fail closed', () => {
         ['POST', `${user}/messages`, { subject: 'x' }],
         ['PATCH', `${user}/messages/${draftId}`, { isRead: false }, utc],
         ['POST', `${user}/messages/${draftId}/move`, { destinationId: 'deleteditems' }],
-        ['GET', `${user}/mailFolders/inbox/messages`, undefined],
+        ['GET', `${pagingFolder}?$top=2`, undefined],
         ['GET', `${user}/messages/${messageId}/attachments`, undefined],
         [
           'GET',
@@ -632,6 +630,39 @@ describe('fail closed', () => {
       // Nothing was written: not even a counter advanced, and no copy monitor exists.
       expect(target.snapshot()).toEqual(before)
       expect(target.monitors()).toEqual([])
+    })
+  )
+
+  it.effect('caps $top at the largest value a fixture sends to each route', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const before = target.snapshot()
+      const children = `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children?$top=`
+      const range = ['2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z'] as const
+
+      // Calendar views: $top=50 (list-range, precision); children: $top=200 (folder, copy).
+      const cases: ReadonlyArray<readonly [string, number, Record<string, string>?]> = [
+        [calendarViewPath(...range, '&$top=50'), 200, utc],
+        [calendarViewPath(...range, '&$top=51'), 400, utc],
+        [calendarViewPath(...range, '&$top=1000'), 400, utc],
+        [`${children}200`, 200],
+        [`${children}201`, 400],
+        [`${children}999`, 400],
+        [`${pagingFolder}?$top=2`, 200, immutable],
+        [`${pagingFolder}?$top=3`, 400, immutable]
+      ]
+
+      for (const [path, status, headers] of cases) {
+        const response = await call(target, 'GET', path, { headers })
+
+        expect(response.status, path).toBe(status)
+
+        if (status === 400) {
+          expect(await errorCode(response), path).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
+        }
+      }
+
+      expect(target.snapshot()).toEqual(before)
     })
   )
 
@@ -973,16 +1004,15 @@ describe('outlook', () => {
         expect(immutableId).toMatch(/synthetic-immutable-0001=$/)
         expect(field(created, 'isDraft')).toBe(true)
 
-        for (const destinationId of ['deleteditems', 'drafts']) {
-          const moved = await jsonOf(
-            await call(target, 'POST', `${path}/move`, {
-              body: { destinationId },
-              headers: immutable
-            })
-          )
+        const moved = await jsonOf(
+          await call(target, 'POST', `${path}/move`, {
+            body: { destinationId: 'deleteditems' },
+            headers: immutable
+          })
+        )
 
-          expect(field(moved, 'id')).toBe(immutableId)
-        }
+        expect(field(moved, 'id')).toBe(immutableId)
+        expect(field(moved, 'parentFolderId')).toBe('AAMkAGI2-synthetic-deleteditems-folder=')
 
         expect(
           (await call(target, 'PATCH', path, { body: { isRead: false }, headers: immutable }))
@@ -990,16 +1020,98 @@ describe('outlook', () => {
         ).toBe(200)
 
         // No fixture sends an Outlook request without IdType="ImmutableId": no default ids.
+        const beforePlain = target.snapshot()
+
         const plain = await call(target, 'POST', `${path}/move`, {
-          body: { destinationId: 'inbox' }
+          body: { destinationId: 'deleteditems' }
         })
 
         expect(plain.status).toBe(400)
         expect(await errorCode(plain)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
+        expect(target.snapshot()).toEqual(beforePlain)
         expect(
           target.snapshot().messages.find(message => message.id === immutableId)?.parentFolderId
-        ).toBe('AAMkAGI2-synthetic-drafts-folder=')
+        ).toBe('AAMkAGI2-synthetic-deleteditems-folder=')
       })
+  )
+
+  it.effect('moves only to deleteditems; any other destination is refused and moves nothing', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const draftId = await createDraft(target)
+      const path = `${user}/messages/${encodeURIComponent(draftId)}/move`
+      const before = target.snapshot()
+
+      // The immutable-id fixture moves only to `deleteditems`: other well-known names, another
+      // spelling, and folder ids (even the Deleted Items id) are not emulated.
+      for (const destinationId of [
+        'inbox',
+        'drafts',
+        'sentitems',
+        'DeletedItems',
+        'AAMkAGI2-synthetic-inbox-folder=',
+        'AAMkAGI2-synthetic-deleteditems-folder=',
+        seeds.pagingFolderId ?? '',
+        'missing-folder'
+      ]) {
+        const response = await call(target, 'POST', path, {
+          body: { destinationId },
+          headers: immutable
+        })
+
+        expect(response.status, destinationId).toBe(400)
+        expect(await errorCode(response)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
+      }
+
+      expect(target.snapshot()).toEqual(before)
+
+      // The fixture's own move still applies afterwards.
+      const moved = await call(target, 'POST', path, {
+        body: { destinationId: 'deleteditems' },
+        headers: immutable
+      })
+
+      expect(moved.status).toBe(201)
+      expect(field(await jsonOf(moved), 'parentFolderId')).toBe(
+        'AAMkAGI2-synthetic-deleteditems-folder='
+      )
+    })
+  )
+
+  it.effect('lists folder messages only by folder id, with $top required and at most 2', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const before = target.snapshot()
+      const select = '$select=id,subject'
+
+      // The paging fixture lists its folder by id with $top=2 (the largest it sends).
+      for (const top of ['1', '2']) {
+        const response = await call(target, 'GET', `${pagingFolder}?${select}&$top=${top}`, {
+          headers: immutable
+        })
+
+        expect(response.status, top).toBe(200)
+        expect(await values(response)).toHaveLength(Number(top))
+      }
+
+      for (const path of [
+        `${pagingFolder}?${select}`,
+        `${pagingFolder}?${select}&$skip=2`,
+        `${pagingFolder}?${select}&$top=3`,
+        `${pagingFolder}?${select}&$top=1000`,
+        `${user}/mailFolders/inbox/messages?${select}&$top=2`,
+        `${user}/mailFolders/drafts/messages?${select}&$top=2`,
+        `${user}/mailFolders/deleteditems/messages?${select}&$top=2`,
+        `${user}/mailFolders/missing-folder/messages?${select}&$top=2`
+      ]) {
+        const response = await call(target, 'GET', path, { headers: immutable })
+
+        expect(response.status, path).toBe(400)
+        expect(await errorCode(response), path).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
+      }
+
+      expect(target.snapshot()).toEqual(before)
+    })
   )
 
   it.effect(
@@ -1548,6 +1660,55 @@ describe('handler failures', () => {
       expect(target.snapshot().messages.some(message => message.isDraft)).toBe(false)
     })
   )
+
+  it.effect('answers unknown routes 404 and a closed emulator 503 when the clock throws', () =>
+    Effect.promise(async () => {
+      const target = await makeMicrosoftEmulator({
+        now: () => {
+          throw new Error('synthetic clock failure')
+        }
+      })
+
+      const envelope = (code: string, requestId: string) => ({
+        error: {
+          code,
+          message: expect.any(String),
+          innerError: {
+            date: '1970-01-01T00:00:00',
+            'request-id': requestId,
+            'client-request-id': requestId
+          }
+        }
+      })
+
+      const unknown = await call(target, 'GET', '/v1.0/me/messages')
+
+      expect(unknown.status).toBe(404)
+      expect(await jsonOf(unknown)).toEqual(
+        envelope(microsoftEmulatorErrorCodes.unknownRoute, '00000000-0000-4000-8000-000000000001')
+      )
+      expect(target.ledger.entries()).toEqual([
+        expect.objectContaining({
+          method: 'GET',
+          path: '/v1.0/me/messages',
+          status: 404,
+          evidence: 'unknown-route'
+        })
+      ])
+      expect(target.ledger.entries()[0]?.responseError).toBeUndefined()
+
+      await target.close()
+
+      const closed = await call(target, 'GET', `${pagingFolder}?$top=2`, { headers: immutable })
+
+      expect(closed.status).toBe(503)
+      expect(await jsonOf(closed)).toEqual(
+        envelope(microsoftEmulatorErrorCodes.upstreamError, '00000000-0000-4000-8000-000000000000')
+      )
+      // Requests after close never reach the ledger.
+      expect(target.ledger.entries()).toHaveLength(1)
+    })
+  )
 })
 
 describe('credential redaction', () => {
@@ -1559,7 +1720,7 @@ describe('credential redaction', () => {
       const response = await call(
         target,
         'GET',
-        `${user}/mailFolders/inbox/messages?$top=1&access_token=${secret}&api_key=${secret}`,
+        `${pagingFolder}?$top=1&access_token=${secret}&api_key=${secret}&X-Amz-Signature=${secret}&X-Amz-Credential=${secret}`,
         { headers: immutable }
       )
 
@@ -1568,7 +1729,9 @@ describe('credential redaction', () => {
       expect(target.ledger.entries()[0]?.query).toEqual({
         $top: '1',
         access_token: '<redacted>',
-        api_key: '<redacted>'
+        api_key: '<redacted>',
+        'X-Amz-Signature': '<redacted>',
+        'X-Amz-Credential': '<redacted>'
       })
 
       const recorded = JSON.stringify([

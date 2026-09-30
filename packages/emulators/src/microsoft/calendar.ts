@@ -129,10 +129,14 @@ const findEvent = (state: MicrosoftEmulatorState, request: RouteRequest) =>
 /** Ticks of a stored UTC date-time (always readable: the state schema checks the pattern). */
 const ticksOf = (value: string): bigint => parseInstant(value, 'forbidden') ?? BigInt(0)
 
+/** The largest calendar view `$top` a fixture sends (`$top=50`, list-range and precision cases). */
+const calendarViewMaxTop = 50
+
 /**
  * `GET .../calendars/{calendarId}/calendarView?startDateTime=&endDateTime=`: the events that
  * overlap `[start, end)` (start before the range end and end after the range start), ordered by
- * start, at most `$top` of them (more is not emulated: no fixture pages a calendar view).
+ * start, at most `$top` of them (more is not emulated: no fixture pages a calendar view; `$top`
+ * is required, at most `calendarViewMaxTop`).
  */
 export const calendarView: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
@@ -180,7 +184,7 @@ export const calendarView: RouteHandler = (state, request, env) => {
               : 1
         )
 
-  const page = singlePage(matching, request, 1000)
+  const page = singlePage(matching, request, calendarViewMaxTop)
 
   if (page instanceof Response) return page
 

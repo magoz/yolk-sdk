@@ -275,8 +275,9 @@ There is no root export or barrel.
   handler holds the message for `conflictWindowMs`; an overlapping write gets 409, while
   non-overlapping writes both apply. Copy monitors are runtime data (not in the state; cleared by
   reset/seed). Ledgered bodies and queries redact credential-named keys (`redactCredentialFields`,
-  `redactCredentialQuery`); `test/emulator-http.test.ts` keeps that name rule in step with
-  `@yolk-sdk/conformance`'s.
+  `redactCredentialQuery`, which also covers the conformance scan's `credential_query_param`
+  names such as `x-amz-signature`); `test/emulator-http.test.ts` keeps both name rules in step
+  with `@yolk-sdk/conformance`'s.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -296,8 +297,8 @@ There is no root export or barrel.
 `test/router.test.ts`, `test/router-redirects.test.ts` (redirects and `mapRequest` never escape
 the route table, with a second unrouted loopback server), `test/gateway.test.ts`,
 `test/openai.test.ts`, `test/chat-completions.test.ts` (shared core and per-emulator parameters,
-including each emulator's streamed framing), `test/emulator-http.test.ts` (the credential-name
-rule agrees with the conformance one), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
+including each emulator's streamed framing), `test/emulator-http.test.ts` (the credential header and
+query-parameter rules agree with the conformance ones), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
 cases in-process and over a loopback socket, a disagreement drill, and faults through the real
 provider, including 429 `retry-after` over the socket), `test/gateway-recordings.test.ts` (each
 verified Gateway fixture's recorded request sent to the emulator, with the response's status,

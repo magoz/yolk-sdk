@@ -9,7 +9,8 @@
  *
  * Writes accept only the fields the fixtures send: a draft create takes `subject`, a text `body`,
  * `toRecipients`, and the owner as `from`; an update takes `subject` and `isRead`; a move takes
- * `destinationId`. Anything else, including unknown nested keys, fails closed before any write.
+ * `destinationId`, which must be `deleteditems`. Anything else, including unknown nested keys,
+ * fails closed before any write.
  * The fixtures update, move, and permanently delete only drafts the case created, so those writes
  * to a message that is not a draft are not emulated (400), and neither is permanently deleting a
  * message with attachments (no fixture creates a draft with attachments).
@@ -178,14 +179,24 @@ const renderMessage = (message: MicrosoftEmulatorMessage): Schema.JsonObject => 
   }
 }
 
-/** A folder by id or well-known name (`inbox`, `drafts`, `deleteditems`). */
-const findFolder = (
+/** A folder by id (the paging fixture lists a folder by id, never by well-known name). */
+const folderById = (
   state: MicrosoftEmulatorState,
-  idOrName: string
+  id: string
+): MicrosoftEmulatorMailFolder | undefined => state.mailFolders.find(folder => folder.id === id)
+
+/** The seeded folder with a well-known name (internal lookups and the move destination). */
+const wellKnownFolder = (
+  state: MicrosoftEmulatorState,
+  name: MicrosoftEmulatorMailFolder['wellKnownName']
 ): MicrosoftEmulatorMailFolder | undefined =>
-  state.mailFolders.find(
-    folder => folder.id === idOrName || folder.wellKnownName === idOrName.toLowerCase()
-  )
+  state.mailFolders.find(folder => folder.wellKnownName === name)
+
+/** The only move destination a fixture sends (`{ destinationId: 'deleteditems' }`). */
+const moveDestination = 'deleteditems'
+
+/** The largest folder message `$top` a fixture sends (`$top=2`, the paging case). */
+const folderMessagesMaxTop = 2
 
 /** A message by its (immutable) id. */
 const findMessage = (
@@ -211,7 +222,9 @@ const replaceMessage = (state: MicrosoftEmulatorState, updated: MicrosoftEmulato
 
 /**
  * `GET /users/{userId}/mailFolders/{folderId}/messages`: newest `receivedDateTime` first, one
- * `$top`/`$skip` page with an opaque `@odata.nextLink` on the configured Graph origin.
+ * `$top`/`$skip` page with an opaque `@odata.nextLink` on the configured Graph origin. The folder
+ * is named by id (a well-known name or an unknown id is not emulated), and `$top` is required, at
+ * most `folderMessagesMaxTop`, as the paging fixture sends it.
  */
 export const listFolderMessages: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
@@ -222,9 +235,14 @@ export const listFolderMessages: RouteHandler = (state, request, env) => {
 
   if (immutable !== undefined) return immutable
 
-  const folder = findFolder(state, request.params.folderId ?? '')
+  const folder = folderById(state, request.params.folderId ?? '')
 
-  if (folder === undefined) return notFound(request)
+  if (folder === undefined) {
+    return notEmulated(
+      request,
+      'listing a folder by well-known name or an unknown folder id is not emulated (the paging fixture lists a folder by id).'
+    )
+  }
 
   const fields = selectedFields(request, messageFields)
 
@@ -240,7 +258,7 @@ export const listFolderMessages: RouteHandler = (state, request, env) => {
           : -1
     )
 
-  const page = pageOf(messages, request, { defaultTop: 10, maxTop: 1000 })
+  const page = pageOf(messages, request, folderMessagesMaxTop)
 
   if (page instanceof Response) return page
 
@@ -397,7 +415,7 @@ export const createDraft: RouteHandler = (state, request, env) => {
 
   if (write instanceof Response) return write
 
-  const drafts = findFolder(state, 'drafts')
+  const drafts = wellKnownFolder(state, 'drafts')
 
   if (drafts === undefined) return notFound(request)
 
@@ -521,8 +539,10 @@ export const updateMessage: RouteHandler = (state, request, env) => {
 }
 
 /**
- * `POST /users/{userId}/messages/{messageId}/move` (`{ destinationId }`, a folder id or
- * well-known name): 201 with the moved draft, which keeps its (immutable) id.
+ * `POST /users/{userId}/messages/{messageId}/move` with `{ destinationId: 'deleteditems' }`, the
+ * only destination a fixture sends: 201 with the moved draft, which keeps its (immutable) id. Any
+ * other destination (another well-known name such as `inbox` or `drafts`, or a folder id) is not
+ * emulated (400) and moves nothing.
  */
 export const moveMessage: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
@@ -549,7 +569,15 @@ export const moveMessage: RouteHandler = (state, request, env) => {
     return invalidValue(request, 'destinationId must be a folder id or well-known name.')
   }
 
-  const destination = findFolder(state, fields.destinationId)
+  if (fields.destinationId !== moveDestination) {
+    return notEmulated(
+      request,
+      `moves to destinations other than ${moveDestination} are not emulated (the fixtures move only to Deleted Items).`
+    )
+  }
+
+  // Every valid seed has a Deleted Items folder (the seed check requires it).
+  const destination = wellKnownFolder(state, moveDestination)
 
   if (destination === undefined) return notFound(request)
 

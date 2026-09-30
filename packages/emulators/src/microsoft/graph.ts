@@ -1,8 +1,9 @@
 /**
  * Shared Microsoft Graph emulator wire helpers (internal): the error envelope and codes, JSON
  * responses, `@odata.context`, `$select` projection, `$top`/`$skip` paging with
- * `@odata.nextLink` (folder messages only), single-page `$top` collections, the `Prefer` header, strict nested body objects, and the route handler
- * contract.
+ * `@odata.nextLink` (folder messages only), single-page `$top` collections (`$top` always required
+ * and capped at the largest value a fixture sends to the route), the `Prefer` header, strict nested
+ * body objects, and the route handler contract.
  *
  * @experimental
  */
@@ -322,6 +323,28 @@ const integerQuery = (
       )
 }
 
+/**
+ * The required `$top` of a collection whose fixtures always send it: a positive integer (400
+ * invalid otherwise), and 400 not emulated when it is missing or above `maxTop`, the largest
+ * `$top` any fixture sends to that route.
+ */
+const requiredTop = (request: RouteRequest, maxTop: number): number | Response => {
+  const top = integerQuery(request, '$top', 1, Number.MAX_SAFE_INTEGER)
+
+  if (top instanceof Response) return top
+
+  if (top === undefined) {
+    return notEmulated(request, 'requests without $top are not emulated on this collection.')
+  }
+
+  return top > maxTop
+    ? notEmulated(
+        request,
+        `$top above ${maxTop} (the largest page size a fixture sends) is not emulated on this collection.`
+      )
+    : top
+}
+
 export type Page<A> = {
   readonly items: ReadonlyArray<A>
   readonly top: number
@@ -329,47 +352,47 @@ export type Page<A> = {
   readonly nextSkip: number | undefined
 }
 
-/** One `$top`/`$skip` page of `items`. */
+/**
+ * One `$top`/`$skip` page of `items`. `$top` is required and at most `maxTop` (see
+ * `requiredTop`); no fixture records a default page size.
+ */
 export const pageOf = <A>(
   items: ReadonlyArray<A>,
   request: RouteRequest,
-  limits: { readonly defaultTop: number; readonly maxTop: number }
+  maxTop: number
 ): Page<A> | Response => {
-  const top = integerQuery(request, '$top', 1, limits.maxTop)
-  const skip = integerQuery(request, '$skip', 0, Number.MAX_SAFE_INTEGER)
+  const top = requiredTop(request, maxTop)
 
   if (top instanceof Response) return top
 
+  const skip = integerQuery(request, '$skip', 0, Number.MAX_SAFE_INTEGER)
+
   if (skip instanceof Response) return skip
 
-  const size = top ?? limits.defaultTop
   const start = skip ?? 0
-  const end = start + size
+  const end = start + top
 
   return {
     items: items.slice(start, end),
-    top: size,
+    top,
     nextSkip: end < items.length ? end : undefined
   }
 }
 
 /**
  * A collection whose fixtures send `$top` and never page (calendar views, children listings):
- * the items, or 400 not emulated without `$top` or with more items than `$top` (no fixture
- * records a default page size or a second page of these collections).
+ * the items, or 400 not emulated without `$top`, with `$top` above `maxTop` (see `requiredTop`),
+ * or with more items than `$top` (no fixture records a default page size or a second page of
+ * these collections).
  */
 export const singlePage = <A>(
   items: ReadonlyArray<A>,
   request: RouteRequest,
   maxTop: number
 ): ReadonlyArray<A> | Response => {
-  const top = integerQuery(request, '$top', 1, maxTop)
+  const top = requiredTop(request, maxTop)
 
   if (top instanceof Response) return top
-
-  if (top === undefined) {
-    return notEmulated(request, 'requests without $top are not emulated on this collection.')
-  }
 
   return items.length > top
     ? notEmulated(
