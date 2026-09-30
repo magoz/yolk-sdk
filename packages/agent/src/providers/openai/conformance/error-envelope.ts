@@ -5,7 +5,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * with an unknown model id (404, `model_not_found`).
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:openai --live --account <label>`.
+ * replaces it. Regenerate with `pnpm conformance:openai --live --owner-approved --account <label>`.
  */
 export const openAiChatErrorEnvelopeFixture: WireFixture = {
   id: 'openai.chat.stream.error-envelope.synthetic',
@@ -15,7 +15,7 @@ export const openAiChatErrorEnvelopeFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://api.openai.com/v1/chat/completions',
   model: 'yolk-conformance-model-does-not-exist',
-  note: 'Synthetic placeholder for a non-2xx OpenAI error envelope returned for an unknown model id. Not recorded from a live service; replace with a verified recording from pnpm conformance:openai --live --account <label>.',
+  note: 'Synthetic placeholder for a non-2xx OpenAI error envelope returned for an unknown model id. Not recorded from a live service; replace with a verified recording from pnpm conformance:openai --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

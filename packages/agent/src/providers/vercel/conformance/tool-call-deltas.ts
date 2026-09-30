@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Streamed tool call whose JSON arguments arrive as `delta.tool_calls` fragments that assemble into one call.
  *
  * Verified recording (2026-09-30). Regenerate with
- * `pnpm conformance:gateway --live --account <label>`.
+ * `pnpm conformance:gateway --live --owner-approved --account <label>`.
  */
 export const vercelAiGatewayToolCallDeltasFixture: WireFixture = {
   id: 'vercel-ai-gateway.stream.tool-call-deltas.recorded',

@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Non-2xx JSON error envelope for a request with an invalid model id.
  *
  * Verified recording (2026-09-30). Regenerate with
- * `pnpm conformance:gateway --live --account <label>`.
+ * `pnpm conformance:gateway --live --owner-approved --account <label>`.
  */
 export const vercelAiGatewayErrorEnvelopeFixture: WireFixture = {
   id: 'vercel-ai-gateway.stream.error-envelope.recorded',

@@ -23,22 +23,30 @@ import {
   casesWithoutSingleFixture,
   defaultProbeOptions,
   dryRunReport,
+  gatewayApiKeyEnv,
   gatewayFixtureModuleFor,
   gatewayFixtureModules,
   gatewayFixtureNote,
   gatewayJsonRedactions,
   liveAccountRequiredMessage,
+  liveInCiMessage,
+  ownerApprovalRequiredMessage,
   parseProbeArgs,
   planGatewayProbe,
   redactJsonFields,
   redactRecording,
   renderFixtureModule,
+  runLive,
   unredactedJsonFields,
   verifyGatewayFixtures,
   writeVerifiedFixtures,
   type FixtureWriter,
-  type RecordedGatewayFixture
+  type LiveProbeIo,
+  type ProbeOptions,
+  type RecordedGatewayFixture,
+  defaultLiveProbeIo
 } from '../record-gateway-fixtures.ts'
+import type { ProbeEnv } from '../fixture-probe-internal.ts'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -73,12 +81,13 @@ describe('record-gateway-fixtures arguments', () => {
   })
 
   it('requires an explicit --account label with --live', () => {
-    expect(() => parseProbeArgs(['--live'])).toThrow(liveAccountRequiredMessage)
-    expect(() => parseProbeArgs(['--live', '--plain-model', 'vendor/plain'])).toThrow(
-      '--live requires --account <label>'
-    )
-    expect(parseProbeArgs(['--live', '--account', 'synthetic'])).toMatchObject({
+    expect(() => parseProbeArgs(['--live', '--owner-approved'])).toThrow(liveAccountRequiredMessage)
+    expect(() =>
+      parseProbeArgs(['--live', '--owner-approved', '--plain-model', 'vendor/plain'])
+    ).toThrow('--live requires --account <label>')
+    expect(parseProbeArgs(['--live', '--owner-approved', '--account', 'synthetic'])).toMatchObject({
       live: true,
+      ownerApproved: true,
       account: 'synthetic'
     })
     // Dry runs and help do not need a label.
@@ -100,12 +109,14 @@ describe('record-gateway-fixtures arguments', () => {
       '256',
       '--reasoning-effort',
       'high',
-      '--account=synthetic'
+      '--account=synthetic',
+      '--owner-approved'
     ])
 
     expect(options).toEqual({
       live: true,
       help: false,
+      ownerApproved: true,
       models: {
         plainText: 'vendor/plain',
         reasoning: 'vendor/thinker',
@@ -130,6 +141,118 @@ describe('record-gateway-fixtures arguments', () => {
     expect(() => parseProbeArgs(['--tool-model'])).toThrow('requires a value')
     expect(() => parseProbeArgs(['--max-tokens=0'])).toThrow('positive integer')
     expect(() => parseProbeArgs(['--reasoning-effort=extreme'])).toThrow('must be one of')
+  })
+})
+
+describe('record-gateway-fixtures owner-approval and CI gates', () => {
+  const liveArgs = ['--live', '--owner-approved', '--account', 'synthetic']
+
+  it('refuses --live without --owner-approved', () => {
+    expect(() => parseProbeArgs(['--live', '--account', 'synthetic'])).toThrow(
+      ownerApprovalRequiredMessage
+    )
+    expect(() => parseProbeArgs(['--live'])).toThrow(ownerApprovalRequiredMessage)
+    expect(ownerApprovalRequiredMessage).toContain('--live requires --owner-approved')
+  })
+
+  it('refuses --live whenever CI is non-empty, CI=0 and CI=false included', () => {
+    for (const CI of ['1', '0', 'false', 'true']) {
+      expect(() => parseProbeArgs(liveArgs, { CI })).toThrow(liveInCiMessage)
+      // The CI refusal comes first, whatever else is missing.
+      expect(() => parseProbeArgs(['--live'], { CI })).toThrow(liveInCiMessage)
+    }
+
+    expect(parseProbeArgs(liveArgs, {})).toMatchObject({ live: true, ownerApproved: true })
+    expect(parseProbeArgs(liveArgs, { CI: '' }).live).toBe(true)
+  })
+
+  it('dry-runs without --owner-approved or --account, even in CI', () => {
+    for (const CI of ['1', '0', 'false']) {
+      expect(parseProbeArgs([], { CI })).toEqual(defaultProbeOptions)
+      expect(parseProbeArgs(['--account=synthetic'], { CI }).live).toBe(false)
+    }
+
+    expect(parseProbeArgs(['--live', '--help'], { CI: '1' }).help).toBe(true)
+    expect(dryRunReport(defaultProbeOptions)).toContain(
+      'no credential was read. Pass --live --owner-approved --account <label> to record'
+    )
+  })
+})
+
+describe('record-gateway-fixtures live gates', () => {
+  const approved: ProbeOptions = {
+    ...defaultProbeOptions,
+    live: true,
+    ownerApproved: true,
+    account: 'synthetic'
+  }
+
+  // Credential reads and writes are recorded and fail the run, so a gate that did not refuse first
+  // shows up both in `reads` and in the failure message.
+  const guardedIo = (env: ProbeEnv, credential?: string) => {
+    const reads: Array<string> = []
+
+    const io: LiveProbeIo = {
+      env,
+      readCredential: name => {
+        reads.push(name)
+
+        if (credential === undefined) throw new Error('credential was read')
+
+        return credential
+      },
+      writer: {
+        writeFile: path => {
+          throw new Error(`wrote ${path}`)
+        },
+        formatFiles: paths => {
+          throw new Error(`formatted ${paths.join(', ')}`)
+        }
+      }
+    }
+
+    return { reads, io }
+  }
+
+  const failureOf = async (options: ProbeOptions, io: LiveProbeIo): Promise<string> => {
+    const exit = await Effect.runPromiseExit(runLive(options, io))
+
+    return Exit.isFailure(exit) ? String(Cause.squash(exit.cause)) : 'the live run succeeded'
+  }
+
+  it('refuses a live run without owner approval before reading any credential', async () => {
+    const { reads, io } = guardedIo({})
+
+    expect(await failureOf({ ...approved, ownerApproved: false }, io)).toContain(
+      ownerApprovalRequiredMessage
+    )
+    expect(reads).toEqual([])
+  })
+
+  it('refuses a live run when CI is 1, 0, or false before reading any credential', async () => {
+    for (const CI of ['1', '0', 'false']) {
+      const { reads, io } = guardedIo({ CI })
+
+      expect(await failureOf(approved, io)).toContain(liveInCiMessage)
+      expect(reads).toEqual([])
+    }
+  })
+
+  it('refuses a live run without an account label before reading any credential', async () => {
+    const { reads, io } = guardedIo({ CI: '' })
+
+    expect(await failureOf({ ...approved, account: undefined }, io)).toContain(
+      liveAccountRequiredMessage
+    )
+    expect(reads).toEqual([])
+  })
+
+  it('reads the credential only after every gate passes (an empty one stops the run)', async () => {
+    const { reads, io } = guardedIo({ CI: '' }, '')
+
+    expect(await failureOf(approved, io)).toContain(`${gatewayApiKeyEnv} is required for --live`)
+    expect(reads).toEqual([gatewayApiKeyEnv])
+    expect(gatewayApiKeyEnv).toBe('AI_GATEWAY_API_KEY')
   })
 })
 
@@ -213,7 +336,7 @@ describe('record-gateway-fixtures plan', () => {
     expect(source).toContain('export const vercelAiGatewayPlainTextFixture: WireFixture = {')
     expect(source).toContain(`"caseId": "${vercelAiGatewayPlainTextFixture.caseId}"`)
     expect(source).toContain(
-      'Regenerate with\n * `pnpm conformance:gateway --live --account <label>`.'
+      'Regenerate with\n * `pnpm conformance:gateway --live --owner-approved --account <label>`.'
     )
   })
 })
@@ -377,9 +500,14 @@ describe('record-gateway-fixtures redaction', () => {
     )
     expect(withSession.length).toBeGreaterThan(0)
 
+    // The committed recordings predate --owner-approved: their notes record the command actually
+    // run, so they match the generated note without the flag.
     for (const fixture of vercelAiGatewayConformanceFixtures) {
       expect(fixture.note).toBe(
-        gatewayFixtureNote(withSession.includes(fixture) ? ['clientSessionId'] : [])
+        gatewayFixtureNote(withSession.includes(fixture) ? ['clientSessionId'] : []).replace(
+          ' --live --owner-approved.',
+          ' --live.'
+        )
       )
     }
 
@@ -685,5 +813,54 @@ describe('record-gateway-fixtures CLI', () => {
     for (const caseId of caseIds) {
       expect(result.stdout).toContain(caseId)
     }
+  })
+
+  const runProbeCli = (args: ReadonlyArray<string>, env: Readonly<Record<string, string>>) =>
+    new Promise<{ failed: boolean; stdout: string; stderr: string }>(resolvePromise => {
+      execFile(
+        process.execPath,
+        [tsxCli, probeScript, ...args],
+        { cwd: repoRoot, env: { ...process.env, CI: '', AI_GATEWAY_API_KEY: '', ...env } },
+        (error, stdout, stderr) => {
+          resolvePromise({ failed: error !== null, stdout: String(stdout), stderr: String(stderr) })
+        }
+      )
+    })
+
+  it('refuses --live without --owner-approved', async () => {
+    const result = await runProbeCli(['--live', '--account', 'synthetic'], {})
+
+    expect(result.failed).toBe(true)
+    expect(result.stderr).toContain(ownerApprovalRequiredMessage)
+  })
+
+  it('refuses --live when CI is 1, 0, or false', async () => {
+    for (const CI of ['1', '0', 'false']) {
+      const result = await runProbeCli(['--live', '--owner-approved', '--account', 'synthetic'], {
+        CI
+      })
+
+      expect(result.failed).toBe(true)
+      expect(result.stderr).toContain(liveInCiMessage)
+    }
+  })
+
+  it('dry-runs in CI without --owner-approved', async () => {
+    const result = await runProbeCli([], { CI: '1' })
+
+    expect(result.failed).toBe(false)
+    expect(result.stdout).toContain(
+      'DRY RUN: no network request was made and no credential was read'
+    )
+  })
+})
+
+describe('generated fixture note', () => {
+  it('names the owner-approved live command', () => {
+    expect(gatewayFixtureNote([])).toContain('pnpm conformance:gateway --live --owner-approved')
+  })
+
+  it('keeps the CLI and live defaults on the real environment', () => {
+    expect(defaultLiveProbeIo.env).toBe(process.env)
   })
 })

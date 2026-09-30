@@ -5,7 +5,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * the assistant message, a `stop` finish reason, and usage.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:openai --live --account <label>`.
+ * replaces it. Regenerate with `pnpm conformance:openai --live --owner-approved --account <label>`.
  */
 export const openAiChatJsonPlainTextFixture: WireFixture = {
   id: 'openai.chat.json.plain-text.synthetic',
@@ -15,7 +15,7 @@ export const openAiChatJsonPlainTextFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://api.openai.com/v1/chat/completions',
   model: 'gpt-4.1-nano',
-  note: 'Synthetic placeholder shaped like an OpenAI chat.completion JSON body. Not recorded from a live service; replace with a verified recording from pnpm conformance:openai --live --account <label>.',
+  note: 'Synthetic placeholder shaped like an OpenAI chat.completion JSON body. Not recorded from a live service; replace with a verified recording from pnpm conformance:openai --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {
