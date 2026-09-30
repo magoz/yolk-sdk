@@ -92,14 +92,19 @@ which are exactly the SigV4 entries of the frozen `syntheticPortCredentialParams
 `@yolk-sdk/conformance/fixture` (one source: the R2 constants are read from it). Run **both** scans
 on every R2 fixture:
 
-- The shared `scanPortFixtureForSecrets` refuses every credential query parameter in a JSON string,
-  the note, or the failure message, each judged on its own, unless its whole percent-decoded value
-  is exactly the placeholder for that parameter name (a placeholder with anything appended, under
-  another parameter such as `token=`, or with another date or region is refused), and any
-  `accessKeyId`, `secretAccessKey`, or `sessionToken` field.
-- `findR2PortFixtureSecrets` adds what the shared scan cannot see: percent-encoded parameters and
-  HTML-escaped ones (`&amp;X-Amz-Credential=`, for example in an S3 XML error echoed in a message),
-  with the same exact placeholders.
+- The shared `scanPortFixtureForSecrets` finds every credential query parameter in a JSON string,
+  the note, or the failure message on its own, and refuses it unless its whole raw value (up to
+  `&`, `#`, whitespace, `"`, `<`, `>`, or the end; a raw `?` or `'` and encoded delimiters such as
+  `%3F`, `%26`, `%23`, or `%20` stay inside it), percent-decoded, is exactly the placeholder for
+  that parameter name. A placeholder with anything appended inside the value, under another
+  parameter such as `token=`, or with another date or region is refused; text after a boundary is
+  not part of the value and is judged on its own. It also refuses any `accessKeyId`,
+  `secretAccessKey`, or `sessionToken` field.
+- `findR2PortFixtureSecrets` adds what the shared scan cannot see: names that are percent-encoded
+  (once or twice) or follow an HTML escape (`&amp;X-Amz-Credential=`, for example in an S3 XML error
+  echoed in a message). It applies the same rule to the whole raw value, so
+  `X%2DAmz%2DSignature=yolk-synthetic-signature%3F…` is refused, and a fully percent-encoded URL is
+  refused as a whole (its `&` is `%26`, so the rest of the URL is one value).
 
 `scrubR2PortFixture` rewrites a fixture recorded from a live host before a person promotes it: it
 removes credential fields and rewrites every presigned URL in the request, the response, the note,

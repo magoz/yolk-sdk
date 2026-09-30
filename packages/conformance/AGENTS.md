@@ -45,15 +45,19 @@ There is no root export or barrel.
   name at any depth, AWS-style `accessKeyId` / `secretAccessKey` / `sessionToken` included);
   `scanPortFixtureForSecrets` flags the token patterns, credential fields, any non-null
   `credential(s)` field, and credential query/form parameters inside every JSON string value, the
-  note, and the failure message (signed URLs), judging every `name=` on its own (a value ends at
-  whitespace, a quote, `<`, `>`, `?`, `#`, or `&`, so one value never hides a later parameter). Its
-  only exemption is an EXACT, whole, percent-decoded value from the frozen
-  `syntheticPortCredentialParams` under its own parameter name (today the SigV4
-  `x-amz-signature` / `x-amz-credential` placeholders the R2 fixtures use); a suffix, another
-  parameter name, or another scope is flagged. `scanFixtureForSecrets` exempts nothing. Never add a
-  prefix rule, and never build a placeholder by prefixing or suffixing a real value. Escaped parameters (`&amp;`, percent-encoded names) are
-  not found by the shared scans; port owners that can meet them add their own check (R2:
-  `findR2PortFixtureSecrets`). Replaying port fixtures belongs to the port owner (for
+  note, and the failure message (signed URLs). It finds every `[?&]name=` (or `name=` at the start)
+  on its own, without consuming the value, so no later occurrence is skipped. Its only exemption:
+  the RAW value, taken up to a structural boundary only (`&`, `#`, whitespace, `"`, `<`, `>`,
+  or the end; a raw `?` or `'` and encoded delimiters such as `%3F`, `%26`, `%23`, `%20` stay inside),
+  percent-decoded (up to three layers), EXACTLY equals that parameter's entry in the frozen
+  `syntheticPortCredentialParams` (today the SigV4 `x-amz-signature` / `x-amz-credential`
+  placeholders the R2 fixtures use). Anything else inside the value, another parameter name, or
+  another scope is flagged; text after a boundary is not part of the value and is judged on its
+  own. `scanFixtureForSecrets` exempts nothing and keeps main's pattern. Never add a prefix rule,
+  and never build a placeholder by prefixing or suffixing a real value. Parameters with escaped
+  names (`&amp;` before them, percent-encoded names) are not found by the shared scans; port owners
+  that can meet them add their own check (R2: `findR2PortFixtureSecrets`, which applies the same
+  value rule to raw or encoded names). Replaying port fixtures belongs to the port owner (for
   example the connectors email bridge), not this package. `WireFixture` and HTTP replay are
   unchanged.
 - Recording is lossless: `body` (valid UTF-8) or `bodyBase64`; stream `chunks` entries are strings

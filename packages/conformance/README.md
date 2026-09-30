@@ -88,15 +88,17 @@ date }` records the live observation and makes it `verified` as of that date
 `scanPortFixtureForSecrets` before committing: it applies the same token patterns and
 credential-field scan as `scanFixtureForSecrets`, flags any non-null `credential(s)` field, and
 flags credential query or form parameters inside every JSON string value, the note, and the failure
-message (a signed URL such as an S3 presigned URL), judging every `name=` on its own: a value ends
-at whitespace, a quote, `<`, `>`, `?`, `#`, or `&`, so one value never hides a later parameter in
-the same text. The port scan's only exemption is an exact, whole, percent-decoded value from the
-frozen `syntheticPortCredentialParams` under its own parameter name (the SigV4 `x-amz-signature` and
-`x-amz-credential` placeholders); anything appended, another parameter name, or another scope is
-flagged, and `scanFixtureForSecrets` exempts nothing. Parameters escaped inside a string (`&amp;`,
-percent-encoded names) are not found: port owners that can meet them check them themselves. Replaying port fixtures is
-up to the port's owner (the email bridge ships `makeEmailReplayBackend`); the runner accepts
-`PortFixture`s next to `WireFixture`s for its fixture warnings.
+message (a signed URL such as an S3 presigned URL). Every `name=` is found on its own, so no later
+parameter is skipped. The port scan's only exemption: the raw value, up to a structural boundary
+(`&`, `#`, whitespace, `"`, `<`, `>`, or the end; a raw `?` or `'` and encoded delimiters such as
+`%3F`, `%26`, `%23`, `%20` stay inside), percent-decoded, exactly equals that parameter's entry in
+the frozen `syntheticPortCredentialParams` (the SigV4 `x-amz-signature` and `x-amz-credential`
+placeholders). Anything else inside the value, another parameter name, or another scope is flagged;
+`scanFixtureForSecrets` exempts nothing. A placeholder written by hand in prose and followed by `.`,
+`,`, or `)` is flagged too (fail-closed). Parameters with escaped names (`&amp;` before them,
+percent-encoded names) are not found: port owners that can meet them check them themselves.
+Replaying port fixtures is up to the port's owner (the email bridge ships `makeEmailReplayBackend`);
+the runner accepts `PortFixture`s next to `WireFixture`s for its fixture warnings.
 
 ## Replay
 

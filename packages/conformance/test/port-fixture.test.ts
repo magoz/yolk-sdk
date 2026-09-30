@@ -284,7 +284,7 @@ describe('scanPortFixtureForSecrets', () => {
       )
     }
 
-    // A `?` inside a value ends it too, so the second query string is judged separately.
+    // A raw `?` stays inside the value, and the later `?X-Amz-Signature=` is found on its own too.
     expect(scanUploadUrl(`${signedUrl}?X-Amz-Signature=a1b2c3d4e5f6`)).toEqual(
       flaggedAt('response.uploadUrl')
     )
@@ -298,6 +298,56 @@ describe('scanPortFixtureForSecrets', () => {
         }
       })
     ).toEqual(flaggedAt('failure.message'))
+  })
+
+  const withSignatureSuffix = (suffix: string) =>
+    signedUrl.replace(`X-Amz-Signature=${signature}`, `X-Amz-Signature=${signature}${suffix}`)
+
+  it('keeps a raw `?` and every encoded delimiter inside the value: never exact', () => {
+    for (const suffix of [
+      '?0123abcdef0123abcdef',
+      '%3F0123abcdef',
+      '%260123abcdef',
+      '%23x',
+      '%20x'
+    ]) {
+      expect(scanUploadUrl(withSignatureSuffix(suffix)), suffix).toEqual(
+        flaggedAt('response.uploadUrl')
+      )
+    }
+
+    expect(scanUploadUrl(withSignatureSuffix(`?X-Amz-Signature=a1b2c3d4e5f6`))).toEqual(
+      flaggedAt('response.uploadUrl')
+    )
+  })
+
+  it('ends a value only where a URL query value cannot continue: `&`, `#`, whitespace, `"`, `<`, `>`', () => {
+    // After a boundary the text is not part of the value: an exact placeholder stays exempt, and
+    // what follows is judged on its own (a later credential parameter is still flagged).
+    for (const suffix of ['>x', '"x', ' x', '<x', '&other=1', '#section']) {
+      expect(scanUploadUrl(withSignatureSuffix(suffix)), suffix).toEqual([])
+    }
+
+    // `'` is legal raw inside a query value (RFC 3986), so it continues the value: not exact.
+    expect(scanUploadUrl(withSignatureSuffix("'x")), "'x").toEqual(flaggedAt('response.uploadUrl'))
+
+    for (const suffix of ["'x?token=live-value", '>x&token=live-value']) {
+      expect(scanUploadUrl(withSignatureSuffix(suffix)), suffix).toEqual(
+        flaggedAt('response.uploadUrl')
+      )
+    }
+  })
+
+  it('flags a credential name with an empty value followed by anything but `&` or `#`', () => {
+    for (const query of ['token="x"', 'token= x', 'token=?', "token='x'"]) {
+      expect(scanUploadUrl(`https://storage.example.test/b/k?${query}`), query).toEqual(
+        flaggedAt('response.uploadUrl')
+      )
+    }
+
+    for (const query of ['token=&page=2', 'token=#top']) {
+      expect(scanUploadUrl(`https://storage.example.test/b/k?${query}`), query).toEqual([])
+    }
   })
 
   it('never exempts a placeholder under another parameter name, or a look-alike password', () => {

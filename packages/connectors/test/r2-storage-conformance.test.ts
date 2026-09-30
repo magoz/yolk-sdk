@@ -763,7 +763,12 @@ describe('R2 presigned URL guard', () => {
     )
 
     expect(scanPortFixtureForSecrets(encoded)).toEqual([])
-    expect(findR2PortFixtureSecrets(encoded)).toEqual(['failure.message: a live X-Amz-Signature'])
+    // Fully encoded, the whole rest of the URL is one raw value (its `&` is `%26`), so even the
+    // placeholder credential before the live signature is refused: fail closed.
+    expect(findR2PortFixtureSecrets(encoded)).toEqual([
+      'failure.message: a live X-Amz-Credential',
+      'failure.message: a live X-Amz-Signature'
+    ])
   })
 
   it('refuses placeholders with anything appended, in both scans', () => {
@@ -784,6 +789,66 @@ describe('R2 presigned URL guard', () => {
       ])
       expect(findR2PortFixtureSecrets(fixture), uploadUrl).toHaveLength(1)
     }
+  })
+
+  /** Both promotion scans on one presign answer, as a person promoting a recording runs them. */
+  const bothScans = (uploadUrl: string) => {
+    const fixture = answering({ uploadUrl })(fixtureById(presignId))
+
+    return {
+      shared: scanPortFixtureForSecrets(fixture).map(issue => issue.location),
+      r2: findR2PortFixtureSecrets(fixture)
+    }
+  }
+
+  const signatureParam = `X-Amz-Signature=${r2ConformanceSyntheticSignature}`
+
+  it("refuses a placeholder followed by a raw `?` or `'`; `>` ends the value", () => {
+    expect(bothScans(presignedUrl.replace(signatureParam, `${signatureParam}?0123abcdef`))).toEqual(
+      {
+        shared: ['response.uploadUrl'],
+        r2: ['response.uploadUrl: a live X-Amz-Signature']
+      }
+    )
+
+    // `'` is legal raw inside a query value (RFC 3986), so it continues the value.
+    expect(bothScans(presignedUrl.replace(signatureParam, `${signatureParam}'x`))).toEqual({
+      shared: ['response.uploadUrl'],
+      r2: ['response.uploadUrl: a live X-Amz-Signature']
+    })
+    expect(bothScans(presignedUrl.replace(signatureParam, `${signatureParam}>x`))).toEqual({
+      shared: [],
+      r2: []
+    })
+  })
+
+  it('refuses an encoded name whose placeholder value carries an encoded delimiter', () => {
+    const encodedName = 'X%2DAmz%2DSignature'
+
+    for (const suffix of ['%3F0123456789abcdef', '%260123456789abcdef', '%23x', '%20x']) {
+      const uploadUrl = `https://storage.example.test/b/k?${encodedName}=${r2ConformanceSyntheticSignature}${suffix}`
+
+      // The shared scan cannot read an encoded name; the R2 guard reads the whole raw value.
+      expect(bothScans(uploadUrl), suffix).toEqual({
+        shared: [],
+        r2: ['response.uploadUrl: a live X-Amz-Signature']
+      })
+    }
+
+    // The same name with the exact placeholder is accepted.
+    expect(
+      bothScans(
+        `https://storage.example.test/b/k?${encodedName}=${r2ConformanceSyntheticSignature}&x-id=PutObject`
+      )
+    ).toEqual({ shared: [], r2: [] })
+  })
+
+  it('accepts a clean placeholder followed by another parameter, and refuses a later live one', () => {
+    expect(bothScans(`${presignedUrl}&other=1`)).toEqual({ shared: [], r2: [] })
+    expect(bothScans(`${presignedUrl}?X-Amz-Signature=${liveSignature}`)).toEqual({
+      shared: ['response.uploadUrl'],
+      r2: ['response.uploadUrl: a live X-Amz-Signature']
+    })
   })
 
   it('refuses a live URL that follows the synthetic one in the same string', () => {

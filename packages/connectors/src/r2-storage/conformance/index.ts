@@ -9,12 +9,13 @@
  * verification needs a host implementation of both ports connected to a practice bucket (the
  * connectors package ships no SigV4 signer or S3 client); no live runner ships here.
  *
- * The current fixtures are synthetic placeholders (no `observed`, so `unverified`). Presigned URLs
- * in them carry only `r2ConformanceSyntheticSignature` and `r2ConformanceSyntheticCredential`,
- * the exact SigV4 entries of the shared, frozen `syntheticPortCredentialParams`. Run both `scanPortFixtureForSecrets` and
- * `findR2PortFixtureSecrets` (escaped and percent-encoded parameters, exact placeholders) on every
- * fixture; `scrubR2PortFixture` rewrites a fixture recorded from a live host, except escaped URLs,
- * before a person promotes it.
+ * The current fixtures are synthetic placeholders (no `observed`, so `unverified`). Presigned
+ * URLs in them carry only `r2ConformanceSyntheticSignature` and
+ * `r2ConformanceSyntheticCredential`, the exact SigV4 entries of the shared, frozen
+ * `syntheticPortCredentialParams`. Run both `scanPortFixtureForSecrets` and
+ * `findR2PortFixtureSecrets` (raw or encoded names, whole raw values against the exact
+ * placeholders) on every fixture; `scrubR2PortFixture` rewrites a fixture recorded from a live
+ * host, except escaped URLs, before a person promotes it.
  *
  * @experimental
  */

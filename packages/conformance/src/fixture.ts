@@ -588,11 +588,12 @@ const scanPortJson = (value: Schema.Json, location: string, issues: IssueSink): 
  * `scanFixtureForSecrets`, plus any non-null `credential` / `credentials` field (port requests must
  * be recorded through `redactPortPayload`), plus credential query or form parameters inside every
  * JSON string value, `note`, and `failure.message` (a signed URL a port answered, such as an S3
- * presigned URL's `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token`), each
- * `name=` judged on its own (a value ends at whitespace, a quote, `<`, `>`, `?`, `#`, or `&`). The
- * only exemption is an exact value from `syntheticPortCredentialParams` under its own parameter
- * name. Parameters escaped inside the string (`&amp;`, percent-encoded names) are not found. Covers metadata, the request, the
- * response, and the failure. Issues name locations only. Returns an empty array when clean.
+ * presigned URL's `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token`), each `name=`
+ * found and judged on its own. The only exemption: the raw value, up to `&`, `#`, whitespace, `"`,
+ * `<`, `>`, or the end (never `?` or `'`), percent-decoded, exactly equals that name's entry in
+ * `syntheticPortCredentialParams`. Parameters with escaped names (`&amp;`, percent-encoded) are not
+ * found. Covers metadata, the request, the response, and the failure. Issues name locations only.
+ * Returns an empty array when clean.
  */
 export const scanPortFixtureForSecrets = (
   fixture: PortFixture

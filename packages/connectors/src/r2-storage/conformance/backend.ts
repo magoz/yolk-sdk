@@ -395,15 +395,45 @@ const percentDecoded = (text: string): string => {
   return current
 }
 
+/** `literal` as a case-insensitive pattern whose every character may also be `%XX` or `%25XX`. */
+const encodable = (literal: string): string =>
+  Array.from(literal, character => {
+    const hex = character.charCodeAt(0).toString(16).padStart(2, '0')
+    const plain = /[A-Za-z0-9]/.test(character) ? character : `\\${character}`
+
+    return `(?:${plain}|%${hex}|%25${hex})`
+  }).join('')
+
 /**
- * `name=value` `X-Amz-*` parameters in `text` (percent-decoded first), names lower-cased. A name
- * counts wherever no name character precedes it, so escaped forms such as `&amp;X-Amz-Credential=`
- * (an S3 XML error echoed in a message) are found too.
+ * Every `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token` name in `text`, raw or
+ * percent-encoded (once or twice), each followed by `=` (raw or encoded), wherever no name
+ * character precedes it (so `&amp;X-Amz-Credential=` in an echoed S3 XML error counts), or right
+ * after a `%XX` escape (an encoded `&` or `?`). Only the name and its `=` are matched: the value is
+ * never consumed, so every later occurrence is found on its own.
+ */
+const credentialNamesAt = new RegExp(
+  `(?:(?<![A-Za-z0-9_-])|(?<=%[0-9a-f]{2}))(${[signatureParam, credentialParam, sessionTokenParam]
+    .map(encodable)
+    .join('|')})${encodable('=')}`,
+  'gi'
+)
+
+/**
+ * `[name, value]` of every `X-Amz-*` credential parameter in `text`: the name decoded and
+ * lower-cased; the value taken RAW, up to a structural boundary only (`&`, `#`, whitespace, `"`,
+ * `<`, `>`, or the end; a raw `?` or `'` and encoded delimiters such as `%3F`, `%26`, `%23`, `%20`
+ * stay inside it), then percent-decoded as a whole. So only an exact whole value can match a
+ * placeholder.
  */
 const queryParams = (text: string): ReadonlyArray<readonly [string, string]> =>
-  [...percentDecoded(text).matchAll(/(?<![A-Za-z0-9_-])(x-amz-[a-z-]+)=([^&#?\s"'<>]*)/gi)].map(
-    match => [(match[1] ?? '').toLowerCase(), match[2] ?? ''] as const
-  )
+  [...text.matchAll(credentialNamesAt)].map(match => {
+    const start = match.index + match[0].length
+    const rest = text.slice(start)
+    const end = rest.search(/[&#\s"<>]/)
+    const raw = end === -1 ? rest : rest.slice(0, end)
+
+    return [percentDecoded(match[1] ?? '').toLowerCase(), percentDecoded(raw)] as const
+  })
 
 const isSyntheticCredential = (value: string) => value === r2ConformanceSyntheticCredential
 
@@ -446,11 +476,13 @@ const findingsIn = (value: Schema.Json, location: string): ReadonlyArray<string>
 
 /**
  * Why an R2 `PortFixture` may not be committed, beyond the shared `scanPortFixtureForSecrets` (run
- * both): every presigned-URL credential that is not the exact synthetic placeholder (an
- * `X-Amz-Signature` other than `r2ConformanceSyntheticSignature`, an `X-Amz-Credential` other than
- * the whole `r2ConformanceSyntheticCredential`, any `X-Amz-Security-Token`), raw,
- * percent-encoded, or HTML-escaped (`&amp;`), anywhere in the request, the response, the note, or
- * the failure message, as `location: finding` lines that never echo the value. Empty when clean.
+ * both): every `X-Amz-Signature`, `X-Amz-Credential`, or `X-Amz-Security-Token` whose name appears
+ * raw, percent-encoded, or after an HTML escape (`&amp;`), anywhere in the request, the response,
+ * the note, or the failure message, unless its whole raw value (up to `&`, `#`, whitespace, `"`,
+ * `<`, `>`, or the end; never `?`, `'`, or an encoded delimiter), percent-decoded, is exactly
+ * `r2ConformanceSyntheticSignature` or `r2ConformanceSyntheticCredential` for that name (a session
+ * token is always refused). Findings are `location: finding` lines that never echo the value.
+ * Empty when clean.
  */
 export const findR2PortFixtureSecrets = (fixture: PortFixture): ReadonlyArray<string> => [
   ...findingsIn(fixture.request, 'request'),
