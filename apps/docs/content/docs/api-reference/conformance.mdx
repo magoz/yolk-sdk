@@ -18,17 +18,21 @@ There is no root export. Import an explicit subpath.
 
 `@yolk-sdk/conformance/fixture`
 
-| Export                                                               | Purpose                                                                                                                                             |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WireFixture`                                                        | Schema and type: `id`, `caseId`, `evidence`, `recordedAt` (`YYYY-MM-DD`), `account`, `endpoint`, `model?`, `note?`, `exchanges`                     |
-| `WireExchange`, `WireRequest`, `WireResponse`                        | One request (method, absolute URL, allowlisted headers, JSON or text body) and its response                                                         |
-| `WireBodyResponse`, `WireTextBodyResponse`, `WireBase64BodyResponse` | Whole body: exactly one of `body` (valid UTF-8 string) or `bodyBase64` (exact bytes, for example a PDF)                                             |
-| `WireStreamResponse`, `WireChunk`                                    | Streamed `chunks` with original boundaries; each entry is a string (valid UTF-8 on its own, empty chunks `""`) or `{ base64 }` with the exact bytes |
-| `WireFixtureEvidence`, `WireHeaders`                                 | `verified` / `unverified`; lowercase header record                                                                                                  |
-| `decodeWireFixture`                                                  | Decode unknown input (for example a JSON file) into a fixture                                                                                       |
-| `isWireStreamResponse`, `isWireBase64BodyResponse`                   | Narrow a response to the streamed or base64 body shape                                                                                              |
-| `fixtureAgeDays`, `isFixtureStale`                                   | Whole UTC days since `recordedAt`; stale after `maxAgeDays` (default 30)                                                                            |
-| `scanFixtureForSecrets`, `FixtureSecretIssue`                        | Pure scan for credential headers, bearer tokens, API-key prefixes, JWTs, credential query/form params and JSON fields                               |
+| Export                                                                                                   | Purpose                                                                                                                                                             |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WireFixture`                                                                                            | Schema and type: `id`, `caseId`, `evidence`, `recordedAt` (`YYYY-MM-DD`), `account`, `endpoint`, `model?`, `note?`, `exchanges`                                     |
+| `WireExchange`, `WireRequest`, `WireResponse`                                                            | One request (method, absolute URL, allowlisted headers, JSON or text body) and its response                                                                         |
+| `WireBodyResponse`, `WireTextBodyResponse`, `WireBase64BodyResponse`                                     | Whole body: exactly one of `body` (valid UTF-8 string) or `bodyBase64` (exact bytes, for example a PDF)                                                             |
+| `WireStreamResponse`, `WireChunk`                                                                        | Streamed `chunks` with original boundaries; each entry is a string (valid UTF-8 on its own, empty chunks `""`) or `{ base64 }` with the exact bytes                 |
+| `WireFixtureEvidence`, `WireHeaders`                                                                     | `verified` / `unverified`; lowercase header record                                                                                                                  |
+| `decodeWireFixture`                                                                                      | Decode unknown input (for example a JSON file) into a fixture                                                                                                       |
+| `isWireStreamResponse`, `isWireBase64BodyResponse`                                                       | Narrow a response to the streamed or base64 body shape                                                                                                              |
+| `fixtureAgeDays`, `isFixtureStale`                                                                       | Whole UTC days since `recordedAt`; stale after `maxAgeDays` (default 30)                                                                                            |
+| `PortFixture`, `PortFailure`, `decodePortFixture`                                                        | One non-HTTP port call: `id`, `port`, `method`, credential-free JSON `request`, exactly one of `response` or `failure` (`expected` / `error`), `observed?`, `note?` |
+| `redactPortPayload`, `scanPortFixtureForSecrets`                                                         | Drop credential fields from a port payload; scan a port fixture (token patterns, credential fields, any non-null `credential(s)`)                                   |
+| `PortValueFixture`, `PortFailureFixture`, `isPortFixture`, `isPortFailureFixture`, `isPortCredentialKey` | The two port fixture branches, their narrowing helpers, and the credential-key predicate `redactPortPayload` uses                                                   |
+| `ConformanceFixture`, `conformanceFixtureEvidence`                                                       | `WireFixture \| PortFixture`; evidence and date (a port fixture is `verified` only with `observed`)                                                                 |
+| `scanFixtureForSecrets`, `FixtureSecretIssue`                                                            | Pure scan for credential headers, bearer tokens, API-key prefixes, JWTs, credential query/form params and JSON fields                                               |
 
 Fixtures must contain synthetic or scrubbed data only. The scan covers metadata strings, URLs,
 headers, request and response bodies (including decodable `bodyBase64` text), each chunk, and the
@@ -38,6 +42,13 @@ numeric usage counters such as `max_tokens` are not flagged. SSE framing with CR
 line endings is recognized. The scan errs toward flagging: a field named exactly `token` (for
 example an OpenAI `logprobs` entry) is flagged, so avoid recording logprobs. It reports locations,
 never secret values, and is a safety net rather than a guarantee.
+
+A `PortFixture` records one call through a host port that is not HTTP, such as the generic
+`EmailClient`. Without `observed` it is a synthetic placeholder (`unverified`, no date); with
+`observed: { account, date }` it is `verified` as of that date. Record requests through
+`redactPortPayload` and scan them with `scanPortFixtureForSecrets`. Replaying port fixtures belongs to
+the port owner (for example `makeEmailReplayBackend`); the runner accepts both fixture kinds for its
+fixture warnings.
 
 ## Replay
 
@@ -130,7 +141,7 @@ in a later drain.
 | Export                                               | Purpose                                                                                                                                                 |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `runConformance(cases, options)`                     | `Effect<ConformanceReport, never, LR>`; runs allowed cases one at a time by default, each with a freshly built `options.layer(case)`                    |
-| `ConformanceRunOptions`                              | `target`, `layer`, `fixtures?`, `now?` (default `Clock`), `maxFixtureAgeDays?` (default 30), `concurrency?` (default 1)                                 |
+| `ConformanceRunOptions`                              | `target`, `layer`, `fixtures?` (wire or port), `now?` (default `Clock`), `maxFixtureAgeDays?` (default 30), `concurrency?` (default 1)                  |
 | `ConformanceTarget`                                  | `replay`, `in-process`, `emulated`, or `live` with `account`, `allowWrites?` (`none` default / `reversible`), and `allowIrreversible?` (exact ids)      |
 | `conformanceSkipReason`                              | The safety policy: `undefined` (runs), `writes-not-allowed`, or `manual-only`                                                                           |
 | `conformanceCaseWarnings`, `ConformanceWarning`      | `unverified-case`, `stale-observation`, `unverified-fixture`, `stale-fixture`, `missing-fixture`                                                        |
@@ -334,3 +345,14 @@ recoverable, failing with `MicrosoftConformanceRestoreFailed` when the removal f
 returns no id. An ambiguous create (transport or decoding failure, no status, or HTTP 5xx) fails
 with `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry
 manual-recovery advice. The create is not interruptible and the runner has no request timeout. See [Microsoft conformance cases](../connectors/microsoft#conformance-cases).
+
+`@yolk-sdk/connectors/email/conformance` exports ten port-level email cases
+(`emailConformanceCases`), their synthetic `PortFixture`s (`emailConformanceFixtures`), and the seeds
+they replay with (`emailConformanceFixtureSeeds`). Yolk never speaks IMAP, POP3, or SMTP: the cases
+run the real email actions over the host `EmailClient`, `CredentialResolver`, and
+`EmailConformanceConfig`. `emailClientLayerFromBackend` turns any plain-JSON backend
+`{ call(method, request) }` into the `EmailClient` layer (requests arrive without credential fields;
+responses are decoded with each method's output schema; `notEmulated` fails closed), and
+`makeEmailReplayBackend` replays the fixtures: each fixture answers at most once, and a call takes
+the first unused matching fixture. Testing only, never a production
+adapter. See [Email conformance cases](../connectors/email#conformance-cases).

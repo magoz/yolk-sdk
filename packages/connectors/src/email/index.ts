@@ -735,7 +735,8 @@ export type EmailClientApi = {
   /**
    * Hosts MUST return the RFC 5322 message headers as `headers`: IMAP via `BODY.PEEK[HEADER]`,
    * POP3 via `TOP`. Return an empty array only when the server response contains no headers;
-   * never omit headers to save a fetch.
+   * never omit headers to save a fetch. An id that addresses no message in the folder answers
+   * `ActionResult.failure` with code `message_not_found` (the conformance cases rely on it).
    */
   readonly getMessage: (
     input: EmailGetMessageRequest

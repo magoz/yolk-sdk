@@ -50,6 +50,10 @@
       "types": "./src/email/index.ts",
       "default": "./src/email/index.ts"
     },
+    "./email/conformance": {
+      "types": "./src/email/conformance/index.ts",
+      "default": "./src/email/conformance/index.ts"
+    },
     "./figma": {
       "types": "./src/figma/index.ts",
       "default": "./src/figma/index.ts"
@@ -140,6 +144,11 @@
         "types": "./dist/email/index.d.mts",
         "import": "./dist/email/index.mjs",
         "default": "./dist/email/index.mjs"
+      },
+      "./email/conformance": {
+        "types": "./dist/email/conformance/index.d.mts",
+        "import": "./dist/email/conformance/index.mjs",
+        "default": "./dist/email/conformance/index.mjs"
       },
       "./figma": {
         "types": "./dist/figma/index.d.mts",

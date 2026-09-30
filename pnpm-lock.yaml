@@ -429,6 +429,9 @@ importers:
       '@yolk-sdk/conformance':
         specifier: workspace:^
         version: link:../conformance
+      '@yolk-sdk/connectors':
+        specifier: workspace:^
+        version: link:../connectors
 
   packages/harness:
     dependencies:

@@ -216,6 +216,11 @@ const rules: ReadonlyArray<BoundaryRule> = [
     excludedDirs: ['packages/connectors/src/agent.ts']
   },
   {
+    // Connectors never depend on emulators: emulators follow connector fixtures, never the reverse.
+    packageDir: 'packages/connectors/src',
+    forbiddenImports: ['@yolk-sdk/emulators']
+  },
+  {
     packageDir: 'packages/emulators/src',
     forbiddenImports: emulatorsForbiddenImports
   },

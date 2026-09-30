@@ -11,7 +11,7 @@
  */
 import { Cause, Clock, Effect, Exit, Option, Predicate, type Layer } from 'effect'
 import { ConformanceMismatch, type ConformanceCase, type ConformanceSafety } from './case.ts'
-import { fixtureAgeDays, type WireFixture } from './fixture.ts'
+import { conformanceFixtureEvidence, fixtureAgeDays, type ConformanceFixture } from './fixture.ts'
 import { redactCredentialText } from './wire-internal.ts'
 
 /**
@@ -68,7 +68,7 @@ export type ConformanceWarning =
   | { readonly kind: 'unverified-case' }
   /** `observed.date` is older than the max age (`ageDays` absent when unreadable). */
   | { readonly kind: 'stale-observation'; readonly ageDays?: number }
-  /** A referenced fixture is a synthetic placeholder (`evidence: 'unverified'`). */
+  /** A referenced fixture is a synthetic placeholder (`evidence: 'unverified'`, or a `PortFixture` without `observed`). */
   | { readonly kind: 'unverified-fixture'; readonly fixtureId: string }
   /** A referenced fixture is older than the max age (`ageDays` absent when unreadable). */
   | { readonly kind: 'stale-fixture'; readonly fixtureId: string; readonly ageDays?: number }
@@ -126,8 +126,11 @@ export type ConformanceCaseRequirements<C> = C extends {
 
 type RunSettings = {
   readonly target: ConformanceTarget
-  /** Fixtures to check referenced ids against (evidence, staleness, missing ids). */
-  readonly fixtures?: ReadonlyArray<WireFixture>
+  /**
+   * Fixtures to check referenced ids against (evidence, staleness, missing ids): HTTP
+   * `WireFixture`s and `PortFixture`s alike.
+   */
+  readonly fixtures?: ReadonlyArray<ConformanceFixture>
   /** Reference time for staleness and `startedAt`. Defaults to the Effect `Clock`. */
   readonly now?: Date
   /** Fixtures and observations older than this many whole days are stale. Default 30. */
@@ -185,7 +188,7 @@ export const conformanceCaseWarnings = (
   context: {
     readonly target: ConformanceTarget
     readonly now: Date
-    readonly fixtures?: ReadonlyArray<WireFixture> | undefined
+    readonly fixtures?: ReadonlyArray<ConformanceFixture> | undefined
     readonly maxFixtureAgeDays?: number | undefined
   }
 ): ReadonlyArray<ConformanceWarning> => {
@@ -216,11 +219,14 @@ export const conformanceCaseWarnings = (
       continue
     }
 
-    if (fixture.evidence === 'unverified') {
+    const { evidence, date } = conformanceFixtureEvidence(fixture)
+
+    if (evidence === 'unverified') {
       warnings.push({ kind: 'unverified-fixture', fixtureId })
     }
 
-    const stale = staleAge(fixture.recordedAt, context.now, maxAgeDays)
+    // A synthetic `PortFixture` carries no date: it is unverified, not stale.
+    const stale = date === undefined ? Option.none() : staleAge(date, context.now, maxAgeDays)
 
     if (Option.isSome(stale)) {
       warnings.push(withAge({ kind: 'stale-fixture', fixtureId }, stale.value))

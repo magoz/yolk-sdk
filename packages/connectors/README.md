@@ -22,6 +22,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/conformance`           | Experimental, conformance/testing only: Effect `HttpClient` bridges to the HTTP ports and a static resolver   |
 | `@yolk-sdk/connectors/dropbox`               | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update     |
 | `@yolk-sdk/connectors/email`                 | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port    |
+| `@yolk-sdk/connectors/email/conformance`     | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge |
 | `@yolk-sdk/connectors/figma`                 | Figma remote MCP auth action and OAuth constants                                                              |
 | `@yolk-sdk/connectors/fortnox`               | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update |
 | `@yolk-sdk/connectors/fortnox/conformance`   | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                            |
@@ -349,6 +350,36 @@ messages. Hosts implement `modifyLabels` with UID-addressed `STORE` (`+FLAGS.SIL
 additions, `-FLAGS.SILENT` for removals), preserving all other keywords and system flags rather
 than overwriting the whole flags list. Hosts check `PERMANENTFLAGS` first and return a failure
 for unsupported keywords; a keyword listed in both inputs is removed.
+
+### Email conformance cases (experimental)
+
+`@yolk-sdk/connectors/email/conformance` exports ten port-level conformance cases for
+`@yolk-sdk/conformance/runner` (`emailConformanceCases`), their synthetic `PortFixture`s
+(`emailConformanceFixtures`; no `observed`, so `unverified`), and the seeds they replay with
+(`emailConformanceFixtureSeeds`). Yolk never speaks IMAP, POP3, or SMTP: each case runs the real
+email actions over the host `EmailClient` plus `CredentialResolver` and `EmailConformanceConfig`
+(practice-mailbox seeds; a missing seed fails with a `precondition:` mismatch before any port
+call). They cover required `get_message` headers without marking a message read, filtered listing
+without `listMessages` fallback, `\Drafts` discovery, `set_read`/`set_flag`, trash and untrash to
+INBOX, moves returning destination ids (the stale source id must answer the `message_not_found`
+failure code, `emailMessageNotFoundCode`), POP3 rejections of every mutation action, Sent-copy statuses (including the legacy
+`unsupported`/`skipped` synthesis), and SMTP acceptance that is not delivery. Case table:
+[Email conformance guide](../../apps/docs/content/docs/connectors/email.mdx#conformance-cases).
+
+The subpath also ships a small bridge for conformance and tests only: `emailClientLayerFromBackend`
+(and `emailClientFromBackend`) turn any plain-JSON backend `{ call(method, request) }` into the
+`EmailClient` port. Requests reach the backend as plain JSON without credential fields; a
+`response` is decoded with the method's output schema, a `failure` becomes an
+`ActionResult.failure` (`expected`) or a `ConnectorError` (`error`), and `notEmulated` fails closed
+with a `transport_failed` `ConnectorError`. `makeEmailReplayBackend(fixtures)` replays email
+`PortFixture`s (each fixture answers at most once; a call takes the first unused matching fixture; anything else is refused and ledgered), and the
+fixture-driven fake in `@yolk-sdk/emulators/email` plugs in the same way (connectors never depend on
+emulators). Neither is a production adapter. Write cases create their own `yolk-conformance`
+draft and permanently delete it again (or restore the seeded flags), failing with
+`EmailConformanceRestoreFailed` instead of hiding a failed restore; the three send cases are
+`write-irreversible` and run live only when started by id. Live verification needs a host
+`EmailClient` implementation connected to a practice mailbox; no live probe ships in this
+repository.
 
 ## Google connector
 

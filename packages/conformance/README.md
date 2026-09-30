@@ -23,7 +23,7 @@ There is no root export. Import an explicit subpath:
 
 | Subpath                         | Purpose                                                                                                                    |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/conformance/fixture` | `WireFixture` / `WireExchange` schemas and types, `decodeWireFixture`, staleness helpers, `scanFixtureForSecrets`          |
+| `@yolk-sdk/conformance/fixture` | `WireFixture` / `PortFixture` schemas and types, decoders, staleness helpers, secret scans, `redactPortPayload`            |
 | `@yolk-sdk/conformance/replay`  | `ReplayHttpClient.layer`, `makeReplayHttpClient`, `ReplayLedger`, `WireFault`                                              |
 | `@yolk-sdk/conformance/record`  | `WireRecorder.layer`, `makeRecordingHttpClient`, `makeWireFixture`                                                         |
 | `@yolk-sdk/conformance/case`    | `defineConformanceCase`, `ConformanceCase`, `ConformanceSafety`, `expectConformance`, `expectEqual`, `ConformanceMismatch` |
@@ -59,6 +59,35 @@ is a safety net, not a guarantee: review fixtures before publishing them.
 
 `fixtureAgeDays(fixture, now)` and `isFixtureStale(fixture, now, maxAgeDays = 30)` help hosts
 decide when a recording should be refreshed.
+
+### Port fixtures
+
+Some outside services are reached through a host-provided port rather than HTTP (for example the
+generic `EmailClient` port of `@yolk-sdk/connectors/email`, where the host speaks IMAP and SMTP).
+A `PortFixture` records one such call as plain JSON:
+
+```ts
+import type { PortFixture } from '@yolk-sdk/conformance/fixture'
+
+const listed: PortFixture = {
+  id: 'example.list.synthetic',
+  port: 'ExampleClient',
+  method: 'listItems',
+  request: { folder: 'INBOX', limit: 50 },
+  response: { items: [] }
+}
+```
+
+It carries exactly one of `response` (any JSON value) or `failure` (`{ kind: 'expected' | 'error',
+code, message, status? }`: `expected` is the port's value-level failure, `error` its typed error
+channel). Without `observed` it is a synthetic placeholder (`unverified`); `observed: { account,
+date }` records the live observation and makes it `verified` as of that date
+(`conformanceFixtureEvidence`). Record requests through `redactPortPayload`, which drops
+`credential(s)` and every credential field name at any depth, and run `scanPortFixtureForSecrets`
+before committing: it applies the same token patterns and credential-field scan as
+`scanFixtureForSecrets` and also flags any non-null `credential(s)` field. Replaying port fixtures is
+up to the port's owner (the email bridge ships `makeEmailReplayBackend`); the runner accepts
+`PortFixture`s next to `WireFixture`s for its fixture warnings.
 
 ## Replay
 

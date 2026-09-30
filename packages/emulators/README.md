@@ -9,7 +9,8 @@ Chat Completions wire: the Vercel AI Gateway and OpenAI itself. A third emulates
 and two more speak the OpenAI Responses wire of the subscription providers: the ChatGPT Codex
 endpoint and the xAI Grok CLI proxy. The OpenCode Go emulator answers the Go chat, Messages,
 Responses, and usage routes under one origin, and the Anthropic, Codex, and Grok emulators also
-answer their subscription-usage endpoints; those newer routes are fixture-only (see below).
+answer their subscription-usage endpoints; those newer routes are fixture-only (see below). One
+emulator is not HTTP at all: a fixture-driven fake backend for the generic `EmailClient` port.
 Emulators never import other `@yolk-sdk/*` code: their wire shapes follow conformance fixtures
 (verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
 names the conformance cases behind it.
@@ -35,6 +36,7 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/codex`     | `makeCodexEmulator`, `codexEmulatorRoutes`, fault and scripted-turn schemas (ChatGPT Codex Responses)       |
 | `@yolk-sdk/emulators/xai`       | `makeXAiGrokEmulator`, `xAiGrokEmulatorRoutes`, fault and scripted-turn schemas (Grok CLI proxy Responses)  |
 | `@yolk-sdk/emulators/opencode`  | `makeOpenCodeGoEmulator`, `openCodeGoEmulatorRoutes` (OpenCode Go chat, Messages, Responses, and usage)     |
+| `@yolk-sdk/emulators/email`     | `makeEmailEmulator`, `emailEmulatorRoutes`, seed and fault schemas (plain-JSON `EmailClient` backend)       |
 | `@yolk-sdk/emulators/node`      | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
 
 ## Routing
@@ -450,22 +452,83 @@ The ledger records `anthropic-beta` (Claude) and `x-grok-client-version` / `x-gr
 `xAiGrokSubscriptionUsageEmulatorRoutes`, and the usage route of `openCodeGoEmulatorRoutes` cite
 the usage snapshot cases of each vendor's conformance subpath.
 
+## Email emulator
+
+`makeEmailEmulator({ seed? })` is an in-memory fake backend for the generic `EmailClient` port of
+`@yolk-sdk/connectors/email`. Yolk never speaks IMAP, POP3, or SMTP, and neither does this
+emulator: there is no socket, TLS, MIME, or mail library, no Node builtin, and no SDK import. It is
+a plain object whose `call(method, request)` takes one port call as plain JSON (the request without
+credential fields) and answers `{ response }`, `{ failure }`, or `{ notEmulated: { reason } }`.
+`emailClientLayerFromBackend(emulator)` from `@yolk-sdk/connectors/email/conformance` turns it
+into the `EmailClient` layer, so the email conformance cases and your own tests run the real
+connector actions against it:
+
+```ts
+import { Layer } from 'effect'
+import { emailClientLayerFromBackend } from '@yolk-sdk/connectors/email/conformance'
+import { makeEmailEmulator } from '@yolk-sdk/emulators/email'
+
+const email = makeEmailEmulator()
+
+email.faults.add({
+  kind: 'failure',
+  method: 'move',
+  count: 1,
+  failure: { kind: 'error', code: 'transport_failed', message: 'Synthetic outage.' }
+})
+
+const emailLayer = emailClientLayerFromBackend(email)
+```
+
+Responses come only from the email conformance fixtures (copied as data; `emailEmulatorFixtures`).
+The emulator keeps a mailbox (`emailEmulatorDefaultSeed`: folders with `\Drafts`, `\Sent`, and
+`\Trash` SPECIAL-USE attributes and two INBOX messages) that only decides which fixture answers:
+the first fixture whose method and request match and whose answer is consistent with the mailbox
+(preferring one not used since the last reset). The mailbox then records what that fixture says
+happened: flags set, a draft appended, a message moved to the destination id the fixture names, a
+message deleted, a Sent copy saved. It never invents an id, flag, or response.
+
+- Request-shape latitude: credential fields are never compared or recorded, and `connection.host`
+  is not compared, so a different practice host still matches. Every other connection field
+  (`protocol`, `port`, `security`) and everything else must equal a fixture request exactly.
+
+Anything else fails closed with a ledgered `notEmulated` answer (the port analogue of HTTP 400):
+an unknown method (`unknown-method`), a request that is not an object (`invalid-request`), no
+matching fixture (`no-matching-fixture`), or no matching fixture consistent with the mailbox
+(`state-conflict`). Faults (`kind: 'failure'`, a `method`, an optional deep-subset `match` on the
+request, an optional `count`, and the `failure` to answer) change no state. `ledger` records every
+call (credential-free request, outcome, fixture or fault id, reason), `state()` returns the current
+mailbox, `reset()` restores the seed and clears the ledger, faults, and fixture use, and
+`coverage()` reports calls per route, refusals, and unused fixtures. An invalid seed or fault
+throws `EmailEmulatorInputInvalid`.
+
+`emailEmulatorRoutes` names each emulated method as `PORT EmailClient.<method>` with the email
+cases it follows. All routes are unverified: the fixtures are synthetic. Live verification needs a
+host `EmailClient` implementation connected to a practice mailbox.
+
 ## Evidence
 
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
-`xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, and the three subscription-usage manifests list
-every emulated route with `method`, `path`,
+`xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests, and
+`emailEmulatorRoutes` list every emulated route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
-`observedAt`. Every response from an unverified route carries `x-emulator-evidence: unverified`.
-The Gateway route is `verified` (`observedAt: '2026-09-30'`): its wire shapes are checked against
-the verified live recordings. Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, and
-the usage routes) is unverified, like the synthetic fixtures it follows.
+`observedAt`. Every response from an unverified route of a fetch-handler emulator carries
+`x-emulator-evidence: unverified`; the email emulator records evidence on each ledger entry
+instead, since its plain-JSON replies carry no header. The Gateway route is `verified`
+(`observedAt: '2026-09-30'`): its wire shapes are checked against the verified live recordings.
+Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, and email) is
+unverified, like the synthetic fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes
 whose `observedAt` is missing, unreadable, or in the future, and verified routes whose cited cases
 have no verified fixture fail, as do verified connector write routes citing no cases; unverified or
 stale (over 30 days) evidence and other routes citing no cases warn.
+
+The email emulator's eight write routes are unverified connector writes. Until an owner-approved
+live run against a practice mailbox verifies them, the repository lists them in a visible,
+time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry
+date): the check reports them as PENDING warnings until that date and fails again after it.
 
 ## Node server
 

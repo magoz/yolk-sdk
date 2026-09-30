@@ -1,0 +1,70 @@
+---
+title: Email conformance
+description: Experimental port-level conformance cases for the generic EmailClient, for tests and hand-run practice-mailbox checks.
+---
+
+Generic email actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../api-reference/integrations). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice mailbox.
+
+Yolk never speaks IMAP, POP3, or SMTP: generic email goes through the host-provided `EmailClient`
+port. `@yolk-sdk/connectors/email/conformance` exports port-level cases for
+`@yolk-sdk/conformance/runner` that run the real connector email actions over that port, plus
+`CredentialResolver` and `EmailConformanceConfig` seeds. The claims are as currently understood;
+none is observed live yet, and the fixtures are synthetic `PortFixture`s.
+
+| Case id                                       | Safety               | Seeds                                               | Claim (as currently understood)                                                                                                                                                                                                               |
+| --------------------------------------------- | -------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `email.imap.list-and-get-headers`             | `read`               | `imapHost`, `unreadMessageId`                       | `get_message` returns the id and `headers` including `Date` and `From` (and a matching `Message-ID`); listing again still shows the message unread (`BODY.PEEK`)                                                                              |
+| `email.imap.filtered-list-no-fallback`        | `read`               | `imapHost`, `unreadMessageId`                       | An `isRead: false` list calls `listMessagesFiltered` once and `listMessages` never; against a legacy-host shim without it, the list fails `validation_failed` with no call                                                                    |
+| `email.imap.draft-drafts-discovery`           | `write-reversible`   | `imapHost`, `draftsFolder`                          | A folder-less draft lands in the `\Drafts` SPECIAL-USE mailbox (not a fallback name) with a `draftId` that reads it back; `\Draft` itself is checked by hand                                                                                  |
+| `email.imap.set-read-and-flag`                | `write-reversible`   | `imapHost`, `unreadMessageId`                       | `set_read` and `set_flag` each change exactly one flag, visible through `get_message`; the restore puts both back                                                                                                                             |
+| `email.imap.trash-untrash-to-inbox`           | `write-reversible`   | `imapHost`, `draftsFolder`, `trashFolder`           | Trash moves the case's draft to the discovered `\Trash` mailbox with a new id; untrash restores it to INBOX (not the Drafts mailbox) with another new id                                                                                      |
+| `email.imap.move-destination-ids`             | `write-reversible`   | `imapHost`, `draftsFolder`, `moveDestinationFolder` | A move returns the destination id, which resolves there; the stale source id answers `message_not_found` (any other failure fails the case)                                                                                                   |
+| `email.pop3.rejects-folders-drafts-mutations` | `read`               | `pop3Host`                                          | POP3 folders, filters, drafts, and every mutation (single-message, labels, the six batch actions, and `delete_permanently`) fail `validation_failed` with no port call and no credential resolution; a plain list reaches `listMessages` once |
+| `email.smtp.sent-copy-statuses`               | `write-irreversible` | `imapHost`, `smtpHost`, `recipient`, `sentFolder`   | Default saving sends an IMAP `sentCopy` and reports `saved` in the `\Sent` mailbox; `saveToSentItems: false` reports `skipped`; a missing Sent folder reports `failed`, still accepted                                                        |
+| `email.smtp.legacy-host-sent-copy`            | `write-irreversible` | `imapHost`, `smtpHost`, `recipient`                 | Behind a legacy-host shim (no `sentCopy` in or out), the action synthesizes `unsupported` (saving requested) or `skipped` (disabled), never `saved`                                                                                           |
+| `email.smtp.acceptance-not-delivery`          | `write-irreversible` | `imapHost`, `smtpHost`, `undeliverableRecipient`    | SMTP accepts a submission to an undeliverable address; the output claims submission only (`accepted`, `submissionId`, `sentCopy`, `warning`), never delivery                                                                                  |
+
+The move case relies on one host-port convention, exported as `emailMessageNotFoundCode`:
+`EmailClient.getMessage` for an id that addresses no message in the folder answers
+`ActionResult.failure` with code `message_not_found`. Authentication, throttling, or server
+failures prove nothing about absence, so they fail the case.
+
+`EmailConformanceConfig` holds the seeds; a missing seed fails the case with a `precondition:`
+mismatch before any port call. Use a practice mailbox whose `\Drafts` mailbox is not literally
+named `Drafts`, so discovery differs from a hard-coded fallback. Credentials bind through
+`emailConformanceIntegration` (credential refs `email.conformance.incoming` and
+`email.conformance.smtp`).
+
+Write cases never touch seeded messages except the flag case, which restores the seeded flags.
+Draft, trash, and move cases create their own `yolk-conformance` draft, track its location across
+moves, and permanently delete it again through `email.delete_permanently`, also after a failed
+claim or an interruption. A failed removal fails the case with `EmailConformanceRestoreFailed`;
+remove the draft by hand if it still exists. The three send cases send real mail (to the practice
+mailbox itself, or to the seeded undeliverable address) and run live only when started by id.
+
+For tests, `emailClientLayerFromBackend` turns any plain-JSON backend `{ call(method, request) }`
+into the `EmailClient` layer. `makeEmailReplayBackend(fixtures)` returns `{ backend, ledger }`, so
+pass its `backend` (and keep the `ledger` to check which fixtures answered):
+
+```ts
+import {
+  emailClientLayerFromBackend,
+  emailConformanceFixtures,
+  makeEmailReplayBackend
+} from '@yolk-sdk/connectors/email/conformance'
+
+const replay = makeEmailReplayBackend(emailConformanceFixtures)
+const emailLayer = emailClientLayerFromBackend(replay.backend)
+```
+
+The fixture-driven fake in [`@yolk-sdk/emulators/email`](../api-reference/emulators#email-emulator)
+is itself a backend: pass it directly (`emailClientLayerFromBackend(makeEmailEmulator())`). Neither
+is a production adapter. Live verification needs a host `EmailClient` implementation connected to a
+practice mailbox; no live probe ships in the repository. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the fixture type.

@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, a fixture-driven fake EmailClient backend, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -53,6 +53,10 @@
     "./opencode": {
       "types": "./src/opencode.ts",
       "default": "./src/opencode.ts"
+    },
+    "./email": {
+      "types": "./src/email.ts",
+      "default": "./src/email.ts"
     },
     "./node": {
       "types": "./src/node.ts",
@@ -106,6 +110,11 @@
         "import": "./dist/opencode.mjs",
         "default": "./dist/opencode.mjs"
       },
+      "./email": {
+        "types": "./dist/email.d.mts",
+        "import": "./dist/email.mjs",
+        "default": "./dist/email.mjs"
+      },
       "./node": {
         "types": "./dist/node.d.mts",
         "import": "./dist/node.mjs",
@@ -124,6 +133,7 @@
   },
   "devDependencies": {
     "@yolk-sdk/agent": "workspace:^",
-    "@yolk-sdk/conformance": "workspace:^"
+    "@yolk-sdk/conformance": "workspace:^",
+    "@yolk-sdk/connectors": "workspace:^"
   }
 }
