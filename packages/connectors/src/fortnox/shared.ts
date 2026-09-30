@@ -216,7 +216,7 @@ const requestFortnox = (
       body: body === undefined ? undefined : JSON.stringify(body)
     }
 
-    // Only set when asked for, so every other request is built exactly as before.
+    // Only set when asked for, so connector action requests carry neither key.
     if (transport.redirect !== undefined) {
       fields.redirect = transport.redirect
     }

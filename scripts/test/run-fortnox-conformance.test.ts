@@ -600,6 +600,25 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
     }
   })
 
+  it('refuses a recordings root inside committed package sources', async () => {
+    const { writer, operations } = memoryWriter()
+    const root = join(repoRoot, 'packages/connectors/src/fortnox/conformance/recordings')
+
+    const result = await Effect.runPromise(
+      stageRecordings(passedReport([...listRecorders().keys()]), listRecorders(), recordInputs, {
+        writer,
+        recordingsRoot: root,
+        stagingDir: join(root, runId),
+        recordedAt: '2026-09-29'
+      }).pipe(Effect.result)
+    )
+
+    expect(failureMessage(result)).toBe(
+      `Refusing a recordings root inside committed package sources (${root}); nothing was written`
+    )
+    expect(operations).toEqual([])
+  })
+
   it('writes nothing when no case passed', async () => {
     const { writer, operations } = memoryWriter()
 

@@ -1084,10 +1084,13 @@ describe('Fortnox conformance disagreement drills', () => {
           .map(testCase => testCase.id)
           .reduce((longest, id) => (id.length > longest.length ? id : longest))
 
-        // A summary at its cap (60 characters, ending in "...").
+        // A summary at its cap (60 characters, ending in "..."), and an untruncated 60-character
+        // restore error without a final period, which gains one (61): the true worst case.
         const summary = `${'Synthetic failure summary; '.repeat(3).slice(0, 57)}...`
+        const restoreError = 'Synthetic restore error without a final period, sixty chars!'
 
         expect(summary).toHaveLength(60)
+        expect(restoreError).toHaveLength(60)
 
         const failing = defineConformanceCase({
           id: caseId,
@@ -1098,7 +1101,7 @@ describe('Fortnox conformance disagreement drills', () => {
           run: Effect.fail(
             new FortnoxConformanceRestoreFailed({
               caseId,
-              reason: summary,
+              reason: restoreError,
               caseOutcome: 'claim failed',
               claimFailure: summary
             })
@@ -1114,7 +1117,7 @@ describe('Fortnox conformance disagreement drills', () => {
         const message = report.results[0]?.failure?.message ?? expect.fail('expected a failure')
 
         expect(message).toBe(
-          `${caseId}: restore failed; restore the account by hand if it still differs from its original state. Restore error: ${summary} Claim failed first: ${summary}`
+          `${caseId}: restore failed; restore the account by hand if it still differs from its original state. Restore error: ${restoreError}. Claim failed first: ${summary}`
         )
         expect(message.length).toBeLessThanOrEqual(300)
       })

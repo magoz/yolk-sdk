@@ -855,11 +855,13 @@ export const stageRecordings = (
     const stagingDir = resolve(options.stagingDir)
     const runName = basename(stagingDir)
 
-    if (
-      dirname(stagingDir) !== root ||
-      runName.startsWith('.') ||
-      isInside(root, committedSources)
-    ) {
+    if (isInside(root, committedSources)) {
+      return yield* new FortnoxRunFailed({
+        message: `Refusing a recordings root inside committed package sources (${root}); nothing was written`
+      })
+    }
+
+    if (dirname(stagingDir) !== root || runName.startsWith('.')) {
       return yield* new FortnoxRunFailed({
         message: `Refusing to stage recordings outside the recordings root (${root}); nothing was written`
       })
