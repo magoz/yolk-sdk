@@ -940,6 +940,41 @@ describe('Dropbox conformance write ownership', () => {
       })
   )
 
+  it.effect(
+    'reports a 408 create as ambiguous, with the exact path, after one best-effort delete',
+    () =>
+      Effect.gen(function* () {
+        const timedOut: WireFixture = {
+          ...dropboxCreateFolderConflictFixture,
+          exchanges: [
+            exchangeAt(dropboxCreateFolderConflictFixture, 0),
+            {
+              ...exchangeAt(dropboxCreateFolderConflictFixture, 1),
+              response: withStatus(
+                408,
+                '{"error_summary": "request_timeout/.", "error": {".tag": "other"}}'
+              )(exchangeAt(dropboxCreateFolderConflictFixture, 1).response)
+            },
+            deleteByPath(conflictFolder, {
+              status: 409,
+              headers: { 'content-type': 'application/json' },
+              body: notFoundBody
+            }),
+            exchangeAt(dropboxCreateFolderConflictFixture, 5)
+          ]
+        }
+
+        const { failure, entries } = yield* drill(dropboxCreateFolderConflictCase, timedOut)
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'DropboxConformanceActionFailed',
+          message: `dropbox.create_folder failed: dropbox_create_folder_failed (HTTP 408); create outcome unknown: delete ${conflictFolder} by hand if it exists`
+        })
+        expect(deleteBodies(entries)).toEqual([{ path: conflictFolder }])
+      })
+  )
+
   it.effect('refuses to adopt a created path outside the case folder', () =>
     Effect.gen(function* () {
       const outside = withoutExchanges(

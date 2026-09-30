@@ -77,7 +77,9 @@ const packages: ReadonlyArray<PackageManifest> = [
       './notion/conformance',
       './r2-storage',
       './telegram',
-      './todoist'
+      './telegram/conformance',
+      './todoist',
+      './todoist/conformance'
     ]
   },
   {
@@ -282,6 +284,12 @@ const main = async () => {
           'const notionConformance = await import("@yolk-sdk/connectors/notion/conformance")',
           'if (notionConformance.notionConformanceCases.length !== 8 || notionConformance.notionConformanceFixtures.length !== 8) throw new Error("Missing Notion conformance cases/fixtures")',
           'if (notionConformance.notionConformanceCases.filter(testCase => testCase.safety === "read").length !== 7 || notionConformance.notionConformanceCases.some(testCase => testCase.safety === "write-irreversible")) throw new Error("Notion conformance safety mismatch")',
+          'const todoistConformance = await import("@yolk-sdk/connectors/todoist/conformance")',
+          'if (todoistConformance.todoistConformanceCases.length !== 7 || todoistConformance.todoistConformanceFixtures.length !== 7 || typeof todoistConformance.findTodoistConformanceLeftovers !== "object") throw new Error("Missing Todoist conformance cases/fixtures")',
+          'if (todoistConformance.todoistConformanceCases.filter(testCase => testCase.safety === "read").length !== 3 || todoistConformance.todoistConformanceCases.some(testCase => testCase.safety === "write-irreversible")) throw new Error("Todoist conformance safety mismatch")',
+          'const telegramConformance = await import("@yolk-sdk/connectors/telegram/conformance")',
+          'if (telegramConformance.telegramConformanceCases.length !== 4 || telegramConformance.telegramConformanceFixtures.length !== 4) throw new Error("Missing Telegram conformance cases/fixtures")',
+          'if (telegramConformance.telegramConformanceCases.filter(testCase => testCase.safety === "read").length !== 3 || telegramConformance.telegramConformanceCases.filter(testCase => testCase.safety === "write-irreversible").map(testCase => testCase.id).join() !== "telegram.messages.send-message") throw new Error("Telegram conformance safety mismatch")',
           'const emailConformance = await import("@yolk-sdk/connectors/email/conformance")',
           'if (emailConformance.emailConformanceCases.length !== 10 || emailConformance.emailConformanceFixtures.length !== 32 || typeof emailConformance.emailClientLayerFromBackend !== "function" || typeof emailConformance.makeEmailReplayBackend !== "function") throw new Error("Missing email conformance cases/fixtures/bridge")',
           'if (emailConformance.emailConformanceCases.filter(testCase => testCase.safety === "write-irreversible").length !== 3 || emailConformance.emailConformanceCases.filter(testCase => testCase.safety === "read").length !== 3) throw new Error("Email conformance safety mismatch")',

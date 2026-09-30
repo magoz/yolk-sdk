@@ -106,9 +106,17 @@
       "types": "./src/telegram/index.ts",
       "default": "./src/telegram/index.ts"
     },
+    "./telegram/conformance": {
+      "types": "./src/telegram/conformance/index.ts",
+      "default": "./src/telegram/conformance/index.ts"
+    },
     "./todoist": {
       "types": "./src/todoist/index.ts",
       "default": "./src/todoist/index.ts"
+    },
+    "./todoist/conformance": {
+      "types": "./src/todoist/conformance/index.ts",
+      "default": "./src/todoist/conformance/index.ts"
     }
   },
   "files": [
@@ -223,10 +231,20 @@
         "import": "./dist/telegram/index.mjs",
         "default": "./dist/telegram/index.mjs"
       },
+      "./telegram/conformance": {
+        "types": "./dist/telegram/conformance/index.d.mts",
+        "import": "./dist/telegram/conformance/index.mjs",
+        "default": "./dist/telegram/conformance/index.mjs"
+      },
       "./todoist": {
         "types": "./dist/todoist/index.d.mts",
         "import": "./dist/todoist/index.mjs",
         "default": "./dist/todoist/index.mjs"
+      },
+      "./todoist/conformance": {
+        "types": "./dist/todoist/conformance/index.d.mts",
+        "import": "./dist/todoist/conformance/index.mjs",
+        "default": "./dist/todoist/conformance/index.mjs"
       }
     }
   },

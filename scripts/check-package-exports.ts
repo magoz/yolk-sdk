@@ -175,7 +175,9 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './notion/conformance',
       './r2-storage',
       './telegram',
-      './todoist'
+      './telegram/conformance',
+      './todoist',
+      './todoist/conformance'
     ],
     root: 'full'
   },
