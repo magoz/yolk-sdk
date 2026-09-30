@@ -71,19 +71,31 @@ verified under these conditions:
 Deleted folders stay restorable in the account's deleted files for the Dropbox retention period.
 
 In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, and the running
-case's cleanup is attempted before the process exits (code 130). The cleanup is not confirmed: a
-cleanup that fails, or a create whose outcome is unknown, while the case is being interrupted
-prints its full message, with the exact path, as a WARN line (through the case's
-`ConformanceCleanupReporter`), and the runner then lists `workFolderPath` again (read-only) and
-prints a WARN line for every `yolk-conformance-run-*` folder still present. one Ctrl-C reaches pnpm, tsx, and node, and the wrappers relay it, so further signals within a
-second count as the same keypress. A signal a second or more later exits at once and may skip the
-cleanup, as does killing the process; pnpm itself returns to the prompt at once while tsx and node
-finish.
+case's cleanup is attempted before the process exits; no further case starts. The cleanup is not
+confirmed:
+
+- A cleanup that fails, or a create whose outcome is unknown, while the case is being interrupted
+  prints its full message, with the exact path, as a WARN line (through the case's
+  `ConformanceCleanupReporter`). The run then ends with that error (exit code 1).
+- Only when the run ends as a plain interruption (exit code 130) does the runner list
+  `workFolderPath` again (read-only, bounded as below) and print a WARN line for every
+  `yolk-conformance-run-*` folder still present.
+
+One Ctrl-C reaches every process of the foreground group, and the wrappers relay it, so further
+signals within a second count as the same keypress. A signal a second or more later exits at once
+and may skip the cleanup, as does killing the process. Run live runs as
+`pnpm conformance:dropbox …` (pnpm waits for the runner and exits with its code; observed with
+pnpm 11) or `./node_modules/.bin/tsx scripts/run-dropbox-conformance.ts …`. Avoid
+`pnpm exec tsx …`: on Ctrl-C it returns to the prompt at once (observed), so the WARN and leftover
+lines print after the prompt, `$?` is pnpm's own code rather than the runner's, and a second Ctrl-C
+no longer reaches the runner; stop it with `kill -TERM <pid>`, using the pid the first-signal
+message prints, at least a second after the first signal.
 
 Before any write case, the runner lists `workFolderPath` read-only
-(`findDropboxConformanceLeftovers`) and prints a WARN line for every `yolk-conformance-run-*`
+(`findDropboxConformanceLeftovers`) and prints a WARN line for each `yolk-conformance-run-*`
 folder an earlier run left behind; a work folder that does not exist yet holds none, and a failed
-lookup prints its failure code. It never deletes them. Check each one, and delete it by hand when
+lookup prints its failure code. The lookup is bounded, not exhaustive: it reads at most 50 listing
+pages of up to 2,000 entries each. It never deletes them. Check each one, and delete it by hand when
 no run is using it. Every valid `runId` starts with `run-` (`dropboxConformanceRunFolderPrefix` is
 `yolk-conformance-run-`), so the lookup covers every run, host-supplied run ids included.
 

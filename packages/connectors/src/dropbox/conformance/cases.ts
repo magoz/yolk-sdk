@@ -128,7 +128,8 @@ export const DropboxConformanceSeeds = Schema.Struct({
   copySourcePath: Schema.optionalKey(SeedPath),
   /**
    * Invocation-unique segment of every write case's folder name: `run-` then lower-case letters,
-   * digits, and inner hyphens (the prefix keeps every run's folders visible to the leftover lookup). Replay uses the fixed synthetic id of the fixtures; the live runner generates a fresh
+   * digits, and inner hyphens (the prefix keeps every run's folders visible to the leftover
+   * lookup). Replay uses the fixed synthetic id of the fixtures; the live runner generates a fresh
    * random one per invocation, which is what makes concurrent runs safe.
    */
   runId: Schema.optionalKey(RunId)
@@ -1252,12 +1253,14 @@ export const dropboxConformanceRunFolderPrefix = `${dropboxConformanceMarker}-ru
 const leftoverPageCap = 50
 
 /**
- * READ-ONLY: the paths of `yolk-conformance-run-*` entries directly under `workFolderPath`, which
- * earlier runs left behind (a killed process, a failed or ambiguous cleanup); a `workFolderPath`
- * that does not exist yet answers none. Every valid run id starts with `run-`, so every run's
- * folders match `dropboxConformanceRunFolderPrefix`. Live runners call it
- * before any write case and warn per leftover; nothing is ever deleted automatically. Fails with a
- * `precondition:` mismatch without the `workFolderPath` seed.
+ * READ-ONLY and bounded: the paths of `yolk-conformance-run-*` entries directly under
+ * `workFolderPath`, which earlier runs left behind (a killed process, a failed or ambiguous
+ * cleanup). It reads at most 50 listing pages of up to 2000 entries each and then stops, so a
+ * larger work folder may hide some leftovers. A `workFolderPath` that does not exist yet answers
+ * none. Every valid run id starts with `run-`, so every run's folders match
+ * `dropboxConformanceRunFolderPrefix`. Live runners call it before any write case and warn per
+ * leftover; nothing is ever deleted automatically. Fails with a `precondition:` mismatch without
+ * the `workFolderPath` seed.
  */
 export const findDropboxConformanceLeftovers: Effect.Effect<
   ReadonlyArray<string>,

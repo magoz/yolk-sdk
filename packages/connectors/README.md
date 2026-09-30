@@ -873,13 +873,18 @@ fiber interruption, then checks that `get_metadata` answers not-found; a failed 
 `DropboxConformanceRestoreFailed` naming the path, and a create answering a path outside the case
 folder is never deleted (`DropboxConformanceCleanupRefused`). Neither the runner nor the bridges set
 a request timeout, so a hanging request delays an interruption. The live runner turns the first
-SIGINT/SIGTERM into a fiber interruption, so the cleanup is attempted (not confirmed): a cleanup
-problem raised meanwhile prints as a WARN line through `ConformanceCleanupReporter`, and the
-read-only leftover lookup runs again afterwards. Duplicate signals within a second (one Ctrl-C
-reaches pnpm, tsx, and node) are ignored; a later signal or a kill skips the cleanup. Before any
-write case, the runner warns read-only about `yolk-conformance-run-*` folders earlier runs left
-under `workFolderPath` (`findDropboxConformanceLeftovers`; every valid `runId` starts with `run-`,
-and a missing work folder holds none); it never deletes them. `pnpm conformance:dropbox` in this repository dry-runs by default;
+SIGINT/SIGTERM into a fiber interruption, so the cleanup is attempted (not confirmed) and no
+further case starts: a cleanup problem raised meanwhile prints as a WARN line through
+`ConformanceCleanupReporter` and ends the run with that failure (exit 1); only an interrupt-only
+exit (130) runs the read-only leftover lookup again. Duplicate signals within a second (one Ctrl-C
+reaches every process of the foreground group) are ignored; a later signal or a kill skips the
+cleanup. Run live runs as `pnpm conformance:dropbox` or with `tsx` directly: `pnpm exec tsx`
+returns to the prompt at once on Ctrl-C (observed), so later lines print after the prompt, `$?` is
+pnpm's own code, and the runner must be stopped with `kill -TERM <pid>` (printed by the first-signal
+message). Before any write case, the runner warns read-only about `yolk-conformance-run-*` folders
+earlier runs left under `workFolderPath` (`findDropboxConformanceLeftovers`; bounded to 50 listing
+pages; every valid `runId` starts with `run-`, and a missing work folder holds none); it never
+deletes them. `pnpm conformance:dropbox` in this repository dry-runs by default;
 `--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; needs
 `DROPBOX_ACCESS_TOKEN` and the seeds) is for owners running a practice account by hand,
 `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or
@@ -1290,10 +1295,12 @@ trashes the page and checks that `notion.get_page` reports `archived: true`. A f
 with `NotionConformanceRestoreFailed`, and an ambiguous create fails with
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) with manual-recovery advice. The live
 runner turns the first SIGINT/SIGTERM into a fiber interruption, so the cleanup is attempted (not
-confirmed; a cleanup problem raised meanwhile prints as a WARN line, and the leftover search runs
-again afterwards; duplicate signals within a second are ignored, a later one or a kill skips the
-cleanup) and, before the write case, warns about untrashed `yolk-conformance page` pages
-found by a read-only, best-effort search (`findNotionConformanceLeftovers`); it never trashes them.
+confirmed; a cleanup problem raised meanwhile prints as a WARN line and ends the run with exit 1,
+and only an interrupt-only exit (130) runs the leftover search again; duplicate signals within a
+second are ignored, a later one or a kill skips the cleanup; use `pnpm conformance:notion` or `tsx`
+directly, not `pnpm exec tsx`, which returns to the prompt at once) and, before the write case,
+warns about untrashed `yolk-conformance page` pages found by a read-only, bounded (10 search pages),
+best-effort search (`findNotionConformanceLeftovers`); it never trashes them.
 `pnpm conformance:notion` in this repository dry-runs by default; `--live --owner-approved --account
 <label>` (refused whenever `CI` is non-empty; needs `NOTION_API_TOKEN` and the seeds) is for owners
 running a practice workspace by hand, `--allow-writes reversible` adds the write case, and

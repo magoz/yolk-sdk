@@ -1172,8 +1172,9 @@ const pageTitle = (
 }
 
 /**
- * READ-ONLY and best effort: pages titled `yolk-conformance page...` that are not in the trash,
- * found through `notion.search` (whose index can lag behind recent writes). Earlier runs leave them
+ * READ-ONLY, bounded, and best effort: pages titled `yolk-conformance page...` that are not in the
+ * trash, found through `notion.search` (whose index can lag behind recent writes), reading at most
+ * 10 search pages of 100 results each. Earlier runs leave them
  * behind when a process is killed or a cleanup fails. Live runners call it before the write case
  * and warn per leftover (`title (id)`); nothing is ever trashed automatically.
  */

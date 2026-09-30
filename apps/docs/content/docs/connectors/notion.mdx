@@ -57,17 +57,28 @@ ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) fails
 advice. Trashed pages stay restorable in the workspace trash until they are deleted from there.
 
 In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, and the cleanup
-is attempted before the process exits (code 130). The cleanup is not confirmed: a cleanup that
-fails, or a create whose outcome is unknown, while the case is being interrupted prints its full
-message as a WARN line (through the case's `ConformanceCleanupReporter`), and the runner then
-repeats the leftover search below. one Ctrl-C reaches pnpm, tsx, and node, and the wrappers relay it, so further signals within a
-second count as the same keypress. A signal a second or more later exits at once and may skip the
-cleanup, as does killing the process; pnpm itself returns to the prompt at once while tsx and node
-finish.
+is attempted before the process exits; no further case starts. The cleanup is not confirmed:
+
+- A cleanup that fails, or a create whose outcome is unknown, while the case is being interrupted
+  prints its full message as a WARN line (through the case's `ConformanceCleanupReporter`). The run
+  then ends with that error (exit code 1).
+- Only when the run ends as a plain interruption (exit code 130) does the runner repeat the
+  leftover search below.
+
+One Ctrl-C reaches every process of the foreground group, and the wrappers relay it, so further
+signals within a second count as the same keypress. A signal a second or more later exits at once
+and may skip the cleanup, as does killing the process. Run live runs as
+`pnpm conformance:notion …` (pnpm waits for the runner and exits with its code; observed with
+pnpm 11) or `./node_modules/.bin/tsx scripts/run-notion-conformance.ts …`. Avoid
+`pnpm exec tsx …`: on Ctrl-C it returns to the prompt at once (observed), so the WARN and leftover
+lines print after the prompt, `$?` is pnpm's own code rather than the runner's, and a second Ctrl-C
+no longer reaches the runner; stop it with `kill -TERM <pid>`, using the pid the first-signal
+message prints, at least a second after the first signal.
 
 Before the write case, the runner (`findNotionConformanceLeftovers`) searches read-only for pages titled
-`yolk-conformance page...` that are not in the trash and prints a WARN line for each (best effort:
-Notion's search index can lag behind recent writes); it never trashes them. Check each one, and
+`yolk-conformance page...` that are not in the trash and prints a WARN line for each. The search is
+bounded and best effort: it reads at most 10 search pages of 100 results, and Notion's search index
+can lag behind recent writes. It never trashes them. Check each one, and
 trash it by hand when no run is using it.
 
 The shipped fixtures are synthetic (`evidence: 'unverified'`). In this repository,

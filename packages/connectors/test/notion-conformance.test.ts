@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient } from 'effect/unstable/http'
-import type { ConformanceCase } from '@yolk-sdk/conformance/case'
+import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,
   isWireBase64BodyResponse,
@@ -823,6 +823,135 @@ describe('Notion conformance interruption reporting', () => {
       expect(reported[0]).toContain(
         'notion.pages.archive-in-trash: restore failed; trash the case-created page by hand if it is not trashed yet'
       )
+    })
+  )
+})
+
+describe('Notion conformance run interruption', () => {
+  it.effect('stops the whole run when interrupted mid-archive with a failing restore', () =>
+    Effect.gen(function* () {
+      const archiveSent = yield* Deferred.make<void>()
+      const releaseArchive = yield* Deferred.make<void>()
+      const warnings = yield* Ref.make<ReadonlyArray<string>>([])
+      const sentinelRan = yield* Ref.make(false)
+
+      const sentinel = defineConformanceCase({
+        id: 'test.sentinel.after-interrupted-case',
+        safety: 'read',
+        docs: 'Synthetic sentinel: records whether it ran.',
+        wire: 'Runs only if the run was not stopped.',
+        fixtures: [],
+        run: Ref.set(sentinelRan, true)
+      })
+
+      const failedArchive = {
+        ...archiveExchange,
+        response: withStatus(500, serverError)(archiveExchange.response)
+      }
+
+      const { client } = yield* makeReplayHttpClient([
+        {
+          ...notionArchiveInTrashFixture,
+          exchanges: [createExchange, failedArchive, untrashedRead, failedArchive]
+        }
+      ])
+
+      let archives = 0
+
+      const holdingArchive = HttpClient.transform(client, (response, request) =>
+        request.method === 'PATCH' && archives++ === 0
+          ? response.pipe(
+              Effect.tap(() => Deferred.succeed(archiveSent, undefined)),
+              Effect.tap(() => Deferred.await(releaseArchive))
+            )
+          : response
+      )
+
+      const fiber = yield* runConformance([notionArchiveInTrashCase, sentinel], {
+        target: { kind: 'replay' },
+        now,
+        layer: () => portsOver(Layer.succeed(HttpClient.HttpClient, holdingArchive))
+      }).pipe(
+        Effect.provideService(ConformanceCleanupReporter, {
+          warn: message => Ref.update(warnings, list => [...list, message])
+        }),
+        Effect.forkChild
+      )
+
+      yield* Deferred.await(archiveSent)
+
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseArchive, undefined)
+      yield* Fiber.join(interrupting)
+
+      const exit = yield* Fiber.await(fiber)
+
+      // (a) No further case starts after the interruption.
+      expect(yield* Ref.get(sentinelRan)).toBe(false)
+
+      // (b) The run ends with the case's own RestoreFailed, without an Interrupt in the cause.
+      if (Exit.isSuccess(exit)) {
+        return expect.fail('expected the interrupted run to fail')
+      }
+
+      expect(Cause.hasInterrupts(exit.cause)).toBe(false)
+      expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'NotionConformanceRestoreFailed' })
+
+      // (c) The reporter captured what to trash by hand.
+      const reported = yield* Ref.get(warnings)
+
+      expect(reported).toHaveLength(1)
+      expect(reported[0]).toContain('trash the case-created page by hand if it is not trashed yet')
+    })
+  )
+
+  it.effect('reports an ambiguous create answered while the case is being interrupted', () =>
+    Effect.gen(function* () {
+      const createSent = yield* Deferred.make<void>()
+      const releaseCreate = yield* Deferred.make<void>()
+      const warnings = yield* Ref.make<ReadonlyArray<string>>([])
+
+      const { client } = yield* makeReplayHttpClient([
+        {
+          ...notionArchiveInTrashFixture,
+          exchanges: [
+            { ...createExchange, response: withStatus(502, serverError)(createExchange.response) }
+          ]
+        }
+      ])
+
+      // Notion receives the create; its answer (a 502) is held until the case is being stopped.
+      const holdingCreate = HttpClient.transform(client, (response, request) =>
+        request.method === 'POST'
+          ? response.pipe(
+              Effect.tap(() => Deferred.succeed(createSent, undefined)),
+              Effect.tap(() => Deferred.await(releaseCreate))
+            )
+          : response
+      )
+
+      const fiber = yield* notionArchiveInTrashCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holdingCreate))),
+        Effect.provideService(ConformanceCleanupReporter, {
+          warn: message => Ref.update(warnings, list => [...list, message])
+        }),
+        Effect.forkChild
+      )
+
+      yield* Deferred.await(createSent)
+
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseCreate, undefined)
+      yield* Fiber.join(interrupting)
+      yield* Fiber.await(fiber)
+
+      expect(yield* Ref.get(warnings)).toEqual([
+        'notion.create_page failed: notion_create_page_failed (HTTP 502); the page may exist anyway: trash the case-created page by hand if it is not trashed yet (title starts with yolk-conformance, under parentPageId).'
+      ])
     })
   )
 })

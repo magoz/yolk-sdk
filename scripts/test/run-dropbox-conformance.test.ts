@@ -22,7 +22,9 @@ import {
 } from '../../packages/conformance/src/fixture.ts'
 import type { WireRecorderApi } from '../../packages/conformance/src/record.ts'
 import { ReplayHttpClient } from '../../packages/conformance/src/replay.ts'
+import { defineConformanceCase } from '../../packages/conformance/src/case.ts'
 import type { ConformanceReport } from '../../packages/conformance/src/runner.ts'
+import { ConformanceCleanupReporter } from '../../packages/connectors/src/conformance/cleanup-reporter.ts'
 import {
   dropboxConformanceCases,
   dropboxConformanceFixtureSeeds,
@@ -52,6 +54,7 @@ import {
   staleSharedSeeds,
   leftoverWarnings,
   runInterruptibly,
+  runLive,
   type CliIo,
   type CliSignal,
   type LiveInputs,
@@ -908,7 +911,7 @@ describe('connector conformance live runs are interruptible', () => {
       const signals = fakeSignals()
       const { io, errors, exitCodes, forcedExits } = fakeIo()
       const running = runningProgram()
-      const done = runInterruptibly(running.program, signals.source, io)
+      const done = runInterruptibly(running.program, signals.source, io, { pid: 4242 })
 
       await running.started
       signals.emit(signal)
@@ -917,7 +920,7 @@ describe('connector conformance live runs are interruptible', () => {
 
       expect(running.cleaned).toEqual(['cleaned'])
       expect(errors[0]).toBe(
-        `${signal}: interrupting the run; the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line. Send ${signal} again, at least a second later, to exit without waiting.`
+        `${signal}: interrupting the run (pid 4242); the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line. Send ${signal} again, at least a second later, to exit without waiting; if the prompt has returned, stop it with \`kill -TERM 4242\` (at least 1s later).`
       )
       expect(errors.at(-1)).toBe(
         "Interrupted. The running case's cleanup was attempted but is not confirmed: read the WARN lines, and look for yolk-conformance items by hand if in doubt."
@@ -987,6 +990,41 @@ describe('connector conformance live runs are interruptible', () => {
     expect(exitCodes).toEqual([130])
   })
 
+  it('keeps the signal handlers until the after-interrupt lookup has resolved', async () => {
+    const signals = fakeSignals()
+    const { io, forcedExits, exitCodes } = fakeIo()
+    const running = runningProgram()
+    const lookupStarted = Effect.runSync(Deferred.make<void>())
+    const releaseLookup = Effect.runSync(Deferred.make<void>())
+    let clock = 0
+
+    const done = runInterruptibly(running.program, signals.source, io, {
+      now: () => clock,
+      afterInterrupt: Deferred.succeed(lookupStarted, undefined).pipe(
+        Effect.andThen(Deferred.await(releaseLookup)),
+        Effect.as(['WARN still present after the interruption (from this or an earlier run): x'])
+      )
+    })
+
+    await running.started
+    signals.emit('SIGINT')
+    running.releaseCleanup()
+    await Effect.runPromise(Deferred.await(lookupStarted))
+
+    // The run fiber has ended, but the lookup still runs: the handlers are still installed, so a
+    // late relayed duplicate is absorbed rather than killing the process.
+    expect(signals.registered()).toBe(2)
+    clock += 30
+    signals.emit('SIGINT')
+    expect(forcedExits).toEqual([])
+
+    Effect.runSync(Deferred.succeed(releaseLookup, undefined))
+    await done
+
+    expect(exitCodes).toEqual([130])
+    expect(signals.registered()).toBe(0)
+  })
+
   it('reports a failed run with exit code 1 and no signal handlers left behind', async () => {
     const signals = fakeSignals()
     const { io, errors, exitCodes } = fakeIo()
@@ -996,6 +1034,42 @@ describe('connector conformance live runs are interruptible', () => {
     expect(errors).toEqual(['synthetic live failure'])
     expect(exitCodes).toEqual([1])
     expect(signals.registered()).toBe(0)
+  })
+})
+
+describe('connector conformance live run wiring', () => {
+  it('provides the stderr WARN cleanup reporter around runConformance', async () => {
+    const out: Array<string> = []
+    const err: Array<string> = []
+
+    // A read case that reports a cleanup problem, as a write case does while being interrupted.
+    const reporting = defineConformanceCase({
+      id: 'test.reporter.wiring',
+      safety: 'read',
+      docs: 'Synthetic: hands one message to the cleanup reporter.',
+      wire: 'The live runner prints it to stderr as a WARN line.',
+      fixtures: [],
+      run: Effect.gen(function* () {
+        const reporter = yield* ConformanceCleanupReporter
+
+        yield* reporter.warn('synthetic cleanup problem: delete /Conformance/Work/x by hand')
+      })
+    })
+
+    await Effect.runPromise(
+      runLive({ ...dropboxRunner, cases: [reporting] }, live(), recordInputs, {
+        http: ReplayHttpClient.layer([]),
+        out: line => {
+          out.push(line)
+        },
+        err: line => {
+          err.push(line)
+        }
+      })
+    )
+
+    expect(err).toEqual(['WARN synthetic cleanup problem: delete /Conformance/Work/x by hand'])
+    expect(out.join('\n')).toContain('PASS  test.reporter.wiring  [read]')
   })
 })
 

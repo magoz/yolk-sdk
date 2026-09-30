@@ -385,14 +385,23 @@ connector actions; the pinned-version case observes the outgoing `Notion-Version
 failing with `NotionConformanceRestoreFailed` when that fails; an ambiguous create fails with
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) and manual-recovery advice. The create
 is not interruptible and the runner has no request timeout. `findNotionConformanceLeftovers`
-searches, read-only and best effort, for untrashed `yolk-conformance page` pages. See
+searches, read-only, bounded (at most 10 search pages), and best effort, for untrashed
+`yolk-conformance page` pages; `findDropboxConformanceLeftovers` likewise reads at most 50
+listing pages. See
 [Notion conformance cases](../connectors/notion#conformance-cases).
 
-When a case is interrupted, the fiber's exit may no longer carry a cleanup failure raised during the
-interruption. So Dropbox and Notion write cases also hand such a failure (a failed cleanup, or a
-create whose outcome is unknown) to `ConformanceCleanupReporter` from
+When a case is interrupted, the run no longer produces a report, and no further case starts. So
+Dropbox and Notion write cases also hand a cleanup problem raised during the interruption (a
+failed cleanup, or a create whose outcome is unknown) to `ConformanceCleanupReporter` from
 `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
-`Effect.logWarning`. The live runners print it to stderr as a WARN line: their first SIGINT/SIGTERM
-interrupts the run fiber so the cleanup is attempted, duplicates within a second (one Ctrl-C
-reaches pnpm, tsx, and node) are ignored, a later signal exits at once, and after an interruption
-the read-only leftover lookup runs again and lists what is still present.
+`Effect.logWarning`. On effect 4.0.0-rc.115 such a run ends with that failure itself (no Interrupt
+in the cause); a run whose cleanup succeeded ends as a plain interruption. The live runners print
+reported problems to stderr as WARN lines. Their first SIGINT/SIGTERM interrupts the run fiber so
+the cleanup is attempted; duplicates within a second (one Ctrl-C reaches every process of the
+foreground group, and the wrappers relay it) are ignored, and a later signal exits at once. Only
+after an interrupt-only exit (code 130) does the read-only leftover lookup run again and list what
+is still present; a run that ends with a cleanup failure exits 1 with that failure's message. Run
+live runs as `pnpm conformance:<provider>` or with `tsx` directly: `pnpm exec tsx` returns to the
+prompt at once on Ctrl-C (observed), so later output prints after the prompt, `$?` is pnpm's own
+code, and the runner is then stopped with `kill -TERM <pid>` (the first-signal message prints the
+pid).

@@ -28,7 +28,6 @@ export const interruptPending = (
   unmask: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 ): Effect.Effect<boolean> => Effect.exit(unmask(Effect.yieldNow)).pipe(Effect.map(Exit.isFailure))
 
-/** Report `error.message` through the `ConformanceCleanupReporter`. */
 export const reportCleanupProblem = (error: { readonly message: string }): Effect.Effect<void> =>
   Effect.gen(function* () {
     const reporter = yield* ConformanceCleanupReporter

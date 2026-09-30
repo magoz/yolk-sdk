@@ -1155,15 +1155,37 @@ export const leftoverWarnings = <K extends string, S extends SeedRecord<K>, E, R
   )
 }
 
-/** Cleanup problems a case reports during an interruption, printed to stderr as WARN lines. */
-const stderrCleanupReporter: ConformanceCleanupReporterApi = {
-  warn: message => Effect.sync(() => console.error(`WARN ${message}`))
+/** Where a live run talks to the provider and prints; injectable so tests need no network. */
+export type LiveRunIo = {
+  readonly http: Layer.Layer<HttpClient.HttpClient>
+  /** stdout lines: leftover warnings before the run, the report, and staging output. */
+  readonly out: (line: string) => void
+  /** stderr lines: cleanup problems a case reports while being interrupted. */
+  readonly err: (line: string) => void
 }
 
-const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
+const processLiveRunIo: LiveRunIo = {
+  http: FetchHttpClient.layer,
+  out: line => console.log(line),
+  err: line => console.error(line)
+}
+
+/** Cleanup problems a case reports during an interruption, printed to `err` as WARN lines. */
+export const stderrCleanupReporter = (
+  err: (line: string) => void
+): ConformanceCleanupReporterApi => ({
+  warn: message => Effect.sync(() => err(`WARN ${message}`))
+})
+
+/**
+ * One live run: the leftover warnings, every case (with the WARN cleanup reporter provided around
+ * `runConformance`), the report, and the `--record` staging.
+ */
+export const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
   runner: ConnectorConformanceRunner<K, S, E, R>,
   options: RunOptions<K>,
-  inputs: LiveInputs<S>
+  inputs: LiveInputs<S>,
+  io: LiveRunIo = processLiveRunIo
 ) =>
   Effect.gen(function* () {
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
@@ -1183,19 +1205,19 @@ const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
 
               return Layer.succeed(HttpClient.HttpClient, client)
             })
-          ).pipe(Layer.provide(FetchHttpClient.layer))
-        : FetchHttpClient.layer
+          ).pipe(Layer.provide(io.http))
+        : io.http
 
-    for (const line of yield* leftoverWarnings(runner, options, inputs, FetchHttpClient.layer)) {
-      console.log(line)
+    for (const line of yield* leftoverWarnings(runner, options, inputs, io.http)) {
+      io.out(line)
     }
 
     const report = yield* runConformance(runner.cases, {
       target: liveTarget(options),
       layer: testCase => runner.casePorts(httpFor(testCase), inputs.accessToken, inputs.seeds)
-    }).pipe(Effect.provideService(ConformanceCleanupReporter, stderrCleanupReporter))
+    }).pipe(Effect.provideService(ConformanceCleanupReporter, stderrCleanupReporter(io.err)))
 
-    console.log(formatConformanceReport(report))
+    io.out(formatConformanceReport(report))
 
     if (options.record) {
       const now = new Date()
@@ -1208,9 +1230,9 @@ const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
       })
 
       if (staged === undefined) {
-        console.log('No passed case to record.')
+        io.out('No passed case to record.')
       } else {
-        console.log(
+        io.out(
           [
             `Staged ${staged.files.length} files (gitignored) in ${relative(workspaceRoot, staged.stagingDir)}; nothing committed was changed.`,
             ...staged.checklist
@@ -1310,6 +1332,8 @@ export type RunInterruptiblyOptions = {
   readonly afterInterrupt?: Effect.Effect<ReadonlyArray<string>>
   /** Clock for the duplicate-signal window (milliseconds); injectable for tests. */
   readonly now?: () => number
+  /** The runner's process id, named in the first-signal message (default `process.pid`). */
+  readonly pid?: number
 }
 
 /**
@@ -1317,9 +1341,12 @@ export type RunInterruptiblyOptions = {
  * cleanups are attempted, and the run waits for them) instead of killing the process. One Ctrl-C
  * reaches every process of the foreground group (pnpm, tsx, node) and the wrappers relay it, so a
  * second signal within `duplicateSignalWindowMs` of the first is ignored as a duplicate; a later
- * one force-exits with a message that cleanup may have been skipped. Resolves when the program
- * ends: an interruption prints a not-confirmed note plus the `afterInterrupt` lines and sets exit
- * code 130; a failure prints its message and sets exit code 1.
+ * one force-exits with a message that cleanup may have been skipped. `pnpm exec tsx …` returns to
+ * the prompt at the first Ctrl-C (observed; `pnpm <script>` and `tsx` itself wait), so the
+ * first-signal message names the pid to `kill -TERM` from there. Resolves when the program ends: an interrupt-only exit prints a
+ * not-confirmed note plus the `afterInterrupt` lines and sets exit code 130; any other failure
+ * (including a cleanup failure raised during the interruption) prints its message and sets exit
+ * code 1. The signal handlers stay installed until everything, `afterInterrupt` included, is done.
  */
 export const runInterruptibly = <E>(
   program: Effect.Effect<void, E>,
@@ -1328,6 +1355,7 @@ export const runInterruptibly = <E>(
   options: RunInterruptiblyOptions = {}
 ): Promise<void> => {
   const now = options.now ?? Date.now
+  const pid = options.pid ?? process.pid
   const fiber = Effect.runFork(program)
   let firstSignalAt: number | undefined
 
@@ -1350,7 +1378,7 @@ export const runInterruptibly = <E>(
 
       firstSignalAt = at
       io.error(
-        `${signal}: interrupting the run; the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line. Send ${signal} again, at least a second later, to exit without waiting.`
+        `${signal}: interrupting the run (pid ${pid}); the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line. Send ${signal} again, at least a second later, to exit without waiting; if the prompt has returned, stop it with \`kill -TERM ${pid}\` (at least 1s later).`
       )
       Effect.runFork(Fiber.interrupt(fiber))
     }
@@ -1360,11 +1388,13 @@ export const runInterruptibly = <E>(
     return { signal, handler }
   })
 
-  return Effect.runPromise(Fiber.await(fiber)).then(async exit => {
+  const removeHandlers = () => {
     for (const { signal, handler } of handlers) {
       signals.off(signal, handler)
     }
+  }
 
+  const finish = async (exit: Exit.Exit<void, E>) => {
     if (Exit.isSuccess(exit)) {
       return
     }
@@ -1390,5 +1420,9 @@ export const runInterruptibly = <E>(
 
     io.error(error instanceof Error ? error.message : String(error))
     io.setExitCode(1)
-  })
+  }
+
+  // Keep the handlers until the after-interrupt lookup has resolved, so a late relayed duplicate
+  // is still absorbed instead of killing the lookup through Node's default handler.
+  return Effect.runPromise(Fiber.await(fiber)).then(finish).finally(removeHandlers)
 }

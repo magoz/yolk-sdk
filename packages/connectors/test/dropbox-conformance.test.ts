@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Predicate, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
 import { TestClock } from 'effect/testing'
 import {
@@ -8,7 +8,7 @@ import {
   HttpClientResponse,
   type HttpClientRequest
 } from 'effect/unstable/http'
-import type { ConformanceCase } from '@yolk-sdk/conformance/case'
+import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,
   isWireBase64BodyResponse,
@@ -1605,4 +1605,98 @@ describe('Dropbox conformance interruption reporting', () => {
         expect(yield* Ref.get(warnings)).toEqual([])
       })
   )
+})
+
+// Run-level interruption drill: runConformance over [a write case whose restore fails, a sentinel].
+// Interrupting during the restore must stop the run: the sentinel never starts.
+
+describe('Dropbox conformance run interruption', () => {
+  for (const moment of ['during the copy claim', 'during the restore delete'] as const) {
+    it.effect(`stops the whole run when interrupted ${moment} with a failing restore`, () =>
+      Effect.gen(function* () {
+        const sent = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const deletes = yield* Ref.make(0)
+        const sentinelRan = yield* Ref.make(false)
+        const { warnings, reporter } = yield* capturingReporter
+
+        const sentinel = defineConformanceCase({
+          id: 'test.sentinel.after-interrupted-case',
+          safety: 'read',
+          docs: 'Synthetic sentinel: records whether it ran.',
+          wire: 'Runs only if the run was not stopped.',
+          fixtures: [],
+          run: Ref.set(sentinelRan, true)
+        })
+
+        const failing = insertAfter(
+          replaceResponse(dropboxCopyMoveMetadataFixture, 5, withStatus(500, serverError)),
+          5,
+          deleteByPath(copyFolder, {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+            body: serverError
+          })
+        )
+
+        const { client } = yield* makeReplayHttpClient([failing])
+
+        const hold = <A, E, R>(response: Effect.Effect<A, E, R>) =>
+          response.pipe(
+            Effect.tap(() => Deferred.succeed(sent, undefined)),
+            Effect.tap(() => Deferred.await(release))
+          )
+
+        const holding = HttpClient.transform(client, (response, request) => {
+          if (moment === 'during the copy claim' && request.url.endsWith('/files/copy_v2')) {
+            return hold(response)
+          }
+
+          if (moment === 'during the restore delete' && request.url.endsWith('/files/delete_v2')) {
+            return Ref.updateAndGet(deletes, n => n + 1).pipe(
+              Effect.flatMap(n => (n === 1 ? hold(response) : response))
+            )
+          }
+
+          return response
+        })
+
+        const fiber = yield* runConformance([dropboxCopyMoveMetadataCase, sentinel], {
+          target: { kind: 'replay' },
+          now,
+          layer: () => portsOver(Layer.succeed(HttpClient.HttpClient, holding))
+        }).pipe(Effect.provideService(ConformanceCleanupReporter, reporter), Effect.forkChild)
+
+        yield* Deferred.await(sent)
+
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(interrupting)
+
+        const exit = yield* Fiber.await(fiber)
+
+        // (a) No further case starts after the interruption.
+        expect(yield* Ref.get(sentinelRan)).toBe(false)
+
+        // (b) Observed on effect 4.0.0-rc.115: the run ends with the case's own RestoreFailed, and
+        // no Interrupt in the cause. Leaving the case's mask with a failure while an interruption
+        // is pending, the failure exit skips every error continuation (runConformance's Effect.exit
+        // included; finalizers still run), so the run produces no report and resumes no case.
+        if (Exit.isSuccess(exit)) {
+          return expect.fail('expected the interrupted run to fail')
+        }
+
+        expect(Cause.hasInterrupts(exit.cause)).toBe(false)
+        expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'DropboxConformanceRestoreFailed' })
+
+        // (c) The reporter captured the path to check by hand.
+        const reported = yield* Ref.get(warnings)
+
+        expect(reported).toHaveLength(1)
+        expect(reported[0]).toContain(`delete ${copyFolder} by hand if it still exists.`)
+      })
+    )
+  }
 })
