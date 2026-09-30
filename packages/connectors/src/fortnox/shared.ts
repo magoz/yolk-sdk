@@ -170,33 +170,76 @@ const resolveFortnoxAccessToken = (integration: ConnectorIntegration, slot: Cred
     return credential.accessToken
   })
 
+/**
+ * Optional per-request transport flags, forwarded to the host `ConnectorHttpClient` unchanged.
+ * Connector actions send neither.
+ */
+export type FortnoxTransportOptions = {
+  /** Ask the host not to follow redirects, so a 3xx reaches the caller. */
+  readonly redirect?: 'manual'
+  /** Ask the host to omit cookie jars and ambient credentials. */
+  readonly credentials?: 'omit'
+}
+
+type FortnoxRequestFields = {
+  readonly method: 'GET' | 'POST' | 'PUT'
+  readonly url: string
+  readonly headers: Readonly<Record<string, string>>
+  readonly body: string | undefined
+  redirect?: 'manual'
+  credentials?: 'omit'
+}
+
 const requestFortnox = (
   integration: ConnectorIntegration,
   slot: CredentialSlot,
   method: 'GET' | 'POST' | 'PUT',
   path: string,
-  body?: unknown
+  body?: unknown,
+  transport: FortnoxTransportOptions = {}
 ) =>
   Effect.gen(function* () {
     const token = yield* resolveFortnoxAccessToken(integration, slot)
     const http = yield* ConnectorHttpClient
 
-    return yield* http.request(
-      ConnectorHttpRequest.make({
-        method,
-        url: `${fortnoxApiBaseUrl}/${path}`,
-        headers:
-          body === undefined
-            ? { authorization: `Bearer ${token}`, accept: 'application/json' }
-            : {
-                authorization: `Bearer ${token}`,
-                accept: 'application/json',
-                'content-type': 'application/json'
-              },
-        body: body === undefined ? undefined : JSON.stringify(body)
-      })
-    )
+    const fields: FortnoxRequestFields = {
+      method,
+      url: `${fortnoxApiBaseUrl}/${path}`,
+      headers:
+        body === undefined
+          ? { authorization: `Bearer ${token}`, accept: 'application/json' }
+          : {
+              authorization: `Bearer ${token}`,
+              accept: 'application/json',
+              'content-type': 'application/json'
+            },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }
+
+    // Only set when asked for, so connector action requests carry neither key.
+    if (transport.redirect !== undefined) {
+      fields.redirect = transport.redirect
+    }
+
+    if (transport.credentials !== undefined) {
+      fields.credentials = transport.credentials
+    }
+
+    return yield* http.request(ConnectorHttpRequest.make(fields))
   })
+
+/**
+ * The raw response to an authenticated Fortnox GET (same credential rules and headers as every
+ * connector request), without status mapping or decoding. For conformance cases that must inspect
+ * a request the connector deliberately has no action for. `transport` optionally asks the host for
+ * manual redirects and no ambient credentials.
+ */
+export const getFortnoxResponse = (
+  integration: ConnectorIntegration,
+  slot: CredentialSlot,
+  path: string,
+  transport: FortnoxTransportOptions = {}
+) => requestFortnox(integration, slot, 'GET', path, undefined, transport)
 
 export const readFortnox = <A, B>(
   integration: ConnectorIntegration,

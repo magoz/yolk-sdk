@@ -34,6 +34,10 @@
       "types": "./src/agent.ts",
       "default": "./src/agent.ts"
     },
+    "./conformance": {
+      "types": "./src/conformance/index.ts",
+      "default": "./src/conformance/index.ts"
+    },
     "./afloat": {
       "types": "./src/afloat/index.ts",
       "default": "./src/afloat/index.ts"
@@ -53,6 +57,10 @@
     "./fortnox": {
       "types": "./src/fortnox/index.ts",
       "default": "./src/fortnox/index.ts"
+    },
+    "./fortnox/conformance": {
+      "types": "./src/fortnox/conformance/index.ts",
+      "default": "./src/fortnox/conformance/index.ts"
     },
     "./github": {
       "types": "./src/github/index.ts",
@@ -109,6 +117,11 @@
         "import": "./dist/agent.mjs",
         "default": "./dist/agent.mjs"
       },
+      "./conformance": {
+        "types": "./dist/conformance/index.d.mts",
+        "import": "./dist/conformance/index.mjs",
+        "default": "./dist/conformance/index.mjs"
+      },
       "./afloat": {
         "types": "./dist/afloat/index.d.mts",
         "import": "./dist/afloat/index.mjs",
@@ -133,6 +146,11 @@
         "types": "./dist/fortnox/index.d.mts",
         "import": "./dist/fortnox/index.mjs",
         "default": "./dist/fortnox/index.mjs"
+      },
+      "./fortnox/conformance": {
+        "types": "./dist/fortnox/conformance/index.d.mts",
+        "import": "./dist/fortnox/conformance/index.mjs",
+        "default": "./dist/fortnox/conformance/index.mjs"
       },
       "./github": {
         "types": "./dist/github/index.d.mts",
@@ -184,6 +202,7 @@
   },
   "dependencies": {
     "@yolk-sdk/agent": "workspace:^",
+    "@yolk-sdk/conformance": "workspace:^",
     "effect": "catalog:"
   }
 }

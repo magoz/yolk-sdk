@@ -63,6 +63,9 @@ yarn-error.log*
 # alchemy local state/logs
 .alchemy/
 
+# staged live conformance recordings (practice-company data; scrub, then promote by hand)
+/.conformance-recordings/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

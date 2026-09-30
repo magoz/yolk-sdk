@@ -410,6 +410,9 @@ importers:
       '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../agent
+      '@yolk-sdk/conformance':
+        specifier: workspace:^
+        version: link:../conformance
       effect:
         specifier: 'catalog:'
         version: 4.0.0-rc.115

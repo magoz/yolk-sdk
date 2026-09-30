@@ -51,12 +51,12 @@ metadata.
   - `@yolk-sdk/mcp/server`
   - `@yolk-sdk/mcp/server/node`
 - `@yolk-sdk/knowledge` owns knowledge document/file/context/search contracts. Public subpaths: `./documents`, `./files`, `./store`, `./context`, `./chunking`, `./embeddings`, `./extraction`, `./ingestion`, `./search`, `./summarization`, `./errors`, and `./agent`.
-- `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./afloat`, `./dropbox`, `./email`, `./figma`, `./fortnox`, `./github`, `./google`, `./linkedin-search`, `./microsoft`, `./notion`, `./r2-storage`, `./telegram`, and `./todoist`.
+- `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./afloat`, `./conformance`, `./dropbox`, `./email`, `./figma`, `./fortnox`, `./fortnox/conformance`, `./github`, `./google`, `./linkedin-search`, `./microsoft`, `./notion`, `./r2-storage`, `./telegram`, and `./todoist`. `./conformance` (experimental) holds conformance/testing-only Effect `HttpClient` bridges to the connector HTTP ports plus a static credential resolver; it is not a production adapter.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, `./testing` exports the `TestWorkflowWorld` behavioral emulator, and hosts own concrete Workflow directives.
 - `@yolk-sdk/harness` owns run lifecycle (coordinator, store, inbox, driver, outcome). Public subpaths: `./coordinator`, `./store`, `./inbox`, `./driver`, `./driver/memory`, `./driver/durable-object`, and `./outcome`. It does not replace `@yolk-sdk/agent/loop`.
 - `@yolk-sdk/conformance` (experimental) owns wire fixtures, offline fail-closed replay, wire faults, recording over a host-provided `HttpClient`, conformance case definitions, and the safety-gated case runner. Public subpaths: `./fixture`, `./replay`, `./record`, `./case`, and `./runner`; there is no root export. It performs no network I/O itself.
-- Provider wire fixtures and conformance cases live under `@yolk-sdk/agent/providers/<vendor>/conformance` (currently `vercel`); see the conformance import rule under [Dependency Direction](#dependency-direction).
+- Provider wire fixtures and conformance cases live under `@yolk-sdk/agent/providers/<vendor>/conformance` (currently `vercel`) and `@yolk-sdk/connectors/<provider>/conformance` (currently `fortnox`); see the conformance import rule under [Dependency Direction](#dependency-direction).
 - OpenAI/Codex, Vercel AI Gateway, OpenCode Go, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, Grok, and OpenCode Go also expose best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
@@ -89,6 +89,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/harness core -> Effect only; ./outcome -> @yolk-sdk/agent/{protocol,loop,compaction}; no app/auth/UI/product policy
 @yolk-sdk/conformance -> Effect only (no @yolk-sdk/*, Node builtins, React, Next); hosts supply the network HttpClient
 @yolk-sdk/agent/providers/*/conformance -> @yolk-sdk/conformance/* (see conformance import rule below)
+@yolk-sdk/connectors/**/conformance -> @yolk-sdk/conformance/* (see conformance import rule below)
 @yolk-sdk/agent/client -> @yolk-sdk/agent/protocol + Effect HTTP/Stream + runtime-only browser WebSocket/Blob/File/FileReader APIs
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol} + Effect

@@ -12,6 +12,7 @@
   "ignorePatterns": [
     "pnpm-lock.yaml",
     ".repos/",
+    ".conformance-recordings/",
     ".claude/",
     "**/.source/",
     "tools/oxlint/anti-slop/"

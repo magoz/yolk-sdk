@@ -14,23 +14,25 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                | Purpose                                                                                                       |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types        |
-| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                             |
-| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                   |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update     |
-| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port    |
-| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                              |
-| `@yolk-sdk/connectors/fortnox`         | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update |
-| `@yolk-sdk/connectors/github`          | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                |
-| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                           |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                                      |
-| `@yolk-sdk/connectors/microsoft`       | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments      |
-| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot                         |
-| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                             |
-| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                            |
-| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label/comment actions and API token slot constants                                       |
+| Subpath                                    | Purpose                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                     | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types        |
+| `@yolk-sdk/connectors/agent`               | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                             |
+| `@yolk-sdk/connectors/afloat`              | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                   |
+| `@yolk-sdk/connectors/conformance`         | Experimental, conformance/testing only: Effect `HttpClient` bridges to the HTTP ports and a static resolver   |
+| `@yolk-sdk/connectors/dropbox`             | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update     |
+| `@yolk-sdk/connectors/email`               | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port    |
+| `@yolk-sdk/connectors/figma`               | Figma remote MCP auth action and OAuth constants                                                              |
+| `@yolk-sdk/connectors/fortnox`             | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update |
+| `@yolk-sdk/connectors/fortnox/conformance` | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                            |
+| `@yolk-sdk/connectors/github`              | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                |
+| `@yolk-sdk/connectors/google`              | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                           |
+| `@yolk-sdk/connectors/linkedin-search`     | Exa people search and Enrich Layer profile/email actions                                                      |
+| `@yolk-sdk/connectors/microsoft`           | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments      |
+| `@yolk-sdk/connectors/notion`              | Notion search/page/block/database/data-source/comment/user actions and API token slot                         |
+| `@yolk-sdk/connectors/r2-storage`          | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                             |
+| `@yolk-sdk/connectors/telegram`            | Telegram bot send/validate actions                                                                            |
+| `@yolk-sdk/connectors/todoist`             | Todoist project/task/label/comment actions and API token slot constants                                       |
 
 ## Imports
 
@@ -641,6 +643,84 @@ See the [official API reference](https://apps.fortnox.se/apidocs),
 [scopes](https://www.fortnox.se/developer/guides-and-good-to-know/scopes),
 [OAuth lifecycle](https://www.fortnox.se/developer/authorization/), and
 [pagination/search](https://www.fortnox.se/developer/guides-and-good-to-know/parameters/).
+
+### Fortnox conformance cases (experimental)
+
+`@yolk-sdk/connectors/fortnox/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`, each checking one claim about how the real Fortnox API behaves where
+it differs from, or goes beyond, its docs. Each case runs the real connector actions and helpers over
+`ConnectorHttpClient`, `ConnectorBinaryHttpClient`, and `CredentialResolver`, plus the
+`FortnoxConformanceConfig` service, which holds host-supplied seed identities in a Fortnox developer
+test company (practice account). Cases never hard-code account data; a missing seed fails the case
+with a `precondition:` mismatch before any request. Credentials bind through
+`fortnoxConformanceIntegration` (`fortnox.oauth`, credential ref `fortnox.conformance`). The case
+table, seeds, and claims live in the
+[Fortnox guide](../../apps/docs/content/docs/connectors/fortnox.mdx#conformance-cases).
+
+The row and customer mutation cases read the original state first, always restore it afterwards
+(also after a failed assertion or interruption), verify the restore by reading back, and fail with
+`FortnoxConformanceRestoreFailed` when the restore fails (check the account and restore it by hand
+if it still differs). The rejection case restores nothing: it only confirms the customer is absent
+before its write and names any invoice Fortnox unexpectedly creates for manual cancellation. The
+email case aborts unless the invoice's `EmailInformation.EmailAddressTo` equals the `emailRecipient`
+seed exactly; the runner never runs it live unless its exact id is allowed.
+
+`fortnoxConformanceFixtures` are synthetic placeholders (`evidence: 'unverified'`) that replay with
+`fortnoxConformanceFixtureSeeds`. `pnpm conformance:fortnox` in this repository dry-runs by default;
+its `--live --account <label>` mode is for owners running a practice account by hand. `--record`
+stages verified recordings all or nothing in a new gitignored run directory,
+`.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`, and never writes committed
+sources. Promotion is manual: scrub, copy into `src/fortnox/conformance/`, and update the tests in
+the same change, because promoted fixtures change fixture ids, `evidence`, and `account`. A promoted
+payment-filter recording also needs the tests' fixed clock (`atTestNow`) moved past the recorded
+`DueDate`.
+
+`@yolk-sdk/connectors/conformance` supplies the ports for such runs:
+`connectorHttpClientFromEffectHttpClientLayer`, `connectorBinaryHttpClientFromEffectHttpClientLayer`
+(or both via `connectorHttpClientsFromEffectHttpClientLayer`) over any Effect `HttpClient` (for
+example `ReplayHttpClient.layer` or `FetchHttpClient.layer`), and `staticCredentialResolverLayer`.
+**These are for conformance and tests only, not production adapters:** they enforce no streamed
+byte limits, redirect, DNS/IP, timeout, or TLS policy (binary `maxBytes`/`maxErrorBodyBytes` are
+checked only after buffering), forward `redirect: 'manual'`/`credentials: 'omit'` as
+`FetchHttpClient.RequestInit` options, and map transport failures to code-only errors without URLs,
+headers, or bodies. The static resolver ignores scopes and never refreshes; hosts own real
+credential storage.
+
+```ts
+import { Layer } from 'effect'
+import { OAuthCredential } from '@yolk-sdk/connectors'
+import {
+  connectorHttpClientsFromEffectHttpClientLayer,
+  staticCredentialResolverLayer
+} from '@yolk-sdk/connectors/conformance'
+import {
+  FortnoxConformanceConfig,
+  fortnoxConformanceCases,
+  fortnoxConformanceFixtureSeeds,
+  fortnoxConformanceFixtures
+} from '@yolk-sdk/connectors/fortnox/conformance'
+import { ReplayHttpClient } from '@yolk-sdk/conformance/replay'
+import { runConformance } from '@yolk-sdk/conformance/runner'
+
+const report = runConformance(fortnoxConformanceCases, {
+  target: { kind: 'replay' },
+  fixtures: fortnoxConformanceFixtures,
+  layer: testCase =>
+    Layer.mergeAll(
+      connectorHttpClientsFromEffectHttpClientLayer.pipe(
+        Layer.provide(
+          ReplayHttpClient.layer(
+            fortnoxConformanceFixtures.filter(fixture => testCase.fixtures.includes(fixture.id))
+          )
+        )
+      ),
+      staticCredentialResolverLayer(
+        OAuthCredential.make({ provider: 'fortnox', accessToken: 'replay', expiresAt: 0 })
+      ),
+      Layer.succeed(FortnoxConformanceConfig, fortnoxConformanceFixtureSeeds)
+    )
+})
+```
 
 ## Dropbox connector
 

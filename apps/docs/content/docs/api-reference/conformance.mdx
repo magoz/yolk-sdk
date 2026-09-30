@@ -195,3 +195,37 @@ The same subpath exports four `read` conformance cases backed by those fixtures
 `VercelAiGatewayConformanceConfig` service (API key, output limits, reasoning effort, and model ids;
 `vercelAiGatewayConformanceDefaultModels` holds the fixture model ids), so they run against replay
 or a host's live client. None is observed live yet, so reports warn `unverified-case`.
+
+## Connector conformance
+
+> **Experimental.** Conformance/testing only.
+
+`@yolk-sdk/connectors/conformance` provides the connector ports from an Effect `HttpClient`, so
+connector cases run the real connector actions over replay, an emulator, or a host's live client:
+
+| Export                                               | Purpose                                                                                                                                |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `connectorHttpClientFromEffectHttpClientLayer`       | `ConnectorHttpClient` over the `HttpClient` in context; keeps method, URL, headers, string body, content type, status, and body text   |
+| `connectorBinaryHttpClientFromEffectHttpClientLayer` | GET-only `ConnectorBinaryHttpClient`; buffers, then fails oversize 200s (`response_too_large`) and truncates error bodies              |
+| `connectorHttpClientsFromEffectHttpClientLayer`      | Both bridges                                                                                                                           |
+| `staticCredentialResolverLayer(credentials)`         | `CredentialResolver` returning one `RuntimeCredential` for every slot, or credentials keyed by slot id (missing: `credential_missing`) |
+
+These bridges are **not production adapters**. They enforce no streamed byte limits, redirect,
+DNS/IP, timeout, or TLS policy; binary limits are checked only after buffering. `redirect: 'manual'`
+and `credentials: 'omit'` are forwarded as `FetchHttpClient.RequestInit` options, and transport
+failures become code-only errors without URLs, headers, or bodies. The static resolver ignores
+scopes and never refreshes; hosts own real credential storage.
+
+`@yolk-sdk/connectors/fortnox/conformance` exports seven Fortnox cases (`fortnoxConformanceCases`),
+their synthetic fixtures (`fortnoxConformanceFixtures`, `evidence: 'unverified'`), and the seeds they
+replay with (`fortnoxConformanceFixtureSeeds`). Cases need the connector ports plus
+`FortnoxConformanceConfig`, which holds seed identities in a Fortnox developer test company. A
+missing seed fails the case with a `precondition:` mismatch before any request. None of the cases is
+observed live yet, so reports warn `unverified-case`.
+
+The row and customer mutation cases restore what they change, verify the restore by reading back,
+and fail with `FortnoxConformanceRestoreFailed` instead of hiding a failed restore. The rejection
+case restores nothing: it only confirms that the customer is absent before its write, and reports
+any invoice Fortnox unexpectedly creates for manual cancellation. See
+[Fortnox conformance cases](../connectors/fortnox#conformance-cases) for the case table, seeds, and
+claims.
