@@ -226,7 +226,6 @@ const isOpenAiModel = (model: string): boolean => vendorOf(model) === 'openai'
 const syntheticResponseId = (identity: ChatResponseIdentity): string =>
   `resp_synthetic_${identity.id}`
 
-/** The upstream provider a model routes to, and its `provider_metadata` entry if any. */
 type GatewayUpstream = { readonly provider: string; readonly entry?: Schema.JsonObject }
 
 /**

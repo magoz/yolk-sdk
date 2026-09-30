@@ -139,7 +139,7 @@ export const vercelAiGatewayPlainTextCase: VercelAiGatewayConformanceCase = defi
   id: 'vercel-ai-gateway.stream.plain-text',
   title: 'Streamed plain text ends with one stop and a usage report',
   safety: 'read',
-  docs: 'The Gateway Chat Completions endpoint is OpenAI-compatible: `stream: true` returns `chat.completion.chunk` server-sent events, and `stream_options.include_usage` adds `usage`, which the Gateway sends on the finish event rather than in a separate chunk.',
+  docs: 'The Gateway Chat Completions endpoint is OpenAI-compatible: `stream: true` returns `chat.completion.chunk` server-sent events, and `stream_options.include_usage` adds a `usage` report.',
   wire: 'A streamed request succeeds with non-empty answer text, a `stop` finish, and a usage report (the live Gateway sends `usage` on the finish event itself): the provider stream completes without error, its TextDelta events join to non-empty text, and it emits exactly one Done(stop) plus Usage. How many content events carry the text is not part of the claim.',
   observed: liveObservation,
   fixtures: [vercelAiGatewayPlainTextFixture.id],
