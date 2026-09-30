@@ -8,8 +8,9 @@ description: Experimental service emulators, HttpClient routing to them, and a l
 
 `@yolk-sdk/emulators` runs stand-ins for outside services in tests and local development, and
 routes an Effect `HttpClient` to them instead of the real service. Emulators never import other
-`@yolk-sdk/*` code: their wire shapes follow the recorded conformance fixtures, and each emulated
-route names the conformance cases it follows. The package depends only on `effect`.
+`@yolk-sdk/*` code: their wire shapes follow the conformance fixtures (verified recordings for the
+Gateway, synthetic placeholders elsewhere), and each emulated route names the conformance cases it
+follows. The package depends only on `effect`.
 
 There is no root export. Import an explicit subpath.
 
@@ -225,7 +226,67 @@ Scripted turns are responses (`reasoning`, `text`, `functionCalls` with `argumen
 `status` (for example 429 with `retry-after`), `error-after-chunks`, `truncate-after-chunks` (for
 example before `response.completed`), and `error-event-after-chunks` (N events, then an `error`
 event, or a `response.failed` event with `event: 'response.failed'`; streamed responses only, and
-only before `response.completed`). OpenCode Go Responses are not emulated yet.
+only before `response.completed`).
+
+## Fixture-only routes
+
+The OpenCode Go routes and the Claude, Codex, and Grok subscription-usage routes are fixture-only;
+the earlier model routes above keep their behaviour. A request matching a recorded request's shape
+gets that fixture's recorded response (same status, headers, and bytes). Everything else answers
+one 400 not-emulated, written to the ledger and using up no fault or turn:
+`{ error: { type: 'not_emulated', message } }`. That covers unknown routes and methods, missing or
+invalid credentials, missing or other headers and query parameters, unknown models, non-streamed
+modes, tools, reasoning, and extra fields. No provider status or error envelope is guessed.
+
+Accepted request-shape latitude: any credential value; extra headers; key order; any string value
+except `model`, `role`, `type`, and `phase`; any positive integer where the recording has a number
+(the output-token limit); an `anthropic-beta` list that includes `oauth-2025-04-20`; any
+non-empty Grok `x-userid` and `x-grok-client-version`; and `content-type` parameters. The query
+string must match byte for byte (a bare `?` counts as no query), and Grok's `X-XAI-Token-Auth` (`xai-grok-cli`) and
+`x-grok-client-mode` (`headless`) must be the SDK's fixed values. Test controls are the shared faults, scripted error turns, and, on usage
+routes, a scripted `{ usage }` body or `subscriptionUsage` option with the recorded JSON shape;
+fault and scripted-error statuses are 400-599 only. All
+of these routes are `unverified` (synthetic fixtures).
+
+## OpenCode Go emulator
+
+`@yolk-sdk/emulators/opencode`
+
+| Export                             | Purpose                                                                                             |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `makeOpenCodeGoEmulator(options?)` | `{ fetch, reset, coverage, chat, messages, responses, usage }` for `https://opencode.ai/zen/go/v1`  |
+| `openCodeGoEmulatorRoutes`         | Route evidence manifest (four routes) linked to the OpenCode Go conformance cases                   |
+| `openCodeGoUsageDefault`           | The recorded usage body (`usage.rolling`, `.weekly`, `.monthly` as `{ percent, resetsAt }`)         |
+| `openCodeGoEmulatorDefaultModels`  | The recorded model ids (one per protocol); no other model is emulated                               |
+| `OpenCodeGoEmulatorInputInvalid`   | Thrown by a part's `faults.add` / `script.enqueue`, or for a differently shaped `subscriptionUsage` |
+
+One fetch handler serves the four routes the OpenCode Go provider and usage fetcher call, each
+answering its Go fixture: `POST /zen/go/v1/chat/completions` (Bearer; streamed plain text with
+usage), `POST /zen/go/v1/messages` (`x-api-key`, `anthropic-version: 2023-06-01`; streamed plain
+text), `POST /zen/go/v1/responses` (Bearer; streamed plain text, or a text answer to a replayed tool
+turn with commentary-tagged text), and `GET /zen/go/v1/usage` (Bearer). Each part (`emulator.chat`,
+`.messages`, `.responses`, `.usage`) is a full emulator API with its own ledger, faults, and turns,
+and its control plane over HTTP is `/_emulate/<part>/*`; `coverage()` / `GET /_emulate/coverage`
+combine every route, and `reset()` / `POST /_emulate/reset` reset every part. Requests on no route
+answer 400 not-emulated, ledgered by the chat part.
+
+## Subscription-usage routes
+
+The Anthropic, Codex, and Grok emulators also answer their provider's subscription-usage endpoint
+on the same origin, with their own manifest, ledger, faults, turns, and coverage (`emulator.usage`,
+control plane `/_emulate/usage/*`). The model route's manifest and coverage are unchanged; the
+emulator types gain `usage` and a `subscriptionUsage` option.
+
+| Emulator     | Route                            | Headers the fetcher sends (all required)                                              | Manifest                                   |
+| ------------ | -------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `/anthropic` | `GET /api/oauth/usage`           | Bearer, `anthropic-beta` listing `oauth-2025-04-20`                                   | `anthropicSubscriptionUsageEmulatorRoutes` |
+| `/codex`     | `GET /backend-api/wham/usage`    | Bearer, `ChatGPT-Account-Id`                                                          | `codexSubscriptionUsageEmulatorRoutes`     |
+| `/xai`       | `GET /v1/billing?format=credits` | Bearer, `X-XAI-Token-Auth`, `x-userid`, `x-grok-client-version`, `x-grok-client-mode` | `xAiGrokSubscriptionUsageEmulatorRoutes`   |
+
+Each answers its recorded synthetic snapshot body (`*SubscriptionUsageDefault`) for a request with
+those headers, `accept: application/json`, and exactly the recorded query; anything else is 400
+not-emulated. Credential and account values are never recorded, and are not checked except Grok's
+fixed `X-XAI-Token-Auth: xai-grok-cli`.
 
 ## Node server
 
@@ -246,5 +307,5 @@ Emulated routes carry evidence: `verified` routes follow a live observation date
 `observedAt`; `unverified` routes follow synthetic placeholders and tag every response with
 `x-emulator-evidence: unverified`. The Gateway route is verified (`observedAt: '2026-09-30'`): the
 emulator follows the verified live Gateway recordings, and the Yolk repository checks its response
-shapes against each recording. The OpenAI, Anthropic, Codex, and Grok routes are unverified, like
-the synthetic fixtures they follow.
+shapes against each recording. The OpenAI, Anthropic, Codex, Grok, OpenCode Go, and
+subscription-usage routes are unverified, like the synthetic fixtures they follow.

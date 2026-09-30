@@ -7,9 +7,12 @@ Emulators for outside services, for tests and local development. A route table s
 `HttpClient` to an emulator instead of the real service. Two emulators speak the OpenAI-compatible
 Chat Completions wire: the Vercel AI Gateway and OpenAI itself. A third emulates Anthropic Messages,
 and two more speak the OpenAI Responses wire of the subscription providers: the ChatGPT Codex
-endpoint and the xAI Grok CLI proxy. Emulators never import other `@yolk-sdk/*` code:
-their wire shapes follow recorded conformance fixtures, and each emulated route names the
-conformance cases behind it.
+endpoint and the xAI Grok CLI proxy. The OpenCode Go emulator answers the Go chat, Messages,
+Responses, and usage routes under one origin, and the Anthropic, Codex, and Grok emulators also
+answer their subscription-usage endpoints; those newer routes are fixture-only (see below).
+Emulators never import other `@yolk-sdk/*` code: their wire shapes follow conformance fixtures
+(verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
+names the conformance cases behind it.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -31,6 +34,7 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/anthropic` | `makeAnthropicEmulator`, `anthropicEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)   |
 | `@yolk-sdk/emulators/codex`     | `makeCodexEmulator`, `codexEmulatorRoutes`, fault and scripted-turn schemas (ChatGPT Codex Responses)       |
 | `@yolk-sdk/emulators/xai`       | `makeXAiGrokEmulator`, `xAiGrokEmulatorRoutes`, fault and scripted-turn schemas (Grok CLI proxy Responses)  |
+| `@yolk-sdk/emulators/opencode`  | `makeOpenCodeGoEmulator`, `openCodeGoEmulatorRoutes` (OpenCode Go chat, Messages, Responses, and usage)     |
 | `@yolk-sdk/emulators/node`      | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
 
 ## Routing
@@ -349,17 +353,113 @@ const httpLayer = InProcessHttpClient.layer([
 
 `codexEmulatorRoutes` and `xAiGrokEmulatorRoutes` link each route to the Responses conformance
 cases in `@yolk-sdk/agent/providers/openai/conformance` (Codex) and
-`@yolk-sdk/agent/providers/xai/conformance` (Grok). OpenCode Go Responses are not emulated yet.
+`@yolk-sdk/agent/providers/xai/conformance` (Grok).
+
+## Fixture-only routes
+
+The OpenCode Go routes and the Claude, Codex, and Grok subscription-usage routes follow a stricter
+rule than the earlier model routes (whose behaviour above is unchanged): response behaviour comes
+only from the committed conformance fixtures.
+
+- A request that matches a recorded request's shape, within the request-shape latitude below,
+  gets that fixture's recorded response, copied as data: the same status, headers, chunks, and
+  bytes.
+- Everything else answers one 400 not-emulated, written to the ledger (`notEmulated`) and using up
+  no fault or turn: `{ error: { type: 'not_emulated', message: 'Not emulated: <reason>' } }`. That
+  covers unknown routes and methods, missing or invalid credentials, missing or other headers and
+  query parameters, unknown models, non-streamed modes, tools, reasoning, extra fields, and
+  anything else no fixture records. No provider status, envelope, or error code is guessed.
+- Test controls: the shared faults (`status`, `error-after-chunks`, `truncate-after-chunks`; a
+  `status` fault without a body answers `{ error: { type: 'emulator_fault', message } }`) and
+  scripted error turns `{ error: { status, body, headers? } }`. Usage routes also take a scripted
+  `{ usage }` body and a `subscriptionUsage` option, both required to keep the recorded JSON shape
+  (the same keys and value kinds; only values change).
+- Request-shape latitude (the only accepted deviations): any credential value (never checked or
+  stored); extra request headers; JSON key order; any string value except the discriminators
+  `model`, `role`, `type`, and `phase`; any positive integer where the recording has a number (the
+  output-token limit); an `anthropic-beta` list that includes `oauth-2025-04-20` (Claude usage);
+  any non-empty `x-userid` and `x-grok-client-version` (Grok usage); `content-type` parameters. Object keys, array lengths, booleans (`stream`, `store`,
+  `include_usage`, `parallel_tool_calls`, `additionalProperties`), `accept`, the query string (byte
+  for byte; a bare `?` counts as no query), the method, `X-XAI-Token-Auth: xai-grok-cli`, and `x-grok-client-mode: headless` must
+  equal the recording or the SDK's fixed value. Faults and scripted errors on these routes take
+  statuses of 400-599 only.
+
+All fixtures behind these routes are synthetic and the routes are `unverified`.
+
+## OpenCode Go emulator
+
+`makeOpenCodeGoEmulator(options?)` (`@yolk-sdk/emulators/opencode`) answers the origin
+`https://opencode.ai` with one fetch handler for the routes the OpenCode Go provider and usage
+fetcher call under `/zen/go/v1`. Each route is fixture-only and answers its Go conformance fixture:
+
+| Route                              | Headers the provider sends                   | Recorded answer                                                     |
+| ---------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| `POST /zen/go/v1/chat/completions` | `Authorization: Bearer`                      | Streamed plain text with a usage chunk and `data: [DONE]`           |
+| `POST /zen/go/v1/messages`         | `x-api-key`, `anthropic-version: 2023-06-01` | Streamed plain text ending with `message_stop`                      |
+| `POST /zen/go/v1/responses`        | `Authorization: Bearer`                      | Streamed plain text, or (replayed tool turn) a streamed text answer |
+| `GET /zen/go/v1/usage`             | `Authorization: Bearer`                      | `usage.rolling` / `weekly` / `monthly` as `{ percent, resetsAt }`   |
+
+Only the recorded models are emulated (`openCodeGoEmulatorDefaultModels`: `synthetic-go-chat`,
+`synthetic-go-messages`, `synthetic-go-responses`, one per protocol). It returns
+`{ fetch, reset, coverage, chat, messages, responses, usage }`: each part is a full emulator API
+(`ledger`, `faults`, `script`, `coverage`, its own `fetch`), and over HTTP its control plane is
+`/_emulate/<chat|messages|responses|usage>/*`. `coverage()` and `GET /_emulate/coverage` combine
+all four routes; `reset()` and `POST /_emulate/reset` reset every part. Requests on no route
+answer 400 not-emulated, ledgered by the chat part. `openCodeGoUsageDefault` is the recorded usage
+body; `options.subscriptionUsage` replaces it with a same-shaped body. Invalid input throws
+`OpenCodeGoEmulatorInputInvalid`.
+
+```ts
+import { makeOpenCodeGoEmulator } from '@yolk-sdk/emulators/opencode'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const go = makeOpenCodeGoEmulator()
+
+go.responses.faults.add({ kind: 'status', status: 429, headers: { 'retry-after': '2' }, count: 1 })
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://opencode.ai', go.fetch)
+])
+```
+
+`openCodeGoEmulatorRoutes` links the four routes to the cases in
+`@yolk-sdk/agent/providers/opencode/conformance`.
+
+## Subscription-usage routes
+
+The router takes one route per origin, so the usage endpoint of each subscription provider is
+served by the emulator already bound to its origin, with its own manifest, ledger, faults, turns,
+and coverage (`emulator.usage`, control plane `/_emulate/usage/*`). The model route's manifest,
+coverage, and top-level `ledger` / `faults` / `script` are unchanged; the emulator types gain
+`usage` and a `subscriptionUsage` option, and `reset()` and `POST /_emulate/reset` reset both.
+Each usage route is fixture-only: a request with the headers the SDK fetcher sends, the recorded
+`accept: application/json`, and the recorded query gets the recorded body (`*SubscriptionUsageDefault`);
+anything else answers 400 not-emulated. Credential and account values are never recorded, and
+are not checked except Grok's fixed `X-XAI-Token-Auth: xai-grok-cli`.
+
+| Emulator     | Route                            | Headers the fetcher sends (all required)                                              | Recorded body                                            |
+| ------------ | -------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `/anthropic` | `GET /api/oauth/usage`           | Bearer, `anthropic-beta` listing `oauth-2025-04-20`                                   | `five_hour`, `seven_day` as `{ utilization, resets_at }` |
+| `/codex`     | `GET /backend-api/wham/usage`    | Bearer, `ChatGPT-Account-Id`                                                          | `rate_limit.primary_window` / `secondary_window`         |
+| `/xai`       | `GET /v1/billing?format=credits` | Bearer, `X-XAI-Token-Auth`, `x-userid`, `x-grok-client-version`, `x-grok-client-mode` | `config.creditUsagePercent` and `config.currentPeriod`   |
+| `/opencode`  | `GET /zen/go/v1/usage`           | Bearer                                                                                | `usage.rolling` / `weekly` / `monthly`                   |
+
+The ledger records `anthropic-beta` (Claude) and `x-grok-client-version` / `x-grok-client-mode`
+(Grok), never `ChatGPT-Account-Id` or `x-userid`. The manifests
+`anthropicSubscriptionUsageEmulatorRoutes`, `codexSubscriptionUsageEmulatorRoutes`,
+`xAiGrokSubscriptionUsageEmulatorRoutes`, and the usage route of `openCodeGoEmulatorRoutes` cite
+the usage snapshot cases of each vendor's conformance subpath.
 
 ## Evidence
 
-`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`, and
-`xAiGrokEmulatorRoutes` list every emulated route with `method`, `path`,
+`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
+`xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, and the three subscription-usage manifests list
+every emulated route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route carries `x-emulator-evidence: unverified`.
 The Gateway route is `verified` (`observedAt: '2026-09-30'`): its wire shapes are checked against
-the verified live recordings. The OpenAI and Anthropic routes are unverified, like the synthetic
-fixtures they follow.
+the verified live recordings. Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, and
+the usage routes) is unverified, like the synthetic fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes

@@ -23,17 +23,17 @@ Public packages use the `@yolk-sdk/*` scope and release in lockstep.
 
 The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 
-| Package                                                   | Role                                                                                                                                                               |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@yolk-sdk/agent`                                         | Agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice                                               |
-| `@yolk-sdk/mcp`                                           | MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility                                                                                 |
-| `@yolk-sdk/knowledge`                                     | Knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers                                                                   |
-| `@yolk-sdk/connectors`                                    | Effect-native connector primitives and reusable provider actions                                                                                                   |
-| `@yolk-sdk/sandbox`                                       | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes                                                                                             |
-| `@yolk-sdk/vercel-workflows`                              | Workflow loop contract, durable stream helpers, and Effect Workflow client/layer                                                                                   |
-| [`@yolk-sdk/harness`](packages/harness/README.md)         | Run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)                                                                               |
-| [`@yolk-sdk/conformance`](packages/conformance/README.md) | Experimental wire fixtures (record, fail-closed replay, wire faults) and a safety-gated conformance case runner                                                    |
-| [`@yolk-sdk/emulators`](packages/emulators/README.md)     | Experimental service emulators (Vercel AI Gateway, OpenAI chat, Anthropic Messages, Codex and Grok Responses), `HttpClient` routing to them, and a loopback server |
+| Package                                                   | Role                                                                                                                                                                                                |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent`                                         | Agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice                                                                                |
+| `@yolk-sdk/mcp`                                           | MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility                                                                                                                  |
+| `@yolk-sdk/knowledge`                                     | Knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers                                                                                                    |
+| `@yolk-sdk/connectors`                                    | Effect-native connector primitives and reusable provider actions                                                                                                                                    |
+| `@yolk-sdk/sandbox`                                       | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes                                                                                                                              |
+| `@yolk-sdk/vercel-workflows`                              | Workflow loop contract, durable stream helpers, and Effect Workflow client/layer                                                                                                                    |
+| [`@yolk-sdk/harness`](packages/harness/README.md)         | Run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)                                                                                                                |
+| [`@yolk-sdk/conformance`](packages/conformance/README.md) | Experimental wire fixtures (record, fail-closed replay, wire faults) and a safety-gated conformance case runner                                                                                     |
+| [`@yolk-sdk/emulators`](packages/emulators/README.md)     | Experimental service emulators (Vercel AI Gateway, OpenAI chat, Anthropic Messages, Codex and Grok Responses, OpenCode Go, subscription usage), `HttpClient` routing to them, and a loopback server |
 
 Docs site source lives in `apps/docs` and uses Fumadocs to explain the public SDK package set.
 

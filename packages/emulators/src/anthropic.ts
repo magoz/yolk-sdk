@@ -14,12 +14,19 @@
  * Requests authenticate with a non-empty `x-api-key` (native API keys) or `Authorization:
  * Bearer` (Claude OAuth) credential. Neither value is ever checked or stored.
  *
+ * The same fetch handler also answers the Claude subscription-usage route
+ * (`GET /api/oauth/usage`, `emulator.usage`) with its own manifest
+ * (`anthropicSubscriptionUsageEmulatorRoutes`), ledger, faults, and turns; see
+ * `makeAnthropicEmulator`.
+ *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
  * no Effect runtime is required to use it.
  *
  * @experimental
  */
 import { Data } from 'effect'
+import type * as Schema from 'effect/Schema'
+import { withSubscriptionUsage } from './emulator-compose.ts'
 import type {
   EmulatorCoverage,
   EmulatorFaultState,
@@ -40,12 +47,51 @@ import {
   type MessagesLedgerEntry
 } from './messages.ts'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
+import {
+  makeSubscriptionUsageEmulator,
+  recordedUsageBody,
+  SubscriptionUsageFault,
+  type SubscriptionUsageEmulator,
+  type SubscriptionUsageLedgerEntry,
+  type SubscriptionUsageScriptedTurn
+} from './subscription-usage.ts'
+import { anthropicClaudeUsageRecording } from './subscription-usage-recordings.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export const anthropicMessagesPath = '/v1/messages'
+
+/** The Claude subscription-usage path (`anthropicClaudeSubscriptionUsageUrl` in the SDK). */
+export const anthropicSubscriptionUsagePath = '/api/oauth/usage'
+
+/** The `anthropic-beta` value the Claude usage fetcher sends for OAuth credentials. */
+export const anthropicOAuthBeta = 'oauth-2025-04-20'
+
+/**
+ * Route evidence manifest of the Claude subscription-usage route (served by the same fetch
+ * handler as the Messages route, with its own ledger and coverage). Synthetic, unverified.
+ */
+export const anthropicSubscriptionUsageEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
+  {
+    method: 'GET',
+    path: anthropicSubscriptionUsagePath,
+    kind: 'provider',
+    write: false,
+    caseIds: ['anthropic.claude.usage.snapshot'],
+    evidence: 'unverified',
+    observedAt: undefined
+  }
+]
+
+/**
+ * The recorded Claude usage body (the synthetic `anthropic.claude.usage.snapshot` fixture, copied
+ * as data): `five_hour` and `seven_day` as `{ utilization, resets_at }`.
+ */
+export const anthropicSubscriptionUsageDefault: Schema.Json = recordedUsageBody(
+  anthropicClaudeUsageRecording
+)
 
 /** Synthetic-safe default model ids, including the Anthropic Messages conformance defaults. */
 export const anthropicEmulatorDefaultModels: ReadonlyArray<string> = [
@@ -158,12 +204,30 @@ export type AnthropicRouteCoverage = EmulatorRouteCoverage
 
 export type AnthropicCoverage = EmulatorCoverage
 
+/** A usage-route fault (`status`, `error-after-chunks`, `truncate-after-chunks`). */
+export const AnthropicUsageFault = SubscriptionUsageFault
+
+export type AnthropicUsageFault = SubscriptionUsageFault
+
+/** A usage turn: `{ usage }` (a body with the recorded JSON shape) or `{ error }`. */
+export type AnthropicUsageScriptedTurn = SubscriptionUsageScriptedTurn
+
+export type AnthropicUsageLedgerEntry = SubscriptionUsageLedgerEntry
+
+export type AnthropicUsageEmulator = SubscriptionUsageEmulator
+
 export type AnthropicEmulatorOptions = {
   /** Model ids that exist. Defaults to `anthropicEmulatorDefaultModels`. */
   readonly knownModels?: ReadonlyArray<string>
+  /**
+   * Replacement usage-route body; must have the recorded JSON shape (same keys and value kinds).
+   * Defaults to the recorded body (`anthropicSubscriptionUsageDefault`).
+   */
+  readonly subscriptionUsage?: Schema.Json
 }
 
-export type AnthropicEmulator = MessagesEmulator
+/** The Messages emulator, plus `usage`: the subscription-usage route's own emulator API. */
+export type AnthropicEmulator = MessagesEmulator & { readonly usage: AnthropicUsageEmulator }
 
 /**
  * Create an Anthropic Messages emulator. Each call has independent ledger, fault, and script
@@ -185,11 +249,41 @@ export type AnthropicEmulator = MessagesEmulator
  * 404 envelope. The OAuth `anthropic-beta` header and `budget_tokens` limits are not enforced. The
  * ledger records which header carried the credential, `anthropic-version`, and `anthropic-beta`,
  * never a credential value.
+ *
+ * `GET /api/oauth/usage` is fixture-only: a request with a non-empty bearer credential (never
+ * checked or stored), an `anthropic-beta` header listing `oauth-2025-04-20`, `accept:
+ * application/json`, and no query gets the recorded body (`anthropicSubscriptionUsageDefault`,
+ * or a same-shaped `options.subscriptionUsage` / scripted `{ usage }`); anything else answers 400
+ * not-emulated. Throws `AnthropicEmulatorInputInvalid` for a differently shaped
+ * `subscriptionUsage`. Its ledger, faults, turns, and coverage are
+ * `emulator.usage` (control plane `/_emulate/usage/*`); `emulator.faults` and the other top-level
+ * APIs stay the Messages route's. `reset()` and `POST /_emulate/reset` reset both.
  */
 export const makeAnthropicEmulator = (options: AnthropicEmulatorOptions = {}): AnthropicEmulator =>
-  makeMessagesEmulator({
-    path: anthropicMessagesPath,
-    routes: anthropicEmulatorRoutes,
-    knownModels: options.knownModels ?? anthropicEmulatorDefaultModels,
-    inputInvalid: (input, reason) => new AnthropicEmulatorInputInvalid({ input, reason })
-  })
+  withSubscriptionUsage(
+    makeMessagesEmulator({
+      path: anthropicMessagesPath,
+      routes: anthropicEmulatorRoutes,
+      knownModels: options.knownModels ?? anthropicEmulatorDefaultModels,
+      inputInvalid: (input, reason) => new AnthropicEmulatorInputInvalid({ input, reason })
+    }),
+    makeSubscriptionUsageEmulator({
+      path: anthropicSubscriptionUsagePath,
+      routes: anthropicSubscriptionUsageEmulatorRoutes,
+      recording: anthropicClaudeUsageRecording,
+      headers: [
+        {
+          name: 'anthropic-beta',
+          record: true,
+          accepts: value =>
+            value
+              .split(',')
+              .map(beta => beta.trim())
+              .includes(anthropicOAuthBeta)
+        }
+      ],
+      subscriptionUsage: options.subscriptionUsage,
+      inputInvalid: (input, reason) => new AnthropicEmulatorInputInvalid({ input, reason })
+    }),
+    anthropicSubscriptionUsagePath
+  )

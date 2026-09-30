@@ -115,6 +115,10 @@
       "types": "./src/providers/opencode/usage.ts",
       "default": "./src/providers/opencode/usage.ts"
     },
+    "./providers/opencode/conformance": {
+      "types": "./src/providers/opencode/conformance/index.ts",
+      "default": "./src/providers/opencode/conformance/index.ts"
+    },
     "./providers/anthropic": {
       "types": "./src/providers/anthropic/index.ts",
       "default": "./src/providers/anthropic/index.ts"
@@ -297,6 +301,11 @@
         "types": "./dist/providers/opencode/usage.d.mts",
         "import": "./dist/providers/opencode/usage.mjs",
         "default": "./dist/providers/opencode/usage.mjs"
+      },
+      "./providers/opencode/conformance": {
+        "types": "./dist/providers/opencode/conformance/index.d.mts",
+        "import": "./dist/providers/opencode/conformance/index.mjs",
+        "default": "./dist/providers/opencode/conformance/index.mjs"
       },
       "./providers/anthropic": {
         "types": "./dist/providers/anthropic/index.d.mts",

@@ -5,21 +5,26 @@ Effect `HttpClient` routing that points code at them.
 
 ## Subpaths
 
-| Subpath                         | Source                    | Role                                                                                                                                     |
-| ------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/emulators/router`    | `src/router.ts`           | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                 |
-| `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`          | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                 |
-| `@yolk-sdk/emulators/openai`    | `src/openai.ts`           | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                          |
-| `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`        | Anthropic Messages fetch-handler emulator and its manifest                                                                               |
-| `@yolk-sdk/emulators/codex`     | `src/codex.ts`            | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
-| `@yolk-sdk/emulators/xai`       | `src/xai.ts`              | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
-| `@yolk-sdk/emulators/node`      | `src/node.ts`             | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
-| (internal)                      | `src/emulator-kernel.ts`  | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
-| (internal)                      | `src/chat-completions.ts` | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
-| (internal)                      | `src/messages.ts`         | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
-| (internal)                      | `src/responses.ts`        | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai`                                                            |
-| (internal)                      | `src/emulator-http.ts`    | Fault/scripted-error status and header validators                                                                                        |
-| (internal)                      | `src/route-evidence.ts`   | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
+| Subpath                         | Source                      | Role                                                                                                                                     |
+| ------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`    | `src/router.ts`             | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                 |
+| `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`            | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                 |
+| `@yolk-sdk/emulators/openai`    | `src/openai.ts`             | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                          |
+| `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`          | Anthropic Messages fetch-handler emulator and its manifest                                                                               |
+| `@yolk-sdk/emulators/codex`     | `src/codex.ts`              | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
+| `@yolk-sdk/emulators/xai`       | `src/xai.ts`                | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
+| `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`           | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                              |
+| `@yolk-sdk/emulators/node`      | `src/node.ts`               | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
+| (internal)                      | `src/emulator-kernel.ts`    | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
+| (internal)                      | `src/chat-completions.ts`   | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
+| (internal)                      | `src/messages.ts`           | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
+| (internal)                      | `src/responses.ts`          | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai` (not `/opencode`, which is fixture-only)                   |
+| (internal)                      | `src/fixture-route.ts`      | Fixture-only route core (`makeFixtureRouteEmulator`): recorded answers, 400 not-emulated otherwise; used by every Go and usage route     |
+| (internal)                      | `src/subscription-usage.ts` | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go               |
+| (internal)                      | `src/*-recordings.ts`       | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                             |
+| (internal)                      | `src/emulator-compose.ts`   | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                  |
+| (internal)                      | `src/emulator-http.ts`      | Fault/scripted-error status and header validators                                                                                        |
+| (internal)                      | `src/route-evidence.ts`     | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
 
 There is no root export or barrel.
 
@@ -29,7 +34,7 @@ There is no root export or barrel.
   (`scripts/check-package-boundaries.ts` enforces this). Tests may import `@yolk-sdk/agent` and
   `@yolk-sdk/conformance` (workspace devDependencies).
 - `node:` builtins are allowed only in `src/node.ts` (also enforced).
-- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, and `xai` are plain Web fetch
+- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain Web fetch
   handlers (no Effect runtime needed, no Node builtins); `node` is the only Node boundary.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
@@ -51,17 +56,50 @@ There is no root export or barrel.
   it sends with `redirect: 'manual'`, merging `RequestInit` defaults visible at build and request
   time; `followRedirects` belongs on top, never underneath; any other underlying client must not
   follow redirects by itself (documented for hosts). `test/router-redirects.test.ts` guards this.
-- Wire shapes come from the recorded conformance fixtures (the Gateway ones are verified live
-  recordings and the Gateway route is `verified`, with `test/gateway-recordings.test.ts` comparing
-  the emulator's response shapes with them; the OpenAI, Anthropic, Codex, and Grok ones are
-  synthetic), copied as data, never imported. Each emulated route lists the conformance case ids it
-  follows in its manifest (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`,
-  `anthropicEmulatorRoutes`, `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`). Each manifest route
+- Wire shapes come from the conformance fixtures (the Gateway ones are verified live recordings
+  and the Gateway route is `verified`, with `test/gateway-recordings.test.ts` comparing the
+  emulator's response shapes with them; the OpenAI, Anthropic, Codex, Grok, OpenCode Go, and
+  subscription-usage ones are synthetic placeholders), copied as data, never imported. Each
+  emulated route lists the conformance case ids it follows in its manifest
+  (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`,
+  `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`,
+  `anthropicSubscriptionUsageEmulatorRoutes`, `codexSubscriptionUsageEmulatorRoutes`,
+  `xAiGrokSubscriptionUsageEmulatorRoutes`). Each manifest route
   needs its own handler: `bindRouteHandlers` (`src/route-evidence.ts`) pairs them at construction
   and throws `EmulatorRouteUnmapped` for a manifest route without a handler or a handler without a
   manifest route.
-- Evidence policy: unknown emulated API routes fail closed (404 JSON, written to the ledger;
-  control-plane requests are never recorded); unverified routes answer but carry
+- Fixture-only rule (lasting; every new emulator and route follows it): response behaviour comes
+  only from the committed fixtures. A request matching a recorded request's shape, within the
+  documented request-shape latitude, gets that fixture's response, copied as data (default content
+  equals the fixture byte for byte); everything else (unknown routes and methods, missing or
+  invalid credentials, missing or other headers and query parameters, unknown models, non-streamed
+  modes, tools, reasoning, extra fields, anything no fixture records) answers one ledgered 400
+  not-emulated (`{ error: { type: 'not_emulated', message } }`, `notEmulated` in the ledger) and
+  uses up no fault or turn. No guessed provider status, envelope, or error code. Test controls stay
+  within the shared kernel faults and scripted error turns; a scripted or default replacement body
+  must keep the recorded JSON shape. A recordings-parity test per fixture
+  (`test/fixture-recordings.test.ts`) compares status, event kinds and order, field names, and
+  content. Scope: the four `/opencode` routes and the three subscription-usage routes (Claude,
+  Codex, Grok) today, on `src/fixture-route.ts`. The earlier model routes (`/gateway`, `/openai`,
+  `/anthropic`, `/codex`, `/xai` Messages and Responses) predate the rule and keep their synthetic
+  behaviour and 404 fallback unchanged; do not copy that behaviour into new routes.
+- Request-shape latitude (fixture-only routes, the only accepted deviations): any credential value
+  (never checked or stored); extra request headers; JSON key order; any string value except the
+  discriminators `model`, `role`, `type`, and `phase`; any positive integer where the recording has
+  a number (the output-token limit); for `anthropic-beta` (Claude usage), a comma-separated list
+  that includes `oauth-2025-04-20`; any non-empty `x-userid` and `x-grok-client-version` (Grok
+  usage); for `content-type`, media-type parameters. Everything else must
+  equal the recording: object keys, array lengths, booleans (`stream`, `store`, `include_usage`,
+  `parallel_tool_calls`, `additionalProperties`), the `accept` value, the query string (a bare `?` counts as no query; otherwise byte for
+  byte), the method,
+  and the headers the SDK sends (Go chat, Responses, usage: Bearer; Go Messages: `x-api-key` and
+  `anthropic-version: 2023-06-01`; Claude usage: Bearer and `anthropic-beta`; Codex usage: Bearer
+  and `ChatGPT-Account-Id`; Grok usage: Bearer, `X-XAI-Token-Auth: xai-grok-cli`, `x-userid`,
+  `x-grok-client-version`, and `x-grok-client-mode: headless`). Fault and scripted-error statuses on
+  fixture-only routes are 400-599 only.
+- Evidence policy: unknown API routes fail closed and are written to the ledger (404 JSON on the
+  earlier model-route emulators, 400 not-emulated on fixture-only routes; control-plane requests
+  are never recorded); unverified routes answer but carry
   `x-emulator-evidence: unverified`, are tagged in the ledger, and are listed by the evidence
   check; evidence older than 30 days warns; connector write routes need `verified` evidence with a
   readable, not-future `observedAt`, and a verified route fails when none of its cited cases has a
@@ -107,7 +145,7 @@ There is no root export or barrel.
   pass here. Its extra fault `error-event-after-chunks` (a mid-stream
   `event: error`) applies only to streamed responses and before `message_stop`; otherwise it
   answers 500 and is kept (never a silent no-op).
-- `/codex` and `/xai` use `src/responses.ts`: Responses request parsing (`model`, an `input` string
+- `/codex` and `/xai` (not `/opencode`) use `src/responses.ts`: Responses request parsing (`model`, an `input` string
   or array or 400, `instructions`, `tools`, `tool_choice`, `reasoning`, `stream`, `store`,
   `max_output_tokens`), SSE with typed `event:` names and `sequence_number`s in the real order
   (`response.created`, `response.in_progress`; per output item `response.output_item.added`, its
@@ -126,12 +164,30 @@ There is no root export or barrel.
   `/codex` records `originator` and never records `ChatGPT-Account-Id`. Known leniency (unverified):
   `store`, `stream`, `instructions`, the model override matching `model`, the client version value,
   and output limits are not enforced. The Codex and Grok error envelopes and unknown-model status
-  (400 `model_not_found`) are synthetic until a live recording. OpenCode Go Responses are not
-  emulated yet.
+  (400 `model_not_found`) are synthetic until a live recording.
+- One origin, one fetch handler: the router takes one route per origin, so routes of different cores
+  on one origin are composed by `src/emulator-compose.ts`, each part keeping its own manifest,
+  ledger, faults, turns, coverage, and control plane (`/_emulate/<part>/*`); `POST /_emulate/reset`
+  resets every part. Do not merge parts into one kernel, and never add a usage route to a model
+  route's manifest (its manifest and coverage stay unchanged).
+- `/opencode` composes four fixture-only parts under `/zen/go/v1` (`emulator.chat` / `.messages` /
+  `.responses` / `.usage`; combined `coverage()` and `GET /_emulate/coverage`; requests on no
+  route are ledgered as not-emulated by the chat part). It does not use the chat, Messages, or
+  Responses cores: their synthetic output cannot equal the fixtures. Chat answers the streamed
+  plain-text recording, Messages the streamed plain-text recording, Responses the plain-text or the
+  commentary-replay recording (a text answer) by request shape, and usage the snapshot. There is
+  no `knownModels` option; `openCodeGoEmulatorDefaultModels` lists the recorded models.
+- Subscription-usage routes use `src/subscription-usage.ts` on the fixture-only core (credential,
+  header rules in order, recorded `accept` and query, then status fault, scripted `{ usage }` /
+  `{ error }` turn, recorded body; chunk faults shape the one-chunk body). `/anthropic`, `/codex`,
+  and `/xai` serve their usage route through `withSubscriptionUsage` (`emulator.usage`, own
+  manifest `*SubscriptionUsageEmulatorRoutes`); `/opencode` includes it as a part. All four take a
+  `subscriptionUsage` option (a replacement body with the recorded shape). Credential and account
+  headers (`ChatGPT-Account-Id`, `x-userid`, `X-XAI-Token-Auth`) are required but never recorded.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
-  `XAiGrokEmulatorInputInvalid` for invalid input.
+  `XAiGrokEmulatorInputInvalid` / `OpenCodeGoEmulatorInputInvalid` for invalid input.
 - Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over
   (network chunks; a Gateway chunk may pack several SSE events); chunk faults that cannot take
   effect answer 500 and are not consumed, never a silent no-op.
@@ -163,4 +219,15 @@ faults, control plane, and manifests for `/codex` and `/xai`), and
 loopback socket, disagreement drills, and 429 `retry-after` / mid-stream `error` and
 `response.failed` events / dropped connection / truncation faults through the real Codex and Grok
 providers, pinning Grok's required terminal event, Codex's EOF-completion compatibility, and the
-426 for a missing client version). Loopback sockets only; never call real services.
+426 for a missing client version), `test/fixture-recordings.test.ts` (recordings parity: each Go
+and usage fixture's recorded request answered with the recorded status, content type, event kinds
+and order, field names, and content; data copies equal to the fixtures; a drift drill),
+`test/opencode.test.ts` (recorded answers, the documented latitude, 400 not-emulated rejections
+that leave faults and turns untouched, per-part controls, control planes, coverage, reset,
+manifest), `test/opencode-conformance.test.ts` (the Go cases in-process and over a loopback socket,
+the commentary replay's recorded text answer, drills, and 429 / truncation / scripted-error /
+not-emulated outcomes through the real Go provider), `test/subscription-usage.test.ts` (the Claude,
+Codex, and Grok usage routes: recorded bodies, not-emulated rejections, shape-checked scripted and
+default bodies, faults, control plane, and untouched model-route manifests), and
+`test/subscription-usage-conformance.test.ts` (the four usage cases in-process and over a loopback
+socket, drills, and 401 / 429 / dropped / truncated faults through the real fetchers). Loopback sockets only; never call real services.

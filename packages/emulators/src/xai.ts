@@ -15,6 +15,11 @@
  * requests), and `x-grok-model-override` (400 without it). The client version and model override
  * are recorded in the ledger; the version value itself is not checked.
  *
+ * The same fetch handler also answers the Grok subscription-usage route
+ * (`GET /v1/billing?format=credits`, `emulator.usage`) with its own manifest
+ * (`xAiGrokSubscriptionUsageEmulatorRoutes`), ledger, faults, and turns; see
+ * `makeXAiGrokEmulator`.
+ *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
  * no Effect runtime is required to use it.
  *
@@ -22,6 +27,7 @@
  */
 import { Data } from 'effect'
 import type * as Schema from 'effect/Schema'
+import { withSubscriptionUsage } from './emulator-compose.ts'
 import type {
   EmulatorCoverage,
   EmulatorFaultState,
@@ -43,12 +49,49 @@ import {
   type ResponsesWireError
 } from './responses.ts'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
+import {
+  makeSubscriptionUsageEmulator,
+  recordedUsageBody,
+  SubscriptionUsageFault,
+  type SubscriptionUsageEmulator,
+  type SubscriptionUsageLedgerEntry,
+  type SubscriptionUsageScriptedTurn
+} from './subscription-usage.ts'
+import { xAiGrokUsageRecording } from './subscription-usage-recordings.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export const xAiGrokResponsesPath = '/v1/responses'
+
+/**
+ * The Grok subscription-usage path; the SDK fetcher (`xAiGrokSubscriptionUsageUrl`) adds
+ * `?format=credits`, the recorded query.
+ */
+export const xAiGrokSubscriptionUsagePath = '/v1/billing'
+
+/**
+ * Route evidence manifest of the Grok subscription-usage route (served by the same fetch handler
+ * as the Responses route, with its own ledger and coverage). Synthetic, unverified.
+ */
+export const xAiGrokSubscriptionUsageEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
+  {
+    method: 'GET',
+    path: xAiGrokSubscriptionUsagePath,
+    kind: 'provider',
+    write: false,
+    caseIds: ['xai.grok.usage.snapshot'],
+    evidence: 'unverified',
+    observedAt: undefined
+  }
+]
+
+/**
+ * The recorded Grok usage body (the synthetic `xai.grok.usage.snapshot` fixture, copied as data):
+ * `config.creditUsagePercent` and `config.currentPeriod` `{ type, start, end }`.
+ */
+export const xAiGrokSubscriptionUsageDefault: Schema.Json = recordedUsageBody(xAiGrokUsageRecording)
 
 /** Synthetic-safe default model ids, including the Grok conformance defaults. */
 export const xAiGrokEmulatorDefaultModels: ReadonlyArray<string> = ['grok-build', 'grok-4.6']
@@ -149,12 +192,30 @@ export type XAiGrokRouteCoverage = EmulatorRouteCoverage
 
 export type XAiGrokCoverage = EmulatorCoverage
 
+/** A usage-route fault (`status`, `error-after-chunks`, `truncate-after-chunks`). */
+export const XAiGrokUsageFault = SubscriptionUsageFault
+
+export type XAiGrokUsageFault = SubscriptionUsageFault
+
+/** A usage turn: `{ usage }` (a body with the recorded JSON shape) or `{ error }`. */
+export type XAiGrokUsageScriptedTurn = SubscriptionUsageScriptedTurn
+
+export type XAiGrokUsageLedgerEntry = SubscriptionUsageLedgerEntry
+
+export type XAiGrokUsageEmulator = SubscriptionUsageEmulator
+
 export type XAiGrokEmulatorOptions = {
   /** Model ids that exist. Defaults to `xAiGrokEmulatorDefaultModels`. */
   readonly knownModels?: ReadonlyArray<string>
+  /**
+   * Replacement usage-route body; must have the recorded JSON shape (same keys and value kinds).
+   * Defaults to the recorded body (`xAiGrokSubscriptionUsageDefault`).
+   */
+  readonly subscriptionUsage?: Schema.Json
 }
 
-export type XAiGrokEmulator = ResponsesEmulator
+/** The Responses emulator, plus `usage`: the subscription-usage route's own emulator API. */
+export type XAiGrokEmulator = ResponsesEmulator & { readonly usage: XAiGrokUsageEmulator }
 
 const errorEnvelope = (error: ResponsesWireError): Schema.Json => ({
   error: {
@@ -181,8 +242,41 @@ const errorEnvelope = (error: ResponsesWireError): Schema.Json => ({
  * `x-grok-model-override` 400; a non-positive `max_output_tokens` gets 400; unknown routes get a
  * 404 envelope. Not enforced: that `x-grok-model-override` matches the body `model`, the client
  * version value, and the output limit itself (recorded as `maxOutputTokens`).
+ *
+ * `GET /v1/billing?format=credits` is fixture-only: a request with the headers the SDK fetcher
+ * sends (a non-empty bearer, `X-XAI-Token-Auth: xai-grok-cli`, a non-empty `x-userid`, a
+ * non-empty `x-grok-client-version`, and `x-grok-client-mode: headless`; the bearer, user id, and
+ * client-version values are request-shape latitude, and the user id and token-auth are never
+ * recorded),
+ * `accept: application/json`, and exactly the recorded `format=credits` query gets the recorded
+ * body (`xAiGrokSubscriptionUsageDefault`, or a same-shaped `options.subscriptionUsage` / scripted
+ * `{ usage }`); anything else answers 400 not-emulated. The client version and mode are recorded.
+ * Its ledger, faults, turns, and coverage are `emulator.usage`
+ * (control plane `/_emulate/usage/*`); `reset()` and `POST /_emulate/reset` reset both routes.
  */
 export const makeXAiGrokEmulator = (options: XAiGrokEmulatorOptions = {}): XAiGrokEmulator =>
+  withSubscriptionUsage(
+    makeXAiGrokResponsesEmulator(options),
+    makeXAiGrokUsageEmulator(options),
+    xAiGrokSubscriptionUsagePath
+  )
+
+const makeXAiGrokUsageEmulator = (options: XAiGrokEmulatorOptions): XAiGrokUsageEmulator =>
+  makeSubscriptionUsageEmulator({
+    path: xAiGrokSubscriptionUsagePath,
+    routes: xAiGrokSubscriptionUsageEmulatorRoutes,
+    recording: xAiGrokUsageRecording,
+    headers: [
+      { name: 'x-xai-token-auth', record: false, accepts: value => value === 'xai-grok-cli' },
+      { name: 'x-userid', record: false },
+      { name: 'x-grok-client-version', record: true },
+      { name: 'x-grok-client-mode', record: true, accepts: value => value === 'headless' }
+    ],
+    subscriptionUsage: options.subscriptionUsage,
+    inputInvalid: (input, reason) => new XAiGrokEmulatorInputInvalid({ input, reason })
+  })
+
+const makeXAiGrokResponsesEmulator = (options: XAiGrokEmulatorOptions): ResponsesEmulator =>
   makeResponsesEmulator({
     path: xAiGrokResponsesPath,
     routes: xAiGrokEmulatorRoutes,
