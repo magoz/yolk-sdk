@@ -229,6 +229,38 @@ describe('openai emulator defaults', () => {
     ).toContain('tool_calls')
   })
 
+  it("answers tool_choice 'none' with text even when tools are offered", async () => {
+    const emulator = makeOpenAiEmulator()
+
+    const response = await chat(
+      emulator,
+      plainRequest({
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'lookup_weather',
+              parameters: { type: 'object', properties: { city: { type: 'string' } } }
+            }
+          }
+        ],
+        tool_choice: 'none'
+      })
+    )
+
+    const events = sseEvents(await response.text())
+
+    expect(deltas(events).flatMap(delta => delta.tool_calls ?? [])).toEqual([])
+    expect(
+      deltas(events)
+        .map(delta => delta.content ?? '')
+        .join('')
+    ).not.toBe('')
+    expect(
+      payloads(events).flatMap(payload => payload.choices.map(choice => choice.finish_reason))
+    ).toContain('stop')
+  })
+
   it('rejects unknown models with a 404 OpenAI error envelope', async () => {
     const emulator = makeOpenAiEmulator({ knownModels: ['example-model-a'] })
 

@@ -81,7 +81,8 @@ Without a script, a known model gets synthetic output: `stream: true` streams
 completion. Reasoning models asked for reasoning (`reasoning_effort`, or `thinking` enabled) stream
 `delta.reasoning_content` first. A request with `tools` gets one tool call whose arguments are
 synthesized from the tool's JSON Schema and streamed in several fragments, finishing with
-`tool_calls`. Unknown models get the Gateway error envelope (400, `model_not_found`), a missing
+`tool_calls`; a `tool_choice` naming an offered function picks that tool (otherwise the first), and
+`tool_choice: 'none'` answers with text. Unknown models get the Gateway error envelope (400, `model_not_found`), a missing
 bearer credential gets 401, and unknown routes get a 404 JSON error. The credential is never
 checked or stored.
 

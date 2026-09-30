@@ -2,8 +2,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
  * Streamed OpenAI tool call, forced with `tool_choice`, whose JSON arguments arrive as
- * `delta.tool_calls` fragments that assemble into one call (this placeholder splits them across several chunks), finishing with
- * `tool_calls`, a usage chunk, and `data: [DONE]`.
+ * `delta.tool_calls` fragments that assemble into one call (this placeholder splits them across
+ * several chunks), finishing with `tool_calls`, a usage chunk, and `data: [DONE]`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
  * replaces it. Regenerate with `pnpm conformance:openai --live --account <label>`.

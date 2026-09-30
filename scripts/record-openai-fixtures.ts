@@ -368,7 +368,13 @@ const recordCase = (
       note: 'Recorded from the live OpenAI Chat Completions API by running its conformance case through pnpm conformance:openai --live. Prompts and outputs are synthetic.',
       exchanges
     }).pipe(Effect.mapError(error => new ProbeFailed({ caseId, message: error.message })))
-  }).pipe(Effect.provide(WireRecorder.layer().pipe(Layer.provide(FetchHttpClient.layer))))
+  }).pipe(
+    Effect.provide(
+      WireRecorder.layer({ responseHeaders: ['content-type'] }).pipe(
+        Layer.provide(FetchHttpClient.layer)
+      )
+    )
+  )
 
 export const renderFixtureModule = (
   fixtureModule: OpenAiFixtureModule,
