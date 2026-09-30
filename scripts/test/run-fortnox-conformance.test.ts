@@ -37,6 +37,8 @@ import {
   liveInCiMessage,
   nodeRecordingWriter,
   ownerApprovalRequiredMessage,
+  recordingContainsAccessToken,
+  textContainsAccessToken,
   type CliIo,
   type CliSignal,
   type RecordingWriter,
@@ -54,11 +56,13 @@ import {
   mergedFixtureSeeds,
   parseRunArgs,
   planFortnoxRun,
+  recordedTokenRefusal,
   recordingReviewChecklist,
   recordingRunId,
   recordingsRoot,
   renderFixtureModule,
   renderSeedsModule,
+  renderedTokenRefusal,
   runFortnoxInterruptibly,
   runFortnoxLive,
   stageRecordings,
@@ -258,6 +262,50 @@ describe('run-fortnox-conformance live refusal (no network)', () => {
     })
   })
 
+  it('reads no credential when it refuses in CI, without approval, or without an account', () => {
+    // An environment whose token getter counts every read.
+    const counted = (extra: Readonly<Record<string, string>> = {}) => {
+      let reads = 0
+      const env = { ...extra }
+
+      Object.defineProperty(env, 'FORTNOX_ACCESS_TOKEN', {
+        enumerable: true,
+        get: () => {
+          reads += 1
+
+          return 'synthetic-token'
+        }
+      })
+
+      return { env, reads: () => reads }
+    }
+
+    const refusals = [
+      [live(allSeedFlags), counted({ CI: 'false' })],
+      [{ ...defaultRunOptions, live: true, account: 'practice' }, counted()],
+      [{ ...defaultRunOptions, live: true, ownerApproved: true }, counted()]
+    ] as const
+
+    for (const [options, { env, reads }] of refusals) {
+      expect(liveInputs(options, env)).toHaveProperty('refusal')
+      expect(reads()).toBe(0)
+    }
+
+    // Parsing never reads it either, also when it refuses --live in CI.
+    const parsing = counted({ CI: 'true' })
+
+    expect(() =>
+      parseRunArgs(['--live', '--owner-approved', '--account', 'practice'], parsing.env)
+    ).toThrow(liveInCiMessage)
+    expect(parsing.reads()).toBe(0)
+
+    // The counter works: an accepted run reads the token once.
+    const accepted = counted()
+
+    expect(liveInputs(live(allSeedFlags), accepted.env)).toHaveProperty('inputs')
+    expect(accepted.reads()).toBe(1)
+  })
+
   it('refuses when a case that would run lacks its seed or a seed is invalid', () => {
     const env = { FORTNOX_ACCESS_TOKEN: 'synthetic-token' }
 
@@ -444,18 +492,47 @@ const previewId = fortnoxInvoicePreviewPdfFixture.caseId
 /** An opaque live token: no Bearer prefix, not JWT-shaped, no known API-key prefix. */
 const opaqueToken = 'opaque7c1d9e2b4a6f8e0d3c5b'
 
-const tokenRefusal =
-  'The staged files or the review checklist would contain the live access token; nothing was written'
+/** `opaqueToken` with an interior JSON Unicode escape (`\u0037` is `7`), as JSON text. */
+const escapedOpaqueToken = `opaque\\u0037${opaqueToken.slice('opaque7'.length)}`
 
-const stageWithToken = (recorders: ReadonlyMap<string, WireRecorderApi>, writer: RecordingWriter) =>
+const stageWithToken = (
+  recorders: ReadonlyMap<string, WireRecorderApi>,
+  writer: RecordingWriter,
+  accessToken: string = opaqueToken
+) =>
   Effect.runPromise(
     stageRecordings(
       passedReport([...recorders.keys()]),
       recorders,
-      { ...recordInputs, accessToken: opaqueToken },
+      { ...recordInputs, accessToken },
       { writer, stagingDir, recordedAt: '2026-09-29' }
     ).pipe(Effect.result)
   )
+
+/** The list recording with `ExternalInvoiceReference1` set to `value` (raw JSON text). */
+const listWithReference = (value: string): WireFixture['exchanges'] => {
+  const [first, ...rest] = fortnoxInvoiceListPopulatedFixture.exchanges
+
+  if (isWireStreamResponse(first.response) || isWireBase64BodyResponse(first.response)) {
+    return expect.fail('expected a text list response')
+  }
+
+  expect(first.response.body).toContain('"ExternalInvoiceReference1":""')
+
+  return [
+    {
+      ...first,
+      response: {
+        ...first.response,
+        body: first.response.body.replace(
+          '"ExternalInvoiceReference1":""',
+          `"ExternalInvoiceReference1":"${value}"`
+        )
+      }
+    },
+    ...rest
+  ]
+}
 
 const stage = (
   recorders: ReadonlyMap<string, WireRecorderApi>,
@@ -654,34 +731,51 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
     expect(operations).toEqual([])
   })
 
-  it('writes nothing when a JSON body field echoes the live access token', async () => {
+  // An opaque (not JWT-shaped) token in an innocuous field, raw or with an interior JSON escape
+  // (which rendering escapes again): the secret scan cannot see it, and the field is not listed
+  // for review. The recorded exchanges are searched before anything is rendered.
+  for (const [label, value] of [
+    ['verbatim', opaqueToken],
+    ['with an interior Unicode escape', escapedOpaqueToken]
+  ] as const) {
+    it(`writes nothing when a JSON body field echoes the live access token ${label}`, async () => {
+      const { writer, operations } = memoryWriter()
+      const echoed = listWithReference(value)
+
+      expect(recordingContainsAccessToken(echoed, opaqueToken)).toBe(true)
+
+      const result = await stageWithToken(new Map([[listId, recorderOf(echoed)]]), writer)
+
+      expect(failureMessage(result)).toBe(recordedTokenRefusal)
+      expect(operations).toEqual([])
+    })
+  }
+
+  it('the rendered-text check alone also finds the doubly escaped token', () => {
+    const spec = fortnoxCaseSpecs.find(entry => entry.caseId === listId) ?? expect.fail('spec')
+
+    const rendered = renderFixtureModule(spec, {
+      ...fortnoxInvoiceListPopulatedFixture,
+      exchanges: listWithReference(escapedOpaqueToken)
+    })
+
+    expect(rendered).toContain(`opaque\\\\u0037`)
+    expect(textContainsAccessToken(rendered, opaqueToken)).toBe(true)
+  })
+
+  it('still refuses rendered files that carry the token when the recordings do not', async () => {
     const { writer, operations } = memoryWriter()
-    const [first, ...rest] = fortnoxInvoiceListPopulatedFixture.exchanges
 
-    if (isWireStreamResponse(first.response) || isWireBase64BodyResponse(first.response)) {
-      return expect.fail('expected a text list response')
-    }
+    // Only the rendered seeds module carries this value (the committed missing-customer seed).
+    const seedValue = fortnoxConformanceFixtureSeeds.missingCustomerNumber ?? expect.fail('seed')
 
-    // An opaque (not JWT-shaped) token in an innocuous field: the secret scan cannot see it.
-    expect(first.response.body).toContain('"ExternalInvoiceReference1":""')
+    expect(
+      recordingContainsAccessToken(fortnoxInvoiceListPopulatedFixture.exchanges, seedValue)
+    ).toBe(false)
 
-    const echoed: ReadonlyArray<WireExchange> = [
-      {
-        ...first,
-        response: {
-          ...first.response,
-          body: first.response.body.replace(
-            '"ExternalInvoiceReference1":""',
-            `"ExternalInvoiceReference1":"${opaqueToken}"`
-          )
-        }
-      },
-      ...rest
-    ]
+    const result = await stageWithToken(listRecorders(), writer, seedValue)
 
-    const result = await stageWithToken(new Map([[listId, recorderOf(echoed)]]), writer)
-
-    expect(failureMessage(result)).toBe(tokenRefusal)
+    expect(failureMessage(result)).toBe(renderedTokenRefusal)
     expect(operations).toEqual([])
   })
 
@@ -708,9 +802,12 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
       ...rest
     ]
 
+    // Not strict UTF-8, so the bytes are searched as text instead of refusing the PDF.
+    expect(recordingContainsAccessToken(echoed, opaqueToken)).toBe(true)
+
     const result = await stageWithToken(new Map([[previewId, recorderOf(echoed)]]), writer)
 
-    expect(failureMessage(result)).toBe(tokenRefusal)
+    expect(failureMessage(result)).toBe(recordedTokenRefusal)
     expect(operations).toEqual([])
   })
 
@@ -1019,7 +1116,10 @@ describe('run-fortnox-conformance live runs are interruptible', () => {
         `${signal}: interrupting the run (pid 4242); the running case's cleanup is attempted before exit`
       )
       expect(errors.at(-1)).toBe(`Interrupted. Read the WARN lines. ${fortnoxRecoveryAdvice}`)
-      expect(errors.join('\n')).not.toContain('yolk-conformance')
+      // Fortnox cases create no items to look for: the advice names the changed records instead.
+      expect(errors.join('\n')).not.toContain('yolk-conformance items')
+      expect(fortnoxRecoveryAdvice).toContain('Comments equal to "yolk-conformance marker')
+      expect(fortnoxRecoveryAdvice).toContain('a Discount of 10 or 0')
       expect(exitCodes).toEqual([130])
       expect(forcedExits).toEqual([])
       expect(signals.registered()).toBe(0)

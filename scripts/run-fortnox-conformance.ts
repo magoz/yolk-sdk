@@ -20,9 +20,10 @@
  * `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After the
  * run it builds `verified` fixtures (today's date, the account label) for the cases that passed,
  * re-runs each case on replay against its new fixture, and renders every fixture module plus the
- * seeds module. Only if every recorded case verified and passed the secret scan, and no rendered
- * file or review-checklist line carries the live access token (the shared `textContainsAccessToken`
- * check), does it write them, all or nothing, to a NEW run directory under the GITIGNORED root
+ * seeds module. Only if every recorded case verified and passed the secret scan, no recorded
+ * exchange carries the live access token (the shared `recordingContainsAccessToken`, before
+ * rendering), and no rendered file or review-checklist line does either (`textContainsAccessToken`),
+ * does it write them, all or nothing, to a NEW run directory under the GITIGNORED root
  * `.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`: it writes the whole batch into
  * a sibling temp directory and publishes it with one rename, refuses an existing destination, and
  * leaves no run directory when anything fails. It never writes committed sources. Like the shared
@@ -42,8 +43,11 @@
  * Fortnox keeps its own runner rather than the shared `ConnectorConformanceRunner`: the preview
  * case records a PDF body, which the shared per-body access-token guard
  * (`inspectRecordingForAccessToken`) refuses as uninspectable, and the seeds module uses the
- * branded `FortnoxDocumentNumber` / `FortnoxCustomerNumber` constructors. The final check on the
- * rendered text still runs: there the PDF is `bodyBase64` text, searched at every byte alignment.
+ * branded `FortnoxDocumentNumber` / `FortnoxCustomerNumber` constructors. Instead, the recorded
+ * exchanges are searched before rendering with the PDF's bytes read as latin1 and lossy UTF-8 text
+ * (`recordingContainsAccessToken`), and the rendered text is searched again, where the PDF is
+ * `bodyBase64` text searched at every byte alignment. Neither finds a token inside a compressed PDF
+ * stream: the review checklist asks for the PDF to be opened and checked by hand.
  *
  * Promotion is manual: scrub the staged files of practice-company data, copy them into
  * `packages/connectors/src/fortnox/conformance/`, run `pnpm format:fix`, and update
@@ -94,6 +98,7 @@ import {
   FortnoxConformanceConfig,
   FortnoxConformanceSeeds,
   fortnoxConformanceCases,
+  fortnoxConformanceCommentsMarker,
   fortnoxConformanceFixtureSeeds,
   type FortnoxConformanceCase,
   type FortnoxConformanceSeedKey
@@ -107,6 +112,7 @@ import {
   processCliIo,
   processLiveRunIo,
   processSignals,
+  recordingContainsAccessToken,
   runInterruptibly,
   stderrCleanupReporter,
   textContainsAccessToken,
@@ -549,6 +555,14 @@ export class FortnoxRunFailed extends Schema.TaggedError<FortnoxRunFailed>()('Fo
   message: Schema.String
 }) {}
 
+/** Why `--record` refuses a recording in which the live access token appears. */
+export const recordedTokenRefusal =
+  'A recorded exchange contains the live access token; nothing was written'
+
+/** Why `--record` refuses staged files or checklist lines that would contain the token. */
+export const renderedTokenRefusal =
+  'The staged files or the review checklist would contain the live access token; nothing was written'
+
 /** Gitignored root of staged recordings; one new directory per `--record` run. */
 export const recordingsRoot = join(workspaceRoot, '.conformance-recordings', 'fortnox')
 
@@ -873,15 +887,17 @@ export const recordingReviewChecklist = (
 }
 
 /**
- * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan), then
- * renders every fixture module, the seeds module, and the review checklist, refuses them if any
- * carries the live access token (`textContainsAccessToken`), writes the files into a sibling temp
- * directory (`<root>/.tmp-<run>`), and publishes it to `options.stagingDir` with one rename.
- * All or nothing: any failure (verification, the token check, a write, or the rename) leaves no
- * staging directory, and the temp directory is removed (best effort). A staging directory that is
- * not a direct child of the recordings root, that already exists, or that is not physically inside
- * the containment root (a symlinked or redirected component, checked before and after creating the
- * temp directory and again before the rename) is refused. Returns `undefined` when no case passed.
+ * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan),
+ * refuses the recordings if any exchange carries the live access token
+ * (`recordingContainsAccessToken`), then renders every fixture module, the seeds module, and the
+ * review checklist, refuses them if any carries the token (`textContainsAccessToken`), writes the
+ * files into a sibling temp directory (`<root>/.tmp-<run>`), and publishes it to
+ * `options.stagingDir` with one rename. All or nothing: any failure (verification, either token
+ * check, a write, or the rename) leaves no staging directory, and the temp directory is removed
+ * (best effort). A staging directory that is not a direct child of the recordings root, that
+ * already exists, or that is not physically inside the containment root (a symlinked or redirected
+ * component, checked before and after creating the temp directory and again before the rename) is
+ * refused. Returns `undefined` when no case passed.
  */
 export const stageRecordings = (
   report: ConformanceReport,
@@ -952,6 +968,17 @@ export const stageRecordings = (
       return undefined
     }
 
+    // The recorded exchanges themselves, before rendering: every URL, header, text body, and JSON
+    // string value and key (parsed, so JSON escapes are undone); the PDF's bytes are searched as
+    // text rather than refused.
+    if (
+      recorded.some(({ fixture }) =>
+        recordingContainsAccessToken(fixture.exchanges, inputs.accessToken)
+      )
+    ) {
+      return yield* new FortnoxRunFailed({ message: recordedTokenRefusal })
+    }
+
     // Everything verified: render every file before writing any of them.
     const files = [
       ...recorded.map(({ spec, fixture }) => ({
@@ -973,16 +1000,14 @@ export const stageRecordings = (
     const checklist = recordingReviewChecklist(recorded)
 
     // Last line of defence, over exactly what would be written and printed (seeds included). The
-    // PDF body is base64 text here, which the check searches at every byte alignment.
+    // PDF body is base64 text here, which the check searches at every byte alignment; a JSON escape
+    // that rendering escaped again (`\\u0037`) is decoded too.
     if (
       [...files.map(file => file.contents), ...checklist].some(text =>
         textContainsAccessToken(text, inputs.accessToken)
       )
     ) {
-      return yield* new FortnoxRunFailed({
-        message:
-          'The staged files or the review checklist would contain the live access token; nothing was written'
-      })
+      return yield* new FortnoxRunFailed({ message: renderedTokenRefusal })
     }
 
     yield* refuseExisting
@@ -1108,11 +1133,11 @@ const parseCliArgs = (): RunOptions | undefined => {
 }
 
 /**
- * What an interrupted Fortnox run may have left behind, for the interruption and forced-exit
- * messages of `runInterruptibly` (Fortnox cases create no `yolk-conformance` items).
+ * What an interrupted Fortnox run may have left behind, and the signs of it the owner can see, for
+ * the interruption and forced-exit messages of `runInterruptibly` (Fortnox cases create no
+ * `yolk-conformance` items to look for, so the advice names the records the cases change).
  */
-export const fortnoxRecoveryAdvice =
-  'If a row or customer case was running, compare the seeded invoice rows (Discount, DiscountType) and the seeded customer Comments with their values before the run and restore them by hand; if the rejection case was running, look for an invoice created for the missing customer and cancel it by hand.'
+export const fortnoxRecoveryAdvice = `Check the records the cases change. Row case (--discount-invoice): rows of that invoice with DiscountType PERCENT and a Discount of 10 or 0 they did not have before mean its rows were not restored; set each row's Discount back by hand. Customer case (--customer): Comments equal to "${fortnoxConformanceCommentsMarker}" means that customer's Comments were not restored; put the original text back by hand. Rejection case (--missing-customer): an invoice for that customer number means Fortnox accepted the rejected create; cancel it by hand.`
 
 /** `runInterruptibly` options of the Fortnox runner: its recovery advice; its cases restore. */
 export const fortnoxInterruptOptions: Pick<

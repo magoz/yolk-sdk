@@ -5,9 +5,8 @@
  * CLI). Each runner supplies a
  * `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential, and ports)
  * and gets the same behaviour as the Microsoft runner, plus the owner-approval and CI gates. The
- * Fortnox runner (`run-fortnox-conformance.ts`) keeps its own module and reuses the gate messages,
- * `physicallyContained`, `nodeRecordingWriter`, `textContainsAccessToken`, `LiveRunIo`,
- * `stderrCleanupReporter`, and `runInterruptibly` from here:
+ * Fortnox runner (`run-fortnox-conformance.ts`) keeps its own module and imports individual exports
+ * from here (its import list is the only list of them; see `scripts/AGENTS.md`):
  *
  * - DRY RUN by default: prints every case id, its safety, whether it would run under the chosen
  *   flags, and the seeds it still needs; no network call and no credential read.
@@ -1277,19 +1276,35 @@ const inspectText = (text: string, forms: ReadonlyArray<string>): TokenVerdict =
 }
 
 /**
- * Inspect bytes. Allowlist: only strict UTF-8 plain text can be inspected; anything else (binary,
- * compressed, UTF-16, ...) is `uninspectable`, whatever its magic bytes. The raw bytes (one
- * character per byte) are searched first, so a token in bytes that are refused anyway still reports
- * `token`.
+ * What to do with a body that is not strict UTF-8 plain text: `refuse` it as `uninspectable` (the
+ * strict guard), or `search` its bytes as latin1 and lossy UTF-8 text and call it `clean` when no
+ * form is found (for runners that must record binary bodies; a token inside compressed data is not
+ * found that way).
  */
-const inspectBytes = (bytes: Uint8Array, forms: ReadonlyArray<string>): TokenVerdict => {
+type BinaryBodies = 'refuse' | 'search'
+
+/**
+ * Inspect bytes. Allowlist: only strict UTF-8 plain text can be inspected; anything else (binary,
+ * compressed, UTF-16, ...) is `uninspectable`, whatever its magic bytes, unless `binary` is
+ * `search`. The raw bytes (one character per byte) are searched first, so a token in bytes that are
+ * refused anyway still reports `token`.
+ */
+const inspectBytes = (
+  bytes: Uint8Array,
+  forms: ReadonlyArray<string>,
+  binary: BinaryBodies
+): TokenVerdict => {
   const raw = Array.from(bytes, byte => String.fromCharCode(byte)).join('')
 
   if (textHasToken(raw, forms)) return 'token'
 
   const text = strictUtf8Text(bytes)
 
-  return text === undefined ? 'uninspectable' : inspectText(text, forms)
+  if (text !== undefined) return inspectText(text, forms)
+
+  if (binary === 'refuse') return 'uninspectable'
+
+  return textHasToken(new TextDecoder('utf-8').decode(bytes), forms) ? 'token' : 'clean'
 }
 
 const worst = (verdicts: ReadonlyArray<TokenVerdict>): TokenVerdict =>
@@ -1299,11 +1314,17 @@ const worst = (verdicts: ReadonlyArray<TokenVerdict>): TokenVerdict =>
       ? 'uninspectable'
       : 'clean'
 
-const inspectResponse = (response: WireResponse, forms: ReadonlyArray<string>): TokenVerdict => {
+const inspectResponse = (
+  response: WireResponse,
+  forms: ReadonlyArray<string>,
+  binary: BinaryBodies
+): TokenVerdict => {
   if (isWireBase64BodyResponse(response)) {
     const bytes = decodeBase64Bytes(response.bodyBase64)
 
-    return Option.isSome(bytes) ? inspectBytes(bytes.value, forms) : 'uninspectable'
+    if (Option.isSome(bytes)) return inspectBytes(bytes.value, forms, binary)
+
+    return binary === 'refuse' ? 'uninspectable' : inspectText(response.bodyBase64, forms)
   }
 
   if (isWireStreamResponse(response)) {
@@ -1317,9 +1338,14 @@ const inspectResponse = (response: WireResponse, forms: ReadonlyArray<string>): 
 
       const bytes = decodeBase64Bytes(chunk.base64)
 
-      if (Option.isNone(bytes)) return 'uninspectable'
-
-      chunks.push(bytes.value)
+      if (Option.isSome(bytes)) {
+        chunks.push(bytes.value)
+      } else if (binary === 'refuse') {
+        return 'uninspectable'
+      } else {
+        // Undecodable: the base64 text itself is what a fixture would carry.
+        chunks.push(new TextEncoder().encode(chunk.base64))
+      }
     }
 
     // Reassembled, so a token split across chunks is still found.
@@ -1331,24 +1357,16 @@ const inspectResponse = (response: WireResponse, forms: ReadonlyArray<string>): 
       return offset + chunk.byteLength
     }, 0)
 
-    return inspectBytes(joined, forms)
+    return inspectBytes(joined, forms, binary)
   }
 
   return inspectText(response.body, forms)
 }
 
-/**
- * Look for the live access token everywhere a staged fixture or the review checklist could carry
- * it: request URLs, header names and values, request bodies (every JSON string value), and response
- * headers and bodies (text, decoded `bodyBase64`, and reassembled stream chunks). `token` when any
- * form of it is found (see `accessTokenForms`); `uninspectable` when a body is outside the
- * allowlist of what the guard can read, strict UTF-8 text without NUL characters (so binary,
- * compressed, and UTF-16 bodies, and undecodable base64, are refused whatever they contain);
- * otherwise `clean`.
- */
-export const inspectRecordingForAccessToken = (
+const inspectExchanges = (
   exchanges: ReadonlyArray<WireExchange>,
-  accessToken: string
+  accessToken: string,
+  binary: BinaryBodies
 ): TokenVerdict => {
   const forms = accessTokenForms(accessToken)
 
@@ -1366,10 +1384,36 @@ export const inspectRecordingForAccessToken = (
           ? inspectText(request.body, forms)
           : inspectText(JSON.stringify(request.body), forms),
       ...headerTexts(response.headers).map(text => inspectText(text, forms)),
-      inspectResponse(response, forms)
+      inspectResponse(response, forms, binary)
     ])
   )
 }
+
+/**
+ * Look for the live access token everywhere a staged fixture or the review checklist could carry
+ * it: request URLs, header names and values, request bodies (every JSON string value), and response
+ * headers and bodies (text, decoded `bodyBase64`, and reassembled stream chunks). `token` when any
+ * form of it is found (see `accessTokenForms`); `uninspectable` when a body is outside the
+ * allowlist of what the guard can read, strict UTF-8 text without NUL characters (so binary,
+ * compressed, and UTF-16 bodies, and undecodable base64, are refused whatever they contain);
+ * otherwise `clean`.
+ */
+export const inspectRecordingForAccessToken = (
+  exchanges: ReadonlyArray<WireExchange>,
+  accessToken: string
+): TokenVerdict => inspectExchanges(exchanges, accessToken, 'refuse')
+
+/**
+ * The same search as `inspectRecordingForAccessToken`, over the recorded exchanges before any
+ * fixture is rendered, for runners that record binary bodies (the Fortnox preview PDF): a body that
+ * is not strict UTF-8 text is searched as latin1 and lossy UTF-8 text instead of being refused, so
+ * a token inside compressed data (a compressed PDF stream, for example) is NOT found; the final
+ * check on the rendered text and the manual review remain. True when any form is found.
+ */
+export const recordingContainsAccessToken = (
+  exchanges: ReadonlyArray<WireExchange>,
+  accessToken: string
+): boolean => inspectExchanges(exchanges, accessToken, 'search') === 'token'
 
 /** Build a verified fixture for one passed case and prove it replays with the same case. */
 const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
@@ -1774,7 +1818,6 @@ export type LiveRunIo = {
   readonly err: (line: string) => void
 }
 
-/** The running process's network (`fetch`), stdout, and stderr. */
 export const processLiveRunIo: LiveRunIo = {
   http: FetchHttpClient.layer,
   out: line => console.log(line),
