@@ -13,8 +13,11 @@
  * against the real Gateway, through the conformance recorder wrapped around a real fetch
  * `HttpClient` (failures are reported with the runner's sanitizer), turns each single recorded
  * exchange into a `verified` fixture dated today, then replays the new fixtures through the same
- * cases. Nothing is written unless every case passes live, records cleanly, passes the secret
- * scan, and passes again on replay; only then are the fixture modules under
+ * cases. Recorded bodies and chunks have machine-identifying JSON fields (`gatewayJsonRedactions`,
+ * for example the Gateway's fingerprint-derived `clientSessionId`) replaced by fixed placeholders
+ * before anything is written. Nothing is written unless every case passes live, records cleanly,
+ * is fully redacted, passes the secret scan, and passes again on replay; only then are the
+ * fixture modules under
  * `packages/agent/src/providers/vercel/conformance/` rewritten. Live runs spend Gateway credits:
  * never run in CI.
  *
@@ -26,7 +29,8 @@ import { writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { Data, Effect, Layer, Redacted } from 'effect'
+import { Data, Effect, Encoding, Layer, Predicate, Redacted, Result } from 'effect'
+import type * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import { vercelAiGatewayChatCompletionsUrl } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
@@ -38,7 +42,14 @@ import {
   type VercelAiGatewayConformanceModels,
   type VercelAiGatewayConformanceSettings
 } from '@yolk-sdk/agent/providers/vercel/conformance'
-import type { WireFixture } from '../packages/conformance/src/fixture.ts'
+import {
+  isWireBase64BodyResponse,
+  isWireStreamResponse,
+  type WireChunk,
+  type WireExchange,
+  type WireFixture,
+  type WireResponse
+} from '../packages/conformance/src/fixture.ts'
 import { makeWireFixture, WireRecorder } from '../packages/conformance/src/record.ts'
 import { ReplayHttpClient } from '../packages/conformance/src/replay.ts'
 import {
@@ -219,7 +230,7 @@ export const gatewayFixtureModules: ReadonlyArray<GatewayFixtureModule> = [
     caseId: 'vercel-ai-gateway.stream.plain-text',
     fileName: 'plain-text.ts',
     exportName: 'vercelAiGatewayPlainTextFixture',
-    doc: 'Streamed plain-text answer: text deltas, a finish chunk, a usage chunk, and `data: [DONE]`.',
+    doc: 'Streamed plain-text answer: text deltas, a `stop` finish with usage (`stream_options.include_usage`), and `data: [DONE]`.',
     model: 'plainText',
     reasoning: false
   },
@@ -227,7 +238,7 @@ export const gatewayFixtureModules: ReadonlyArray<GatewayFixtureModule> = [
     caseId: 'vercel-ai-gateway.stream.deepseek-reasoning',
     fileName: 'deepseek-reasoning.ts',
     exportName: 'vercelAiGatewayDeepSeekReasoningFixture',
-    doc: 'DeepSeek-style streamed reasoning (`delta.reasoning_content`, or the Gateway-normalized `delta.reasoning`) before the answer text, requested with `reasoning_effort` and a `thinking` toggle.',
+    doc: 'DeepSeek-style streamed reasoning (the Gateway-normalized `delta.reasoning`, or `delta.reasoning_content`) before the answer text, requested with `reasoning_effort` and a `thinking` toggle.',
     model: 'reasoning',
     reasoning: true
   },
@@ -351,6 +362,185 @@ export const casesWithoutSingleFixture = (
     .map(testCase => testCase.id)
     .filter(caseId => fixtures.filter(fixture => fixture.caseId === caseId).length !== 1)
 
+/** JSON field name to the fixed placeholder that replaces its string value before writing. */
+export type JsonFieldRedactions = Readonly<Record<string, string>>
+
+/**
+ * Fields redacted from every Gateway recording. The Gateway's routing metadata carries a
+ * `clientSessionId` derived from a client fingerprint (`clientSessionIdSource: "fingerprint"`),
+ * which may identify the machine that ran the probe; fixtures are public.
+ */
+export const gatewayJsonRedactions = {
+  clientSessionId: 'redacted-client-session'
+} satisfies JsonFieldRedactions
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// `"field": "value"` inside JSON text (a string value, escapes included). Only the value changes,
+// so every other recorded byte (whitespace, key order, neighbours) is preserved.
+const jsonFieldPattern = (field: string): RegExp =>
+  new RegExp(`("${escapeRegExp(field)}"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`, 'g')
+
+const redactJsonText = (text: string, redactions: JsonFieldRedactions): string =>
+  Object.entries(redactions).reduce(
+    (current, [field, placeholder]) =>
+      current.replace(
+        jsonFieldPattern(field),
+        (_match, prefix: string) => `${prefix}${JSON.stringify(placeholder)}`
+      ),
+    text
+  )
+
+const isJsonArray = (value: Schema.JsonArray | Schema.JsonObject): value is Schema.JsonArray =>
+  Array.isArray(value)
+
+const redactJsonValue = (value: Schema.Json, redactions: JsonFieldRedactions): Schema.Json => {
+  if (Predicate.isString(value)) {
+    return redactJsonText(value, redactions)
+  }
+
+  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) {
+    return value
+  }
+
+  if (isJsonArray(value)) {
+    return value.map(item => redactJsonValue(item, redactions))
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      const placeholder = Object.hasOwn(redactions, key) ? redactions[key] : undefined
+
+      return [
+        key,
+        placeholder !== undefined && Predicate.isString(item)
+          ? placeholder
+          : redactJsonValue(item, redactions)
+      ]
+    })
+  )
+}
+
+const redactResponse = (response: WireResponse, redactions: JsonFieldRedactions): WireResponse => {
+  if (isWireStreamResponse(response)) {
+    return {
+      ...response,
+      chunks: response.chunks.map(chunk =>
+        Predicate.isString(chunk) ? redactJsonText(chunk, redactions) : chunk
+      )
+    }
+  }
+
+  return isWireBase64BodyResponse(response)
+    ? response
+    : { ...response, body: redactJsonText(response.body, redactions) }
+}
+
+// Exact bytes of base64 text; undecodable base64 yields no bytes (the recorder never writes it).
+const base64Bytes = (base64: string): Uint8Array =>
+  Result.getOrElse(Encoding.decodeBase64(base64), () => new Uint8Array())
+
+const chunkBytes = (chunk: WireChunk): Uint8Array =>
+  Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)
+
+const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
+  const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
+  let offset = 0
+
+  for (const part of parts) {
+    joined.set(part, offset)
+    offset += part.length
+  }
+
+  return joined
+}
+
+// Non-fatal UTF-8 decode: invalid bytes become U+FFFD, the rest of the text stays checkable.
+const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
+
+// The whole response text a survivor check reads: the text body, the decoded `bodyBase64`, or
+// every stream chunk (text and `{ base64 }`) reassembled into one byte stream and decoded, so a
+// value inside a base64 chunk, or split across chunks (even mid-character), is still seen.
+const responseText = (response: WireResponse): string => {
+  if (isWireStreamResponse(response)) {
+    return lossyText(concatBytes(response.chunks.map(chunkBytes)))
+  }
+
+  return isWireBase64BodyResponse(response)
+    ? lossyText(base64Bytes(response.bodyBase64))
+    : response.body
+}
+
+/**
+ * Replace the string value of every redacted JSON field in recorded exchanges: request bodies
+ * (parsed JSON, or JSON text), text response bodies, and text stream chunks (SSE `data:` JSON).
+ * Chunk boundaries and all other bytes are kept. Base64 bodies and `{ base64 }` chunks are never
+ * rewritten, and chunks are never merged or re-split: a value there, or split across chunks, is
+ * left in place and reported by `unredactedJsonFields`, so the probe refuses to write it.
+ */
+export const redactJsonFields = (
+  exchanges: ReadonlyArray<WireExchange>,
+  redactions: JsonFieldRedactions
+): ReadonlyArray<WireExchange> =>
+  exchanges.map(({ request, response }) => ({
+    request:
+      request.body === undefined
+        ? request
+        : { ...request, body: redactJsonValue(request.body, redactions) },
+    response: redactResponse(response, redactions)
+  }))
+
+/**
+ * Redacted fields still carrying another value, checked on each exchange's whole text: request
+ * body, text or decoded base64 response body, and every stream chunk (text and base64) reassembled
+ * as bytes and decoded non-fatally. A value in a base64 chunk or body, or split across network
+ * chunks, is therefore caught. Empty when fully redacted.
+ */
+export const unredactedJsonFields = (
+  exchanges: ReadonlyArray<WireExchange>,
+  redactions: JsonFieldRedactions
+): ReadonlyArray<string> => {
+  const texts = exchanges.flatMap(({ request, response }) => [
+    JSON.stringify(request.body ?? null),
+    responseText(response)
+  ])
+
+  return Object.entries(redactions).flatMap(([field, placeholder]) =>
+    texts.some(text => redactJsonText(text, { [field]: placeholder }) !== text) ? [field] : []
+  )
+}
+
+/** The redacted exchanges, the fields that were redacted, and any field left unredacted. */
+export type RedactedRecording = {
+  readonly exchanges: ReadonlyArray<WireExchange>
+  readonly redactedFields: ReadonlyArray<string>
+  readonly unredactedFields: ReadonlyArray<string>
+}
+
+export const redactRecording = (
+  exchanges: ReadonlyArray<WireExchange>,
+  redactions: JsonFieldRedactions = gatewayJsonRedactions
+): RedactedRecording => {
+  const redacted = redactJsonFields(exchanges, redactions)
+
+  return {
+    exchanges: redacted,
+    redactedFields: unredactedJsonFields(exchanges, redactions),
+    unredactedFields: unredactedJsonFields(redacted, redactions)
+  }
+}
+
+/** Why the probe refuses to write a recording that still carries a redacted field's value. */
+export const unredactedRecordingMessage = (fields: ReadonlyArray<string>): string =>
+  `could not redact ${fields.join(', ')} from the recording: the value is inside a base64 body or chunk, or split across network chunks, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
+
+/** The note written into every recorded fixture, naming the fields redacted from it. */
+export const gatewayFixtureNote = (redactedFields: ReadonlyArray<string>): string =>
+  [
+    'Recorded from the live Vercel AI Gateway by running its conformance case through pnpm conformance:gateway --live. Prompts and outputs are synthetic.',
+    ...redactedFields.map(field => `${field} redacted after recording.`)
+  ].join(' ')
+
 export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
   readonly caseId: string
   readonly message: string
@@ -363,8 +553,8 @@ const fixtureDir = join(workspaceRoot, 'packages/agent/src/providers/vercel/conf
 const today = () => new Date().toISOString().slice(0, 10)
 
 // Runs the case through `runConformance` on the live target (same safety policy and sanitized
-// failure report as any conformance run) with the recording client, then turns the single
-// recorded exchange into a verified fixture.
+// failure report as any conformance run) with the recording client, then redacts the single
+// recorded exchange (`gatewayJsonRedactions`) and turns it into a verified fixture.
 const recordCase = (
   entry: GatewayProbePlanEntry,
   settings: VercelAiGatewayConformanceSettings,
@@ -401,6 +591,15 @@ const recordCase = (
       })
     }
 
+    const redacted = redactRecording(exchanges)
+
+    if (redacted.unredactedFields.length > 0) {
+      return yield* new ProbeFailed({
+        caseId,
+        message: unredactedRecordingMessage(redacted.unredactedFields)
+      })
+    }
+
     return yield* makeWireFixture({
       id: `${caseId}.recorded`,
       caseId,
@@ -409,8 +608,8 @@ const recordCase = (
       account,
       endpoint: vercelAiGatewayChatCompletionsUrl,
       model: entry.model,
-      note: 'Recorded from the live Vercel AI Gateway by running its conformance case through pnpm conformance:gateway --live. Prompts and outputs are synthetic.',
-      exchanges
+      note: gatewayFixtureNote(redacted.redactedFields),
+      exchanges: redacted.exchanges
     }).pipe(Effect.mapError(error => new ProbeFailed({ caseId, message: error.message })))
   }).pipe(Effect.provide(WireRecorder.layer().pipe(Layer.provide(FetchHttpClient.layer))))
 
@@ -455,9 +654,11 @@ export const defaultFixtureWriter: FixtureWriter = {
 }
 
 /**
- * The write gate: replay `recorded` through every case and write the fixture modules only when
- * the report passes and every case has exactly one recording. On failure nothing is written and
- * the formatted report is logged. Returns the report and the written paths.
+ * The write gate: refuse any recording that still carries a redacted field's value
+ * (`gatewayJsonRedactions`, checked across base64 and split chunks), then replay `recorded`
+ * through every case and write the fixture modules only when the report passes and every case
+ * has exactly one recording. On failure nothing is written (the replay report is logged when
+ * replay failed). Returns the report and the written paths.
  */
 export const writeVerifiedFixtures = (
   recorded: ReadonlyArray<RecordedGatewayFixture>,
@@ -466,6 +667,18 @@ export const writeVerifiedFixtures = (
 ) =>
   Effect.gen(function* () {
     const fixtures = recorded.map(({ fixture }) => fixture)
+
+    for (const fixture of fixtures) {
+      const unredactedFields = unredactedJsonFields(fixture.exchanges, gatewayJsonRedactions)
+
+      if (unredactedFields.length > 0) {
+        return yield* new ProbeFailed({
+          caseId: fixture.caseId,
+          message: `${unredactedRecordingMessage(unredactedFields)}; no fixture was written`
+        })
+      }
+    }
+
     const report = yield* verifyGatewayFixtures(fixtures, options)
     const unmatched = casesWithoutSingleFixture(fixtures)
 

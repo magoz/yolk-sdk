@@ -38,7 +38,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/providers/openai/realtime`            | OpenAI Realtime session config and event codecs                                       |
 | `@yolk-sdk/agent/providers/openai/speech`              | OpenAI text-to-speech and transcription adapters                                      |
 | `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | Vercel AI Gateway Chat Completions provider factory                                   |
-| `@yolk-sdk/agent/providers/vercel/conformance`         | Synthetic Gateway wire fixtures and conformance cases for `@yolk-sdk/conformance`     |
+| `@yolk-sdk/agent/providers/vercel/conformance`         | Verified Gateway wire fixtures plus conformance cases for `@yolk-sdk/conformance`     |
 | `@yolk-sdk/agent/providers/opencode/go-provider`       | OpenCode Go Chat Completions, Messages, and Responses provider                        |
 | `@yolk-sdk/agent/providers/opencode/usage`             | OpenCode Go subscription-allowance snapshots                                          |
 | `@yolk-sdk/agent/providers/anthropic`                  | Anthropic/Claude OAuth and broker helpers                                             |

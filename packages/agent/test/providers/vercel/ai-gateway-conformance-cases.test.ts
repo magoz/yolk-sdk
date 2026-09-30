@@ -17,7 +17,6 @@ import { vercelAiGatewayChatCompletionsUrl } from '../../../src/providers/vercel
 import {
   VercelAiGatewayConformanceConfig,
   vercelAiGatewayConformanceCases,
-  vercelAiGatewayConformanceDefaultModels,
   vercelAiGatewayConformanceFixtures,
   vercelAiGatewayDeepSeekReasoningCase,
   vercelAiGatewayDeepSeekReasoningFixture,
@@ -30,15 +29,33 @@ import {
   type VercelAiGatewayConformanceCase,
   type VercelAiGatewayConformanceSettings
 } from '../../../src/providers/vercel/conformance/index.ts'
+import {
+  pickRecordedRequestFields,
+  recordedNumber,
+  recordedReasoningEffort,
+  recordedRequestBody,
+  recordedString
+} from './recorded-gateway-request.ts'
 
-const now = new Date('2026-09-29T12:00:00.000Z')
+const now = new Date('2026-09-30T12:00:00.000Z')
 
+// Replay-only settings: every model, limit, and effort comes from the recorded request bodies,
+// so each case sends the request its fixture recorded (the DeepSeek fixture, for example, was
+// recorded with a reasoning-model override rather than the public default models).
 const settings: VercelAiGatewayConformanceSettings = {
   apiKey: Redacted.make('synthetic-gateway-key'),
-  maxCompletionTokens: 64,
-  reasoningMaxCompletionTokens: 512,
-  reasoningEffort: 'high',
-  models: vercelAiGatewayConformanceDefaultModels
+  maxCompletionTokens: recordedNumber(vercelAiGatewayPlainTextFixture, 'max_tokens'),
+  reasoningMaxCompletionTokens: recordedNumber(
+    vercelAiGatewayDeepSeekReasoningFixture,
+    'max_tokens'
+  ),
+  reasoningEffort: recordedReasoningEffort(vercelAiGatewayDeepSeekReasoningFixture),
+  models: {
+    plainText: recordedString(vercelAiGatewayPlainTextFixture, 'model'),
+    reasoning: recordedString(vercelAiGatewayDeepSeekReasoningFixture, 'model'),
+    toolCall: recordedString(vercelAiGatewayToolCallDeltasFixture, 'model'),
+    invalid: recordedString(vercelAiGatewayErrorEnvelopeFixture, 'model')
+  }
 }
 
 const configLayer = Layer.succeed(VercelAiGatewayConformanceConfig, settings)
@@ -51,58 +68,90 @@ const fixturesFor = (
 const replayCaseLayer = (testCase: VercelAiGatewayConformanceCase) =>
   Layer.mergeAll(ReplayHttpClient.layer(fixturesFor(testCase)), configLayer)
 
+type ExpectedWarning = { readonly kind: string; readonly fixtureId?: string }
+
+// Case-level warnings, derived from the case data: `unverified-case` without a live observation.
+// (No observation here is stale: `now` is within 30 days of every observation date.)
+const expectedCaseWarnings = (
+  testCase: Pick<VercelAiGatewayConformanceCase, 'id' | 'observed'>
+): Array<ExpectedWarning> => (testCase.observed === undefined ? [{ kind: 'unverified-case' }] : [])
+
+// Fixture-level warnings (non-live targets only), derived from each backing fixture's evidence.
+const expectedFixtureWarnings = (
+  testCase: Pick<VercelAiGatewayConformanceCase, 'fixtures'>,
+  fixtures: ReadonlyArray<WireFixture>
+): Array<ExpectedWarning> =>
+  fixturesFor(testCase, fixtures).flatMap(fixture =>
+    fixture.evidence === 'unverified' ? [{ kind: 'unverified-fixture', fixtureId: fixture.id }] : []
+  )
+
+const formatExpectedWarnings = (warnings: ReadonlyArray<ExpectedWarning>): string =>
+  warnings.length === 0
+    ? ''
+    : `  warnings: ${warnings
+        .map(warning =>
+          warning.fixtureId === undefined ? warning.kind : `${warning.kind}:${warning.fixtureId}`
+        )
+        .join(', ')}`
+
 describe('Vercel AI Gateway conformance cases', () => {
-  it('are read-only, unverified, and backed by the Gateway fixtures', () => {
+  it('are read-only and backed by the Gateway fixtures, observed when a verified recording exists', () => {
     expect(vercelAiGatewayConformanceCases.map(testCase => testCase.id)).toEqual(
       vercelAiGatewayConformanceFixtures.map(fixture => fixture.caseId)
     )
 
     for (const testCase of vercelAiGatewayConformanceCases) {
+      const fixtures = fixturesFor(testCase)
+
       expect(testCase.safety).toBe('read')
-      expect(testCase.observed).toBeUndefined()
-      expect(fixturesFor(testCase).map(fixture => fixture.caseId)).toEqual([testCase.id])
+      expect(fixtures.map(fixture => fixture.caseId)).toEqual([testCase.id])
+
+      // A verified recording is a live observation of the case: the case records the same
+      // account label and date as the recording it is backed by.
+      for (const fixture of fixtures.filter(candidate => candidate.evidence === 'verified')) {
+        expect(testCase.observed).toEqual({ account: fixture.account, date: fixture.recordedAt })
+      }
     }
   })
 
-  it.effect('all pass against the replayed fixtures with unverified warnings', () =>
-    Effect.gen(function* () {
-      const report = yield* runConformance(vercelAiGatewayConformanceCases, {
-        target: { kind: 'replay' },
-        now,
-        fixtures: vercelAiGatewayConformanceFixtures,
-        layer: replayCaseLayer
+  it.effect(
+    'all pass against the replayed fixtures with warnings derived from their evidence',
+    () =>
+      Effect.gen(function* () {
+        const report = yield* runConformance(vercelAiGatewayConformanceCases, {
+          target: { kind: 'replay' },
+          now,
+          fixtures: vercelAiGatewayConformanceFixtures,
+          layer: replayCaseLayer
+        })
+
+        expect(report.target).toEqual({ kind: 'replay' })
+        expect(report.summary).toEqual({ passed: 4, failed: 0, skipped: 0 })
+        expect(conformanceReportFailed(report)).toBe(false)
+
+        // Expected warnings and report lines derive from the case observations and fixture
+        // evidence, so re-recording or re-observing keeps this test valid.
+        const expectedWarnings = vercelAiGatewayConformanceCases.map(testCase => [
+          ...expectedCaseWarnings(testCase),
+          ...expectedFixtureWarnings(testCase, vercelAiGatewayConformanceFixtures)
+        ])
+
+        expect(report.results.map(result => result.status)).toEqual([
+          'passed',
+          'passed',
+          'passed',
+          'passed'
+        ])
+        expect(report.results.map(result => result.warnings)).toEqual(expectedWarnings)
+
+        expect(formatConformanceReport(report).split('\n')).toEqual([
+          ...vercelAiGatewayConformanceCases.map(
+            (testCase, index) =>
+              `PASS  ${testCase.id}  [read]${formatExpectedWarnings(expectedWarnings[index] ?? [])}`
+          ),
+          `4 passed, 0 failed, 0 skipped; target replay; started ${now.toISOString()}`
+        ])
       })
-
-      expect(report.target).toEqual({ kind: 'replay' })
-      expect(report.summary).toEqual({ passed: 4, failed: 0, skipped: 0 })
-      expect(conformanceReportFailed(report)).toBe(false)
-
-      // Expected warnings and report lines derive from the fixtures, so a verified live recording
-      // (different ids, `evidence: 'verified'`) keeps this test valid.
-      const expectedWarnings = vercelAiGatewayConformanceFixtures.map(fixture =>
-        fixture.evidence === 'unverified'
-          ? [{ kind: 'unverified-case' }, { kind: 'unverified-fixture', fixtureId: fixture.id }]
-          : [{ kind: 'unverified-case' }]
-      )
-
-      expect(report.results.map(result => result.status)).toEqual([
-        'passed',
-        'passed',
-        'passed',
-        'passed'
-      ])
-      expect(report.results.map(result => result.warnings)).toEqual(expectedWarnings)
-
-      expect(formatConformanceReport(report).split('\n')).toEqual([
-        ...vercelAiGatewayConformanceFixtures.map(fixture =>
-          [
-            `PASS  ${fixture.caseId}  [read]  warnings: unverified-case`,
-            fixture.evidence === 'unverified' ? `, unverified-fixture:${fixture.id}` : ''
-          ].join('')
-        ),
-        '4 passed, 0 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
-      ])
-    })
   )
 
   it.effect('run only on read-safe live targets with case-level warnings only', () =>
@@ -117,16 +166,43 @@ describe('Vercel AI Gateway conformance cases', () => {
       })
 
       expect(report.summary).toEqual({ passed: 4, failed: 0, skipped: 0 })
-      expect(report.results.map(result => result.warnings)).toEqual([
-        [{ kind: 'unverified-case' }],
-        [{ kind: 'unverified-case' }],
-        [{ kind: 'unverified-case' }],
-        [{ kind: 'unverified-case' }]
+      expect(report.results.map(result => result.warnings)).toEqual(
+        vercelAiGatewayConformanceCases.map(expectedCaseWarnings)
+      )
+    })
+  )
+
+  // The shipped cases are observed and their fixtures verified, so the unverified paths are
+  // exercised with a test-local copy: an unobserved case backed by an unverified fixture.
+  it.effect('warn unverified-case and unverified-fixture for an unobserved, unverified copy', () =>
+    Effect.gen(function* () {
+      const { observed: _observed, ...unobservedCase } = vercelAiGatewayPlainTextCase
+
+      const unverifiedFixture: WireFixture = {
+        ...vercelAiGatewayPlainTextFixture,
+        evidence: 'unverified'
+      }
+
+      const replay = yield* runConformance([unobservedCase], {
+        target: { kind: 'replay' },
+        now,
+        fixtures: [unverifiedFixture],
+        layer: () => Layer.mergeAll(ReplayHttpClient.layer([unverifiedFixture]), configLayer)
+      })
+
+      expect(replay.summary).toEqual({ passed: 1, failed: 0, skipped: 0 })
+      expect(replay.results[0]?.warnings).toEqual([
+        ...expectedCaseWarnings(unobservedCase),
+        ...expectedFixtureWarnings(unobservedCase, [unverifiedFixture])
+      ])
+      expect(replay.results[0]?.warnings).toEqual([
+        { kind: 'unverified-case' },
+        { kind: 'unverified-fixture', fixtureId: unverifiedFixture.id }
       ])
     })
   )
 
-  it.effect('send the claimed requests (asserted through the replay ledger)', () =>
+  it.effect('send the recorded requests (asserted through the replay ledger)', () =>
     Effect.gen(function* () {
       const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
 
@@ -174,18 +250,28 @@ describe('Vercel AI Gateway conformance cases', () => {
           return entries[0]?.bodyJson
         })
 
+      // Every case sends its fixture's recorded model, effort, thinking toggle, token limit,
+      // streaming flag, and tools.
+      for (const testCase of vercelAiGatewayConformanceCases) {
+        const [fixture] = fixturesFor(testCase)
+
+        if (fixture === undefined) {
+          return expect.fail(`no fixture for ${testCase.id}`)
+        }
+
+        expect(pickRecordedRequestFields(yield* entriesOf(testCase))).toEqual(
+          pickRecordedRequestFields(recordedRequestBody(fixture))
+        )
+      }
+
       expect(yield* entriesOf(vercelAiGatewayPlainTextCase)).toMatchObject({
-        model: settings.models.plainText,
         stream: true,
-        stream_options: { include_usage: true },
-        max_tokens: settings.maxCompletionTokens
+        stream_options: { include_usage: true }
       })
 
       const reasoningBody = yield* entriesOf(vercelAiGatewayDeepSeekReasoningCase)
 
       expect(reasoningBody).toMatchObject({
-        model: settings.models.reasoning,
-        stream: true,
         reasoning_effort: settings.reasoningEffort,
         thinking: { type: 'enabled' },
         max_tokens: settings.reasoningMaxCompletionTokens
@@ -193,14 +279,7 @@ describe('Vercel AI Gateway conformance cases', () => {
       expect(reasoningBody).not.toHaveProperty('reasoning')
 
       expect(yield* entriesOf(vercelAiGatewayToolCallDeltasCase)).toMatchObject({
-        model: settings.models.toolCall,
-        stream: true,
         tools: [{ type: 'function', function: { name: 'lookup_weather' } }]
-      })
-
-      expect(yield* entriesOf(vercelAiGatewayErrorEnvelopeCase)).toMatchObject({
-        model: settings.models.invalid,
-        stream: true
       })
     })
   )
@@ -209,7 +288,7 @@ describe('Vercel AI Gateway conformance cases', () => {
 // Disagreement drills: replay a fixture that contradicts a claim and check the matching case fails
 // with a ConformanceMismatch instead of passing. Fixtures are mutated structurally (parsed SSE
 // `data:` payloads, parsed tool arguments, status codes), never by matching their text, so the
-// drills keep working when the synthetic placeholders are replaced by live recordings.
+// drills keep working when the live recordings are re-recorded.
 
 type SseEvent = { readonly data: string; readonly json: unknown }
 
@@ -528,7 +607,10 @@ describe('Vercel AI Gateway conformance disagreement drills', () => {
       : expect.fail('error fixture has no JSON error envelope')
   }
 
-  // The provider falls back from `error.code` to `error.type`, so the drill drops both.
+  const errorStatus = (): number => vercelAiGatewayErrorEnvelopeFixture.exchanges[0].response.status
+
+  // The provider falls back from `error.code` to `error.type`, so the drill drops both (the
+  // recorded envelope has only `error.type`). The recorded status is kept.
   it.effect('fails the error-envelope case when the envelope carries no code or type', () =>
     Effect.gen(function* () {
       const envelope = errorEnvelope()
@@ -544,7 +626,7 @@ describe('Vercel AI Gateway conformance disagreement drills', () => {
           withResponse(
             vercelAiGatewayErrorEnvelopeFixture,
             'codeless',
-            400,
+            errorStatus(),
             JSON.stringify(envelope)
           )
         )

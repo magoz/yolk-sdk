@@ -8,24 +8,32 @@ import {
   vercelAiGatewayConformanceDefaultModels,
   vercelAiGatewayConformanceFixtures,
   vercelAiGatewayDeepSeekReasoningFixture,
+  vercelAiGatewayErrorEnvelopeFixture,
   vercelAiGatewayPlainTextFixture
 } from '../../packages/agent/src/providers/vercel/conformance/index.ts'
 import {
   isWireStreamResponse,
+  type WireChunk,
   type WireExchange,
   type WireFixture
 } from '../../packages/conformance/src/fixture.ts'
 import { conformanceReportFailed } from '../../packages/conformance/src/runner.ts'
+import { recordBytes } from '../../packages/conformance/src/wire-internal.ts'
 import {
   casesWithoutSingleFixture,
   defaultProbeOptions,
   dryRunReport,
   gatewayFixtureModuleFor,
   gatewayFixtureModules,
+  gatewayFixtureNote,
+  gatewayJsonRedactions,
   liveAccountRequiredMessage,
   parseProbeArgs,
   planGatewayProbe,
+  redactJsonFields,
+  redactRecording,
   renderFixtureModule,
+  unredactedJsonFields,
   verifyGatewayFixtures,
   writeVerifiedFixtures,
   type FixtureWriter,
@@ -39,6 +47,17 @@ const tsxCli = join(repoRoot, 'node_modules/tsx/dist/cli.mjs')
 const probeScript = join(repoRoot, 'scripts/record-gateway-fixtures.ts')
 
 const caseIds = vercelAiGatewayConformanceCases.map(testCase => testCase.id)
+
+// Probe options matching the committed recordings (the DeepSeek one used a `--reasoning-model`
+// override), so replay verification sends the requests that were actually recorded.
+const recordedOptions = parseProbeArgs([
+  '--reasoning-model',
+  String(
+    vercelAiGatewayConformanceFixtures.find(
+      fixture => fixture.caseId === 'vercel-ai-gateway.stream.deepseek-reasoning'
+    )?.model ?? expect.fail('missing DeepSeek fixture')
+  )
+])
 
 describe('record-gateway-fixtures arguments', () => {
   it('defaults to a dry run with the conformance default models and no account label', () => {
@@ -266,7 +285,7 @@ const withoutReasoning = (fixture: WireFixture): WireFixture => {
 describe('record-gateway-fixtures replay verification', () => {
   it('passes every case against the committed fixtures', async () => {
     const report = await Effect.runPromise(
-      verifyGatewayFixtures(vercelAiGatewayConformanceFixtures)
+      verifyGatewayFixtures(vercelAiGatewayConformanceFixtures, recordedOptions)
     )
 
     expect(conformanceReportFailed(report)).toBe(false)
@@ -282,7 +301,7 @@ describe('record-gateway-fixtures replay verification', () => {
         : fixture
     )
 
-    const report = await Effect.runPromise(verifyGatewayFixtures(tampered))
+    const report = await Effect.runPromise(verifyGatewayFixtures(tampered, recordedOptions))
 
     expect(conformanceReportFailed(report)).toBe(true)
     expect(report.results.map(result => [result.id, result.status])).toEqual(
@@ -299,7 +318,7 @@ describe('record-gateway-fixtures replay verification', () => {
       fixture => fixture.id !== vercelAiGatewayPlainTextFixture.id
     )
 
-    const report = await Effect.runPromise(verifyGatewayFixtures(missing))
+    const report = await Effect.runPromise(verifyGatewayFixtures(missing, recordedOptions))
 
     expect(conformanceReportFailed(report)).toBe(true)
     expect(report.results[0]).toMatchObject({
@@ -309,6 +328,212 @@ describe('record-gateway-fixtures replay verification', () => {
     expect(casesWithoutSingleFixture(missing)).toEqual(['vercel-ai-gateway.stream.plain-text'])
   })
 })
+
+const placeholder =
+  gatewayJsonRedactions.clientSessionId ?? expect.fail('no clientSessionId redaction')
+
+// A fingerprint-shaped stand-in for a live session id: never a real recorded value.
+const fakeSessionId = '0123456789abcdef0123456789abcdef'
+
+// Put a live-looking session id back into a committed (redacted) recording.
+const unredacted = (exchange: WireExchange): WireExchange => {
+  const response = exchange.response
+
+  return isWireStreamResponse(response)
+    ? {
+        ...exchange,
+        response: {
+          ...response,
+          chunks: response.chunks.map(chunk =>
+            Predicate.isString(chunk)
+              ? chunk.replaceAll(
+                  `"clientSessionId":"${placeholder}"`,
+                  `"clientSessionId":"${fakeSessionId}"`
+                )
+              : chunk
+          )
+        }
+      }
+    : exchange
+}
+
+describe('record-gateway-fixtures redaction', () => {
+  it('keeps the committed recordings fully redacted, with the redaction in their notes', () => {
+    for (const fixture of vercelAiGatewayConformanceFixtures) {
+      expect(unredactedJsonFields(fixture.exchanges, gatewayJsonRedactions)).toEqual([])
+      expect(redactRecording(fixture.exchanges)).toEqual({
+        exchanges: fixture.exchanges,
+        redactedFields: [],
+        unredactedFields: []
+      })
+    }
+
+    const withSession = vercelAiGatewayConformanceFixtures.filter(fixture =>
+      JSON.stringify(fixture.exchanges).includes('clientSessionId')
+    )
+
+    expect(withSession.map(fixture => fixture.id)).not.toContain(
+      vercelAiGatewayErrorEnvelopeFixture.id
+    )
+    expect(withSession.length).toBeGreaterThan(0)
+
+    for (const fixture of vercelAiGatewayConformanceFixtures) {
+      expect(fixture.note).toBe(
+        gatewayFixtureNote(withSession.includes(fixture) ? ['clientSessionId'] : [])
+      )
+    }
+
+    expect(gatewayFixtureNote(['clientSessionId'])).toContain(
+      'clientSessionId redacted after recording.'
+    )
+  })
+
+  it('redacts a live session id from stream chunks, changing no other recorded byte', () => {
+    for (const fixture of vercelAiGatewayConformanceFixtures) {
+      const live = fixture.exchanges.map(unredacted)
+      const redacted = redactRecording(live)
+      const hadSession = JSON.stringify(live).includes(fakeSessionId)
+
+      expect(redacted.redactedFields).toEqual(hadSession ? ['clientSessionId'] : [])
+      expect(redacted.unredactedFields).toEqual([])
+      // Chunk boundaries and every other byte match the committed recording.
+      expect(redacted.exchanges).toEqual(fixture.exchanges)
+    }
+  })
+
+  it('redacts request bodies and text bodies, keeping whitespace and neighbouring fields', () => {
+    const exchanges: ReadonlyArray<WireExchange> = [
+      {
+        request: {
+          method: 'POST',
+          url: 'https://example.test/v1',
+          body: {
+            clientSessionId: fakeSessionId,
+            nested: [{ clientSessionId: fakeSessionId, keep: 'value' }],
+            count: 1
+          }
+        },
+        response: {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+          body: `{"clientSessionId" : "${fakeSessionId}","clientSessionIdSource":"fingerprint"}`
+        }
+      },
+      {
+        request: { method: 'GET', url: 'https://example.test/v1' },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [`data: {"a":1,"clientSessionId":"${fakeSessionId}"}\n\n`, { base64: 'AAEC' }]
+        }
+      }
+    ]
+
+    expect(redactJsonFields(exchanges, gatewayJsonRedactions)).toEqual([
+      {
+        request: {
+          method: 'POST',
+          url: 'https://example.test/v1',
+          body: {
+            clientSessionId: placeholder,
+            nested: [{ clientSessionId: placeholder, keep: 'value' }],
+            count: 1
+          }
+        },
+        response: {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+          body: `{"clientSessionId" : "${placeholder}","clientSessionIdSource":"fingerprint"}`
+        }
+      },
+      {
+        request: { method: 'GET', url: 'https://example.test/v1' },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [`data: {"a":1,"clientSessionId":"${placeholder}"}\n\n`, { base64: 'AAEC' }]
+        }
+      }
+    ])
+    expect(redactRecording(exchanges).redactedFields).toEqual(['clientSessionId'])
+    expect(redactRecording(exchanges).unredactedFields).toEqual([])
+  })
+
+  it('reports a value split across network chunks as unredacted, so the probe refuses to write', () => {
+    const split: ReadonlyArray<WireExchange> = [
+      {
+        request: { method: 'POST', url: 'https://example.test/v1' },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [
+            `data: {"clientSessionId":"${fakeSessionId.slice(0, 8)}`,
+            `${fakeSessionId.slice(8)}"}\n\n`
+          ]
+        }
+      }
+    ]
+
+    expect(redactRecording(split).unredactedFields).toEqual(['clientSessionId'])
+  })
+
+  it('reports a value inside a base64 body or chunk as unredacted, leaving the bytes untouched', () => {
+    const json = `{"clientSessionId":"${fakeSessionId}"}`
+    const base64 = Buffer.from(json, 'utf8').toString('base64')
+
+    const exchanges: ReadonlyArray<WireExchange> = [
+      {
+        request: { method: 'POST', url: 'https://example.test/v1' },
+        response: { status: 200, headers: {}, bodyBase64: base64 }
+      },
+      {
+        request: { method: 'POST', url: 'https://example.test/v1' },
+        response: { status: 200, headers: {}, chunks: ['data: ', { base64 }, '\n\n'] }
+      }
+    ]
+
+    for (const exchange of exchanges) {
+      const redacted = redactRecording([exchange])
+
+      expect(redacted.unredactedFields).toEqual(['clientSessionId'])
+      expect(redacted.exchanges).toEqual([exchange])
+    }
+  })
+})
+
+// A live-shaped plain-text recording whose session id sits in `{ base64 }` chunks: the chunk that
+// carries it is split inside the multibyte `\u2192` before it, so (as `WireRecorder` does for bytes
+// that are not valid UTF-8 on their own) both halves are recorded as base64.
+const splitMultibyteRecording = (): WireFixture => {
+  const fixture = vercelAiGatewayPlainTextFixture
+  const [exchange, ...rest] = fixture.exchanges
+  const live = unredacted(exchange)
+  const response = live.response
+
+  if (!isWireStreamResponse(response)) {
+    return expect.fail('plain-text recording is not a stream')
+  }
+
+  const chunks = response.chunks.flatMap((chunk): ReadonlyArray<WireChunk> => {
+    if (!Predicate.isString(chunk) || !chunk.includes(fakeSessionId)) {
+      return [chunk]
+    }
+
+    const bytes = new TextEncoder().encode(chunk)
+    const arrow = new TextEncoder().encode(chunk.slice(0, chunk.indexOf('\u2192'))).length
+
+    expect(chunk.indexOf('\u2192')).toBeGreaterThan(-1)
+    expect(chunk.indexOf('\u2192')).toBeLessThan(chunk.indexOf(fakeSessionId))
+
+    return [bytes.subarray(0, arrow + 1), bytes.subarray(arrow + 1)].map(part => {
+      const recorded = recordBytes(part)
+
+      return 'text' in recorded ? recorded.text : { base64: recorded.base64 }
+    })
+  })
+
+  return { ...fixture, exchanges: [{ ...live, response: { ...response, chunks } }, ...rest] }
+}
 
 describe('record-gateway-fixtures write gate', () => {
   type WriterCall = { readonly kind: 'write' | 'format'; readonly paths: ReadonlyArray<string> }
@@ -332,7 +557,7 @@ describe('record-gateway-fixtures write gate', () => {
   const recordedFrom = (
     fixtures: ReadonlyArray<WireFixture>
   ): ReadonlyArray<RecordedGatewayFixture> =>
-    planGatewayProbe(defaultProbeOptions).flatMap(entry =>
+    planGatewayProbe(recordedOptions).flatMap(entry =>
       fixtures.flatMap(fixture =>
         fixture.caseId === entry.testCase.id ? [{ entry, fixture }] : []
       )
@@ -344,7 +569,7 @@ describe('record-gateway-fixtures write gate', () => {
     const result = await Effect.runPromise(
       writeVerifiedFixtures(
         recordedFrom(vercelAiGatewayConformanceFixtures),
-        defaultProbeOptions,
+        recordedOptions,
         writer
       )
     )
@@ -369,12 +594,58 @@ describe('record-gateway-fixtures write gate', () => {
     )
 
     const exit = await Effect.runPromiseExit(
-      writeVerifiedFixtures(recordedFrom(tampered), defaultProbeOptions, writer)
+      writeVerifiedFixtures(recordedFrom(tampered), recordedOptions, writer)
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
       'no fixture was written'
+    )
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when a session id survives in base64 chunks split mid-character', async () => {
+    const { calls, writer } = recordingWriter()
+    const split = splitMultibyteRecording()
+    const splitResponse = split.exchanges[0]?.response
+
+    const splitChunks =
+      splitResponse !== undefined && isWireStreamResponse(splitResponse)
+        ? splitResponse.chunks
+        : expect.fail('split recording is not a stream')
+
+    const committedResponse = vercelAiGatewayPlainTextFixture.exchanges[0].response
+
+    const committedChunks = isWireStreamResponse(committedResponse)
+      ? committedResponse.chunks
+      : expect.fail('plain-text recording is not a stream')
+
+    // The session id now lives only in base64 chunks, one more than the committed recording.
+    expect(splitChunks).toHaveLength(committedChunks.length + 1)
+    expect(splitChunks.filter(chunk => !Predicate.isString(chunk))).toHaveLength(2)
+    expect(JSON.stringify(splitChunks)).not.toContain(fakeSessionId)
+
+    // Redaction cannot rewrite it and never re-chunks, so the survivor is reported.
+    const redacted = redactRecording(split.exchanges)
+
+    expect(redacted.unredactedFields).toEqual(['clientSessionId'])
+    expect(redacted.exchanges).toEqual(split.exchanges)
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(
+        recordedFrom(
+          vercelAiGatewayConformanceFixtures.map(fixture =>
+            fixture.id === split.id ? split : fixture
+          )
+        ),
+        recordedOptions,
+        writer
+      )
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'could not redact clientSessionId from the recording: the value is inside a base64 body or chunk'
     )
     expect(calls).toEqual([])
   })
@@ -387,7 +658,7 @@ describe('record-gateway-fixtures write gate', () => {
     )
 
     const exit = await Effect.runPromiseExit(
-      writeVerifiedFixtures(recordedFrom(missing), defaultProbeOptions, writer)
+      writeVerifiedFixtures(recordedFrom(missing), recordedOptions, writer)
     )
 
     expect(Exit.isFailure(exit)).toBe(true)

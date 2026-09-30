@@ -1,21 +1,20 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * Non-2xx JSON error envelope (`{ error: { message, type, code } }`) for a request with an
- * invalid model id.
+ * Non-2xx JSON error envelope for a request with an invalid model id.
  *
- * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:gateway --live --account <label>`.
+ * Verified recording (2026-09-30). Regenerate with
+ * `pnpm conformance:gateway --live --account <label>`.
  */
 export const vercelAiGatewayErrorEnvelopeFixture: WireFixture = {
-  id: 'vercel-ai-gateway.stream.error-envelope.synthetic',
+  id: 'vercel-ai-gateway.stream.error-envelope.recorded',
   caseId: 'vercel-ai-gateway.stream.error-envelope',
-  evidence: 'unverified',
-  recordedAt: '2026-09-29',
+  evidence: 'verified',
+  recordedAt: '2026-09-30',
   account: 'synthetic',
   endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
   model: 'yolk-conformance/model-does-not-exist',
-  note: 'Synthetic placeholder for a non-2xx OpenAI-compatible error envelope returned for an unknown model id. Not recorded from a live service; replace with a verified recording from pnpm conformance:gateway --live --account <label>.',
+  note: 'Recorded from the live Vercel AI Gateway by running its conformance case through pnpm conformance:gateway --live. Prompts and outputs are synthetic.',
   exchanges: [
     {
       request: {
@@ -45,11 +44,11 @@ export const vercelAiGatewayErrorEnvelopeFixture: WireFixture = {
         }
       },
       response: {
-        status: 400,
+        status: 404,
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"error":{"message":"Synthetic placeholder: the requested model is not available.","type":"invalid_request_error","code":"model_not_found"}}'
+        body: '{"error":{"message":"Model \'yolk-conformance/model-does-not-exist\' not found","type":"model_not_found","param":{"modelId":"yolk-conformance/model-does-not-exist"}}}'
       }
     }
   ]

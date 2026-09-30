@@ -1,22 +1,20 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * Streamed tool call whose JSON arguments arrive as `delta.tool_calls` fragments that assemble
- * into one call (this placeholder splits them across several chunks), finishing with
- * `tool_calls`, a usage chunk, and `data: [DONE]`.
+ * Streamed tool call whose JSON arguments arrive as `delta.tool_calls` fragments that assemble into one call.
  *
- * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:gateway --live --account <label>`.
+ * Verified recording (2026-09-30). Regenerate with
+ * `pnpm conformance:gateway --live --account <label>`.
  */
 export const vercelAiGatewayToolCallDeltasFixture: WireFixture = {
-  id: 'vercel-ai-gateway.stream.tool-call-deltas.synthetic',
+  id: 'vercel-ai-gateway.stream.tool-call-deltas.recorded',
   caseId: 'vercel-ai-gateway.stream.tool-call-deltas',
-  evidence: 'unverified',
-  recordedAt: '2026-09-29',
+  evidence: 'verified',
+  recordedAt: '2026-09-30',
   account: 'synthetic',
   endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
   model: 'openai/gpt-4.1-nano',
-  note: 'Synthetic placeholder shaped like OpenAI-compatible Gateway chat.completion.chunk SSE. Not recorded from a live service; replace with a verified recording from pnpm conformance:gateway --live --account <label>.',
+  note: 'Recorded from the live Vercel AI Gateway by running its conformance case through pnpm conformance:gateway --live. Prompts and outputs are synthetic. clientSessionId redacted after recording.',
   exchanges: [
     {
       request: {
@@ -71,13 +69,8 @@ export const vercelAiGatewayToolCallDeltasFixture: WireFixture = {
           'content-type': 'text/event-stream'
         },
         chunks: [
-          'data: {"id":"gen-synthetic-tool-call","object":"chat.completion.chunk","created":1790000000,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_synthetic_weather","type":"function","function":{"name":"lookup_weather","arguments":""}}]},"finish_reason":null}]}\n\n',
-          'data: {"id":"gen-synthetic-tool-call","object":"chat.completion.chunk","created":1790000000,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"ci"}}]},"finish_reason":null}]}\n\n',
-          'data: {"id":"gen-synthetic-tool-call","object":"chat.completion.chunk","created":1790000000,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ty\\":\\"Spri"}}]},"finish_reason":null}]}\n\n',
-          'data: {"id":"gen-synthetic-tool-call","object":"chat.completion.chunk","created":1790000000,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ngfield\\"}"}}]},"finish_reason":null}]}\n\n',
-          'data: {"id":"gen-synthetic-tool-call","object":"chat.completion.chunk","created":1790000000,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
-          'data: {"id":"gen-synthetic-tool-call","object":"chat.completion.chunk","created":1790000000,"model":"openai/gpt-4.1-nano","choices":[],"usage":{"prompt_tokens":48,"completion_tokens":9,"total_tokens":57}}\n\n',
-          'data: [DONE]\n\n'
+          'data: {"id":"gen_01M3RJQ4Y5T3YBSZ53M4SXBM1M","object":"chat.completion.chunk","created":1790752561,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}],"system_fingerprint":"fp_d72r0jc07w"}\n\ndata: {"id":"gen_01M3RJQ4Y5T3YBSZ53M4SXBM1M","object":"chat.completion.chunk","created":1790752561,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_PPgIsvVSqOXPm73xqTOTi9Xb","type":"function","function":{"name":"lookup_weather","arguments":""}}]},"logprobs":null,"finish_reason":null}],"system_fingerprint":"fp_d72r0jc07w"}\n\ndata: {"id":"gen_01M3RJQ4Y5T3YBSZ53M4SXBM1M","object":"chat.completion.chunk","created":1790752561,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"city\\":\\"Springfield\\"}"}}]},"logprobs":null,"finish_reason":null}],"system_fingerprint":"fp_d72r0jc07w"}\n\n',
+          'data: {"id":"gen_01M3RJQ4Y5T3YBSZ53M4SXBM1M","object":"chat.completion.chunk","created":1790752561,"model":"openai/gpt-4.1-nano","choices":[{"index":0,"delta":{"provider_metadata":{"openai":{"responseId":"resp_00dc756baac5ab1c016abcb730379887d1a98f7b7e5454c94b","serviceTier":"default"},"gateway":{"routing":{"originalModelId":"openai/gpt-4.1-nano","resolvedProvider":"openai","fallbacksAvailable":["azure"],"planningReasoning":"System credentials planned for: openai, azure. Total execution order: openai(system) → azure(system)","canonicalSlug":"openai/gpt-4.1-nano","finalProvider":"openai","modelAttemptCount":1,"modelAttempts":[{"canonicalSlug":"openai/gpt-4.1-nano","success":true,"providerAttemptCount":1,"providerAttempts":[{"provider":"openai","credentialType":"system","success":true,"startTime":1790752560100,"endTime":1790752561184,"providerRequestId":"req_c39432217f4d40e295fe39b191367cc8","statusCode":200,"providerResponseId":"resp_00dc756baac5ab1c016abcb730379887d1a98f7b7e5454c94b"}]}],"totalProviderAttemptCount":1,"affinity":{"outcome":"skipped_below_min_prefix"},"clientSessionId":"redacted-client-session","clientSessionIdSource":"fingerprint"},"cost":"0.0000189","marketCost":"0.0000189","surchargeCost":"0","gatewayCost":"0.0000189","inferenceCost":"0.0000189","inputInferenceCost":"0.0000061","outputInferenceCost":"0.0000128","generationId":"gen_01M3RJQ4Y5T3YBSZ53M4SXBM1M"}}},"logprobs":null,"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":61,"completion_tokens":32,"total_tokens":93,"cost":0.0000189,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0,"upstream_inference_completions_cost":0},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0},"cache_creation_input_tokens":0,"market_cost":0.0000189,"gateway_cost":0.0000189},"system_fingerprint":"fp_d72r0jc07w","service_tier":"default","generationId":"gen_01M3RJQ4Y5T3YBSZ53M4SXBM1M"}\n\ndata: [DONE]\n\n'
         ]
       }
     }

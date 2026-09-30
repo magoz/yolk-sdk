@@ -2,9 +2,10 @@
  * Vercel AI Gateway wire fixtures for replay with `@yolk-sdk/conformance/replay`, and the
  * conformance cases they back for `@yolk-sdk/conformance/runner`.
  *
- * The current fixtures are synthetic placeholders (`evidence: 'unverified'`) shaped like the
- * OpenAI-compatible Gateway Chat Completions wire; a live probe replaces them with verified
- * recordings.
+ * The fixtures are verified live recordings (`evidence: 'verified'`, recorded 2026-09-30 with the
+ * synthetic account label `synthetic` and synthetic prompts) of the OpenAI-compatible Gateway Chat
+ * Completions wire, written by `pnpm conformance:gateway --live --account <label>`. The DeepSeek
+ * fixture was recorded with `--reasoning-model deepseek/deepseek-v4.1-flash`.
  */
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 import {

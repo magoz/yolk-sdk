@@ -148,5 +148,7 @@ delivery survives the socket; a body stream error drops the connection.
 
 Emulated routes carry evidence: `verified` routes follow a live observation dated by
 `observedAt`; `unverified` routes follow synthetic placeholders and tag every response with
-`x-emulator-evidence: unverified`. The Gateway and OpenAI routes are currently unverified, like
-the fixtures they follow.
+`x-emulator-evidence: unverified`. The Gateway conformance fixtures are verified live recordings,
+but the Gateway route is still unverified: it follows the earlier synthetic wire shapes and stays
+unverified until the emulator is aligned with the recordings (a tracked follow-up). The OpenAI route
+is unverified, like the synthetic fixtures it follows.
