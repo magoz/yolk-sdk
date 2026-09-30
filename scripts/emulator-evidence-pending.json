@@ -89,77 +89,77 @@
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/users/{userId}/calendars/{calendarId}/events",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id and microsoft.calendar.cancel-semantics.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id and microsoft.calendar.cancel-semantics.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "PATCH",
       "path": "/v1.0/users/{userId}/events/{eventId}",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "DELETE",
       "path": "/v1.0/users/{userId}/events/{eventId}",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id and microsoft.calendar.cancel-semantics.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id and microsoft.calendar.cancel-semantics.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/users/{userId}/events/{eventId}/cancel",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.cancel-semantics.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.cancel-semantics.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/users/{userId}/messages",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "PATCH",
       "path": "/v1.0/users/{userId}/messages/{messageId}",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/users/{userId}/messages/{messageId}/move",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/$batch",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/drives/{driveId}/items/{itemId}/children",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.create-folder-roundtrip and microsoft.onedrive.copy-accepted-monitor.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.create-folder-roundtrip and microsoft.onedrive.copy-accepted-monitor.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "DELETE",
       "path": "/v1.0/drives/{driveId}/items/{itemId}",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.create-folder-roundtrip and microsoft.onedrive.copy-accepted-monitor.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.create-folder-roundtrip and microsoft.onedrive.copy-accepted-monitor.",
       "expires": "2026-11-27"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/drives/{driveId}/items/{itemId}/copy",
-      "reason": "Microsoft Graph emulator (step 2b) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.copy-accepted-monitor.",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.copy-accepted-monitor.",
       "expires": "2026-11-27"
     }
   ]
