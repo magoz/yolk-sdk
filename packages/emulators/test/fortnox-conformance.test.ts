@@ -155,12 +155,13 @@ const withoutRowIds = (state: FortnoxEmulatorState) => ({
 
 describe('cross-check A: in-process emulator through the real connector', () => {
   // What "ends at the seed" means per case: the read and rejection cases leave the exact seed;
-  // the reversible write cases restore what they wrote, so they end equal to the seed except the
-  // RowIds and the RowId counter, which Fortnox regenerates by design (the test proves they
-  // changed); the email case is irreversible by definition and leaves exactly `Sent` plus one
-  // outbox entry. Customers and company information end exactly at the seed in every case.
+  // the empty-string case restores what it wrote and ends exactly at the seed; the row-discount
+  // case restores what it wrote and differs from the seed only in the RowIds and the RowId
+  // counter, which Fortnox regenerates by design (the test proves they changed); the email case
+  // is irreversible by definition and leaves exactly `Sent` plus one outbox entry. Customers and
+  // company information end exactly at the seed in every case.
   it.effect(
-    'passes every Fortnox case; reversible cases end at the seed except regenerated RowIds and counters; email leaves Sent and one outbox entry',
+    'passes every Fortnox case; the row-discount case differs from the seed only in RowIds and the RowId counter; the empty-string case ends exactly at the seed; email leaves Sent and one outbox entry',
     () =>
       withEmulators({}, emulators =>
         Effect.gen(function* () {

@@ -165,10 +165,51 @@ const isIsoDate = (value: string): boolean => {
 
 const today = (env: FortnoxApiEnv): string => new Date(env.now()).toISOString().slice(0, 10)
 
-const addDays = (date: string, days: number): string =>
-  new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10)
+/** `date` plus `days`, or `undefined` when the result is not a representable `YYYY-MM-DD` date. */
+const addDays = (date: string, days: number): string | undefined => {
+  const result = new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 24 * 60 * 60 * 1000)
+
+  if (Number.isNaN(result.getTime())) return undefined
+
+  const iso = result.toISOString().slice(0, 10)
+
+  return isIsoDate(iso) ? iso : undefined
+}
+
+/** The longest emulated `TermsOfPayment`, in days. */
+const maxTermsOfPaymentDays = 365
+
+/**
+ * `TermsOfPayment` as a whole number of days (`0`–`365`, no sign or leading zeros), or
+ * `undefined` when the value is not emulated. Fortnox also knows named terms (such as `K`); the
+ * emulated company has day terms only.
+ */
+const termsOfPaymentDays = (value: string): number | undefined => {
+  if (!/^(?:0|[1-9]\d{0,2})$/.test(value)) return undefined
+
+  const days = Number(value)
+
+  return days <= maxTermsOfPaymentDays ? days : undefined
+}
+
+const unsupportedTermsOfPayment = (value: string): Response =>
+  invalidField(
+    `TermsOfPayment ${value} is not emulated (whole days from 0 to ${maxTermsOfPaymentDays} only).`
+  )
+
+/**
+ * The customer categorical values the emulator deliberately models. This is the emulated subset,
+ * not Fortnox's full enum: other values (for example export or EU reverse-charge VAT) would change
+ * invoice VAT, which the emulator does not model, so they are rejected.
+ */
+const emulatedCustomerVatTypes: ReadonlyArray<string> = ['SEVAT']
+
+const emulatedCustomerTypes: ReadonlyArray<string> = ['COMPANY', 'PRIVATE']
+
+const unsupportedVatType = (value: string): Response =>
+  invalidField(
+    `VATType ${value} is not emulated (supported: ${emulatedCustomerVatTypes.join(', ')}).`
+  )
 
 const customerUrl = (env: FortnoxApiEnv, customerNumber: string): string =>
   `${env.linkOrigin}${fortnoxEmulatorBasePath}/customers/${encodeURIComponent(customerNumber)}`
@@ -432,7 +473,8 @@ type CustomerUpdates = {
 
 /**
  * Why a customer field value is not emulated (fail closed), or `undefined`. The emulated company
- * has only SEK, no cost centers, and terms of payment in whole days.
+ * has only SEK, no cost centers, terms of payment in whole days (0–365), `VATType` `SEVAT`, and
+ * `Type` `COMPANY` or `PRIVATE`.
  */
 const unsupportedCustomerValue = (
   key: CustomerStringField,
@@ -444,9 +486,15 @@ const unsupportedCustomerValue = (
     case 'CostCenter':
       return value === '' ? undefined : noReferencedEntity('CostCenter', value)
     case 'TermsOfPayment':
-      return /^\d+$/.test(value)
+      return termsOfPaymentDays(value) === undefined ? unsupportedTermsOfPayment(value) : undefined
+    case 'VATType':
+      return emulatedCustomerVatTypes.includes(value) ? undefined : unsupportedVatType(value)
+    case 'Type':
+      return emulatedCustomerTypes.includes(value)
         ? undefined
-        : invalidField(`TermsOfPayment ${value} is not emulated (whole days only).`)
+        : invalidField(
+            `Type ${value} is not emulated (supported: ${emulatedCustomerTypes.join(', ')}).`
+          )
     default:
       return undefined
   }
@@ -455,8 +503,9 @@ const unsupportedCustomerValue = (
 /**
  * Quirk 2: an empty string keeps the stored value (unless the `emptyStringClears` drill knob is
  * set); omitted fields keep theirs. Quirk 5: `Country` is read-only. Unknown fields, wrong types,
- * and values the emulator does not support (non-SEK `Currency`, a `CostCenter`, non-numeric
- * `TermsOfPayment`) are rejected; the update is atomic.
+ * and values the emulator does not support (non-SEK `Currency`, a `CostCenter`, `TermsOfPayment`
+ * other than 0–365 days, `VATType` other than `SEVAT`, `Type` other than `COMPANY`/`PRIVATE`) are
+ * rejected; the update is atomic.
  */
 const customerUpdates = (
   fields: Schema.JsonObject,
@@ -1008,8 +1057,25 @@ const createInvoice: RouteHandler = (state, { body }, env) => {
 
   if (currency !== 'SEK') return noReferencedEntity('Currency', currency)
 
+  // Likewise the inherited VAT type (invoice VAT comes from the rows only) and payment terms,
+  // which the invoice records and derives its due date from.
+  if (!emulatedCustomerVatTypes.includes(customer.VATType)) {
+    return unsupportedVatType(customer.VATType)
+  }
+
+  const terms = termsOfPaymentDays(customer.TermsOfPayment)
+
+  if (terms === undefined) return unsupportedTermsOfPayment(customer.TermsOfPayment)
+
   const invoiceDate = updates.scalars.InvoiceDate ?? today(env)
-  const terms = Number(customer.TermsOfPayment)
+  const dueDate = updates.scalars.DueDate ?? addDays(invoiceDate, terms)
+
+  if (dueDate === undefined) {
+    return invalidField(
+      `the due date ${invoiceDate} + ${terms} days is not a representable YYYY-MM-DD date.`
+    )
+  }
+
   const ids: RowIds = { next: state.counters.nextRowId }
 
   const seed: FortnoxEmulatorInvoiceSeed = {
@@ -1017,9 +1083,7 @@ const createInvoice: RouteHandler = (state, { body }, env) => {
     DocumentNumber: String(state.counters.nextDocumentNumber),
     CustomerNumber: customer.CustomerNumber,
     InvoiceDate: invoiceDate,
-    DueDate:
-      updates.scalars.DueDate ??
-      addDays(invoiceDate, Number.isSafeInteger(terms) && terms >= 0 ? terms : 30),
+    DueDate: dueDate,
     EmailInformation: defaultEmailInformation(customer, state.company),
     InvoiceRows: updates.rows ?? []
   }

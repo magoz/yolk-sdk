@@ -245,7 +245,11 @@ There is no root export or barrel.
   `paymentFiltersIncludeUnbooked`) is a disagreement-drill knob for tests only: defaults follow the
   observed behavior. Fail closed on anything not emulated (unknown query parameters, filters,
   fields, referenced articles/cost centers/projects, non-SEK currency, including a customer's
-  inherited currency) instead of ignoring it. Query keys are allowlisted per route in the route
+  inherited currency) instead of ignoring it. Customer categorical values are the emulated subset
+  only (document it as such, never as Fortnox's full enum): `VATType` `SEVAT`, `Type`
+  `COMPANY`/`PRIVATE`, `TermsOfPayment` whole days `0`-`365`; invoice creation checks the
+  inherited `VATType` and `TermsOfPayment` (and the computed due date) before committing, with
+  no silent fallback. Query keys are allowlisted per route in the route
   table (`queryKeys`, empty by default) and checked before the handler runs, so a rejected write
   never writes. `lastmodified` is not emulated (the state tracks no modification times).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly

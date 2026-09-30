@@ -368,7 +368,16 @@ describe('customers', () => {
       for (const fields of [
         { Comments: 'changed', Currency: 'USD' },
         { CostCenter: 'CC1' },
-        { TermsOfPayment: 'K' }
+        { TermsOfPayment: 'K' },
+        { TermsOfPayment: '366' },
+        { TermsOfPayment: '999999999' },
+        { TermsOfPayment: '9007199254740992' },
+        { TermsOfPayment: '-1' },
+        { TermsOfPayment: '1.5' },
+        { TermsOfPayment: '030' },
+        { Comments: 'changed', VATType: 'EXPORT' },
+        { VATType: 'bogus' },
+        { Type: 'FOO' }
       ]) {
         const response = await call(target, 'PUT', '/3/customers/1001', {
           body: { Customer: fields }
@@ -380,13 +389,38 @@ describe('customers', () => {
 
       expect(target.snapshot()).toEqual(before)
 
-      // The supported values (and empty strings, which keep the stored value) still apply.
+      // The emulated values (and empty strings, which keep the stored value) still apply.
       const kept = await call(target, 'PUT', '/3/customers/1001', {
-        body: { Customer: { Currency: 'SEK', CostCenter: '', TermsOfPayment: '10' } }
+        body: {
+          Customer: {
+            Currency: 'SEK',
+            CostCenter: '',
+            TermsOfPayment: '10',
+            VATType: '',
+            Type: 'PRIVATE'
+          }
+        }
       })
 
+      const customer = field(await jsonOf(kept), 'Customer')
+
       expect(kept.status).toBe(200)
-      expect(field(field(await jsonOf(kept), 'Customer'), 'TermsOfPayment')).toBe('10')
+      expect([
+        field(customer, 'TermsOfPayment'),
+        field(customer, 'VATType'),
+        field(customer, 'Type')
+      ]).toEqual(['10', 'SEVAT', 'PRIVATE'])
+
+      for (const fields of [
+        { TermsOfPayment: '0', VATType: 'SEVAT', Type: 'COMPANY' },
+        { TermsOfPayment: '365' }
+      ]) {
+        const response = await call(target, 'PUT', '/3/customers/1001', {
+          body: { Customer: fields }
+        })
+
+        expect(response.status, JSON.stringify(fields)).toBe(200)
+      }
     })
   )
 
@@ -604,6 +638,51 @@ describe('invoices', () => {
       }
 
       expect(target.snapshot()).toEqual(before)
+    })
+  )
+
+  it.effect('validates the inherited VAT type and payment terms before creating an invoice', () =>
+    Effect.promise(async () => {
+      const target = await emulator({
+        seed: {
+          customers: [
+            { CustomerNumber: '1', Name: 'Export AB', VATType: 'EXPORT' },
+            { CustomerNumber: '2', Name: 'Cash AB', TermsOfPayment: 'K' },
+            { CustomerNumber: '3', Name: 'Far AB', TermsOfPayment: '999999999' },
+            { CustomerNumber: '4', Name: 'Unsafe AB', TermsOfPayment: '9007199254740992' },
+            { CustomerNumber: '5', Name: 'Late AB', TermsOfPayment: '30' }
+          ],
+          invoices: []
+        }
+      })
+
+      const before = target.snapshot()
+
+      for (const [invoice, message] of [
+        [{ CustomerNumber: '1' }, 'VATType EXPORT'],
+        [{ CustomerNumber: '2' }, 'TermsOfPayment K'],
+        [{ CustomerNumber: '2', DueDate: '2026-12-31' }, 'TermsOfPayment K'],
+        [{ CustomerNumber: '3' }, 'TermsOfPayment 999999999'],
+        [{ CustomerNumber: '4' }, 'TermsOfPayment 9007199254740992'],
+        [{ CustomerNumber: '5', InvoiceDate: '9999-12-31' }, 'not a representable']
+      ] as const) {
+        const response = await call(target, 'POST', '/3/invoices', { body: { Invoice: invoice } })
+
+        expect(response.status, JSON.stringify(invoice)).toBe(400)
+        expect(await errorCode(response.clone())).toBe(fortnoxEmulatorErrorCodes.invalidField)
+        expect(field(field(await jsonOf(response), 'ErrorInformation'), 'message')).toContain(
+          message
+        )
+      }
+
+      expect(target.snapshot()).toEqual(before)
+
+      const created = await call(target, 'POST', '/3/invoices', {
+        body: { Invoice: { CustomerNumber: '5', InvoiceDate: '2026-12-15' } }
+      })
+
+      expect(created.status).toBe(201)
+      expect(field(field(await jsonOf(created), 'Invoice'), 'DueDate')).toBe('2027-01-14')
     })
   )
 

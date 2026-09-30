@@ -556,8 +556,14 @@ unverified, uncited read routes (the evidence check warns about them).
 Anything else fails closed with a 404 `ErrorInformation` (ledgered); unsupported query parameters
 (checked per route before it runs, so a rejected write writes nothing), unknown filters, unknown or
 read-only body fields, and values the emulated company does not have (non-SEK currency, including
-the currency a new invoice inherits from its customer; cost centers; non-numeric customer
-`TermsOfPayment`) get a 400 `ErrorInformation` instead of being ignored. The list filter
+the currency a new invoice inherits from its customer; cost centers) get a 400 `ErrorInformation`
+instead of being ignored. Customer categorical values are limited to the emulated subset (not
+Fortnox's full enums): `VATType` `SEVAT`, `Type` `COMPANY` or `PRIVATE`, and `TermsOfPayment` as
+whole days from `0` to `365`. Other values (named terms such as `K`, export or reverse-charge VAT)
+get a 400 on a customer update, and a new invoice is rejected with a 400 before anything is
+written when the customer it inherits from (a seed can hold anything) carries one, or when its
+computed due date is not a representable `YYYY-MM-DD` date. An empty string still keeps the
+stored value. The list filter
 `lastmodified` (the connector's `lastModified` input) is not emulated: the emulator tracks no
 modification times and answers it with a 400 saying so. Errors use the lowercase `{ ErrorInformation: { error, message, code } }` of the rejection
 fixture; `fortnoxEmulatorErrorCodes` lists the codes (the `2999xxx` ones are synthetic).
