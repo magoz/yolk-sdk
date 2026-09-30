@@ -395,12 +395,11 @@ const createdItem = <T, R>(
  * the restore relies on (the create itself cannot be interrupted, and there is no request
  * timeout); `use` (the claims) runs interruptibly again. An ambiguous create failure (see
  * `createdItem`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) may still have
- * created the item: it fails as a
- * `MicrosoftConformanceActionFailed` with `createOutcome: 'unknown'` whose message carries the
- * manual-recovery advice. The restore runs uninterruptibly after `use` succeeds, fails, or is
- * interrupted, and does nothing once `pending` is empty. A failed restore fails the case with `MicrosoftConformanceRestoreFailed`, which says
- * whether the claim itself held and, if not, summarizes why; otherwise the outcome of `use`
- * (including an interruption) is returned unchanged. A create that succeeds without an id leaves
+ * created the item: it fails as a `MicrosoftConformanceActionFailed` with `createOutcome: 'unknown'`
+ * whose message carries the manual-recovery advice. The restore runs uninterruptibly after `use`
+ * succeeds, fails, or is interrupted, and does nothing once `pending` is empty. A failed restore
+ * fails the case with `MicrosoftConformanceRestoreFailed`, which says whether the claim itself
+ * held and, if not, summarizes why; otherwise the outcome of `use` (including an interruption) is returned unchanged. A create that succeeds without an id leaves
  * nothing to remove automatically: it fails with `MicrosoftConformanceRestoreFailed` too, so the
  * item is removed by hand.
  */

@@ -1092,4 +1092,27 @@ describe('Microsoft conformance ambiguous creates', () => {
       })
     })
   )
+
+  it.effect(
+    'reports a 409 folder create as the leftover-folder precondition, deleting nothing',
+    () =>
+      Effect.gen(function* () {
+        const conflict = replaceResponse(
+          microsoftOneDriveCreateFolderFixture,
+          0,
+          withStatus(409, graphServerError)
+        )
+
+        const { failure, entries } = yield* drill(
+          microsoftOneDriveCreateFolderCase,
+          pickExchanges(conflict, [0])
+        )
+
+        expect(failure?.tag).toBe('ConformanceMismatch')
+        expect(failure?.message).toMatch(
+          /^precondition: a folder named "[^"]+" already exists under driveParentItemId \(left by an earlier run\?\); delete it by hand/
+        )
+        expect(exchangeIndices(entries)).toEqual(['POST 0'])
+      })
+  )
 })

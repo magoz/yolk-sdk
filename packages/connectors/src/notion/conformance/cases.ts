@@ -17,8 +17,8 @@
  * archive, counts as trashed, so an uncertain claim about how a trashed page reads back is reported
  * as a claim failure, never as a failed restore. An ambiguous create (the shared
  * `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
- * `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) and says to trash the page by hand if it exists. Neither the runner nor the bridges set
- * a request timeout, so a hanging create delays an interruption until it answers. Notion keeps
+ * `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) and says to trash the page by hand
+ * if it exists. Neither the runner nor the bridges set a request timeout, so a hanging create delays an interruption until it answers. Notion keeps
  * trashed pages in the workspace trash (restorable) until they are deleted from there.
  */
 import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
