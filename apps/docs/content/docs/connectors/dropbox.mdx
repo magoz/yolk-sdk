@@ -1,0 +1,48 @@
+---
+title: Dropbox conformance
+description: Experimental Dropbox conformance cases for tests and hand-run practice-account checks.
+---
+
+Dropbox actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#dropbox). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice Dropbox account.
+
+`@yolk-sdk/connectors/dropbox/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Every case runs the real connector actions or the host-only upload
+helpers (`createDropboxFile`, `updateDropboxFile`) over the connector ports, and checks one wire
+claim the connector relies on. The claims are as currently understood; none is observed live yet.
+
+| Case id                                   | Safety             | Seeds                              | Claim (as currently understood)                                                                                                                              |
+| ----------------------------------------- | ------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `dropbox.files.list-folder-cursor-paging` | `read`             | `pagingFolderPath`                 | `limit: 2` on a larger folder answers `has_more` and a cursor; `list_folder/continue` returns the rest with no repeats and still carries a cursor at the end |
+| `dropbox.files.path-lower-lookup`         | `read`             | `mixedCasePath`                    | A lower-cased path finds the same entry id; `path_lower` is the lower-cased path and the last `path_display` component keeps its casing                      |
+| `dropbox.files.search-continue`           | `read`             | `searchQuery`                      | `max_results: 1` answers the nested `{ ".tag": "metadata", metadata }` match, `has_more`, and a cursor; `search/continue_v2` returns new matches             |
+| `dropbox.errors.not-found-409-envelope`   | `read`             | `workFolderPath`                   | A missing path answers HTTP 409 (not 404) with `error_summary` `path/not_found/...`; the connector reports `dropbox_not_found`                               |
+| `dropbox.files.create-folder-conflict`    | `write-reversible` | `workFolderPath`                   | Creating an existing folder again, or with its name upper-cased, fails with HTTP 409 `path/conflict/folder` (`dropbox_conflict`)                             |
+| `dropbox.files.delete-then-not-found`     | `write-reversible` | `workFolderPath`                   | `delete_v2` answers the folder metadata; `get_metadata` then answers `not_found`, and with `include_deleted` answers `deleted` metadata                      |
+| `dropbox.files.copy-move-metadata`        | `write-reversible` | `workFolderPath`, `copySourcePath` | Single-item `copy_v2` answers `{ metadata }` for a new file; `move_v2` answers `{ metadata }` keeping the id; no async job                                   |
+| `dropbox.files.upload-rev-precondition`   | `write-reversible` | `workFolderPath`                   | `add` never overwrites and an `update` naming a stale rev fails with HTTP 409 (`conflict`); the file keeps its current rev                                   |
+
+`DropboxConformanceConfig` holds the seed paths. Cases never hard-code account data, and a missing
+seed fails the case with a `precondition:` mismatch before any request. Credentials bind through
+`dropboxConformanceIntegration` (`dropbox.oauth`, credential ref `dropbox.conformance`); an OAuth or
+bearer token for the practice account needs `files.metadata.read` and `files.content.write`.
+
+Every write case works inside its own `yolk-conformance-*` folder under `workFolderPath`. Before
+writing it proves that path absent (an existing folder is a precondition failure, and nothing is
+written). It registers the path for cleanup before the create, so whatever the create answers,
+including a transport failure or an interruption, the cleanup deletes the path again (accepting
+"already gone") and checks that `get_metadata` then answers not-found. A failed cleanup fails the case
+with `DropboxConformanceRestoreFailed`; delete the folder by hand if it still exists. Deleted
+folders stay restorable in the account's deleted files for the Dropbox retention period.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`). In this repository,
+`pnpm conformance:dropbox` dry-runs by default; `--live --owner-approved --account <label>` (refused
+whenever `CI` is non-empty) needs `DROPBOX_ACCESS_TOKEN` and the seeds, `--allow-writes reversible`
+adds the write cases, and `--record` stages verified recordings only in the gitignored
+`.conformance-recordings/dropbox/` for manual scrubbing and promotion. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

@@ -46,6 +46,10 @@
       "types": "./src/dropbox/index.ts",
       "default": "./src/dropbox/index.ts"
     },
+    "./dropbox/conformance": {
+      "types": "./src/dropbox/conformance/index.ts",
+      "default": "./src/dropbox/conformance/index.ts"
+    },
     "./email": {
       "types": "./src/email/index.ts",
       "default": "./src/email/index.ts"
@@ -89,6 +93,10 @@
     "./notion": {
       "types": "./src/notion/index.ts",
       "default": "./src/notion/index.ts"
+    },
+    "./notion/conformance": {
+      "types": "./src/notion/conformance/index.ts",
+      "default": "./src/notion/conformance/index.ts"
     },
     "./r2-storage": {
       "types": "./src/r2-storage/index.ts",
@@ -139,6 +147,11 @@
         "types": "./dist/dropbox/index.d.mts",
         "import": "./dist/dropbox/index.mjs",
         "default": "./dist/dropbox/index.mjs"
+      },
+      "./dropbox/conformance": {
+        "types": "./dist/dropbox/conformance/index.d.mts",
+        "import": "./dist/dropbox/conformance/index.mjs",
+        "default": "./dist/dropbox/conformance/index.mjs"
       },
       "./email": {
         "types": "./dist/email/index.d.mts",
@@ -194,6 +207,11 @@
         "types": "./dist/notion/index.d.mts",
         "import": "./dist/notion/index.mjs",
         "default": "./dist/notion/index.mjs"
+      },
+      "./notion/conformance": {
+        "types": "./dist/notion/conformance/index.d.mts",
+        "import": "./dist/notion/conformance/index.mjs",
+        "default": "./dist/notion/conformance/index.mjs"
       },
       "./r2-storage": {
         "types": "./dist/r2-storage/index.d.mts",
