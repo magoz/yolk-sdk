@@ -56,6 +56,7 @@ metadata.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, `./testing` exports the `TestWorkflowWorld` behavioral emulator, and hosts own concrete Workflow directives.
 - `@yolk-sdk/harness` owns run lifecycle (coordinator, store, inbox, driver, outcome). Public subpaths: `./coordinator`, `./store`, `./inbox`, `./driver`, `./driver/memory`, `./driver/durable-object`, and `./outcome`. It does not replace `@yolk-sdk/agent/loop`.
 - `@yolk-sdk/conformance` (experimental) owns wire fixtures, offline fail-closed replay, wire faults, recording over a host-provided `HttpClient`, conformance case definitions, and the safety-gated case runner. Public subpaths: `./fixture`, `./replay`, `./record`, `./case`, and `./runner`; there is no root export. It performs no network I/O itself.
+- `@yolk-sdk/emulators` (experimental) owns emulators for outside services and the `HttpClient` routing to them. Public subpaths: `./router` (Effect `EmulatedHttpClient` / `InProcessHttpClient` layers), `./gateway` (Vercel AI Gateway fetch-handler emulator and its route evidence manifest), and `./node` (loopback server; the only Node subpath); there is no root export.
 - Provider wire fixtures and conformance cases live under `@yolk-sdk/agent/providers/<vendor>/conformance` (currently `vercel`) and `@yolk-sdk/connectors/<provider>/conformance` (currently `fortnox`); see the conformance import rule under [Dependency Direction](#dependency-direction).
 - OpenAI/Codex, Vercel AI Gateway, OpenCode Go, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, Grok, and OpenCode Go also expose best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
@@ -69,6 +70,7 @@ metadata.
 - Vercel Workflow internals live under `packages/vercel-workflows/src/*`, not app code.
 - Harness internals live under `packages/harness/src/*`, not app code.
 - Conformance internals live under `packages/conformance/src/*`, not app code.
+- Emulator internals live under `packages/emulators/src/*`, not app code.
 - Area tests mirror source layout:
   - `packages/agent/test/{protocol,loop,runtime,client,compaction,tools,react,oauth,providers,skillset,voice,property}`
   - `packages/mcp/test/{client,server}`
@@ -76,6 +78,7 @@ metadata.
   - `packages/vercel-workflows/test`
   - `packages/harness/test`
   - `packages/conformance/test`
+  - `packages/emulators/test`
 
 ## Dependency Direction
 
@@ -88,6 +91,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
 @yolk-sdk/harness core -> Effect only; ./outcome -> @yolk-sdk/agent/{protocol,loop,compaction}; no app/auth/UI/product policy
 @yolk-sdk/conformance -> Effect only (no @yolk-sdk/*, Node builtins, React, Next); hosts supply the network HttpClient
+@yolk-sdk/emulators ./router -> Effect only; ./gateway -> Web fetch APIs + Effect Schema; ./node -> node:http; never @yolk-sdk/*, React, or Next (wire shapes come from recorded fixtures, linked by case id)
 @yolk-sdk/agent/providers/*/conformance -> @yolk-sdk/conformance/* (see conformance import rule below)
 @yolk-sdk/connectors/**/conformance -> @yolk-sdk/conformance/* (see conformance import rule below)
 @yolk-sdk/agent/client -> @yolk-sdk/agent/protocol + Effect HTTP/Stream + runtime-only browser WebSocket/Blob/File/FileReader APIs
@@ -109,7 +113,7 @@ Conformance import rule (canonical statement; other docs reference it): in `pack
 - Use explicit `exports`; avoid broad root barrels for feature APIs.
 - No top-level env reads, service construction, SDK clients, or network calls in packages.
 - Import types as types; Oxlint enforces `typescript/consistent-type-imports`.
-- Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/mcp/client/node`, `@yolk-sdk/mcp/server/node`).
+- Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/mcp/client/node`, `@yolk-sdk/mcp/server/node`, `@yolk-sdk/emulators/node`).
 - Prefer runtime-portable Effect APIs in package code.
 
 ## Workspace Setup
@@ -123,7 +127,7 @@ Conformance import rule (canonical statement; other docs reference it): in `pack
 
 ## Boundary Enforcement
 
-- `pnpm packages:check` runs package typechecks, `scripts/check-package-boundaries.ts`, and `scripts/check-package-exports.ts`.
+- `pnpm packages:check` runs package typechecks, `scripts/check-package-boundaries.ts`, `scripts/check-package-exports.ts`, and `scripts/check-emulator-evidence.ts`.
 - Boundary script prevents example app, Cloudflare, and `examples/next/e2e` code from importing retired internal package names.
 - Boundary script prevents retired package directories from reappearing.
 - Boundary script prevents root `@yolk-sdk/agent` and `@yolk-sdk/mcp` imports in example app, Cloudflare, and `examples/next/e2e` code; use explicit subpaths.
@@ -134,7 +138,9 @@ Conformance import rule (canonical statement; other docs reference it): in `pack
 - Boundary script prevents conformance from importing other `@yolk-sdk/*` packages, Node builtins, React, or Next.
 - Boundary script enforces the conformance import rule from [Dependency Direction](#dependency-direction).
 - Boundary script allows `@yolk-sdk/agent` in `packages/connectors/src` only from `src/agent.ts`.
-- Export smoke script verifies explicit exports, ESM, `sideEffects: false`, tiny agent/MCP roots, and that `@yolk-sdk/conformance` has no root export.
+- Boundary script prevents emulators from importing other `@yolk-sdk/*` packages, React, or Next, and allows Node builtins only in `packages/emulators/src/node.ts`.
+- Evidence script (`scripts/check-emulator-evidence.ts`, `pnpm packages:evidence`) fails emulator route manifests that cite unknown conformance case ids, list a route twice, mark a connector write route without verified evidence or with a missing, unreadable, or future `observedAt`, or mark a route verified when none of its cited cases has a verified fixture, or mark a connector write route verified while citing no cases; it warns on unverified and stale (over 30 days) evidence and on other routes citing no cases.
+- Export smoke script verifies explicit exports, ESM, `sideEffects: false`, tiny agent/MCP roots, and that `@yolk-sdk/conformance` and `@yolk-sdk/emulators` have no root export.
 - Vercel Workflow durable event helpers stay generic over JSON-serializable events; do not import `@yolk-sdk/agent/protocol` there.
 
 ## When Adding A Package API

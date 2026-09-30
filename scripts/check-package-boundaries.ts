@@ -78,6 +78,22 @@ const conformanceForbiddenImports = [
   'node:'
 ]
 
+// Emulators never import SDK code at runtime: their wire shapes come from recorded fixtures.
+// Listed explicitly for the same self-import reason as conformance.
+const emulatorsForbiddenImports = [
+  ...retiredImports,
+  '@yolk-sdk/agent',
+  '@yolk-sdk/conformance',
+  '@yolk-sdk/connectors',
+  '@yolk-sdk/harness',
+  '@yolk-sdk/knowledge',
+  '@yolk-sdk/mcp',
+  '@yolk-sdk/sandbox',
+  '@yolk-sdk/vercel-workflows',
+  'next',
+  'react'
+]
+
 const rules: ReadonlyArray<BoundaryRule> = [
   {
     packageDir: 'examples/next/app',
@@ -198,6 +214,15 @@ const rules: ReadonlyArray<BoundaryRule> = [
     packageDir: 'packages/connectors/src',
     forbiddenImports: ['@yolk-sdk/agent'],
     excludedDirs: ['packages/connectors/src/agent.ts']
+  },
+  {
+    packageDir: 'packages/emulators/src',
+    forbiddenImports: emulatorsForbiddenImports
+  },
+  {
+    packageDir: 'packages/emulators/src',
+    forbiddenImports: ['node:'],
+    excludedDirs: ['packages/emulators/src/node.ts']
   }
 ]
 

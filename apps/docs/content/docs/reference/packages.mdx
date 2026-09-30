@@ -13,6 +13,7 @@ description: Package roles and explicit public subpaths.
 | `@yolk-sdk/vercel-workflows` | durable Workflow orchestration contracts                                                 |
 | `@yolk-sdk/harness`          | run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)     |
 | `@yolk-sdk/conformance`      | experimental: record, replay, and fault-inject HTTP wire fixtures; run conformance cases |
+| `@yolk-sdk/emulators`        | experimental: service emulators and `HttpClient` routing to them for tests               |
 
 Package roots stay tiny. Import feature APIs from explicit subpaths.
 
@@ -65,6 +66,7 @@ Package roots stay tiny. Import feature APIs from explicit subpaths.
 | `@yolk-sdk/vercel-workflows` | root, `workflow`, `effect`, `testing`                                                                                                                                                                                            |
 | `@yolk-sdk/harness`          | `coordinator`, `store`, `inbox`, `driver`, `driver/memory`, `driver/durable-object`, `outcome`                                                                                                                                   |
 | `@yolk-sdk/conformance`      | `fixture`, `replay`, `record`, `case`, `runner` (no root export)                                                                                                                                                                 |
+| `@yolk-sdk/emulators`        | `router`, `gateway`, `node` (no root export)                                                                                                                                                                                     |
 
 ## Import rule
 

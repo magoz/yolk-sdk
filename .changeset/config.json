@@ -11,7 +11,8 @@
       "@yolk-sdk/sandbox",
       "@yolk-sdk/vercel-workflows",
       "@yolk-sdk/harness",
-      "@yolk-sdk/conformance"
+      "@yolk-sdk/conformance",
+      "@yolk-sdk/emulators"
     ]
   ],
   "linked": [],

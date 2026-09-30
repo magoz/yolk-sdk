@@ -15,6 +15,7 @@ Every public package should have `packages/<name>/README.md`:
 - `@yolk-sdk/vercel-workflows`
 - `@yolk-sdk/harness`
 - `@yolk-sdk/conformance`
+- `@yolk-sdk/emulators`
 
 Do not require READMEs for private workspaces unless useful internally.
 

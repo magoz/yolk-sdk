@@ -322,6 +322,80 @@ describe('conformance and connector import rules', () => {
   })
 })
 
+describe('emulators import rules', () => {
+  const scaffoldEmulators = (root: string): void => {
+    scaffoldPackages(root)
+    write(
+      root,
+      'packages/conformance/package.json',
+      JSON.stringify({
+        name: '@yolk-sdk/conformance',
+        exports: { './fixture': './src/fixture.ts' }
+      })
+    )
+    write(root, 'packages/conformance/src/fixture.ts', `export const fixture = 1\n`)
+    write(
+      root,
+      'packages/emulators/package.json',
+      JSON.stringify({
+        name: '@yolk-sdk/emulators',
+        exports: {
+          './router': './src/router.ts',
+          './gateway': './src/gateway.ts',
+          './node': './src/node.ts'
+        }
+      })
+    )
+    write(root, 'packages/emulators/src/router.ts', `export const router = 1\n`)
+  }
+
+  it('forbids @yolk-sdk packages, React, and Next in emulator sources but allows relative imports', () => {
+    const root = fixtureDirectory()
+
+    scaffoldEmulators(root)
+    write(
+      root,
+      'packages/emulators/src/gateway.ts',
+      `import { router } from './router.ts'\nimport { y } from '@yolk-sdk/agent/loop'\nimport { fixture } from '@yolk-sdk/conformance/fixture'\nimport { rel } from '../../mcp/src/rel'\nimport React from 'react'\nimport Link from 'next/link'\n\nexport const probe = [router, y, fixture, rel, React, Link]\n`
+    )
+    write(root, 'packages/mcp/src/rel.ts', `export const rel = 1\n`)
+
+    const found = violationsFor(root, 'packages/emulators/src/gateway.ts')
+
+    expect(found.map(violation => violation.forbidden).sort()).toEqual([
+      '@yolk-sdk/agent',
+      '@yolk-sdk/conformance',
+      '@yolk-sdk/mcp',
+      'next',
+      'react'
+    ])
+  })
+
+  it('allows node: builtins only in src/node.ts', () => {
+    const root = fixtureDirectory()
+
+    scaffoldEmulators(root)
+
+    const importNode = `import { createServer } from 'node:http'\nimport fs from 'fs'\n\nexport const probe = [createServer, fs]\n`
+
+    write(root, 'packages/emulators/src/node.ts', importNode)
+    write(root, 'packages/emulators/src/gateway.ts', importNode)
+    write(root, 'packages/emulators/src/nested/helper.ts', importNode)
+
+    expect(violationsFor(root, 'packages/emulators/src/node.ts')).toEqual([])
+
+    for (const rel of [
+      'packages/emulators/src/gateway.ts',
+      'packages/emulators/src/nested/helper.ts'
+    ]) {
+      expect(
+        violationsFor(root, rel).map(violation => violation.forbidden),
+        rel
+      ).toEqual(['node:', 'node:'])
+    }
+  })
+})
+
 describe('global packages -> apps ban', () => {
   it('fires outside per-area rules and inside local exclusions', () => {
     const root = fixtureDirectory()

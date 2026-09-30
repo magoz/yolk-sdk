@@ -112,6 +112,10 @@ const packages: ReadonlyArray<PackageManifest> = [
   {
     name: '@yolk-sdk/conformance',
     exports: ['./fixture', './replay', './record', './case', './runner']
+  },
+  {
+    name: '@yolk-sdk/emulators',
+    exports: ['./router', './gateway', './node']
   }
 ]
 
@@ -242,7 +246,14 @@ const main = async () => {
           'const fortnoxConformance = await import("@yolk-sdk/connectors/fortnox/conformance")',
           'if (fortnoxConformance.fortnoxConformanceCases.length !== 7 || fortnoxConformance.fortnoxConformanceFixtures.length !== 7) throw new Error("Missing Fortnox conformance cases/fixtures")',
           'if (fortnoxConformance.fortnoxConformanceCases.filter(testCase => testCase.safety === "read").length !== 3 || fortnoxConformance.fortnoxConformanceCases.find(testCase => testCase.id === "fortnox.invoice.send-email")?.safety !== "write-irreversible") throw new Error("Fortnox conformance safety mismatch")',
-          'if ((await import("@yolk-sdk/connectors/fortnox")).FortnoxConnector.actions.some(action => /email|send/.test(action.id))) throw new Error("Fortnox send leaked into connector actions")'
+          'if ((await import("@yolk-sdk/connectors/fortnox")).FortnoxConnector.actions.some(action => /email|send/.test(action.id))) throw new Error("Fortnox send leaked into connector actions")',
+          'await import("@yolk-sdk/emulators").then(() => { throw new Error("@yolk-sdk/emulators must not expose a root export") }, error => { if (error?.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw error })',
+          'const emulatorRouter = await import("@yolk-sdk/emulators/router")',
+          'if (typeof emulatorRouter.EmulatedHttpClient.layer !== "function" || typeof emulatorRouter.InProcessHttpClient.layer !== "function" || typeof emulatorRouter.EmulatorRoute.url !== "function") throw new Error("Missing emulator router exports")',
+          'const gatewayEmulator = (await import("@yolk-sdk/emulators/gateway")).makeGatewayEmulator()',
+          'const emulated = await gatewayEmulator.fetch(new Request("https://ai-gateway.vercel.sh/v1/chat/completions", { method: "POST", headers: { authorization: "Bearer synthetic", "content-type": "application/json" }, body: JSON.stringify({ model: "openai/gpt-4.1-nano", messages: [], stream: false }) }))',
+          'if (emulated.status !== 200 || emulated.headers.get("x-emulator-evidence") !== "unverified" || (await emulated.json()).object !== "chat.completion") throw new Error("Gateway emulator smoke failed")',
+          'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")'
         ].join('\n')
     )
 
