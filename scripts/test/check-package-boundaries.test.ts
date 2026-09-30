@@ -393,27 +393,43 @@ describe('emulators import rules', () => {
     }
   })
 
-  it('allows node: builtins only in src/node.ts', () => {
+  it('allows node: builtins and @emulators/core only in src/node.ts and the Fortnox emulator', () => {
     const root = fixtureDirectory()
 
     scaffoldEmulators(root)
 
-    const importNode = `import { createServer } from 'node:http'\nimport fs from 'fs'\n\nexport const probe = [createServer, fs]\n`
+    const importNode = `import { createServer } from 'node:http'\nimport fs from 'fs'\nimport { defineEmulator } from '@emulators/core'\nimport type { Hono } from '@emulators/core'\n\nexport const probe = [createServer, fs, defineEmulator, import('@emulators/core')]\nexport type Probe = Hono\n`
 
-    write(root, 'packages/emulators/src/node.ts', importNode)
-    write(root, 'packages/emulators/src/gateway.ts', importNode)
-    write(root, 'packages/emulators/src/nested/helper.ts', importNode)
+    const allowed = [
+      'packages/emulators/src/node.ts',
+      'packages/emulators/src/fortnox.ts',
+      'packages/emulators/src/fortnox/api.ts',
+      'packages/emulators/src/fortnox/nested/state.ts'
+    ]
 
-    expect(violationsFor(root, 'packages/emulators/src/node.ts')).toEqual([])
-
-    for (const rel of [
+    const forbidden = [
       'packages/emulators/src/gateway.ts',
-      'packages/emulators/src/nested/helper.ts'
-    ]) {
+      'packages/emulators/src/router.ts',
+      'packages/emulators/src/nested/helper.ts',
+      'packages/emulators/src/fortnox-helpers.ts',
+      'packages/emulators/src/fortnoxish/api.ts'
+    ]
+
+    for (const rel of [...allowed, ...forbidden]) {
+      write(root, rel, importNode)
+    }
+
+    for (const rel of allowed) {
+      expect(violationsFor(root, rel), rel).toEqual([])
+    }
+
+    for (const rel of forbidden) {
       expect(
-        violationsFor(root, rel).map(violation => violation.forbidden),
+        violationsFor(root, rel)
+          .map(violation => violation.forbidden)
+          .sort(),
         rel
-      ).toEqual(['node:', 'node:'])
+      ).toEqual(['@emulators/core', '@emulators/core', '@emulators/core', 'node:', 'node:'])
     }
   })
 })

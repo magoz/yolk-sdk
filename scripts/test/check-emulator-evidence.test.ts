@@ -6,6 +6,7 @@ import { vercelAiGatewayConformanceFixtures } from '../../packages/agent/src/pro
 import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
 import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
+import { fortnoxEmulatorRoutes } from '../../packages/emulators/src/fortnox.ts'
 import type { EmulatorRouteEvidence } from '../../packages/emulators/src/route-evidence.ts'
 import {
   checkEmulatorEvidence,
@@ -464,6 +465,15 @@ describe('repo emulator manifests', () => {
     .filter(emailRoute => emailRoute.write)
     .map(emailRoute => `${emailRoute.method} ${emailRoute.path}`)
 
+  const fortnoxWriteRoutes = fortnoxEmulatorRoutes
+    .filter(fortnoxRoute => fortnoxRoute.write)
+    .map(fortnoxRoute => `${fortnoxRoute.method} ${fortnoxRoute.path}`)
+
+  const failedRoutes = (report: ReturnType<typeof repoCheck>, manifest: string) =>
+    report.findings
+      .filter(finding => finding.severity === 'fail' && finding.manifest === manifest)
+      .map(finding => finding.route)
+
   const repoCheck = (
     at: Date,
     pending: ReadonlyArray<PendingEvidenceEntry> = repoPending.entries
@@ -503,7 +513,8 @@ describe('repo emulator manifests', () => {
       'codex-usage',
       'xai-usage',
       'opencode',
-      'email'
+      'email',
+      'fortnox'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -549,7 +560,13 @@ describe('repo emulator manifests', () => {
       report.findings
         .filter(finding => finding.kind === 'pending-write')
         .map(finding => finding.route)
-    ).toEqual(emailWriteRoutes)
+    ).toEqual([...emailWriteRoutes, ...fortnoxWriteRoutes])
+    expect(fortnoxWriteRoutes).toEqual([
+      'PUT /3/customers/{CustomerNumber}',
+      'POST /3/invoices',
+      'PUT /3/invoices/{DocumentNumber}',
+      'GET /3/invoices/{DocumentNumber}/email'
+    ])
   })
 
   it('ships one pending entry per email write route, at most 60 days out, naming the live run', () => {
@@ -570,9 +587,39 @@ describe('repo emulator manifests', () => {
   it('fails the unverified email write routes without the pending file or after it expires', () => {
     for (const report of [repoCheck(now, []), repoCheck(new Date('2026-11-30T00:00:00.000Z'))]) {
       expect(evidenceReportFailed(report)).toBe(true)
-      expect(
-        report.findings.filter(finding => finding.severity === 'fail').map(finding => finding.route)
-      ).toEqual(emailWriteRoutes)
+      expect(failedRoutes(report, 'email')).toEqual(emailWriteRoutes)
+    }
+  })
+
+  it('ships one pending entry per Fortnox write route, at most 60 days out, naming the live run', () => {
+    const fortnoxEntries = repoPending.entries.filter(entry => entry.manifest === 'fortnox')
+
+    expect(fortnoxEntries.map(entry => `${entry.method} ${entry.path}`)).toEqual(fortnoxWriteRoutes)
+
+    for (const entry of fortnoxEntries) {
+      // At most 60 days from 2026-09-30.
+      expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+      expect(entry.reason).toContain('owner-approved')
+      expect(entry.reason).toContain('live run of fortnox.')
+    }
+  })
+
+  it('fails the unverified Fortnox write routes without the pending file or after it expires', () => {
+    const fortnoxExpiry = repoPending.entries
+      .filter(entry => entry.manifest === 'fortnox')
+      .map(entry => entry.expires)
+      .toSorted()
+      .at(-1)
+
+    expect(fortnoxExpiry).toBeDefined()
+
+    const dayAfterFortnoxExpiry = new Date(
+      Date.parse(`${fortnoxExpiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
+    )
+
+    for (const report of [repoCheck(now, []), repoCheck(dayAfterFortnoxExpiry)]) {
+      expect(evidenceReportFailed(report)).toBe(true)
+      expect(failedRoutes(report, 'fortnox')).toEqual(fortnoxWriteRoutes)
     }
   })
 
@@ -645,6 +692,7 @@ describe('repo emulator manifests', () => {
       'WARN  email  PORT EmailClient.createDraft  PENDING until 2026-11-29'
     )
     expect(result.stdout).toContain('WARN  email  PORT EmailClient.getMessage  unverified evidence')
+    expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-10-31')
 
     // The PENDING count comes from the pending file, not a hard-coded number.
     const pendingLine = result.stdout.split('\n').find(line => line.startsWith('PENDING: '))

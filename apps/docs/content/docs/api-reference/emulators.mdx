@@ -11,7 +11,8 @@ routes an Effect `HttpClient` to them instead of the real service. The email emu
 port-level fake instead: a plain-JSON `EmailClient` backend. Emulators never import other
 `@yolk-sdk/*` code: their wire shapes follow the conformance fixtures (verified recordings for the
 Gateway, synthetic placeholders elsewhere), and each emulated route names the conformance cases it
-follows. The package depends only on `effect`.
+follows. The package depends on `effect`; the Node-only `fortnox` subpath also depends on the
+upstream `@emulators/core` runtime (Apache-2.0, pinned to exactly `0.12.0`).
 
 There is no root export. Import an explicit subpath.
 
@@ -325,6 +326,58 @@ Anything else fails closed with a ledgered `notEmulated` answer, the port analog
 (`{ kind: 'failure', method, match?, count?, failure }`, `match` a deep subset of the request)
 change no state. `reset()` restores the seed and clears the ledger, faults, and fixture use.
 
+## Fortnox emulator
+
+`@yolk-sdk/emulators/fortnox`
+
+> **Experimental, Node only.** A stateful stand-in for the Fortnox `/3` API, built on the
+> `@emulators/core` custom runtime (loaded lazily when you create an emulator).
+
+| Export                                          | Purpose                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `makeFortnoxEmulator(options?)`                 | `Promise` of `{ fetch, baseUrl, ledger, faults, reset, seed, snapshot, coverage, close }`        |
+| `fortnoxEmulatorRoutes`                         | Route evidence manifest (every route is `unverified`; four are connector write routes)           |
+| `fortnoxEmulatorQuirks`                         | The observed quirks it implements, each with its conformance case id and drill knob              |
+| `FortnoxEmulatorSeed`, `FortnoxEmulatorProfile` | Typed seed schema (`profile`, `company`, `customers`, `invoices`) and account-variance profiles  |
+| `FortnoxFault`                                  | `{ kind: 'status', status, headers?, body?, match?: { method?, path? }, count? }`                |
+| `fortnoxEmulatorErrorCodes`                     | `ErrorInformation` codes (customer-not-found codes from the fixtures; `2999xxx` codes synthetic) |
+| `FortnoxEmulatorInputInvalid`                   | Invalid seed, fault, or option passed to the JS API                                              |
+
+It serves `GET /3/companyinformation`, `GET /3/customers`, `GET`/`PUT /3/customers/{CustomerNumber}`,
+`GET`/`POST /3/invoices`, `GET`/`PUT /3/invoices/{DocumentNumber}`,
+`GET /3/invoices/{DocumentNumber}/preview` (a small synthetic PDF), and
+`GET /3/invoices/{DocumentNumber}/email` (marks the invoice sent and records an outbox entry in
+state; nothing is ever delivered). Requests need `Authorization: Bearer <non-empty>`; the token is
+never stored or ledgered. Anything else fails closed with a 404 `ErrorInformation`, and unsupported
+query parameters or fields get a 400 instead of being ignored.
+
+The default seed holds the synthetic fixture entities with the same numbers as
+`fortnoxConformanceFixtureSeeds`, so the Fortnox conformance cases run unmodified against it.
+Profiles: `default`, `empty-company`, `no-booked-invoices`. `reset()` restores the seed; `seed()`
+replaces it.
+
+It implements the quirks the Fortnox cases claim: an omitted row `Discount` stays on positional row
+updates (`Discount: 0` clears; RowIds regenerate; totals are recomputed); an empty customer string
+keeps the stored value; `unpaid`/`unpaidoverdue`/`fullypaid` skip unbooked invoices
+(`unpaidoverdue` uses the injectable `now` clock); rejected writes answer 400 `ErrorInformation`;
+customer `Country` is read-only.
+
+The `quirks` option (`stickyRowDiscount: false`, `emptyStringClears: true`,
+`paymentFiltersIncludeUnbooked: true`) is a test-only drill knob: it flips one quirk to prove that
+the matching conformance case fails. Faults, the ledger, and the control plane (`/_emulate/ledger`,
+`faults`, `reset`, `state`, `seed`, `coverage`) work as in the Gateway emulator.
+
+```ts
+import { makeFortnoxEmulator } from '@yolk-sdk/emulators/fortnox'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const fortnox = await makeFortnoxEmulator({ seed: { profile: 'default' } })
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://api.fortnox.se', fortnox.fetch)
+])
+```
+
 ## Node server
 
 `@yolk-sdk/emulators/node`
@@ -345,9 +398,11 @@ Emulated routes carry evidence: `verified` routes follow a live observation date
 response from an unverified route with `x-emulator-evidence: unverified`; the email emulator's
 plain-JSON replies carry no header, so it records the evidence on each ledger entry instead. The Gateway route is verified (`observedAt: '2026-09-30'`): the
 emulator follows the verified live Gateway recordings, and the Yolk repository checks its response
-shapes against each recording. The OpenAI, Anthropic, Codex, Grok, OpenCode Go, subscription-usage, and email routes are unverified,
+shapes against each recording. The OpenAI, Anthropic, Codex, Grok, OpenCode Go, subscription-usage, email, and Fortnox routes are unverified,
 like the synthetic fixtures they follow. The email write routes are connector writes: until an
 owner-approved live run against a practice mailbox, through a host `EmailClient` implementation,
 verifies them, the repository lists them in a time-bounded allowlist
 (`scripts/emulator-evidence-pending.json`), and the evidence check reports them as PENDING
-warnings until each entry's expiry date and fails again after it.
+warnings until each entry's expiry date and fails again after it. The four Fortnox
+write routes are held in the same pending list until a live run against a Fortnox test company
+verifies them.

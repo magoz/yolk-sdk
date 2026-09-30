@@ -137,7 +137,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './xai',
       './opencode',
       './email',
-      './node'
+      './node',
+      './fortnox'
     ]
   }
 ]
@@ -183,6 +184,8 @@ const main = async () => {
       private: true,
       dependencies: {
         '@effect/platform-node': '4.0.0-rc.115',
+        // Dependency of @yolk-sdk/emulators (./fortnox); tarballs are extracted, not installed.
+        '@emulators/core': '0.12.0',
         '@modelcontextprotocol/client': '2.0.0',
         '@modelcontextprotocol/core': '2.0.0',
         '@modelcontextprotocol/server': '2.0.0',
@@ -343,7 +346,14 @@ const main = async () => {
           'const emailReply = emailEmulator.call(emailFixture.method, emailFixture.request)',
           'const emailRefused = emailEmulator.call("listMessages", { limit: 1 })',
           'if (JSON.stringify(emailReply) !== JSON.stringify({ response: emailFixture.response }) || !("notEmulated" in emailRefused) || emailEmulator.ledger.entries().length !== 2 || emailEmulator.coverage().notEmulatedCalls !== 1) throw new Error("Email emulator smoke failed")',
-          'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")'
+          'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")',
+          'const fortnoxEmulatorModule = await import("@yolk-sdk/emulators/fortnox")',
+          'if (fortnoxEmulatorModule.fortnoxEmulatorRoutes.length !== 10 || !fortnoxEmulatorModule.fortnoxEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Fortnox emulator manifest mismatch")',
+          'const fortnoxEmulator = await fortnoxEmulatorModule.makeFortnoxEmulator()',
+          'const fortnoxInvoices = await fortnoxEmulator.fetch(new Request("https://api.fortnox.se/3/invoices?limit=10", { headers: { authorization: "Bearer synthetic" } }))',
+          'if (fortnoxInvoices.status !== 200 || fortnoxInvoices.headers.get("x-emulator-evidence") !== "unverified" || (await fortnoxInvoices.json()).MetaInformation["@TotalResources"] !== 5) throw new Error("Fortnox emulator smoke failed")',
+          'if ((await fortnoxEmulator.fetch(new Request("https://api.fortnox.se/3/articles", { headers: { authorization: "Bearer synthetic" } }))).status !== 404) throw new Error("Fortnox emulator must fail closed")',
+          'await fortnoxEmulator.close()'
         ].join('\n')
     )
 
