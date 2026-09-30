@@ -1,0 +1,88 @@
+---
+title: Telegram conformance
+description: Experimental Telegram conformance cases for tests and hand-run practice-bot checks.
+---
+
+Telegram actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#telegram). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice bot and chat.
+
+`@yolk-sdk/connectors/telegram/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Every case runs the real connector actions, or the host-only
+`downloadTelegramFile` helper, over the connector ports, and checks one wire claim the connector
+relies on. The connector reads only the HTTP status of Bot API answers, never the `{ ok, result }`
+or `{ ok: false, error_code, description }` body, so the cases observe the body at the port the host
+provides; they send no request of their own. The claims are as currently understood; none is
+observed live yet.
+
+| Case id                          | Safety               | Seeds             | Claim (as currently understood)                                                                                                            |
+| -------------------------------- | -------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `telegram.validate.get-chat`     | `read`               | `chatId`          | `telegram.validate` is one POST `getChat` (not `getMe`), answered 2xx with `{ ok: true, result }` for a chat the bot is in                 |
+| `telegram.errors.error-envelope` | `read`               | `chatId`          | An absent chat and a token that names no bot both answer a 4xx status with `{ ok: false, error_code, description }` (exact 4xx unverified) |
+| `telegram.files.get-file-path`   | `read`               | `fileId`          | `getFile` echoes the `file_id` (unverified), a relative `file_path`, and `file_size`; the file URL answers exactly `file_size` bytes       |
+| `telegram.messages.send-message` | `write-irreversible` | `chatId`, `runId` | `sendMessage` answers 2xx with `{ ok: true, result }`, still accepting `disable_web_page_preview` (unverified); the message stays          |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- `getChat` for a chat the bot is not a member of answers 400 (`chat not found`).
+- `getChat` with a token that names no bot answers 401 or 404.
+- `getFile` echoes the `file_id` it was given rather than another valid id for the same file;
+  `downloadTelegramFile` fails with `invalid_metadata` otherwise.
+- `sendMessage` still accepts the deprecated `disable_web_page_preview` field (Bot API 7.0 replaced
+  it with `link_preview_options`), which the connector sends on every message.
+
+Not covered: `sendMessage` rate limiting. The connector maps HTTP 429 to `telegram_rate_limited`
+without reading `parameters.retry_after`, and a practice run cannot provoke a 429 without flooding
+the chat, so no case claims it; the send case treats a 429 as a definitive rejection.
+
+`TelegramConformanceConfig` holds the seeds: `chatId` (an integer chat id or `@username` of a
+practice chat the bot is a member of), `fileId` (the `file_id` of a small file, at most 1 MB, the
+bot received), and `runId`. Cases never hard-code account data, and a missing seed fails the case
+with a `precondition:` mismatch before any request. Credentials bind through
+`telegramConformanceIntegration(chatId)` (`telegram.bot_token`, credential ref
+`telegram.conformance`, integration config `chatId`). The bot token is part of every Bot API URL:
+hosts must never log those URLs, and case failures never carry one.
+
+### The send is irreversible
+
+**`telegram.messages.send-message` posts a real message to the seeded chat, and the connector cannot
+delete it** (it has no delete action). The case is therefore `write-irreversible`: it never runs
+under `allowWrites: 'reversible'`, and a runner starts it only when a person names its exact id
+(`allowIrreversible: ['telegram.messages.send-message']`; the live runner's
+`--allow-irreversible telegram.messages.send-message`). Nothing is cleaned up afterwards.
+
+- The message text is `yolk-conformance <runId>: synthetic conformance message, safe to ignore`.
+  The `runId` seed is a per-invocation `run-<hex>` value (the fixtures replay with `run-synthetic`;
+  the live runner generates a fresh one every time and never takes it as a flag), so each run's
+  message is distinct.
+- The send, its decoding, and its classification run without interruption; an interruption waits
+  for the answer. Neither the runner nor the bridges set a request timeout.
+- A definitive rejection (HTTP 4xx, 429 included) sent nothing: the case fails without advice.
+- An ambiguous outcome (a transport or decoding failure, no status, or HTTP 5xx) may have delivered
+  the message anyway: the case fails with `TelegramConformanceActionFailed`
+  (`sendOutcome: 'unknown'`) naming the exact text to look for in the chat. When that happens while
+  the case is being interrupted, the message is also handed to `ConformanceCleanupReporter`, which
+  the live runner prints as a WARN line.
+
+There is no leftover lookup: the Bot API cannot list the messages a bot sent, and there is nothing
+to clean up.
+
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber; a send already in
+flight completes first, and no further case starts. Further signals within a second count as the
+same keypress; a later one exits at once. Run live runs as `pnpm conformance:telegram …` or
+`./node_modules/.bin/tsx scripts/run-telegram-conformance.ts …`, not `pnpm exec tsx …`, which returns
+to the prompt at once on Ctrl-C.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`), and their URLs carry the synthetic
+`telegramConformanceReplayBotToken` (`123456789:yolk-synthetic-replay-token`). In this repository,
+`pnpm conformance:telegram` dry-runs by default; `--live --owner-approved --account <label>`
+(refused whenever `CI` is non-empty) needs `TELEGRAM_BOT_TOKEN` and the seeds, and
+`--allow-irreversible telegram.messages.send-message` adds the send (`--allow-writes` never does).
+`--record` replaces the live bot token with the replay token in every recorded URL, refuses to stage
+any recording that still contains the live token, and stages verified recordings only in the
+gitignored `.conformance-recordings/telegram/` for manual scrubbing and promotion. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

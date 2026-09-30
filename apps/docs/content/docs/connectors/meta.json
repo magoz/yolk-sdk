@@ -1,4 +1,14 @@
 {
   "title": "Connectors",
-  "pages": ["index", "files", "fortnox", "microsoft", "email", "dropbox", "notion"]
+  "pages": [
+    "index",
+    "files",
+    "fortnox",
+    "microsoft",
+    "email",
+    "dropbox",
+    "notion",
+    "todoist",
+    "telegram"
+  ]
 }

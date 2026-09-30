@@ -1,6 +1,7 @@
 /**
- * Shared pieces of the Dropbox and Notion connector conformance runners
- * (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`; not a CLI). Each runner supplies a
+ * Shared pieces of the Dropbox, Notion, Todoist, and Telegram connector conformance runners
+ * (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`, `run-todoist-conformance.ts`,
+ * `run-telegram-conformance.ts`; not a CLI). Each runner supplies a
  * `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential, and ports)
  * and gets the same behaviour as the Microsoft runner, plus the owner-approval and CI gates:
  *
@@ -11,8 +12,14 @@
  *   non-empty value (`0` and `false` included) and without `--owner-approved` (the repository
  *   owner's explicit approval). The token comes from the environment only, never a flag. The label
  *   is synthetic and non-identifying (it is printed in reports and recorded in fixtures). Read cases
- *   always run; `--allow-writes reversible` adds the write-reversible cases. There is no flag for
- *   write-irreversible cases: neither runner has one.
+ *   always run; `--allow-writes reversible` adds the write-reversible cases. A write-irreversible
+ *   case runs only when named by its exact id with `--allow-irreversible <case-id>` (repeatable),
+ *   independent of `--allow-writes`; the flag exists only for runners that have such a case (today
+ *   only Telegram), and is an unknown argument everywhere else.
+ * - A runner whose provider puts the credential in request URLs (Telegram's `/bot<token>/`)
+ *   supplies `scrubRecording` and `replayAccessToken`: recorded exchanges have the live token
+ *   replaced before the fixture is built, and replay verification resolves the replay token.
+ *   Staging refuses any recording that still contains the live access token, for every runner.
  * - `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After
  *   the run it builds `verified` fixtures for the cases that passed, re-runs each case on replay
  *   against its new fixture, and renders every fixture module plus the seeds module. Only if every
@@ -57,6 +64,7 @@ import type { ConformanceCase, ConformanceSafety } from '../packages/conformance
 import {
   isWireBase64BodyResponse,
   isWireStreamResponse,
+  type WireExchange,
   type WireFixture
 } from '../packages/conformance/src/fixture.ts'
 import {
@@ -121,8 +129,13 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   readonly tokenScopes: string
   /** The API base URL recorded as each fixture `endpoint`. */
   readonly endpoint: string
-  /** What the write cases do, for the dry-run footer and usage. */
+  /** What the write-reversible cases do, for the dry-run footer and usage. */
   readonly writeNote: string
+  /**
+   * What the write-irreversible cases do and why they need `--allow-irreversible`, for the
+   * dry-run footer. Only runners with such cases set it.
+   */
+  readonly irreversibleNote?: string
   readonly cases: ReadonlyArray<ConformanceCase<E, R>>
   readonly seedSources: ReadonlyArray<SeedSource<K>>
   /**
@@ -155,6 +168,20 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   /** Extra request headers the recorder keeps (credential headers are always dropped). */
   readonly recordedRequestHeaders: ReadonlyArray<string>
   /**
+   * Rewrites recorded exchanges before the fixture is built, for providers that put the live
+   * credential where the recorder cannot drop it (Telegram's `/bot<token>/` URL path). Staging
+   * still refuses a recording that contains the live access token afterwards.
+   */
+  readonly scrubRecording?: (
+    exchanges: ReadonlyArray<WireExchange>,
+    accessToken: string
+  ) => ReadonlyArray<WireExchange>
+  /**
+   * The access token replay verification resolves (default `replay-access-token`); it must match
+   * whatever `scrubRecording` writes into the fixtures.
+   */
+  readonly replayAccessToken?: string
+  /**
    * READ-ONLY lookup of items earlier runs left behind (for example `yolk-conformance-run-*`
    * folders), run over the case ports before any write case; each result becomes one WARN line.
    * Never deletes anything.
@@ -185,6 +212,11 @@ export type RunOptions<K extends string> = {
   /** Synthetic, non-identifying account label. Required with `--live`. */
   readonly account: string | undefined
   readonly allowWrites: 'none' | 'reversible'
+  /**
+   * Exact ids of write-irreversible cases a person explicitly started (`--allow-irreversible`).
+   * Present only when at least one was given.
+   */
+  readonly allowIrreversible?: ReadonlyArray<string>
   /** Raw seed identities from flags or environment (validated before a live run). */
   readonly seeds: Readonly<Partial<Record<K, string>>>
 }
@@ -213,6 +245,28 @@ export const liveInCiMessage =
 export const accessTokenRequiredMessage = (runner: { readonly tokenEnv: string }) =>
   `${runner.tokenEnv} is required for --live`
 
+/** Ids of the runner's write-irreversible cases (the only values `--allow-irreversible` takes). */
+export const irreversibleCaseIds = <K extends string, S extends SeedRecord<K>>(
+  runner: RunnerData<K, S>
+): ReadonlyArray<string> =>
+  runner.cases
+    .filter(testCase => testCase.safety === 'write-irreversible')
+    .map(testCase => testCase.id)
+
+const hasReversibleCases = <K extends string, S extends SeedRecord<K>>(runner: RunnerData<K, S>) =>
+  runner.cases.some(testCase => testCase.safety === 'write-reversible')
+
+const irreversibleUsage = <K extends string, S extends SeedRecord<K>>(runner: RunnerData<K, S>) => {
+  const ids = irreversibleCaseIds(runner)
+
+  return ids.length === 0
+    ? ''
+    : `
+  --allow-irreversible <case-id>  run this exact write-irreversible case, which cannot be undone
+                                  (repeatable; independent of --allow-writes):
+                                  ${ids.join(', ')}`
+}
+
 export const usage = <K extends string, S extends SeedRecord<K>>(runner: RunnerData<K, S>) =>
   `Usage: pnpm conformance:${runner.provider} [--live --owner-approved --account <label>] [options]
 
@@ -228,7 +282,7 @@ Options:
                                   (lower-case letters, digits, hyphens; for example practice)
   --allow-writes <none|reversible>
                                   default none; reversible runs the write-reversible cases
-                                  (they ${runner.writeNote})
+                                  (${hasReversibleCases(runner) ? `they ${runner.writeNote}` : 'this runner has none'})${irreversibleUsage(runner)}
   --record                        with --live: record the cases that passed, verify on replay,
                                   and stage them in a new run directory under
                                   .conformance-recordings/${runner.provider}/ (gitignored) for manual
@@ -249,8 +303,10 @@ tests in the same change (fixture ids, evidence, and account change).`
 
 /**
  * Parse CLI arguments (without the node/script prefix) and seed environment variables. Throws on
- * unknown flags, missing values, invalid labels, `--record` without `--live`, and `--live` in CI
- * (`CI` non-empty), without `--owner-approved`, or without `--account`.
+ * unknown flags (`--allow-irreversible` included, for a runner without write-irreversible cases),
+ * missing values, invalid labels, an `--allow-irreversible` value that is not the exact id of one
+ * of the runner's write-irreversible cases, `--record` without `--live`, and `--live` in CI (`CI`
+ * non-empty), without `--owner-approved`, or without `--account`.
  */
 export const parseRunArgs = <K extends string, S extends SeedRecord<K>>(
   runner: RunnerData<K, S>,
@@ -263,6 +319,8 @@ export const parseRunArgs = <K extends string, S extends SeedRecord<K>>(
   let ownerApproved = false
   let account: string | undefined
   let allowWrites: RunOptions<K>['allowWrites'] = 'none'
+  const allowIrreversible: Array<string> = []
+  const irreversibleIds = irreversibleCaseIds(runner)
   const seeds: Partial<Record<K, string>> = {}
 
   for (const source of runner.seedSources) {
@@ -278,6 +336,22 @@ export const parseRunArgs = <K extends string, S extends SeedRecord<K>>(
 
     if (seed !== undefined) {
       seeds[seed.key] = value()
+
+      return
+    }
+
+    if (flag === '--allow-irreversible' && irreversibleIds.length > 0) {
+      const caseId = value()
+
+      if (!irreversibleIds.includes(caseId)) {
+        throw new Error(
+          `--allow-irreversible takes an exact write-irreversible case id: ${irreversibleIds.join(', ')}`
+        )
+      }
+
+      if (!allowIrreversible.includes(caseId)) {
+        allowIrreversible.push(caseId)
+      }
 
       return
     }
@@ -325,7 +399,12 @@ export const parseRunArgs = <K extends string, S extends SeedRecord<K>>(
     }
   })
 
-  const options: RunOptions<K> = { live, help, record, ownerApproved, account, allowWrites, seeds }
+  const parsed: RunOptions<K> = { live, help, record, ownerApproved, account, allowWrites, seeds }
+
+  // `allowIrreversible` is present only when a case was named, so runners without write-irreversible
+  // cases keep their exact option shape.
+  const options: RunOptions<K> =
+    allowIrreversible.length === 0 ? parsed : { ...parsed, allowIrreversible }
 
   if (help) {
     return options
@@ -355,7 +434,7 @@ export const liveTarget = <K extends string>(options: RunOptions<K>): Conformanc
   kind: 'live',
   account: options.account ?? 'dry-run',
   allowWrites: options.allowWrites,
-  allowIrreversible: []
+  allowIrreversible: options.allowIrreversible ?? []
 })
 
 const generatedKeys = <K extends string, S extends SeedRecord<K>>(
@@ -415,11 +494,26 @@ export const dryRunReport = <K extends string, S extends SeedRecord<K>>(
       .join('  ')
   })
 
+  const irreversible =
+    irreversibleCaseIds(runner).length === 0
+      ? ''
+      : `, allowIrreversible=[${(options.allowIrreversible ?? []).join(', ')}]`
+
+  const notes = [
+    hasReversibleCases(runner) ? `Write cases ${runner.writeNote}.` : undefined,
+    irreversibleCaseIds(runner).length > 0 && runner.irreversibleNote !== undefined
+      ? `${runner.irreversibleNote}.`
+      : undefined
+  ].filter(Predicate.isNotUndefined)
+
   return [
     `DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to run (needs ${runner.tokenEnv}).`,
-    `Plan for a live target: allowWrites=${options.allowWrites}${options.record ? ', record' : ''}`,
+    `Plan for a live target: allowWrites=${options.allowWrites}${irreversible}${options.record ? ', record' : ''}`,
     ...lines,
-    `Use ${runner.practiceTarget} only, with the repository owner's approval; never in CI. Write cases ${runner.writeNote}.`
+    [
+      `Use ${runner.practiceTarget} only, with the repository owner's approval; never in CI.`,
+      ...notes
+    ].join(' ')
   ].join('\n')
 }
 
@@ -827,6 +921,18 @@ type RecordedFixture<K extends string> = {
   readonly fixture: WireFixture
 }
 
+/** True when `exchanges` contain `accessToken`, verbatim or percent-encoded, anywhere. */
+export const containsAccessToken = (
+  exchanges: ReadonlyArray<WireExchange>,
+  accessToken: string
+): boolean => {
+  const text = JSON.stringify(exchanges)
+
+  return [accessToken, encodeURIComponent(accessToken), JSON.stringify(accessToken).slice(1, -1)]
+    .filter(form => form.length > 0)
+    .some(form => text.includes(form))
+}
+
 /** Build a verified fixture for one passed case and prove it replays with the same case. */
 const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
   runner: ConnectorConformanceRunner<K, S, E, R>,
@@ -842,7 +948,20 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
       return yield* new ConnectorRunFailed({ message: `No fixture module for ${testCase.id}` })
     }
 
-    const exchanges = yield* recorder.drain
+    const drained = yield* recorder.drain
+
+    const exchanges =
+      runner.scrubRecording === undefined
+        ? drained
+        : runner.scrubRecording(drained, inputs.accessToken)
+
+    // The secret scan knows credential headers and token shapes, not every provider's token (a
+    // Telegram bot token sits in the URL path): refuse any trace of the live token itself.
+    if (containsAccessToken(exchanges, inputs.accessToken)) {
+      return yield* new ConnectorRunFailed({
+        message: `${testCase.id}: the recording still contains the live access token; nothing was written`
+      })
+    }
 
     const fixture = yield* makeWireFixture({
       id: `${testCase.id}.recorded`,
@@ -858,7 +977,11 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
     const replayed = yield* runConformance([testCase], {
       target: { kind: 'replay' },
       layer: () =>
-        runner.casePorts(ReplayHttpClient.layer([fixture]), 'replay-access-token', inputs.seeds)
+        runner.casePorts(
+          ReplayHttpClient.layer([fixture]),
+          runner.replayAccessToken ?? 'replay-access-token',
+          inputs.seeds
+        )
     })
 
     if (conformanceReportFailed(replayed)) {

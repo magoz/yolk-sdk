@@ -390,9 +390,37 @@ searches, read-only, bounded (at most 10 search pages), and best effort, for unt
 listing pages. See
 [Notion conformance cases](../connectors/notion#conformance-cases).
 
+`@yolk-sdk/connectors/todoist/conformance` exports seven Todoist cases (`todoistConformanceCases`),
+their synthetic fixtures (`todoistConformanceFixtures`), and the seeds they replay with
+(`todoistConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `CredentialResolver`, and
+`TodoistConformanceConfig` (seed ids in a practice Todoist account). Every case runs the real
+connector actions. Write cases each create their own invocation-unique
+`yolk-conformance-<runId>-<case>` project under `workProjectId` and delete it again by id, failing
+with `TodoistConformanceRestoreFailed` when that fails. A definitive create rejection deletes
+nothing; an ambiguous create fails with `TodoistConformanceActionFailed` (`createOutcome: 'unknown'`)
+naming the exact project or task; and a created project without the requested name, or a task
+outside the case project, is never deleted (`TodoistConformanceCleanupRefused`). Every write is not
+interruptible, and the runner has no request timeout. `findTodoistConformanceLeftovers` lists,
+read-only and bounded (at most 20 listing pages), the active projects whose names start with
+`todoistConformanceRunProjectPrefix` (`yolk-conformance-run-`). See
+[Todoist conformance cases](../connectors/todoist#conformance-cases).
+
+`@yolk-sdk/connectors/telegram/conformance` exports four Telegram cases
+(`telegramConformanceCases`), their synthetic fixtures (`telegramConformanceFixtures`, whose URLs
+carry the synthetic `telegramConformanceReplayBotToken`), and the seeds they replay with
+(`telegramConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `ConnectorBinaryHttpClient`
+(the file case runs `downloadTelegramFile`), `CredentialResolver`, and `TelegramConformanceConfig`
+(a practice chat id, a file id, and the run id). The connector reads only HTTP statuses, so claims
+about the Bot API body are observed at the ports. The send case is **write-irreversible**: a sent
+message cannot be deleted through the connector, so it runs only when a person names its exact id
+(`allowIrreversible`); an ambiguous send fails with `TelegramConformanceActionFailed`
+(`sendOutcome: 'unknown'`) naming the text to look for in the chat. There is no leftover lookup.
+See [Telegram conformance cases](../connectors/telegram#conformance-cases).
+
 When a case is interrupted, the run no longer produces a report, and no further case starts. So
-Dropbox and Notion write cases also hand a cleanup problem raised during the interruption (a
-failed cleanup, or a create whose outcome is unknown) to `ConformanceCleanupReporter` from
+Dropbox, Notion, and Todoist write cases (and the Telegram send) also hand a cleanup problem raised
+during the interruption (a failed cleanup, or a create or send whose outcome is unknown) to
+`ConformanceCleanupReporter` from
 `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
 `Effect.logWarning`. With the Effect version this repository pins, such a run ends with that
 failure itself (no Interrupt in the cause), and a run whose cleanup succeeded ends as a plain

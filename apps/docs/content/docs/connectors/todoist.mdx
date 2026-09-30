@@ -1,0 +1,108 @@
+---
+title: Todoist conformance
+description: Experimental Todoist conformance cases for tests and hand-run practice-account checks.
+---
+
+Todoist actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#todoist). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice Todoist account.
+
+`@yolk-sdk/connectors/todoist/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Every case runs the real connector actions over the connector ports
+against the Todoist API v1 (`https://api.todoist.com/api/v1`), and checks one wire claim the
+connector relies on. The claims are as currently understood; none is observed live yet.
+
+| Case id                                  | Safety             | Seeds                    | Claim (as currently understood)                                                                                                                         |
+| ---------------------------------------- | ------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `todoist.tasks.list-cursor-paging`       | `read`             | `pagingProjectId`        | `limit=2` answers at most two tasks and a string `next_cursor`; the cursor with the same `project_id` returns the rest, ending with `next_cursor: null` |
+| `todoist.errors.not-found-envelope`      | `read`             | none                     | An unknown task id answers HTTP 404 (`todoist_not_found`) with a JSON `error` string that ends the connector message (both unverified)                  |
+| `todoist.labels.task-labels-are-names`   | `read`             | `labeledTaskId`          | A task's `labels` are label names, each the `name` of a personal label `todoist.list_labels` returns                                                    |
+| `todoist.tasks.lifecycle-close`          | `write-reversible` | `workProjectId`, `runId` | Create, get, and update answer the task; `close_task` answers 2xx; `list_tasks` then omits the closed task (active tasks only)                          |
+| `todoist.tasks.due-dates`                | `write-reversible` | `workProjectId`, `runId` | `due_date` answers `due.date` `2030-01-15` with `is_recurring: false`; `due_datetime` answers `due.date` carrying the instant (unverified)              |
+| `todoist.projects.parent-id`             | `write-reversible` | `workProjectId`, `runId` | `create_project` with a parent answers `parent_id`, and `get_project` reads it back                                                                     |
+| `todoist.projects.delete-then-not-found` | `write-reversible` | `workProjectId`, `runId` | After `delete_project`, `get_project` answers 404 and a task that was in it answers not found (both unverified)                                         |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- An unknown, well-formed task id answers HTTP 404, not 400.
+- The API v1 error body is `{ error, error_code, error_extra, error_tag, http_code }`; the connector
+  uses the first non-empty string of `error`, `message`, `error_description`, `error_tag`.
+- API v1 keeps a timed due in `due.date` (for example `2030-01-15T09:30:00Z`, possibly with
+  fractional seconds), with no separate `datetime` field.
+- A deleted project answers 404 rather than a body marked `is_deleted`.
+- Deleting a project deletes its tasks.
+
+The write cases' own cleanup relies on the last two: it deletes the case project by id and then
+requires `todoist.get_project` to answer not found. If a live run shows otherwise, the delete case
+fails, and every write case's cleanup reports `TodoistConformanceRestoreFailed` (check by hand)
+rather than passing silently.
+
+`TodoistConformanceConfig` holds the seed ids and the `runId`. Cases never hard-code account data,
+and a missing seed fails the case with a `precondition:` mismatch before any request. Credentials
+bind through `todoistConformanceIntegration` (`todoist.api_token`, credential ref
+`todoist.conformance`). The personal labels on the `labeledTaskId` task must be listed by
+`todoist.list_labels` (shared-only labels are not).
+
+Every write case creates its own project `yolk-conformance-<runId>-<case>` under `workProjectId`
+and works only inside it. The `runId` seed makes that namespace unique per invocation: the fixtures
+replay with `run-synthetic`, and the live runner generates a fresh random id every time (it is never
+a flag). The cleanup is attempted and verified under these conditions:
+
+- The project create request, its decoding, and the registration of the created project's id run
+  together without interruption, and so does every later write (task create, update, close,
+  project delete): an aborted request could otherwise land after the cleanup. Neither the runner
+  nor the bridges set a request timeout, so a hanging request delays an interruption until it
+  answers.
+- A definitive create rejection (HTTP 4xx, for example the account's project limit) proves the case
+  created nothing: it fails and deletes **nothing**.
+- An ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) may still have
+  created the project, and the case never learned its id: it fails with
+  `TodoistConformanceActionFailed` (`createOutcome: 'unknown'`) naming the exact project to check by
+  hand. Project names are not unique, so the case never deletes by name. An ambiguous task create
+  names the task the same way; it would sit inside the case project, which the cleanup deletes.
+- After a successful create, the cleanup deletes the project **by id** (a not-found answer proves it
+  gone) and checks that `todoist.get_project` then answers not found. It also runs after a failed
+  assertion or a fiber interruption. A failed cleanup fails with `TodoistConformanceRestoreFailed`
+  naming the project and its id.
+- A create that answers a project without the requested run-scoped name, or a task outside the case
+  project, is never deleted: the case fails with `TodoistConformanceCleanupRefused` naming it.
+
+Todoist's free plan limits the number of active projects; each write case holds one extra project
+while it runs.
+
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, and the running
+case's cleanup is attempted before the process exits; no further case starts. The cleanup is not
+confirmed:
+
+- A cleanup that fails, or a create whose outcome is unknown, while the case is being interrupted
+  prints its full message, with the exact project, as a WARN line (through the case's
+  `ConformanceCleanupReporter`). The run then ends with that error (exit code 1).
+- Only when the run ends as a plain interruption (exit code 130) does the runner repeat the
+  leftover lookup below and print a WARN line for every `yolk-conformance-run-*` project still
+  present.
+
+One Ctrl-C reaches every process of the foreground group, and the wrappers relay it, so further
+signals within a second count as the same keypress. A signal a second or more later exits at once
+and may skip the cleanup, as does killing the process. Run live runs as
+`pnpm conformance:todoist …` or `./node_modules/.bin/tsx scripts/run-todoist-conformance.ts …`.
+Avoid `pnpm exec tsx …`: on Ctrl-C it returns to the prompt at once, so later lines print after the
+prompt; stop the runner with `kill -TERM <pid>`, using the pid the first-signal message prints.
+
+Before any write case, the runner lists projects read-only (`findTodoistConformanceLeftovers`) and
+prints a WARN line for each active project whose name starts with `yolk-conformance-run-`
+(`todoistConformanceRunProjectPrefix`) that an earlier run left behind, wherever it sits; a failed
+lookup prints its failure code. The lookup is bounded, not exhaustive: it reads at most 20 listing
+pages of 200 projects each. It never deletes them. Check each one, and delete it by hand when no run
+is using it. Every valid `runId` starts with `run-`, so the lookup covers every run.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`). In this repository,
+`pnpm conformance:todoist` dry-runs by default; `--live --owner-approved --account <label>` (refused
+whenever `CI` is non-empty) needs `TODOIST_API_TOKEN` and the seeds, `--allow-writes reversible`
+adds the write cases, and `--record` stages verified recordings only in the gitignored
+`.conformance-recordings/todoist/` for manual scrubbing and promotion. There are no
+write-irreversible Todoist cases. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
