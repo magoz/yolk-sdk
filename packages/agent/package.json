@@ -71,6 +71,10 @@
       "types": "./src/providers/openai/index.ts",
       "default": "./src/providers/openai/index.ts"
     },
+    "./providers/openai/conformance": {
+      "types": "./src/providers/openai/conformance/index.ts",
+      "default": "./src/providers/openai/conformance/index.ts"
+    },
     "./providers/openai/codex": {
       "types": "./src/providers/openai/codex.ts",
       "default": "./src/providers/openai/codex.ts"
@@ -230,6 +234,11 @@
         "types": "./dist/providers/openai/index.d.mts",
         "import": "./dist/providers/openai/index.mjs",
         "default": "./dist/providers/openai/index.mjs"
+      },
+      "./providers/openai/conformance": {
+        "types": "./dist/providers/openai/conformance/index.d.mts",
+        "import": "./dist/providers/openai/conformance/index.mjs",
+        "default": "./dist/providers/openai/conformance/index.mjs"
       },
       "./providers/openai/codex": {
         "types": "./dist/providers/openai/codex.d.mts",

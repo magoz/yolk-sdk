@@ -81,7 +81,8 @@ Without a script, a known model gets synthetic output: `stream: true` streams
 completion. Reasoning models asked for reasoning (`reasoning_effort`, or `thinking` enabled) stream
 `delta.reasoning_content` first. A request with `tools` gets one tool call whose arguments are
 synthesized from the tool's JSON Schema and streamed in several fragments, finishing with
-`tool_calls`. Unknown models get the Gateway error envelope (400, `model_not_found`), a missing
+`tool_calls`; a `tool_choice` naming an offered function picks that tool (otherwise the first), and
+`tool_choice: 'none'` answers with text. Unknown models get the Gateway error envelope (400, `model_not_found`), a missing
 bearer credential gets 401, and unknown routes get a 404 JSON error. The credential is never
 checked or stored.
 
@@ -94,7 +95,8 @@ exclude 1xx, 204, 205, and every 3xx (including 304), header names and values mu
 `location` header is rejected.
 
 The ledger records every emulated API request (control-plane requests are not recorded): method,
-path, parsed body, model, `stream`, `reasoning_effort`, `thinking`, tool names, the applied fault,
+path, parsed body, model, `stream`, the `max_tokens` limit (`maxCompletionTokens`, never
+validated), `reasoning_effort`, `thinking`, tool names, the applied fault,
 the evidence tag, the status actually sent, and body chunks sent; never credential headers. When a
 planned response cannot be built, the emulator answers an evidence-tagged 500, records it with
 `responseError`, and does not use up the fault. The same fetch handler serves the control plane:
@@ -107,6 +109,27 @@ planned response cannot be built, the emulator answers an evidence-tagged 500, r
 | `/_emulate/reset`    | `POST`                  |
 | `/_emulate/state`    | `GET`                   |
 | `/_emulate/coverage` | `GET`                   |
+
+## OpenAI emulator
+
+`@yolk-sdk/emulators/openai`
+
+| Export                                | Purpose                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------ |
+| `makeOpenAiEmulator(options?)`        | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/chat/completions` |
+| `openAiEmulatorRoutes`                | Route evidence manifest linked to the OpenAI chat conformance cases                  |
+| `OpenAiFault`, `OpenAiScriptedTurn`   | Schemas and types for wire faults and scripted turns (no reasoning fields)           |
+| `OpenAiLedgerEntry`, `OpenAiCoverage` | Ledger entry and coverage report types                                               |
+| `openAiEmulatorDefaultModels`         | Synthetic-safe default model ids (`gpt-4.1-nano`, `gpt-4.1-mini`)                    |
+| `OpenAiEmulatorInputInvalid`          | Thrown by `faults.add` / `script.enqueue` for invalid input                          |
+
+It stands in for OpenAI Chat Completions at `https://api.openai.com` and shares the Gateway
+emulator's Chat Completions core, so streaming, JSON mode, tool-call fragments, scripted turns,
+faults, the ledger, and the control plane behave the same. Errors use the OpenAI envelope
+`{ error: { message, type, param, code } }`: an unknown model gets 404 `model_not_found`, and a
+missing bearer credential gets 401 `invalid_api_key` (the credential is never checked or stored).
+The ledger records `max_completion_tokens` as `maxCompletionTokens`. Reasoning models are not
+emulated for `/openai` yet: scripted turns reject reasoning fields.
 
 ## Node server
 
@@ -125,5 +148,5 @@ delivery survives the socket; a body stream error drops the connection.
 
 Emulated routes carry evidence: `verified` routes follow a live observation dated by
 `observedAt`; `unverified` routes follow synthetic placeholders and tag every response with
-`x-emulator-evidence: unverified`. The Gateway route is currently unverified, like the Gateway
-fixtures it follows.
+`x-emulator-evidence: unverified`. The Gateway and OpenAI routes are currently unverified, like
+the fixtures they follow.

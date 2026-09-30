@@ -86,6 +86,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './providers/anthropic/usage',
       './providers/openai',
       './providers/openai/codex',
+      './providers/openai/conformance',
       './providers/openai/codex-provider',
       './providers/openai/codex-usage',
       './providers/openai/provider',
@@ -208,7 +209,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/emulators',
     packageName: '@yolk-sdk/emulators',
-    expectedExports: ['./package.json', './router', './gateway', './node'],
+    expectedExports: ['./package.json', './router', './gateway', './openai', './node'],
     root: 'none'
   }
 ]

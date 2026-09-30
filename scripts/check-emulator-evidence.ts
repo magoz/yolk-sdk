@@ -8,8 +8,8 @@
  * - FAIL: a connector route with `write: true` has evidence other than `verified`.
  * - FAIL: a verified connector write route has a missing, unreadable, or future `observedAt`.
  * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
- *   (only checked when fixture evidence is supplied; the CLI loads the Gateway and Fortnox
- *   fixtures).
+ *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat, and
+ *   Fortnox fixtures).
  * - WARN: a route's evidence is `unverified` (the emulator tags its responses
  *   `x-emulator-evidence: unverified`).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
@@ -22,11 +22,14 @@ import { resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import type { WireFixture } from '../packages/conformance/src/fixture.ts'
+import { openAiConformanceCases } from '../packages/agent/src/providers/openai/conformance/cases.ts'
+import { openAiConformanceFixtures } from '../packages/agent/src/providers/openai/conformance/index.ts'
 import { vercelAiGatewayConformanceCases } from '../packages/agent/src/providers/vercel/conformance/cases.ts'
 import { vercelAiGatewayConformanceFixtures } from '../packages/agent/src/providers/vercel/conformance/index.ts'
 import { fortnoxConformanceCases } from '../packages/connectors/src/fortnox/conformance/cases.ts'
 import { fortnoxConformanceFixtures } from '../packages/connectors/src/fortnox/conformance/index.ts'
 import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
+import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
 import type {
   EmulatorEvidence,
   EmulatorRouteEvidence
@@ -80,12 +83,14 @@ export type EvidenceCheckInput = {
 
 /** Every emulator manifest the repo ships. Add new emulators here. */
 export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
-  { name: 'gateway', routes: gatewayEmulatorRoutes }
+  { name: 'gateway', routes: gatewayEmulatorRoutes },
+  { name: 'openai', routes: openAiEmulatorRoutes }
 ]
 
 /** Every conformance case id the manifests may cite. */
 export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...vercelAiGatewayConformanceCases.map(testCase => testCase.id),
+  ...openAiConformanceCases.map(testCase => testCase.id),
   ...fortnoxConformanceCases.map(testCase => testCase.id)
 ])
 
@@ -105,11 +110,15 @@ export const fixtureEvidenceByCase = (
   return byCase
 }
 
-/** Evidence of every committed Gateway and Fortnox fixture, by case id. */
+/** Evidence of every committed Gateway, OpenAI chat, and Fortnox fixture, by case id. */
 export const conformanceFixtureEvidence: ReadonlyMap<
   string,
   ReadonlyArray<EmulatorEvidence>
-> = fixtureEvidenceByCase([...vercelAiGatewayConformanceFixtures, ...fortnoxConformanceFixtures])
+> = fixtureEvidenceByCase([
+  ...vercelAiGatewayConformanceFixtures,
+  ...openAiConformanceFixtures,
+  ...fortnoxConformanceFixtures
+])
 
 const dayMs = 24 * 60 * 60 * 1000
 
