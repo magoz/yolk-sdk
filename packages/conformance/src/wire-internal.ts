@@ -107,8 +107,8 @@ const exactPlaceholders = new Map<string, string>(Object.entries(syntheticPortCr
 
 /**
  * `text` with `%XX` escapes decoded, repeatedly (at most three layers, then left as it is). The R2
- * guard (`findR2PortFixtureSecrets` in `@yolk-sdk/connectors`) searches the same three layers:
- * keep the depth in step.
+ * guard (`findR2PortFixtureSecrets` in `@yolk-sdk/connectors`) applies at most the same three
+ * percent-decoding rounds (plus its escape rounds): keep the percent depth in step.
  */
 const percentDecodedLayers = (text: string): string => {
   let current = text

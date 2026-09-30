@@ -95,10 +95,11 @@ parameter is skipped. The port scan's only exemption: the raw value, up to a str
 the frozen `syntheticPortCredentialParams` (the SigV4 `x-amz-signature` and `x-amz-credential`
 placeholders). Anything else inside the value, another parameter name, or another scope is flagged;
 `scanFixtureForSecrets` exempts nothing. A placeholder written by hand in prose and followed by `.`,
-`,`, `)`, or `'` (a URL quoted in single quotes) is flagged too (fail-closed). Parameters with escaped names (`&amp;` before them,
-percent-encoded names) are not found: port owners that can meet them check them themselves.
-Replaying port fixtures is up to the port's owner (the email bridge ships `makeEmailReplayBackend`);
-the runner accepts `PortFixture`s next to `WireFixture`s for its fixture warnings.
+`,`, `)`, or `'` (a URL quoted in single quotes) is flagged too (fail-closed). Parameters with
+escaped names (`&amp;` before them, percent-encoded names) are not found: port owners that can meet
+them check them themselves. Replaying port fixtures is up to the port's owner (the email bridge
+ships `makeEmailReplayBackend`); the runner accepts `PortFixture`s next to `WireFixture`s for its
+fixture warnings.
 
 ## Replay
 

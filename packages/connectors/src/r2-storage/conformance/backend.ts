@@ -386,13 +386,79 @@ const credentialParam = 'x-amz-credential'
 const sessionTokenParam = 'x-amz-security-token'
 
 /**
- * `text` with one layer of `%XX` escapes decoded. The guard searches three layers, the same depth
- * as the shared scan's `percentDecodedLayers` (`@yolk-sdk/conformance`, internal): keep them in step.
+ * `text` with one layer of `%XX` escapes decoded. The guard applies at most three rounds of it, the
+ * same percent depth as the shared scan's `percentDecodedLayers` (`@yolk-sdk/conformance`,
+ * internal): keep the two in step.
  */
-const decodedOnce = (text: string): string =>
+const percentDecodedOnce = (text: string): string =>
   text.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
     String.fromCharCode(Number.parseInt(hex, 16))
   )
+
+const codePoint = (value: number): string => String.fromCodePoint(Math.min(value, 0x10ffff))
+
+/**
+ * `text` with one layer of the escapes a serializer adds by accident decoded: JSON `\uXXXX`,
+ * `\xXX`, `\\` (one backslash), and numeric HTML character references (`&#88;`, `&#x58;`). One
+ * pass, left to right, so a doubly escaped `\\u0058` becomes `\u0058` and needs a second round.
+ */
+const escapesDecodedOnce = (text: string): string =>
+  text.replace(
+    /\\u([0-9A-Fa-f]{4})|\\x([0-9A-Fa-f]{2})|\\\\|&#[xX]([0-9A-Fa-f]{1,6});?|&#([0-9]{1,7});?/g,
+    (match, unicode?: string, hex?: string, entityHex?: string, entity?: string) => {
+      const hexDigits = unicode ?? hex ?? entityHex
+
+      if (hexDigits !== undefined) {
+        return codePoint(Number.parseInt(hexDigits, 16))
+      }
+
+      if (entity !== undefined) {
+        return codePoint(Number.parseInt(entity, 10))
+      }
+
+      return match === '\\\\' ? '\\' : match
+    }
+  )
+
+/** Rounds of each decoding the guard applies, in any order (so at most six rounds in all). */
+const maxRoundsPerDecoding = 3
+
+/**
+ * Every variant of `text` reachable with at most three rounds of percent-decoding and at most three
+ * rounds of escape-decoding, in every order (the original included), deduplicated.
+ */
+const decodedVariants = (text: string): ReadonlyArray<string> => {
+  const seen = new Set<string>([text])
+
+  let frontier: ReadonlyArray<{ text: string; percent: number; escapes: number }> = [
+    { text, percent: 0, escapes: 0 }
+  ]
+
+  while (frontier.length > 0) {
+    frontier = frontier.flatMap(variant => {
+      const next = [
+        ...(variant.percent < maxRoundsPerDecoding
+          ? [{ ...variant, text: percentDecodedOnce(variant.text), percent: variant.percent + 1 }]
+          : []),
+        ...(variant.escapes < maxRoundsPerDecoding
+          ? [{ ...variant, text: escapesDecodedOnce(variant.text), escapes: variant.escapes + 1 }]
+          : [])
+      ]
+
+      return next.filter(candidate => {
+        if (seen.has(candidate.text)) {
+          return false
+        }
+
+        seen.add(candidate.text)
+
+        return true
+      })
+    })
+  }
+
+  return [...seen]
+}
 
 // The only credential parameters a committed fixture may spell out, each exactly as the fixtures
 // and `scrubR2PortFixture` write it: `URLSearchParams` leaves the signature as it is and encodes
@@ -423,7 +489,9 @@ const withoutCanonicalPlaceholders = (text: string): string => {
       text.startsWith(placeholder, valueStart) &&
       canonicalValueEnd.test(text.slice(valueEnd))
     ) {
-      masked = `${masked.slice(0, nameStart)}${' '.repeat(valueEnd - nameStart)}${masked.slice(valueEnd)}`
+      const blank = ' '.repeat(valueEnd - nameStart)
+
+      masked = `${masked.slice(0, nameStart)}${blank}${masked.slice(valueEnd)}`
     }
   }
 
@@ -439,24 +507,19 @@ const credentialNames = [
 
 /**
  * Why a string may not be committed: one finding per credential name it still carries once the
- * canonical placeholder occurrences are blanked out. The masked text is searched raw and after one,
- * two, and three layers of percent-decoding (each also with its letters lower-cased first), for
- * each name anywhere, case-insensitively, with no `=` or value needed: any spelling or encoding
- * of a credential name outside an exact canonical placeholder is refused, prose included.
+ * canonical placeholder occurrences are blanked out. The masked text and every variant reachable
+ * with at most three rounds of percent-decoding and three of escape-decoding, in any order
+ * (`decodedVariants`), are searched for each name anywhere, case-insensitively, with no `=` or
+ * value needed, prose included. Deliberate obfuscation (base64, other encodings, deeper nesting)
+ * is out of scope: a person reviews every recording before promoting it.
  */
 const stringFindings = (text: string): ReadonlyArray<string> => {
-  const layers: Array<string> = [withoutCanonicalPlaceholders(text)]
-
-  for (let depth = 1; depth <= 3; depth++) {
-    layers.push(decodedOnce(layers[depth - 1] ?? ''))
-  }
-
-  const searched = [...layers, ...layers.map(layer => decodedOnce(layer.toLowerCase()))].map(
-    layer => layer.toLowerCase()
+  const searched = decodedVariants(withoutCanonicalPlaceholders(text)).map(variant =>
+    variant.toLowerCase()
   )
 
   return credentialNames.flatMap(([name, finding]) =>
-    searched.some(layer => layer.includes(name)) ? [finding] : []
+    searched.some(variant => variant.includes(name)) ? [finding] : []
   )
 }
 
@@ -485,22 +548,38 @@ const findingsIn = (value: Schema.Json, location: string): ReadonlyArray<string>
 
 /**
  * Why an R2 `PortFixture` may not be committed, beyond the shared `scanPortFixtureForSecrets` (run
- * both). Fail-closed: in every string (and JSON key) of the request, the response, the note, and
- * the failure message, the canonical placeholder occurrences are blanked out first: `?` or `&` (or
- * the start of the string), `X-Amz-Signature` or `X-Amz-Credential` spelled in raw ASCII (any
- * case), `=`, and exactly the value the fixtures and the scrubber write (`r2ConformanceSyntheticSignature`,
- * or `encodeURIComponent(r2ConformanceSyntheticCredential)`), followed by `&`, `#`, whitespace, `"`,
- * `<`, `>`, or the end. Whatever remains is searched raw and after one, two, and three layers of
- * percent-decoding, and ANY case-insensitive occurrence of `x-amz-credential`, `x-amz-signature`,
- * or `x-amz-security-token` is a finding (one per name and string, as `location: finding` lines
- * that never echo a value): another value, an encoded or escaped name (even with the exact
- * placeholder), a fully encoded URL, or a credential name in prose. Empty when clean.
+ * both). Fail-closed, over every string (and JSON key) of the fixture: `id`, `port`, `method`,
+ * `note`, `observed.account`, the request, and the response or the failure code and message.
+ *
+ * 1. The canonical placeholder occurrences are blanked out: `?` or `&` (or the start of the
+ *    string), `X-Amz-Signature` or `X-Amz-Credential` in raw ASCII (any case), `=`, and exactly the
+ *    value the fixtures and the scrubber write (`r2ConformanceSyntheticSignature`, or
+ *    `encodeURIComponent(r2ConformanceSyntheticCredential)`), followed by `&`, `#`, whitespace,
+ *    `"`, `<`, `>`, or the end.
+ * 2. The rest is searched raw and in every variant reachable with at most three rounds of
+ *    percent-decoding and three of escape-decoding (JSON `\uXXXX`, `\xXX`, `\\`, numeric HTML
+ *    character references), in any order. ANY case-insensitive `x-amz-credential`,
+ *    `x-amz-signature`, or `x-amz-security-token` is a finding: another value, an encoded or
+ *    escaped name (even with the exact placeholder), an encoded URL, or a name in prose.
+ *
+ * Findings are `location: finding` lines, one per name and string, that never echo a value.
+ * Deliberate obfuscation (base64, other encodings, deeper nesting) is out of scope; a person
+ * reviews every recording before promoting it. Empty when clean.
  */
 export const findR2PortFixtureSecrets = (fixture: PortFixture): ReadonlyArray<string> => [
+  ...findingsIn(fixture.id, 'id'),
+  ...findingsIn(fixture.port, 'port'),
+  ...findingsIn(fixture.method, 'method'),
+  ...(fixture.observed === undefined
+    ? []
+    : findingsIn(fixture.observed.account, 'observed.account')),
   ...findingsIn(fixture.request, 'request'),
   ...(fixture.failure === undefined
     ? findingsIn(fixture.response, 'response')
-    : findingsIn(fixture.failure.message, 'failure.message')),
+    : [
+        ...findingsIn(fixture.failure.code, 'failure.code'),
+        ...findingsIn(fixture.failure.message, 'failure.message')
+      ]),
   ...(fixture.note === undefined ? [] : findingsIn(fixture.note, 'note'))
 ]
 

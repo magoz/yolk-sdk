@@ -106,12 +106,17 @@ on every R2 fixture:
   `X-Amz-Credential` spelled in raw ASCII (any letter case), `=`, and exactly the value the fixtures
   and the scrubber write (`yolk-synthetic-signature`, or the credential with its `/` encoded as
   `%2F`), followed by `&`, `#`, whitespace, `"`, `<`, `>`, or the end. It then searches what remains
-  raw and after one, two, and three layers of percent-decoding, and refuses ANY case-insensitive
-  occurrence of `x-amz-signature`, `x-amz-credential`, or `x-amz-security-token`, with or without
-  `=` or a value. So any other value, an encoded or escaped name (even with the exact placeholder),
-  a fully or doubly percent-encoded URL, a JSON-escaped (`\u0026`) parameter, and a credential name
-  mentioned in prose (a note or a failure message) are all refused. Keep committed notes and
-  messages free of those names.
+  raw and in every variant reachable with up to three rounds of percent-decoding and up to three
+  rounds of escape-decoding (JSON `\uXXXX`, `\xXX`, `\\` as one backslash, and numeric HTML
+  character references such as `&#88;`), in any order, and refuses ANY case-insensitive occurrence
+  of `x-amz-signature`, `x-amz-credential`, or `x-amz-security-token`, with or without `=` or a
+  value. So any other value, an encoded or escaped name (even with the exact placeholder), a fully
+  or doubly percent-encoded URL, a name escaped by `JSON.stringify` (once or twice) or by an HTML
+  serializer, and a credential name mentioned in prose are all refused. It searches every string of
+  the fixture (`id`, `port`, `method`, `note`, `observed.account`, the request, the response, and
+  the failure code and message), JSON keys included. Deliberate obfuscation (base64, other
+  encodings, deeper nesting) is out of scope: a person reviews every recording before promoting it.
+  Keep committed notes and messages free of credential names.
 
 `scrubR2PortFixture` rewrites a fixture recorded from a live host before a person promotes it: it
 removes credential fields and rewrites every presigned URL in the request, the response, the note,

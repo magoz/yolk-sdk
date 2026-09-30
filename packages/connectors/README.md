@@ -1447,15 +1447,15 @@ replay with (`r2ConformanceFixtureSeeds`). The connector never talks to R2 itsel
 `updateR2Object` over the host `R2ObjectClient`, plus `CredentialResolver` and
 `R2ConformanceConfig`. They cover the presigned PUT URL (bucket and key, SigV4 parameters, an expiry
 within the SigV4 limit, the signed content type, and a credential for the access key id the
-connector passed), `maxBytes` and `expectedEtag` on get, a missing
-key, an absent-only create, and an `If-Match` update. `r2PortsLayerFromBackend` bridges a plain-JSON
-backend to both ports without ever handing it the credentials, and `makeR2ReplayBackend` replays the
-fixtures. The two write cases are **write-irreversible** (the connector cannot delete R2 objects):
-they write only under `yolk-conformance/<runId>/` and report an ambiguous put with the exact bucket
-and key; a live host must generate a fresh `run-<hex>` per invocation. Presigned URLs in fixtures
-carry only synthetic credential placeholders: run both `scanPortFixtureForSecrets` and
-`findR2PortFixtureSecrets` (fail-closed: any credential name, in any spelling or encoding, outside
-an exact canonical placeholder occurrence);
+connector passed), `maxBytes` and `expectedEtag` on get, a missing key, an absent-only create, and
+an `If-Match` update. `r2PortsLayerFromBackend` bridges a plain-JSON backend to both ports without
+ever handing it the credentials, and `makeR2ReplayBackend` replays the fixtures. The two write cases
+are **write-irreversible** (the connector cannot delete R2 objects): they write only under
+`yolk-conformance/<runId>/` and report an ambiguous put with the exact bucket and key; a live host
+must generate a fresh `run-<hex>` per invocation. Presigned URLs in fixtures carry only synthetic
+credential placeholders: run both `scanPortFixtureForSecrets` and `findR2PortFixtureSecrets`
+(fail-closed: any credential name outside an exact canonical placeholder occurrence, in any letter
+case, raw or percent-, JSON-, `\x`-, or HTML-escape-decoded up to the stated depth);
 `scrubR2PortFixture` rewrites live ones except escaped URLs, so rerun both scans after it. Live
 verification needs a host implementation of both ports; no live R2 runner ships. The case table
 lives in the

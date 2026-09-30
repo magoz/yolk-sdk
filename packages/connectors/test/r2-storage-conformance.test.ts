@@ -937,6 +937,60 @@ describe('R2 presigned URL guard', () => {
     ).toEqual(['failure.message: a live X-Amz-Signature'])
   })
 
+  it('refuses credential names hidden by escapes a serializer adds, alone or mixed with percent', () => {
+    const cases = [
+      // JSON `\uXXXX`, `\xXX`, and numeric HTML references, on letters and hyphens.
+      ['\\u0058-Amz-Signature', 'a live X-Amz-Signature'],
+      ['X\\u002dAmz\\u002dCredential', 'a live X-Amz-Credential'],
+      ['\\x58-Amz-Security-Token', 'X-Amz-Security-Token'],
+      ['X-Amz-&#83;ignature', 'a live X-Amz-Signature'],
+      ['&#x58;-Amz-Credential', 'a live X-Amz-Credential'],
+      ['X&#45;Amz&#45;Security&#45;Token', 'X-Amz-Security-Token'],
+      // Percent and JSON escapes combined, in both orders.
+      ['%5Cu0058-Amz-Signature', 'a live X-Amz-Signature'],
+      ['\\u002558-Amz-Credential', 'a live X-Amz-Credential'],
+      ['X-Amz-Security%255Cu002dToken', 'X-Amz-Security-Token'],
+      // A doubly JSON-escaped name (JSON.stringify of a JSON body).
+      ['\\\\u0058-Amz-Signature', 'a live X-Amz-Signature'],
+      ['X-Amz-\\\\\\\\u0043redential', 'a live X-Amz-Credential']
+    ] as const
+
+    for (const [name, finding] of cases) {
+      for (const value of [r2ConformanceSyntheticSignature, liveSignature]) {
+        const fixture = failingWith(`{"url":"https://h.example.test/b/k?${name}=${value}"}`)
+
+        expect(
+          {
+            shared: scanPortFixtureForSecrets(fixture),
+            r2: findR2PortFixtureSecrets(fixture)
+          },
+          `${name}=${value}`
+        ).toEqual({ shared: [], r2: [`failure.message: ${finding}`] })
+      }
+    }
+  })
+
+  it('searches every scalar field the shared scan reads', () => {
+    const leaky: PortFixture = {
+      id: 'r2.leak.X%2DAmz%2DSignature.synthetic',
+      port: missing.port,
+      method: missing.method,
+      request: missing.request,
+      failure: {
+        kind: 'error',
+        code: 'x\\u002damz\\u002dsecurity\\u002dtoken',
+        message: 'No object with that key.'
+      },
+      observed: { account: 'X-Amz-Credential', date: '2026-09-30' }
+    }
+
+    expect(findR2PortFixtureSecrets(leaky)).toEqual([
+      'id: a live X-Amz-Signature',
+      'observed.account: a live X-Amz-Credential',
+      'failure.code: X-Amz-Security-Token'
+    ])
+  })
+
   it('accepts a clean placeholder followed by another parameter, and refuses a later live one', () => {
     expect(bothScans(`${presignedUrl}&other=1`)).toEqual({ shared: [], r2: [] })
     expect(bothScans(`${presignedUrl}?X-Amz-Signature=${liveSignature}`)).toEqual({
