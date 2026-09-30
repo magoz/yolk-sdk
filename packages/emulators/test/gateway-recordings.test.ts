@@ -1,15 +1,13 @@
 /**
  * Proof that the Gateway emulator matches the wire: for every verified Gateway fixture, the
  * fixture's recorded request is sent to the emulator and the structural shape of the emulator's
- * response is compared with the recording. Compared: the status, the `content-type`, the SSE event
- * kinds in order (each event reduced to its outline: field names and value types, runs of same-shaped
- * events collapsed), where the finish reason and usage sit, that the last network chunk ends with
- * the finish event and `data: [DONE]`, that some network chunk packs several events, and the
- * error envelope's keys. Ignored: ids, text, numbers, and how many content events carry the text.
- *
- * The upstream-provider entry of `provider_metadata` is keyed by whichever provider the Gateway
- * routed to (`openai`, `baseten`, ...), which varies per route, so only its `gateway` entry is
- * compared. Tests may import SDK packages; the emulator source never does.
+ * response is compared with the recording by `mismatches`. Compared: the status, the
+ * `content-type`, the SSE event kinds in order (each event reduced to its outline: field names and
+ * value types, including every `provider_metadata` entry; runs of same-shaped events collapsed),
+ * where the finish reason and usage sit, that the last network chunk ends with the finish event and
+ * `data: [DONE]`, that some network chunk packs several events, and the error envelope's outline.
+ * Ignored: ids, text, numbers, and how many content events carry the text. Tests may import SDK
+ * packages; the emulator source never does.
  */
 import { Encoding, Predicate, Result } from 'effect'
 import type * as Schema from 'effect/Schema'
@@ -25,11 +23,7 @@ import { gatewayEmulatorRoutes, makeGatewayEmulator, type GatewayEmulator } from
 /** Field names and value types of a JSON value, keys sorted, array element outlines deduplicated. */
 type Outline = string | ReadonlyArray<Outline> | { readonly [key: string]: Outline }
 
-/**
- * The outline of a JSON value. Inside `provider_metadata` only the `gateway` entry is kept (see
- * the header).
- */
-const outlineOf = (value: Schema.Json, key?: string): Outline => {
+const outlineOf = (value: Schema.Json): Outline => {
   if (value === null) return 'null'
 
   if (Predicate.isString(value)) return 'string'
@@ -52,9 +46,8 @@ const outlineOf = (value: Schema.Json, key?: string): Outline => {
 
   return Object.fromEntries(
     Object.entries(value)
-      .filter(([field]) => key !== 'provider_metadata' || field === 'gateway')
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([field, entry]) => [field, outlineOf(entry, field)])
+      .map(([field, entry]) => [field, outlineOf(entry)])
   )
 }
 
@@ -114,36 +107,130 @@ const chunkText = (chunk: WireChunk): string => {
   )
 }
 
-const emulatorChunks = async (response: Response): Promise<ReadonlyArray<string>> => {
-  const reader = response.body?.getReader()
-
-  if (reader === undefined) return []
-
-  const decoder = new TextDecoder()
-  const chunks: Array<string> = []
-
-  for (;;) {
-    const next = await reader.read()
-
-    if (next.done) return chunks
-
-    chunks.push(decoder.decode(next.value))
-  }
+/** What the emulator sent: status, `content-type`, and the body's network chunks as text. */
+type Observed = {
+  readonly status: number
+  readonly contentType: string | null
+  readonly chunks: ReadonlyArray<string>
 }
 
-/** Send the fixture's recorded request (plus a synthetic bearer credential) to a fresh emulator. */
-const replayRequest = (fixture: WireFixture, emulator: GatewayEmulator = makeGatewayEmulator()) => {
+const observe = async (response: Response): Promise<Observed> => {
+  const chunks: Array<string> = []
+  const reader = response.body?.getReader()
+
+  if (reader !== undefined) {
+    const decoder = new TextDecoder()
+
+    for (;;) {
+      const next = await reader.read()
+
+      if (next.done) break
+
+      chunks.push(decoder.decode(next.value))
+    }
+  }
+
+  return { status: response.status, contentType: response.headers.get('content-type'), chunks }
+}
+
+const differ = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left) !== JSON.stringify(right)
+
+/** Structural stream checks that hold for any recorded or emulated Gateway stream. */
+const framingMismatches = (label: string, chunks: ReadonlyArray<string>): Array<string> => {
+  const found: Array<string> = []
+  const all = placements(chunks)
+  const [finish, done] = finishAndUsage(chunks)
+  const last = eventData(chunks.at(-1) ?? '')
+
+  if (done?.index !== all.length - 1 || finish?.index !== all.length - 2) {
+    found.push(`${label}: the finish event is not followed only by [DONE]`)
+  }
+
+  if (last.at(-1) !== '[DONE]' || last.length < 2) {
+    found.push(`${label}: the last network chunk does not carry the finish event and [DONE]`)
+  }
+
+  if (!chunks.some(chunk => eventData(chunk).length > 1)) {
+    found.push(`${label}: no network chunk packs several events`)
+  }
+
+  return found
+}
+
+/** Every structural difference between the fixture's recorded response and `observed`. */
+const mismatches = (fixture: WireFixture, observed: Observed): ReadonlyArray<string> => {
+  const recorded = fixture.exchanges[0].response
+  const found: Array<string> = []
+
+  if (observed.status !== recorded.status) {
+    found.push(`status ${observed.status}, recorded ${recorded.status}`)
+  }
+
+  if (observed.contentType !== recorded.headers['content-type']) {
+    found.push(`content-type ${String(observed.contentType)}`)
+  }
+
+  if (!isWireStreamResponse(recorded)) {
+    if (!Predicate.isString(recorded.body)) return [...found, 'recorded body is not text']
+
+    const body = Result.try(() => parseJson(observed.chunks.join('')))
+
+    if (Result.isFailure(body)) return [...found, 'body is not JSON']
+
+    if (differ(outlineOf(body.success), outlineOf(parseJson(recorded.body)))) {
+      found.push('error envelope outline differs')
+    }
+
+    return found
+  }
+
+  const recordedChunks = recorded.chunks.map(chunkText)
+
+  if (differ(eventKinds(observed.chunks), eventKinds(recordedChunks))) {
+    found.push('event kinds differ')
+  }
+
+  const recordedPlacement = finishAndUsage(recordedChunks).map(entry => entry.placement)
+
+  if (
+    differ(
+      finishAndUsage(observed.chunks).map(entry => entry.placement),
+      recordedPlacement
+    )
+  ) {
+    found.push('finish and usage placement differs')
+  }
+
+  const beforeDone = recordedPlacement.at(-2)
+
+  if (beforeDone === undefined || beforeDone === '[DONE]' || !beforeDone.usage) {
+    found.push('recording: usage is not on the finish event')
+  }
+
+  return [
+    ...found,
+    ...framingMismatches('recording', recordedChunks),
+    ...framingMismatches('emulator', observed.chunks)
+  ]
+}
+
+/** Send the fixture's recorded request (plus a synthetic bearer credential) to the emulator. */
+const replay = async (
+  fixture: WireFixture,
+  emulator: GatewayEmulator = makeGatewayEmulator()
+): Promise<Observed> => {
   const [exchange] = fixture.exchanges
 
-  const response = emulator.fetch(
-    new Request(exchange.request.url, {
-      method: exchange.request.method,
-      headers: { ...exchange.request.headers, authorization: 'Bearer synthetic-gateway-key' },
-      body: JSON.stringify(exchange.request.body)
-    })
+  return observe(
+    await emulator.fetch(
+      new Request(exchange.request.url, {
+        method: exchange.request.method,
+        headers: { ...exchange.request.headers, authorization: 'Bearer synthetic-gateway-key' },
+        body: JSON.stringify(exchange.request.body)
+      })
+    )
   )
-
-  return { exchange, emulator, response }
 }
 
 const verifiedFixtures = vercelAiGatewayConformanceFixtures.filter(
@@ -160,78 +247,72 @@ describe('the Gateway emulator matches the verified recordings', () => {
 
   for (const fixture of verifiedFixtures) {
     it(`${fixture.caseId}: status, content type, and body shape match the recording`, async () => {
-      const { exchange, emulator, response: pending } = replayRequest(fixture)
-      const recorded = exchange.response
-      const response = await pending
+      const emulator = makeGatewayEmulator()
+      const observed = await replay(fixture, emulator)
 
-      expect(response.status).toBe(recorded.status)
-      expect(response.headers.get('content-type')).toBe(recorded.headers['content-type'])
+      expect(mismatches(fixture, observed)).toEqual([])
 
-      if (!isWireStreamResponse(recorded)) {
-        // The error envelope: the same keys and value types (no `code`).
-        const recordedText = Predicate.isString(recorded.body)
-          ? recorded.body
-          : expect.fail('expected a recorded text body')
-
-        const body: Schema.Json = await response.json()
-
-        expect(outlineOf(body)).toEqual(outlineOf(parseJson(recordedText)))
-        expect(Predicate.hasProperty(body, 'error')).toBe(true)
-        expect(
-          Predicate.hasProperty(body, 'error') && Predicate.hasProperty(body.error, 'code')
-        ).toBe(false)
-
-        return
+      if (isWireStreamResponse(fixture.exchanges[0].response)) {
+        expect(emulator.ledger.entries()[0]?.bodyChunks).toBe(observed.chunks.length)
       }
-
-      const recordedChunks = recorded.chunks.map(chunkText)
-      const chunks = await emulatorChunks(response)
-
-      // Event kinds and field names, in order.
-      expect(eventKinds(chunks)).toEqual(eventKinds(recordedChunks))
-
-      // Finish and usage placement: usage rides on the finish event, followed only by [DONE].
-      const recordedPlacement = finishAndUsage(recordedChunks).map(entry => entry.placement)
-
-      expect(finishAndUsage(chunks).map(entry => entry.placement)).toEqual(recordedPlacement)
-      expect(recordedPlacement.at(-2)).toMatchObject({ usage: true })
-
-      for (const events of [recordedChunks, chunks]) {
-        const all = placements(events)
-        const [finish, done] = finishAndUsage(events)
-
-        expect(done?.index).toBe(all.length - 1)
-        expect(finish?.index).toBe(all.length - 2)
-      }
-
-      // Chunk packing: the last network chunk carries the finish event and [DONE] together,
-      // and some network chunk carries several events, as recorded.
-      for (const events of [recordedChunks, chunks]) {
-        const last = eventData(events.at(-1) ?? '')
-
-        expect(last.at(-1)).toBe('[DONE]')
-        expect(last.length).toBeGreaterThan(1)
-        expect(events.some(chunk => eventData(chunk).length > 1)).toBe(true)
-      }
-
-      expect(emulator.ledger.entries()[0]?.bodyChunks).toBe(chunks.length)
     })
   }
 })
 
-const recordedStream = (fixture: WireFixture | undefined): ReadonlyArray<string> => {
-  const response = fixture?.exchanges[0].response
+const fixtureFor = (caseId: string): WireFixture =>
+  verifiedFixtures.find(fixture => fixture.caseId === caseId) ?? expect.fail(`missing ${caseId}`)
 
-  return response !== undefined && isWireStreamResponse(response)
-    ? response.chunks.map(chunkText)
-    : expect.fail('expected a recorded stream')
+const plainText = () => fixtureFor('vercel-ai-gateway.stream.plain-text')
+
+const deepseekReasoning = () => fixtureFor('vercel-ai-gateway.stream.deepseek-reasoning')
+
+const errorEnvelope = () => fixtureFor('vercel-ai-gateway.stream.error-envelope')
+
+/** The parts of an emulated event payload the drills rewrite. */
+type Payload = {
+  readonly choices: ReadonlyArray<{
+    readonly delta: { readonly provider_metadata?: Record<string, Schema.Json> }
+  }>
+  readonly system_fingerprint?: string
 }
 
-const fixtureFor = (caseId: string) => verifiedFixtures.find(fixture => fixture.caseId === caseId)
+/**
+ * Rewrite the JSON payload of every SSE event (the event's index across the stream is passed),
+ * keeping the network chunk boundaries and `data: [DONE]`.
+ */
+const rewriteEvents = (
+  observed: Observed,
+  rewrite: (payload: Payload, index: number) => object
+): Observed => {
+  let index = 0
+
+  const chunks = observed.chunks.map(chunk =>
+    eventData(chunk)
+      .map(data => {
+        const current = index++
+
+        return `data: ${data === '[DONE]' ? data : JSON.stringify(rewrite(JSON.parse(data), current))}\n\n`
+      })
+      .join('')
+  )
+
+  return { ...observed, chunks }
+}
+
+/** Update the finish event's `provider_metadata` in place. */
+const withMetadata = (
+  payload: Payload,
+  update: (metadata: Record<string, Schema.Json>) => void
+): Payload => {
+  const metadata = payload.choices[0]?.delta.provider_metadata
+
+  if (metadata !== undefined) update(metadata)
+
+  return payload
+}
 
 describe('the shape comparison catches disagreements', () => {
   it('rejects the earlier reasoning_content field for the DeepSeek recording', async () => {
-    const fixture = fixtureFor('vercel-ai-gateway.stream.deepseek-reasoning')
     const emulator = makeGatewayEmulator()
 
     emulator.script.enqueue({
@@ -240,35 +321,114 @@ describe('the shape comparison catches disagreements', () => {
       text: ['Hello.']
     })
 
-    const chunks = await emulatorChunks(
-      await replayRequest(fixture ?? expect.fail('missing'), emulator).response
+    expect(mismatches(deepseekReasoning(), await replay(deepseekReasoning(), emulator))).toContain(
+      'event kinds differ'
     )
-
-    expect(eventKinds(chunks)).not.toEqual(eventKinds(recordedStream(fixture)))
   })
 
-  it('rejects one event per network chunk and a dropped usage for the plain-text recording', async () => {
-    const fixture = fixtureFor('vercel-ai-gateway.stream.plain-text')
+  it('rejects one event per network chunk for the plain-text recording', async () => {
+    const observed = await replay(plainText(), makeGatewayEmulator({ eventsPerChunk: 1 }))
 
-    const unpacked = await emulatorChunks(
-      await replayRequest(
-        fixture ?? expect.fail('missing'),
-        makeGatewayEmulator({ eventsPerChunk: 1 })
-      ).response
+    expect(mismatches(plainText(), observed)).toEqual([
+      'emulator: the last network chunk does not carry the finish event and [DONE]',
+      'emulator: no network chunk packs several events'
+    ])
+  })
+
+  it('rejects a dropped usage for the plain-text recording', async () => {
+    const emulator = makeGatewayEmulator()
+
+    emulator.script.enqueue({ text: ['Hello.'], usage: null })
+
+    expect(mismatches(plainText(), await replay(plainText(), emulator))).toContain(
+      'finish and usage placement differs'
+    )
+  })
+
+  it('rejects a removed upstream entry for the DeepSeek recording', async () => {
+    const observed = await replay(deepseekReasoning())
+
+    expect(mismatches(deepseekReasoning(), observed)).toEqual([])
+
+    const withoutBaseten = rewriteEvents(observed, payload =>
+      withMetadata(payload, metadata => {
+        delete metadata.baseten
+      })
     )
 
-    expect(unpacked.some(chunk => eventData(chunk).length > 1)).toBe(false)
+    expect(mismatches(deepseekReasoning(), withoutBaseten)).toEqual(['event kinds differ'])
+  })
 
-    const withoutUsage = makeGatewayEmulator()
+  it('rejects a corrupted openai entry for the plain-text recording', async () => {
+    const observed = await replay(plainText())
 
-    withoutUsage.script.enqueue({ text: ['Hello.'], usage: null })
+    expect(mismatches(plainText(), observed)).toEqual([])
 
-    const chunks = await emulatorChunks(
-      await replayRequest(fixture ?? expect.fail('missing'), withoutUsage).response
+    const corrupted = rewriteEvents(observed, payload =>
+      withMetadata(payload, metadata => {
+        metadata.openai = { responseId: 1, serviceTier: 'default' }
+      })
     )
 
-    expect(finishAndUsage(chunks).map(entry => entry.placement)).not.toEqual(
-      finishAndUsage(recordedStream(fixture)).map(entry => entry.placement)
-    )
+    expect(mismatches(plainText(), corrupted)).toEqual(['event kinds differ'])
+  })
+
+  it('rejects an error envelope with an extra code', async () => {
+    const emulator = makeGatewayEmulator()
+
+    emulator.script.enqueue({
+      error: {
+        status: 404,
+        body: {
+          error: {
+            message: "Model 'synthetic' not found",
+            type: 'model_not_found',
+            param: { modelId: 'synthetic' },
+            code: 'model_not_found'
+          }
+        }
+      }
+    })
+
+    expect(mismatches(errorEnvelope(), await replay(errorEnvelope(), emulator))).toEqual([
+      'error envelope outline differs'
+    ])
+  })
+
+  it('rejects an error envelope sent as a 400', async () => {
+    const emulator = makeGatewayEmulator()
+
+    emulator.script.enqueue({
+      error: {
+        status: 400,
+        body: {
+          error: {
+            message: "Model 'synthetic' not found",
+            type: 'model_not_found',
+            param: { modelId: 'synthetic' }
+          }
+        }
+      }
+    })
+
+    expect(mismatches(errorEnvelope(), await replay(errorEnvelope(), emulator))).toEqual([
+      'status 400, recorded 404'
+    ])
+  })
+
+  it('rejects a per-chunk field missing from one event', async () => {
+    const observed = await replay(plainText())
+
+    expect(mismatches(plainText(), observed)).toEqual([])
+
+    const withoutFingerprint = rewriteEvents(observed, (payload, index) => {
+      if (index !== 2) return payload
+
+      const { system_fingerprint: _dropped, ...rest } = payload
+
+      return rest
+    })
+
+    expect(mismatches(plainText(), withoutFingerprint)).toEqual(['event kinds differ'])
   })
 })

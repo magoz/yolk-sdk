@@ -175,7 +175,7 @@ describe('gateway emulator defaults', () => {
     expect(events).toHaveLength(all.length + 1)
   })
 
-  it('sends service_tier and the upstream openai metadata only for openai/* models', async () => {
+  it('sends service_tier only for openai/* models, and the recorded upstream entry per family', async () => {
     const emulator = makeGatewayEmulator()
 
     const events = sseEvents(
@@ -186,7 +186,17 @@ describe('gateway emulator defaults', () => {
 
     expect(finish?.service_tier).toBeUndefined()
     expect(finish?.generationId).toBe(finish?.id)
-    expect(Object.keys(finish?.choices[0]?.delta.provider_metadata ?? {})).toEqual(['gateway'])
+    expect(finish?.choices[0]?.delta.provider_metadata).toMatchObject({
+      baseten: { acceptedPredictionTokens: 0, rejectedPredictionTokens: 0 }
+    })
+    expect(Object.keys(finish?.choices[0]?.delta.provider_metadata ?? {})).toEqual([
+      'baseten',
+      'gateway'
+    ])
+    expect(finish?.choices[0]?.delta.provider_metadata?.gateway?.routing).toMatchObject({
+      resolvedProvider: 'baseten',
+      finalProvider: 'baseten'
+    })
   })
 
   it('omits usage unless stream_options.include_usage is set', async () => {

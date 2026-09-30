@@ -77,13 +77,8 @@ There is no root export or barrel.
   and unknown-model status and error (or whole body), 401 error, completion-token field (recorded in the ledger as
   `maxCompletionTokens`, never validated), whether reasoning is emulated, its turn schema, its
   input-invalid error, and its wire profile (`ChatWireProfile`; omitted is the plain OpenAI wire).
-  The Gateway profile follows the recordings: `eventsPerChunk` SSE events per network chunk
-  (default 2, packed from the end so the finish event and `data: [DONE]` share the last chunk;
-  chunk faults count network chunks), usage on the finish event, a `{ role }` opening delta,
-  `logprobs: null`, `system_fingerprint` on every chunk, `provider_metadata` in the finish delta,
-  `service_tier` (for `openai/*` models) and `generationId` on the finish event, and
-  `delta.reasoning` with `reasoning_details`. Its unknown-model answer is the recorded 404
-  `{ error: { message, type: 'model_not_found', param: { modelId } } }` (no `code`). Any core
+  The Gateway profile must match its verified recordings structurally (keys and value types; values synthetic);
+  the wire fields it sends are listed once in `README.md` (Gateway emulator). Any core
   change is a profile or config parameter: keep the OpenAI wire unchanged (`test/openai.test.ts`
   and `test/openai-conformance.test.ts` are the guards) and the Gateway matching its recordings
   (`test/gateway.test.ts`, `test/gateway-recordings.test.ts`). `/openai` does not emulate reasoning yet: its turn

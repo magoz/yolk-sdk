@@ -17,7 +17,8 @@
  * models, envelope, reasoning, and wire profile.
  *
  * Not covered by a recording (synthetic): the 401 error, default fault
- * bodies, and the non-streamed `chat.completion` body.
+ * bodies, the non-streamed `chat.completion` body, and the answer to a request
+ * without a `model` (404 `Model '' not found` with `param.modelId: null`).
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`,
  * `TextEncoder`, `URL`); no Effect runtime is required to use it.
@@ -213,22 +214,51 @@ const syntheticAttemptTime = 1790000000000
 
 const syntheticCost = '0'
 
-/** The upstream provider the Gateway would route a model id to (its vendor prefix). */
-const upstreamProvider = (model: string): string => {
+const vendorOf = (model: string): string | undefined => {
   const [vendor] = model.split('/')
 
-  return vendor === undefined || vendor.length === 0 || vendor === model ? 'synthetic' : vendor
+  return vendor === undefined || vendor.length === 0 || vendor === model ? undefined : vendor
 }
 
-// Only OpenAI models were recorded with an upstream `openai` metadata entry and `service_tier`.
-const isOpenAiModel = (model: string): boolean => upstreamProvider(model) === 'openai'
+// `service_tier` was recorded only for OpenAI models.
+const isOpenAiModel = (model: string): boolean => vendorOf(model) === 'openai'
 
 const syntheticResponseId = (identity: ChatResponseIdentity): string =>
   `resp_synthetic_${identity.id}`
 
+/** The upstream provider a model routes to, and its `provider_metadata` entry if any. */
+type GatewayUpstream = { readonly provider: string; readonly entry?: Schema.JsonObject }
+
+/**
+ * The upstream provider the Gateway routes a model to, and its `provider_metadata` entry (keyed by
+ * that provider), per model family as recorded: `openai/*` routes to `openai` with
+ * `{ responseId, serviceTier }`; `deepseek/*` routes to `baseten` with
+ * `{ acceptedPredictionTokens, rejectedPredictionTokens }` (synthetic zero counts). Other families
+ * were not recorded: they route to their vendor prefix without an upstream entry.
+ */
+const upstreamOf = (identity: ChatResponseIdentity): GatewayUpstream => {
+  const vendor = vendorOf(identity.model)
+
+  if (vendor === 'openai') {
+    return {
+      provider: 'openai',
+      entry: { responseId: syntheticResponseId(identity), serviceTier: 'default' }
+    }
+  }
+
+  if (vendor === 'deepseek') {
+    return {
+      provider: 'baseten',
+      entry: { acceptedPredictionTokens: 0, rejectedPredictionTokens: 0 }
+    }
+  }
+
+  return { provider: vendor ?? 'synthetic' }
+}
+
 /** The `gateway` entry of `provider_metadata`: routing, costs, and the generation id. */
 const gatewayRoutingMetadata = (identity: ChatResponseIdentity): Schema.JsonObject => {
-  const provider = upstreamProvider(identity.model)
+  const { provider } = upstreamOf(identity)
   const responseId = syntheticResponseId(identity)
 
   return {
@@ -275,12 +305,13 @@ const gatewayRoutingMetadata = (identity: ChatResponseIdentity): Schema.JsonObje
   }
 }
 
-/** `provider_metadata`: the upstream provider's entry first (only OpenAI's was recorded), then `gateway`. */
+/** `provider_metadata`: the upstream provider's entry first (when its family has one), then `gateway`. */
 const gatewayProviderMetadata = (identity: ChatResponseIdentity): Schema.JsonObject => {
   const metadata: Record<string, Schema.Json> = {}
+  const upstream = upstreamOf(identity)
 
-  if (isOpenAiModel(identity.model)) {
-    metadata.openai = { responseId: syntheticResponseId(identity), serviceTier: 'default' }
+  if (upstream.entry !== undefined) {
+    metadata[upstream.provider] = upstream.entry
   }
 
   metadata.gateway = gatewayRoutingMetadata(identity)

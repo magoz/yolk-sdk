@@ -104,10 +104,11 @@ Defaults (no script):
   two DeepSeek ids.
 - `stream: true` streams `chat.completion.chunk` server-sent events as recorded: a
   `{ role: 'assistant' }` opening delta, several text deltas, then one finish event whose `delta`
-  carries `provider_metadata` (a synthetic `gateway` routing and cost entry, plus an `openai` entry
-  for `openai/*` models) and which carries `usage` (when `stream_options.include_usage` is set),
-  `system_fingerprint`, `service_tier` (`openai/*` models only), and `generationId`, followed only
-  by `data: [DONE]`. Every chunk carries `system_fingerprint`, and every choice `logprobs: null`.
+  carries `provider_metadata` (the recorded upstream entry, `openai` for `openai/*` models or
+  `baseten` for `deepseek/*` models, then a `gateway` routing and cost entry, all synthetic) and
+  which carries `usage` (when `stream_options.include_usage` is set), `system_fingerprint`,
+  `service_tier` (`openai/*` models only), and `generationId`, followed only by `data: [DONE]`.
+  Every chunk carries `system_fingerprint`, and every choice `logprobs: null`.
   `stream: false` returns one `chat.completion` JSON body (not covered by a recording).
 - Events are packed several per network chunk, as the live Gateway sends them: `eventsPerChunk`
   (default 2, a positive integer; 1 sends one event per chunk) counted from the end, so the last
@@ -153,10 +154,10 @@ throws `GatewayEmulatorInputInvalid` (the control plane answers 400).
 | `truncate-after-chunks` | Send N body chunks, then close cleanly (no `data: [DONE]`)                |
 
 Chunk faults count network chunks: with the default packing, `truncate-after-chunks` with N = 2
-sends four events. A chunk fault that cannot take effect answers 500 instead of silently doing
-nothing. If the
-emulator cannot build a planned response, it answers an evidence-tagged 500, the ledger records
-500 with `responseError`, and the matching fault is not used up.
+sends up to four events (four for the default plain-text response). A chunk fault that cannot
+take effect answers 500 instead of silently doing nothing. If the emulator cannot build a planned
+response, it answers an evidence-tagged 500, the ledger records 500 with `responseError`, and the
+matching fault is not used up.
 
 `ledger.entries()` records every emulated API request (control-plane requests are not recorded):
 method, path, parsed JSON body, model, `stream`, the `max_tokens` limit (as `maxCompletionTokens`;
