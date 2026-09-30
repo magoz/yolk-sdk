@@ -1,7 +1,12 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Exit, Fiber, Deferred, Layer, Ref } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Layer, Predicate, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
-import { HttpClient, HttpClientError } from 'effect/unstable/http'
+import {
+  HttpClient,
+  HttpClientError,
+  HttpClientResponse,
+  type HttpClientRequest
+} from 'effect/unstable/http'
 import type { ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,
@@ -527,8 +532,43 @@ const drill = (
     return { failure: report.results[0]?.failure, ...(yield* ledgerOf(ledgers, testCase.id)) }
   })
 
+/** A copy of `fixture` (same id) with `extra` inserted after exchange `index`. */
+const insertAfter = (fixture: WireFixture, index: number, extra: WireExchange): WireFixture => {
+  const [first, ...rest] = fixture.exchanges.flatMap((exchange, position) =>
+    position === index ? [exchange, extra] : [exchange]
+  )
+
+  return first === undefined
+    ? expect.fail('no exchanges')
+    : { ...fixture, exchanges: [first, ...rest] }
+}
+
+const exchangeAt = (fixture: WireFixture, index: number): WireExchange =>
+  fixture.exchanges[index] ?? expect.fail(`no exchange ${index} in ${fixture.id}`)
+
+/** A `delete_v2` by the owned path (the fallback after a refused id delete). */
+const deleteByPath = (path: string, response: WireResponse): WireExchange => ({
+  request: {
+    method: 'POST',
+    url: 'https://api.dropboxapi.com/2/files/delete_v2',
+    headers: { 'content-type': 'application/json' },
+    body: { path }
+  },
+  response
+})
+
+const copyFolder = '/Conformance/Work/yolk-conformance-run-synthetic-copy'
+
+const conflictFolder = '/Conformance/Work/yolk-conformance-run-synthetic-folder'
+
+const malformedPathBody =
+  '{"error_summary": "path_lookup/malformed_path/.", "error": {".tag": "path_lookup", "path_lookup": {".tag": "malformed_path"}}}'
+
+const deleteBodies = (entries: ReadonlyArray<ReplayLedgerEntry>) =>
+  entries.flatMap(entry => (entry.url.endsWith('/files/delete_v2') ? [entry.bodyJson] : []))
+
 describe('Dropbox conformance restore', () => {
-  it.effect('still deletes the case folder when a claim fails mid-flow', () =>
+  it.effect('still deletes the case folder, by id, when a claim fails mid-flow', () =>
     Effect.gen(function* () {
       const { entries, remaining } = yield* drill(
         dropboxCreateFolderConflictCase,
@@ -543,34 +583,80 @@ describe('Dropbox conformance restore', () => {
         'files/delete_v2 4',
         'files/get_metadata 5'
       ])
+      expect(deleteBodies(entries)).toEqual([{ path: 'id:SyntheticConflictFolder1' }])
       expect(remaining).toEqual([])
     })
   )
 
-  it.effect('reports a failed restore instead of swallowing it', () =>
+  it.effect('falls back to the owned path when the id delete is refused', () =>
     Effect.gen(function* () {
-      const undeleted = replaceResponse(
-        dropboxCopyMoveMetadataFixture,
+      yield* atTestNow
+
+      const fixture = insertAfter(
+        replaceResponse(dropboxCopyMoveMetadataFixture, 5, withStatus(409, malformedPathBody)),
         5,
-        withStatus(500, serverError)
+        deleteByPath(copyFolder, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: textBody(exchangeAt(dropboxCopyMoveMetadataFixture, 5).response)
+        })
+      )
+
+      const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
+
+      const report = yield* runConformance([dropboxCopyMoveMetadataCase], {
+        target: { kind: 'replay' },
+        now,
+        layer: ledgerCaseLayer(ledgers, [fixture])
+      })
+
+      const { entries, remaining } = yield* ledgerOf(ledgers, dropboxCopyMoveMetadataCase.id)
+
+      expect(report.summary.passed).toBe(1)
+      expect(deleteBodies(entries)).toEqual([
+        { path: 'id:SyntheticCopyFolder0001' },
+        { path: copyFolder }
+      ])
+      expect(remaining).toEqual([])
+    })
+  )
+
+  it.effect('reports a failed restore, naming the path, instead of swallowing it', () =>
+    Effect.gen(function* () {
+      const undeleted = insertAfter(
+        replaceResponse(dropboxCopyMoveMetadataFixture, 5, withStatus(500, serverError)),
+        5,
+        deleteByPath(copyFolder, {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+          body: serverError
+        })
       )
 
       const { failure } = yield* drill(dropboxCopyMoveMetadataCase, undeleted)
 
       expect(failure?.tag).toBe('DropboxConformanceRestoreFailed')
       expect(failure?.message).toBe(
-        'dropbox.files.copy-move-metadata: restore failed; delete the case-created folder by hand if it still exists (its name starts with yolk-conformance, under workFolderPath). Restore error: dropbox.delete dropbox_delete_failed 500. Claim held first.'
+        `dropbox.files.copy-move-metadata: restore failed; delete ${copyFolder} by hand if it still exists. Restore error: dropbox.delete dropbox_delete_failed 500. Claim held first.`
       )
     })
   )
 
   it.effect('reports both a failed claim and a failed restore', () =>
     Effect.gen(function* () {
-      // The stale-rev tamper (the claim fails), and its restore delete (5) answers 500.
-      const both = replaceResponse(
-        tampers[7]?.fixture ?? expect.fail('missing tamper'),
+      // The stale-rev tamper (the claim fails); its restore id delete (5) and path delete answer 500.
+      const both = insertAfter(
+        replaceResponse(
+          tampers[7]?.fixture ?? expect.fail('missing tamper'),
+          5,
+          withStatus(500, serverError)
+        ),
         5,
-        withStatus(500, serverError)
+        deleteByPath('/Conformance/Work/yolk-conformance-run-synthetic-upload', {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+          body: serverError
+        })
       )
 
       const { failure } = yield* drill(dropboxUploadRevPreconditionCase, both)
@@ -589,9 +675,9 @@ describe('Dropbox conformance restore', () => {
         headers: response.headers,
         body: JSON.stringify({
           '.tag': 'folder',
-          name: 'yolk-conformance-folder',
-          path_lower: '/conformance/work/yolk-conformance-folder',
-          path_display: '/Conformance/Work/yolk-conformance-folder',
+          name: 'yolk-conformance-run-synthetic-folder',
+          path_lower: '/conformance/work/yolk-conformance-run-synthetic-folder',
+          path_display: conflictFolder,
           id: 'id:SyntheticConflictFolder1'
         })
       }))
@@ -599,51 +685,11 @@ describe('Dropbox conformance restore', () => {
       const { failure } = yield* drill(dropboxCreateFolderConflictCase, stillThere)
 
       expect(failure?.tag).toBe('DropboxConformanceRestoreFailed')
+      expect(failure?.message).toContain(`delete ${conflictFolder} by hand if it still exists`)
       expect(failure?.message).toContain(
         'Restore error: expected get_metadata of the case-created folder to answe...'
       )
       expect(failure?.message).toContain('Claim held first.')
-    })
-  )
-
-  it.effect('deletes the path even when the create itself failed', () =>
-    Effect.gen(function* () {
-      const [absent, , , , deleted, gone] = dropboxCreateFolderConflictFixture.exchanges
-
-      if (absent === undefined || deleted === undefined || gone === undefined) {
-        return expect.fail('expected six exchanges')
-      }
-
-      const created = dropboxCreateFolderConflictFixture.exchanges[1]
-
-      if (created === undefined) {
-        return expect.fail('expected a create exchange')
-      }
-
-      const fixture: WireFixture = {
-        ...dropboxCreateFolderConflictFixture,
-        exchanges: [
-          absent,
-          { request: created.request, response: withStatus(500, serverError)(created.response) },
-          { request: deleted.request, response: withStatus(409, notFoundBody)(deleted.response) },
-          gone
-        ]
-      }
-
-      const { failure, entries, remaining } = yield* drill(dropboxCreateFolderConflictCase, fixture)
-
-      expect(failure).toEqual({
-        kind: 'failure',
-        tag: 'DropboxConformanceActionFailed',
-        message: 'dropbox.create_folder failed: dropbox_create_folder_failed (HTTP 500)'
-      })
-      expect(exchangeIndices(entries)).toEqual([
-        'files/get_metadata 0',
-        'files/create_folder_v2 1',
-        'files/delete_v2 2',
-        'files/get_metadata 3'
-      ])
-      expect(remaining).toEqual([])
     })
   )
 
@@ -654,7 +700,7 @@ describe('Dropbox conformance restore', () => {
         0,
         withStatus(
           200,
-          '{".tag":"folder","name":"yolk-conformance-folder","id":"id:SyntheticLeftoverFolder"}'
+          '{".tag":"folder","name":"yolk-conformance-run-synthetic-folder","id":"id:SyntheticLeftoverFolder"}'
         )
       )
 
@@ -665,7 +711,7 @@ describe('Dropbox conformance restore', () => {
 
       expect(failure).toEqual(
         mismatch(
-          'precondition: a Dropbox entry already exists at the case folder yolk-conformance-folder under workFolderPath (left by an earlier run?); delete it by hand; nothing was written'
+          'precondition: a Dropbox entry already exists at the case folder yolk-conformance-run-synthetic-folder under workFolderPath; delete it by hand; nothing was written'
         )
       )
       expect(exchangeIndices(entries)).toEqual(['files/get_metadata 0'])
@@ -684,6 +730,23 @@ describe('Dropbox conformance restore', () => {
 
       expect(failure).toEqual(
         mismatch('precondition: DropboxConformanceConfig.pagingFolderPath is not configured')
+      )
+      expect(entries).toEqual([])
+    })
+  )
+
+  it.effect('refuses every write case before any request without a run id', () =>
+    Effect.gen(function* () {
+      const { runId: _dropped, ...seeds } = dropboxConformanceFixtureSeeds
+
+      const { failure, entries } = yield* drill(
+        dropboxCreateFolderConflictCase,
+        dropboxCreateFolderConflictFixture,
+        seeds
+      )
+
+      expect(failure).toEqual(
+        mismatch('precondition: DropboxConformanceConfig.runId is not configured')
       )
       expect(entries).toEqual([])
     })
@@ -727,6 +790,53 @@ describe('Dropbox conformance restore', () => {
     })
   )
 
+  it.effect('registers a create in flight when interrupted, then deletes it by id', () =>
+    Effect.gen(function* () {
+      const createSent = yield* Deferred.make<void>()
+      const releaseCreate = yield* Deferred.make<void>()
+
+      // The absence check (0), the create (1), then only the restore's delete (4) and lookup (5).
+      const { client, ledger } = yield* makeReplayHttpClient([
+        withoutExchanges(dropboxCreateFolderConflictFixture, [2, 3])
+      ])
+
+      // Dropbox has created the folder, but its response is held back until the test releases it.
+      const holdingCreate = HttpClient.transform(client, (response, request) =>
+        request.url.endsWith('/files/create_folder_v2')
+          ? response.pipe(
+              Effect.tap(() => Deferred.succeed(createSent, undefined)),
+              Effect.tap(() => Deferred.await(releaseCreate))
+            )
+          : response
+      )
+
+      const fiber = yield* dropboxCreateFolderConflictCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holdingCreate))),
+        Effect.forkChild
+      )
+
+      yield* Deferred.await(createSent)
+
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseCreate, undefined)
+      yield* Fiber.join(interrupting)
+
+      const exit = yield* Fiber.await(fiber)
+      const entries = yield* ledger.entries
+
+      expect(Exit.hasInterrupts(exit)).toBe(true)
+      expect(exchangeIndices(entries)).toEqual([
+        'files/get_metadata 0',
+        'files/create_folder_v2 1',
+        'files/delete_v2 2',
+        'files/get_metadata 3'
+      ])
+      expect(deleteBodies(entries)).toEqual([{ path: 'id:SyntheticConflictFolder1' }])
+    })
+  )
+
   it.effect('reports a transport failure without a status', () =>
     Effect.gen(function* () {
       const dropping = HttpClient.make(request =>
@@ -749,4 +859,330 @@ describe('Dropbox conformance restore', () => {
       })
     })
   )
+})
+
+// Ownership drills: definitive rejections delete nothing, ambiguous creates are reported with the
+// exact path, and cleanup never leaves the case folder.
+
+const foreignFolder =
+  '{"metadata":{"name":"elsewhere","path_lower":"/conformance/other/elsewhere","path_display":"/Conformance/Other/elsewhere","id":"id:SyntheticForeign0001"}}'
+
+describe('Dropbox conformance write ownership', () => {
+  it.effect('deletes nothing after a definitive create rejection', () =>
+    Effect.gen(function* () {
+      const rejected = withoutExchanges(
+        replaceResponse(
+          dropboxCreateFolderConflictFixture,
+          1,
+          withStatus(409, textBody(exchangeAt(dropboxCreateFolderConflictFixture, 2).response))
+        ),
+        [2, 3, 4, 5]
+      )
+
+      const { failure, entries, remaining } = yield* drill(
+        dropboxCreateFolderConflictCase,
+        rejected
+      )
+
+      expect(failure).toEqual({
+        kind: 'failure',
+        tag: 'DropboxConformanceActionFailed',
+        message: 'dropbox.create_folder failed: dropbox_conflict (HTTP 409)'
+      })
+      expect(exchangeIndices(entries)).toEqual(['files/get_metadata 0', 'files/create_folder_v2 1'])
+      expect(remaining).toEqual([])
+    })
+  )
+
+  it.effect(
+    'reports an ambiguous 5xx create with the exact path after one best-effort delete',
+    () =>
+      Effect.gen(function* () {
+        const ambiguous: WireFixture = {
+          ...dropboxCreateFolderConflictFixture,
+          exchanges: [
+            exchangeAt(dropboxCreateFolderConflictFixture, 0),
+            {
+              ...exchangeAt(dropboxCreateFolderConflictFixture, 1),
+              response: withStatus(
+                500,
+                serverError
+              )(exchangeAt(dropboxCreateFolderConflictFixture, 1).response)
+            },
+            deleteByPath(conflictFolder, {
+              status: 409,
+              headers: { 'content-type': 'application/json' },
+              body: notFoundBody
+            }),
+            exchangeAt(dropboxCreateFolderConflictFixture, 5)
+          ]
+        }
+
+        const { failure, entries } = yield* drill(dropboxCreateFolderConflictCase, ambiguous)
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'DropboxConformanceActionFailed',
+          message: `dropbox.create_folder failed: dropbox_create_folder_failed (HTTP 500); create outcome unknown: delete ${conflictFolder} by hand if it exists`
+        })
+        expect(deleteBodies(entries)).toEqual([{ path: conflictFolder }])
+      })
+  )
+
+  it.effect('refuses to adopt a created path outside the case folder', () =>
+    Effect.gen(function* () {
+      const outside = withoutExchanges(
+        replaceResponse(dropboxCreateFolderConflictFixture, 1, withStatus(200, foreignFolder)),
+        [2, 3, 4, 5]
+      )
+
+      const { failure, entries } = yield* drill(dropboxCreateFolderConflictCase, outside)
+
+      expect(failure).toEqual({
+        kind: 'failure',
+        tag: 'DropboxConformanceCleanupRefused',
+        message:
+          'dropbox.files.create-folder-conflict: cleanup refused; a create answered /conformance/other/elsewhere, outside the case folder, so nothing was deleted there; check it by hand.'
+      })
+      expect(deleteBodies(entries)).toEqual([])
+    })
+  )
+
+  it.effect(
+    'refuses an out-of-namespace path from a surprising duplicate create, cleaning only its own',
+    () =>
+      Effect.gen(function* () {
+        const outside = replaceResponse(
+          dropboxCreateFolderConflictFixture,
+          3,
+          withStatus(200, foreignFolder)
+        )
+
+        const { failure, entries, remaining } = yield* drill(
+          dropboxCreateFolderConflictCase,
+          outside
+        )
+
+        expect(failure?.tag).toBe('DropboxConformanceCleanupRefused')
+        expect(deleteBodies(entries)).toEqual([{ path: 'id:SyntheticConflictFolder1' }])
+        expect(remaining).toEqual([])
+      })
+  )
+
+  it.effect('a concurrent create conflict: the losing run deletes nothing', () =>
+    Effect.gen(function* () {
+      yield* atTestNow
+
+      const fake = yield* makeFakeDropbox
+      const bothChecked = yield* Deferred.make<void>()
+      const lookups = yield* Ref.make(0)
+
+      // Both runs pass their absence check before either create reaches the fake.
+      const gated = HttpClient.make((request, url) =>
+        Effect.gen(function* () {
+          if (url.pathname.endsWith('/files/get_metadata')) {
+            if ((yield* Ref.updateAndGet(lookups, count => count + 1)) === 2) {
+              yield* Deferred.succeed(bothChecked, undefined)
+            }
+          }
+
+          if (url.pathname.endsWith('/files/create_folder_v2')) {
+            yield* Deferred.await(bothChecked)
+          }
+
+          return yield* fake.handle(request, url)
+        })
+      )
+
+      // Same seeds, same namespace: a collision the unique run id normally prevents.
+      const runOnce = dropboxCreateFolderConflictCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, gated))),
+        Effect.exit
+      )
+
+      const exits = yield* Effect.all([runOnce, runOnce], { concurrency: 2 })
+      const failures = exits.filter(Exit.isFailure)
+
+      expect(exits.filter(Exit.isSuccess)).toHaveLength(1)
+      expect(failures).toHaveLength(1)
+      expect(String(failures[0]?.cause)).toContain(
+        'dropbox.create_folder failed: dropbox_conflict (HTTP 409)'
+      )
+
+      const log = yield* Ref.get(fake.log)
+
+      // Only the winner deleted anything, and only its own entry, by id.
+      const deletes = log.filter(line => line.startsWith('delete_v2'))
+
+      expect(deletes).toHaveLength(1)
+      expect(deletes[0]).toMatch(/^delete_v2 id:SyntheticFake\d{4}$/)
+      expect((yield* Ref.get(fake.entries)).size).toBe(0)
+    })
+  )
+
+  it.effect('a create that lands after the cleanup lookup is still reported as ambiguous', () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeDropbox
+      const deferred = yield* Ref.make<ReadonlyArray<string>>([])
+
+      // The connection drops while Dropbox is still creating the folder; it lands only later.
+      const dropping = HttpClient.make((request, url) =>
+        url.pathname.endsWith('/files/create_folder_v2')
+          ? Ref.update(deferred, paths => [...paths, requestPath(request)]).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new HttpClientError.HttpClientError({
+                    reason: new HttpClientError.TransportError({
+                      request,
+                      description: 'connection reset'
+                    })
+                  })
+                )
+              )
+            )
+          : fake.handle(request, url)
+      )
+
+      const exit = yield* dropboxCreateFolderConflictCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, dropping))),
+        Effect.exit
+      )
+
+      // The best-effort cleanup looked the path up and found nothing; then the create lands.
+      expect(yield* Ref.get(fake.log)).toEqual([
+        `get_metadata ${conflictFolder}`,
+        `delete_v2 ${conflictFolder}`,
+        `get_metadata ${conflictFolder}`
+      ])
+
+      for (const path of yield* Ref.get(deferred)) {
+        yield* fake.create(path)
+      }
+
+      expect((yield* Ref.get(fake.entries)).size).toBe(1)
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(String(Exit.isFailure(exit) ? exit.cause : '')).toContain(
+        `dropbox.create_folder failed: transport_failed; create outcome unknown: delete ${conflictFolder} by hand if it exists`
+      )
+    })
+  )
+})
+
+// A minimal in-memory Dropbox (folders only) for the ownership drills.
+
+type FakeFolder = {
+  readonly id: string
+  readonly name: string
+  readonly path_lower: string
+  readonly path_display: string
+}
+
+const requestPath = (request: HttpClientRequest.HttpClientRequest): string => {
+  const text = Predicate.isTagged(request.body, 'Uint8Array')
+    ? new TextDecoder().decode(request.body.body)
+    : '{}'
+
+  const path: unknown = JSON.parse(text).path
+
+  return Predicate.isString(path) ? path : ''
+}
+
+const jsonResponse = (
+  request: HttpClientRequest.HttpClientRequest,
+  status: number,
+  body: unknown
+) =>
+  HttpClientResponse.fromWeb(
+    request,
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  )
+
+const makeFakeDropbox = Effect.gen(function* () {
+  const entries = yield* Ref.make(new Map<string, FakeFolder>())
+  const log = yield* Ref.make<ReadonlyArray<string>>([])
+  const counter = yield* Ref.make(0)
+
+  const notFound = JSON.parse(notFoundBody)
+
+  const conflict = {
+    error_summary: 'path/conflict/folder/..',
+    error: { '.tag': 'path', path: { '.tag': 'conflict', conflict: { '.tag': 'folder' } } }
+  }
+
+  const find = (path: string) =>
+    Ref.get(entries).pipe(
+      Effect.map(map =>
+        path.startsWith('id:')
+          ? [...map.values()].find(folder => folder.id === path)
+          : map.get(path.toLowerCase())
+      )
+    )
+
+  const create = (path: string) =>
+    Effect.gen(function* () {
+      const id = `id:SyntheticFake${String(yield* Ref.updateAndGet(counter, n => n + 1)).padStart(4, '0')}`
+
+      return yield* Ref.modify(
+        entries,
+        (map): [FakeFolder | undefined, Map<string, FakeFolder>] => {
+          if (map.has(path.toLowerCase())) return [undefined, map]
+
+          const folder: FakeFolder = {
+            id,
+            name: path.slice(path.lastIndexOf('/') + 1),
+            path_lower: path.toLowerCase(),
+            path_display: path
+          }
+
+          return [folder, new Map(map).set(folder.path_lower, folder)]
+        }
+      )
+    })
+
+  const handle = (request: HttpClientRequest.HttpClientRequest, url: URL) =>
+    Effect.gen(function* () {
+      const route = url.pathname.slice(url.pathname.lastIndexOf('/') + 1)
+      const path = requestPath(request)
+
+      yield* Ref.update(log, lines => [...lines, `${route} ${path}`])
+
+      switch (route) {
+        case 'get_metadata': {
+          const folder = yield* find(path)
+
+          return folder === undefined
+            ? jsonResponse(request, 409, notFound)
+            : jsonResponse(request, 200, { '.tag': 'folder', ...folder })
+        }
+
+        case 'create_folder_v2': {
+          const folder = yield* create(path)
+
+          return folder === undefined
+            ? jsonResponse(request, 409, conflict)
+            : jsonResponse(request, 200, { metadata: folder })
+        }
+
+        case 'delete_v2': {
+          const folder = yield* find(path)
+
+          if (folder === undefined) return jsonResponse(request, 409, notFound)
+
+          yield* Ref.update(entries, map => {
+            const next = new Map(map)
+
+            next.delete(folder.path_lower)
+
+            return next
+          })
+
+          return jsonResponse(request, 200, { metadata: { '.tag': 'folder', ...folder } })
+        }
+
+        default:
+          return jsonResponse(request, 400, { error_summary: 'unsupported/.' })
+      }
+    })
+
+  return { entries, log, create, handle }
 })

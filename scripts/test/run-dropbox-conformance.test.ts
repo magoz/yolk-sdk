@@ -1,5 +1,14 @@
 import { execFile } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Effect, Result } from 'effect'
@@ -28,8 +37,10 @@ import {
   liveInputs,
   liveTarget,
   mergedFixtureSeeds,
+  nodeRecordingWriter,
   ownerApprovalRequiredMessage,
   parseRunArgs,
+  physicallyContained,
   planRun,
   recordingReviewChecklist,
   recordingRunId,
@@ -43,6 +54,7 @@ import {
 import {
   dropboxCaseSpecs,
   dropboxRunner,
+  generateRunId,
   liveCredential,
   recordingsRoot
 } from '../run-dropbox-conformance.ts'
@@ -139,6 +151,8 @@ describe('run-dropbox-conformance arguments', () => {
       'Unknown argument'
     )
     expect(() => parse(['--record'])).toThrow('--record requires --live')
+    // The run id is generated per invocation, never supplied.
+    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument')
   })
 })
 
@@ -189,7 +203,7 @@ describe('run-dropbox-conformance plan', () => {
       'RUN   dropbox.files.delete-then-not-found  [write-reversible]  needs --work-folder',
       'RUN   dropbox.files.copy-move-metadata  [write-reversible]  needs --work-folder, --copy-source',
       'RUN   dropbox.files.upload-rev-precondition  [write-reversible]  needs --work-folder',
-      "Use a practice Dropbox account only, with the repository owner's approval; never in CI. Write cases work inside their own yolk-conformance folder under --work-folder and delete it again."
+      "Use a practice Dropbox account only, with the repository owner's approval; never in CI. Write cases work inside their own yolk-conformance-<run id> folder under --work-folder (a fresh random run id per invocation) and delete it again."
     ])
   })
 })
@@ -230,13 +244,35 @@ describe('run-dropbox-conformance live refusal (no network)', () => {
     expect(
       liveInputs(dropboxRunner, live([...readSeedFlags, '--work-folder=Conformance/Work/']), env)
     ).toEqual({ refusal: dropboxRunner.invalidSeedsMessage })
-    expect(liveInputs(dropboxRunner, live(readSeedFlags), env)).toMatchObject({
+    expect(
+      liveInputs(dropboxRunner, live(readSeedFlags), env, { runId: 'run-0000beef' })
+    ).toMatchObject({
       inputs: {
         account: 'practice',
         accessToken: 'synthetic-token',
-        seeds: { workFolderPath: '/Conformance/Work', searchQuery: 'yolk-search-probe' }
+        seeds: {
+          workFolderPath: '/Conformance/Work',
+          searchQuery: 'yolk-search-probe',
+          runId: 'run-0000beef'
+        }
       }
     })
+  })
+
+  it('generates a fresh, valid run id for every live invocation', () => {
+    const runIdOf = () => {
+      const checked = liveInputs(dropboxRunner, live(readSeedFlags), env)
+
+      return 'inputs' in checked ? checked.inputs.seeds.runId : expect.fail(checked.refusal)
+    }
+
+    const first = runIdOf()
+    const second = runIdOf()
+
+    expect(first).toMatch(/^run-[0-9a-f]{8}$/)
+    expect(second).toMatch(/^run-[0-9a-f]{8}$/)
+    expect(first).not.toBe(second)
+    expect(generateRunId()).toMatch(/^run-[0-9a-f]{8}$/)
   })
 
   it('binds the live token as a bearer credential', () => {
@@ -261,11 +297,15 @@ describe('run-dropbox-conformance rendering', () => {
     const merged = mergedFixtureSeeds(
       dropboxRunner,
       dropboxConformanceFixtureSeeds,
-      { workFolderPath: '/Practice/Work' },
+      { workFolderPath: '/Practice/Work', runId: 'run-0000beef' },
       ['dropbox.files.create-folder-conflict']
     )
 
-    expect(merged).toEqual({ ...dropboxConformanceFixtureSeeds, workFolderPath: '/Practice/Work' })
+    expect(merged).toEqual({
+      ...dropboxConformanceFixtureSeeds,
+      workFolderPath: '/Practice/Work',
+      runId: 'run-0000beef'
+    })
     expect(
       staleSharedSeeds(dropboxRunner, dropboxConformanceFixtureSeeds, merged, [
         'dropbox.files.create-folder-conflict'
@@ -275,6 +315,14 @@ describe('run-dropbox-conformance rendering', () => {
         key: 'workFolderPath',
         cases: [
           'dropbox.errors.not-found-409-envelope',
+          'dropbox.files.delete-then-not-found',
+          'dropbox.files.copy-move-metadata',
+          'dropbox.files.upload-rev-precondition'
+        ]
+      },
+      {
+        key: 'runId',
+        cases: [
           'dropbox.files.delete-then-not-found',
           'dropbox.files.copy-move-metadata',
           'dropbox.files.upload-rev-precondition'
@@ -372,7 +420,9 @@ const memoryWriter = (
       for (const dir of [...directories].filter(dir => isUnder(dir, path))) directories.delete(dir)
 
       for (const file of [...files.keys()].filter(file => isUnder(file, path))) files.delete(file)
-    }
+    },
+    // No symlinks in memory: every path is its own canonical location.
+    realpath: path => path
   }
 
   const entriesUnderRoot = () =>
@@ -455,6 +505,10 @@ describe('run-dropbox-conformance --record staging (offline)', () => {
     )
     expect(result.success.files).toEqual(staged)
     expect(result.success.checklist.join('\n')).toContain('names: "/Conformance/Paging"')
+    expect(result.success.checklist.join('\n')).toContain(
+      '  seeds.ts: every value names practice-account data; replace each with a synthetic value'
+    )
+    expect(result.success.checklist.join('\n')).toContain('pagingFolderPath="/Conformance/Paging"')
     expect(result.success.checklist.join('\n')).not.toContain('SHARED SEED')
   })
 
@@ -622,6 +676,72 @@ describe('run-dropbox-conformance --record staging (offline)', () => {
     )
     expect(checklist).toContain('"Quarterly numbers.xlsx"')
     expect(checklist).toContain('"/Finance/Quarterly numbers.xlsx"')
+  })
+})
+
+describe('run-dropbox-conformance --record containment (real filesystem)', () => {
+  it('refuses a symlinked recordings directory and writes nothing through it', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'yolk-recordings-')))
+
+    try {
+      // A tracked-looking target, and a recordings directory that is a symlink into it.
+      const target = join(base, 'packages-like-target')
+
+      mkdirSync(target)
+      symlinkSync(target, join(base, '.conformance-recordings'))
+
+      const root = join(base, '.conformance-recordings', 'dropbox')
+
+      const result = await Effect.runPromise(
+        stageRecordings(dropboxRunner, passedReport([pagingId]), pagingRecorders(), recordInputs, {
+          writer: nodeRecordingWriter,
+          recordingsRoot: root,
+          containmentRoot: base,
+          stagingDir: join(root, runId),
+          recordedAt: '2026-09-30'
+        }).pipe(Effect.result)
+      )
+
+      expect(failureMessage(result)).toBe(
+        `Refusing recordings under a symlinked or redirected directory (${root}); nothing was written`
+      )
+      expect(readdirSync(target)).toEqual([])
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('stages into a real directory under the containment root', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'yolk-recordings-')))
+
+    try {
+      const root = join(base, '.conformance-recordings', 'dropbox')
+
+      const result = await Effect.runPromise(
+        stageRecordings(dropboxRunner, passedReport([pagingId]), pagingRecorders(), recordInputs, {
+          writer: nodeRecordingWriter,
+          recordingsRoot: root,
+          containmentRoot: base,
+          stagingDir: join(root, runId),
+          recordedAt: '2026-09-30'
+        }).pipe(Effect.result)
+      )
+
+      expect(Result.isSuccess(result)).toBe(true)
+      expect(readdirSync(join(root, runId)).sort()).toEqual(['list-folder-paging.ts', 'seeds.ts'])
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('checks physical containment component by component', () => {
+    const redirect = (from: string, to: string) => ({
+      realpath: (path: string) => (path.startsWith(from) ? to + path.slice(from.length) : path)
+    })
+
+    expect(physicallyContained(redirect('/x', '/x'), '/w', ['/w/a/b'])).toBe(true)
+    expect(physicallyContained(redirect('/w/a', '/w/elsewhere'), '/w', ['/w/a/b'])).toBe(false)
+    expect(physicallyContained(redirect('/x', '/x'), '/w', ['/outside/a'])).toBe(false)
   })
 })
 

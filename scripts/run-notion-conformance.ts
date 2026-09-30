@@ -5,8 +5,7 @@
  * flags, then exits without any network call or credential read.
  *
  * `--live --owner-approved --account <label>`: runs the cases against the real Notion API with a
- * `FetchHttpClient`, through the real connector actions (the version-header case also sends one
- * raw GET without `Notion-Version`, which no action can). Refused whenever `CI` is non-empty and
+ * `FetchHttpClient`, through the real connector actions. Refused whenever `CI` is non-empty and
  * without `--owner-approved`. Requires `NOTION_API_TOKEN` (environment only, never a flag; an
  * internal integration token of the practice workspace with read content and insert/update content
  * capabilities, shared with every seeded page and database) and the seed ids of every case that
@@ -90,7 +89,7 @@ export const notionSeedSources: ReadonlyArray<SeedSource<NotionConformanceSeedKe
     key: 'propertyId',
     flag: '--property-id',
     env: 'NOTION_CONFORMANCE_PROPERTY_ID',
-    description: 'that property id exactly as the page object returns it'
+    description: 'that property id as the page returns it; must contain a %XX escape'
   },
   {
     key: 'databaseId',
@@ -117,12 +116,12 @@ export const notionCaseSpecs: ReadonlyArray<CaseSpec<NotionConformanceSeedKey>> 
     doc: 'A `page_size: 1` search for the seeded query, then the pages its `next_cursor` leads to.'
   },
   {
-    caseId: 'notion.api.version-header-required',
+    caseId: 'notion.api.pinned-version-accepted',
     seeds: [],
     optionalSeeds: [],
     fileName: 'version-header.ts',
     exportName: 'notionVersionHeaderFixture',
-    doc: 'GET /v1/users/me without `Notion-Version`, then with it through `notion.get_bot_user`.'
+    doc: '`notion.get_bot_user`: one GET /v1/users/me carrying the pinned `Notion-Version`.'
   },
   {
     caseId: 'notion.errors.error-envelope',
@@ -154,7 +153,7 @@ export const notionCaseSpecs: ReadonlyArray<CaseSpec<NotionConformanceSeedKey>> 
     optionalSeeds: [],
     fileName: 'property-item-paging.ts',
     exportName: 'notionPropertyItemPagingFixture',
-    doc: 'A `page_size=2` page of property items, then the pages its `next_cursor` leads to.'
+    doc: 'The seeded page, a `page_size=2` page of property items requested with the id percent-encoded again, then the pages its `next_cursor` leads to.'
   },
   {
     caseId: 'notion.data-sources.database-split',

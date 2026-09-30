@@ -857,11 +857,20 @@ not-found, single-item copy/move metadata, and the upload rev precondition. Cred
 table, seeds, and claims live in the
 [Dropbox conformance guide](../../apps/docs/content/docs/connectors/dropbox.mdx#conformance-cases).
 
-Every write case works inside its own `yolk-conformance-*` folder under the `workFolderPath` seed:
-it proves the path absent before writing, registers it before the create, and always deletes it by
-path again (also after a failed assertion, a failed or ambiguous create, or an interruption), then
-checks that `get_metadata` answers not-found; a failed cleanup fails with
-`DropboxConformanceRestoreFailed`. `pnpm conformance:dropbox` in this repository dry-runs by default;
+Every write case works only inside its own `yolk-conformance-<runId>-<case>` folder under the
+`workFolderPath` seed. The `runId` seed makes that namespace unique per invocation (the fixtures
+replay with `run-synthetic`; the live runner generates a fresh random id every time), so concurrent
+runs are supported only through distinct run ids. A case proves its folder path absent before
+writing, and registers the created entry together with the create (uninterruptibly). A definitive
+create rejection (HTTP 4xx, such as `path/conflict`) deletes nothing. An ambiguous create (a
+transport or decoding failure, no status, or HTTP 5xx) gets one best-effort delete of the owned path
+but always fails with `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) naming the
+exact path to check by hand. After a successful create, the cleanup deletes the entry by id
+(falling back to the owned path), also after a failed assertion or an interruption, then checks that
+`get_metadata` answers not-found; a failed cleanup fails with `DropboxConformanceRestoreFailed`
+naming the path, and a create answering a path outside the case folder is never deleted
+(`DropboxConformanceCleanupRefused`). Neither the runner nor the bridges set a request timeout, so a
+hanging create delays an interruption. `pnpm conformance:dropbox` in this repository dry-runs by default;
 `--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; needs
 `DROPBOX_ACCESS_TOKEN` and the seeds) is for owners running a practice account by hand,
 `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or
@@ -1255,17 +1264,20 @@ promotion.
 (`notionConformanceFixtureSeeds`). Every case runs the real connector actions over
 `ConnectorHttpClient` and `CredentialResolver` plus `NotionConformanceConfig`, which holds
 host-supplied seed ids in a practice Notion workspace. They cover search, block children, and page
-property cursor paging, the `Notion-Version` requirement, the `{ object: "error", status, code,
+property cursor paging (including the connector's second percent-encoding of property ids), the
+pinned `Notion-Version`, the `{ object: "error", status, code,
 message }` envelope, title rich text, the 2025-09-03 database/data source split, and archiving a
-page to the trash. **Every action sends `Notion-Version: 2025-09-03`**, so the version-header case
-also sends one raw GET without it through the same ports. Credentials bind through
+page to the trash. **Every action sends `Notion-Version: 2025-09-03`**; the pinned-version case
+observes that header at the `ConnectorHttpClient` port and sends no request of its own. Credentials bind through
 `notionConformanceIntegration` (`notion.api_token`, credential ref `notion.conformance`). The case
 table, seeds, and claims live in the
 [Notion conformance guide](../../apps/docs/content/docs/connectors/notion.mdx#conformance-cases).
 
 The write case creates its own page under the `parentPageId` seed and registers its id before any
-claim runs (the create and registration are not interruptible); the cleanup trashes the page when
-the claim did not and checks that `notion.get_page` reports `archived: true`. A failed cleanup fails
+claim runs (the create and registration are not interruptible, and no request timeout is set, so a
+hanging create delays an interruption). Any response showing the page trashed (`archived` or
+`in_trash`), or a not-found read after a successful archive, counts as trashed; otherwise the cleanup
+trashes the page and checks that `notion.get_page` reports `archived: true`. A failed cleanup fails
 with `NotionConformanceRestoreFailed`, and an ambiguous create fails with
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) with manual-recovery advice.
 `pnpm conformance:notion` in this repository dry-runs by default; `--live --owner-approved --account

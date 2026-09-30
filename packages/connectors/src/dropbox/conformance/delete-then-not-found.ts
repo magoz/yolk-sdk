@@ -14,14 +14,14 @@ const json = (status: number, body: string) => ({
   body
 })
 
-const folderPath = '/Conformance/Work/yolk-conformance-delete'
+const folderPath = '/Conformance/Work/yolk-conformance-run-synthetic-delete'
 
 const notFound =
   '{"error_summary": "path/not_found/.", "error": {".tag": "path", "path": {".tag": "not_found"}}}'
 
 const folder = {
-  name: 'yolk-conformance-delete',
-  path_lower: '/conformance/work/yolk-conformance-delete',
+  name: 'yolk-conformance-run-synthetic-delete',
+  path_lower: '/conformance/work/yolk-conformance-run-synthetic-delete',
   path_display: folderPath,
   id: 'id:SyntheticDeleteFolder01'
 }

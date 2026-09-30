@@ -14,7 +14,7 @@ const json = (status: number, body: string) => ({
   body
 })
 
-const folderPath = '/Conformance/Work/yolk-conformance-folder'
+const folderPath = '/Conformance/Work/yolk-conformance-run-synthetic-folder'
 
 const notFound =
   '{"error_summary": "path/not_found/.", "error": {".tag": "path", "path": {".tag": "not_found"}}}'
@@ -23,15 +23,15 @@ const conflict =
   '{"error_summary": "path/conflict/folder/..", "error": {".tag": "path", "path": {".tag": "conflict", "conflict": {".tag": "folder"}}}}'
 
 const folder = {
-  name: 'yolk-conformance-folder',
-  path_lower: '/conformance/work/yolk-conformance-folder',
+  name: 'yolk-conformance-run-synthetic-folder',
+  path_lower: '/conformance/work/yolk-conformance-run-synthetic-folder',
   path_display: folderPath,
   id: 'id:SyntheticConflictFolder1'
 }
 
 /**
  * Absence check, the case-owned folder create (no `.tag` in its metadata), the same create again
- * and upper-cased (both 409 `path/conflict/folder`), then the restore: delete and a final
+ * and upper-cased (both 409 `path/conflict/folder`), then the restore: delete by id and a
  * not-found lookup.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
@@ -59,13 +59,13 @@ export const dropboxCreateFolderConflictFixture: WireFixture = {
     },
     {
       request: rpc('create_folder_v2', {
-        path: '/Conformance/Work/YOLK-CONFORMANCE-FOLDER',
+        path: '/Conformance/Work/YOLK-CONFORMANCE-RUN-SYNTHETIC-FOLDER',
         autorename: false
       }),
       response: json(409, conflict)
     },
     {
-      request: rpc('delete_v2', { path: folderPath }),
+      request: rpc('delete_v2', { path: folder.id }),
       response: json(200, JSON.stringify({ metadata: { '.tag': 'folder', ...folder } }))
     },
     { request: rpc('get_metadata', { path: folderPath }), response: json(409, notFound) }

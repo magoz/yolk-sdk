@@ -124,7 +124,7 @@ describe('run-notion-conformance plan', () => {
       'DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to run (needs NOTION_API_TOKEN).',
       'Plan for a live target: allowWrites=none',
       'RUN   notion.search.cursor-paging  [read]  needs --search-query',
-      'RUN   notion.api.version-header-required  [read]',
+      'RUN   notion.api.pinned-version-accepted  [read]',
       'RUN   notion.errors.error-envelope  [read]',
       'RUN   notion.pages.title-plain-text  [read]  needs --title-page, --title-page-title',
       'RUN   notion.blocks.children-cursor-paging  [read]  needs --blocks-page',
@@ -237,7 +237,8 @@ const memoryWriter = () => {
     },
     rm: path => {
       operations.push(`rm ${path}`)
-    }
+    },
+    realpath: path => path
   }
 
   return { writer, files, operations }
@@ -295,12 +296,10 @@ describe('run-notion-conformance --record staging (offline)', () => {
   it('writes nothing when a recording fails replay verification', async () => {
     const { writer, operations } = memoryWriter()
 
-    // The unversioned request is accepted: the claim no longer holds.
-    const contradicted = notionVersionHeaderFixture.exchanges.map((exchange, index) =>
-      index === 0 &&
-      !isWireStreamResponse(exchange.response) &&
-      !isWireBase64BodyResponse(exchange.response)
-        ? { ...exchange, response: { ...exchange.response, status: 200 } }
+    // The pinned version is rejected: the claim no longer holds.
+    const contradicted = notionVersionHeaderFixture.exchanges.map(exchange =>
+      !isWireStreamResponse(exchange.response) && !isWireBase64BodyResponse(exchange.response)
+        ? { ...exchange, response: { ...exchange.response, status: 400 } }
         : exchange
     )
 

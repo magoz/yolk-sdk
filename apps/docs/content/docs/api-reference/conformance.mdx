@@ -362,17 +362,21 @@ their synthetic fixtures (`dropboxConformanceFixtures`), and the seeds they repl
 (`dropboxConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`,
 `ConnectorBinaryWriteHttpClient` (the upload case runs `createDropboxFile` / `updateDropboxFile`),
 `CredentialResolver`, and `DropboxConformanceConfig` (seed paths in a practice Dropbox account).
-Every case runs the real connector actions or host-only helpers. Write cases prove their own
-`yolk-conformance-*` folder path absent, register it before creating it, and always delete it by
-path again, failing with `DropboxConformanceRestoreFailed` when the delete or the final not-found
-check fails. See [Dropbox conformance cases](../connectors/dropbox#conformance-cases).
+Every case runs the real connector actions or host-only helpers. Write cases work only inside an
+invocation-unique `yolk-conformance-<runId>-*` folder (the `runId` seed; the live runner generates a
+fresh one each time, so concurrent runs are supported only through distinct run ids). A definitive
+create rejection deletes nothing; an ambiguous create fails with `DropboxConformanceActionFailed`
+(`createOutcome: 'unknown'`) naming the exact path; successful creates are deleted by id and
+verified, failing with `DropboxConformanceRestoreFailed` when that fails; and a path outside the
+case folder is never deleted (`DropboxConformanceCleanupRefused`). The create is not interruptible
+and the runner has no request timeout. See [Dropbox conformance cases](../connectors/dropbox#conformance-cases).
 
 `@yolk-sdk/connectors/notion/conformance` exports eight Notion cases (`notionConformanceCases`),
 their synthetic fixtures (`notionConformanceFixtures`), and the seeds they replay with
 (`notionConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `CredentialResolver`, and
 `NotionConformanceConfig` (seed ids in a practice Notion workspace). Every case runs the real
-connector actions, except that the version-header case also sends one raw GET without
-`Notion-Version` through the same ports (no action omits the header). The write case creates its own
-page and moves it to the trash again, failing with `NotionConformanceRestoreFailed` when that fails;
-an ambiguous create fails with `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) and
-manual-recovery advice. See [Notion conformance cases](../connectors/notion#conformance-cases).
+connector actions; the pinned-version case observes the outgoing `Notion-Version` at the
+`ConnectorHttpClient` port. The write case creates its own page and moves it to the trash again,
+failing with `NotionConformanceRestoreFailed` when that fails; an ambiguous create fails with
+`NotionConformanceActionFailed` (`createOutcome: 'unknown'`) and manual-recovery advice. The create
+is not interruptible and the runner has no request timeout. See [Notion conformance cases](../connectors/notion#conformance-cases).

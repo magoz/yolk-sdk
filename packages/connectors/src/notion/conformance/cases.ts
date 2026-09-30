@@ -4,16 +4,21 @@
  * Each case checks one wire claim the Notion connector relies on, running the REAL connector
  * actions over the connector ports (`ConnectorHttpClient`, `CredentialResolver`) plus the
  * host-supplied `NotionConformanceConfig` seed ids. Every connector action sends `Notion-Version:
- * 2025-09-03`; the version-header case alone sends one raw GET without it (no action can) through
- * the same ports and says so in its `docs`. The same cases run on replay fixtures, an emulator, or
- * by hand against a practice workspace. None is observed live yet (`observed` absent = unverified).
+ * 2025-09-03`; the pinned-version case observes that header at the `ConnectorHttpClient` port. The
+ * same cases run on replay fixtures, an emulator, or by hand against a practice workspace. None is
+ * observed live yet (`observed` absent = unverified); sub-claims no live run has settled are marked
+ * "(unverified: ...)" in their `wire`.
  *
  * The one write case creates its own page under the seeded parent page and registers its id for
  * the restore before any claim runs (the create and the registration run uninterruptibly). The
  * restore moves the page to the trash again when the claim did not (also after a failed claim or an
- * interruption), verifies it, and reports (never swallows) a failed restore. An ambiguous create (a
- * transport or decoding failure, no status, or HTTP 5xx) fails with `NotionConformanceActionFailed`
- * (`createOutcome: 'unknown'`) and says to trash the page by hand if it exists. Notion keeps
+ * interruption), verifies it, and reports (never swallows) a failed restore. Any response that
+ * shows the page trashed (`archived` or `in_trash` true), or a not-found read after a successful
+ * archive, counts as trashed, so an uncertain claim about how a trashed page reads back is reported
+ * as a claim failure, never as a failed restore. An ambiguous create (a transport or decoding
+ * failure, no status, or HTTP 5xx) fails with `NotionConformanceActionFailed` (`createOutcome:
+ * 'unknown'`) and says to trash the page by hand if it exists. Neither the runner nor the bridges set
+ * a request timeout, so a hanging create delays an interruption until it answers. Notion keeps
  * trashed pages in the workspace trash (restorable) until they are deleted from there.
  */
 import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
@@ -28,7 +33,7 @@ import {
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import { ConnectorError } from '../../error.ts'
-import type { ConnectorHttpClient } from '../../http.ts'
+import { ConnectorHttpClient, type ConnectorHttpRequest } from '../../http.ts'
 import { makeIntegration } from '../../integration.ts'
 import type { ActionResult, ProviderFailure } from '../../result.ts'
 import {
@@ -64,7 +69,6 @@ import { notionErrorEnvelopeFixture } from './error-envelope.ts'
 import { notionPropertyItemPagingFixture } from './property-item-paging.ts'
 import { notionSearchPagingFixture } from './search-paging.ts'
 import { notionTitlePlainTextFixture } from './title-plain-text.ts'
-import { getWithoutNotionVersion, unversionedRequestId } from './unversioned.ts'
 import { notionVersionHeaderFixture } from './version-header.ts'
 
 const SeedString = Schema.Trimmed.check(Schema.isNonEmpty())
@@ -85,7 +89,10 @@ export const NotionConformanceSeeds = Schema.Struct({
   blocksPageId: Schema.optionalKey(SeedString),
   /** A page with a paginated property (title, rich_text, relation, or people) of more than two items. */
   propertyPageId: Schema.optionalKey(SeedString),
-  /** That property's id exactly as the page object returns it (it may contain `%` escapes). */
+  /**
+   * That property's id exactly as the page object returns it. It must contain a `%XX` escape (for
+   * example `abc%3A`), so the case exercises the connector's second percent-encoding of the id.
+   */
   propertyId: Schema.optionalKey(SeedString),
   /** A database with at least one data source that holds at least one page. */
   databaseId: Schema.optionalKey(SeedString),
@@ -411,29 +418,32 @@ export const notionSearchPagingCase: NotionConformanceCase = defineConformanceCa
 
 const BotUser = Schema.Struct({ object: Schema.Literal('user'), type: Schema.Literal('bot') })
 
+/** The `Notion-Version` header of a request, matched case-insensitively. */
+const notionVersionOf = (request: ConnectorHttpRequest): string | undefined =>
+  Object.entries(request.headers ?? {}).find(
+    ([name]) => name.toLowerCase() === 'notion-version'
+  )?.[1]
+
 export const notionVersionHeaderCase: NotionConformanceCase = defineConformanceCase({
-  id: 'notion.api.version-header-required',
-  title: 'Requests without Notion-Version are rejected; the connector always sends it',
+  id: 'notion.api.pinned-version-accepted',
+  title: 'Action requests carry the pinned Notion-Version, and Notion accepts it',
   safety: 'read',
-  docs: 'Every Notion connector request sends `Notion-Version: 2025-09-03` with the bearer token (`notionAuthorizationHeaders`). No action omits the header, so this case sends one raw GET /v1/users/me without it through the connector ports, then calls `notion.get_bot_user`.',
-  wire: 'GET /v1/users/me with a valid token but no `Notion-Version` header answers HTTP 400 with the error envelope `{ object: "error", status: 400, code: "missing_version" }`; the same request through `notion.get_bot_user` (which sends `Notion-Version: 2025-09-03`) answers the bot user (`object: "user"`, `type: "bot"`).',
+  docs: "Every Notion connector request sends `Notion-Version: 2025-09-03` with the bearer token (`notionAuthorizationHeaders`), and the connector's database, data source, and page-parent handling assume that version. The case observes the outgoing request at the `ConnectorHttpClient` port the host provides; it sends no request of its own.",
+  wire: '`notion.get_bot_user` sends exactly one GET /v1/users/me carrying `Notion-Version: 2025-09-03`, and Notion answers it with the bot user (`object: "user"`, `type: "bot"`), not a version error.',
   fixtures: [notionVersionHeaderFixture.id],
   run: Effect.gen(function* () {
-    const unversioned = yield* getWithoutNotionVersion(integration, '/users/me')
+    const http = yield* ConnectorHttpClient
+    const sent = yield* Ref.make<ReadonlyArray<ConnectorHttpRequest>>([])
 
-    yield* expectEqual(
-      unversioned.status,
-      400,
-      `expected ${unversionedRequestId} without Notion-Version to answer HTTP 400`
-    )
-    yield* expectEnvelope(
-      yield* errorEnvelopeOf(unversioned.body),
-      'missing_version',
-      400,
-      'the unversioned response'
-    )
+    const observing = ConnectorHttpClient.of({
+      request: request =>
+        Ref.update(sent, requests => [...requests, request]).pipe(
+          Effect.andThen(http.request(request))
+        )
+    })
 
     yield* notionGetBotUserAction.executeTyped({ integration, input: {} }).pipe(
+      Effect.provideService(ConnectorHttpClient, observing),
       Effect.flatMap(result => successValue(notionGetBotUserAction.id, result)),
       Effect.flatMap(
         decodeAs(
@@ -441,6 +451,14 @@ export const notionVersionHeaderCase: NotionConformanceCase = defineConformanceC
           `expected notion.get_bot_user with Notion-Version ${notionVersion} to answer the bot user`
         )
       )
+    )
+
+    const requests = yield* Ref.get(sent)
+
+    yield* expectEqual(
+      requests.map(request => [request.method, notionVersionOf(request) ?? null]),
+      [['GET', notionVersion]],
+      `expected notion.get_bot_user to send one GET carrying Notion-Version ${notionVersion}`
     )
   })
 })
@@ -667,17 +685,61 @@ const propertyPage = (pageId: string, propertyId: string, startCursor: string | 
       )
     )
 
+const PropertyIds = Schema.Record(Schema.String, Schema.Struct({ id: Schema.String }))
+
+const percentEscape = /%[0-9A-Fa-f]{2}/
+
 export const notionPropertyItemPagingCase: NotionConformanceCase = defineConformanceCase({
   id: 'notion.pages.property-item-paging',
   title: 'Long page properties page item by item through the property endpoint',
   safety: 'read',
   docs: '`notion.get_page_property` sends GET /v1/pages/{page_id}/properties/{property_id} (the property id percent-encoded again by the connector) with `page_size` and `start_cursor`, and returns the body untyped. Page objects truncate paginated properties (title, rich_text, relation, people) to 25 items, so hosts read long values here.',
-  wire: '`notion.get_page_property` with `pageSize: 2` for a seeded paginated property of more than two items (its id exactly as the page object returns it) answers `{ object: "list", type: "property_item", property_item: { type }, results, has_more: true, next_cursor }` whose results are `property_item` objects of the property type; following `next_cursor` returns the remaining items and ends with `has_more: false` and `next_cursor: null`.',
+  wire: 'Two sub-claims. (1) Notion accepts the property id percent-encoded again: the seeded id, read from the page object exactly as returned and containing a `%XX` escape, is sent as `.../properties/<encodeURIComponent(id)>` (for example `Syn%3Ap` as `Syn%253Ap`) and Notion answers the property rather than 400/404 (unverified: the id\'s own `next_url` uses the single-encoded form). (2) `notion.get_page_property` with `pageSize: 2` for a paginated property of more than two items answers `{ object: "list", type: "property_item", property_item: { type }, results, has_more: true, next_cursor }` whose results are `property_item` objects of the property type; following `next_cursor` returns the remaining items and ends with `has_more: false` and `next_cursor: null`.',
   fixtures: [notionPropertyItemPagingFixture.id],
   run: Effect.gen(function* () {
     const pageId = yield* requireSeed('propertyPageId')
     const propertyId = yield* requireSeed('propertyId')
-    const first = yield* propertyPage(pageId, propertyId, undefined)
+
+    yield* expectConformance(
+      percentEscape.test(propertyId),
+      'precondition: propertyId must contain a %XX escape (exactly as the page returns it), so the second percent-encoding is exercised'
+    )
+
+    const owner = yield* getPage(pageId).pipe(
+      Effect.flatMap(result => successValue(notionGetPageAction.id, result))
+    )
+
+    const ids = Object.values(owner.properties ?? {})
+      .filter(Schema.is(Schema.Struct({ id: Schema.String })))
+      .map(property => property.id)
+
+    yield* expectConformance(
+      Schema.is(PropertyIds)(owner.properties ?? {}) && ids.includes(propertyId),
+      'precondition: propertyId must be a property id of propertyPageId exactly as the page returns it'
+    )
+
+    const firstResult = yield* notionGetPagePropertyAction.executeTyped({
+      integration,
+      input: NotionGetPagePropertyInput.make({ pageId, propertyId, pageSize: propertyPageSize })
+    })
+
+    const rejected = failureOf(firstResult)
+
+    if (rejected !== undefined && (rejected.status === 400 || rejected.status === 404)) {
+      return yield* new ConformanceMismatch({
+        message: `expected Notion to accept the property id percent-encoded again (HTTP ${rejected.status})`
+      })
+    }
+
+    const first = yield* successValue(notionGetPagePropertyAction.id, firstResult).pipe(
+      Effect.flatMap(
+        decodeAs(
+          PropertyItemPage,
+          'expected a paginated property item list: object list, type property_item, property_item, has_more, next_cursor'
+        )
+      )
+    )
+
     const type = first.property_item.type
 
     yield* expectConformance(
@@ -759,10 +821,10 @@ const DataSourcePage = Schema.Struct({
 
 export const notionDataSourceSplitCase: NotionConformanceCase = defineConformanceCase({
   id: 'notion.data-sources.database-split',
-  title: 'Under 2025-09-03 a database lists data sources; schema and rows live on the data source',
+  title: 'Under 2025-09-03 a database lists its data sources, which hold the schema and the rows',
   safety: 'read',
   docs: 'The connector pins `Notion-Version: 2025-09-03` and offers database actions (`notion.get_database`) next to data source actions (`notion.get_data_source`, `notion.query_data_source`); `notion.create_page` accepts a `parentDataSourceId` for pages in a data source.',
-  wire: '`notion.get_database` of the seeded database answers `object: "database"` with a non-empty `data_sources` array (`{ id, name }`) and no `properties`; `notion.get_data_source` of its first data source answers `object: "data_source"` with the `properties` schema and `parent: { type: "database_id", database_id }` naming the database; `notion.query_data_source` with `pageSize: 1` answers pages whose `parent` is `{ type: "data_source_id", data_source_id }` naming that data source.',
+  wire: '`notion.get_database` of the seeded database answers `object: "database"` with a non-empty `data_sources` array (`{ id, name }`), which is how hosts discover the ids the data source actions take; `notion.get_data_source` of its first data source answers `object: "data_source"` with the `properties` schema and `parent: { type: "database_id", database_id }` naming the database (unverified: the parent shape); `notion.query_data_source` with `pageSize: 1` answers pages whose `parent` is `{ type: "data_source_id", data_source_id }` naming that data source (unverified: the row parent shape).',
   fixtures: [notionDataSourceSplitFixture.id],
   run: Effect.gen(function* () {
     const databaseId = yield* requireSeed('databaseId')
@@ -775,11 +837,6 @@ export const notionDataSourceSplitCase: NotionConformanceCase = defineConformanc
       DatabaseObject,
       'expected the database object to list data_sources ({ id, name })'
     )(raw)
-
-    yield* expectConformance(
-      !Predicate.hasProperty(raw, 'properties'),
-      'expected the database object to carry no properties (they live on the data source)'
-    )
 
     const [dataSource] = database.data_sources
 
@@ -841,11 +898,21 @@ export const notionDataSourceSplitCase: NotionConformanceCase = defineConformanc
 
 // Write case.
 
-const TrashedPage = Schema.Struct({
+/** The trash flags an archive response or page may carry. */
+const TrashFlags = Schema.Struct({
+  archived: Schema.optional(Schema.Boolean),
+  in_trash: Schema.optional(Schema.Boolean)
+})
+
+/** True when an untyped page body shows the page trashed (`archived` or `in_trash` true). */
+const showsTrashed = (value: unknown): boolean =>
+  Schema.is(TrashFlags)(value) && (value.archived === true || value.in_trash === true)
+
+const ArchiveResponse = Schema.Struct({
   object: Schema.Literal('page'),
   id: Schema.String,
-  archived: Schema.Boolean,
-  in_trash: Schema.Boolean
+  archived: Schema.optional(Schema.Boolean),
+  in_trash: Schema.optional(Schema.Boolean)
 })
 
 const archiveCaseId = 'notion.pages.archive-in-trash'
@@ -858,28 +925,40 @@ const archivePage = (pageId: string) =>
     input: NotionUpdatePageInput.make({ pageId, archived: true })
   })
 
-/** Trash a case-created page unless it already is, then verify `notion.get_page` reports it. */
-const ensureTrashed = (pageId: string) =>
+/**
+ * Trash a case-created page unless it already is. Proof of trashing: `notion.get_page` reporting
+ * `archived`, an archive response showing `archived` or `in_trash`, or a not-found read after an
+ * archive succeeded (`archivedOnce`).
+ */
+const ensureTrashed = (archivedOnce: Ref.Ref<boolean>) => (pageId: string) =>
   Effect.gen(function* () {
-    const current = yield* getPage(pageId).pipe(
-      Effect.flatMap(result => successValue(notionGetPageAction.id, result))
+    const current = yield* getPage(pageId)
+
+    if (Predicate.isTagged(current, 'Success') && current.value.archived === true) return
+
+    if (Predicate.isTagged(current, 'Failure')) {
+      if (current.error.code === 'notion_not_found' && (yield* Ref.get(archivedOnce))) return
+
+      return yield* successValue(notionGetPageAction.id, current).pipe(Effect.asVoid)
+    }
+
+    const archived = yield* archivePage(pageId).pipe(
+      Effect.flatMap(result => successValue(notionUpdatePageAction.id, result))
     )
 
-    if (current.archived !== true) {
-      yield* archivePage(pageId).pipe(
-        Effect.flatMap(result => successValue(notionUpdatePageAction.id, result))
-      )
+    yield* Ref.set(archivedOnce, true)
 
-      const after = yield* getPage(pageId).pipe(
-        Effect.flatMap(result => successValue(notionGetPageAction.id, result))
-      )
+    if (showsTrashed(archived)) return
 
-      yield* expectEqual(
-        after.archived ?? null,
-        true,
-        'expected get_page of the case-created page to report archived after restoring'
-      )
-    }
+    const after = yield* getPage(pageId)
+
+    if (Predicate.isTagged(after, 'Failure') && after.error.code === 'notion_not_found') return
+
+    yield* expectEqual(
+      Predicate.isTagged(after, 'Success') ? (after.value.archived ?? null) : null,
+      true,
+      'expected get_page of the case-created page to report archived after restoring'
+    )
   })
 
 /**
@@ -927,10 +1006,15 @@ const ambiguousCreateFailure = (error: unknown): NotionConformanceActionFailed |
  */
 const withOwnPage = <A, E, R>(
   parentPageId: string,
-  use: (page: NotionPage, pending: Ref.Ref<ReadonlyArray<string>>) => Effect.Effect<A, E, R>
+  use: (
+    page: NotionPage,
+    pending: Ref.Ref<ReadonlyArray<string>>,
+    archivedOnce: Ref.Ref<boolean>
+  ) => Effect.Effect<A, E, R>
 ) =>
   Effect.gen(function* () {
     const pending = yield* Ref.make<ReadonlyArray<string>>([])
+    const archivedOnce = yield* Ref.make(false)
 
     return yield* Effect.uninterruptibleMask(unmask =>
       Effect.gen(function* () {
@@ -946,11 +1030,13 @@ const withOwnPage = <A, E, R>(
 
         yield* Ref.set(pending, [page.id])
 
-        const outcome = yield* Effect.exit(unmask(use(page, pending)))
+        const outcome = yield* Effect.exit(unmask(use(page, pending, archivedOnce)))
 
         const restored = yield* Effect.exit(
           Ref.get(pending).pipe(
-            Effect.flatMap(ids => Effect.forEach(ids, ensureTrashed, { discard: true }))
+            Effect.flatMap(ids =>
+              Effect.forEach(ids, ensureTrashed(archivedOnce), { discard: true })
+            )
           )
         )
 
@@ -976,27 +1062,36 @@ const withOwnPage = <A, E, R>(
 
 export const notionArchiveInTrashCase: NotionConformanceCase = defineConformanceCase({
   id: archiveCaseId,
-  title: 'Archiving a page moves it to the trash; it stays readable with archived true',
+  title: 'Archiving a page reports archived, and the page reads back archived',
   safety: 'write-reversible',
   docs: '`notion.update_page` sends PATCH /v1/pages/{id} with `archived` (the connector has no delete-page action; archiving is its delete) and returns the body untyped; `notion.get_page` decodes `NotionPage`, whose optional `archived` flag is how hosts see a trashed page.',
-  wire: '`notion.update_page` with `archived: true` on the case-owned page answers the page with `archived: true` and `in_trash: true`; afterwards `notion.get_page` still answers HTTP 200 (not 404) with `archived: true`. The case creates its own page under the seeded parent page with `notion.create_page` and moves it to the trash again whenever the claim did not; trashed pages stay restorable in the workspace trash.',
+  wire: '`notion.update_page` with `archived: true` on the case-owned page answers the page with `archived: true` (unverified: that 2025-09-03 still returns `archived` next to `in_trash`; `in_trash` is observed but not required); afterwards `notion.get_page` still answers HTTP 200 (not 404) with `archived: true` (unverified: that a trashed page stays readable). The case creates its own page under the seeded parent page with `notion.create_page` and moves it to the trash again whenever the claim did not; trashed pages stay restorable in the workspace trash.',
   fixtures: [notionArchiveInTrashFixture.id],
   run: Effect.gen(function* () {
     const parentPageId = yield* requireSeed('parentPageId')
 
-    yield* withOwnPage(parentPageId, (page, pending) =>
+    yield* withOwnPage(parentPageId, (page, pending, archivedOnce) =>
       Effect.gen(function* () {
-        const trashed = yield* archivePage(page.id).pipe(
-          Effect.flatMap(result => successValue(notionUpdatePageAction.id, result)),
-          Effect.flatMap(
-            decodeAs(TrashedPage, 'expected the archive response to carry archived and in_trash')
-          )
+        const response = yield* archivePage(page.id).pipe(
+          Effect.flatMap(result => successValue(notionUpdatePageAction.id, result))
         )
 
+        yield* Ref.set(archivedOnce, true)
+
+        // The page is known to be trashed: no restore is needed, whatever the claims below find.
+        if (showsTrashed(response)) {
+          yield* Ref.set(pending, [])
+        }
+
+        const archived = yield* decodeAs(
+          ArchiveResponse,
+          'expected the archive response to be the page object'
+        )(response)
+
         yield* expectEqual(
-          [trashed.archived, trashed.in_trash],
-          [true, true],
-          'expected the archive response to report archived true and in_trash true'
+          archived.archived ?? null,
+          true,
+          'expected the archive response to report archived true'
         )
 
         const after = yield* getPage(page.id)

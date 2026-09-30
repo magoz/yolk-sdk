@@ -10,8 +10,10 @@
  * (environment only, never a flag; a token for the practice account with `files.metadata.read` and
  * `files.content.write`) and the seed paths of every case that will run (flags or environment, see
  * the usage text). Read cases always run; `--allow-writes reversible` adds the write-reversible
- * cases, which work inside their own `yolk-conformance-*` folder under `--work-folder` and always
- * delete it again. There are no write-irreversible Dropbox cases.
+ * cases, which work inside their own `yolk-conformance-<runId>-*` folder under `--work-folder`. The
+ * runner generates a fresh random `runId` for every invocation (it is never a flag), so concurrent
+ * runs never share a folder; a definitive create rejection deletes nothing, and an ambiguous create
+ * is reported with the exact path to check by hand. There are no write-irreversible Dropbox cases.
  *
  * `--record` (with `--live`) stages verified recordings all or nothing in a new run directory
  * under the gitignored `.conformance-recordings/dropbox/`; the recorder keeps `dropbox-api-arg` so
@@ -24,6 +26,7 @@
  *
  * Never run live in CI.
  */
+import { randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -123,7 +126,7 @@ export const dropboxCaseSpecs: ReadonlyArray<CaseSpec<DropboxConformanceSeedKey>
   },
   {
     caseId: 'dropbox.files.create-folder-conflict',
-    seeds: ['workFolderPath'],
+    seeds: ['workFolderPath', 'runId'],
     optionalSeeds: [],
     fileName: 'create-folder-conflict.ts',
     exportName: 'dropboxCreateFolderConflictFixture',
@@ -131,7 +134,7 @@ export const dropboxCaseSpecs: ReadonlyArray<CaseSpec<DropboxConformanceSeedKey>
   },
   {
     caseId: 'dropbox.files.delete-then-not-found',
-    seeds: ['workFolderPath'],
+    seeds: ['workFolderPath', 'runId'],
     optionalSeeds: [],
     fileName: 'delete-then-not-found.ts',
     exportName: 'dropboxDeleteThenNotFoundFixture',
@@ -139,7 +142,7 @@ export const dropboxCaseSpecs: ReadonlyArray<CaseSpec<DropboxConformanceSeedKey>
   },
   {
     caseId: 'dropbox.files.copy-move-metadata',
-    seeds: ['workFolderPath', 'copySourcePath'],
+    seeds: ['workFolderPath', 'copySourcePath', 'runId'],
     optionalSeeds: [],
     fileName: 'copy-move-metadata.ts',
     exportName: 'dropboxCopyMoveMetadataFixture',
@@ -147,13 +150,16 @@ export const dropboxCaseSpecs: ReadonlyArray<CaseSpec<DropboxConformanceSeedKey>
   },
   {
     caseId: 'dropbox.files.upload-rev-precondition',
-    seeds: ['workFolderPath'],
+    seeds: ['workFolderPath', 'runId'],
     optionalSeeds: [],
     fileName: 'upload-rev-precondition.ts',
     exportName: 'dropboxUploadRevPreconditionFixture',
     doc: 'Folder create, `add` and rev `update` uploads, two rejected uploads, the file lookup, then the delete and a not-found lookup.'
   }
 ]
+
+/** A fresh invocation-unique run id (`run-<8 hex>`), so concurrent live runs never share folders. */
+export const generateRunId = (): string => `run-${randomBytes(4).toString('hex')}`
 
 /** The live credential: the practice account's bearer token. */
 export const liveCredential = (accessToken: string) =>
@@ -178,9 +184,10 @@ export const dropboxRunner = {
   tokenScopes: 'a token for the practice account with files.metadata.read and files.content.write',
   endpoint: dropboxApiBaseUrl,
   writeNote:
-    'work inside their own yolk-conformance folder under --work-folder and delete it again',
+    'work inside their own yolk-conformance-<run id> folder under --work-folder (a fresh random run id per invocation) and delete it again',
   cases: dropboxConformanceCases,
   seedSources: dropboxSeedSources,
+  generatedSeeds: { keys: ['runId'], generate: () => ({ runId: generateRunId() }) },
   caseSpecs: dropboxCaseSpecs,
   fixtureSeeds: dropboxConformanceFixtureSeeds,
   seedNoun: 'paths',

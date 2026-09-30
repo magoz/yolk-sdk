@@ -14,20 +14,30 @@ conformance cases only.
 `@yolk-sdk/connectors/notion/conformance` exports conformance cases for
 `@yolk-sdk/conformance/runner`. Every case runs the real connector actions over the connector ports
 and checks one wire claim the connector relies on. **Every connector action sends
-`Notion-Version: 2025-09-03`**, so the version-header case also sends one raw GET without that
-header through the same ports and says so in its `docs`. The claims are as currently understood;
+`Notion-Version: 2025-09-03`**; the pinned-version case observes that header at the
+`ConnectorHttpClient` port and sends no request of its own. The claims are as currently understood;
 none is observed live yet.
 
 | Case id                                | Safety             | Seeds                           | Claim (as currently understood)                                                                                                                                |
 | -------------------------------------- | ------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `notion.search.cursor-paging`          | `read`             | `searchQuery`                   | `page_size: 1` answers `has_more` and a string `next_cursor`; following it returns new pages and ends with `next_cursor: null` present                         |
-| `notion.api.version-header-required`   | `read`             | none                            | Without `Notion-Version` the API answers HTTP 400 `missing_version`; with the connector's header, `notion.get_bot_user` answers the bot user                   |
+| `notion.api.pinned-version-accepted`   | `read`             | none                            | `notion.get_bot_user` sends one request carrying `Notion-Version: 2025-09-03`, and Notion answers the bot user                                                 |
 | `notion.errors.error-envelope`         | `read`             | none                            | Errors carry `{ object: "error", status, code, message }` (404 `object_not_found`, 400 `validation_error`); the connector keeps the status and the message     |
 | `notion.pages.title-plain-text`        | `read`             | `titlePageId`, `titlePageTitle` | A page has one `title` property of rich text items with `type: "text"` and `plain_text`, joining to the seeded title                                           |
 | `notion.blocks.children-cursor-paging` | `read`             | `blocksPageId`                  | `page_size=2` block children answer `object: "list"`, `type: "block"`, `has_more`, and `next_cursor`; following it returns the rest, ending with a null cursor |
-| `notion.pages.property-item-paging`    | `read`             | `propertyPageId`, `propertyId`  | A long paginated property pages item by item (`type: "property_item"`); the id as the page returns it is percent-encoded again by the connector                |
-| `notion.data-sources.database-split`   | `read`             | `databaseId`                    | Under 2025-09-03 a database lists `data_sources` without `properties`; the data source holds the schema, and its rows have a `data_source_id` parent           |
-| `notion.pages.archive-in-trash`        | `write-reversible` | `parentPageId`                  | `archived: true` answers `archived` and `in_trash` true; `notion.get_page` still answers (not 404) with `archived: true`                                       |
+| `notion.pages.property-item-paging`    | `read`             | `propertyPageId`, `propertyId`  | Notion accepts a `%XX`-escaped property id percent-encoded again (unverified), and a long property pages item by item (`type: "property_item"`)                |
+| `notion.data-sources.database-split`   | `read`             | `databaseId`                    | Under 2025-09-03 a database lists its `data_sources`; the data source holds the schema, and its rows have a `data_source_id` parent (parent shapes unverified) |
+| `notion.pages.archive-in-trash`        | `write-reversible` | `parentPageId`                  | `archived: true` answers `archived: true` (`in_trash` observed, not required); `notion.get_page` still answers (not 404) with `archived: true` (unverified)    |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- Notion accepts a property id that already contains `%XX` escapes when the connector
+  percent-encodes it again (`Syn%3Ap` sent as `Syn%253Ap`); the property's own `next_url` uses the
+  single-encoded form. The `propertyId` seed must contain such an escape and be read from the page.
+- A data source's `parent` is `{ type: "database_id", database_id }`.
+- A data source row's `parent` is `{ type: "data_source_id", data_source_id }`.
+- Under 2025-09-03 an archive response still carries `archived` next to `in_trash`.
+- A trashed page stays readable through `notion.get_page` (not 404).
 
 `NotionConformanceConfig` holds the seed ids (every seeded page and database must be shared with the
 integration). Cases never hard-code account data, and a missing seed fails the case with a
@@ -36,9 +46,12 @@ integration). Cases never hard-code account data, and a missing seed fails the c
 
 The write case creates its own page (titled with the `yolk-conformance` marker) under
 `parentPageId` and registers its id for cleanup before any claim runs; the create and the
-registration are not interruptible. When the claim did not trash the page, the cleanup trashes it
-(also after a failed assertion or an interruption) and checks that `notion.get_page` reports
-`archived: true`. A failed cleanup fails the case with `NotionConformanceRestoreFailed`, and an
+registration are not interruptible, and neither the runner nor the bridges set a request timeout,
+so a hanging create delays an interruption until it answers. Any response showing the page trashed
+(`archived` or `in_trash` true), or a not-found read after a successful archive, counts as trashed,
+so an unverified readback claim that turns out false fails the claim, not the cleanup. Otherwise
+the cleanup trashes the page (also after a failed assertion or an interruption) and checks that
+`notion.get_page` reports `archived: true`. A failed cleanup fails the case with `NotionConformanceRestoreFailed`, and an
 ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) fails with
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry manual-recovery
 advice. Trashed pages stay restorable in the workspace trash until they are deleted from there.

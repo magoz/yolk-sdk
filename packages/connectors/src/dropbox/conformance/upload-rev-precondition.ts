@@ -24,7 +24,7 @@ const json = (status: number, body: string) => ({
   body
 })
 
-const folderPath = '/Conformance/Work/yolk-conformance-upload'
+const folderPath = '/Conformance/Work/yolk-conformance-run-synthetic-upload'
 
 const filePath = `${folderPath}/yolk-conformance-upload.txt`
 
@@ -41,8 +41,8 @@ const uploadConflict =
   '{"error_summary": "path/conflict/file/..", "error": {".tag": "path", "path": {"reason": {".tag": "conflict", "conflict": {".tag": "file"}}}}}'
 
 const folder = {
-  name: 'yolk-conformance-upload',
-  path_lower: '/conformance/work/yolk-conformance-upload',
+  name: 'yolk-conformance-run-synthetic-upload',
+  path_lower: '/conformance/work/yolk-conformance-run-synthetic-upload',
   path_display: folderPath,
   id: 'id:SyntheticUploadFolder01'
 }
@@ -74,7 +74,7 @@ const updateArg = {
 /**
  * Absence check, the case-owned folder create, an `add` upload (rev A), an `update` with rev A
  * (rev B), a stale `update` still naming rev A and a second `add` (both 409 conflicts), the file
- * lookup still at rev B, then the restore: delete and a final not-found lookup.
+ * lookup still at rev B, then the restore: delete by id and a not-found lookup of the owned path.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
  * `pnpm conformance:dropbox --live --owner-approved --account <label> --record` stages a
@@ -113,7 +113,7 @@ export const dropboxUploadRevPreconditionFixture: WireFixture = {
     },
     { request: rpc('get_metadata', { path: filePath }), response: json(200, file(revB)) },
     {
-      request: rpc('delete_v2', { path: folderPath }),
+      request: rpc('delete_v2', { path: folder.id }),
       response: json(200, JSON.stringify({ metadata: { '.tag': 'folder', ...folder } }))
     },
     { request: rpc('get_metadata', { path: folderPath }), response: json(409, notFound) }

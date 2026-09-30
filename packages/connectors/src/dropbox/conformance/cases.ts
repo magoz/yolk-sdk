@@ -8,14 +8,28 @@
  * fixtures, an emulator, or by hand against a practice Dropbox account. None is observed live yet
  * (`observed` absent = unverified).
  *
- * Every write case works inside its own `yolk-conformance-*` folder under the seeded
- * `workFolderPath`. Before writing, it proves the folder path is absent; it then registers that
- * path for the restore BEFORE the create, so whatever the create outcome (success, rejection,
- * transport failure, or interruption) the restore deletes the path again, accepting "already gone",
- * and verifies that `get_metadata` answers not-found afterwards. Dropbox addresses items by path,
- * so no create outcome can leave an item the restore cannot name. A failed restore is reported as
- * `DropboxConformanceRestoreFailed` (never swallowed). Deleted items stay restorable in the
- * account's deleted files for the Dropbox retention period.
+ * Write ownership. Every write case works only inside its own case folder
+ * `<workFolderPath>/yolk-conformance-<runId>-<case>`: the `runId` seed makes that namespace unique
+ * per invocation (fixtures replay with a fixed synthetic run id; the live runner generates a fresh
+ * random one each time), so concurrent runs are supported ONLY through distinct run ids. Before
+ * writing, a case proves its folder path absent. The folder create, its decoding, and the
+ * registration of the created entry's id run uninterruptibly together. Then:
+ *
+ * - A definitive rejection (HTTP 4xx, for example `path/conflict`) proves the case created nothing:
+ *   it fails with `DropboxConformanceActionFailed` and deletes NOTHING.
+ * - An ambiguous outcome (a transport or decoding failure, no status, or HTTP 5xx) may or may not
+ *   have created the folder, possibly later: the case makes one best-effort delete of its own path,
+ *   but always fails with `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) whose advice
+ *   names the exact path; one absence check is never treated as reconciliation.
+ * - A success registers the created entry. The cleanup deletes it by id (falling back to the owned
+ *   path when the id form is refused) and verifies that `get_metadata` of the owned path answers
+ *   not-found. A returned path outside the case folder is never adopted for cleanup: the case fails
+ *   with `DropboxConformanceCleanupRefused` naming it.
+ *
+ * A failed cleanup is reported as `DropboxConformanceRestoreFailed` naming the path (never
+ * swallowed). Deleted items stay restorable in the account's deleted files for the Dropbox
+ * retention period. Neither the runner nor the bridges set a request timeout, so a hanging create
+ * delays an interruption until it answers.
  */
 import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -74,6 +88,12 @@ const SeedString = Schema.Trimmed.check(Schema.isNonEmpty())
 /** An absolute Dropbox path: `/`-separated, non-empty components, no trailing slash. */
 const SeedPath = Schema.String.check(Schema.isPattern(/^(?:\/[^/\s][^/]*)+$/))
 
+/** A run id: 1-40 lower-case letters, digits, and inner hyphens. */
+const RunId = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  Schema.isMaxLength(40)
+)
+
 /**
  * Host-supplied seed paths in the practice Dropbox account. Cases never hard-code account data. A
  * case whose required seed is missing fails with a `precondition:` `ConformanceMismatch` before
@@ -95,7 +115,13 @@ export const DropboxConformanceSeeds = Schema.Struct({
    */
   workFolderPath: Schema.optionalKey(SeedPath),
   /** A small file the copy/move case copies into its own folder. */
-  copySourcePath: Schema.optionalKey(SeedPath)
+  copySourcePath: Schema.optionalKey(SeedPath),
+  /**
+   * Invocation-unique segment of every write case's folder name (lower-case letters, digits, inner
+   * hyphens). Replay uses the fixed synthetic id of the fixtures; the live runner generates a fresh
+   * random one per invocation, which is what makes concurrent runs safe.
+   */
+  runId: Schema.optionalKey(RunId)
 })
 
 export type DropboxConformanceSeeds = typeof DropboxConformanceSeeds.Type
@@ -129,12 +155,14 @@ export const dropboxConformanceIntegration = makeIntegration({
 /** Synthetic marker every case-created folder and file name starts with. */
 export const dropboxConformanceMarker = 'yolk-conformance'
 
-const restoreByHandAdvice = `delete the case-created folder by hand if it still exists (its name starts with ${dropboxConformanceMarker}, under workFolderPath).`
-
 /**
  * A connector action or upload helper failed where the case needed success. `code` and `status`
  * keep the underlying classification (a `ConnectorError` cause such as `transport_failed`, or a
  * `ConnectorFileTransferError` code).
+ *
+ * `createOutcome: 'unknown'` marks an ambiguous create of a write case's own folder (a transport or
+ * decoding failure, no status, or HTTP 5xx): Dropbox may have created the folder, even after the
+ * case gave up, so the message names the exact `path` to check by hand.
  */
 export class DropboxConformanceActionFailed extends Data.TaggedError(
   'DropboxConformanceActionFailed'
@@ -142,11 +170,33 @@ export class DropboxConformanceActionFailed extends Data.TaggedError(
   readonly actionId: string
   readonly code: string
   readonly status?: number
+  readonly createOutcome?: 'unknown'
+  readonly path?: string
 }> {
   override get message(): string {
     const status = this.status === undefined ? '' : ` (HTTP ${this.status})`
 
-    return `${this.actionId} failed: ${this.code}${status}`
+    const advice =
+      this.createOutcome === 'unknown'
+        ? `; create outcome unknown: delete ${this.path ?? 'the case folder'} by hand if it exists`
+        : ''
+
+    return `${this.actionId} failed: ${this.code}${status}${advice}`
+  }
+}
+
+/**
+ * A create answered a path outside the case folder. The case never deletes outside its own
+ * namespace, so nothing was deleted at `path`: check it by hand.
+ */
+export class DropboxConformanceCleanupRefused extends Data.TaggedError(
+  'DropboxConformanceCleanupRefused'
+)<{
+  readonly caseId: string
+  readonly path: string
+}> {
+  override get message(): string {
+    return `${this.caseId}: cleanup refused; a create answered ${this.path}, outside the case folder, so nothing was deleted there; check it by hand.`
   }
 }
 
@@ -154,14 +204,15 @@ export class DropboxConformanceActionFailed extends Data.TaggedError(
 const sentence = (text: string): string => (text.endsWith('.') ? text : `${text}.`)
 
 /**
- * Removing a write case's own folder failed. `caseOutcome` says whether the claim itself held
- * before the restore; `claimFailure` is a sanitized summary of why it failed. The folder may or may
- * not still exist: check it, and delete it by hand only if it does.
+ * Removing a write case's own folder at `path` failed. `caseOutcome` says whether the claim itself
+ * held before the restore; `claimFailure` is a sanitized summary of why it failed. The folder may
+ * or may not still exist: check it, and delete it by hand only if it does.
  */
 export class DropboxConformanceRestoreFailed extends Data.TaggedError(
   'DropboxConformanceRestoreFailed'
 )<{
   readonly caseId: string
+  readonly path: string
   readonly reason: string
   readonly caseOutcome: 'claim held' | 'claim failed'
   readonly claimFailure?: string
@@ -175,7 +226,7 @@ export class DropboxConformanceRestoreFailed extends Data.TaggedError(
           : `Claim failed first: ${this.claimFailure}`
 
     // Conformance reports cap failure messages at 300 characters: the advice comes first.
-    return `${this.caseId}: restore failed; ${restoreByHandAdvice} Restore error: ${sentence(this.reason)} ${claim}`
+    return `${this.caseId}: restore failed; delete ${this.path} by hand if it still exists. Restore error: ${sentence(this.reason)} ${claim}`
   }
 }
 
@@ -183,6 +234,7 @@ export type DropboxConformanceError =
   | ConformanceMismatch
   | ConnectorError
   | DropboxConformanceActionFailed
+  | DropboxConformanceCleanupRefused
   | DropboxConformanceRestoreFailed
 
 /** What every Dropbox conformance case requires from the host. */
@@ -345,10 +397,22 @@ const deletePath = (path: string) =>
 const isNotFound = <A>(result: ActionResult<A>): boolean =>
   failureOf(result)?.code === 'dropbox_not_found'
 
-// Write-case folders: absence proven first, path registered before the create, always restored.
+// Write-case folders: an invocation-unique namespace, absence proven first, the created entry
+// registered uninterruptibly with its create, and cleanup confined to the namespace.
 
-/** Paths the restore must delete; a case drops a path once it has itself proven it is gone. */
-type PendingPaths = Ref.Ref<ReadonlyArray<string>>
+/** A registered cleanup target: the created entry's id (when known) and its owned path. */
+type OwnedEntry = { readonly id?: string; readonly path: string }
+
+/** Entries the restore must delete; a case drops them once it has itself proven they are gone. */
+type PendingEntries = Ref.Ref<ReadonlyArray<OwnedEntry>>
+
+/** True when `candidate` is the owned folder or inside it (Dropbox paths are case-insensitive). */
+const inNamespace = (owned: string, candidate: string): boolean => {
+  const root = owned.toLowerCase()
+  const path = candidate.toLowerCase()
+
+  return path === root || path.startsWith(`${root}/`)
+}
 
 /** Fail unless nothing exists at `path` (before any write). */
 const requireAbsent = (path: string) =>
@@ -357,7 +421,7 @@ const requireAbsent = (path: string) =>
 
     if (Predicate.isTagged(found, 'Success')) {
       return yield* new ConformanceMismatch({
-        message: `precondition: a Dropbox entry already exists at the case folder ${lastComponent(path)} under workFolderPath (left by an earlier run?); delete it by hand; nothing was written`
+        message: `precondition: a Dropbox entry already exists at the case folder ${lastComponent(path)} under workFolderPath; delete it by hand; nothing was written`
       })
     }
 
@@ -366,16 +430,25 @@ const requireAbsent = (path: string) =>
     }
   })
 
-/** Delete a case-created path that may still exist, then verify `get_metadata` answers not-found. */
-const ensureAbsent = (path: string) =>
+/**
+ * Delete an owned entry that may still exist, then verify `get_metadata` of its owned path answers
+ * not-found. The delete addresses the entry by id when it has one (so it removes exactly what the
+ * case created) and falls back to the owned path when the id delete does not succeed; either
+ * delete accepts not-found.
+ */
+const ensureAbsent = (entry: OwnedEntry) =>
   Effect.gen(function* () {
-    const deleted = yield* deletePath(path)
+    const byId = entry.id === undefined ? undefined : yield* deletePath(entry.id)
 
-    if (!Predicate.isTagged(deleted, 'Success') && !isNotFound(deleted)) {
-      return yield* successValue(dropboxDeleteAction.id, deleted).pipe(Effect.asVoid)
+    if (byId === undefined || !Predicate.isTagged(byId, 'Success')) {
+      const byPath = yield* deletePath(entry.path)
+
+      if (!Predicate.isTagged(byPath, 'Success') && !isNotFound(byPath)) {
+        return yield* successValue(dropboxDeleteAction.id, byPath).pipe(Effect.asVoid)
+      }
     }
 
-    const after = yield* getMetadata(path)
+    const after = yield* getMetadata(entry.path)
 
     yield* expectConformance(
       isNotFound(after),
@@ -384,41 +457,112 @@ const ensureAbsent = (path: string) =>
     )
   })
 
+/** What the case folder create established. */
+type CreateOutcome =
+  | { readonly kind: 'created'; readonly folder: DropboxFolderMetadata }
+  | { readonly kind: 'rejected'; readonly error: DropboxConformanceActionFailed }
+  | { readonly kind: 'ambiguous'; readonly error: DropboxConformanceActionFailed }
+  | { readonly kind: 'outside'; readonly path: string }
+
+/** Classify the create exit: 4xx is a definitive rejection; no status, 5xx, or a transport or decoding failure is ambiguous. */
+const classifyCreate = (
+  path: string,
+  exit: Exit.Exit<ActionResult<DropboxFolderMetadata>, ConnectorError>
+): CreateOutcome => {
+  const actionId = dropboxCreateFolderAction.id
+
+  if (Exit.isFailure(exit)) {
+    const error = Cause.findErrorOption(exit.cause)
+
+    return {
+      kind: 'ambiguous',
+      error: new DropboxConformanceActionFailed({
+        actionId,
+        code: Option.isSome(error) ? error.value.cause : 'defect',
+        createOutcome: 'unknown',
+        path
+      })
+    }
+  }
+
+  const result = exit.value
+
+  if (Predicate.isTagged(result, 'Success')) {
+    const created = result.value.pathLower ?? path
+
+    return inNamespace(path, created)
+      ? { kind: 'created', folder: result.value }
+      : { kind: 'outside', path: created }
+  }
+
+  const { code, status } = result.error
+
+  if (status === undefined || status >= 500) {
+    return {
+      kind: 'ambiguous',
+      error:
+        status === undefined
+          ? new DropboxConformanceActionFailed({ actionId, code, createOutcome: 'unknown', path })
+          : new DropboxConformanceActionFailed({
+              actionId,
+              code,
+              status,
+              createOutcome: 'unknown',
+              path
+            })
+    }
+  }
+
+  return { kind: 'rejected', error: new DropboxConformanceActionFailed({ actionId, code, status }) }
+}
+
 /**
- * Prove `path` is absent, register it, create the folder there, run `use`, then ALWAYS delete
- * every pending path and verify it is gone.
+ * Prove `path` absent, create the case folder there, run `use`, then ALWAYS delete every pending
+ * entry and verify it is gone.
  *
- * The path is registered BEFORE the create: absence was just proven, so anything at the path
- * afterwards is the case's own, whatever the create answered (a rejection, a transport failure, an
- * interruption). The create and `use` run interruptibly; the restore runs uninterruptibly after
- * they succeed, fail, or are interrupted, and does nothing once `pending` is empty. A failed
- * restore fails the case with `DropboxConformanceRestoreFailed`, which says whether the claim
- * itself held; otherwise the outcome of `use` is returned unchanged.
+ * The create request, its decoding, and the registration of the created entry run uninterruptibly
+ * together; `use` runs interruptibly; the restore runs uninterruptibly after `use` succeeds, fails,
+ * or is interrupted, and does nothing once `pending` is empty. A definitive create rejection
+ * deletes nothing; an ambiguous one gets one best-effort delete of the owned path and is always
+ * reported as `createOutcome: 'unknown'` naming the path; a create that answers a path outside the
+ * case folder fails with `DropboxConformanceCleanupRefused` and deletes nothing. A failed restore
+ * fails the case with `DropboxConformanceRestoreFailed`, which says whether the claim itself held;
+ * otherwise the outcome of `use` is returned unchanged.
  */
 const withOwnFolder = <A, E, R>(
   caseId: string,
   path: string,
-  use: (folder: DropboxFolderMetadata, pending: PendingPaths) => Effect.Effect<A, E, R>
+  use: (folder: DropboxFolderMetadata, pending: PendingEntries) => Effect.Effect<A, E, R>
 ) =>
   Effect.gen(function* () {
     yield* requireAbsent(path)
 
-    const pending: PendingPaths = yield* Ref.make<ReadonlyArray<string>>([path])
+    const pending: PendingEntries = yield* Ref.make<ReadonlyArray<OwnedEntry>>([])
 
     return yield* Effect.uninterruptibleMask(unmask =>
       Effect.gen(function* () {
-        const outcome = yield* Effect.exit(
-          unmask(
-            createFolder(path).pipe(
-              Effect.flatMap(result => successValue(dropboxCreateFolderAction.id, result)),
-              Effect.flatMap(folder => use(folder, pending))
-            )
-          )
-        )
+        const created = classifyCreate(path, yield* Effect.exit(createFolder(path)))
+
+        switch (created.kind) {
+          case 'rejected':
+            return yield* created.error
+          case 'outside':
+            return yield* new DropboxConformanceCleanupRefused({ caseId, path: created.path })
+          case 'ambiguous':
+            // Best effort only: a deferred create may still land later, so the outcome stays unknown.
+            yield* Effect.exit(ensureAbsent({ path }))
+
+            return yield* created.error
+          case 'created':
+            yield* Ref.set(pending, [{ id: created.folder.id, path }])
+        }
+
+        const folder = created.folder
+        const outcome = yield* Effect.exit(unmask(use(folder, pending)))
 
         const restored = yield* Effect.exit(
           Ref.get(pending).pipe(
-            Effect.flatMap(paths => Effect.forEach(paths, ensureAbsent, { discard: true }))
+            Effect.flatMap(entries => Effect.forEach(entries, ensureAbsent, { discard: true }))
           )
         )
 
@@ -426,11 +570,13 @@ const withOwnFolder = <A, E, R>(
           return yield* Exit.isSuccess(outcome)
             ? new DropboxConformanceRestoreFailed({
                 caseId,
+                path,
                 reason: failureSummary(restored.cause),
                 caseOutcome: 'claim held'
               })
             : new DropboxConformanceRestoreFailed({
                 caseId,
+                path,
                 reason: failureSummary(restored.cause),
                 caseOutcome: 'claim failed',
                 claimFailure: failureSummary(outcome.cause)
@@ -442,9 +588,14 @@ const withOwnFolder = <A, E, R>(
     )
   })
 
-/** The case folder path `<workFolderPath>/<name>`. */
-const caseFolderPath = (name: string) =>
-  requireSeed('workFolderPath').pipe(Effect.map(work => `${work}/${name}`))
+/** The case folder path `<workFolderPath>/yolk-conformance-<runId>-<suffix>`. */
+const caseFolderPath = (suffix: string) =>
+  Effect.gen(function* () {
+    const work = yield* requireSeed('workFolderPath')
+    const runId = yield* requireSeed('runId')
+
+    return `${work}/${dropboxConformanceMarker}-${runId}-${suffix}`
+  })
 
 // Read cases.
 
@@ -520,15 +671,16 @@ export const dropboxPathLowerLookupCase: DropboxConformanceCase = defineConforma
   id: 'dropbox.files.path-lower-lookup',
   title: 'Path lookups are case-insensitive and path_lower is the lower-cased path',
   safety: 'read',
-  docs: 'Dropbox metadata carries `path_lower` (the lower-cased path, for comparisons) and `path_display` (display casing; only the last component is guaranteed to keep the user casing). The connector exposes both unchanged as `pathLower` and `pathDisplay` and accepts any-cased paths as input.',
+  docs: 'Dropbox metadata carries `path_lower` (the lower-cased path, for comparisons) and `path_display` (display casing; only the last component is guaranteed to keep the user casing). The connector passes any-cased input paths through and exposes both fields unchanged as `pathLower` and `pathDisplay`; its consumers compare paths by `pathLower`: hosts matching discovered entries, and these conformance cases when they confine cleanup to the case folder.',
   wire: '`dropbox.get_metadata` of the seeded mixed-case path, and of the same path lower-cased, return the same entry id; `pathLower` equals the lower-cased seeded path in both, and the last component of `pathDisplay` keeps the seeded casing even when the lookup was lower-cased.',
   fixtures: [dropboxPathLowerLookupFixture.id],
   run: Effect.gen(function* () {
     const path = yield* requireSeed('mixedCasePath')
     const lower = path.toLowerCase()
+    const last = lastComponent(path)
 
     yield* expectConformance(
-      lower !== path,
+      last.toLowerCase() !== last,
       'precondition: mixedCasePath needs upper-case letters in its last component'
     )
 
@@ -631,7 +783,7 @@ export const dropboxNotFoundEnvelopeCase: DropboxConformanceCase = defineConform
   wire: '`dropbox.get_metadata` of an absent child of the seeded work folder fails with HTTP 409 (not 404), an `error_summary` starting `path/not_found/`, and `error` tagged `path` with `path: { ".tag": "not_found" }`; the connector reports it as `dropbox_not_found` with status 409.',
   fixtures: [dropboxNotFoundEnvelopeFixture.id],
   run: Effect.gen(function* () {
-    const path = yield* caseFolderPath(absentChildName)
+    const path = `${yield* requireSeed('workFolderPath')}/${absentChildName}`
     const result = yield* getMetadata(path)
     const failure = failureOf(result)
 
@@ -665,28 +817,38 @@ export const dropboxNotFoundEnvelopeCase: DropboxConformanceCase = defineConform
 
 // Write cases.
 
-const conflictFolderName = `${dropboxConformanceMarker}-folder`
-
 const createFolderConflictCaseId = 'dropbox.files.create-folder-conflict'
 
-/** A conflicting create: register any path a surprising success created, then return the failure. */
-const conflictingCreate = (path: string, pending: PendingPaths) =>
-  Effect.gen(function* () {
-    const result = yield* createFolder(path)
+/**
+ * A create that must conflict. A surprising success inside the case folder is registered for
+ * cleanup (by its id); one answering a path outside the case folder is refused, never adopted.
+ * The create and the registration run uninterruptibly together.
+ */
+const conflictingCreate = (owned: string, path: string, pending: PendingEntries) =>
+  Effect.uninterruptible(
+    Effect.gen(function* () {
+      const result = yield* createFolder(path)
 
-    if (Predicate.isTagged(result, 'Success')) {
-      const created = result.value.pathLower ?? path.toLowerCase()
+      if (Predicate.isTagged(result, 'Success')) {
+        const created = result.value.pathLower ?? path
 
-      // Dropbox paths are case-insensitive: a path already pending (in any casing) is covered.
-      yield* Ref.update(pending, paths =>
-        paths.some(pendingPath => pendingPath.toLowerCase() === created)
-          ? paths
-          : [...paths, created]
-      )
-    }
+        if (!inNamespace(owned, created)) {
+          return yield* new DropboxConformanceCleanupRefused({
+            caseId: createFolderConflictCaseId,
+            path: created
+          })
+        }
 
-    return result
-  })
+        yield* Ref.update(pending, entries =>
+          entries.some(entry => entry.id === result.value.id)
+            ? entries
+            : [...entries, { id: result.value.id, path: created }]
+        )
+      }
+
+      return result
+    })
+  )
 
 const expectFolderConflict = <A>(result: ActionResult<A>, message: string) =>
   Effect.gen(function* () {
@@ -712,16 +874,17 @@ export const dropboxCreateFolderConflictCase: DropboxConformanceCase = defineCon
   title: 'Creating an existing folder, in any casing, is a path/conflict/folder error',
   safety: 'write-reversible',
   docs: '`dropbox.create_folder` sends `/files/create_folder_v2` with `autorename` and decodes `{ metadata }` (the folder metadata of this route may omit `.tag`). The connector maps a 409 whose `error_summary` contains `conflict` to `dropbox_conflict`.',
-  wire: 'Creating the case-owned folder (autorename false) returns folder metadata with the requested name; creating it again fails with HTTP 409 and `error_summary` `path/conflict/folder/...` (`dropbox_conflict`), and creating the same name upper-cased fails the same way, because Dropbox paths are case-insensitive. The case works in its own folder under the seeded work folder and deletes it again even when a step fails.',
+  wire: 'Creating the case-owned folder (autorename false) returns folder metadata with the requested name; creating it again fails with HTTP 409 and `error_summary` `path/conflict/folder/...` (`dropbox_conflict`), and creating the same name upper-cased fails the same way, because Dropbox paths are case-insensitive. The case works in its own run-unique folder under the seeded work folder and deletes it again (by id) even when a step fails.',
   fixtures: [dropboxCreateFolderConflictFixture.id],
   run: Effect.gen(function* () {
-    const path = yield* caseFolderPath(conflictFolderName)
+    const path = yield* caseFolderPath('folder')
+    const name = lastComponent(path)
 
     yield* withOwnFolder(createFolderConflictCaseId, path, (folder, pending) =>
       Effect.gen(function* () {
         yield* expectEqual(
           folder.name,
-          conflictFolderName,
+          name,
           'expected the created folder to carry the requested name'
         )
         yield* expectEqual(
@@ -731,22 +894,20 @@ export const dropboxCreateFolderConflictCase: DropboxConformanceCase = defineCon
         )
 
         yield* expectFolderConflict(
-          yield* conflictingCreate(path, pending),
+          yield* conflictingCreate(path, path, pending),
           'expected creating the same folder again to fail with dropbox_conflict (HTTP 409)'
         )
 
-        const upperPath = `${path.slice(0, path.lastIndexOf('/'))}/${conflictFolderName.toUpperCase()}`
+        const upperPath = `${path.slice(0, path.lastIndexOf('/'))}/${name.toUpperCase()}`
 
         yield* expectFolderConflict(
-          yield* conflictingCreate(upperPath, pending),
+          yield* conflictingCreate(path, upperPath, pending),
           'expected creating the folder name upper-cased to fail with dropbox_conflict (HTTP 409)'
         )
       })
     )
   })
 })
-
-const deleteFolderName = `${dropboxConformanceMarker}-delete`
 
 const deleteCaseId = 'dropbox.files.delete-then-not-found'
 
@@ -755,10 +916,10 @@ export const dropboxDeleteThenNotFoundCase: DropboxConformanceCase = defineConfo
   title: 'A deleted folder answers not_found, and deleted metadata only on request',
   safety: 'write-reversible',
   docs: '`dropbox.delete` sends `/files/delete_v2` and decodes `{ metadata }` of the deleted item; `dropbox.get_metadata` sends `include_deleted` and decodes file, folder, or `deleted` metadata.',
-  wire: '`dropbox.delete` of the case-owned folder returns its metadata tagged `folder` (the item as it was, not `deleted`); afterwards `dropbox.get_metadata` fails with 409 `path/not_found` (`dropbox_not_found`), while `dropbox.get_metadata` with `includeDeleted: true` returns metadata tagged `deleted` for the same path. The case works in its own folder under the seeded work folder and deletes it again whenever the claim did not.',
+  wire: '`dropbox.delete` of the case-owned folder returns its metadata tagged `folder` (the item as it was, not `deleted`); afterwards `dropbox.get_metadata` fails with 409 `path/not_found` (`dropbox_not_found`), while `dropbox.get_metadata` with `includeDeleted: true` returns metadata tagged `deleted` for the same path (unverified: Dropbox documents `include_deleted` for files and folders; no live run has confirmed it for a folder). The case works in its own run-unique folder under the seeded work folder and deletes it again whenever the claim did not.',
   fixtures: [dropboxDeleteThenNotFoundFixture.id],
   run: Effect.gen(function* () {
-    const path = yield* caseFolderPath(deleteFolderName)
+    const path = yield* caseFolderPath('delete')
 
     yield* withOwnFolder(deleteCaseId, path, (_folder, pending) =>
       Effect.gen(function* () {
@@ -805,8 +966,6 @@ export const dropboxDeleteThenNotFoundCase: DropboxConformanceCase = defineConfo
   })
 })
 
-const copyFolderName = `${dropboxConformanceMarker}-copy`
-
 const copyCaseId = 'dropbox.files.copy-move-metadata'
 
 export const dropboxCopyMoveMetadataCase: DropboxConformanceCase = defineConformanceCase({
@@ -814,11 +973,11 @@ export const dropboxCopyMoveMetadataCase: DropboxConformanceCase = defineConform
   title: 'Single-item copy_v2 and move_v2 answer the relocated metadata synchronously',
   safety: 'write-reversible',
   docs: '`dropbox.copy` sends `/files/copy_v2` and `dropbox.move` sends `/files/move_v2`; the connector decodes the single-item result `{ metadata }` (async job unions belong to the batch routes the connector does not call).',
-  wire: '`dropbox.copy` of the seeded source file into the case-owned folder answers `{ metadata }` for a NEW file (a different id) at the destination path with the source size and content hash; `dropbox.move` of that copy to a new name answers `{ metadata }` for the SAME id at the new path. Neither answers an async job. The case works in its own folder under the seeded work folder and deletes it (with the copy) again even when a step fails.',
+  wire: '`dropbox.copy` of the seeded source file into the case-owned folder answers `{ metadata }` for a NEW file (a different id) at the destination path with the source size and content hash; `dropbox.move` of that copy to a new name answers `{ metadata }` for the SAME id at the new path. Neither answers an async job. The case works in its own run-unique folder under the seeded work folder and deletes it (with the copy) again even when a step fails.',
   fixtures: [dropboxCopyMoveMetadataFixture.id],
   run: Effect.gen(function* () {
     const sourcePath = yield* requireSeed('copySourcePath')
-    const path = yield* caseFolderPath(copyFolderName)
+    const path = yield* caseFolderPath('copy')
 
     const source = yield* getMetadata(sourcePath).pipe(
       Effect.flatMap(result => successValue(dropboxGetMetadataAction.id, result))
@@ -897,8 +1056,6 @@ export const dropboxCopyMoveMetadataCase: DropboxConformanceCase = defineConform
   })
 })
 
-const uploadFolderName = `${dropboxConformanceMarker}-upload`
-
 const uploadCaseId = 'dropbox.files.upload-rev-precondition'
 
 /** Trusted conformance transfer limits for the tiny upload bodies below. */
@@ -936,10 +1093,10 @@ export const dropboxUploadRevPreconditionCase: DropboxConformanceCase = defineCo
   title: 'Upload add never overwrites and a stale rev update is a conflict',
   safety: 'write-reversible',
   docs: '`createDropboxFile` uploads through `/files/upload` with mode `add`, and `updateDropboxFile` with mode `{ ".tag": "update", update: <rev> }` addressed by file id; both send `autorename: false` and `strict_conflict: true`, and map HTTP 409 to the code-only transfer error `conflict`.',
-  wire: 'In the case-owned folder: an `add` upload creates the file (rev A); an `update` with rev A replaces it under the same id (rev B); an `update` that still names rev A fails with HTTP 409 (`conflict`), and a second `add` to the same path fails with HTTP 409 too; `dropbox.get_metadata` then still reports rev B and its size, so neither rejected write changed the file. The case works in its own folder under the seeded work folder and deletes it again even when a step fails.',
+  wire: 'In the case-owned folder: an `add` upload creates the file (rev A); an `update` with rev A replaces it under the same id (rev B); an `update` that still names rev A fails with HTTP 409 (`conflict`), and a second `add` to the same path fails with HTTP 409 too; `dropbox.get_metadata` then still reports rev B and its size, so neither rejected write changed the file. The case works in its own run-unique folder under the seeded work folder and deletes it again even when a step fails.',
   fixtures: [dropboxUploadRevPreconditionFixture.id],
   run: Effect.gen(function* () {
-    const path = yield* caseFolderPath(uploadFolderName)
+    const path = yield* caseFolderPath('upload')
 
     yield* withOwnFolder(uploadCaseId, path, () =>
       Effect.gen(function* () {

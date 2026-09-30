@@ -14,14 +14,14 @@ const json = (status: number, body: string) => ({
   body
 })
 
-const folderPath = '/Conformance/Work/yolk-conformance-copy'
+const folderPath = '/Conformance/Work/yolk-conformance-run-synthetic-copy'
 
 const notFound =
   '{"error_summary": "path/not_found/.", "error": {".tag": "path", "path": {".tag": "not_found"}}}'
 
 const folder = {
-  name: 'yolk-conformance-copy',
-  path_lower: '/conformance/work/yolk-conformance-copy',
+  name: 'yolk-conformance-run-synthetic-copy',
+  path_lower: '/conformance/work/yolk-conformance-run-synthetic-copy',
   path_display: folderPath,
   id: 'id:SyntheticCopyFolder0001'
 }
@@ -42,7 +42,7 @@ const file = (input: { name: string; folder: string; id: string; rev: string }) 
 
 /**
  * The source lookup, absence check, the case-owned folder create, `copy_v2` and `move_v2`
- * answering `{ metadata }`, then the restore: delete and a final not-found lookup.
+ * answering `{ metadata }`, then the restore: delete by id and a not-found lookup of the owned path.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
  * `pnpm conformance:dropbox --live --owner-approved --account <label> --record` stages a
@@ -114,7 +114,7 @@ export const dropboxCopyMoveMetadataFixture: WireFixture = {
       )
     },
     {
-      request: rpc('delete_v2', { path: folderPath }),
+      request: rpc('delete_v2', { path: folder.id }),
       response: json(200, JSON.stringify({ metadata: { '.tag': 'folder', ...folder } }))
     },
     { request: rpc('get_metadata', { path: folderPath }), response: json(409, notFound) }

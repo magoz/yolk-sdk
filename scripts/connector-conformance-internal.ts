@@ -26,7 +26,7 @@
  * provider's conformance tests (package and runner) in the same change.
  */
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { Effect, Layer, Option, Predicate, Ref } from 'effect'
@@ -100,6 +100,15 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   readonly writeNote: string
   readonly cases: ReadonlyArray<ConformanceCase<E, R>>
   readonly seedSources: ReadonlyArray<SeedSource<K>>
+  /**
+   * Seeds the live runner generates itself, fresh per invocation (never flags or environment), for
+   * example Dropbox's invocation-unique `runId`. Case specs may list them; they are never reported
+   * missing, and they are rendered into the staged seeds module like any other seed.
+   */
+  readonly generatedSeeds?: {
+    readonly keys: ReadonlyArray<K>
+    readonly generate: () => Partial<Record<K, string>>
+  }
   readonly caseSpecs: ReadonlyArray<CaseSpec<K>>
   readonly fixtureSeeds: S
   /** Word for the seeds in the seeds module doc (`paths` or `ids`). */
@@ -316,6 +325,15 @@ export const liveTarget = <K extends string>(options: RunOptions<K>): Conformanc
   allowIrreversible: []
 })
 
+const generatedKeys = <K extends string, S extends SeedRecord<K>>(
+  runner: RunnerData<K, S>
+): ReadonlyArray<K> => runner.generatedSeeds?.keys ?? []
+
+/** Every seed key, in seeds-module order: flag/environment seeds, then generated seeds. */
+const allSeedKeys = <K extends string, S extends SeedRecord<K>>(
+  runner: RunnerData<K, S>
+): ReadonlyArray<K> => [...runner.seedSources.map(source => source.key), ...generatedKeys(runner)]
+
 const specFor = <K extends string, S extends SeedRecord<K>>(
   runner: RunnerData<K, S>,
   caseId: string
@@ -339,7 +357,7 @@ export const planRun = <K extends string, S extends SeedRecord<K>>(
     safety: testCase.safety,
     skipReason: conformanceSkipReason(liveTarget(options), testCase),
     missingSeeds: (specFor(runner, testCase.id)?.seeds ?? []).filter(
-      key => options.seeds[key] === undefined
+      key => options.seeds[key] === undefined && !generatedKeys(runner).includes(key)
     )
   }))
 
@@ -381,12 +399,14 @@ export type LiveInputs<S> = {
 /**
  * Everything a live run needs, or why it must refuse (before any network): CI, a missing owner
  * approval, account label, or access token, missing seeds for cases that will run, or seeds that
- * are not valid.
+ * are not valid. `generated` (fresh from `runner.generatedSeeds` by default) is merged over the
+ * flag/environment seeds.
  */
 export const liveInputs = <K extends string, S extends SeedRecord<K>>(
   runner: RunnerData<K, S>,
   options: RunOptions<K>,
-  env: ProbeEnv
+  env: ProbeEnv,
+  generated: Partial<Record<K, string>> = runner.generatedSeeds?.generate() ?? {}
 ): { readonly refusal: string } | { readonly inputs: LiveInputs<S> } => {
   if (isCiEnvironment(env)) {
     return { refusal: liveInCiMessage }
@@ -416,7 +436,7 @@ export const liveInputs = <K extends string, S extends SeedRecord<K>>(
     return { refusal: `Missing seed identities for the cases that would run: ${flags.join(', ')}` }
   }
 
-  const seeds = runner.decodeSeeds(options.seeds)
+  const seeds = runner.decodeSeeds({ ...options.seeds, ...generated })
 
   if (Option.isNone(seeds)) {
     return { refusal: runner.invalidSeedsMessage }
@@ -468,18 +488,19 @@ export const renderSeedsModule = <K extends string, S extends SeedRecord<K>>(
   runner: RunnerData<K, S>,
   seeds: SeedRecord<K>
 ): string => {
-  const entries = runner.seedSources.flatMap(source => {
-    const value = seeds[source.key]
+  const entries = allSeedKeys(runner).flatMap(key => {
+    const value = seeds[key]
 
-    return value === undefined ? [] : [`  ${source.key}: ${quoted(value)}`]
+    return value === undefined ? [] : [`  ${key}: ${quoted(value)}`]
   })
 
   return [
     `import type { ${runner.seedsTypeName} } from './cases.ts'`,
     '',
     '/**',
-    ` * Seed ${runner.seedNoun} the committed ${runner.displayName} fixtures were recorded with. Replaying the fixtures needs`,
-    ` * these exact seeds in \`${runner.configName}\`. \`pnpm conformance:${runner.provider} --record\` stages an`,
+    ` * Seed ${runner.seedNoun} used by the committed ${runner.displayName} fixtures (synthetic until a scrubbed recording is`,
+    ` * promoted). Replaying the fixtures needs these exact seeds in \`${runner.configName}\`.`,
+    ` * \`pnpm conformance:${runner.provider} --live --owner-approved --account <label> --record\` stages an`,
     ' * updated copy for manual promotion together with the fixtures it records.',
     ' */',
     `export const ${runner.seedsExportName}: ${runner.seedsTypeName} = {`,
@@ -508,7 +529,7 @@ export const mergedFixtureSeeds = <K extends string, S extends SeedRecord<K>>(
   const keys = new Set(recorded.flatMap(caseId => seedsUsedBy(runner, caseId)))
   const merged: Partial<Record<K, string>> = {}
 
-  for (const { key } of runner.seedSources) {
+  for (const key of allSeedKeys(runner)) {
     const value = keys.has(key) ? live[key] : current[key]
 
     if (value !== undefined) {
@@ -529,7 +550,7 @@ export const staleSharedSeeds = <K extends string, S extends SeedRecord<K>>(
   merged: SeedRecord<K>,
   recorded: ReadonlyArray<string>
 ): ReadonlyArray<{ readonly key: K; readonly cases: ReadonlyArray<string> }> =>
-  runner.seedSources.flatMap(({ key }) => {
+  allSeedKeys(runner).flatMap(key => {
     if (current[key] === merged[key]) {
       return []
     }
@@ -556,6 +577,8 @@ export type RecordingWriter = {
   readonly rename: (from: string, to: string) => void
   /** Remove a directory and everything in it. */
   readonly rm: (path: string) => void
+  /** The canonical physical path (symlinks resolved) of an existing path; `undefined` when absent. */
+  readonly realpath: (path: string) => string | undefined
 }
 
 export const nodeRecordingWriter: RecordingWriter = {
@@ -571,7 +594,8 @@ export const nodeRecordingWriter: RecordingWriter = {
   },
   rm: path => {
     rmSync(path, { recursive: true, force: true })
-  }
+  },
+  realpath: path => (existsSync(path) ? realpathSync(path) : undefined)
 }
 
 /** A unique run directory name, `<YYYY-MM-DD>T<HHMMSS>Z-<suffix>` (UTC). */
@@ -655,7 +679,8 @@ const quotedList = (values: ReadonlySet<string>): string =>
  */
 export const recordingReviewChecklist = <K extends string, S extends SeedRecord<K>>(
   runner: RunnerData<K, S>,
-  recorded: ReadonlyArray<{ readonly spec: CaseSpec<K>; readonly fixture: WireFixture }>
+  recorded: ReadonlyArray<{ readonly spec: CaseSpec<K>; readonly fixture: WireFixture }>,
+  seeds?: SeedRecord<K>
 ): ReadonlyArray<string> => {
   const lines = [
     'REVIEW before promoting (staged files hold practice-account data):',
@@ -703,6 +728,19 @@ export const recordingReviewChecklist = <K extends string, S extends SeedRecord<
     lines.push(
       `  ${spec.fileName}: ${items.length === 0 ? 'no candidates found; still read it' : ''}`.trimEnd(),
       ...items.map(item => `    - ${item}`)
+    )
+  }
+
+  if (seeds !== undefined) {
+    const values = allSeedKeys(runner).flatMap(key => {
+      const value = seeds[key]
+
+      return value === undefined ? [] : [`${key}=${JSON.stringify(value)}`]
+    })
+
+    lines.push(
+      `  seeds.ts: ${values.length === 0 ? 'no seeds' : 'every value names practice-account data; replace each with a synthetic value'}`,
+      ...(values.length === 0 ? [] : [`    - seeds: ${values.join(', ')}`])
     )
   }
 
@@ -777,10 +815,58 @@ export type StageRecordingsOptions = {
   readonly writer: RecordingWriter
   /** The gitignored recordings root (defaults to the provider's `recordingsRootFor`). */
   readonly recordingsRoot?: string
+  /**
+   * The directory the recordings root must physically stay inside (defaults to the workspace
+   * root): every existing component between it and the run directory must resolve to exactly that
+   * lexical location, so no symlink can redirect the writes.
+   */
+  readonly containmentRoot?: string
   /** The run directory to publish; must be a new, direct child of the recordings root. */
   readonly stagingDir: string
   /** `recordedAt` of the staged fixtures (`YYYY-MM-DD`). */
   readonly recordedAt: string
+}
+
+/**
+ * True when every existing component of each path, from `base` down, resolves (symlinks followed)
+ * to exactly its lexical location under the canonical `base`. A path outside `base` never is.
+ */
+export const physicallyContained = (
+  writer: Pick<RecordingWriter, 'realpath'>,
+  base: string,
+  paths: ReadonlyArray<string>
+): boolean => {
+  const canonicalBase = writer.realpath(base)
+
+  if (canonicalBase === undefined) {
+    return false
+  }
+
+  return paths.every(path => {
+    const rest = relative(base, resolve(path))
+
+    if (rest.startsWith('..') || isAbsolute(rest)) {
+      return false
+    }
+
+    let current = base
+
+    for (const part of rest.split(/[\\/]/).filter(segment => segment.length > 0)) {
+      current = join(current, part)
+
+      const physical = writer.realpath(current)
+
+      if (physical === undefined) {
+        return true
+      }
+
+      if (physical !== join(canonicalBase, relative(base, current))) {
+        return false
+      }
+    }
+
+    return true
+  })
 }
 
 export type StagedRecordings = {
@@ -823,6 +909,19 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
 
     const { writer } = options
     const tempDir = join(root, `.tmp-${runName}`)
+    const base = resolve(options.containmentRoot ?? workspaceRoot)
+
+    const refuseRedirect = Effect.suspend(() =>
+      physicallyContained(writer, base, [root, tempDir, stagingDir])
+        ? Effect.void
+        : Effect.fail(
+            new ConnectorRunFailed({
+              message: `Refusing recordings under a symlinked or redirected directory (${root}); nothing was written`
+            })
+          )
+    )
+
+    yield* refuseRedirect
 
     const refuseExisting = Effect.suspend(() =>
       writer.exists(stagingDir) || writer.exists(tempDir)
@@ -866,10 +965,16 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
     ]
 
     yield* refuseExisting
+    yield* refuseRedirect
 
     yield* Effect.try({
       try: () => {
         writer.mkdir(tempDir)
+
+        // Re-check after creating the temp directory, before any file is written.
+        if (!physicallyContained(writer, base, [tempDir])) {
+          throw new Error('recordings directory redirected')
+        }
 
         for (const file of files) {
           writer.writeFile(join(tempDir, file.name), file.contents)
@@ -897,7 +1002,7 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
       stagingDir,
       files: files.map(file => join(stagingDir, file.name)),
       checklist: [
-        ...recordingReviewChecklist(runner, recorded),
+        ...recordingReviewChecklist(runner, recorded, seeds),
         ...stale.map(
           ({ key, cases }) =>
             `SHARED SEED ${key} changed: the committed fixtures of ${cases.join(', ')} still use the old value; re-record them or keep the old seed.`

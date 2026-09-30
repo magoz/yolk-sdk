@@ -19,8 +19,9 @@ const item = (index: number) => ({
 })
 
 /**
- * A `page_size=2` page of the seeded rich_text property's items with `has_more` and a
- * `next_cursor`, then the last page.
+ * The seeded page (its `Notes` property id `Syn%3Ap` as the page returns it), a `page_size=2` page
+ * of that rich_text property's items requested with the id percent-encoded again (`Syn%253Ap`),
+ * with `has_more` and a `next_cursor`, then the last page.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
  * `pnpm conformance:notion --live --owner-approved --account <label> --record` stages a
@@ -34,8 +35,44 @@ export const notionPropertyItemPagingFixture: WireFixture = {
   recordedAt: '2026-09-30',
   account: 'synthetic',
   endpoint: 'https://api.notion.com/v1',
-  note: 'Two pages of property items of the seeded rich_text property (three segments, page_size 2). Synthetic placeholder shaped like the Notion wire; not recorded from a live service.',
+  note: 'The seeded page, then two pages of property items of its rich_text property (three segments, page_size 2). Synthetic placeholder shaped like the Notion wire; not recorded from a live service.',
   exchanges: [
+    {
+      request: {
+        method: 'GET',
+        url: `https://api.notion.com/v1/pages/${pageId}`,
+        headers: { 'notion-version': '2025-09-03' }
+      },
+      response: {
+        status: 200,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({
+          object: 'page',
+          id: pageId,
+          created_time: '2026-09-20T09:00:00.000Z',
+          last_edited_time: '2026-09-20T09:00:00.000Z',
+          parent: { type: 'workspace', workspace: true },
+          archived: false,
+          in_trash: false,
+          properties: {
+            Notes: { id: 'Syn%3Ap', type: 'rich_text', rich_text: [item(1).rich_text] },
+            title: {
+              id: 'title',
+              type: 'title',
+              title: [
+                {
+                  type: 'text',
+                  text: { content: 'Synthetic Property Page', link: null },
+                  plain_text: 'Synthetic Property Page',
+                  href: null
+                }
+              ]
+            }
+          },
+          url: 'https://www.notion.so/Synthetic-Property-Page-1f000000000040008000000000000003'
+        })
+      }
+    },
     {
       request: {
         method: 'GET',

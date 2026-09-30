@@ -1,8 +1,9 @@
 import type { DropboxConformanceSeeds } from './cases.ts'
 
 /**
- * Seed paths the committed Dropbox fixtures were recorded with. Replaying the fixtures needs
- * these exact seeds in `DropboxConformanceConfig`. `pnpm conformance:dropbox --record` stages an
+ * Seed paths used by the committed Dropbox fixtures (synthetic until a scrubbed recording is
+ * promoted). Replaying the fixtures needs these exact seeds in `DropboxConformanceConfig`.
+ * `pnpm conformance:dropbox --live --owner-approved --account <label> --record` stages an
  * updated copy for manual promotion together with the fixtures it records.
  */
 export const dropboxConformanceFixtureSeeds: DropboxConformanceSeeds = {
@@ -10,5 +11,6 @@ export const dropboxConformanceFixtureSeeds: DropboxConformanceSeeds = {
   mixedCasePath: '/Conformance/Mixed Case Notes.txt',
   searchQuery: 'yolk-search-probe',
   workFolderPath: '/Conformance/Work',
-  copySourcePath: '/Conformance/copy-source.txt'
+  copySourcePath: '/Conformance/copy-source.txt',
+  runId: 'run-synthetic'
 }

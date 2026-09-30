@@ -40,6 +40,7 @@ import {
   notionConformanceFixtures,
   notionDataSourceSplitFixture,
   notionErrorEnvelopeFixture,
+  notionPropertyItemPagingCase,
   notionPropertyItemPagingFixture,
   notionSearchPagingCase,
   notionSearchPagingFixture,
@@ -121,7 +122,7 @@ const notionOrigin = 'https://api.notion.com/v1/'
 
 const caseIds = [
   ['notion.search.cursor-paging', 'read'],
-  ['notion.api.version-header-required', 'read'],
+  ['notion.api.pinned-version-accepted', 'read'],
   ['notion.errors.error-envelope', 'read'],
   ['notion.pages.title-plain-text', 'read'],
   ['notion.blocks.children-cursor-paging', 'read'],
@@ -162,7 +163,7 @@ describe('Notion conformance cases', () => {
       expect(cited.every(id => id !== undefined && actionIds.has(id))).toBe(true)
     }
 
-    expect(notionVersionHeaderCase.docs).toContain('No action omits the header')
+    expect(notionVersionHeaderCase.docs).toContain('it sends no request of its own')
   })
 
   it.effect('ship synthetic fixtures that decode and pass the secret scan', () =>
@@ -258,7 +259,7 @@ describe('Notion conformance cases', () => {
     })
   )
 
-  it.effect('send Notion-Version on every action request and omit it only on the raw one', () =>
+  it.effect('send the pinned Notion-Version on every action request', () =>
     Effect.gen(function* () {
       yield* atTestNow
 
@@ -273,11 +274,11 @@ describe('Notion conformance cases', () => {
       for (const testCase of notionConformanceCases) {
         const { entries } = yield* ledgerOf(ledgers, testCase.id)
 
-        entries.forEach((entry, index) => {
-          const raw = testCase.id === notionVersionHeaderCase.id && index === 0
+        expect(entries.length).toBeGreaterThan(0)
 
-          expect(entry.headers['notion-version']).toBe(raw ? undefined : '2025-09-03')
-        })
+        for (const entry of entries) {
+          expect(entry.headers['notion-version']).toBe('2025-09-03')
+        }
       }
     })
   )
@@ -350,6 +351,9 @@ const withStatus =
   (status: number, body: string) =>
   (response: WireResponse): WireResponse => ({ status, headers: response.headers, body })
 
+const objectNotFound =
+  '{"object":"error","status":404,"code":"object_not_found","message":"Synthetic placeholder: not found."}'
+
 const serverError =
   '{"object":"error","status":500,"code":"internal_server_error","message":"Synthetic placeholder: server error."}'
 
@@ -386,12 +390,12 @@ const tampers: ReadonlyArray<{ readonly fixture: WireFixture; readonly message: 
     message: 'expected a later search page to repeat no earlier result'
   },
   {
-    fixture: replaceResponse(notionVersionHeaderFixture, 0, response => ({
-      status: 200,
-      headers: response.headers,
-      body: textBody(notionVersionHeaderFixture.exchanges[1]?.response ?? response)
-    })),
-    message: 'expected notion.conformance.unversioned_get without Notion-Version to answer HTTP 400'
+    fixture: replaceResponse(
+      notionVersionHeaderFixture,
+      0,
+      replaceInBody('"type":"bot"', '"type":"person"')
+    ),
+    message: 'expected notion.get_bot_user with Notion-Version 2025-09-03 to answer the bot user'
   },
   {
     fixture: replaceResponse(
@@ -424,7 +428,7 @@ const tampers: ReadonlyArray<{ readonly fixture: WireFixture; readonly message: 
   {
     fixture: replaceResponse(
       notionPropertyItemPagingFixture,
-      1,
+      2,
       replaceInBody('"type":"rich_text","rich_text":{"type"', '"type":"title","rich_text":{"type"')
     ),
     message: 'expected every property item to carry the property type'
@@ -442,9 +446,10 @@ const tampers: ReadonlyArray<{ readonly fixture: WireFixture; readonly message: 
     fixture: replaceResponse(
       notionArchiveInTrashFixture,
       1,
-      replaceInBody('"in_trash":true', '"in_trash":false')
+      replaceInBody('"archived":true', '"archived":false')
     ),
-    message: 'expected the archive response to report archived true and in_trash true'
+    // in_trash stays true: the page is known trashed, so nothing is restored.
+    message: 'expected the archive response to report archived true'
   }
 ]
 
@@ -517,8 +522,7 @@ describe('Notion conformance restore', () => {
           createExchange,
           { ...archiveExchange, response: withStatus(500, serverError)(archiveExchange.response) },
           untrashedRead,
-          archiveExchange,
-          readExchange
+          archiveExchange
         ]
       }
 
@@ -529,7 +533,8 @@ describe('Notion conformance restore', () => {
         tag: 'NotionConformanceActionFailed',
         message: 'notion.update_page failed: notion_update_page_failed (HTTP 500)'
       })
-      expect(exchangeIndices(entries)).toEqual(['POST 0', 'PATCH 1', 'GET 2', 'PATCH 3', 'GET 4'])
+      // The restore's archive response shows the page trashed: that is proof enough.
+      expect(exchangeIndices(entries)).toEqual(['POST 0', 'PATCH 1', 'GET 2', 'PATCH 3'])
       expect(remaining).toEqual([])
     })
   )
@@ -604,7 +609,7 @@ describe('Notion conformance restore', () => {
       const { client, ledger } = yield* makeReplayHttpClient([
         {
           ...notionArchiveInTrashFixture,
-          exchanges: [createExchange, archiveExchange, untrashedRead, archiveExchange, readExchange]
+          exchanges: [createExchange, archiveExchange, untrashedRead, archiveExchange]
         }
       ])
 
@@ -635,10 +640,110 @@ describe('Notion conformance restore', () => {
         'POST 0',
         'PATCH 1',
         'GET 2',
-        'PATCH 3',
-        'GET 4'
+        'PATCH 3'
       ])
       expect(yield* ledger.remaining).toEqual([])
+    })
+  )
+
+  it.effect('a trashed page that reads back 404 fails the claim, not the restore', () =>
+    Effect.gen(function* () {
+      const gone: WireExchange = {
+        request: readExchange.request,
+        response: withStatus(404, objectNotFound)(readExchange.response)
+      }
+
+      const { failure, entries, remaining } = yield* drill(notionArchiveInTrashCase, {
+        ...notionArchiveInTrashFixture,
+        exchanges: [createExchange, archiveExchange, gone]
+      })
+
+      expect(failure).toEqual(
+        mismatch('expected get_page of the archived page to still answer (not 404)')
+      )
+      expect(exchangeIndices(entries)).toEqual(['POST 0', 'PATCH 1', 'GET 2'])
+      expect(remaining).toEqual([])
+    })
+  )
+
+  it.effect('after a successful archive, a 404 read in the restore counts as trashed', () =>
+    Effect.gen(function* () {
+      // The archive answers without trash flags, so the restore still checks; the page reads 404.
+      const flagless: WireExchange = {
+        request: archiveExchange.request,
+        response: {
+          status: 200,
+          headers: archiveExchange.response.headers,
+          body: JSON.stringify({ object: 'page', id: '1f0000e0-0000-4000-8000-000000000001' })
+        }
+      }
+
+      const gone: WireExchange = {
+        request: readExchange.request,
+        response: withStatus(404, objectNotFound)(readExchange.response)
+      }
+
+      const { failure, entries } = yield* drill(notionArchiveInTrashCase, {
+        ...notionArchiveInTrashFixture,
+        exchanges: [createExchange, flagless, gone]
+      })
+
+      expect(failure).toEqual(mismatch('expected the archive response to report archived true'))
+      expect(exchangeIndices(entries)).toEqual(['POST 0', 'PATCH 1', 'GET 2'])
+    })
+  )
+
+  it.effect('refuses a property id without a percent escape before any request', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        notionPropertyItemPagingCase,
+        notionPropertyItemPagingFixture,
+        { ...notionConformanceFixtureSeeds, propertyId: 'title' }
+      )
+
+      expect(failure).toEqual(
+        mismatch(
+          'precondition: propertyId must contain a %XX escape (exactly as the page returns it), so the second percent-encoding is exercised'
+        )
+      )
+      expect(entries).toEqual([])
+    })
+  )
+
+  it.effect('sends the property id percent-encoded again and fails when Notion rejects it', () =>
+    Effect.gen(function* () {
+      const rejected = replaceResponse(
+        notionPropertyItemPagingFixture,
+        1,
+        withStatus(404, objectNotFound)
+      )
+
+      const { failure, entries } = yield* drill(notionPropertyItemPagingCase, rejected)
+
+      expect(failure).toEqual(
+        mismatch('expected Notion to accept the property id percent-encoded again (HTTP 404)')
+      )
+      expect(entries.map(entry => entry.url)).toEqual([
+        'https://api.notion.com/v1/pages/1f000000-0000-4000-8000-000000000003',
+        'https://api.notion.com/v1/pages/1f000000-0000-4000-8000-000000000003/properties/Syn%253Ap?page_size=2'
+      ])
+    })
+  )
+
+  it.effect('refuses a property id the seeded page does not return', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        notionPropertyItemPagingCase,
+        notionPropertyItemPagingFixture,
+        { ...notionConformanceFixtureSeeds, propertyId: 'Other%3Aq' }
+      )
+
+      expect(failure).toEqual(
+        mismatch(
+          'precondition: propertyId must be a property id of propertyPageId exactly as the page returns it'
+        )
+      )
+      expect(exchangeIndices(entries)).toEqual(['GET 0'])
     })
   )
 
