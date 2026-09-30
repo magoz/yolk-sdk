@@ -19,7 +19,10 @@
  * - A runner whose provider puts the credential in request URLs (Telegram's `/bot<token>/`)
  *   supplies `scrubRecording` and `replayAccessToken`: recorded exchanges have the live token
  *   replaced before the fixture is built, and replay verification resolves the replay token.
- *   Staging refuses any recording that still contains the live access token, for every runner.
+ *   For every runner, staging then refuses (before any fixture or checklist is built) a recording
+ *   in which the live access token, or a long `:`-separated part of it, survives anywhere it could
+ *   be written or printed (see `inspectRecordingForAccessToken`), or that holds a body the guard
+ *   cannot fully inspect; a last check refuses rendered files or checklist lines carrying it.
  * - `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After
  *   the run it builds `verified` fixtures for the cases that passed, re-runs each case on replay
  *   against its new fixture, and renders every fixture module plus the seeds module. Only if every
@@ -65,7 +68,8 @@ import {
   isWireBase64BodyResponse,
   isWireStreamResponse,
   type WireExchange,
-  type WireFixture
+  type WireFixture,
+  type WireResponse
 } from '../packages/conformance/src/fixture.ts'
 import {
   defaultRecordedRequestHeaders,
@@ -74,6 +78,7 @@ import {
   type WireRecorderApi
 } from '../packages/conformance/src/record.ts'
 import { ReplayHttpClient } from '../packages/conformance/src/replay.ts'
+import { decodeBase64Bytes } from '../packages/conformance/src/wire-internal.ts'
 import {
   ConformanceCleanupReporter,
   type ConformanceCleanupReporterApi
@@ -129,8 +134,8 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   readonly tokenScopes: string
   /** The API base URL recorded as each fixture `endpoint`. */
   readonly endpoint: string
-  /** What the write-reversible cases do, for the dry-run footer and usage. */
-  readonly writeNote: string
+  /** What the write-reversible cases do, for the dry-run footer and usage (runners with some). */
+  readonly writeNote?: string
   /**
    * What the write-irreversible cases do and why they need `--allow-irreversible`, for the
    * dry-run footer. Only runners with such cases set it.
@@ -189,6 +194,16 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   readonly leftovers?: Effect.Effect<ReadonlyArray<string>, E, R>
   /** What to do about a leftover, appended to each WARN line. */
   readonly leftoverAdvice?: string
+  /**
+   * What an interrupted run may have left behind and where to look, for the interruption and
+   * forced-exit messages. Default: `yolk-conformance` items, which a later write run warns about.
+   */
+  readonly recoveryAdvice?: string
+  /**
+   * The format a live access token must have (checked before any request; the token is never
+   * printed). `description` completes "<tokenEnv> must be ...".
+   */
+  readonly tokenFormat?: { readonly pattern: RegExp; readonly description: string }
   /** JSON keys whose string values usually name a person, a file, or a page. */
   readonly nameKeys: RegExp
   /** JSON keys whose string values hold document or message text. */
@@ -282,7 +297,7 @@ Options:
                                   (lower-case letters, digits, hyphens; for example practice)
   --allow-writes <none|reversible>
                                   default none; reversible runs the write-reversible cases
-                                  (${hasReversibleCases(runner) ? `they ${runner.writeNote}` : 'this runner has none'})${irreversibleUsage(runner)}
+                                  (${hasReversibleCases(runner) ? `they ${runner.writeNote ?? 'restore what they change'}` : 'this runner has none'})${irreversibleUsage(runner)}
   --record                        with --live: record the cases that passed, verify on replay,
                                   and stage them in a new run directory under
                                   .conformance-recordings/${runner.provider}/ (gitignored) for manual
@@ -500,7 +515,9 @@ export const dryRunReport = <K extends string, S extends SeedRecord<K>>(
       : `, allowIrreversible=[${(options.allowIrreversible ?? []).join(', ')}]`
 
   const notes = [
-    hasReversibleCases(runner) ? `Write cases ${runner.writeNote}.` : undefined,
+    hasReversibleCases(runner)
+      ? `Write cases ${runner.writeNote ?? 'restore what they change'}.`
+      : undefined,
     irreversibleCaseIds(runner).length > 0 && runner.irreversibleNote !== undefined
       ? `${runner.irreversibleNote}.`
       : undefined
@@ -551,6 +568,10 @@ export const liveInputs = <K extends string, S extends SeedRecord<K>>(
 
   if (accessToken === undefined || accessToken.length === 0) {
     return { refusal: accessTokenRequiredMessage(runner) }
+  }
+
+  if (runner.tokenFormat !== undefined && !runner.tokenFormat.pattern.test(accessToken)) {
+    return { refusal: `${runner.tokenEnv} must be ${runner.tokenFormat.description}` }
   }
 
   const missing = planRun(runner, options)
@@ -921,16 +942,218 @@ type RecordedFixture<K extends string> = {
   readonly fixture: WireFixture
 }
 
-/** True when `exchanges` contain `accessToken`, verbatim or percent-encoded, anywhere. */
-export const containsAccessToken = (
+// The live-token guard. The fixture secret scan knows credential headers and common token shapes,
+// not every provider's token (a Telegram bot token sits in the URL path, and a response can echo
+// it anywhere), so staging looks for the live token itself in everything a staged file or the
+// review checklist could contain, decoded every way it can be written.
+
+/** A `:`-separated part of a token this long is a secret on its own (a bot token's secret part). */
+const secretPartMinLength = 16
+
+/**
+ * What the guard looks for: the token, and every `:`-separated part of it long enough to be a
+ * secret on its own (Telegram's `<bot id>:<secret>`: the secret; the bot id is public and appears
+ * in every `sendMessage` answer as `from.id`, so it alone is not searched), each verbatim and
+ * percent-encoded.
+ */
+export const accessTokenForms = (accessToken: string): ReadonlyArray<string> => {
+  const parts = accessToken.split(':')
+
+  const secrets = parts.length > 1 ? parts.filter(part => part.length >= secretPartMinLength) : []
+
+  return [
+    ...new Set([accessToken, ...secrets].flatMap(form => [form, encodeURIComponent(form)]))
+  ].filter(form => form.length > 0)
+}
+
+const percentEscape = /%([0-9A-Fa-f]{2})/g
+
+/** Replace `%XX` escapes (repeatedly, for double encoding) with their characters. */
+const percentDecoded = (text: string): string => {
+  let current = text
+
+  for (let round = 0; round < 3 && /%[0-9A-Fa-f]{2}/.test(current); round++) {
+    current = current.replace(percentEscape, (_match, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+  }
+
+  return current
+}
+
+/** Replace `\uXXXX`, `\xXX`, and numeric HTML character references with their characters. */
+const escapesDecoded = (text: string): string =>
+  text
+    .replace(/\\u([0-9A-Fa-f]{4})/g, (_match, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+    .replace(/\\x([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+    .replace(/&#x([0-9A-Fa-f]+);?/g, (_match, hex: string) =>
+      String.fromCodePoint(Math.min(Number.parseInt(hex, 16), 0x10ffff))
+    )
+    .replace(/&#([0-9]+);?/g, (_match, decimal: string) =>
+      String.fromCodePoint(Math.min(Number.parseInt(decimal, 10), 0x10ffff))
+    )
+
+/** True when `text`, raw or with its escapes decoded, contains any form of the token. */
+const textHasToken = (text: string, forms: ReadonlyArray<string>): boolean => {
+  const variants = [
+    text,
+    percentDecoded(text),
+    escapesDecoded(text),
+    percentDecoded(escapesDecoded(text)),
+    escapesDecoded(percentDecoded(text))
+  ]
+
+  return variants.some(variant => forms.some(form => variant.includes(form)))
+}
+
+/** True when `text` holds the token (see `accessTokenForms`), raw, escaped, or encoded. */
+export const textContainsAccessToken = (text: string, accessToken: string): boolean =>
+  textHasToken(text, accessTokenForms(accessToken))
+
+/** Every string (keys included) of a parsed JSON value. */
+const jsonStrings = (value: unknown): ReadonlyArray<string> => {
+  if (Predicate.isString(value)) return [value]
+
+  if (Array.isArray(value)) return value.flatMap(jsonStrings)
+
+  if (Predicate.isObject(value)) {
+    return Object.entries(value).flatMap(([key, child]) => [key, ...jsonStrings(child)])
+  }
+
+  return []
+}
+
+const parsedJson = (text: string): { readonly value: unknown } | undefined => {
+  try {
+    return { value: JSON.parse(text) }
+  } catch {
+    return undefined
+  }
+}
+
+/** Compressed payloads the guard cannot look inside: gzip, zlib, zip. */
+const looksCompressed = (bytes: Uint8Array): boolean =>
+  (bytes[0] === 0x1f && bytes[1] === 0x8b) ||
+  (bytes[0] === 0x78 && [0x01, 0x5e, 0x9c, 0xda].includes(bytes[1] ?? -1)) ||
+  (bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04)
+
+type TokenVerdict = 'clean' | 'token' | 'uninspectable'
+
+/**
+ * Inspect text: raw and escape-decoded, every `data:` line of an event stream, and every JSON string
+ * value after parsing (so `\u0039` escapes are unescaped).
+ */
+const inspectText = (text: string, forms: ReadonlyArray<string>): TokenVerdict => {
+  if (textHasToken(text, forms)) return 'token'
+
+  const payloads = [
+    text,
+    ...text.split(/\r\n|\r|\n/).flatMap(line => (line.startsWith('data:') ? [line.slice(5)] : []))
+  ]
+
+  for (const payload of payloads) {
+    const json = parsedJson(payload.trim())
+
+    if (json !== undefined && jsonStrings(json.value).some(value => textHasToken(value, forms))) {
+      return 'token'
+    }
+  }
+
+  return 'clean'
+}
+
+/** Inspect bytes decoded raw (one character per byte) and lossily as UTF-8. */
+const inspectBytes = (bytes: Uint8Array, forms: ReadonlyArray<string>): TokenVerdict => {
+  if (looksCompressed(bytes)) return 'uninspectable'
+
+  const raw = Array.from(bytes, byte => String.fromCharCode(byte)).join('')
+  const lossy = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+
+  return [raw, lossy].reduce<TokenVerdict>(
+    (verdict, text) => (verdict === 'clean' ? inspectText(text, forms) : verdict),
+    'clean'
+  )
+}
+
+const worst = (verdicts: ReadonlyArray<TokenVerdict>): TokenVerdict =>
+  verdicts.includes('token')
+    ? 'token'
+    : verdicts.includes('uninspectable')
+      ? 'uninspectable'
+      : 'clean'
+
+const inspectResponse = (response: WireResponse, forms: ReadonlyArray<string>): TokenVerdict => {
+  if (isWireBase64BodyResponse(response)) {
+    const bytes = decodeBase64Bytes(response.bodyBase64)
+
+    return Option.isSome(bytes) ? inspectBytes(bytes.value, forms) : 'uninspectable'
+  }
+
+  if (isWireStreamResponse(response)) {
+    const chunks: Array<Uint8Array> = []
+
+    for (const chunk of response.chunks) {
+      if (Predicate.isString(chunk)) {
+        chunks.push(new TextEncoder().encode(chunk))
+        continue
+      }
+
+      const bytes = decodeBase64Bytes(chunk.base64)
+
+      if (Option.isNone(bytes)) return 'uninspectable'
+
+      chunks.push(bytes.value)
+    }
+
+    // Reassembled, so a token split across chunks is still found.
+    const joined = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+
+    chunks.reduce((offset, chunk) => {
+      joined.set(chunk, offset)
+
+      return offset + chunk.byteLength
+    }, 0)
+
+    return inspectBytes(joined, forms)
+  }
+
+  return inspectText(response.body, forms)
+}
+
+/**
+ * Look for the live access token everywhere a staged fixture or the review checklist could carry
+ * it: request URLs, header names and values, request bodies (every JSON string value), and response
+ * headers and bodies (text, decoded `bodyBase64`, and reassembled stream chunks, as raw bytes and as
+ * lossy UTF-8). `token` when any form of it is found; `uninspectable` when a body cannot be fully
+ * inspected (undecodable base64, or a compressed payload); otherwise `clean`.
+ */
+export const inspectRecordingForAccessToken = (
   exchanges: ReadonlyArray<WireExchange>,
   accessToken: string
-): boolean => {
-  const text = JSON.stringify(exchanges)
+): TokenVerdict => {
+  const forms = accessTokenForms(accessToken)
 
-  return [accessToken, encodeURIComponent(accessToken), JSON.stringify(accessToken).slice(1, -1)]
-    .filter(form => form.length > 0)
-    .some(form => text.includes(form))
+  const headerTexts = (headers: Readonly<Record<string, string>> | undefined) =>
+    Object.entries(headers ?? {}).flat()
+
+  return worst(
+    exchanges.flatMap(({ request, response }) => [
+      ...[request.method, request.url, ...headerTexts(request.headers)].map(text =>
+        inspectText(text, forms)
+      ),
+      request.body === undefined
+        ? 'clean'
+        : Predicate.isString(request.body)
+          ? inspectText(request.body, forms)
+          : inspectText(JSON.stringify(request.body), forms),
+      ...headerTexts(response.headers).map(text => inspectText(text, forms)),
+      inspectResponse(response, forms)
+    ])
+  )
 }
 
 /** Build a verified fixture for one passed case and prove it replays with the same case. */
@@ -955,12 +1178,19 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
         ? drained
         : runner.scrubRecording(drained, inputs.accessToken)
 
-    // The secret scan knows credential headers and token shapes, not every provider's token (a
-    // Telegram bot token sits in the URL path): refuse any trace of the live token itself.
-    if (containsAccessToken(exchanges, inputs.accessToken)) {
-      return yield* new ConnectorRunFailed({
-        message: `${testCase.id}: the recording still contains the live access token; nothing was written`
-      })
+    // Before anything printable is built from the recording: refuse any trace of the live token,
+    // and any body the guard cannot fully inspect.
+    switch (inspectRecordingForAccessToken(exchanges, inputs.accessToken)) {
+      case 'token':
+        return yield* new ConnectorRunFailed({
+          message: `${testCase.id}: the recording still contains the live access token; nothing was written`
+        })
+      case 'uninspectable':
+        return yield* new ConnectorRunFailed({
+          message: `${testCase.id}: the recording holds a body the token guard cannot fully inspect (undecodable base64 or a compressed payload); nothing was written`
+        })
+      case 'clean':
+        break
     }
 
     const fixture = yield* makeWireFixture({
@@ -1161,6 +1391,28 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
       { name: 'seeds.ts', contents: renderSeedsModule(runner, seeds) }
     ]
 
+    const stale = staleSharedSeeds(runner, runner.fixtureSeeds, seeds, recordedIds)
+
+    const checklist = [
+      ...recordingReviewChecklist(runner, recorded, seeds),
+      ...stale.map(
+        ({ key, cases }) =>
+          `SHARED SEED ${key} changed: the committed fixtures of ${cases.join(', ')} still use the old value; re-record them or keep the old seed.`
+      )
+    ]
+
+    // Last line of defence, over exactly what would be written and printed (seeds included).
+    if (
+      [...files.map(file => file.contents), ...checklist].some(text =>
+        textContainsAccessToken(text, inputs.accessToken)
+      )
+    ) {
+      return yield* new ConnectorRunFailed({
+        message:
+          'The staged files or the review checklist would contain the live access token; nothing was written'
+      })
+    }
+
     yield* refuseExisting
     yield* refuseRedirect
 
@@ -1198,18 +1450,10 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
       }
     })
 
-    const stale = staleSharedSeeds(runner, runner.fixtureSeeds, seeds, recordedIds)
-
     return {
       stagingDir,
       files: files.map(file => join(stagingDir, file.name)),
-      checklist: [
-        ...recordingReviewChecklist(runner, recorded, seeds),
-        ...stale.map(
-          ({ key, cases }) =>
-            `SHARED SEED ${key} changed: the committed fixtures of ${cases.join(', ')} still use the old value; re-record them or keep the old seed.`
-        )
-      ]
+      checklist
     }
   })
 
@@ -1407,7 +1651,8 @@ export const runConnectorConformanceCli = <K extends string, S extends SeedRecor
         checked.inputs,
         FetchHttpClient.layer,
         'after-interrupt'
-      )
+      ),
+      recoveryAdvice: runner.recoveryAdvice
     })
   }
 }
@@ -1459,6 +1704,12 @@ export type RunInterruptiblyOptions = {
   readonly now?: () => number
   /** The runner's process id, named in the first-signal message (default `process.pid`). */
   readonly pid?: number
+  /**
+   * The runner's `recoveryAdvice`: what an interrupted run may have left and where to look. When
+   * absent, the messages advise looking for `yolk-conformance` items, which a later write run's
+   * leftover lookup warns about.
+   */
+  readonly recoveryAdvice?: string | undefined
 }
 
 /**
@@ -1481,6 +1732,7 @@ export const runInterruptibly = <E>(
 ): Promise<void> => {
   const now = options.now ?? Date.now
   const pid = options.pid ?? process.pid
+  const advice = options.recoveryAdvice
   const fiber = Effect.runFork(program)
   let firstSignalAt: number | undefined
 
@@ -1494,7 +1746,10 @@ export const runInterruptibly = <E>(
         }
 
         io.error(
-          `Second ${signal}: exiting now without waiting for cleanup. Case-created items may remain: look for yolk-conformance items by hand (a later live run with --allow-writes reversible warns about the ones it finds).`
+          `Second ${signal}: exiting now without waiting for cleanup. ${
+            advice ??
+            'Case-created items may remain: look for yolk-conformance items by hand (a later live run with --allow-writes reversible warns about the ones it finds).'
+          }`
         )
         io.forceExit(130)
 
@@ -1503,7 +1758,11 @@ export const runInterruptibly = <E>(
 
       firstSignalAt = at
       io.error(
-        `${signal}: interrupting the run (pid ${pid}); the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line. Send ${signal} again, at least a second later, to exit without waiting; if the prompt has returned, stop it with \`kill -TERM ${pid}\` (at least 1s later).`
+        `${signal}: interrupting the run (pid ${pid}); ${
+          advice === undefined
+            ? "the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line"
+            : 'a write already in flight completes before exit, and a problem it leaves prints a WARN line'
+        }. Send ${signal} again, at least a second later, to exit without waiting; if the prompt has returned, stop it with \`kill -TERM ${pid}\` (at least 1s later).`
       )
       Effect.runFork(Fiber.interrupt(fiber))
     }
@@ -1526,7 +1785,9 @@ export const runInterruptibly = <E>(
 
     if (Cause.hasInterruptsOnly(exit.cause)) {
       io.error(
-        "Interrupted. The running case's cleanup was attempted but is not confirmed: read the WARN lines, and look for yolk-conformance items by hand if in doubt."
+        advice === undefined
+          ? "Interrupted. The running case's cleanup was attempted but is not confirmed: read the WARN lines, and look for yolk-conformance items by hand if in doubt."
+          : `Interrupted. Read the WARN lines. ${advice}`
       )
 
       const lines =

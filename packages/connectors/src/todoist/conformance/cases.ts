@@ -22,10 +22,11 @@
  *   by hand. Todoist project names are not unique, so the case never deletes by name.
  * - A success registers the created project by id. The cleanup deletes it by id (a not-found answer
  *   proves it gone) and verifies that `todoist.get_project` then answers not-found. A create that
- *   answers a project whose name is not the requested run-scoped name is never adopted for
- *   cleanup: the case fails with `TodoistConformanceCleanupRefused` naming it. Tasks the case
- *   creates must answer the case project as their `project_id`, or the case refuses them the same
- *   way; tasks inside the case project go with it when the cleanup deletes the project.
+ *   answers a project without the requested run-scoped name, with a `parent_id` other than
+ *   `workProjectId`, or with a seeded project's id is never adopted for cleanup: the case fails
+ *   with `TodoistConformanceCleanupRefused` naming it. Tasks the case creates must answer the case
+ *   project as their `project_id`, or the case refuses them the same way. The cleanup verifies only
+ *   that the project is gone; that its tasks go with it is the delete case's unverified claim.
  * - Every later write inside the case project (task create, update, close, project delete) is
  *   masked too, so an aborted request cannot land after the cleanup.
  *
@@ -44,10 +45,10 @@ import {
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
-import { interruptPending, reportCleanupProblem } from '../../conformance/cleanup-reporter.ts'
+import { classifyWriteExit, failReporting } from '../../conformance/cleanup-reporter.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import type { ConnectorError } from '../../error.ts'
-import type { ConnectorHttpClient } from '../../http.ts'
+import { ConnectorHttpClient, type ConnectorHttpRequest } from '../../http.ts'
 import { makeIntegration } from '../../integration.ts'
 import type { ActionResult, ProviderFailure } from '../../result.ts'
 import {
@@ -290,14 +291,6 @@ const outcomeOf = <A>(result: ActionResult<A>): string => {
 const isNotFound = <A>(result: ActionResult<A>): boolean =>
   failureOf(result)?.code === 'todoist_not_found'
 
-/** Decode an untyped value; a shape mismatch fails the claim with `message`. */
-const decodeAs =
-  <A>(schema: Schema.Schema<A> & { readonly DecodingServices: never }, message: string) =>
-  (value: unknown): Effect.Effect<A, ConformanceMismatch> =>
-    Schema.decodeUnknownEffect(schema)(value).pipe(
-      Effect.mapError(() => new ConformanceMismatch({ message }))
-    )
-
 /** Longest failure summary embedded in a `TodoistConformanceRestoreFailed` message. */
 const failureSummaryLength = 60
 
@@ -395,10 +388,10 @@ const ensureProjectAbsent = (project: TodoistOwnedProject) =>
   })
 
 /**
- * Classify a failed or refused create of `target`: no status, a 5xx, or a transport or decoding
- * failure is ambiguous (the error names `target` for manual recovery); a 4xx is definitive.
+ * Classify a create of `target` (see `classifyWriteExit`): no status, a 5xx, or a transport or
+ * decoding failure is ambiguous (the error names `target` for manual recovery); a 4xx is definitive.
  */
-const classifyFailedCreate = <A>(
+const classifyCreate = <A>(
   actionId: string,
   target: string,
   exit: Exit.Exit<ActionResult<A>, ConnectorError>
@@ -406,73 +399,28 @@ const classifyFailedCreate = <A>(
   | { readonly kind: 'success'; readonly value: A }
   | { readonly kind: 'rejected'; readonly error: TodoistConformanceActionFailed }
   | { readonly kind: 'ambiguous'; readonly error: TodoistConformanceActionFailed } => {
-  if (Exit.isFailure(exit)) {
-    const error = Cause.findErrorOption(exit.cause)
+  const outcome = classifyWriteExit(exit)
 
-    return {
-      kind: 'ambiguous',
-      error: new TodoistConformanceActionFailed({
-        actionId,
-        code: Option.isSome(error) ? error.value.cause : 'defect',
-        createOutcome: 'unknown',
-        target
-      })
-    }
+  switch (outcome.kind) {
+    case 'success':
+      return outcome
+    case 'rejected':
+      return {
+        kind: 'rejected',
+        error: new TodoistConformanceActionFailed({ actionId, ...outcome.failure })
+      }
+    case 'ambiguous':
+      return {
+        kind: 'ambiguous',
+        error: new TodoistConformanceActionFailed({
+          actionId,
+          ...outcome.failure,
+          createOutcome: 'unknown',
+          target
+        })
+      }
   }
-
-  const result = exit.value
-
-  if (Predicate.isTagged(result, 'Success')) {
-    return { kind: 'success', value: result.value }
-  }
-
-  const { code, status } = result.error
-
-  if (status === undefined) {
-    return {
-      kind: 'ambiguous',
-      error: new TodoistConformanceActionFailed({
-        actionId,
-        code,
-        createOutcome: 'unknown',
-        target
-      })
-    }
-  }
-
-  if (status >= 500) {
-    return {
-      kind: 'ambiguous',
-      error: new TodoistConformanceActionFailed({
-        actionId,
-        code,
-        status,
-        createOutcome: 'unknown',
-        target
-      })
-    }
-  }
-
-  return { kind: 'rejected', error: new TodoistConformanceActionFailed({ actionId, code, status }) }
 }
-
-/**
- * Fail with `error`, first handing its message to the `ConformanceCleanupReporter` when the fiber
- * was interrupted (`interrupted`, or an interruption still pending): an interruption may otherwise
- * replace this error, and with it the item to check by hand.
- */
-const failReporting = <E extends { readonly message: string }>(
-  unmask: <A, E2, R>(effect: Effect.Effect<A, E2, R>) => Effect.Effect<A, E2, R>,
-  error: E,
-  interrupted = false
-) =>
-  Effect.gen(function* () {
-    if (interrupted || (yield* interruptPending(unmask))) {
-      yield* reportCleanupProblem(error)
-    }
-
-    return yield* Effect.fail(error)
-  })
 
 /**
  * Create the case project `name` under `workProjectId`, run `use`, then ALWAYS delete every
@@ -482,8 +430,8 @@ const failReporting = <E extends { readonly message: string }>(
  * uninterruptibly together; `use` runs interruptibly; the restore runs uninterruptibly after `use`
  * succeeds, fails, or is interrupted, and does nothing once `pending` is empty. A definitive create
  * rejection deletes nothing; an ambiguous one is reported as `createOutcome: 'unknown'` naming the
- * project; a create answering another name fails with `TodoistConformanceCleanupRefused` and
- * deletes nothing. A failed restore fails the case with `TodoistConformanceRestoreFailed`, which
+ * project; a create answering another name, a `parent_id` other than `workProjectId`, or a seeded
+ * project's id fails with `TodoistConformanceCleanupRefused` and deletes nothing. A failed restore fails the case with `TodoistConformanceRestoreFailed`, which
  * says whether the claim itself held; otherwise the outcome of `use` is returned unchanged.
  */
 const withOwnProject = <A, E, R>(
@@ -501,7 +449,7 @@ const withOwnProject = <A, E, R>(
 
     return yield* Effect.uninterruptibleMask(unmask =>
       Effect.gen(function* () {
-        const created = classifyFailedCreate(
+        const created = classifyCreate(
           todoistCreateProjectAction.id,
           `project ${name} under workProjectId`,
           yield* Effect.exit(
@@ -522,11 +470,21 @@ const withOwnProject = <A, E, R>(
         }
 
         const project = created.value
+        const seeds = yield* TodoistConformanceConfig
 
-        if (project.name !== name) {
+        // Adopt only the run-scoped project under the work project, never a seeded project.
+        if (
+          project.name !== name ||
+          (project.parent_id ?? null) !== workProjectId ||
+          project.id === seeds.workProjectId ||
+          project.id === seeds.pagingProjectId
+        ) {
           return yield* failReporting(
             unmask,
-            new TodoistConformanceCleanupRefused({ caseId, item: describeProject(project) })
+            new TodoistConformanceCleanupRefused({
+              caseId,
+              item: `${describeProject(project)} with parent ${project.parent_id ?? 'none'}`
+            })
           )
         }
 
@@ -582,7 +540,7 @@ const createOwnTask = (
 ) =>
   Effect.uninterruptibleMask(unmask =>
     Effect.gen(function* () {
-      const created = classifyFailedCreate(
+      const created = classifyCreate(
         todoistCreateTaskAction.id,
         `task "${fields.content}" in project ${project.name}`,
         yield* Effect.exit(
@@ -889,44 +847,68 @@ const dueDate = '2030-01-15'
 
 const dueDatetime = '2030-01-15T09:30:00Z'
 
-const Due = Schema.Struct({ date: Schema.String, is_recurring: Schema.Boolean })
+/** The due fields of an outgoing task request body, as the connector maps them. */
+const OutgoingDue = Schema.Struct({
+  due_date: Schema.optional(Schema.String),
+  due_datetime: Schema.optional(Schema.String)
+})
+
+const decodeOutgoingDue = Schema.decodeUnknownOption(Schema.fromJsonString(OutgoingDue))
+
+/** `[due_date, due_datetime]` of an observed request body (`null` when absent or unreadable). */
+const outgoingDue = (request: ConnectorHttpRequest | undefined) => {
+  const decoded = Predicate.isString(request?.body)
+    ? decodeOutgoingDue(request.body)
+    : Option.none()
+
+  return Option.isSome(decoded)
+    ? [decoded.value.due_date ?? null, decoded.value.due_datetime ?? null]
+    : null
+}
 
 export const todoistDueDatesCase: TodoistConformanceCase = defineConformanceCase({
   id: dueCaseId,
-  title: 'due_date sets a date-only due and due_datetime a timed due in due.date',
+  title: 'Todoist accepts due_date and due_datetime as the connector sends them',
   safety: 'write-reversible',
-  docs: '`todoist.create_task` and `todoist.update_task` send `dueDate` / `dueDatetime` as `due_date` / `due_datetime`; `TodoistTask.due` is passed to hosts untyped.',
-  wire: 'In the case-owned project: `todoist.create_task` with `dueDate: "2030-01-15"` answers `due` with `date: "2030-01-15"` (no time) and `is_recurring: false`; `todoist.update_task` with `dueDatetime: "2030-01-15T09:30:00Z"` answers `due.date` carrying that instant (unverified: API v1 keeps a timed due in `due.date`, as `2030-01-15T09:30:00Z` or with fractional seconds, with no separate `datetime` field). The case creates its own run-unique project under the seeded work project and deletes it (with the task) again, by id, even when a step fails.',
+  docs: '`todoist.create_task` and `todoist.update_task` send `dueDate` / `dueDatetime` as the JSON body fields `due_date` / `due_datetime` and decode any 2xx answer as `TodoistTask`; `TodoistTask.due` is passed to hosts untyped, so the connector reads nothing inside it.',
+  wire: 'In the case-owned project: `todoist.create_task` with `dueDate: "2030-01-15"` sends `due_date: "2030-01-15"` (observed at the `ConnectorHttpClient` port), and Todoist answers it with a 2xx task rather than a validation error; `todoist.update_task` with `dueDatetime: "2030-01-15T09:30:00Z"` sends `due_datetime` with that value and is answered 2xx with the task. The case checks acceptance only, not how Todoist represents the due in its answer. It creates its own run-unique project under the seeded work project and deletes it (with the task) again, by id, even when a step fails.',
   fixtures: [todoistDueDatesFixture.id],
   run: Effect.gen(function* () {
     const name = yield* caseProjectName('due')
 
     yield* withOwnProject(dueCaseId, name, project =>
       Effect.gen(function* () {
-        const task = yield* createOwnTask(dueCaseId, project, { content: taskContent, dueDate })
+        const http = yield* ConnectorHttpClient
+        const sent = yield* Ref.make<ReadonlyArray<ConnectorHttpRequest>>([])
 
-        const dated = yield* decodeAs(
-          Due,
-          'expected the created task to carry a due object with date and is_recurring'
-        )(task.due)
+        // The host's own client, observed: the requests and answers are unchanged.
+        const observing = ConnectorHttpClient.of({
+          request: request =>
+            Ref.update(sent, requests => [...requests, request]).pipe(
+              Effect.andThen(http.request(request))
+            )
+        })
 
-        yield* expectEqual(
-          [dated.date, dated.is_recurring],
-          [dueDate, false],
-          'expected due_date to answer a date-only due { date: "2030-01-15", is_recurring: false }'
+        const task = yield* createOwnTask(dueCaseId, project, {
+          content: taskContent,
+          dueDate
+        }).pipe(Effect.provideService(ConnectorHttpClient, observing))
+
+        yield* updateTask({ taskId: task.id, dueDatetime }).pipe(
+          Effect.provideService(ConnectorHttpClient, observing)
         )
 
-        const updated = yield* updateTask({ taskId: task.id, dueDatetime })
+        const [create, update] = yield* Ref.get(sent)
 
-        const timed = yield* decodeAs(
-          Due,
-          'expected the updated task to carry a due object with date and is_recurring'
-        )(updated.due)
-
-        yield* expectConformance(
-          timed.date.includes('T') && Date.parse(timed.date) === Date.parse(dueDatetime),
-          'expected due_datetime to answer due.date carrying the requested instant',
-          { expected: dueDatetime, actual: timed.date }
+        yield* expectEqual(
+          outgoingDue(create),
+          [dueDate, null],
+          'expected todoist.create_task to send dueDate as due_date'
+        )
+        yield* expectEqual(
+          outgoingDue(update),
+          [null, dueDatetime],
+          'expected todoist.update_task to send dueDatetime as due_datetime'
         )
       })
     )
@@ -940,20 +922,16 @@ export const todoistProjectParentIdCase: TodoistConformanceCase = defineConforma
   title: 'A project created with parent_id answers and reads back that parent',
   safety: 'write-reversible',
   docs: '`todoist.create_project` sends POST /api/v1/projects with `parent_id` (from `parentId`); `todoist.get_project` GETs /projects/{id}; both decode `TodoistProject`, whose optional `parent_id` is how hosts see the project hierarchy.',
-  wire: '`todoist.create_project` with `parentId` set to the seeded work project answers the new project with `parent_id` equal to that id, and `todoist.get_project` of the new project reads the same `parent_id` back. The case creates its own run-unique project and deletes it again, by id, even when a step fails.',
+  wire: "`todoist.create_project` with `parentId` set to the seeded work project answers the new project with `parent_id` equal to that id, and `todoist.get_project` of the new project reads the same `parent_id` back. The create answer's `parent_id` also decides cleanup ownership: a create answering another parent is refused (`TodoistConformanceCleanupRefused`, nothing deleted; check it by hand). The case creates its own run-unique project and deletes it again, by id, even when a step fails.",
   fixtures: [todoistProjectParentIdFixture.id],
   run: Effect.gen(function* () {
     const workProjectId = yield* requireSeed('workProjectId')
     const name = yield* caseProjectName('parent')
 
-    yield* withOwnProject(parentCaseId, name, (project, created) =>
+    // `withOwnProject` adopts the project only when the create answered `parent_id` naming the work
+    // project, so that half of the claim holds once `use` runs.
+    yield* withOwnProject(parentCaseId, name, project =>
       Effect.gen(function* () {
-        yield* expectEqual(
-          created.parent_id ?? null,
-          workProjectId,
-          'expected create_project to answer parent_id naming the work project'
-        )
-
         const fetched = yield* getProject(project.id).pipe(
           Effect.flatMap(successValue(todoistGetProjectAction.id))
         )

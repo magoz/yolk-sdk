@@ -18,8 +18,11 @@
  *
  * The bot token is part of every Bot API URL (`/bot<token>/`), so `--record` replaces it with the
  * synthetic `telegramConformanceReplayBotToken` in every recorded URL before the fixture is built,
- * verifies on replay with that token, and refuses to stage any recording that still contains the
- * live token. `--record` stages verified recordings all or nothing in a new run directory under the
+ * verifies on replay with that token, and refuses to stage any recording in which the live token, or
+ * its secret part, survives anywhere (URLs, headers, decoded bodies, reassembled stream chunks,
+ * unescaped JSON strings) or that holds a body the guard cannot fully inspect (for example a
+ * compressed file: seed a small plain-text file). A live token that is not `<bot id>:<secret>` is
+ * refused before any request. `--record` stages verified recordings all or nothing in a new run directory under the
  * gitignored `.conformance-recordings/telegram/`. Promotion is manual: scrub the staged files of
  * practice-account data (chat ids and titles, bot and user names, file ids and paths, message
  * text, file bytes), copy them into `packages/connectors/src/telegram/conformance/`, run
@@ -156,7 +159,6 @@ export const telegramRunner = {
   tokenEnv: 'TELEGRAM_BOT_TOKEN',
   tokenScopes: "the practice bot's token from @BotFather; the bot must be a member of --chat",
   endpoint: telegramApiBaseUrl,
-  writeNote: 'do not exist for Telegram',
   irreversibleNote:
     'The write-irreversible telegram.messages.send-message case posts a real message naming a fresh run id to --chat that the connector cannot delete; it runs only with --allow-irreversible telegram.messages.send-message',
   cases: telegramConformanceCases,
@@ -173,6 +175,15 @@ export const telegramRunner = {
     '--chat must be an integer chat id or @username, and --file-id a Bot API file_id (letters, digits, underscores, and hyphens)',
   casePorts,
   recordedRequestHeaders: [],
+  // Checked before any request, never printed; downloadTelegramFile requires the same shape.
+  tokenFormat: {
+    pattern: /^[0-9]+:[A-Za-z0-9_-]+$/,
+    description:
+      'a bot token of the form <bot id>:<secret> (digits, a colon, then letters, digits, _ or -)'
+  },
+  // No cleanup exists, and there is no leftover lookup: only the chat itself shows what was sent.
+  recoveryAdvice:
+    'A message the send case posted stays in --chat (the connector cannot delete it): look there for yolk-conformance <run id> messages by hand; nothing else is created.',
   // The bot token is in every URL path: recordings carry the synthetic replay token instead.
   scrubRecording: scrubTelegramRecording,
   replayAccessToken: telegramConformanceReplayBotToken,

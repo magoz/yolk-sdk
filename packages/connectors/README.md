@@ -1318,8 +1318,8 @@ running a practice workspace by hand, `--allow-writes reversible` adds the write
 `ConnectorHttpClient` and `CredentialResolver` plus `TodoistConformanceConfig`, which holds
 host-supplied seed ids in a practice Todoist account. They cover filtered task list cursor paging,
 the HTTP 404 error body, task labels as label names, the create/get/update/close task lifecycle
-(a closed task leaves the active list), the `due_date` / `due_datetime` due shapes, project
-`parent_id`, and delete then not-found. Credentials bind through `todoistConformanceIntegration`
+(a closed task leaves the active list), acceptance of `due_date` / `due_datetime` as the connector
+sends them, project `parent_id`, and delete then not-found. Credentials bind through `todoistConformanceIntegration`
 (`todoist.api_token`, credential ref `todoist.conformance`). The case table, seeds, and claims live
 in the
 [Todoist conformance guide](../../apps/docs/content/docs/connectors/todoist.mdx#conformance-cases).
@@ -1335,7 +1335,9 @@ check by hand, and nothing is deleted by name. After a successful create, the cl
 project by id (also after a failed assertion or an interruption) and checks that
 `todoist.get_project` answers not found; a failed cleanup fails with
 `TodoistConformanceRestoreFailed` naming the project and id, and a project without the requested
-name or a task outside the case project is never deleted (`TodoistConformanceCleanupRefused`).
+name, under another parent, or with a seeded project's id, or a task outside the case project, is
+never deleted (`TodoistConformanceCleanupRefused`). The cleanup verifies only that the project is
+gone; that its tasks go with it is the delete case's unverified claim.
 Before any write case, and again after an interrupt-only exit (130), the runner warns read-only
 about `yolk-conformance-run-*` projects earlier runs left behind
 (`findTodoistConformanceLeftovers`, bounded to 20 listing pages); it never deletes them.
@@ -1354,10 +1356,11 @@ for owners running a practice account by hand, `--allow-writes reversible` adds 
 (`telegramConformanceFixtureSeeds`). Every case runs the real connector actions, or the host-only
 `downloadTelegramFile`, over `ConnectorHttpClient`, `ConnectorBinaryHttpClient`, and
 `CredentialResolver` plus `TelegramConformanceConfig` (a practice chat id, a file id, and the run
-id). The connector reads only HTTP statuses, so claims about the Bot API body are observed at those
-ports. They cover `telegram.validate` (one `getChat`, not `getMe`), the
-`{ ok: false, error_code, description }` error envelope on a 4xx status, `getFile` for downloads,
-and `telegram.send_message`. Credentials bind through `telegramConformanceIntegration(chatId)`
+id). The Telegram actions read only HTTP statuses, so claims about the Bot API `ok` field are
+observed at those ports; the host-only `downloadTelegramFile` decodes the `getFile` result. They
+cover `telegram.validate` (one `getChat`, not `getMe`), errors as a 4xx status with `ok: false`
+(never `200` with `ok: false`), `getFile` for downloads (the seeded file must report a size), and
+`telegram.send_message`. Credentials bind through `telegramConformanceIntegration(chatId)`
 (`telegram.bot_token`, credential ref `telegram.conformance`). The case table, seeds, and claims
 live in the
 [Telegram conformance guide](../../apps/docs/content/docs/connectors/telegram.mdx#conformance-cases).
@@ -1367,15 +1370,17 @@ chat, and the connector cannot delete it. It never runs under `allowWrites: 'rev
 starts it only when a person names its exact id (`allowIrreversible`, or the live runner's
 `--allow-irreversible telegram.messages.send-message`). The send is not interruptible; a definitive
 rejection (4xx, 429 included) sent nothing, and an ambiguous send (a transport or decoding failure,
-no status, or HTTP 5xx) fails with `TelegramConformanceActionFailed` (`sendOutcome: 'unknown'`)
+no status, HTTP 5xx, or a 2xx whose body lacks `ok: true`) fails with `TelegramConformanceActionFailed` (`sendOutcome: 'unknown'`)
 naming the exact text to look for in the chat, also through `ConformanceCleanupReporter` when the
 case is being interrupted. There is nothing to clean up and no leftover lookup.
 `pnpm conformance:telegram` in this repository dry-runs by default; `--live --owner-approved
 --account <label>` (refused whenever `CI` is non-empty; needs `TELEGRAM_BOT_TOKEN` and the seeds) is
 for owners running a practice bot by hand, and `--record` replaces the live bot token with the
-replay token in every recorded URL, refuses any recording that still contains it, and stages
-verified recordings all or nothing in `.conformance-recordings/telegram/<run>/` (gitignored) for
-manual scrubbing and promotion.
+replay token in every recorded URL, then refuses to stage or print a checklist for any recording in
+which the token or its secret part survives anywhere (URLs, headers, decoded base64 bodies,
+reassembled stream chunks, unescaped JSON strings; raw, percent-encoded, or escaped) or that holds a
+body it cannot fully inspect, and stages verified recordings all or nothing in
+`.conformance-recordings/telegram/<run>/` (gitignored) for manual scrubbing and promotion.
 
 ## Host-only file capabilities
 

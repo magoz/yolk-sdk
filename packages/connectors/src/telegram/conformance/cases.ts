@@ -4,9 +4,10 @@
  * Each case checks one wire claim the Telegram connector relies on, running the REAL connector
  * actions (and the host-only `downloadTelegramFile` helper) over the connector ports
  * (`ConnectorHttpClient`, `ConnectorBinaryHttpClient`, `CredentialResolver`) plus the host-supplied
- * `TelegramConformanceConfig` seeds. The connector reads only the HTTP status of Bot API answers,
- * never the `{ ok, result }` / `{ ok: false, error_code, description }` body, so claims about the
- * body are observed at the port the host provides (the cases send no request of their own). The
+ * `TelegramConformanceConfig` seeds. The Telegram actions (`telegram.validate`,
+ * `telegram.send_message`) read only the HTTP status of Bot API answers, never the `{ ok }` body, so
+ * claims about that body are observed at the port the host provides (the cases send no request of
+ * their own); the host-only `downloadTelegramFile` does decode the `getFile` result. The
  * same cases run on replay fixtures, an emulator, or by hand against a practice bot. None is
  * observed live yet (`observed` absent = unverified); sub-claims no live run has settled are marked
  * "(unverified: ...)" in their `wire`.
@@ -17,15 +18,16 @@
  * Irreversible write. `telegram.send_message` posts a real message that the connector cannot
  * delete (it has no delete action), so the send case is `write-irreversible`: a runner starts it
  * only when a person names its exact id. Its text names the `runId` seed, a per-invocation
- * `run-<hex>` value, so the message can be told apart. The send, its decoding, and its
- * classification run uninterruptibly. A definitive rejection (HTTP 4xx, including 429) sent
- * nothing. An ambiguous outcome (a transport or decoding failure, no status, or HTTP 5xx) may have
- * delivered the message anyway: the case fails with `TelegramConformanceActionFailed`
+ * `run-<hex>` value, so the message can be told apart. The send, the decoding of its observed
+ * answer, and its classification run uninterruptibly together. A definitive rejection (HTTP 4xx,
+ * including 429) sent nothing. An ambiguous outcome (a transport or decoding failure, no status,
+ * HTTP 5xx, or a 2xx whose body is not `{ ok: true }`) may have delivered the message anyway: the
+ * case fails with `TelegramConformanceActionFailed`
  * (`sendOutcome: 'unknown'`) naming the text to look for in the seeded chat, and hands that message
  * to the `ConformanceCleanupReporter` when the case is being interrupted. There is nothing to clean
  * up, and no leftover lookup: the Bot API cannot list the messages a bot sent.
  */
-import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
+import { Context, Data, Effect, Exit, Predicate, Ref, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ConformanceMismatch,
@@ -35,7 +37,7 @@ import {
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
 import { ConnectorBinaryHttpClient, type ConnectorBinaryHttpResponse } from '../../binary-http.ts'
-import { interruptPending, reportCleanupProblem } from '../../conformance/cleanup-reporter.ts'
+import { classifyWriteExit, failReporting } from '../../conformance/cleanup-reporter.ts'
 import { ApiKeyCredential, CredentialResolver, makeCredentialBinding } from '../../credential.ts'
 import type { ConnectorError } from '../../error.ts'
 import type {
@@ -52,6 +54,7 @@ import type { ActionResult, ProviderFailure } from '../../result.ts'
 import { downloadTelegramFile } from '../download.ts'
 import {
   TelegramSendMessageInput,
+  type TelegramSendMessageOutput,
   telegramSendMessageAction,
   telegramValidateAction
 } from '../index.ts'
@@ -230,15 +233,12 @@ const outcomeOf = <A>(result: ActionResult<A>): string => {
 /** The Bot API method of a request URL (`getChat`), never the token-bearing path before it. */
 const botMethodOf = (url: string): string => url.slice(url.lastIndexOf('/') + 1).split('?', 1)[0]
 
-// Bot API envelopes: `{ ok: true, result }` and `{ ok: false, error_code, description }`.
+// Bot API envelopes, reduced to the one field that says whether the call succeeded: `ok`. The
+// connector reads none of them; the cases check only that `ok` agrees with the HTTP status.
 
-const BotApiOk = Schema.Struct({ ok: Schema.Literal(true), result: Schema.Unknown })
+const BotApiOk = Schema.Struct({ ok: Schema.Literal(true) })
 
-const BotApiError = Schema.Struct({
-  ok: Schema.Literal(false),
-  error_code: Schema.Number,
-  description: Schema.String
-})
+const BotApiError = Schema.Struct({ ok: Schema.Literal(false) })
 
 /** Decode a JSON text body with `schema`, or `undefined`. */
 const decodeBody = <A>(
@@ -297,7 +297,7 @@ export const telegramValidateGetChatCase: TelegramConformanceCase = defineConfor
   title: 'validate is one getChat call, answered 2xx with ok true for a chat the bot is in',
   safety: 'read',
   docs: '`telegram.validate` sends POST https://api.telegram.org/bot<token>/getChat with the JSON body `{ chat_id }` (integration config `chatId`; it does not call getMe) and reports `{ ok: true, chatId }` on any 2xx status, without reading the body.',
-  wire: "`telegram.validate` for the seeded chat, which the bot is a member of, sends exactly one POST `getChat`, and Telegram answers it with a 2xx status and a body `{ ok: true, result }` (observed at the `ConnectorHttpClient` port), so the connector's status-only check agrees with the Bot API envelope; the connector reports `{ ok: true, chatId }` with the seeded id.",
+  wire: "`telegram.validate` for the seeded chat, which the bot is a member of, sends exactly one POST `getChat`, and Telegram answers it with a 2xx status and a body with `ok: true` (observed at the `ConnectorHttpClient` port), so the connector's status-only check agrees with the Bot API envelope; the connector reports `{ ok: true, chatId }` with the seeded id.",
   fixtures: [telegramValidateGetChatFixture.id],
   run: Effect.gen(function* () {
     const chatId = yield* requireSeed('chatId')
@@ -320,7 +320,7 @@ export const telegramValidateGetChatCase: TelegramConformanceCase = defineConfor
 
     yield* expectConformance(
       body !== undefined,
-      'expected the 2xx getChat answer to carry { ok: true, result }'
+      'expected the 2xx getChat answer to carry ok: true'
     )
   })
 })
@@ -337,10 +337,10 @@ const invalidTokenResolver = CredentialResolver.of({
 
 export const telegramErrorEnvelopeCase: TelegramConformanceCase = defineConformanceCase({
   id: 'telegram.errors.error-envelope',
-  title: 'Bot API errors answer a 4xx status with { ok: false, error_code, description }',
+  title: 'Bot API errors answer a 4xx status, never 200, with ok false',
   safety: 'read',
-  docs: 'The connector treats any non-2xx Bot API answer as a failure (`telegram.validate`: `telegram_validate_failed`; `telegram.send_message`: 429 `telegram_rate_limited`, otherwise `telegram_send_failed`), keeps the HTTP status and the body as `underlying`, and never reads `ok`, `error_code`, `description`, or `parameters`. A 200 answer with `ok: false` would be reported as success.',
-  wire: 'Two triggers, both through `telegram.validate`. (1) `getChat` for a chat id the bot is not a member of answers a 4xx status (unverified: 400 `chat not found`); (2) `getChat` with a bot token that names no bot answers a 4xx status (unverified: 401 or 404). Both bodies are `{ ok: false, error_code, description }`, and the connector reports `telegram_validate_failed` with that status. The exact 4xx and `error_code` are not checked: the connector does not distinguish them.',
+  docs: "The connector treats any non-2xx Bot API answer as a failure (`telegram.validate`: `telegram_validate_failed`; `telegram.send_message`: 429 `telegram_rate_limited`, otherwise `telegram_send_failed`), keeps the HTTP status and the body as `underlying`, and never reads `ok`, `error_code`, `description`, or `parameters`. A 200 answer with `ok: false` would be reported as success, and the send case classifies a 4xx as 'nothing sent' but a 5xx as 'outcome unknown'.",
+  wire: 'Two triggers, both through `telegram.validate`. (1) `getChat` for a chat id the bot is not a member of answers a 4xx status (unverified: 400 `chat not found`); (2) `getChat` with a bot token that names no bot answers a 4xx status (unverified: 401 or 404). Both are errors in the HTTP status itself, not a 200 whose body says `ok: false`, and both bodies carry `ok: false`; the connector reports `telegram_validate_failed` with that 4xx status (not a 5xx, which the send case would treat as an unknown outcome). The exact 4xx and the other body fields are not checked: the connector does not read them.',
   fixtures: [telegramErrorEnvelopeFixture.id],
   run: Effect.gen(function* () {
     const chatId = yield* requireSeed('chatId')
@@ -378,7 +378,7 @@ export const telegramErrorEnvelopeCase: TelegramConformanceCase = defineConforma
 
       yield* expectConformance(
         envelope !== undefined,
-        `expected ${label} to answer { ok: false, error_code, description }`
+        `expected ${label} to answer a body with ok: false`
       )
     }
   })
@@ -405,15 +405,15 @@ const transferFailed = (error: ConnectorFileTransferError) =>
 
 const GetFileAnswer = Schema.Struct({
   ok: Schema.Literal(true),
-  result: Schema.Struct({ file_id: Schema.String, file_size: Schema.Number })
+  result: Schema.Struct({ file_id: Schema.String, file_size: Schema.optional(Schema.Number) })
 })
 
 export const telegramGetFilePathCase: TelegramConformanceCase = defineConformanceCase({
   id: 'telegram.files.get-file-path',
-  title: 'getFile answers the same file_id, a relative file_path, and the exact file_size',
+  title: 'getFile answers the same file_id and a relative file_path; the file matches file_size',
   safety: 'read',
   docs: 'The host-only `downloadTelegramFile` sends GET /bot<token>/getFile?file_id=<id> and requires `{ ok: true, result: { file_id, file_path, file_size? } }` with `file_id` equal to the requested id and a relative `file_path` (letters, digits, `_ . / -`, no empty or dot segments); it then GETs https://api.telegram.org/file/bot<token>/<file_path> without redirects and, when `file_size` is present, requires exactly that many bytes (hosted Bot API files are capped at 20 MB).',
-  wire: 'For the seeded `fileId` (a small file the bot received), `getFile` answers `ok: true` with `result.file_id` equal to the seeded id (unverified: that Telegram echoes the `file_id` it was given rather than another valid id for the same file), a `file_path` the helper accepts, and a `file_size` (observed at the `ConnectorBinaryHttpClient` port); the file URL then answers HTTP 200 with exactly `file_size` bytes, so `downloadTelegramFile` returns them with `source.fileId` equal to the seed.',
+  wire: 'For the seeded `fileId` (a small file the bot received), `getFile` answers `ok: true` with `result.file_id` equal to the seeded id (unverified: that Telegram echoes the `file_id` it was given rather than another valid id for the same file) and a `file_path` the helper accepts; the file URL then answers HTTP 200 with exactly `file_size` bytes, so `downloadTelegramFile` returns them with `source.fileId` equal to the seed. `file_size` is optional for the helper; the seed must name a file whose `getFile` answer reports one (a `precondition:`), so the byte-count check the helper relies on is exercised, and the size is compared only when present (observed at the `ConnectorBinaryHttpClient` port).',
   fixtures: [telegramGetFilePathFixture.id],
   run: Effect.gen(function* () {
     const fileId = yield* requireSeed('fileId')
@@ -445,7 +445,7 @@ export const telegramGetFilePathCase: TelegramConformanceCase = defineConformanc
 
     if (answer === undefined) {
       return yield* new ConformanceMismatch({
-        message: 'expected getFile to answer { ok: true, result } with file_id and file_size'
+        message: 'expected getFile to answer { ok: true, result } with a file_id'
       })
     }
 
@@ -454,9 +454,18 @@ export const telegramGetFilePathCase: TelegramConformanceCase = defineConformanc
       [fileId, fileId],
       'expected getFile to answer the requested file_id'
     )
+
+    const size = answer.result.file_size
+
+    if (size === undefined) {
+      return yield* new ConformanceMismatch({
+        message: 'precondition: fileId must name a file whose getFile answer reports file_size'
+      })
+    }
+
     yield* expectEqual(
       file.byteLength,
-      answer.result.file_size,
+      size,
       'expected the file URL to answer exactly file_size bytes'
     )
   })
@@ -471,42 +480,61 @@ const sendText = (runId: string) =>
   `${telegramConformanceMarker} ${runId}: synthetic conformance message, safe to ignore`
 
 /**
- * Classify a send: a transport or decoding failure, no status, or a 5xx is ambiguous (the message
- * may have been delivered: `sendOutcome: 'unknown'`); a 4xx is a definitive rejection (nothing was
- * sent); `undefined` for a success.
+ * Classify a send from its exit and its observed answer. A transport or decoding failure, no
+ * status, a 5xx, or a 2xx whose observed body is not `{ ok: true }` is ambiguous (the message may
+ * have been delivered: `sendOutcome: 'unknown'`); a 4xx is a definitive rejection (nothing was
+ * sent); `undefined` for a success with an `ok: true` body.
  */
-const classifySend = <A>(
+const classifySend = (
   text: string,
-  exit: Exit.Exit<{ readonly value: ActionResult<A> }, ConnectorError>
-): TelegramConformanceActionFailed | undefined => {
-  const actionId = telegramSendMessageAction.id
+  exit: Exit.Exit<ObservedSend, ConnectorError>
+): Effect.Effect<TelegramConformanceActionFailed | undefined> =>
+  Effect.gen(function* () {
+    const actionId = telegramSendMessageAction.id
+    const outcome = classifyWriteExit(Exit.map(exit, observedSend => observedSend.value))
 
-  if (Exit.isFailure(exit)) {
-    const error = Cause.findErrorOption(exit.cause)
+    switch (outcome.kind) {
+      case 'rejected':
+        return new TelegramConformanceActionFailed({ actionId, ...outcome.failure })
+      case 'ambiguous':
+        return new TelegramConformanceActionFailed({
+          actionId,
+          ...outcome.failure,
+          sendOutcome: 'unknown',
+          text
+        })
+      case 'success':
+        break
+    }
 
-    return new TelegramConformanceActionFailed({
-      actionId,
-      code: Option.isSome(error) ? error.value.cause : 'defect',
-      sendOutcome: 'unknown',
-      text
-    })
-  }
+    // A 2xx the connector reports as sent: unless the observed body says `ok: true`, the send may
+    // or may not have happened.
+    const answer = Exit.isSuccess(exit) ? exit.value.exchanges.at(-1)?.response : undefined
+    const body = yield* decodeBody(BotApiOk, answer?.body)
 
-  const failure = failureOf(exit.value.value)
+    if (body !== undefined) {
+      return undefined
+    }
 
-  if (failure === undefined) {
-    return undefined
-  }
+    return answer === undefined
+      ? new TelegramConformanceActionFailed({
+          actionId,
+          code: 'unobserved_answer',
+          sendOutcome: 'unknown',
+          text
+        })
+      : new TelegramConformanceActionFailed({
+          actionId,
+          code: 'undecodable_answer',
+          status: answer.status,
+          sendOutcome: 'unknown',
+          text
+        })
+  })
 
-  const { code, status } = failure
-
-  if (status === undefined) {
-    return new TelegramConformanceActionFailed({ actionId, code, sendOutcome: 'unknown', text })
-  }
-
-  return status >= 500
-    ? new TelegramConformanceActionFailed({ actionId, code, status, sendOutcome: 'unknown', text })
-    : new TelegramConformanceActionFailed({ actionId, code, status })
+type ObservedSend = {
+  readonly value: ActionResult<TelegramSendMessageOutput>
+  readonly exchanges: ReadonlyArray<ObservedExchange>
 }
 
 export const telegramSendMessageCase: TelegramConformanceCase = defineConformanceCase({
@@ -514,7 +542,7 @@ export const telegramSendMessageCase: TelegramConformanceCase = defineConformanc
   title: 'sendMessage answers 2xx with ok true for a chat the bot may post in',
   safety: 'write-irreversible',
   docs: '`telegram.send_message` sends POST https://api.telegram.org/bot<token>/sendMessage with `{ chat_id, text, disable_web_page_preview }` (the preview is disabled unless the input says otherwise) and reports `{ sent: true, chatId }` on any 2xx status, without reading the body; 429 maps to `telegram_rate_limited`, any other non-2xx to `telegram_send_failed`. The connector has no delete action: a sent message cannot be undone through it.',
-  wire: '`telegram.send_message` of a short synthetic text naming the run id to the seeded chat sends exactly one POST `sendMessage`, and Telegram answers a 2xx status with `{ ok: true, result }` (observed at the `ConnectorHttpClient` port) while still accepting the deprecated `disable_web_page_preview` field (unverified: Bot API 7.0 replaced it with `link_preview_options`); the connector reports `{ sent: true, chatId }`. The message stays in the chat: this case is write-irreversible and runs only when requested by its exact id.',
+  wire: '`telegram.send_message` of a short synthetic text naming the run id to the seeded chat sends exactly one POST `sendMessage`, and Telegram answers a 2xx status with a body carrying `ok: true` (observed at the `ConnectorHttpClient` port and decoded inside the uninterruptible send, so a 2xx without it is reported as an unknown send outcome) while still accepting the deprecated `disable_web_page_preview` field (unverified: Bot API 7.0 replaced it with `link_preview_options`); the connector reports `{ sent: true, chatId }`. The message stays in the chat: this case is write-irreversible and runs only when requested by its exact id.',
   fixtures: [telegramSendMessageFixture.id],
   run: Effect.gen(function* () {
     const chatId = yield* requireSeed('chatId')
@@ -532,15 +560,13 @@ export const telegramSendMessageCase: TelegramConformanceCase = defineConformanc
           )
         )
 
-        const error = classifySend(text, exit)
+        const error = yield* classifySend(text, exit)
 
         if (error !== undefined) {
           // An interruption may replace this failure, and with it the advice to check the chat.
-          if (error.sendOutcome === 'unknown' && (yield* interruptPending(unmask))) {
-            yield* reportCleanupProblem(error)
-          }
-
-          return yield* Effect.fail(error)
+          return yield* error.sendOutcome === 'unknown'
+            ? failReporting(unmask, error)
+            : Effect.fail(error)
         }
 
         return yield* exit
@@ -558,14 +584,6 @@ export const telegramSendMessageCase: TelegramConformanceCase = defineConformanc
       sentMethods(sent.exchanges),
       [['POST', 'sendMessage']],
       'expected telegram.send_message to send exactly one POST sendMessage'
-    )
-
-    const [exchange] = sent.exchanges
-    const body = yield* decodeBody(BotApiOk, exchange?.response.body)
-
-    yield* expectConformance(
-      body !== undefined,
-      'expected the 2xx sendMessage answer to carry { ok: true, result }'
     )
   })
 })

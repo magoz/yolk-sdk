@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Effect, Result } from 'effect'
 import { describe, expect, it } from 'vitest'
-import type { WireExchange } from '../../packages/conformance/src/fixture.ts'
+import type { WireExchange, WireResponse } from '../../packages/conformance/src/fixture.ts'
 import type { WireRecorderApi } from '../../packages/conformance/src/record.ts'
 import { ReplayHttpClient } from '../../packages/conformance/src/replay.ts'
 import type { ConformanceReport } from '../../packages/conformance/src/runner.ts'
@@ -12,12 +12,17 @@ import {
   telegramConformanceCases,
   telegramConformanceFixtureSeeds,
   telegramConformanceReplayBotToken,
+  telegramErrorEnvelopeFixture,
   telegramGetFilePathFixture,
   telegramSendMessageFixture,
   telegramValidateGetChatFixture
 } from '../../packages/connectors/src/telegram/conformance/index.ts'
 import {
-  containsAccessToken,
+  inspectRecordingForAccessToken,
+  runInterruptibly,
+  textContainsAccessToken,
+  type CliIo,
+  type SignalSource,
   defaultRunOptions,
   dryRunReport,
   leftoverWarnings,
@@ -171,6 +176,17 @@ describe('run-telegram-conformance live refusal (no network)', () => {
     ).toEqual({ refusal: telegramRunner.invalidSeedsMessage })
   })
 
+  it('refuses a live token that is not <bot id>:<secret>, without printing it', () => {
+    const checked = liveInputs(telegramRunner, live(seedFlags), {
+      TELEGRAM_BOT_TOKEN: 'not a bot token/../x'
+    })
+
+    expect(checked).toEqual({
+      refusal:
+        'TELEGRAM_BOT_TOKEN must be a bot token of the form <bot id>:<secret> (digits, a colon, then letters, digits, _ or -)'
+    })
+  })
+
   it('generates a fresh run id for every invocation, for the send text', () => {
     const runIdOf = () => {
       const checked = liveInputs(
@@ -213,6 +229,12 @@ describe('run-telegram-conformance live refusal (no network)', () => {
 
 const liveToken = '987654321:synthetic-live-token'
 
+const liveSecret = 'synthetic-live-token'
+
+/** Every character as a `%XX` escape, letters included. */
+const fullyPercentEncoded = (text: string) =>
+  Array.from(text, char => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`).join('')
+
 const recordInputs: LiveInputs<typeof telegramConformanceFixtureSeeds> = {
   account: 'practice',
   accessToken: liveToken,
@@ -240,21 +262,27 @@ describe('run-telegram-conformance token scrubbing', () => {
     expect(scrubTelegramRecording(recorded, liveToken)).toEqual(
       telegramGetFilePathFixture.exchanges
     )
-    expect(containsAccessToken(recorded, liveToken)).toBe(true)
-    expect(containsAccessToken(scrubTelegramRecording(recorded, liveToken), liveToken)).toBe(false)
+    expect(inspectRecordingForAccessToken(recorded, liveToken)).toBe('token')
+    expect(
+      inspectRecordingForAccessToken(scrubTelegramRecording(recorded, liveToken), liveToken)
+    ).toBe('clean')
   })
 
-  it('finds the token verbatim, percent-encoded, or JSON-escaped', () => {
-    const [exchange] = telegramValidateGetChatFixture.exchanges
+  it('finds the token or its secret part raw, percent-encoded, or escaped in any text', () => {
+    for (const text of [
+      liveToken,
+      encodeURIComponent(liveToken),
+      fullyPercentEncoded(liveToken),
+      `\\u0039${liveToken.slice(1)}`,
+      `&#57;${liveToken.slice(1)}`,
+      liveSecret
+    ]) {
+      expect(textContainsAccessToken(text, liveToken)).toBe(true)
+    }
 
-    const withUrl = (url: string): ReadonlyArray<WireExchange> => [
-      { ...exchange, request: { ...exchange.request, url } }
-    ]
-
-    expect(
-      containsAccessToken(withUrl(`https://x.test/${encodeURIComponent(liveToken)}`), liveToken)
-    ).toBe(true)
-    expect(containsAccessToken(withUrl('https://x.test/other'), liveToken)).toBe(false)
+    // The public bot id alone is not a secret: every sendMessage answer carries it as from.id.
+    expect(textContainsAccessToken('{"from":{"id":987654321}}', liveToken)).toBe(false)
+    expect(textContainsAccessToken('https://x.test/other', liveToken)).toBe(false)
   })
 })
 
@@ -335,6 +363,7 @@ describe('run-telegram-conformance --record staging (offline)', () => {
       new Map(
         [
           telegramValidateGetChatFixture,
+          telegramErrorEnvelopeFixture,
           telegramGetFilePathFixture,
           telegramSendMessageFixture
         ].map(fixture => [fixture.caseId, recorderOf(asRecordedLive(fixture.exchanges))] as const)
@@ -349,12 +378,19 @@ describe('run-telegram-conformance --record staging (offline)', () => {
     const staged = [...files.values()].join('\n')
 
     expect([...files.keys()].sort()).toEqual(
-      ['get-file-path.ts', 'seeds.ts', 'send-message.ts', 'validate-get-chat.ts'].map(name =>
-        join(stagingDir, name)
-      )
+      [
+        'error-envelope.ts',
+        'get-file-path.ts',
+        'seeds.ts',
+        'send-message.ts',
+        'validate-get-chat.ts'
+      ].map(name => join(stagingDir, name))
     )
     expect(staged).not.toContain(liveToken)
+    expect(staged).not.toContain(liveSecret)
     expect(staged).toContain(`/bot${telegramConformanceReplayBotToken}/getChat`)
+    // The error case's own synthetic invalid token is not the live one: it stays as recorded.
+    expect(staged).toContain('/bot0:yolk-conformance-invalid-token/getChat')
     expect(staged).toContain(`/file/bot${telegramConformanceReplayBotToken}/documents/file_0.txt`)
 
     const checklist = result.success.checklist.join('\n')
@@ -384,6 +420,134 @@ describe('run-telegram-conformance --record staging (offline)', () => {
 
     expect(Result.isFailure(result) ? result.failure.message : '').toBe(
       `${telegramValidateGetChatFixture.caseId}: the recording still contains the live access token; nothing was written`
+    )
+    expect(operations).toEqual([])
+  })
+
+  const validateCaseId = telegramValidateGetChatFixture.caseId
+
+  /** The validate recording, as live, with its response (and optionally its URL) replaced. */
+  const leakyValidate = (response: WireResponse, url?: string): ReadonlyArray<WireExchange> =>
+    asRecordedLive(telegramValidateGetChatFixture.exchanges).map(exchange => ({
+      request: url === undefined ? exchange.request : { ...exchange.request, url },
+      response
+    }))
+
+  const json = (body: string): WireResponse => ({
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    body
+  })
+
+  const tokenBytes = (prefix: ReadonlyArray<number>) =>
+    Buffer.from([...prefix, ...Buffer.from(liveToken, 'ascii')]).toString('base64')
+
+  const refusal = `${validateCaseId}: the recording still contains the live access token; nothing was written`
+
+  const uninspectable = `${validateCaseId}: the recording holds a body the token guard cannot fully inspect (undecodable base64 or a compressed payload); nothing was written`
+
+  for (const [label, exchanges, message] of [
+    [
+      'a Unicode-escaped JSON body',
+      leakyValidate(
+        json(
+          `{"ok":true,"result":{"id":-1001000000001,"title":"\\u0039${liveToken.slice(1)}","type":"supergroup"}}`
+        )
+      ),
+      refusal
+    ],
+    [
+      'a base64 binary body',
+      leakyValidate({
+        status: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+        bodyBase64: tokenBytes([0xff, 0xfe, 0x00])
+      }),
+      refusal
+    ],
+    [
+      'a token split across stream chunks (text and base64)',
+      leakyValidate({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+        chunks: [
+          `data: {"t":"${liveToken.slice(0, 20)}`,
+          { base64: Buffer.from(`${liveToken.slice(20)}"}\n\n`).toString('base64') }
+        ]
+      }),
+      refusal
+    ],
+    [
+      'a percent-encoded token in the URL',
+      leakyValidate(
+        json('{"ok":true,"result":{"id":-1001000000001,"type":"supergroup"}}'),
+        `https://api.telegram.org/bot${fullyPercentEncoded(liveToken)}/getChat`
+      ),
+      refusal
+    ],
+    [
+      'a token in a response header',
+      leakyValidate({
+        status: 200,
+        headers: { 'content-type': 'application/json', 'x-echo': liveToken },
+        body: '{"ok":true,"result":{"id":-1001000000001,"type":"supergroup"}}'
+      }),
+      refusal
+    ],
+    [
+      'the secret part alone in a body',
+      leakyValidate(json(`{"ok":true,"result":{"description":"${liveSecret}"}}`)),
+      refusal
+    ],
+    [
+      'an undecodable base64 body',
+      leakyValidate({ status: 200, headers: {}, bodyBase64: 'not base64!' }),
+      uninspectable
+    ],
+    [
+      'a compressed body',
+      leakyValidate({
+        status: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+        bodyBase64: Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x01, 0x02]).toString('base64')
+      }),
+      uninspectable
+    ]
+  ] as const) {
+    it(`writes and prints nothing for ${label}`, async () => {
+      const { writer, operations } = memoryWriter()
+
+      const result = await stageWith(
+        telegramRunner,
+        new Map([[validateCaseId, recorderOf(exchanges)]]),
+        writer
+      )
+
+      const failure = Result.isFailure(result) ? result.failure.message : expect.fail('staged')
+
+      expect(failure).toBe(message)
+      expect(failure).not.toContain(liveSecret)
+      expect(operations).toEqual([])
+    })
+  }
+
+  it('writes and prints nothing when a seed would carry the token into seeds.ts', async () => {
+    const { writer, operations } = memoryWriter()
+
+    const result = await Effect.runPromise(
+      stageRecordings(
+        telegramRunner,
+        passedReport([validateCaseId]),
+        new Map([
+          [validateCaseId, recorderOf(asRecordedLive(telegramValidateGetChatFixture.exchanges))]
+        ]),
+        { ...recordInputs, seeds: { ...recordInputs.seeds, chatId: liveToken } },
+        { writer, stagingDir, recordedAt: '2026-09-30' }
+      ).pipe(Effect.result)
+    )
+
+    expect(Result.isFailure(result) ? result.failure.message : '').toBe(
+      'The staged files or the review checklist would contain the live access token; nothing was written'
     )
     expect(operations).toEqual([])
   })
@@ -433,6 +597,30 @@ describe('run-telegram-conformance live run wiring', () => {
     return out.join('\n')
   }
 
+  it('prints no trace of the live token when every request fails', async () => {
+    const out: Array<string> = []
+    const err: Array<string> = []
+
+    // An empty replay fails every request closed, as a dropped connection would.
+    await Effect.runPromise(
+      runLive(telegramRunner, live(['--allow-irreversible', sendCaseId]), recordInputs, {
+        http: ReplayHttpClient.layer([]),
+        out: line => {
+          out.push(line)
+        },
+        err: line => {
+          err.push(line)
+        }
+      })
+    )
+
+    const printed = [...out, ...err].join('\n')
+
+    expect(printed).toContain('FAIL  telegram.messages.send-message')
+    expect(printed).not.toContain(liveSecret)
+    expect(textContainsAccessToken(printed, liveToken)).toBe(false)
+  })
+
   it('skips the send unless its exact id was given, and runs it when it was', async () => {
     expect((await runOver(['--allow-writes', 'reversible'])).split('\n')[0]).toBe(
       'SKIP  telegram.messages.send-message  [write-irreversible]  manual-only  warnings: unverified-case'
@@ -440,6 +628,53 @@ describe('run-telegram-conformance live run wiring', () => {
     expect((await runOver(['--allow-irreversible', sendCaseId])).split('\n')[0]).toBe(
       'PASS  telegram.messages.send-message  [write-irreversible]  warnings: unverified-case'
     )
+  })
+})
+
+describe('run-telegram-conformance interruption advice', () => {
+  it('points at the chat, never at a leftover lookup Telegram does not have', async () => {
+    const errors: Array<string> = []
+    let handlers: Array<() => void> = []
+
+    const signals: SignalSource = {
+      on: (_signal, handler) => {
+        handlers = [...handlers, handler]
+      },
+      off: () => {
+        handlers = []
+      }
+    }
+
+    const io: CliIo = {
+      error: message => {
+        errors.push(message)
+      },
+      setExitCode: () => undefined,
+      forceExit: () => undefined
+    }
+
+    let clock = 0
+
+    const done = runInterruptibly(Effect.never, signals, io, {
+      now: () => clock,
+      pid: 4242,
+      recoveryAdvice: telegramRunner.recoveryAdvice
+    })
+
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 0))
+    handlers[0]?.()
+    clock += 2000
+    handlers[0]?.()
+    await done
+
+    expect(errors[0]).toContain(
+      'SIGINT: interrupting the run (pid 4242); a write already in flight completes before exit'
+    )
+    expect(errors[1]).toBe(
+      `Second SIGINT: exiting now without waiting for cleanup. ${telegramRunner.recoveryAdvice}`
+    )
+    expect(errors.at(-1)).toBe(`Interrupted. Read the WARN lines. ${telegramRunner.recoveryAdvice}`)
+    expect(errors.join('\n')).not.toContain('--allow-writes')
   })
 })
 

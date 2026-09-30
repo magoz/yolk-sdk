@@ -48,7 +48,7 @@ import {
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
 import type { ConnectorBinaryWriteHttpClient } from '../../binary-write-http.ts'
-import { interruptPending, reportCleanupProblem } from '../../conformance/cleanup-reporter.ts'
+import { classifyWriteExit, failReporting } from '../../conformance/cleanup-reporter.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import type { ConnectorError } from '../../error.ts'
 import type {
@@ -498,82 +498,34 @@ type CreateOutcome =
  */
 const classifyCreate = (owned: string, attempted: string, exit: CreateExit): CreateOutcome => {
   const actionId = dropboxCreateFolderAction.id
+  const outcome = classifyWriteExit(exit)
 
-  if (Exit.isFailure(exit)) {
-    const error = Cause.findErrorOption(exit.cause)
+  switch (outcome.kind) {
+    case 'ambiguous':
+      return {
+        kind: 'ambiguous',
+        error: new DropboxConformanceActionFailed({
+          actionId,
+          ...outcome.failure,
+          createOutcome: 'unknown',
+          path: attempted
+        })
+      }
+    case 'rejected':
+      return {
+        kind: 'rejected',
+        result: outcome.result,
+        error: new DropboxConformanceActionFailed({ actionId, ...outcome.failure })
+      }
+    case 'success': {
+      const created = outcome.value.pathLower ?? attempted
 
-    return {
-      kind: 'ambiguous',
-      error: new DropboxConformanceActionFailed({
-        actionId,
-        code: Option.isSome(error) ? error.value.cause : 'defect',
-        createOutcome: 'unknown',
-        path: attempted
-      })
+      return inNamespace(owned, created)
+        ? { kind: 'created', folder: outcome.value }
+        : { kind: 'outside', path: created }
     }
-  }
-
-  const result = exit.value
-
-  if (Predicate.isTagged(result, 'Success')) {
-    const created = result.value.pathLower ?? attempted
-
-    return inNamespace(owned, created)
-      ? { kind: 'created', folder: result.value }
-      : { kind: 'outside', path: created }
-  }
-
-  const { code, status } = result.error
-
-  if (status === undefined) {
-    return {
-      kind: 'ambiguous',
-      error: new DropboxConformanceActionFailed({
-        actionId,
-        code,
-        createOutcome: 'unknown',
-        path: attempted
-      })
-    }
-  }
-
-  if (status >= 500) {
-    return {
-      kind: 'ambiguous',
-      error: new DropboxConformanceActionFailed({
-        actionId,
-        code,
-        status,
-        createOutcome: 'unknown',
-        path: attempted
-      })
-    }
-  }
-
-  return {
-    kind: 'rejected',
-    result,
-    error: new DropboxConformanceActionFailed({ actionId, code, status })
   }
 }
-
-/**
- * Fail with `error`, first handing its message to the `ConformanceCleanupReporter` when the fiber
- * was interrupted (`interrupted`, or an interruption still pending): an interruption may otherwise
- * replace this error, and with it the path to check by hand.
- */
-const failReporting = <E extends { readonly message: string }>(
-  unmask: <A, E2, R>(effect: Effect.Effect<A, E2, R>) => Effect.Effect<A, E2, R>,
-  error: E,
-  interrupted = false
-) =>
-  Effect.gen(function* () {
-    if (interrupted || (yield* interruptPending(unmask))) {
-      yield* reportCleanupProblem(error)
-    }
-
-    return yield* Effect.fail(error)
-  })
 
 /**
  * Prove `path` absent, create the case folder there, run `use`, then ALWAYS delete every pending

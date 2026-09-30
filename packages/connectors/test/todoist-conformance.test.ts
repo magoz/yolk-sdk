@@ -177,7 +177,6 @@ describe('Todoist conformance cases', () => {
     ).toEqual([
       'todoist.errors.not-found-envelope',
       'todoist.errors.not-found-envelope',
-      'todoist.tasks.due-dates',
       'todoist.projects.delete-then-not-found',
       'todoist.projects.delete-then-not-found'
     ])
@@ -389,10 +388,13 @@ const withReplaced = (tampered: WireFixture) =>
 
 const lifecycleTaskBody = textBody(exchangeAt(todoistTaskLifecycleFixture, 2).response)
 
-/** One tamper per case: the fixture edit and the mismatch the case reports. */
+type ReportedFailure = { readonly kind: string; readonly tag: string; readonly message: string }
+
+/** One tamper per case: the fixture edit and the failure the case reports. */
 const tampers: ReadonlyArray<{
   readonly fixture: WireFixture
-  readonly message: string
+  readonly message?: string
+  readonly failure?: ReportedFailure
 }> = [
   {
     fixture: replaceResponse(
@@ -430,12 +432,20 @@ const tampers: ReadonlyArray<{
     message: 'expected list_tasks to omit the closed task (active tasks only)'
   },
   {
+    // Todoist rejects due_datetime as sent: the update is not accepted.
     fixture: replaceResponse(
       todoistDueDatesFixture,
       2,
-      replaceInBody('"date":"2030-01-15T09:30:00Z"', '"date":"2030-01-15T10:30:00Z"')
+      withStatus(
+        400,
+        '{"error":"Invalid argument value","error_code":20,"error_tag":"INVALID_ARGUMENT_VALUE","http_code":400}'
+      )
     ),
-    message: 'expected due_datetime to answer due.date carrying the requested instant'
+    failure: {
+      kind: 'failure',
+      tag: 'TodoistConformanceActionFailed',
+      message: 'todoist.update_task failed: todoist_update_task_failed (HTTP 400)'
+    }
   },
   {
     fixture: replaceResponse(
@@ -460,15 +470,41 @@ describe('Todoist conformance drills (one per case)', () => {
     expect(tampers.map(tamper => tamper.fixture.caseId)).toEqual(caseIds.map(([id]) => id))
   })
 
-  for (const { fixture, message } of tampers) {
+  for (const { fixture, message, failure } of tampers) {
     it.effect(`a tampered fixture fails exactly ${fixture.caseId}`, () =>
       Effect.gen(function* () {
         expect(yield* suiteFailures(withReplaced(fixture))).toEqual([
-          { id: fixture.caseId, failure: mismatch(message) }
+          {
+            id: fixture.caseId,
+            failure: failure ?? mismatch(message ?? expect.fail('tamper without an outcome'))
+          }
         ])
       })
     )
   }
+
+  it.effect('the due case accepts any due representation Todoist answers', () =>
+    Effect.gen(function* () {
+      // The connector passes `due` through untyped: neither is_recurring nor the timed form matter.
+      const bare = replaceResponse(
+        replaceResponse(
+          todoistDueDatesFixture,
+          1,
+          replaceInBody(
+            '"due":{"date":"2030-01-15","timezone":null,"string":"Jan 15 2030","lang":"en","is_recurring":false}',
+            '"due":{"date":"2030-01-15"}'
+          )
+        ),
+        2,
+        replaceInBody(
+          '"due":{"date":"2030-01-15T09:30:00Z","timezone":"UTC","string":"Jan 15 2030 09:30","lang":"en","is_recurring":false}',
+          '"due":{"date":"2030-01-15T09:30:00.000000Z","datetime":"2030-01-15T09:30:00.000000Z"}'
+        )
+      )
+
+      expect(yield* suiteFailures(withReplaced(bare))).toEqual([])
+    })
+  )
 
   for (const [caseId] of caseIds) {
     it.effect(`a dropped fixture fails exactly ${caseId}`, () =>
@@ -834,11 +870,44 @@ describe('Todoist conformance write ownership', () => {
         kind: 'failure',
         tag: 'TodoistConformanceCleanupRefused',
         message:
-          'todoist.tasks.lifecycle-close: cleanup refused; a create answered project Someone else project (id 6XSynLifecycle01), outside the run namespace, so nothing was deleted there; check it by hand.'
+          'todoist.tasks.lifecycle-close: cleanup refused; a create answered project Someone else project (id 6XSynLifecycle01) with parent 6XSyntheticWork0, outside the run namespace, so nothing was deleted there; check it by hand.'
       })
       expect(deleteCalls(entries)).toEqual([])
     })
   )
+
+  for (const [label, from, to, item] of [
+    [
+      'another parent',
+      '"parent_id":"6XSyntheticWork0"',
+      '"parent_id":null',
+      'project yolk-conformance-run-synthetic-lifecycle (id 6XSynLifecycle01) with parent none'
+    ],
+    [
+      "a seeded project's id",
+      '"id":"6XSynLifecycle01"',
+      '"id":"6XSyntheticWork0"',
+      'project yolk-conformance-run-synthetic-lifecycle (id 6XSyntheticWork0) with parent 6XSyntheticWork0'
+    ]
+  ] as const) {
+    it.effect(`refuses to adopt a created project answered with ${label}`, () =>
+      Effect.gen(function* () {
+        const foreign = withoutExchanges(
+          replaceResponse(todoistTaskLifecycleFixture, 0, replaceInBody(from, to)),
+          [1, 2, 3, 4, 5, 6, 7]
+        )
+
+        const { failure, entries } = yield* drill(todoistTaskLifecycleCase, foreign)
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'TodoistConformanceCleanupRefused',
+          message: `todoist.tasks.lifecycle-close: cleanup refused; a create answered ${item}, outside the run namespace, so nothing was deleted there; check it by hand.`
+        })
+        expect(deleteCalls(entries)).toEqual([])
+      })
+    )
+  }
 
   it.effect('refuses a task answered outside the case project, and still deletes the project', () =>
     Effect.gen(function* () {

@@ -2,7 +2,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
  * `telegram.validate` for a chat the bot is not a member of (HTTP 400), then for the seeded chat
- * with a bot token that names no bot (HTTP 401), both answered with the Bot API error envelope. The
+ * with a bot token that names no bot (HTTP 401), both answered with the Bot API error envelope
+ * (the case checks only the 4xx status and `ok: false`). The
  * first URL carries the synthetic replay bot token; the second the case's synthetic invalid one.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
@@ -17,7 +18,7 @@ export const telegramErrorEnvelopeFixture: WireFixture = {
   recordedAt: '2026-09-30',
   account: 'synthetic',
   endpoint: 'https://api.telegram.org',
-  note: 'getChat for an absent chat and with an invalid bot token, both answered with { ok: false, error_code, description }. Synthetic placeholder shaped like the Telegram Bot API wire; not recorded from a live service.',
+  note: 'getChat for an absent chat and with an invalid bot token, both answered with a 4xx status and ok: false. Synthetic placeholder shaped like the Telegram Bot API wire; not recorded from a live service.',
   exchanges: [
     {
       request: {

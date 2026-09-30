@@ -125,8 +125,6 @@ const caseIds = [
 
 const sendCaseId = 'telegram.messages.send-message'
 
-const sentText = 'yolk-conformance run-synthetic: synthetic conformance message, safe to ignore'
-
 function textBody(response: WireResponse): string {
   if (isWireStreamResponse(response) || isWireBase64BodyResponse(response)) {
     return expect.fail('expected a text body')
@@ -383,9 +381,21 @@ const suiteFailures = (fixtures: ReadonlyArray<WireFixture>) =>
 const withReplaced = (tampered: WireFixture) =>
   telegramConformanceFixtures.map(fixture => (fixture.id === tampered.id ? tampered : fixture))
 
+type ReportedFailure = { readonly kind: string; readonly tag: string; readonly message: string }
+
+const sentText = 'yolk-conformance run-synthetic: synthetic conformance message, safe to ignore'
+
+const unknownSendAdvice = `send outcome unknown: the message may have been delivered; look for "${sentText}" in the seeded chat by hand (the connector cannot delete it)`
+
+const actionFailed = (message: string): ReportedFailure => ({
+  kind: 'failure',
+  tag: 'TelegramConformanceActionFailed',
+  message
+})
+
 const tampers: ReadonlyArray<{
   readonly fixture: WireFixture
-  readonly message: string
+  readonly failure: ReportedFailure
 }> = [
   {
     // A 200 carrying ok: false: the connector's status-only check would report success.
@@ -394,7 +404,7 @@ const tampers: ReadonlyArray<{
       0,
       withStatus(200, okFalse(400, 'Bad Request: chat not found'))
     ),
-    message: 'expected the 2xx getChat answer to carry { ok: true, result }'
+    failure: mismatch('expected the 2xx getChat answer to carry ok: true')
   },
   {
     fixture: replaceResponse(
@@ -402,19 +412,27 @@ const tampers: ReadonlyArray<{
       0,
       withStatus(200, okFalse(400, 'Bad Request: chat not found'))
     ),
-    message: 'expected telegram.validate to fail for a chat the bot is not a member of'
+    failure: mismatch('expected telegram.validate to fail for a chat the bot is not a member of')
   },
   {
-    fixture: replaceResponse(telegramGetFilePathFixture, 0, replaceInBody('"file_size":32,', '')),
-    message: 'expected getFile to answer { ok: true, result } with file_id and file_size'
+    // An absolute file_path: the helper refuses it before any download.
+    fixture: replaceResponse(
+      telegramGetFilePathFixture,
+      0,
+      replaceInBody('"file_path":"documents/file_0.txt"', '"file_path":"/documents/file_0.txt"')
+    ),
+    failure: actionFailed('telegram.conformance.download_file failed: invalid_metadata')
   },
   {
+    // A 2xx whose body says ok: false: the connector reports it sent; the case cannot tell.
     fixture: replaceResponse(
       telegramSendMessageFixture,
       0,
       withStatus(200, okFalse(403, 'Forbidden: bot is not a member of the supergroup chat'))
     ),
-    message: 'expected the 2xx sendMessage answer to carry { ok: true, result }'
+    failure: actionFailed(
+      `telegram.send_message failed: undecodable_answer (HTTP 200); ${unknownSendAdvice}`
+    )
   }
 ]
 
@@ -423,15 +441,46 @@ describe('Telegram conformance drills (one per case)', () => {
     expect(tampers.map(tamper => tamper.fixture.caseId)).toEqual(caseIds.map(([id]) => id))
   })
 
-  for (const { fixture, message } of tampers) {
+  for (const { fixture, failure } of tampers) {
     it.effect(`a tampered fixture fails exactly ${fixture.caseId}`, () =>
       Effect.gen(function* () {
         expect(yield* suiteFailures(withReplaced(fixture))).toEqual([
-          { id: fixture.caseId, failure: mismatch(message) }
+          { id: fixture.caseId, failure }
         ])
       })
     )
   }
+
+  it.effect('the error envelope needs only ok: false, not the fields the connector ignores', () =>
+    Effect.gen(function* () {
+      const bare = replaceResponse(
+        replaceResponse(telegramErrorEnvelopeFixture, 0, withStatus(400, '{"ok":false}')),
+        1,
+        withStatus(404, '{"ok":false}')
+      )
+
+      expect(yield* suiteFailures(withReplaced(bare))).toEqual([])
+    })
+  )
+
+  it.effect('a getFile answer without file_size is a seed precondition, not a claim failure', () =>
+    Effect.gen(function* () {
+      expect(
+        yield* suiteFailures(
+          withReplaced(
+            replaceResponse(telegramGetFilePathFixture, 0, replaceInBody('"file_size":32,', ''))
+          )
+        )
+      ).toEqual([
+        {
+          id: 'telegram.files.get-file-path',
+          failure: mismatch(
+            'precondition: fileId must name a file whose getFile answer reports file_size'
+          )
+        }
+      ])
+    })
+  )
 
   for (const [caseId] of caseIds) {
     it.effect(`a dropped fixture fails exactly ${caseId}`, () =>
@@ -524,8 +573,6 @@ const sendDrill = (fixture: WireFixture, seeds = telegramConformanceFixtureSeeds
     return { failure: report.results[0]?.failure, ...(yield* ledgerOf(ledgers, sendCaseId)) }
   })
 
-const unknownSendAdvice = `send outcome unknown: the message may have been delivered; look for "${sentText}" in the seeded chat by hand (the connector cannot delete it)`
-
 const serverError = okFalse(502, 'Bad Gateway')
 
 describe('Telegram conformance irreversible send safety', () => {
@@ -567,6 +614,22 @@ describe('Telegram conformance irreversible send safety', () => {
         tag: 'TelegramConformanceActionFailed',
         message: `telegram.send_message failed: telegram_send_failed (HTTP 502); ${unknownSendAdvice}`
       })
+    })
+  )
+
+  it.effect('a 2xx send whose body is not { ok: true } is an unknown outcome, not a mismatch', () =>
+    Effect.gen(function* () {
+      for (const body of ['not json at all', '{"result":{"message_id":101}}', '']) {
+        const { failure } = yield* sendDrill(
+          replaceResponse(telegramSendMessageFixture, 0, withStatus(200, body))
+        )
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'TelegramConformanceActionFailed',
+          message: `telegram.send_message failed: undecodable_answer (HTTP 200); ${unknownSendAdvice}`
+        })
+      }
     })
   )
 
@@ -687,6 +750,28 @@ describe('Telegram conformance interruption reporting', () => {
 
       expect(yield* Ref.get(warnings)).toEqual([
         `telegram.send_message failed: telegram_send_failed (HTTP 502); ${unknownSendAdvice}`
+      ])
+    })
+  )
+
+  it.effect('reports an undecodable 2xx send answered while the case is being interrupted', () =>
+    Effect.gen(function* () {
+      const { warnings, reporter } = yield* capturingReporter
+
+      const { sent, release, holding } = yield* holdingSend(
+        replaceResponse(telegramSendMessageFixture, 0, withStatus(200, '<html>proxy</html>'))
+      )
+
+      const fiber = yield* telegramSendMessageCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holding))),
+        Effect.provideService(ConformanceCleanupReporter, reporter),
+        Effect.forkChild
+      )
+
+      yield* interruptAfter(fiber, sent, release)
+
+      expect(yield* Ref.get(warnings)).toEqual([
+        `telegram.send_message failed: undecodable_answer (HTTP 200); ${unknownSendAdvice}`
       ])
     })
   )
