@@ -412,6 +412,22 @@ const folderId = microsoftOneDriveCreateFolderFixture.caseId
 const rangeRecorders = () =>
   new Map([[rangeId, recorderOf(microsoftCalendarListRangeFixture.exchanges)]])
 
+/** An opaque live token: no Bearer prefix, not JWT-shaped, no known API-key prefix. */
+const opaqueToken = 'opaque7c1d9e2b4a6f8e0d3c5b'
+
+const tokenRefusal =
+  'The staged files or the review checklist would contain the live access token; nothing was written'
+
+const stageWithToken = (recorders: ReadonlyMap<string, WireRecorderApi>, writer: RecordingWriter) =>
+  Effect.runPromise(
+    stageRecordings(
+      passedReport([...recorders.keys()]),
+      recorders,
+      { ...recordInputs, accessToken: opaqueToken },
+      { writer, stagingDir, recordedAt: '2026-09-30' }
+    ).pipe(Effect.result)
+  )
+
 const stage = (
   recorders: ReadonlyMap<string, WireRecorderApi>,
   writer: RecordingWriter,
@@ -569,6 +585,41 @@ describe('run-microsoft-conformance --record staging (offline)', () => {
       `${rangeId}: recording rejected (WireFixtureSecretsFound); nothing was written`
     )
     expect(operations).toEqual([])
+  })
+
+  it('writes nothing when a JSON body field echoes the live access token', async () => {
+    const { writer, operations } = memoryWriter()
+    const [first, ...rest] = microsoftCalendarListRangeFixture.exchanges
+
+    if (isWireStreamResponse(first.response) || isWireBase64BodyResponse(first.response)) {
+      return expect.fail('expected a text calendar response')
+    }
+
+    // An opaque (not JWT-shaped, as consumer tokens are) token in an event subject: the secret scan
+    // cannot see it.
+    expect(first.response.body).toContain('"subject":"')
+
+    const echoed: ReadonlyArray<WireExchange> = [
+      {
+        ...first,
+        response: {
+          ...first.response,
+          body: first.response.body.replace('"subject":"', `"subject":"${opaqueToken} `)
+        }
+      },
+      ...rest
+    ]
+
+    const result = await stageWithToken(new Map([[rangeId, recorderOf(echoed)]]), writer)
+
+    expect(failureMessage(result)).toBe(tokenRefusal)
+    expect(operations).toEqual([])
+  })
+
+  it('stages the same recording when no field carries the token', async () => {
+    const { writer } = memoryWriter()
+
+    expect(Result.isSuccess(await stageWithToken(rangeRecorders(), writer))).toBe(true)
   })
 
   it('refuses a staging directory that is not a direct child of the recordings root', async () => {

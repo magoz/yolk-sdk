@@ -20,8 +20,9 @@
  * `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After the
  * run it builds `verified` fixtures (today's date, the account label) for the cases that passed,
  * re-runs each case on replay against its new fixture, and renders every fixture module plus the
- * seeds module. Only if every recorded case verified and passed the secret scan does it write them,
- * all or nothing, to a NEW run directory under the GITIGNORED root
+ * seeds module. Only if every recorded case verified and passed the secret scan, and no rendered
+ * file or review-checklist line carries the live access token (the shared `textContainsAccessToken`
+ * check), does it write them, all or nothing, to a NEW run directory under the GITIGNORED root
  * `.conformance-recordings/microsoft/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`: it writes the whole batch
  * into a sibling temp directory and publishes it with one rename, refuses an existing destination,
  * and leaves no run directory when anything fails. It never writes committed sources. Like the
@@ -103,6 +104,7 @@ import {
   processSignals,
   runInterruptibly,
   stderrCleanupReporter,
+  textContainsAccessToken,
   type CliIo,
   type RecordingWriter,
   type RunInterruptiblyOptions,
@@ -960,13 +962,14 @@ export const recordingReviewChecklist = (
 
 /**
  * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan), then
- * renders every fixture module and the seeds module, writes them all into a sibling temp directory
- * (`<root>/.tmp-<run>`), and publishes that directory to `options.stagingDir` with one rename.
- * All or nothing: any failure (verification, a write, or the rename) leaves no staging directory,
- * and the temp directory is removed (best effort). A staging directory that is not a direct child
- * of the recordings root, that already exists, or that is not physically inside the containment
- * root (a symlinked or redirected component, checked before and after creating the temp directory
- * and again before the rename) is refused. Returns `undefined` when no case passed.
+ * renders every fixture module, the seeds module, and the review checklist, refuses them if any
+ * carries the live access token (`textContainsAccessToken`), writes the files into a sibling temp
+ * directory (`<root>/.tmp-<run>`), and publishes it to `options.stagingDir` with one rename.
+ * All or nothing: any failure (verification, the token check, a write, or the rename) leaves no
+ * staging directory, and the temp directory is removed (best effort). A staging directory that is
+ * not a direct child of the recordings root, that already exists, or that is not physically inside
+ * the containment root (a symlinked or redirected component, checked before and after creating the
+ * temp directory and again before the rename) is refused. Returns `undefined` when no case passed.
  */
 export const stageRecordings = (
   report: ConformanceReport,
@@ -1050,6 +1053,28 @@ export const stageRecordings = (
       { name: 'seeds.ts', contents: renderSeedsModule(seeds) }
     ]
 
+    const stale = staleSharedSeeds(microsoftConformanceFixtureSeeds, seeds, recordedIds)
+
+    const checklist = [
+      ...recordingReviewChecklist(recorded),
+      ...stale.map(
+        ({ key, cases }) =>
+          `SHARED SEED ${key} changed: the committed fixtures of ${cases.join(', ')} still use the old value; re-record them or keep the old seed.`
+      )
+    ]
+
+    // Last line of defence, over exactly what would be written and printed (seeds included).
+    if (
+      [...files.map(file => file.contents), ...checklist].some(text =>
+        textContainsAccessToken(text, inputs.accessToken)
+      )
+    ) {
+      return yield* new MicrosoftRunFailed({
+        message:
+          'The staged files or the review checklist would contain the live access token; nothing was written'
+      })
+    }
+
     yield* refuseExisting
     yield* refuseRedirect
 
@@ -1087,18 +1112,10 @@ export const stageRecordings = (
       }
     })
 
-    const stale = staleSharedSeeds(microsoftConformanceFixtureSeeds, seeds, recordedIds)
-
     return {
       stagingDir,
       files: files.map(file => join(stagingDir, file.name)),
-      checklist: [
-        ...recordingReviewChecklist(recorded),
-        ...stale.map(
-          ({ key, cases }) =>
-            `SHARED SEED ${key} changed: the committed fixtures of ${cases.join(', ')} still use the old value; re-record them or keep the old seed.`
-        )
-      ]
+      checklist
     }
   })
 
