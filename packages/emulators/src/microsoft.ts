@@ -20,7 +20,8 @@ import {
   EmulatorHeaderRecord,
   EmulatorResponseStatus,
   handlerFailedHeader,
-  redactCredentialFields
+  redactCredentialFields,
+  redactCredentialQuery
 } from './emulator-http.ts'
 import {
   matchMicrosoftRoute,
@@ -148,6 +149,7 @@ export type MicrosoftLedgerEntry = {
   readonly path: string
   /** Path template of the matched route, for example `/v1.0/users/{userId}/messages`. */
   readonly route?: string
+  /** Query parameters; the values of credential-named keys (`access_token`) are `<redacted>`. */
   readonly query: Readonly<Record<string, string>>
   /**
    * Parsed JSON request body, when there was one, with every credential-named key's value
@@ -380,6 +382,12 @@ const withEvidence = (response: Response, evidence: EmulatorEvidence): Response 
 const isControlPath = (path: string): boolean =>
   path === '/_emulate' || path.startsWith('/_emulate/')
 
+/** The largest instant a JS `Date` holds (ms from the epoch, either way). */
+const maxDateMs = 8_640_000_000_000_000
+
+/** Fixed synthetic `innerError.date` for error recovery when the clock fails (the epoch). */
+const recoveryDateMs = 0
+
 const monitorState = (monitor: CopyMonitor): MicrosoftCopyMonitorState => {
   const base: MicrosoftCopyMonitorState = {
     id: monitor.id,
@@ -403,8 +411,9 @@ const monitorState = (monitor: CopyMonitor): MicrosoftCopyMonitorState => {
  * error envelope), authorization, JSON body parsing, then the first matching fault (answered
  * before the route runs, so nothing is written), then the stateful route (whose query allowlist
  * and `If-Match` refusal are checked before its handler). A handler that throws answers a 500
- * Graph error envelope with `responseError` in the ledger. Every response from an unverified route
- * carries `x-emulator-evidence: unverified`. Ledgered bodies have credential-named keys redacted.
+ * Graph error envelope with `responseError` in the ledger, even when the clock throws. Every
+ * response from an unverified route carries `x-emulator-evidence: unverified`. Ledgered bodies and
+ * query parameters have credential-named keys redacted.
  */
 export const makeMicrosoftEmulator = async (
   options: MicrosoftEmulatorOptions = {}
@@ -589,10 +598,27 @@ export const makeMicrosoftEmulator = async (
   const contextOf = (request: Request, seq: number): ErrorContext =>
     errorContext(now(), seq, request.headers.get('client-request-id'))
 
-  /** The evidence-tagged fallback when a matched route cannot build or produce its response. */
+  /**
+   * The clock for error recovery: read once, and a clock that throws (or answers a value that is
+   * not a finite date) falls back to a fixed synthetic date, so recovery never fails on it.
+   */
+  const recoveryNow = (): number => {
+    try {
+      const value = now()
+
+      return Number.isFinite(value) && Math.abs(value) <= maxDateMs ? value : recoveryDateMs
+    } catch {
+      return recoveryDateMs
+    }
+  }
+
+  /**
+   * The evidence-tagged fallback when a matched route cannot build or produce its response.
+   * Clock-independent: see `recoveryNow`.
+   */
   const responseFailed = (request: Request, seq: number): Response =>
     graphError(
-      contextOf(request, seq),
+      errorContext(recoveryNow(), seq, request.headers.get('client-request-id')),
       500,
       codes.upstreamError,
       'Synthetic: the emulator could not build the response.'
@@ -693,7 +719,7 @@ export const makeMicrosoftEmulator = async (
       seq: nextSeq++,
       method: request.method,
       path: url.pathname,
-      query: Object.fromEntries(url.searchParams),
+      query: redactCredentialQuery(url.searchParams),
       status: 0,
       evidence: matched?.route.evidence ?? 'unknown-route'
     }

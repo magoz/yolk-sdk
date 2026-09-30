@@ -1,7 +1,7 @@
 /**
  * Shared Microsoft Graph emulator wire helpers (internal): the error envelope and codes, JSON
  * responses, `@odata.context`, `$select` projection, `$top`/`$skip` paging with
- * `@odata.nextLink`, the `Prefer` header, strict nested body objects, and the route handler
+ * `@odata.nextLink` (folder messages only), single-page `$top` collections, the `Prefer` header, strict nested body objects, and the route handler
  * contract.
  *
  * @experimental
@@ -194,7 +194,7 @@ export type MicrosoftEmulatorDrills = {
   readonly createOmitsId?: boolean
   /** Fractional digits of event `dateTime` values (Graph uses 7); `3` drills the precision case. */
   readonly timestampPrecisionDigits?: number
-  /** `true`: collection pages never carry `@odata.nextLink`. */
+  /** `true`: folder message pages never carry `@odata.nextLink`. */
   readonly omitNextLink?: boolean
 }
 
@@ -203,7 +203,6 @@ export type CopyMonitor = {
   readonly id: string
   readonly sourceId: string
   readonly destinationParentId: string
-  readonly name: string | undefined
   /** In-progress answers left before the copy runs and completes. */
   pollsLeft: number
   /** Set once the copy ran and completed. */
@@ -352,6 +351,32 @@ export const pageOf = <A>(
     top: size,
     nextSkip: end < items.length ? end : undefined
   }
+}
+
+/**
+ * A collection whose fixtures send `$top` and never page (calendar views, children listings):
+ * the items, or 400 not emulated without `$top` or with more items than `$top` (no fixture
+ * records a default page size or a second page of these collections).
+ */
+export const singlePage = <A>(
+  items: ReadonlyArray<A>,
+  request: RouteRequest,
+  maxTop: number
+): ReadonlyArray<A> | Response => {
+  const top = integerQuery(request, '$top', 1, maxTop)
+
+  if (top instanceof Response) return top
+
+  if (top === undefined) {
+    return notEmulated(request, 'requests without $top are not emulated on this collection.')
+  }
+
+  return items.length > top
+    ? notEmulated(
+        request,
+        `more than $top (${top}) results: paging this collection is not emulated.`
+      )
+    : items
 }
 
 /**

@@ -101,7 +101,11 @@ const route = (
 
 const graph = (path: string) => `${microsoftEmulatorBasePath}${path}`
 
+/** Folder message listing: the paging fixture's `$select`, `$top`, and `$skip`. */
 const paging: ReadonlyArray<string> = ['$select', '$top', '$skip']
+
+/** Calendar views and children listings: their fixtures send `$select` and `$top`, never `$skip`. */
+const onePage: ReadonlyArray<string> = ['$select', '$top']
 
 /** The route table: evidence plus handler. `microsoftEmulatorRoutes` is its evidence part. */
 export const microsoftApiRoutes: ReadonlyArray<MicrosoftApiRoute> = [
@@ -111,7 +115,7 @@ export const microsoftApiRoutes: ReadonlyArray<MicrosoftApiRoute> = [
     false,
     [listRangeCase, precisionCase],
     calendarView,
-    ['startDateTime', 'endDateTime', ...paging]
+    ['startDateTime', 'endDateTime', ...onePage]
   ),
   route(
     'POST',
@@ -172,7 +176,7 @@ export const microsoftApiRoutes: ReadonlyArray<MicrosoftApiRoute> = [
     false,
     [attachmentsCase, contentIdCase],
     listAttachments,
-    paging
+    ['$select']
   ),
   route(
     'GET',
@@ -191,7 +195,7 @@ export const microsoftApiRoutes: ReadonlyArray<MicrosoftApiRoute> = [
     false,
     [folderCase, copyCase],
     listChildren,
-    paging
+    onePage
   ),
   route(
     'POST',

@@ -5,8 +5,10 @@
  *
  * Deleted items are removed with their subtree (no recycle bin is emulated). Folder create and
  * copy take `@microsoft.graph.conflictBehavior` `fail` only, as the fixtures send it, and only for
- * a name that is free: no fixture records a name conflict, so one fails closed (400). A copy
- * answers 202 with one monitor `Location` on the SharePoint origin; the monitor needs no
+ * a name that is free: no fixture records a name conflict, so one fails closed (400). Children
+ * listings need `$top` and answer one page (no `$skip`, no `@odata.nextLink`), as the fixtures
+ * record them. A copy takes what the copy fixture sends (a file, `parentReference { driveId, id }`
+ * on the same drive, no new `name`; anything else is not emulated) and answers 202 with one monitor `Location` on the SharePoint origin; the monitor needs no
  * credentials, answers `inProgress` (202) for `copyInProgressPolls` polls (default 0), then runs
  * the copy and answers `completed` (200) with the new item's `resourceId`, as the fixture's first
  * poll does. No fixture records a failed copy: when the copy can no longer run (source or
@@ -27,16 +29,15 @@ import {
   jsonResponse,
   metadataContext,
   nestedObject,
-  nextLinkOf,
   notEmulated,
   nowTimestamp,
   odataKey,
   padded,
-  pageOf,
   personalSite,
   project,
   selectSuffix,
   selectedFields,
+  singlePage,
   type CopyMonitor,
   type MicrosoftApiEnv,
   type RouteHandler,
@@ -200,7 +201,7 @@ const byName = (left: MicrosoftEmulatorDriveItem, right: MicrosoftEmulatorDriveI
   left.name.localeCompare(right.name, 'en', { sensitivity: 'base' }) ||
   left.id.localeCompare(right.id)
 
-/** `GET /drives/{driveId}/items/{itemId}/children`: by name, one `$top`/`$skip` page. */
+/** `GET /drives/{driveId}/items/{itemId}/children`: by name, at most `$top` (one page only). */
 export const listChildren: RouteHandler = (state, request, env) => {
   const drive = driveProblem(state, request)
 
@@ -216,10 +217,7 @@ export const listChildren: RouteHandler = (state, request, env) => {
 
   if (parent.kind !== 'folder') return notEmulated(request, 'children of a file are not emulated.')
 
-  const page = pageOf([...childrenOf(state, parent.id)].sort(byName), request, {
-    defaultTop: 200,
-    maxTop: 999
-  })
+  const page = singlePage([...childrenOf(state, parent.id)].sort(byName), request, 999)
 
   if (page instanceof Response) return page
 
@@ -227,8 +225,8 @@ export const listChildren: RouteHandler = (state, request, env) => {
     200,
     collection(
       metadataContext(env, `${childrenContext(request)}${selectSuffix(fields)}`),
-      page.items.map(item => project(renderItem(state, env, item), fields)),
-      nextLinkOf(env, request, page, ['$select'])
+      page.map(item => project(renderItem(state, env, item), fields)),
+      undefined
     )
   )
 }
@@ -364,9 +362,11 @@ const monitorPath = (state: MicrosoftEmulatorState, id: string) =>
   `/personal/${personalSite(state.user)}/_api/v2.0/monitor/${id}`
 
 /**
- * `POST /drives/{driveId}/items/{itemId}/copy` (`{ parentReference: { driveId?, id }, name? }`,
- * query `@microsoft.graph.conflictBehavior=fail`): 202 with an empty body and one monitor
- * `Location`. The copy itself runs when the monitor reports completion.
+ * `POST /drives/{driveId}/items/{itemId}/copy` (`{ parentReference: { driveId, id } }`, query
+ * `@microsoft.graph.conflictBehavior=fail`): 202 with an empty body and one monitor `Location`.
+ * The copy itself runs when the monitor reports completion. Only what the copy fixture sends is
+ * emulated: a file source, a destination on the same drive named by `driveId` and `id`, and the
+ * source's name (a new `name`, a folder source, or a missing `driveId` fail closed).
  */
 export const copyItem: RouteHandler = (state, request, env) => {
   const drive = driveProblem(state, request)
@@ -377,6 +377,10 @@ export const copyItem: RouteHandler = (state, request, env) => {
 
   if (source === undefined) return notFound(request)
 
+  if (source.kind !== 'file') {
+    return notEmulated(request, 'copying a folder is not emulated (the fixture copies a file).')
+  }
+
   const behavior = conflictBehaviorProblem(
     request,
     request.query.get('@microsoft.graph.conflictBehavior') ?? undefined
@@ -384,7 +388,8 @@ export const copyItem: RouteHandler = (state, request, env) => {
 
   if (behavior !== undefined) return behavior
 
-  const fields = bodyObject(request, ['parentReference', 'name'])
+  // A new `name` fails here too: the fixture's copy keeps the source's name.
+  const fields = bodyObject(request, ['parentReference'])
 
   if (fields instanceof Response) return fields
 
@@ -392,16 +397,20 @@ export const copyItem: RouteHandler = (state, request, env) => {
     request,
     fields.parentReference,
     ['driveId', 'id'],
-    'parentReference { driveId?, id }'
+    'parentReference { driveId, id }'
   )
 
   if (reference instanceof Response) return reference
 
-  if (!Predicate.isString(reference.id)) {
-    return invalidValue(request, 'parentReference must be { driveId?, id }.')
+  if (reference.driveId === undefined) {
+    return notEmulated(request, 'copies without parentReference.driveId are not emulated.')
   }
 
-  if (reference.driveId !== undefined && reference.driveId !== state.drive.id) {
+  if (!Predicate.isString(reference.id) || !Predicate.isString(reference.driveId)) {
+    return invalidValue(request, 'parentReference must be { driveId, id } with string values.')
+  }
+
+  if (reference.driveId !== state.drive.id) {
     return notEmulated(request, 'copies to another drive are not emulated.')
   }
 
@@ -413,14 +422,6 @@ export const copyItem: RouteHandler = (state, request, env) => {
     return invalidValue(request, 'the destination is not a folder.')
   }
 
-  if (subtreeOf(state, source).some(item => item.id === destination.id)) {
-    return invalidValue(request, 'a folder cannot be copied into itself.')
-  }
-
-  const name = fields.name === undefined ? undefined : nameProblem(request, fields.name)
-
-  if (name instanceof Response) return name
-
   const number = env.monitorCounter.next
 
   env.monitorCounter.next += 1
@@ -429,7 +430,6 @@ export const copyItem: RouteHandler = (state, request, env) => {
     id: `00000000-0000-4000-8000-${padded(number, 12)}`,
     sourceId: source.id,
     destinationParentId: destination.id,
-    name,
     pollsLeft: env.copyInProgressPolls,
     resourceId: undefined
   }
@@ -441,13 +441,12 @@ export const copyItem: RouteHandler = (state, request, env) => {
   })
 }
 
-/** Copy `item` (and its subtree) under `parentId` with fresh ids; returns the new root id. */
-const copyTree = (
+/** Copy the file `item` under `parentId` with a fresh id and its name; returns the new id. */
+const copyFile = (
   state: MicrosoftEmulatorState,
   env: MicrosoftApiEnv,
   item: MicrosoftEmulatorDriveItem,
-  parentId: string,
-  name: string
+  parentId: string
 ): string => {
   const now = nowTimestamp(env)
 
@@ -455,16 +454,11 @@ const copyTree = (
     ...item,
     id: nextItemId(state),
     parentId,
-    name,
     createdDateTime: now,
     lastModifiedDateTime: now
   }
 
-  const children = childrenOf(state, item.id)
-
   state.driveItems = [...state.driveItems, copy]
-
-  for (const child of children) copyTree(state, env, child, copy.id, child.name)
 
   return copy.id
 }
@@ -485,13 +479,11 @@ const runCopy = (
     return { problem: 'the copy source or destination no longer exists' }
   }
 
-  const name = monitor.name ?? source.name
-
-  if (nameTaken(state, destination.id, name)) {
+  if (nameTaken(state, destination.id, source.name)) {
     return { problem: 'the copy name is already taken in the destination' }
   }
 
-  return copyTree(state, env, source, destination.id, name)
+  return copyFile(state, env, source, destination.id)
 }
 
 const monitorContentType = 'application/json;odata.metadata=minimal;odata.streaming=true'

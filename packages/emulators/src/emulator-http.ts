@@ -130,6 +130,18 @@ export const redactCredentialFields = (value: Schema.Json): Schema.Json => {
 }
 
 /**
+ * Query parameters safe to keep in a ledger: the value of every key that `isCredentialHeaderName`
+ * accepts (for example `access_token` or `api_key`) is replaced by `<redacted>`.
+ */
+export const redactCredentialQuery = (query: URLSearchParams): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    [...query].map(([key, value]) => [
+      key,
+      isCredentialHeaderName(key) ? redactedCredentialValue : value
+    ])
+  )
+
+/**
  * Internal response header a stateful core route sets on the bodiless 500 it answers when its
  * handler throws. The wrapper never forwards it: it answers its own error envelope 500 instead
  * and records `responseError` in the ledger.

@@ -147,7 +147,8 @@ There is no root export or barrel.
   with a monitor `Location`). All emulators share these validators (`src/emulator-http.ts`,
   internal, no Node builtins). Build a response before consuming its fault; a response that cannot
   be built, or a stateful route handler that throws, answers an evidence-tagged 500 in the
-  service's error envelope, recorded in the ledger (`responseError`).
+  service's error envelope, recorded in the ledger (`responseError`); that recovery never depends
+  on the injectable clock (a clock that throws falls back to a fixed synthetic date).
 - Every fetch-handler emulator is built on `src/emulator-kernel.ts` (the `/email` port emulator is
   not; see below): fault and scripted-turn state (strict
   decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
@@ -267,12 +268,15 @@ There is no root export or barrel.
   README for its routes and wire claims. Non-obvious rules: behaviour comes only from the
   conformance fixtures; anything they do not show fails closed (400 `Synthetic*`) unless a case
   needs it to run, and each such exception is listed under the README's "Emulator extrapolations
-  (no fixture)". Route params are matched on the raw path and decoded once; `@odata.nextLink`
-  reuses the raw path. Created ids and change keys come from counters that only advance, so the
-  state-equals-seed proof excludes only the counters. The first message write to reach the
+  (no fixture)" (with the one opt-in extra, `copyInProgressPolls`, labelled as such). Route
+  params are matched on the raw path and decoded once; `@odata.nextLink` reuses the raw path.
+  Created ids and change keys come from counters that only advance, so the state-equals-seed
+  proof excludes only the counters. The first message write to reach the
   handler holds the message for `conflictWindowMs`; an overlapping write gets 409, while
   non-overlapping writes both apply. Copy monitors are runtime data (not in the state; cleared by
-  reset/seed). Ledgered bodies redact credential-named keys (`redactCredentialFields`).
+  reset/seed). Ledgered bodies and queries redact credential-named keys (`redactCredentialFields`,
+  `redactCredentialQuery`); `test/emulator-http.test.ts` keeps that name rule in step with
+  `@yolk-sdk/conformance`'s.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -292,7 +296,8 @@ There is no root export or barrel.
 `test/router.test.ts`, `test/router-redirects.test.ts` (redirects and `mapRequest` never escape
 the route table, with a second unrouted loopback server), `test/gateway.test.ts`,
 `test/openai.test.ts`, `test/chat-completions.test.ts` (shared core and per-emulator parameters,
-including each emulator's streamed framing), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
+including each emulator's streamed framing), `test/emulator-http.test.ts` (the credential-name
+rule agrees with the conformance one), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
 cases in-process and over a loopback socket, a disagreement drill, and faults through the real
 provider, including 429 `retry-after` over the socket), `test/gateway-recordings.test.ts` (each
 verified Gateway fixture's recorded request sent to the emulator, with the response's status,

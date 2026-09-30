@@ -2,8 +2,10 @@
  * Microsoft Graph emulator calendar routes (internal): `calendarView`, event create, get, update,
  * delete, and cancel. Wire shapes follow the synthetic calendar conformance fixtures.
  *
- * Event times are stored in UTC with seven fractional digits and always answered in UTC; a
- * `Prefer: outlook.timezone` other than UTC is refused (fail closed). Events are answered with
+ * Event times are stored in UTC with seven fractional digits and answered in UTC. Every calendar
+ * fixture sends `Prefer: outlook.timezone="UTC"`, so every calendar route needs it; without it, or
+ * with another time zone, a request is refused (fail closed). Calendar views need `$top` and answer
+ * one page (no `$skip`, no `@odata.nextLink`), as the fixtures record them. Events are answered with
  * the fixture fields only (`@odata.etag`, `id`, `subject`, `start`, `end`, `isCancelled`); a create
  * takes the fixture's fields (`subject`, a text `body`, `start`, `end`, `isReminderOn`, `showAs`)
  * and an update only `subject`; anything else, including unknown nested keys, fails closed.
@@ -23,16 +25,15 @@ import {
   metadataContext,
   nestedObject,
   nextChangeKey,
-  nextLinkOf,
   notEmulated,
   nowTimestamp,
   odataKey,
   padded,
-  pageOf,
   project,
   resolveUser,
   selectSuffix,
   selectedFields,
+  singlePage,
   textBody,
   type MicrosoftApiEnv,
   type RouteHandler,
@@ -90,20 +91,29 @@ const userContext = (request: RouteRequest): string =>
 const calendarContext = (request: RouteRequest): string =>
   `${userContext(request)}/calendars${odataKey(request.params.calendarId ?? '')}`
 
-/** Every calendar route answers in UTC; any other `outlook.timezone` is not emulated. */
+/**
+ * Every calendar fixture sends `Prefer: outlook.timezone="UTC"`: a request without it, or with any
+ * other time zone, is not emulated.
+ */
 const timezoneProblem = (request: RouteRequest): Response | undefined => {
   const timezone = request.prefer.timezone
 
-  return timezone === undefined || timezone.toUpperCase() === 'UTC'
+  if (timezone === undefined) {
+    return notEmulated(
+      request,
+      'calendar requests without Prefer: outlook.timezone="UTC" are not emulated.'
+    )
+  }
+
+  return timezone.toUpperCase() === 'UTC'
     ? undefined
     : notEmulated(request, `outlook.timezone ${timezone} is not emulated (UTC only).`)
 }
 
-/** `preference-applied` on reads that asked for UTC, as the fixtures record it. */
-const readHeaders = (request: RouteRequest): HeadersInit =>
-  request.prefer.timezone === undefined
-    ? {}
-    : { 'preference-applied': `outlook.timezone="${request.prefer.timezone}"` }
+/** `preference-applied` on reads (which asked for UTC), as the fixtures record it. */
+const readHeaders = (request: RouteRequest): HeadersInit => ({
+  'preference-applied': `outlook.timezone="${request.prefer.timezone ?? 'UTC'}"`
+})
 
 const findCalendar = (state: MicrosoftEmulatorState, request: RouteRequest) =>
   state.calendars.find(calendar => calendar.id === request.params.calendarId)
@@ -122,7 +132,7 @@ const ticksOf = (value: string): bigint => parseInstant(value, 'forbidden') ?? B
 /**
  * `GET .../calendars/{calendarId}/calendarView?startDateTime=&endDateTime=`: the events that
  * overlap `[start, end)` (start before the range end and end after the range start), ordered by
- * start, one `$top`/`$skip` page with `@odata.nextLink`.
+ * start, at most `$top` of them (more is not emulated: no fixture pages a calendar view).
  */
 export const calendarView: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
@@ -170,7 +180,7 @@ export const calendarView: RouteHandler = (state, request, env) => {
               : 1
         )
 
-  const page = pageOf(matching, request, { defaultTop: 10, maxTop: 1000 })
+  const page = singlePage(matching, request, 1000)
 
   if (page instanceof Response) return page
 
@@ -178,8 +188,8 @@ export const calendarView: RouteHandler = (state, request, env) => {
     200,
     collection(
       metadataContext(env, `${calendarContext(request)}/calendarView${selectSuffix(fields)}`),
-      page.items.map(event => project(renderEvent(env, event), fields)),
-      nextLinkOf(env, request, page, ['startDateTime', 'endDateTime', '$select'])
+      page.map(event => project(renderEvent(env, event), fields)),
+      undefined
     ),
     readHeaders(request)
   )
@@ -436,6 +446,10 @@ export const deleteEvent: RouteHandler = (state, request) => {
 
   if (user instanceof Response) return user
 
+  const zone = timezoneProblem(request)
+
+  if (zone !== undefined) return zone
+
   const event = findEvent(state, request)
 
   if (event === undefined) return eventNotFound(request)
@@ -454,6 +468,10 @@ export const cancelEvent: RouteHandler = (state, request) => {
   const user = resolveUser(state, request)
 
   if (user instanceof Response) return user
+
+  const zone = timezoneProblem(request)
+
+  if (zone !== undefined) return zone
 
   const event = findEvent(state, request)
 

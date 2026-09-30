@@ -10,6 +10,9 @@
  * Writes accept only the fields the fixtures send: a draft create takes `subject`, a text `body`,
  * `toRecipients`, and the owner as `from`; an update takes `subject` and `isRead`; a move takes
  * `destinationId`. Anything else, including unknown nested keys, fails closed before any write.
+ * The fixtures update, move, and permanently delete only drafts the case created, so those writes
+ * to a message that is not a draft are not emulated (400), and neither is permanently deleting a
+ * message with attachments (no fixture creates a draft with attachments).
  *
  * Concurrent writes: the first write (update or move) to reach the handler holds its message for
  * `conflictWindowMs` before answering; an overlapping write to that message gets 409
@@ -189,6 +192,18 @@ const findMessage = (
   state: MicrosoftEmulatorState,
   id: string
 ): MicrosoftEmulatorMessage | undefined => state.messages.find(message => message.id === id)
+
+/** 400 for a write to a message that is not a draft (the fixtures write only case drafts). */
+const notDraftProblem = (
+  request: RouteRequest,
+  message: MicrosoftEmulatorMessage
+): Response | undefined =>
+  message.isDraft
+    ? undefined
+    : notEmulated(
+        request,
+        'writes to a message that is not a draft are not emulated (the fixtures write only drafts).'
+      )
 
 const replaceMessage = (state: MicrosoftEmulatorState, updated: MicrosoftEmulatorMessage) => {
   state.messages = state.messages.map(message => (message.id === updated.id ? updated : message))
@@ -462,7 +477,10 @@ const withMessageLock = async (
   }
 }
 
-/** `PATCH /users/{userId}/messages/{messageId}`: update `subject` or `isRead`; 200 with the message. */
+/**
+ * `PATCH /users/{userId}/messages/{messageId}`: update a draft's `subject` or `isRead`; 200 with
+ * the message.
+ */
 export const updateMessage: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
 
@@ -475,6 +493,10 @@ export const updateMessage: RouteHandler = (state, request, env) => {
   const message = findMessage(state, request.params.messageId ?? '')
 
   if (message === undefined) return notFound(request)
+
+  const notDraft = notDraftProblem(request, message)
+
+  if (notDraft !== undefined) return notDraft
 
   const fields = bodyObject(request, updateKeys)
 
@@ -500,7 +522,7 @@ export const updateMessage: RouteHandler = (state, request, env) => {
 
 /**
  * `POST /users/{userId}/messages/{messageId}/move` (`{ destinationId }`, a folder id or
- * well-known name): 201 with the moved message, which keeps its (immutable) id.
+ * well-known name): 201 with the moved draft, which keeps its (immutable) id.
  */
 export const moveMessage: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
@@ -514,6 +536,10 @@ export const moveMessage: RouteHandler = (state, request, env) => {
   const message = findMessage(state, request.params.messageId ?? '')
 
   if (message === undefined) return notFound(request)
+
+  const notDraft = notDraftProblem(request, message)
+
+  if (notDraft !== undefined) return notDraft
 
   const fields = bodyObject(request, ['destinationId'])
 
@@ -571,7 +597,8 @@ const renderAttachment = (attachment: MicrosoftEmulatorAttachment) => ({
 })
 
 /**
- * `GET /users/{userId}/messages/{messageId}/attachments`: every attachment, inline ones included.
+ * `GET /users/{userId}/messages/{messageId}/attachments`: every attachment, inline ones included,
+ * in one response (the fixtures send only `$select`: no `$top`, `$skip`, or `@odata.nextLink`).
  * `$select` accepts only base `attachment` properties, so a listing never carries `contentId`.
  */
 export const listAttachments: RouteHandler = (state, request, env) => {
@@ -592,9 +619,6 @@ export const listAttachments: RouteHandler = (state, request, env) => {
   if (fields instanceof Response) return fields
 
   const attachments = state.attachments.filter(attachment => attachment.messageId === message.id)
-  const page = pageOf(attachments, request, { defaultTop: 10, maxTop: 1000 })
-
-  if (page instanceof Response) return page
 
   const context = metadataContext(
     env,
@@ -605,8 +629,8 @@ export const listAttachments: RouteHandler = (state, request, env) => {
     200,
     collection(
       context,
-      page.items.map(attachment => project(renderListedAttachment(attachment), fields)),
-      nextLinkOf(env, request, page, ['$select'])
+      attachments.map(attachment => project(renderListedAttachment(attachment), fields)),
+      undefined
     )
   )
 }
@@ -710,9 +734,10 @@ const permanentDeleteOf = (entry: Schema.Json): PermanentDelete | string => {
  * `POST /$batch`: at most 20 subrequests with unique ids, each a message `permanentDelete` with
  * `Prefer: IdType="ImmutableId"`, answered `{ responses: [{ id, status: 204, headers: {} }] }` as
  * the fixtures record. Every subrequest is checked before any runs: anything else (another
- * route, an unknown user or message, a message named twice, or a message with a write in flight)
- * refuses the whole batch with 400 and deletes nothing, because no fixture records a failed
- * subrequest.
+ * route, an unknown user or message, a message named twice, a message with a write in flight, a
+ * message that is not a draft, or one with attachments) refuses the whole batch with 400 and
+ * deletes nothing, because no fixture records a failed subrequest or deletes anything but a
+ * case-created draft (which has no attachments).
  */
 export const batch: RouteHandler = (state, request, env) => {
   const fields = bodyObject(request, ['requests'])
@@ -762,6 +787,20 @@ export const batch: RouteHandler = (state, request, env) => {
       )
     }
 
+    if (!message.isDraft) {
+      return notEmulated(
+        request,
+        `batch request ${entry.id} names a message that is not a draft (the fixtures delete only drafts).`
+      )
+    }
+
+    if (state.attachments.some(attachment => attachment.messageId === message.id)) {
+      return notEmulated(
+        request,
+        `batch request ${entry.id} names a message with attachments (not emulated: no fixture deletes one).`
+      )
+    }
+
     if (env.messageLocks.has(message.id)) {
       return notEmulated(
         request,
@@ -775,7 +814,6 @@ export const batch: RouteHandler = (state, request, env) => {
   const removed = new Set(messages.map(message => message.id))
 
   state.messages = state.messages.filter(message => !removed.has(message.id))
-  state.attachments = state.attachments.filter(attachment => !removed.has(attachment.messageId))
 
   return jsonResponse(200, {
     responses: deletes.map(entry => ({ id: entry.id, status: 204, headers: {} }))

@@ -93,6 +93,29 @@ const call = (
 
 const immutable = { prefer: 'IdType="ImmutableId"' }
 
+// The copy fixture's destination: the destination drive and folder.
+const copyDestination = {
+  driveId: 'b!synthetic-drive-0001',
+  id: '01SYNTHETICPARENTFOLDER0000000001'
+}
+
+// Every calendar fixture sends it; calendar requests without it fail closed.
+const utc = { prefer: 'outlook.timezone="UTC"' }
+
+const calendarViewPath = (start: string, end: string, extra = '&$top=50') =>
+  `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/calendarView?startDateTime=${start}&endDateTime=${end}${extra}`
+
+/** A new draft (the only kind of message the fixtures update, move, or delete); its raw id. */
+const createDraft = async (target: MicrosoftEmulator, subject = 'Draft'): Promise<string> =>
+  String(
+    field(
+      await jsonOf(
+        await call(target, 'POST', `${user}/messages`, { body: { subject }, headers: immutable })
+      ),
+      'id'
+    )
+  )
+
 const field = (value: unknown, key: string): unknown =>
   Predicate.isObject(value) ? value[key] : undefined
 
@@ -253,7 +276,28 @@ describe('fail closed', () => {
           { name: 'n', folder: {} }
         ],
         ['GET', `${user}/events/x?$expand=attachments`, undefined],
-        ['POST', `/v1.0/$batch?x=1`, { requests: [] }]
+        ['POST', `/v1.0/$batch?x=1`, { requests: [] }],
+        // $skip is emulated on folder messages only; attachment listings take $select only.
+        [
+          'GET',
+          calendarViewPath('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z', '&$top=1&$skip=1'),
+          undefined
+        ],
+        [
+          'GET',
+          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0001=')}/attachments?$top=1`,
+          undefined
+        ],
+        [
+          'GET',
+          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0001=')}/attachments?$skip=1`,
+          undefined
+        ],
+        [
+          'GET',
+          `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children?$top=1&$skip=1`,
+          undefined
+        ]
       ] as const) {
         const response = await call(target, method, path, { body })
 
@@ -269,8 +313,12 @@ describe('fail closed', () => {
   it.effect('rejects $select fields, bodies, and values it does not emulate', () =>
     Effect.promise(async () => {
       const target = await emulator()
+      // Update bodies are checked on a draft: writes to other messages are refused regardless.
+      const draftId = encodeURIComponent(await createDraft(target))
       const before = target.snapshot()
       const messageId = encodeURIComponent('AAMkAGI2-synthetic-message-0001=')
+      const events = `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/events`
+      const eventPath = `${user}/events/${encodeURIComponent(seeds.calendarEventId ?? '')}`
 
       const rejected: ReadonlyArray<readonly [string, string, unknown, Record<string, string>?]> = [
         // contentId is a fileAttachment property: not selectable on the listing.
@@ -290,28 +338,59 @@ describe('fail closed', () => {
         ['GET', `${user}/mailFolders/inbox/messages?$top=abc`, undefined, immutable],
         [
           'GET',
-          `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/calendarView?startDateTime=2026-09-21T00:00:00Z&endDateTime=2026-09-28T00:00:00Z`,
+          calendarViewPath('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z'),
           undefined,
           { prefer: 'outlook.timezone="Pacific Standard Time"' }
         ],
+        // No fixture sends a calendar request without Prefer: outlook.timezone="UTC".
+        ['GET', calendarViewPath('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z'), undefined],
         [
           'POST',
-          `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/events`,
+          events,
+          {
+            subject: 'x',
+            start: { dateTime: '2026-01-05T09:00:00', timeZone: 'UTC' },
+            end: { dateTime: '2026-01-05T09:30:00', timeZone: 'UTC' }
+          }
+        ],
+        ['GET', `${eventPath}?$select=id,subject`, undefined],
+        ['PATCH', eventPath, { subject: 'x' }],
+        ['DELETE', eventPath, undefined],
+        ['POST', `${eventPath}/cancel`, { comment: 'x' }],
+        // No fixture sends a calendar view or children listing without $top, or pages one.
+        [
+          'GET',
+          calendarViewPath('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z', ''),
+          undefined,
+          utc
+        ],
+        [
+          'GET',
+          calendarViewPath('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z', '&$top=1'),
+          undefined,
+          utc
+        ],
+        ['GET', `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children`, undefined],
+        [
+          'POST',
+          events,
           {
             subject: 'x',
             start: { dateTime: '2026-01-05T09:00:00', timeZone: 'UTC' },
             end: { dateTime: '2026-01-05T09:30:00', timeZone: 'UTC' },
             attendees: [{ emailAddress: { address: 'grace@example.test' } }]
-          }
+          },
+          utc
         ],
         [
           'POST',
-          `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/events`,
+          events,
           {
             subject: 'x',
             start: { dateTime: '2026-01-05T09:00:00', timeZone: 'W. Europe Standard Time' },
             end: { dateTime: '2026-01-05T09:30:00', timeZone: 'UTC' }
-          }
+          },
+          utc
         ],
         [
           'POST',
@@ -322,31 +401,12 @@ describe('fail closed', () => {
         // Fields no fixture writes: cc/bcc, flags, categories, read state on create.
         ['POST', `${user}/messages`, { subject: 'x', ccRecipients: [] }, immutable],
         ['POST', `${user}/messages`, { subject: 'x', isRead: false }, immutable],
-        [
-          'PATCH',
-          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}`,
-          { flag: { flagStatus: 'flagged' } },
-          immutable
-        ],
-        [
-          'PATCH',
-          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}`,
-          { categories: ['x'] },
-          immutable
-        ],
+        ['PATCH', `${user}/messages/${draftId}`, { flag: { flagStatus: 'flagged' } }, immutable],
+        ['PATCH', `${user}/messages/${draftId}`, { categories: ['x'] }, immutable],
         // No fixture sends an Outlook request without the immutable-id preference.
         ['POST', `${user}/messages`, { subject: 'x' }],
-        [
-          'PATCH',
-          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}`,
-          { isRead: false },
-          { prefer: 'outlook.timezone="UTC"' }
-        ],
-        [
-          'POST',
-          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}/move`,
-          { destinationId: 'deleteditems' }
-        ],
+        ['PATCH', `${user}/messages/${draftId}`, { isRead: false }, utc],
+        ['POST', `${user}/messages/${draftId}/move`, { destinationId: 'deleteditems' }],
         ['GET', `${user}/mailFolders/inbox/messages`, undefined],
         ['GET', `${user}/messages/${messageId}/attachments`, undefined],
         [
@@ -370,7 +430,7 @@ describe('fail closed', () => {
         ],
         [
           'PATCH',
-          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}`,
+          `${user}/messages/${draftId}`,
           { isRead: false },
           { ...immutable, 'if-match': 'W/"CQAAABYAAAAsynthetic0101"' }
         ],
@@ -407,16 +467,32 @@ describe('fail closed', () => {
         [
           'POST',
           `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=replace`,
-          { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } }
+          { parentReference: copyDestination }
         ],
         [
           'POST',
           `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=rename`,
-          { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } }
+          { parentReference: copyDestination }
         ],
         [
           'POST',
           `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy`,
+          { parentReference: copyDestination }
+        ],
+        // The copy fixture copies a file, names the destination drive, and keeps the name.
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=fail`,
+          { parentReference: copyDestination, name: 'renamed.txt' }
+        ],
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICSOURCEPARENT000000001/copy?@microsoft.graph.conflictBehavior=fail`,
+          { parentReference: copyDestination }
+        ],
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=fail`,
           { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } }
         ],
         [
@@ -449,6 +525,7 @@ describe('fail closed', () => {
         const response = await call(target, method, path, { body, headers })
 
         expect(response.status, `${method} ${path} ${JSON.stringify(body)}`).toBe(400)
+        expect(await errorCode(response), `${method} ${path}`).toMatch(/^Synthetic/)
       }
 
       // A refused batch runs none of its subrequests; nothing refused wrote anything.
@@ -507,11 +584,17 @@ describe('fail closed', () => {
           { from: { emailAddress: { address: 'ada@example.test', extra: 'x' } } },
           immutable
         ],
-        ['POST', events, { ...event, body: { contentType: 'text', content: 'x', unexpected: 1 } }],
         [
           'POST',
           events,
-          { ...event, start: { dateTime: '2026-01-05T09:00:00', timeZone: 'UTC', extra: 1 } }
+          { ...event, body: { contentType: 'text', content: 'x', unexpected: 1 } },
+          utc
+        ],
+        [
+          'POST',
+          events,
+          { ...event, start: { dateTime: '2026-01-05T09:00:00', timeZone: 'UTC', extra: 1 } },
+          utc
         ],
         [
           'POST',
@@ -590,7 +673,7 @@ describe('authorization', () => {
         'POST',
         `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=fail`,
         {
-          body: { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } },
+          body: { parentReference: copyDestination },
           headers: { 'client-request-id': 'synthetic-client-1' }
         }
       )
@@ -620,17 +703,14 @@ describe('authorization', () => {
 })
 
 describe('calendar', () => {
-  const calendarView = (start: string, end: string, extra = '') =>
-    `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/calendarView?startDateTime=${start}&endDateTime=${end}${extra}`
+  const calendarView = calendarViewPath
 
   it.effect('filters by overlap with [start, end) and answers seven-digit UTC times', () =>
     Effect.promise(async () => {
       const target = await emulator()
 
       const view = (start: string, end: string) =>
-        call(target, 'GET', calendarView(start, end), {
-          headers: { prefer: 'outlook.timezone="UTC"' }
-        }).then(ids)
+        call(target, 'GET', calendarView(start, end), { headers: utc }).then(ids)
 
       // Event 1 is 12:00-13:00 on 2026-09-23; event 2 is 08:30-09:00 on 2026-09-24.
       expect(await view('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z')).toEqual([
@@ -650,10 +730,8 @@ describe('calendar', () => {
       const response = await call(
         target,
         'GET',
-        calendarView('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z', '&$select=id,start&$top=1'),
-        {
-          headers: { prefer: 'outlook.timezone="UTC"' }
-        }
+        calendarView('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z', '&$select=id,start&$top=2'),
+        { headers: utc }
       )
 
       expect(response.headers.get('preference-applied')).toBe('outlook.timezone="UTC"')
@@ -665,18 +743,34 @@ describe('calendar', () => {
           '@odata.etag': 'W/"DwAAABYAAAAsynthetic0001"',
           id: 'AAMkAGI2-synthetic-event-0001=',
           start: { dateTime: '2026-09-23T12:00:00.0000000', timeZone: 'UTC' }
+        },
+        {
+          '@odata.etag': 'W/"DwAAABYAAAAsynthetic0002"',
+          id: 'AAMkAGI2-synthetic-event-0002=',
+          start: { dateTime: '2026-09-24T08:30:00.0000000', timeZone: 'UTC' }
         }
       ])
-      expect(field(body, '@odata.nextLink')).toBe(
-        `${origin}${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/calendarView?startDateTime=2026-09-21T00%3A00%3A00Z&endDateTime=2026-09-28T00%3A00%3A00Z&%24select=id%2Cstart&%24top=1&%24skip=1`
+      // One page only: no fixture pages a calendar view, so there is never a nextLink ...
+      expect(field(body, '@odata.nextLink')).toBeUndefined()
+
+      // ... and a view with more events than $top fails closed instead of inventing one.
+      const more = await call(
+        target,
+        'GET',
+        calendarView('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z', '&$top=1'),
+        { headers: utc }
       )
+
+      expect(more.status).toBe(400)
+      expect(await errorCode(more)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
 
       expect(
         (
           await call(
             target,
             'GET',
-            `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/calendarView`
+            `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/calendarView`,
+            { headers: utc }
           )
         ).status
       ).toBe(400)
@@ -701,7 +795,8 @@ describe('calendar', () => {
               end: { dateTime: '2026-01-05T09:30:00', timeZone: 'UTC' },
               isReminderOn: false,
               showAs: 'free'
-            }
+            },
+            headers: utc
           }
         )
 
@@ -717,24 +812,30 @@ describe('calendar', () => {
         isCancelled: false
       })
 
-      const patched = await call(target, 'PATCH', eventPath, { body: { subject: 'Renamed' } })
+      const patched = await call(target, 'PATCH', eventPath, {
+        body: { subject: 'Renamed' },
+        headers: utc
+      })
 
       expect(field(await jsonOf(patched), 'subject')).toBe('Renamed')
-      expect((await call(target, 'GET', eventPath)).status).toBe(200)
-      expect((await call(target, 'DELETE', eventPath)).status).toBe(204)
-      expect(await errorCode(await call(target, 'GET', eventPath))).toBe('ErrorItemNotFound')
+      expect((await call(target, 'GET', eventPath, { headers: utc })).status).toBe(200)
+      expect((await call(target, 'DELETE', eventPath, { headers: utc })).status).toBe(204)
+      expect(await errorCode(await call(target, 'GET', eventPath, { headers: utc }))).toBe(
+        'ErrorItemNotFound'
+      )
 
       const second = await jsonOf(await create('Cancel me'))
       const secondPath = `${user}/events/${encodeURIComponent(String(field(second, 'id')))}`
 
       const cancelled = await call(target, 'POST', `${secondPath}/cancel`, {
-        body: { comment: 'x' }
+        body: { comment: 'x' },
+        headers: utc
       })
 
       expect(cancelled.status).toBe(202)
       expect(await cancelled.text()).toBe('')
-      expect((await call(target, 'GET', secondPath)).status).toBe(404)
-      expect((await call(target, 'DELETE', secondPath)).status).toBe(404)
+      expect((await call(target, 'GET', secondPath, { headers: utc })).status).toBe(404)
+      expect((await call(target, 'DELETE', secondPath, { headers: utc })).status).toBe(404)
       expect(target.snapshot().events).toEqual(before.events)
     })
   )
@@ -745,12 +846,15 @@ describe('calendar', () => {
 
       const empty = await emulator({ drills: { calendarRangeEmpty: true } })
 
-      expect(await ids(await call(empty, 'GET', view))).toEqual([])
+      expect(await ids(await call(empty, 'GET', view, { headers: utc }))).toEqual([])
 
       const coarse = await emulator({ drills: { timestampPrecisionDigits: 3 } })
 
       expect(
-        field(field((await values(await call(coarse, 'GET', view)))[0], 'start'), 'dateTime')
+        field(
+          field((await values(await call(coarse, 'GET', view, { headers: utc })))[0], 'start'),
+          'dateTime'
+        )
       ).toBe('2026-09-23T12:00:00.000')
 
       const noId = await emulator({ drills: { createOmitsId: true } })
@@ -764,7 +868,8 @@ describe('calendar', () => {
             subject: 'x',
             start: { dateTime: '2026-01-05T09:00:00', timeZone: 'UTC' },
             end: { dateTime: '2026-01-05T09:30:00', timeZone: 'UTC' }
-          }
+          },
+          headers: utc
         }
       )
 
@@ -983,12 +1088,14 @@ describe('outlook', () => {
   )
 
   it.effect(
-    'permanently deletes through $batch; any subrequest it cannot run refuses the batch',
+    'permanently deletes a draft through $batch; any subrequest it cannot run refuses the batch',
     () =>
       Effect.promise(async () => {
         const target = await emulator()
+        const seeded = target.snapshot()
+        // The fixtures permanently delete only a draft the case created.
+        const messageId = encodeURIComponent(await createDraft(target))
         const before = target.snapshot()
-        const messageId = encodeURIComponent('AAMkAGI2-synthetic-message-0001=')
 
         const deleteRequest = (
           id: string,
@@ -1027,7 +1134,8 @@ describe('outlook', () => {
         expect(await jsonOf(response)).toEqual({
           responses: [{ id: 'req-1', status: 204, headers: {} }]
         })
-        expect(target.snapshot().attachments).toEqual([])
+        expect(target.snapshot().messages).toEqual(seeded.messages)
+        expect(target.snapshot().attachments).toEqual(seeded.attachments)
 
         // The message is gone: deleting it again refuses the whole batch (no failed subrequests).
         expect(
@@ -1038,6 +1146,67 @@ describe('outlook', () => {
           ).status
         ).toBe(400)
       })
+  )
+
+  it.effect('updates, moves, and deletes only drafts; a draft with attachments stays', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const before = target.snapshot()
+
+      const batchDelete = (id: string) => ({
+        requests: [
+          {
+            id: 'req-1',
+            method: 'POST',
+            url: `/users/ada%40example.test/messages/${encodeURIComponent(id)}/permanentDelete`,
+            headers: { Prefer: 'IdType="ImmutableId"' }
+          }
+        ]
+      })
+
+      // Received (non-draft) messages: no fixture updates, moves, or deletes one.
+      for (const id of ['AAMkAGI2-synthetic-message-0101=', 'AAMkAGI2-synthetic-message-0001=']) {
+        const path = `${user}/messages/${encodeURIComponent(id)}`
+
+        for (const response of [
+          await call(target, 'PATCH', path, { body: { isRead: false }, headers: immutable }),
+          await call(target, 'POST', `${path}/move`, {
+            body: { destinationId: 'deleteditems' },
+            headers: immutable
+          }),
+          await call(target, 'POST', '/v1.0/$batch', { body: batchDelete(id) })
+        ]) {
+          expect(response.status, id).toBe(400)
+          expect(await errorCode(response)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
+        }
+      }
+
+      expect(target.snapshot()).toEqual(before)
+
+      // A seeded draft with an attachment: no fixture deletes a message with attachments.
+      const draftId = 'AAMkAGI2-synthetic-seeded-draft='
+
+      await target.seed({
+        messages: [
+          {
+            id: draftId,
+            parentFolderId: 'AAMkAGI2-synthetic-drafts-folder=',
+            subject: 'Seeded draft',
+            isDraft: true
+          }
+        ],
+        attachments: [
+          { id: 'AAMkAGI2-synthetic-seeded-attachment=', messageId: draftId, name: 'x' }
+        ]
+      })
+
+      const seeded = target.snapshot()
+      const refused = await call(target, 'POST', '/v1.0/$batch', { body: batchDelete(draftId) })
+
+      expect(refused.status).toBe(400)
+      expect(await errorCode(refused)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
+      expect(target.snapshot()).toEqual(seeded)
+    })
   )
 
   it.effect('never ledgers a credential sent inside a rejected $batch body', () =>
@@ -1133,14 +1302,21 @@ describe('onedrive', () => {
       expect(await errorCode(conflict)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
       expect(field(await jsonOf(await create('Other folder')), 'name')).toBe('Other folder')
 
-      expect(await ids(await call(target, 'GET', `${children}?$top=1`))).toEqual([
-        '01SYNTHETICITEM00000000000000001'
-      ])
-      expect(await ids(await call(target, 'GET', children))).toEqual([
+      const listed = await jsonOf(await call(target, 'GET', `${children}?$top=3`))
+      const listedItems = field(listed, 'value')
+
+      expect(Array.isArray(listedItems) ? listedItems.map(item => field(item, 'id')) : []).toEqual([
         '01SYNTHETICITEM00000000000000001',
         '01SYNTHETICITEM00000000000000002',
         '01SYNTHETICEXISTINGFILE000000001'
       ])
+      // One page only: the fixtures never page a children listing, so more than $top fails closed.
+      expect(field(listed, '@odata.nextLink')).toBeUndefined()
+
+      const more = await call(target, 'GET', `${children}?$top=2`)
+
+      expect(more.status).toBe(400)
+      expect(await errorCode(more)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
 
       for (const id of ['01SYNTHETICITEM00000000000000001', '01SYNTHETICITEM00000000000000002']) {
         expect((await call(target, 'DELETE', `${drive}/items/${id}`)).status).toBe(204)
@@ -1325,6 +1501,84 @@ describe('handler failures', () => {
       ).toBe(201)
     })
   )
+
+  it.effect('recovers without the clock when the clock always throws', () =>
+    Effect.promise(async () => {
+      let reads = 0
+
+      const target = await emulator({
+        now: () => {
+          reads += 1
+          throw new Error('synthetic clock failure')
+        }
+      })
+
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+      const failed = await call(target, 'POST', `${user}/messages`, {
+        body: { subject: 'x' },
+        headers: immutable
+      }).finally(() => consoleError.mockRestore())
+
+      // The handler's timestamp read throws; recovery tries the clock once more, then answers
+      // with a fixed synthetic date instead of failing on it.
+      expect(reads).toBe(2)
+      expect(failed.status).toBe(500)
+      expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(await jsonOf(failed)).toEqual({
+        error: {
+          code: microsoftEmulatorErrorCodes.upstreamError,
+          message: expect.any(String),
+          innerError: {
+            date: '1970-01-01T00:00:00',
+            'request-id': '00000000-0000-4000-8000-000000000001',
+            'client-request-id': '00000000-0000-4000-8000-000000000001'
+          }
+        }
+      })
+      expect(target.ledger.entries()).toEqual([
+        expect.objectContaining({
+          route: '/v1.0/users/{userId}/messages',
+          status: 500,
+          evidence: 'unverified',
+          responseError: 'the route handler failed'
+        })
+      ])
+      // Nothing was written: the draft never reached the state.
+      expect(target.snapshot().messages.some(message => message.isDraft)).toBe(false)
+    })
+  )
+})
+
+describe('credential redaction', () => {
+  it.effect('redacts credential-named query keys in the ledger', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const secret = 'synthetic-query-secret'
+
+      const response = await call(
+        target,
+        'GET',
+        `${user}/mailFolders/inbox/messages?$top=1&access_token=${secret}&api_key=${secret}`,
+        { headers: immutable }
+      )
+
+      expect(response.status).toBe(400)
+      expect(await errorCode(response)).toBe(microsoftEmulatorErrorCodes.unsupportedQuery)
+      expect(target.ledger.entries()[0]?.query).toEqual({
+        $top: '1',
+        access_token: '<redacted>',
+        api_key: '<redacted>'
+      })
+
+      const recorded = JSON.stringify([
+        target.ledger.entries(),
+        await jsonOf(await target.fetch(new Request(`${origin}/_emulate/ledger`)))
+      ])
+
+      expect(recorded).not.toContain(secret)
+    })
+  )
 })
 
 // Values the emulator generates itself, so they cannot equal a synthetic fixture's: version
@@ -1407,6 +1661,9 @@ describe('fixture envelopes', () => {
 
           const location = expected.headers.location
           const actualLocation = response.headers.get('location')
+
+          // A fixture Location must be answered: a missing header fails here.
+          expect(actualLocation === null, `${label} location`).toBe(location === undefined)
 
           if (location !== undefined && actualLocation !== null) {
             // Monitor URLs differ only in the monitor id.
@@ -1680,7 +1937,7 @@ describe('seeds and the control plane', () => {
         target,
         'POST',
         `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=fail`,
-        { body: { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } } }
+        { body: { parentReference: copyDestination } }
       )
       target.faults.add({ kind: 'status', status: 503 })
 
