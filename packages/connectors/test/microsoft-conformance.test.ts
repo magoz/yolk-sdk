@@ -1052,6 +1052,26 @@ describe('Microsoft conformance ambiguous creates', () => {
     })
   )
 
+  it.effect('reports a 408 create as ambiguous: a timed-out create may still have written', () =>
+    Effect.gen(function* () {
+      const timedOut = replaceResponse(
+        microsoftOutlookImmutableIdFixture,
+        0,
+        withStatus(408, graphServerError)
+      )
+
+      const { failure, entries } = yield* drill(
+        microsoftOutlookImmutableIdCase,
+        pickExchanges(timedOut, [0])
+      )
+
+      expect(failure?.tag).toBe('MicrosoftConformanceActionFailed')
+      expect(failure?.message).toMatch(/^outlook\.create_draft failed: \S+ \(HTTP 408\); /)
+      expect(failure?.message).toContain(ambiguousCreateAdvice)
+      expect(exchangeIndices(entries)).toEqual(['POST 0'])
+    })
+  )
+
   it.effect('reports a 4xx create without the advice: nothing was created', () =>
     Effect.gen(function* () {
       const rejected = replaceResponse(
@@ -1071,5 +1091,28 @@ describe('Microsoft conformance ambiguous creates', () => {
         message: 'onedrive.create_folder failed: microsoft_unauthorized (HTTP 403)'
       })
     })
+  )
+
+  it.effect(
+    'reports a 409 folder create as the leftover-folder precondition, deleting nothing',
+    () =>
+      Effect.gen(function* () {
+        const conflict = replaceResponse(
+          microsoftOneDriveCreateFolderFixture,
+          0,
+          withStatus(409, graphServerError)
+        )
+
+        const { failure, entries } = yield* drill(
+          microsoftOneDriveCreateFolderCase,
+          pickExchanges(conflict, [0])
+        )
+
+        expect(failure?.tag).toBe('ConformanceMismatch')
+        expect(failure?.message).toMatch(
+          /^precondition: a folder named "[^"]+" already exists under driveParentItemId \(left by an earlier run\?\); delete it by hand/
+        )
+        expect(exchangeIndices(entries)).toEqual(['POST 0'])
+      })
   )
 })

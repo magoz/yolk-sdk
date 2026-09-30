@@ -1264,7 +1264,7 @@ is recoverable, the case removes the item again automatically (also after a fail
 interruption), verifies the removal where Graph allows it, and fails with
 `MicrosoftConformanceRestoreFailed` when the removal fails. A create that succeeds without an id also
 fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create (a transport or decoding
-failure, no status, or HTTP 5xx) fails with `MicrosoftConformanceActionFailed`
+failure, no status, HTTP 408, or HTTP 5xx) fails with `MicrosoftConformanceActionFailed`
 (`createOutcome: 'unknown'`, code and status kept): both messages advise manual recovery of the
 `yolk-conformance` item. No case sends mail or invitations. `pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account
 <label>` (with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by

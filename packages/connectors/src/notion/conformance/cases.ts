@@ -15,10 +15,10 @@
  * interruption), verifies it, and reports (never swallows) a failed restore. Any response that
  * shows the page trashed (`archived` or `in_trash` true), or a not-found read after a successful
  * archive, counts as trashed, so an uncertain claim about how a trashed page reads back is reported
- * as a claim failure, never as a failed restore. An ambiguous create (a transport or decoding
- * failure, no status, or HTTP 5xx) fails with `NotionConformanceActionFailed` (`createOutcome:
- * 'unknown'`) and says to trash the page by hand if it exists. Neither the runner nor the bridges set
- * a request timeout, so a hanging create delays an interruption until it answers. Notion keeps
+ * as a claim failure, never as a failed restore. An ambiguous create (the shared
+ * `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
+ * `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) and says to trash the page by hand
+ * if it exists. Neither the runner nor the bridges set a request timeout, so a hanging create delays an interruption until it answers. Notion keeps
  * trashed pages in the workspace trash (restorable) until they are deleted from there.
  */
 import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
@@ -31,9 +31,13 @@ import {
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
-import { interruptPending, reportCleanupProblem } from '../../conformance/cleanup-reporter.ts'
+import {
+  classifyWriteExit,
+  interruptPending,
+  reportCleanupProblem
+} from '../../conformance/cleanup-reporter.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
-import { ConnectorError } from '../../error.ts'
+import type { ConnectorError } from '../../error.ts'
 import { ConnectorHttpClient, type ConnectorHttpRequest } from '../../http.ts'
 import { makeIntegration } from '../../integration.ts'
 import type { ActionResult, ProviderFailure } from '../../result.ts'
@@ -137,9 +141,10 @@ const restoreByHandAdvice = `trash the case-created page by hand if it is not tr
 
 /**
  * A connector action failed where the case needed success.
- * `createOutcome: 'unknown'` marks an ambiguous create of the write case's own page (a transport
- * or decoding failure, no status, or HTTP 5xx): Notion may have created it without the case
- * learning its id, so the message adds the manual-recovery advice.
+ * `createOutcome: 'unknown'` marks an ambiguous create of the write case's own page (see
+ * `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx): Notion
+ * may have created it without the case learning its id, so the message adds the manual-recovery
+ * advice.
  */
 export class NotionConformanceActionFailed extends Data.TaggedError(
   'NotionConformanceActionFailed'
@@ -966,41 +971,35 @@ const ensureTrashed = (archivedOnce: Ref.Ref<boolean>) => (pageId: string) =>
   })
 
 /**
- * An ambiguous create failure (transport or decoding failure, no status, or HTTP 5xx), or
- * `undefined` for a failure that proves nothing was created.
+ * The created page, classified by the shared `classifyWriteExit`: a definitive rejection (any 4xx
+ * other than 408; nothing was created) fails with `NotionConformanceActionFailed`; an ambiguous
+ * failure (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx; Notion may still
+ * have created it) also carries `createOutcome: 'unknown'`.
  */
-const ambiguousCreateFailure = (error: unknown): NotionConformanceActionFailed | undefined => {
-  if (error instanceof NotionConformanceActionFailed) {
-    if (error.status === undefined) {
-      return new NotionConformanceActionFailed({
-        actionId: error.actionId,
-        code: error.code,
-        createOutcome: 'unknown'
-      })
-    }
+const createdPage = (
+  exit: Exit.Exit<ActionResult<NotionPage>, ConnectorError>
+): Effect.Effect<NotionPage, NotionConformanceActionFailed> => {
+  const outcome = classifyWriteExit(exit)
 
-    return error.status >= 500
-      ? new NotionConformanceActionFailed({
-          actionId: error.actionId,
-          code: error.code,
-          status: error.status,
+  switch (outcome.kind) {
+    case 'success':
+      return Effect.succeed(outcome.value)
+    case 'rejected':
+      return Effect.fail(
+        new NotionConformanceActionFailed({
+          actionId: notionCreatePageAction.id,
+          ...outcome.failure
+        })
+      )
+    case 'ambiguous':
+      return Effect.fail(
+        new NotionConformanceActionFailed({
+          actionId: notionCreatePageAction.id,
+          ...outcome.failure,
           createOutcome: 'unknown'
         })
-      : undefined
+      )
   }
-
-  if (
-    error instanceof ConnectorError &&
-    (error.cause === 'transport_failed' || error.cause === 'validation_failed')
-  ) {
-    return new NotionConformanceActionFailed({
-      actionId: notionCreatePageAction.id,
-      code: error.cause,
-      createOutcome: 'unknown'
-    })
-  }
-
-  return undefined
 }
 
 /**
@@ -1027,11 +1026,7 @@ const withOwnPage = <A, E, R>(
             integration,
             input: NotionCreatePageInput.make({ parentPageId, title: archivePageTitle })
           })
-          .pipe(
-            Effect.flatMap(result => successValue(notionCreatePageAction.id, result)),
-            Effect.mapError(error => ambiguousCreateFailure(error) ?? error),
-            Effect.exit
-          )
+          .pipe(Effect.exit, Effect.flatMap(createdPage), Effect.exit)
 
         if (Exit.isFailure(created)) {
           const error = Cause.findErrorOption(created.cause)

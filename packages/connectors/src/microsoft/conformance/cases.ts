@@ -16,10 +16,10 @@
  * create cannot be interrupted; nothing here adds a request timeout). The restore then removes it
  * again (also after a failed claim or an interruption), verifies the removal where Graph allows it,
  * and reports (never swallows) a failed restore. A create that succeeds without a recoverable id
- * fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create failure (transport or
- * decoding failure, no status, or HTTP 5xx) fails with `MicrosoftConformanceActionFailed`
- * (`createOutcome: 'unknown'`): both messages say to remove the item by hand if it exists. No case
- * sends mail or invitations.
+ * fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create failure (the shared
+ * `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
+ * `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`): both messages say to remove the
+ * item by hand if it exists. No case sends mail or invitations.
  */
 import { Cause, Chunk, Context, Data, Duration, Effect, Exit, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -31,8 +31,9 @@ import {
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
+import { classifyWriteExit } from '../../conformance/cleanup-reporter.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
-import { ConnectorError } from '../../error.ts'
+import type { ConnectorError } from '../../error.ts'
 import type { ConnectorHttpClient } from '../../http.ts'
 import { makeIntegration } from '../../integration.ts'
 import type { ActionResult } from '../../result.ts'
@@ -172,10 +173,11 @@ const restoreByHandAdvice =
 /**
  * A connector action (or raw calendar request) returned a failure where the case needed success.
  *
- * `createOutcome: 'unknown'` marks an ambiguous create of a write case's own item (a transport or
- * decoding failure, no status, or HTTP 5xx): Graph may have created the item without the case
- * learning its id, so the message adds the manual-recovery advice. `code` and `status` keep the
- * underlying classification (`transport_failed` or `validation_failed` for a `ConnectorError`).
+ * `createOutcome: 'unknown'` marks an ambiguous create of a write case's own item (see
+ * `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx): Graph
+ * may have created the item without the case learning its id, so the message adds the
+ * manual-recovery advice. `code` and `status` keep the underlying classification (the
+ * `ConnectorError` cause, such as `transport_failed` or `validation_failed`, for a failed action).
  */
 export class MicrosoftConformanceActionFailed extends Data.TaggedError(
   'MicrosoftConformanceActionFailed'
@@ -341,56 +343,49 @@ const failureSummary = (cause: Cause.Cause<unknown>): string => {
 type PendingIds = Ref.Ref<ReadonlyArray<string>>
 
 /** How a write case creates its own item. */
-interface OwnItem<T, E, R> {
+interface OwnItem<T, R> {
   /** The action (or raw calendar request) id the create reports failures under. */
   readonly actionId: string
-  /** Creates the item remotely and decodes the response. */
-  readonly create: Effect.Effect<T, E, R>
+  /** Creates the item remotely and decodes the response: its result, or the connector failure. */
+  readonly create: Effect.Effect<ActionResult<T>, ConnectorError, R>
   /** The id of the created item, or `undefined` when the create response carries none. */
   readonly idOf: (created: T) => string | undefined
+  /**
+   * A definitive rejection (HTTP status) the case reports as its own failure instead, for example a
+   * name conflict that is a precondition; `undefined` keeps the `MicrosoftConformanceActionFailed`.
+   */
+  readonly rejectedAs?: (status: number) => ConformanceMismatch | undefined
 }
 
 /**
- * An ambiguous create failure (transport or decoding failure, no status, or HTTP 5xx) as a
- * `MicrosoftConformanceActionFailed` with `createOutcome: 'unknown'`, keeping its code and status;
- * `undefined` for a failure that proves nothing was created.
+ * The item a case created, classified by the shared `classifyWriteExit`: the decoded value; a
+ * definitive rejection (any 4xx other than 408; nothing was created) as `rejectedAs` or a
+ * `MicrosoftConformanceActionFailed`; or an ambiguous failure (a transport or decoding failure, no
+ * status, HTTP 408, or HTTP 5xx; Graph may still have created it) as a
+ * `MicrosoftConformanceActionFailed` with `createOutcome: 'unknown'`.
  */
-const ambiguousCreateFailure = (
-  actionId: string,
-  error: unknown
-): MicrosoftConformanceActionFailed | undefined => {
-  if (error instanceof MicrosoftConformanceActionFailed) {
-    if (error.status === undefined) {
-      return new MicrosoftConformanceActionFailed({
-        actionId: error.actionId,
-        code: error.code,
-        createOutcome: 'unknown'
-      })
-    }
+const createdItem = <T, R>(
+  item: OwnItem<T, R>
+): Effect.Effect<T, MicrosoftConformanceActionFailed | ConformanceMismatch, R> =>
+  Effect.gen(function* () {
+    const outcome = classifyWriteExit(yield* Effect.exit(item.create))
 
-    return error.status >= 500
-      ? new MicrosoftConformanceActionFailed({
-          actionId: error.actionId,
-          code: error.code,
-          status: error.status,
+    switch (outcome.kind) {
+      case 'success':
+        return outcome.value
+      case 'rejected':
+        return yield* (
+          item.rejectedAs?.(outcome.failure.status) ??
+            new MicrosoftConformanceActionFailed({ actionId: item.actionId, ...outcome.failure })
+        )
+      case 'ambiguous':
+        return yield* new MicrosoftConformanceActionFailed({
+          actionId: item.actionId,
+          ...outcome.failure,
           createOutcome: 'unknown'
         })
-      : undefined
-  }
-
-  if (
-    error instanceof ConnectorError &&
-    (error.cause === 'transport_failed' || error.cause === 'validation_failed')
-  ) {
-    return new MicrosoftConformanceActionFailed({
-      actionId,
-      code: error.cause,
-      createOutcome: 'unknown'
-    })
-  }
-
-  return undefined
-}
+    }
+  })
 
 /**
  * Create a case-owned item, run `use`, then ALWAYS remove whatever is still pending.
@@ -398,24 +393,24 @@ const ambiguousCreateFailure = (
  * The create request, its decoding, and the registration of the id in `pending` run
  * uninterruptibly, so an interruption cannot land between the remote create and the registration
  * the restore relies on (the create itself cannot be interrupted, and there is no request
- * timeout); `use` (the claims) runs interruptibly again. An ambiguous create failure (transport or
- * decoding failure, no status, or HTTP 5xx) may still have created the item: it fails as a
- * `MicrosoftConformanceActionFailed` with `createOutcome: 'unknown'` whose message carries the
- * manual-recovery advice. The restore runs uninterruptibly after `use` succeeds, fails, or is
- * interrupted, and does nothing once `pending` is empty. A failed restore fails the case with `MicrosoftConformanceRestoreFailed`, which says
- * whether the claim itself held and, if not, summarizes why; otherwise the outcome of `use`
- * (including an interruption) is returned unchanged. A create that succeeds without an id leaves
+ * timeout); `use` (the claims) runs interruptibly again. An ambiguous create failure (see
+ * `createdItem`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) may still have
+ * created the item: it fails as a `MicrosoftConformanceActionFailed` with `createOutcome: 'unknown'`
+ * whose message carries the manual-recovery advice. The restore runs uninterruptibly after `use`
+ * succeeds, fails, or is interrupted, and does nothing once `pending` is empty. A failed restore
+ * fails the case with `MicrosoftConformanceRestoreFailed`, which says whether the claim itself
+ * held and, if not, summarizes why; otherwise the outcome of `use` (including an interruption) is returned unchanged. A create that succeeds without an id leaves
  * nothing to remove automatically: it fails with `MicrosoftConformanceRestoreFailed` too, so the
  * item is removed by hand.
  */
-const withOwnItem = <T, A, E1, R1, E, R, E2, R2>(
+const withOwnItem = <T, A, R1, E, R, E2, R2>(
   caseId: string,
-  item: OwnItem<T, E1, R1>,
+  item: OwnItem<T, R1>,
   use: (created: T, id: string, pending: PendingIds) => Effect.Effect<A, E, R>,
   remove: (ids: ReadonlyArray<string>) => Effect.Effect<void, E2, R2>
 ): Effect.Effect<
   A,
-  E1 | E | MicrosoftConformanceActionFailed | MicrosoftConformanceRestoreFailed,
+  E | ConformanceMismatch | MicrosoftConformanceActionFailed | MicrosoftConformanceRestoreFailed,
   R1 | R | R2
 > =>
   Effect.gen(function* () {
@@ -423,9 +418,7 @@ const withOwnItem = <T, A, E1, R1, E, R, E2, R2>(
 
     return yield* Effect.uninterruptibleMask(unmask =>
       Effect.gen(function* () {
-        const created = yield* item.create.pipe(
-          Effect.mapError(error => ambiguousCreateFailure(item.actionId, error) ?? error)
-        )
+        const created = yield* createdItem(item)
 
         const id = item.idOf(created)
 
@@ -665,7 +658,7 @@ export const microsoftCalendarCreateEventCase: MicrosoftConformanceCase = define
           body: 'Synthetic conformance event; safe to delete.',
           startUtc: '2026-01-05T09:00:00',
           endUtc: '2026-01-05T09:30:00'
-        }).pipe(Effect.flatMap(result => successValue(calendarActionIds.create, result))),
+        }),
         idOf: eventIdOf
       },
       (_created, eventId, pending) =>
@@ -738,7 +731,7 @@ export const microsoftCalendarCancelCase: MicrosoftConformanceCase = defineConfo
           body: 'Synthetic conformance event; cancelled by the case.',
           startUtc: '2026-01-05T10:00:00',
           endUtc: '2026-01-05T10:30:00'
-        }).pipe(Effect.flatMap(result => successValue(calendarActionIds.create, result))),
+        }),
         idOf: eventIdOf
       },
       (_created, eventId, pending) =>
@@ -934,20 +927,18 @@ const draftSubject = `${microsoftConformanceMarker} draft: safe to delete`
 /** A case-owned, recipient-free draft (never sent). */
 const ownDraft = (
   mailbox: string | undefined
-): OwnItem<OutlookMessage, MicrosoftConformanceError, MicrosoftConformanceRequirements> => ({
+): OwnItem<OutlookMessage, MicrosoftConformanceRequirements> => ({
   actionId: outlookCreateDraftAction.id,
-  create: outlookCreateDraftAction
-    .executeTyped({
-      integration,
-      input: OutlookComposeInput.make({
-        mailbox,
-        to: [],
-        subject: draftSubject,
-        body: 'Synthetic conformance draft; never sent.',
-        contentType: 'text'
-      })
+  create: outlookCreateDraftAction.executeTyped({
+    integration,
+    input: OutlookComposeInput.make({
+      mailbox,
+      to: [],
+      subject: draftSubject,
+      body: 'Synthetic conformance draft; never sent.',
+      contentType: 'text'
     })
-    .pipe(Effect.flatMap(result => successValue(outlookCreateDraftAction.id, result))),
+  }),
   idOf: draft => (isNonEmptyString(draft.id) ? draft.id : undefined)
 })
 
@@ -1147,24 +1138,14 @@ const listChildren = (driveId: string | undefined, parentItemId: string) =>
   })
 
 const createOwnFolder = (driveId: string | undefined, parentItemId: string, name: string) =>
-  Effect.gen(function* () {
-    const created = yield* oneDriveCreateFolderAction.executeTyped({
-      integration,
-      input: OneDriveCreateFolderInput.make({
-        name,
-        driveId,
-        parentItemId,
-        conflictBehavior: 'fail'
-      })
+  oneDriveCreateFolderAction.executeTyped({
+    integration,
+    input: OneDriveCreateFolderInput.make({
+      name,
+      driveId,
+      parentItemId,
+      conflictBehavior: 'fail'
     })
-
-    if (Predicate.isTagged(created, 'Failure') && created.error.status === 409) {
-      return yield* new ConformanceMismatch({
-        message: `precondition: a folder named "${name}" already exists under driveParentItemId (left by an earlier run?); delete it by hand`
-      })
-    }
-
-    return yield* successValue(oneDriveCreateFolderAction.id, created)
   })
 
 const getDriveItem = (driveId: string | undefined, itemId: string) =>
@@ -1188,10 +1169,17 @@ const ownFolder = (
   driveId: string | undefined,
   parentItemId: string,
   name: string
-): OwnItem<OneDriveItem, MicrosoftConformanceError, MicrosoftConformanceRequirements> => ({
+): OwnItem<OneDriveItem, MicrosoftConformanceRequirements> => ({
   actionId: oneDriveCreateFolderAction.id,
   create: createOwnFolder(driveId, parentItemId, name),
-  idOf: folder => (isNonEmptyString(folder.id) ? folder.id : undefined)
+  idOf: folder => (isNonEmptyString(folder.id) ? folder.id : undefined),
+  // `conflictBehavior: 'fail'` answers 409 when an earlier run left the folder behind.
+  rejectedAs: status =>
+    status === 409
+      ? new ConformanceMismatch({
+          message: `precondition: a folder named "${name}" already exists under driveParentItemId (left by an earlier run?); delete it by hand`
+        })
+      : undefined
 })
 
 /** Remove a case-created folder that may still exist, then verify GET answers 404. */

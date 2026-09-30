@@ -584,6 +584,26 @@ describe('Notion conformance restore', () => {
     })
   )
 
+  it.effect('reports a 408 create as ambiguous: a timed-out create may still have written', () =>
+    Effect.gen(function* () {
+      const timedOut =
+        '{"object":"error","status":408,"code":"request_timeout","message":"Synthetic placeholder: timeout."}'
+
+      const { failure, entries } = yield* drill(notionArchiveInTrashCase, {
+        ...notionArchiveInTrashFixture,
+        exchanges: [
+          { ...createExchange, response: withStatus(408, timedOut)(createExchange.response) }
+        ]
+      })
+
+      expect(failure?.tag).toBe('NotionConformanceActionFailed')
+      expect(failure?.message).toMatch(
+        /^notion\.create_page failed: \S+ \(HTTP 408\); the page may exist anyway: /
+      )
+      expect(exchangeIndices(entries)).toEqual(['POST 0'])
+    })
+  )
+
   it.effect('reports a 4xx create without the advice: nothing was created', () =>
     Effect.gen(function* () {
       const rejected =
