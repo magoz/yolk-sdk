@@ -124,6 +124,27 @@ describe('OpenCode Go subscription usage', () => {
       })
   )
 
+  it.effect('requests a caller-supplied endpoint override with the same credentials', () =>
+    Effect.gen(function* () {
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+      const client = HttpClient.make(request => {
+        requests.push(request)
+
+        return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(wire)))
+      })
+
+      yield* fetchOpenCodeGoSubscriptionUsage(apiKey, {
+        url: 'http://127.0.0.1:4010/zen/go/v1/usage'
+      }).pipe(Effect.provideService(HttpClient.HttpClient, client))
+
+      expect(requests.map(request => [request.method, request.url])).toEqual([
+        ['GET', 'http://127.0.0.1:4010/zen/go/v1/usage']
+      ])
+      expect(requests[0]?.headers.authorization).toBe('Bearer go-secret')
+    })
+  )
+
   it.effect('validates key and timeout before HTTP', () =>
     Effect.gen(function* () {
       let called = false

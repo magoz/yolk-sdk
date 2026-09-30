@@ -290,6 +290,28 @@ describe('xAI Grok subscription usage', () => {
     }
   )
 
+  it.effect('requests a caller-supplied endpoint override with the same credentials', () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+    const client = HttpClient.make(request => {
+      requests.push(request)
+
+      return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(modernUsage(1))))
+    })
+
+    return Effect.gen(function* () {
+      yield* fetchXAiGrokSubscriptionUsage(token, {
+        ...options,
+        url: 'http://127.0.0.1:4010/v1/billing?format=credits'
+      }).pipe(Effect.provideService(HttpClient.HttpClient, client))
+
+      expect(requests.map(request => [request.method, request.url])).toEqual([
+        ['GET', 'http://127.0.0.1:4010/v1/billing?format=credits']
+      ])
+      expect(requests[0]?.headers.authorization).toBe('Bearer grok-secret')
+    })
+  })
+
   it.effect(
     'rejects provider, identity, client-version, and timeout configuration before HTTP',
     () => {

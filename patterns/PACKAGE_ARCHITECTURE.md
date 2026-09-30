@@ -26,6 +26,7 @@ metadata.
   - `@yolk-sdk/agent/providers/openai/realtime`
   - `@yolk-sdk/agent/providers/openai/speech`
   - `@yolk-sdk/agent/providers/vercel/ai-gateway-provider`
+  - `@yolk-sdk/agent/providers/vercel/conformance`
   - `@yolk-sdk/agent/providers/opencode/go-provider`
   - `@yolk-sdk/agent/providers/opencode/usage`
   - `@yolk-sdk/agent/providers/anthropic`
@@ -54,6 +55,8 @@ metadata.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, `./testing` exports the `TestWorkflowWorld` behavioral emulator, and hosts own concrete Workflow directives.
 - `@yolk-sdk/harness` owns run lifecycle (coordinator, store, inbox, driver, outcome). Public subpaths: `./coordinator`, `./store`, `./inbox`, `./driver`, `./driver/memory`, `./driver/durable-object`, and `./outcome`. It does not replace `@yolk-sdk/agent/loop`.
+- `@yolk-sdk/conformance` (experimental) owns wire fixtures, offline fail-closed replay, wire faults, and recording over a host-provided `HttpClient`. Public subpaths: `./fixture`, `./replay`, and `./record`; there is no root export. It performs no network I/O itself.
+- Provider wire fixtures live under `@yolk-sdk/agent/providers/<vendor>/conformance` (currently `vercel`); see the conformance import rule under [Dependency Direction](#dependency-direction).
 - OpenAI/Codex, Vercel AI Gateway, OpenCode Go, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, Grok, and OpenCode Go also expose best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
@@ -65,12 +68,14 @@ metadata.
 - Sandbox internals live under `packages/sandbox/src/*`, not separate workspace packages.
 - Vercel Workflow internals live under `packages/vercel-workflows/src/*`, not app code.
 - Harness internals live under `packages/harness/src/*`, not app code.
+- Conformance internals live under `packages/conformance/src/*`, not app code.
 - Area tests mirror source layout:
   - `packages/agent/test/{protocol,loop,runtime,client,compaction,tools,react,oauth,providers,skillset,voice,property}`
   - `packages/mcp/test/{client,server}`
   - `packages/sandbox/test/{core,agent,vercel}.test.ts`
   - `packages/vercel-workflows/test`
   - `packages/harness/test`
+  - `packages/conformance/test`
 
 ## Dependency Direction
 
@@ -82,6 +87,8 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/sandbox root -> Effect only; ./agent -> sandbox core + @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
 @yolk-sdk/vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
 @yolk-sdk/harness core -> Effect only; ./outcome -> @yolk-sdk/agent/{protocol,loop,compaction}; no app/auth/UI/product policy
+@yolk-sdk/conformance -> Effect only (no @yolk-sdk/*, Node builtins, React, Next); hosts supply the network HttpClient
+@yolk-sdk/agent/providers/*/conformance -> @yolk-sdk/conformance/* (see conformance import rule below)
 @yolk-sdk/agent/client -> @yolk-sdk/agent/protocol + Effect HTTP/Stream + runtime-only browser WebSocket/Blob/File/FileReader APIs
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol} + Effect
@@ -91,6 +98,8 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/agent/voice/react -> voice core + voice/browser + React peer
 @yolk-sdk/agent core -> no @yolk-sdk/knowledge, @yolk-sdk/mcp, app, Next, provider SDKs
 ```
+
+Conformance import rule (canonical statement; other docs reference it): in `packages/agent/src`, only code under `providers/*/conformance/` may import `@yolk-sdk/conformance/*` (any subpath); in `packages/connectors/src`, only code under a `conformance/` directory may. Package tests may import it.
 
 ## Tree-Shaking Constraints
 
@@ -121,7 +130,10 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 - Boundary script prevents knowledge from importing MCP/React/Next/Node.
 - Boundary script prevents sandbox core from importing agent deps and `@vercel/sandbox` outside `packages/sandbox/src/vercel`.
 - Boundary script prevents harness from importing agent/knowledge/MCP/Next/React/Node except `packages/harness/src/outcome.ts`, which may import `@yolk-sdk/agent/{loop,protocol,compaction}`.
-- Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.
+- Boundary script prevents conformance from importing other `@yolk-sdk/*` packages, Node builtins, React, or Next.
+- Boundary script enforces the conformance import rule from [Dependency Direction](#dependency-direction).
+- Boundary script allows `@yolk-sdk/agent` in `packages/connectors/src` only from `src/agent.ts`.
+- Export smoke script verifies explicit exports, ESM, `sideEffects: false`, tiny agent/MCP roots, and that `@yolk-sdk/conformance` has no root export.
 - Vercel Workflow durable event helpers stay generic over JSON-serializable events; do not import `@yolk-sdk/agent/protocol` there.
 
 ## When Adding A Package API

@@ -33,6 +33,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './providers/openai/realtime',
       './providers/openai/speech',
       './providers/vercel/ai-gateway-provider',
+      './providers/vercel/conformance',
       './providers/opencode/go-provider',
       './providers/opencode/usage',
       './providers/subscription-usage',
@@ -105,7 +106,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './driver/durable-object',
       './outcome'
     ]
-  }
+  },
+  { name: '@yolk-sdk/conformance', exports: ['./fixture', './replay', './record'] }
 ]
 
 const extractTarballName = (output: string) => {
@@ -218,7 +220,12 @@ const main = async () => {
           'const dropbox = await import("@yolk-sdk/connectors/dropbox")',
           'for (const symbol of ["downloadDropboxFile", "DropboxDownloadError", "DropboxDownloadSource", "createDropboxFile", "updateDropboxFile"]) { if (typeof dropbox[symbol] !== "function") throw new Error(`Missing Dropbox export: ${symbol}`) }',
           'if (dropbox.DropboxDownloadErrorCode === undefined) throw new Error("Missing Dropbox download error codes")',
-          'if (dropbox.DropboxConnector.actions.some(action => /download|content/.test(action.id))) throw new Error("Host Dropbox download leaked into default actions")'
+          'if (dropbox.DropboxConnector.actions.some(action => /download|content/.test(action.id))) throw new Error("Host Dropbox download leaked into default actions")',
+          'await import("@yolk-sdk/conformance").then(() => { throw new Error("@yolk-sdk/conformance must not expose a root export") }, error => { if (error?.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw error })',
+          'const replay = await import("@yolk-sdk/conformance/replay")',
+          'if (typeof replay.ReplayHttpClient.layer !== "function" || typeof replay.WireFault.FailAfterChunks !== "function") throw new Error("Missing conformance replay exports")',
+          'const gatewayFixtures = await import("@yolk-sdk/agent/providers/vercel/conformance")',
+          'if (gatewayFixtures.vercelAiGatewayConformanceFixtures.length !== 4) throw new Error("Missing Gateway conformance fixtures")'
         ].join('\n')
     )
 

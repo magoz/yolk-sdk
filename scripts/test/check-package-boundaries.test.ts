@@ -226,6 +226,102 @@ describe('runCheck on a fixture workspace', () => {
   })
 })
 
+describe('conformance and connector import rules', () => {
+  const scaffoldConformance = (root: string): void => {
+    scaffoldPackages(root)
+    write(
+      root,
+      'packages/conformance/package.json',
+      JSON.stringify({
+        name: '@yolk-sdk/conformance',
+        exports: { './fixture': './src/fixture.ts' }
+      })
+    )
+    write(root, 'packages/conformance/src/fixture.ts', `export const fixture = 1\n`)
+  }
+
+  it('keeps conformance Effect-only while allowing its own relative imports', () => {
+    const root = fixtureDirectory()
+
+    scaffoldConformance(root)
+    write(
+      root,
+      'packages/conformance/src/replay.ts',
+      `import { fixture } from './fixture.ts'\nimport { y } from '@yolk-sdk/agent/loop'\nimport { rel } from '../../mcp/src/rel'\nimport fs from 'node:fs'\nimport React from 'react'\n\nexport const probe = [fixture, y, rel, fs, React]\n`
+    )
+    write(root, 'packages/mcp/src/rel.ts', `export const rel = 1\n`)
+
+    const found = violationsFor(root, 'packages/conformance/src/replay.ts')
+
+    expect(found.map(violation => violation.forbidden).sort()).toEqual([
+      '@yolk-sdk/agent',
+      '@yolk-sdk/mcp',
+      'node:',
+      'react'
+    ])
+  })
+
+  it('allows @yolk-sdk/conformance only under agent providers/*/conformance and connector conformance dirs', () => {
+    const root = fixtureDirectory()
+
+    scaffoldConformance(root)
+
+    const importConformance = `import { fixture } from '@yolk-sdk/conformance/fixture'\n\nexport const probe = fixture\n`
+
+    write(root, 'packages/agent/src/providers/vercel/conformance/index.ts', importConformance)
+    write(root, 'packages/agent/src/providers/vercel/ai-gateway-provider.ts', importConformance)
+    write(root, 'packages/agent/src/loop/replay.ts', importConformance)
+    write(root, 'packages/agent/src/providers/vercel/nested/conformance/deep.ts', importConformance)
+    write(root, 'packages/connectors/src/fortnox/conformance/fixtures.ts', importConformance)
+    write(root, 'packages/connectors/src/conformance/shared.ts', importConformance)
+    write(root, 'packages/connectors/src/fortnox/files.ts', importConformance)
+
+    expect(violationsFor(root, 'packages/agent/src/providers/vercel/conformance/index.ts')).toEqual(
+      []
+    )
+    expect(violationsFor(root, 'packages/connectors/src/fortnox/conformance/fixtures.ts')).toEqual(
+      []
+    )
+    expect(violationsFor(root, 'packages/connectors/src/conformance/shared.ts')).toEqual([])
+
+    for (const rel of [
+      'packages/agent/src/providers/vercel/ai-gateway-provider.ts',
+      'packages/agent/src/loop/replay.ts',
+      'packages/agent/src/providers/vercel/nested/conformance/deep.ts',
+      'packages/connectors/src/fortnox/files.ts'
+    ]) {
+      expect(
+        violationsFor(root, rel).map(violation => violation.forbidden),
+        rel
+      ).toContain('@yolk-sdk/conformance')
+    }
+  })
+
+  it('allows @yolk-sdk/agent in connectors only from src/agent.ts', () => {
+    const root = fixtureDirectory()
+
+    scaffoldConformance(root)
+
+    const importAgent = `import { protocol } from '@yolk-sdk/agent/protocol'\n\nexport const probe = protocol\n`
+
+    write(root, 'packages/connectors/src/agent.ts', importAgent)
+    write(root, 'packages/connectors/src/github/actions.ts', importAgent)
+    write(
+      root,
+      'packages/connectors/src/github/uses-adapter.ts',
+      `import { probe } from '../agent.ts'\n\nexport const again = probe\n`
+    )
+
+    expect(violationsFor(root, 'packages/connectors/src/agent.ts')).toEqual([])
+    expect(violationsFor(root, 'packages/connectors/src/github/uses-adapter.ts')).toEqual([])
+    expect(
+      violationsFor(root, 'packages/connectors/src/github/actions.ts').map(
+        violation => violation.forbidden
+      )
+    ).toEqual(['@yolk-sdk/agent'])
+  })
+})
+
 describe('global packages -> apps ban', () => {
   it('fires outside per-area rules and inside local exclusions', () => {
     const root = fixtureDirectory()

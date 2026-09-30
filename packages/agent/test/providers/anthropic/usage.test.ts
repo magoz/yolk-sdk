@@ -85,6 +85,29 @@ describe('Anthropic Claude subscription usage', () => {
     })
   })
 
+  it.effect('requests a caller-supplied endpoint override with the same credentials', () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+    const client = HttpClient.make(request => {
+      requests.push(request)
+
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(request, Response.json({ five_hour: { utilization: 1 } }))
+      )
+    })
+
+    return Effect.gen(function* () {
+      yield* fetchAnthropicClaudeSubscriptionUsage(token, {
+        url: 'http://127.0.0.1:4010/api/oauth/usage'
+      }).pipe(Effect.provideService(HttpClient.HttpClient, client))
+
+      expect(requests.map(request => [request.method, request.url])).toEqual([
+        ['GET', 'http://127.0.0.1:4010/api/oauth/usage']
+      ])
+      expect(requests[0]?.headers.authorization).toBe('Bearer anthropic-secret')
+    })
+  })
+
   it.effect('rejects mismatched tokens before making an HTTP request', () => {
     let called = false
 

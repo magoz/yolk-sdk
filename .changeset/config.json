@@ -10,7 +10,8 @@
       "@yolk-sdk/mcp",
       "@yolk-sdk/sandbox",
       "@yolk-sdk/vercel-workflows",
-      "@yolk-sdk/harness"
+      "@yolk-sdk/harness",
+      "@yolk-sdk/conformance"
     ]
   ],
   "linked": [],

@@ -13,6 +13,7 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 | `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel client/layer adapter, and testing fakes                                  | `packages/sandbox/AGENTS.md`          |
 | `@yolk-sdk/vercel-workflows` | Workflow loop contract, generic durable stream helpers, and Effect Workflow client/layer                             | `packages/vercel-workflows/AGENTS.md` |
 | `@yolk-sdk/harness`          | Run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)                                 | `packages/harness/AGENTS.md`          |
+| `@yolk-sdk/conformance`      | Experimental wire fixtures, offline fail-closed replay, wire faults, and recording over a host `HttpClient`          | `packages/conformance/AGENTS.md`      |
 
 ## Dependency direction
 

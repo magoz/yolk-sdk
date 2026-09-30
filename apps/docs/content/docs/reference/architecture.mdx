@@ -14,6 +14,9 @@ host app / runtime / UI
   -> @yolk-sdk/sandbox
   -> @yolk-sdk/vercel-workflows
   -> @yolk-sdk/harness
+
+host tests / fixture scripts
+  -> @yolk-sdk/conformance (experimental)
 ```
 
 Rules of thumb:
@@ -32,5 +35,6 @@ Rules of thumb:
 - `knowledge`, `connectors`, and `sandbox` expose optional agent adapters behind explicit subpaths.
 - `vercel-workflows` stays generic over serializable `unknown` payloads and does not import agent protocol.
 - `harness` owns run lifecycle (claims, inbox, drains). It is not the agent loop and does not add a Workflow driver.
+- `conformance` (experimental) depends only on `effect`: it records, replays, and fault-injects HTTP wire fixtures for tests and never performs network I/O itself. Provider fixture modules such as `agent/providers/vercel/conformance` import it; runtime code does not.
 
 Strict boundaries let the packages fit many hosts: Next.js, Workers, Durable Objects, Workflows, CLIs, and tests.

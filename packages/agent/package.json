@@ -99,6 +99,10 @@
       "types": "./src/providers/vercel/ai-gateway-provider.ts",
       "default": "./src/providers/vercel/ai-gateway-provider.ts"
     },
+    "./providers/vercel/conformance": {
+      "types": "./src/providers/vercel/conformance/index.ts",
+      "default": "./src/providers/vercel/conformance/index.ts"
+    },
     "./providers/opencode/go-provider": {
       "types": "./src/providers/opencode/go-provider.ts",
       "default": "./src/providers/opencode/go-provider.ts"
@@ -262,6 +266,11 @@
         "import": "./dist/providers/vercel/ai-gateway-provider.mjs",
         "default": "./dist/providers/vercel/ai-gateway-provider.mjs"
       },
+      "./providers/vercel/conformance": {
+        "types": "./dist/providers/vercel/conformance/index.d.mts",
+        "import": "./dist/providers/vercel/conformance/index.mjs",
+        "default": "./dist/providers/vercel/conformance/index.mjs"
+      },
       "./providers/opencode/go-provider": {
         "types": "./dist/providers/opencode/go-provider.d.mts",
         "import": "./dist/providers/opencode/go-provider.mjs",
@@ -346,6 +355,7 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@yolk-sdk/conformance": "workspace:^",
     "effect": "catalog:"
   },
   "peerDependencies": {

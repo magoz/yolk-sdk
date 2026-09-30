@@ -22,6 +22,12 @@ export const anthropicClaudeSubscriptionUsageUrl = 'https://api.anthropic.com/ap
 
 export type AnthropicClaudeSubscriptionUsageOptions = {
   readonly requestTimeoutMs?: number
+  /**
+   * Endpoint override. Defaults to `anthropicClaudeSubscriptionUsageUrl`. Override only with a trusted
+   * proxy or a local emulator: the credential is sent to this URL. Redirects stay
+   * manual and non-2xx redirects are still rejected.
+   */
+  readonly url?: string
 }
 
 const NullableNumber = Schema.NullOr(Schema.Number)
@@ -148,7 +154,7 @@ export const fetchAnthropicClaudeSubscriptionUsage = (
 
     const client = yield* HttpClient.HttpClient
 
-    const request = HttpClientRequest.get(anthropicClaudeSubscriptionUsageUrl).pipe(
+    const request = HttpClientRequest.get(options.url ?? anthropicClaudeSubscriptionUsageUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
         ...anthropicClaudeAuthorizationHeaders(token),

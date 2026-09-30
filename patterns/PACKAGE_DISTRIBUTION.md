@@ -43,7 +43,8 @@ Current Changesets config:
       "@yolk-sdk/mcp",
       "@yolk-sdk/sandbox",
       "@yolk-sdk/vercel-workflows",
-      "@yolk-sdk/harness"
+      "@yolk-sdk/harness",
+      "@yolk-sdk/conformance"
     ]
   ],
   "updateInternalDependencies": "patch",
@@ -150,6 +151,7 @@ Publish all public packages together:
 - `@yolk-sdk/sandbox`
 - `@yolk-sdk/vercel-workflows`
 - `@yolk-sdk/harness`
+- `@yolk-sdk/conformance` (experimental)
 
 Rationale: lockstep versions are simpler when every public `packages/*` package is published together. Private app workspaces stay private; unstable public packages document instability in README.
 
@@ -221,7 +223,8 @@ for package in \
   @yolk-sdk/connectors \
   @yolk-sdk/sandbox \
   @yolk-sdk/vercel-workflows \
-  @yolk-sdk/harness; do
+  @yolk-sdk/harness \
+  @yolk-sdk/conformance; do
   npm view "$package" dist-tags --json
 done
 git fetch --tags

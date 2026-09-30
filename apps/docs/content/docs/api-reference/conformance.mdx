@@ -1,0 +1,115 @@
+---
+title: Conformance APIs
+description: Experimental wire-fixture record, replay, and fault-injection subpaths.
+---
+
+> **Experimental.** `@yolk-sdk/conformance` may change in any canary release. It is new after
+> `0.1.0-canary.95`; keep it on the same lockstep version as the other public packages.
+
+`@yolk-sdk/conformance` records real HTTP exchanges with outside services, replays them in tests
+offline (fail closed), and injects wire faults. It depends only on `effect` and never performs
+network I/O itself: for live recording, your host supplies the real `HttpClient`.
+
+There is no root export. Import an explicit subpath.
+
+## Fixture
+
+`@yolk-sdk/conformance/fixture`
+
+| Export                                                               | Purpose                                                                                                                                             |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WireFixture`                                                        | Schema and type: `id`, `caseId`, `evidence`, `recordedAt` (`YYYY-MM-DD`), `account`, `endpoint`, `model?`, `note?`, `exchanges`                     |
+| `WireExchange`, `WireRequest`, `WireResponse`                        | One request (method, absolute URL, allowlisted headers, JSON or text body) and its response                                                         |
+| `WireBodyResponse`, `WireTextBodyResponse`, `WireBase64BodyResponse` | Whole body: exactly one of `body` (valid UTF-8 string) or `bodyBase64` (exact bytes, for example a PDF)                                             |
+| `WireStreamResponse`, `WireChunk`                                    | Streamed `chunks` with original boundaries; each entry is a string (valid UTF-8 on its own, empty chunks `""`) or `{ base64 }` with the exact bytes |
+| `WireFixtureEvidence`, `WireHeaders`                                 | `verified` / `unverified`; lowercase header record                                                                                                  |
+| `decodeWireFixture`                                                  | Decode unknown input (for example a JSON file) into a fixture                                                                                       |
+| `isWireStreamResponse`, `isWireBase64BodyResponse`                   | Narrow a response to the streamed or base64 body shape                                                                                              |
+| `fixtureAgeDays`, `isFixtureStale`                                   | Whole UTC days since `recordedAt`; stale after `maxAgeDays` (default 30)                                                                            |
+| `scanFixtureForSecrets`, `FixtureSecretIssue`                        | Pure scan for credential headers, bearer tokens, API-key prefixes, JWTs, credential query/form params and JSON fields                               |
+
+Fixtures must contain synthetic or scrubbed data only. The scan covers metadata strings, URLs,
+headers, request and response bodies (including decodable `bodyBase64` text), each chunk, and the
+reassembled stream, so a secret split across chunks is still found. JSON bodies and SSE `data:`
+payloads get the credential-field scan (`access_token`, `client_secret`, `password`, `token`, ...);
+numeric usage counters such as `max_tokens` are not flagged. SSE framing with CRLF, LF, or bare CR
+line endings is recognized. The scan errs toward flagging: a field named exactly `token` (for
+example an OpenAI `logprobs` entry) is flagged, so avoid recording logprobs. It reports locations,
+never secret values, and is a safety net rather than a guarantee.
+
+## Replay
+
+`@yolk-sdk/conformance/replay`
+
+| Export                                       | Purpose                                                                                                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReplayHttpClient.layer(fixtures, options?)` | `Layer<HttpClient.HttpClient \| ReplayLedger>` with fresh state per build                                                                               |
+| `makeReplayHttpClient`                       | Effect returning `{ client, ledger }` for manual wiring                                                                                                 |
+| `ReplayLedger.entries`, `ReplayLedgerEntry`  | Every request: method, URL, redacted headers, body text/JSON, attempt, match outcome (`matched`, `injected`, `unmatched`, `invalid`), applied fault tag |
+| `ReplayLedger.remaining`                     | Recorded exchanges (`fixtureId`, `exchangeIndex`) not consumed yet, in fixture order                                                                    |
+| `WireFault`                                  | `StatusOnAttempt`, `FailAfterChunks`, `TruncateAfterChunks`, `HoldAfterChunks` constructors                                                             |
+| `WireTransportFault`                         | Cause attached to a body stream failed by `FailAfterChunks`                                                                                             |
+| `WireReplayInvalid`                          | Cause of the `HttpClientError` for a matched exchange that cannot be replayed as requested                                                              |
+
+Requests match by method and normalized absolute URL (hash removed, query parameters sorted). Each
+exchange is consumed once, in recorded order per method and URL. Unknown requests fail with an
+`HttpClientError` whose message names the method and URL only, and are still recorded in the
+ledger as `unmatched`; faults never answer them, so `StatusOnAttempt` fires only when an
+unconsumed recorded exchange exists for the method and URL. Replay emits the exact recorded bytes:
+one `Uint8Array` per recorded chunk (including empty ones), each produced only when pulled, and
+`bodyBase64` as the original bytes. A fault `match.url` matches exactly, or as a prefix when it
+ends with `*`.
+
+A chunk fault that cannot take effect fails the request with an `HttpClientError` whose cause is
+`WireReplayInvalid`, recorded in the ledger as `invalid` without a fault tag: any chunk fault
+matched against a whole-body response, `TruncateAfterChunks` or `HoldAfterChunks` with `chunks` at
+or beyond the recorded chunk count, or `FailAfterChunks` with `chunks` beyond it. The error reason
+is a `TransportError`, which generic transient-retry policies retry; when a test runs through a
+retrying client, also assert the ledger has no `invalid` outcome.
+
+```ts
+import { Effect } from 'effect'
+import { ReplayHttpClient, ReplayLedger, WireFault } from '@yolk-sdk/conformance/replay'
+
+const replayLayer = ReplayHttpClient.layer([hostFixture], {
+  faults: [WireFault.StatusOnAttempt({ attempt: 1, status: 429, headers: { 'retry-after': '2' } })]
+})
+
+const ledgerEntries = Effect.gen(function* () {
+  const ledger = yield* ReplayLedger
+  return yield* ledger.entries
+})
+```
+
+`hostFixture` is a placeholder for your own `WireFixture`. Provide `replayLayer` below the code
+under test, for example a provider layer.
+
+## Record
+
+`@yolk-sdk/conformance/record`
+
+| Export                                                                                       | Purpose                                                                                                             |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `WireRecorder.layer(options?)`                                                               | Wraps the `HttpClient` already in context; provides the recording client and `WireRecorder`                         |
+| `makeRecordingHttpClient`                                                                    | Effect returning `{ client, recorder }` around a given client                                                       |
+| `WireRecorderApi.drain`                                                                      | Take recorded exchanges; fails with `WireRecordingIncomplete` if a request failed or was unread                     |
+| `makeWireFixture`                                                                            | Validate a fixture; fails with `WireFixtureInvalid` on schema errors or `WireFixtureSecretsFound` on any scan issue |
+| `WireFixtureInvalid`, `WireFixtureSecretsFound`, `WireRecordingIncomplete`                   | Typed errors from `makeWireFixture` and `drain`                                                                     |
+| `defaultRecordedRequestHeaders`, `defaultRecordedResponseHeaders`, `defaultStreamMediaTypes` | Allowlist defaults                                                                                                  |
+
+The recorder keeps `content-type` and `accept` request headers and `content-type`, `retry-after`,
+`retry-after-ms`, and rate-limit response headers by default. Credential headers such as
+`authorization`, `cookie`, `set-cookie`, and token/key-bearing names such as `x-auth-token`,
+`private-token`, or `x-*-key` are always dropped. `text/event-stream` responses are teed chunk by
+chunk without changing what the caller receives; each chunk is recorded standalone as text when
+valid UTF-8, otherwise as `{ base64 }`. Other bodies are recorded as `body` or `bodyBase64`. A
+request still pending when `drain` runs is reported by that drain and then dropped; it never lands
+in a later drain.
+
+## Provider fixtures
+
+`@yolk-sdk/agent/providers/vercel/conformance` exports Vercel AI Gateway fixtures for replay tests:
+`vercelAiGatewayPlainTextFixture`, `vercelAiGatewayDeepSeekReasoningFixture`,
+`vercelAiGatewayToolCallDeltasFixture`, `vercelAiGatewayErrorEnvelopeFixture`, and
+`vercelAiGatewayConformanceFixtures`. They are synthetic placeholders (`evidence: 'unverified'`)
+until replaced by verified recordings.

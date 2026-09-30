@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
 import { Predicate } from 'effect'
@@ -61,7 +61,8 @@ type PackageExportContract = {
   readonly packageDir: string
   readonly packageName: string
   readonly expectedExports: ReadonlyArray<string>
-  readonly tinyRoot: boolean
+  // 'tiny': root must be `export {}`; 'full': any root; 'none': no `.` export and no src/index.ts.
+  readonly root: 'tiny' | 'full' | 'none'
 }
 
 const workspaceRoot = process.cwd()
@@ -91,6 +92,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './providers/openai/realtime',
       './providers/openai/speech',
       './providers/vercel/ai-gateway-provider',
+      './providers/vercel/conformance',
       './providers/opencode/go-provider',
       './providers/opencode/usage',
       './providers/subscription-usage',
@@ -106,7 +108,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './voice/browser',
       './voice/react'
     ],
-    tinyRoot: true
+    root: 'tiny'
   },
   {
     packageDir: 'packages/mcp',
@@ -121,7 +123,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './server',
       './server/node'
     ],
-    tinyRoot: true
+    root: 'tiny'
   },
   {
     packageDir: 'packages/knowledge',
@@ -142,7 +144,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './store',
       './summarization'
     ],
-    tinyRoot: false
+    root: 'full'
   },
   {
     packageDir: 'packages/connectors',
@@ -165,19 +167,19 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './telegram',
       './todoist'
     ],
-    tinyRoot: false
+    root: 'full'
   },
   {
     packageDir: 'packages/sandbox',
     packageName: '@yolk-sdk/sandbox',
     expectedExports: ['./package.json', '.', './agent', './testing', './vercel'],
-    tinyRoot: false
+    root: 'full'
   },
   {
     packageDir: 'packages/vercel-workflows',
     packageName: '@yolk-sdk/vercel-workflows',
     expectedExports: ['./package.json', '.', './effect', './testing', './workflow'],
-    tinyRoot: false
+    root: 'full'
   },
   {
     packageDir: 'packages/harness',
@@ -193,7 +195,13 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './driver/durable-object',
       './outcome'
     ],
-    tinyRoot: true
+    root: 'tiny'
+  },
+  {
+    packageDir: 'packages/conformance',
+    packageName: '@yolk-sdk/conformance',
+    expectedExports: ['./package.json', './fixture', './replay', './record'],
+    root: 'none'
   }
 ]
 
@@ -254,13 +262,29 @@ const failures = packageExportContracts.flatMap(packageExport => {
   const packageJson = readPackageManifest(packageJsonPath)
   const exportKeys = packageJson.exportKeys
 
-  const rootSource = readFileSync(
-    join(workspaceRoot, packageExport.packageDir, 'src/index.ts'),
-    'utf8'
-  )
-
-  const rootStatements = normalizedRootSource(rootSource)
+  const rootPath = join(workspaceRoot, packageExport.packageDir, 'src/index.ts')
   const packageFailures: Array<string> = []
+
+  if (packageExport.root === 'none') {
+    if (exportKeys.includes('.')) {
+      packageFailures.push(`${packageExport.packageDir}/package.json must not export a root "."`)
+    }
+
+    if (existsSync(rootPath)) {
+      packageFailures.push(
+        `${packageExport.packageDir}/src/index.ts must not exist (no root barrel)`
+      )
+    }
+  }
+
+  if (packageExport.root !== 'none' && !existsSync(rootPath)) {
+    packageFailures.push(`${packageExport.packageDir}/src/index.ts root entry is missing`)
+  }
+
+  const rootStatements =
+    packageExport.root === 'tiny' && existsSync(rootPath)
+      ? normalizedRootSource(readFileSync(rootPath, 'utf8'))
+      : []
 
   if (packageJson.name !== packageExport.packageName) {
     packageFailures.push(
@@ -289,7 +313,7 @@ const failures = packageExportContracts.flatMap(packageExport => {
   }
 
   if (
-    packageExport.tinyRoot &&
+    packageExport.root === 'tiny' &&
     (rootStatements.length !== 1 || rootStatements[0] !== 'export {}')
   ) {
     packageFailures.push(

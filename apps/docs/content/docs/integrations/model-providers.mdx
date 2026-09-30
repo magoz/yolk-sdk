@@ -204,7 +204,9 @@ Claude, Codex, Grok, and OpenCode Go subscription connections can expose current
 reset windows. Claude normalizes aggregate five-hour and seven-day windows; Codex normalizes primary
 and secondary rate-limit windows; Grok normalizes its aggregate shared credit allowance. Additional
 provider-specific buckets are ignored. The usage adapters use private provider endpoints, so treat
-snapshots as best-effort and keep failures isolated from core agent execution.
+snapshots as best-effort and keep failures isolated from core agent execution. Each fetcher accepts
+an optional `url` that replaces the default endpoint; point it only at a trusted proxy or a local
+emulator, because the credential is sent there.
 
 This server-side fragment reads Codex allowance using a fresh host-owned token:
 

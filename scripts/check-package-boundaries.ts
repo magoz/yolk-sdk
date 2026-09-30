@@ -9,6 +9,9 @@ type BoundaryRule = {
   readonly packageDir: string
   readonly forbiddenImports: ReadonlyArray<string>
   readonly excludedDirs?: ReadonlyArray<string>
+  // Matched against the workspace-relative POSIX path of each scanned file; use for
+  // wildcard exemptions such as `providers/*/conformance`.
+  readonly excludedPathPatterns?: ReadonlyArray<RegExp>
 }
 
 type RetiredPackage = {
@@ -53,6 +56,23 @@ const agentCoreForbiddenImports = [
   '@yolk-sdk/knowledge',
   '@yolk-sdk/mcp',
   '@yolk-sdk/agent/react',
+  'next',
+  'react',
+  'node:'
+]
+
+// Every other public package: conformance is Effect-only and must not depend on
+// them. Listed explicitly because relative self-imports resolve to
+// `@yolk-sdk/conformance/*` owners, so a bare `@yolk-sdk/` prefix would flag them.
+const conformanceForbiddenImports = [
+  ...retiredImports,
+  '@yolk-sdk/agent',
+  '@yolk-sdk/connectors',
+  '@yolk-sdk/harness',
+  '@yolk-sdk/knowledge',
+  '@yolk-sdk/mcp',
+  '@yolk-sdk/sandbox',
+  '@yolk-sdk/vercel-workflows',
   'next',
   'react',
   'node:'
@@ -159,6 +179,25 @@ const rules: ReadonlyArray<BoundaryRule> = [
       'node:'
     ],
     excludedDirs: ['packages/harness/src/outcome.ts']
+  },
+  {
+    packageDir: 'packages/conformance/src',
+    forbiddenImports: conformanceForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src',
+    forbiddenImports: ['@yolk-sdk/conformance'],
+    excludedPathPatterns: [/^packages\/agent\/src\/providers\/[^/]+\/conformance\//]
+  },
+  {
+    packageDir: 'packages/connectors/src',
+    forbiddenImports: ['@yolk-sdk/conformance'],
+    excludedPathPatterns: [/^packages\/connectors\/src\/(?:.+\/)?conformance\//]
+  },
+  {
+    packageDir: 'packages/connectors/src',
+    forbiddenImports: ['@yolk-sdk/agent'],
+    excludedDirs: ['packages/connectors/src/agent.ts']
   }
 ]
 
@@ -968,16 +1007,17 @@ export const rulePathFiles = (workspaceRoot: string, packageDir: string): Readon
   return kind === 'file' ? [absolutePath] : walk(absolutePath)
 }
 
-const isExcludedFile = (
-  workspaceRoot: string,
-  file: string,
-  excludedDirs: ReadonlyArray<string> = []
-): boolean =>
-  excludedDirs.some(excludedDir => {
-    const absoluteExcludedDir = join(workspaceRoot, excludedDir)
+const isExcludedFile = (workspaceRoot: string, file: string, rule: BoundaryRule): boolean => {
+  const relativePath = relative(workspaceRoot, file).split(sep).join('/')
 
-    return file === absoluteExcludedDir || file.startsWith(`${absoluteExcludedDir}/`)
-  })
+  return (
+    (rule.excludedDirs ?? []).some(excludedDir => {
+      const absoluteExcludedDir = join(workspaceRoot, excludedDir)
+
+      return file === absoluteExcludedDir || file.startsWith(`${absoluteExcludedDir}/`)
+    }) || (rule.excludedPathPatterns ?? []).some(pattern => pattern.test(relativePath))
+  )
+}
 
 const packageDirs = (context: ResolverContext): ReadonlyArray<string> => {
   const packagesRoot = join(context.root, 'packages')
@@ -1037,7 +1077,7 @@ export const runCheck = (workspaceRoot: string): BoundaryReport => {
     }
 
     return rulePathFiles(root, rule.packageDir)
-      .filter(file => !isExcludedFile(root, file, rule.excludedDirs))
+      .filter(file => !isExcludedFile(root, file, rule))
       .flatMap(file => ownerViolationsForFile(context, file, rule))
   })
 
