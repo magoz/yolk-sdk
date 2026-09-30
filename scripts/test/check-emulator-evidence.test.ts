@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { vercelAiGatewayConformanceFixtures } from '../../packages/agent/src/providers/vercel/conformance/index.ts'
+import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import type { EmulatorRouteEvidence } from '../../packages/emulators/src/route-evidence.ts'
 import {
   checkEmulatorEvidence,
@@ -183,33 +185,74 @@ describe('checkEmulatorEvidence', () => {
     expect(kinds([writeRoute])).toEqual([])
   })
 
-  it('the repo fixtures are all unverified, so a verified route citing them fails', () => {
-    const report = checkEmulatorEvidence({
-      manifests: [
-        {
-          name: 'example',
-          routes: [
-            route({
-              method: 'POST',
-              write: true,
-              caseIds: ['fortnox.invoice.send-email'],
-              observedAt: '2026-09-29'
-            })
-          ]
-        }
-      ],
+  // Repo cross-checks derive every expectation from the committed fixture data: which cases are
+  // backed by a verified fixture, and which only by unverified ones.
+  const repoFixtures = [...vercelAiGatewayConformanceFixtures, ...fortnoxConformanceFixtures]
+
+  const hasVerifiedFixture = (caseId: string) =>
+    repoFixtures.some(fixture => fixture.caseId === caseId && fixture.evidence === 'verified')
+
+  const repoCrossCheck = (routes: ReadonlyArray<EmulatorRouteEvidence>) =>
+    checkEmulatorEvidence({
+      manifests: [{ name: 'example', routes }],
       caseIds: knownConformanceCaseIds,
       now,
       fixtureEvidence: conformanceFixtureEvidence
     })
 
-    expect(conformanceFixtureEvidence.get('fortnox.invoice.send-email')).toEqual(['unverified'])
-    expect(conformanceFixtureEvidence.get('vercel-ai-gateway.stream.plain-text')).toEqual([
-      'unverified'
+  it('passes a verified route whose cited cases all have verified repo fixtures (Gateway)', () => {
+    const gatewayCaseIds = [
+      ...new Set(vercelAiGatewayConformanceFixtures.map(fixture => fixture.caseId))
+    ]
+
+    const verifiedCaseIds = gatewayCaseIds.filter(hasVerifiedFixture)
+
+    expect(verifiedCaseIds).not.toEqual([])
+    expect(verifiedCaseIds).toEqual(gatewayCaseIds)
+
+    for (const caseId of verifiedCaseIds) {
+      expect(conformanceFixtureEvidence.get(caseId)).toContain('verified')
+    }
+
+    const recordedAt = vercelAiGatewayConformanceFixtures
+      .filter(fixture => fixture.evidence === 'verified')
+      .map(fixture => fixture.recordedAt)
+      .sort()
+      .at(0)
+
+    const report = repoCrossCheck([
+      route({
+        method: 'POST',
+        path: '/v1/chat/completions',
+        kind: 'provider',
+        caseIds: verifiedCaseIds,
+        observedAt: recordedAt
+      })
     ])
+
+    expect(report.findings).toEqual([])
+    expect(evidenceReportFailed(report)).toBe(false)
+  })
+
+  it('fails unbacked-verified for a verified route citing only still-unverified repo cases (Fortnox)', () => {
+    const unverifiedCaseIds = [
+      ...new Set(fortnoxConformanceFixtures.map(fixture => fixture.caseId))
+    ].filter(caseId => !hasVerifiedFixture(caseId))
+
+    expect(unverifiedCaseIds).not.toEqual([])
+
+    for (const caseId of unverifiedCaseIds) {
+      expect(conformanceFixtureEvidence.get(caseId)).not.toContain('verified')
+    }
+
+    const report = repoCrossCheck([
+      route({ method: 'GET', caseIds: unverifiedCaseIds, observedAt: '2026-09-29' })
+    ])
+
     expect(report.findings.map(finding => `${finding.severity}:${finding.kind}`)).toEqual([
       'fail:unbacked-verified'
     ])
+    expect(evidenceReportFailed(report)).toBe(true)
   })
 
   it('computes whole UTC days', () => {

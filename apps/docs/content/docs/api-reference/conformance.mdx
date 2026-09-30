@@ -185,16 +185,20 @@ const report = runConformance(hostCases, {
 `@yolk-sdk/agent/providers/vercel/conformance` exports Vercel AI Gateway fixtures for replay tests:
 `vercelAiGatewayPlainTextFixture`, `vercelAiGatewayDeepSeekReasoningFixture`,
 `vercelAiGatewayToolCallDeltasFixture`, `vercelAiGatewayErrorEnvelopeFixture`, and
-`vercelAiGatewayConformanceFixtures`. They are synthetic placeholders (`evidence: 'unverified'`)
-until replaced by verified recordings.
+`vercelAiGatewayConformanceFixtures`. They are verified live recordings (`evidence: 'verified'`,
+recorded 2026-09-30 with the synthetic account label `synthetic` and synthetic prompts) written by
+`pnpm conformance:gateway --live --account <label>`.
 
 The same subpath exports four `read` conformance cases backed by those fixtures
 (`vercelAiGatewayPlainTextCase`, `vercelAiGatewayDeepSeekReasoningCase`,
 `vercelAiGatewayToolCallDeltasCase`, `vercelAiGatewayErrorEnvelopeCase`, and
 `vercelAiGatewayConformanceCases`). They require only an `HttpClient` and the
 `VercelAiGatewayConformanceConfig` service (API key, output limits, reasoning effort, and model ids;
-`vercelAiGatewayConformanceDefaultModels` holds the fixture model ids), so they run against replay
-or a host's live client. None is observed live yet, so reports warn `unverified-case`.
+`vercelAiGatewayConformanceDefaultModels` holds the live probe's default model ids; the DeepSeek
+fixture was recorded with `--reasoning-model deepseek/deepseek-v4.1-flash`), so they run against
+replay or a host's live client. Each case records the live observation that produced its fixture
+(`observed: { account: 'synthetic', date: '2026-09-30' }`), so reports do not warn
+`unverified-case`.
 
 `@yolk-sdk/agent/providers/openai/conformance` does the same for the generic OpenAI-compatible chat
 provider against OpenAI Chat Completions (`https://api.openai.com/v1/chat/completions`,

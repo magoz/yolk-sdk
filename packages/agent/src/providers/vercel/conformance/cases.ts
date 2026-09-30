@@ -4,8 +4,9 @@
  * Each case builds the Gateway provider from `VercelAiGatewayConformanceConfig`, streams one
  * request through `LLMProvider`, and asserts one wire claim from the events it sees. Cases need
  * only `HttpClient.HttpClient` and the config service, so the same case runs against replayed
- * fixtures (`ReplayHttpClient`) or a host's live `HttpClient`. All four are `read` cases; none is
- * observed live yet (`observed` absent = unverified).
+ * fixtures (`ReplayHttpClient`) or a host's live `HttpClient`. All four are `read` cases, observed
+ * live by the owner-approved `pnpm conformance:gateway --live` probe that recorded the committed
+ * fixtures.
  */
 import { Context, Effect, Predicate, Result, Stream, type Redacted } from 'effect'
 import type { HttpClient } from 'effect/unstable/http'
@@ -45,7 +46,11 @@ export type VercelAiGatewayConformanceModels = {
   readonly invalid: string
 }
 
-/** Model ids used by the committed fixtures and the live probe defaults. */
+/**
+ * Live probe default model ids. The committed plain-text, tool-call, and error-envelope fixtures use
+ * these; the committed DeepSeek fixture was recorded with the
+ * `--reasoning-model deepseek/deepseek-v4.1-flash` override.
+ */
 export const vercelAiGatewayConformanceDefaultModels: VercelAiGatewayConformanceModels = {
   plainText: 'openai/gpt-4.1-nano',
   reasoning: 'deepseek/deepseek-v3.2',
@@ -80,6 +85,10 @@ export type VercelAiGatewayConformanceCase = ConformanceCase<
 >
 
 const systemPrompt = 'Reply in one short sentence.'
+
+// The owner-approved live probe (`pnpm conformance:gateway --live --account synthetic`) that
+// recorded the committed verified fixtures observed every case pass on this date.
+const liveObservation = { account: 'synthetic', date: '2026-09-30' } as const
 
 const lookupWeatherTool = ToolDef.make({
   name: 'lookup_weather',
@@ -132,7 +141,8 @@ export const vercelAiGatewayPlainTextCase: VercelAiGatewayConformanceCase = defi
   title: 'Streamed plain text ends with one stop and a usage report',
   safety: 'read',
   docs: 'The Gateway Chat Completions endpoint is OpenAI-compatible: `stream: true` returns `chat.completion.chunk` server-sent events, and `stream_options.include_usage` adds a usage chunk.',
-  wire: 'A streamed request succeeds with non-empty answer text, a `stop` finish, and a usage chunk: the provider stream completes without error, its TextDelta events join to non-empty text, and it emits exactly one Done(stop) plus Usage. How many content events carry the text is not part of the claim.',
+  wire: 'A streamed request succeeds with non-empty answer text, a `stop` finish, and a usage report (the live Gateway sends `usage` on the finish event itself): the provider stream completes without error, its TextDelta events join to non-empty text, and it emits exactly one Done(stop) plus Usage. How many content events carry the text is not part of the claim.',
+  observed: liveObservation,
   fixtures: [vercelAiGatewayPlainTextFixture.id],
   run: Effect.gen(function* () {
     const settings = yield* VercelAiGatewayConformanceConfig
@@ -157,6 +167,7 @@ export const vercelAiGatewayDeepSeekReasoningCase: VercelAiGatewayConformanceCas
     safety: 'read',
     docs: 'DeepSeek-style models accept `reasoning_effort` and a `thinking` toggle through the OpenAI-compatible endpoint and stream their reasoning as `delta.reasoning_content` (or the Gateway-normalized `delta.reasoning`).',
     wire: 'With reasoning content, the `reasoning_effort` format, and thinking enabled, every reasoning delta arrives before the first answer text delta: the provider emits ReasoningDelta events (from either reasoning field) strictly before TextDelta events, then Done(stop).',
+    observed: liveObservation,
     fixtures: [vercelAiGatewayDeepSeekReasoningFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* VercelAiGatewayConformanceConfig
@@ -202,6 +213,7 @@ export const vercelAiGatewayToolCallDeltasCase: VercelAiGatewayConformanceCase =
     safety: 'read',
     docs: 'Streamed tool calls arrive as `delta.tool_calls` entries whose `function.arguments` JSON string is streamed in fragments.',
     wire: 'For a single offered tool, the streamed argument fragments assemble into exactly one ToolCall named after the tool whose params are a JSON object with a string `city`, followed by Done(tool_use). Where the fragments split is not asserted (a provider/replay concern).',
+    observed: liveObservation,
     fixtures: [vercelAiGatewayToolCallDeltasFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* VercelAiGatewayConformanceConfig
@@ -248,6 +260,7 @@ export const vercelAiGatewayErrorEnvelopeCase: VercelAiGatewayConformanceCase =
     safety: 'read',
     docs: 'Errors use the OpenAI-compatible envelope `{ error: { message, type, code } }` with a non-2xx status.',
     wire: 'An unknown model id is rejected as a model error (400, 404, or 422; never a 401/403 authentication or permission failure) with a JSON envelope before any stream starts: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps the status and provider code (`error.code`, else `error.type`), and whose message is status-only (no upstream body text).',
+    observed: liveObservation,
     fixtures: [vercelAiGatewayErrorEnvelopeFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* VercelAiGatewayConformanceConfig

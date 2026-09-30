@@ -219,7 +219,7 @@ export const gatewayFixtureModules: ReadonlyArray<GatewayFixtureModule> = [
     caseId: 'vercel-ai-gateway.stream.plain-text',
     fileName: 'plain-text.ts',
     exportName: 'vercelAiGatewayPlainTextFixture',
-    doc: 'Streamed plain-text answer: text deltas, a finish chunk, a usage chunk, and `data: [DONE]`.',
+    doc: 'Streamed plain-text answer: text deltas, a `stop` finish with usage (`stream_options.include_usage`), and `data: [DONE]`.',
     model: 'plainText',
     reasoning: false
   },
@@ -227,7 +227,7 @@ export const gatewayFixtureModules: ReadonlyArray<GatewayFixtureModule> = [
     caseId: 'vercel-ai-gateway.stream.deepseek-reasoning',
     fileName: 'deepseek-reasoning.ts',
     exportName: 'vercelAiGatewayDeepSeekReasoningFixture',
-    doc: 'DeepSeek-style streamed reasoning (`delta.reasoning_content`, or the Gateway-normalized `delta.reasoning`) before the answer text, requested with `reasoning_effort` and a `thinking` toggle.',
+    doc: 'DeepSeek-style streamed reasoning (the Gateway-normalized `delta.reasoning`, or `delta.reasoning_content`) before the answer text, requested with `reasoning_effort` and a `thinking` toggle.',
     model: 'reasoning',
     reasoning: true
   },
