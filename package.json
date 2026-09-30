@@ -48,6 +48,7 @@
     "conformance:fortnox": "tsx scripts/run-fortnox-conformance.ts",
     "conformance:gateway": "tsx scripts/record-gateway-fixtures.ts",
     "conformance:openai": "tsx scripts/record-openai-fixtures.ts",
+    "conformance:microsoft": "tsx scripts/run-microsoft-conformance.ts",
     "skillset:build": "tsx scripts/build-skillset.ts && oxfmt --config .oxfmtrc.json --write cloudflare/agent/src/generated/skillset.ts",
     "clone-repos": "node --experimental-strip-types scripts/clone-repos.ts",
     "knip": "node --env-file examples/next/.env.local node_modules/knip/bin/knip.js",

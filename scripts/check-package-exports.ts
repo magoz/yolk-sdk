@@ -165,6 +165,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './google',
       './linkedin-search',
       './microsoft',
+      './microsoft/conformance',
       './notion',
       './r2-storage',
       './telegram',

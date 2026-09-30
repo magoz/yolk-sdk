@@ -1,0 +1,621 @@
+import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { Effect, Result } from 'effect'
+import { describe, expect, it } from 'vitest'
+import {
+  isWireBase64BodyResponse,
+  isWireStreamResponse,
+  type WireExchange,
+  type WireFixture
+} from '../../packages/conformance/src/fixture.ts'
+import type { WireRecorderApi } from '../../packages/conformance/src/record.ts'
+import type { ConformanceReport } from '../../packages/conformance/src/runner.ts'
+import {
+  microsoftCalendarListRangeFixture,
+  microsoftConformanceCases,
+  microsoftConformanceFixtureSeeds,
+  microsoftOneDriveCreateFolderFixture,
+  microsoftOutlookPagingNextLinkFixture
+} from '../../packages/connectors/src/microsoft/conformance/index.ts'
+import {
+  accessTokenRequiredMessage,
+  defaultRunOptions,
+  dryRunReport,
+  liveAccountRequiredMessage,
+  liveCredential,
+  liveInputs,
+  liveTarget,
+  mergedFixtureSeeds,
+  microsoftCaseSpecs,
+  parseRunArgs,
+  planMicrosoftRun,
+  recordingReviewChecklist,
+  recordingRunId,
+  recordingsRoot,
+  renderFixtureModule,
+  renderSeedsModule,
+  stageRecordings,
+  staleSharedSeeds,
+  type LiveInputs,
+  type RecordingWriter
+} from '../run-microsoft-conformance.ts'
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
+
+const tsxCli = join(repoRoot, 'node_modules/tsx/dist/cli.mjs')
+
+const runnerScript = join(repoRoot, 'scripts/run-microsoft-conformance.ts')
+
+const readSeedFlags = [
+  '--range-start=2026-09-21T00:00:00Z',
+  '--range-end=2026-09-28T00:00:00Z',
+  '--event=AAMkAGI2-synthetic-event-0001=',
+  '--event-start=2026-09-23T12:00:00Z',
+  '--attachment-message=AAMkAGI2-synthetic-message-0001=',
+  '--paging-folder=AAMkAGI2-synthetic-folder-0001='
+]
+
+describe('run-microsoft-conformance arguments', () => {
+  it('defaults to a dry run with no writes, no account, and no seeds', () => {
+    expect(parseRunArgs([])).toEqual(defaultRunOptions)
+    expect(liveTarget(defaultRunOptions)).toEqual({
+      kind: 'live',
+      account: 'dry-run',
+      allowWrites: 'none',
+      allowIrreversible: []
+    })
+  })
+
+  it('requires an explicit synthetic --account label with --live', () => {
+    expect(() => parseRunArgs(['--live'])).toThrow(liveAccountRequiredMessage)
+    expect(() => parseRunArgs(['--live', '--account', 'Example Person'])).toThrow(
+      '--account must be a short synthetic label'
+    )
+    expect(parseRunArgs(['--live', '--account', 'practice'])).toMatchObject({
+      live: true,
+      account: 'practice'
+    })
+    expect(parseRunArgs(['--live', '--help']).help).toBe(true)
+  })
+
+  it('reads write policy, record, and seeds from flags over env', () => {
+    const options = parseRunArgs(
+      [
+        '--live',
+        '--account=practice',
+        '--allow-writes',
+        'reversible',
+        '--record',
+        '--mailbox',
+        'ada@example.test'
+      ],
+      {
+        MICROSOFT_CONFORMANCE_MAILBOX: 'grace@example.test',
+        MICROSOFT_CONFORMANCE_DRIVE: ' b!synthetic-drive-0001 ',
+        MICROSOFT_CONFORMANCE_EVENT: ''
+      }
+    )
+
+    expect(options).toEqual({
+      live: true,
+      help: false,
+      record: true,
+      account: 'practice',
+      allowWrites: 'reversible',
+      seeds: { mailbox: 'ada@example.test', driveId: 'b!synthetic-drive-0001' }
+    })
+  })
+
+  it('rejects unknown flags, bad values, irreversible flags, and --record without --live', () => {
+    expect(() => parseRunArgs(['--nope'])).toThrow('Unknown argument')
+    expect(() => parseRunArgs(['--mailbox'])).toThrow('requires a value')
+    expect(() => parseRunArgs(['--allow-writes=all'])).toThrow('none or reversible')
+    // There are no write-irreversible Microsoft cases, so there is no flag to allow one.
+    expect(() =>
+      parseRunArgs(['--allow-irreversible', 'microsoft.calendar.cancel-semantics'])
+    ).toThrow('Unknown argument')
+    expect(() => parseRunArgs(['--record'])).toThrow('--record requires --live')
+  })
+})
+
+describe('run-microsoft-conformance plan', () => {
+  it('knows every case and its fixture module', () => {
+    expect(microsoftCaseSpecs.map(spec => spec.caseId)).toEqual(
+      microsoftConformanceCases.map(testCase => testCase.id)
+    )
+    expect(
+      microsoftConformanceCases.some(testCase => testCase.safety === 'write-irreversible')
+    ).toBe(false)
+  })
+
+  it('runs only read cases by default and every case with reversible writes', () => {
+    const skips = (argv: ReadonlyArray<string>) =>
+      planMicrosoftRun(parseRunArgs(argv)).map(entry => [entry.id, entry.skipReason ?? 'runs'])
+
+    expect(skips([])).toEqual([
+      ['microsoft.calendar.list-range-returns-events', 'runs'],
+      ['microsoft.calendar.timestamp-precision', 'runs'],
+      ['microsoft.calendar.create-returns-event-id', 'writes-not-allowed'],
+      ['microsoft.calendar.cancel-semantics', 'writes-not-allowed'],
+      ['microsoft.outlook.attachments-listing', 'runs'],
+      ['microsoft.outlook.attachment-content-id', 'runs'],
+      ['microsoft.outlook.paging-next-link', 'runs'],
+      ['microsoft.outlook.immutable-id-survives-move', 'writes-not-allowed'],
+      ['microsoft.outlook.concurrent-writes-same-message', 'writes-not-allowed'],
+      ['microsoft.onedrive.create-folder-roundtrip', 'writes-not-allowed'],
+      ['microsoft.onedrive.copy-accepted-monitor', 'writes-not-allowed']
+    ])
+    expect(skips(['--allow-writes', 'reversible']).every(([, skip]) => skip === 'runs')).toBe(true)
+  })
+
+  it('prints a dry-run plan with safety, skip reasons, and missing seeds', () => {
+    const report = dryRunReport(parseRunArgs(['--allow-writes', 'reversible']))
+
+    expect(report.split('\n')).toEqual([
+      'DRY RUN: no network request was made. Pass --live --account <label> to run (needs MICROSOFT_ACCESS_TOKEN).',
+      'Plan for a live target: allowWrites=reversible',
+      'RUN   microsoft.calendar.list-range-returns-events  [read]  needs --range-start, --range-end, --event',
+      'RUN   microsoft.calendar.timestamp-precision  [read]  needs --range-start, --range-end, --event, --event-start',
+      'RUN   microsoft.calendar.create-returns-event-id  [write-reversible]',
+      'RUN   microsoft.calendar.cancel-semantics  [write-reversible]',
+      'RUN   microsoft.outlook.attachments-listing  [read]  needs --attachment-message',
+      'RUN   microsoft.outlook.attachment-content-id  [read]  needs --attachment-message',
+      'RUN   microsoft.outlook.paging-next-link  [read]  needs --paging-folder',
+      'RUN   microsoft.outlook.immutable-id-survives-move  [write-reversible]',
+      'RUN   microsoft.outlook.concurrent-writes-same-message  [write-reversible]',
+      'RUN   microsoft.onedrive.create-folder-roundtrip  [write-reversible]  needs --drive-parent',
+      'RUN   microsoft.onedrive.copy-accepted-monitor  [write-reversible]  needs --drive, --drive-parent, --copy-source',
+      'Use a Microsoft 365 practice tenant only. Write cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations.'
+    ])
+  })
+})
+
+describe('run-microsoft-conformance live refusal (no network)', () => {
+  const live = (argv: ReadonlyArray<string>) =>
+    parseRunArgs(['--live', '--account', 'practice', ...argv])
+
+  it('refuses without an account or an access token', () => {
+    expect(liveInputs({ ...defaultRunOptions, live: true }, {})).toEqual({
+      refusal: liveAccountRequiredMessage
+    })
+    expect(liveInputs(live(readSeedFlags), {})).toEqual({ refusal: accessTokenRequiredMessage })
+    expect(liveInputs(live(readSeedFlags), { MICROSOFT_ACCESS_TOKEN: '  ' })).toEqual({
+      refusal: accessTokenRequiredMessage
+    })
+  })
+
+  it('refuses when a case that would run lacks its seed or a seed is invalid', () => {
+    const env = { MICROSOFT_ACCESS_TOKEN: 'synthetic-token' }
+
+    expect(liveInputs(live([]), env)).toEqual({
+      refusal:
+        'Missing seed identities for the cases that would run: --range-start, --range-end, --event, --event-start, --attachment-message, --paging-folder'
+    })
+    expect(liveInputs(live([...readSeedFlags, '--event-start=2026-09-23 12:00']), env)).toEqual({
+      refusal:
+        'Seed identities must be non-empty trimmed values, and --range-start, --range-end, and --event-start ISO UTC instants (for example 2026-09-21T00:00:00Z)'
+    })
+
+    expect(liveInputs(live([...readSeedFlags, '--mailbox=ada@example.test']), env)).toMatchObject({
+      inputs: {
+        account: 'practice',
+        accessToken: 'synthetic-token',
+        seeds: { mailbox: 'ada@example.test', calendarEventStart: '2026-09-23T12:00:00Z' }
+      }
+    })
+  })
+
+  it('binds the live credential to the mailbox seed as its account', () => {
+    expect(liveCredential('synthetic-token', { mailbox: 'ada@example.test' })).toMatchObject({
+      _tag: 'OAuthCredential',
+      provider: 'microsoft',
+      accountId: 'ada@example.test'
+    })
+    expect(liveCredential('synthetic-token', {}).accountId).toBeUndefined()
+  })
+})
+
+describe('run-microsoft-conformance rendering', () => {
+  it('renders the committed seeds module exactly', () => {
+    const committed = readFileSync(
+      join(repoRoot, 'packages/connectors/src/microsoft/conformance/seeds.ts'),
+      'utf8'
+    )
+
+    expect(renderSeedsModule(microsoftConformanceFixtureSeeds)).toBe(committed)
+  })
+
+  it('merges the required and optional seeds of recorded cases only', () => {
+    const merged = mergedFixtureSeeds(
+      microsoftConformanceFixtureSeeds,
+      { pagingFolderId: 'AAMkAGI2-synthetic-folder-0009=' },
+      ['microsoft.outlook.paging-next-link']
+    )
+
+    // The live run used /me: the mailbox seed is dropped with the recorded case.
+    const { mailbox: _dropped, ...rest } = microsoftConformanceFixtureSeeds
+
+    expect(merged).toEqual({ ...rest, pagingFolderId: 'AAMkAGI2-synthetic-folder-0009=' })
+    expect(
+      staleSharedSeeds(microsoftConformanceFixtureSeeds, merged, [
+        'microsoft.outlook.paging-next-link'
+      ]).map(entry => entry.key)
+    ).toEqual(['mailbox'])
+  })
+
+  it('renders a fixture module typed with the conformance fixture type', () => {
+    const spec = microsoftCaseSpecs.find(
+      entry => entry.caseId === 'microsoft.outlook.paging-next-link'
+    )
+
+    if (spec === undefined) {
+      return expect.fail('missing paging spec')
+    }
+
+    const source = renderFixtureModule(spec, microsoftOutlookPagingNextLinkFixture)
+
+    expect(source).toContain("import type { WireFixture } from '@yolk-sdk/conformance/fixture'")
+    expect(source).toContain('export const microsoftOutlookPagingNextLinkFixture: WireFixture = {')
+    expect(source).toContain('pnpm conformance:microsoft --live --account <label> --record')
+  })
+})
+
+// Offline `--record` gate: fake recorders hand back synthetic exchanges; an in-memory writer stands
+// in for the filesystem. Nothing touches the disk or the network.
+
+const recorderOf = (exchanges: ReadonlyArray<WireExchange>): WireRecorderApi => ({
+  drain: Effect.succeed(exchanges)
+})
+
+const passedReport = (caseIds: ReadonlyArray<string>): ConformanceReport => ({
+  target: { kind: 'live', account: 'practice' },
+  startedAt: '2026-09-30T12:00:00.000Z',
+  results: caseIds.map(id => ({
+    id,
+    safety: microsoftConformanceCases.find(testCase => testCase.id === id)?.safety ?? 'read',
+    status: 'passed',
+    warnings: [],
+    durationMs: 1
+  })),
+  summary: { passed: caseIds.length, failed: 0, skipped: 0 }
+})
+
+const recordInputs: LiveInputs = {
+  account: 'practice',
+  accessToken: 'synthetic-token',
+  seeds: microsoftConformanceFixtureSeeds
+}
+
+const isUnder = (path: string, dir: string) => path === dir || path.startsWith(`${dir}/`)
+
+/**
+ * In-memory directory tree behind `RecordingWriter`. `failOnWrite` throws on that (0-based)
+ * `writeFile` call; `failRename` throws on the rename.
+ */
+const memoryWriter = (
+  faults: { readonly failOnWrite?: number; readonly failRename?: boolean } = {}
+) => {
+  const directories = new Set<string>()
+  const files = new Map<string, string>()
+  const operations: Array<string> = []
+  let writeCount = 0
+
+  const writer: RecordingWriter = {
+    exists: path => directories.has(path) || files.has(path),
+    mkdir: path => {
+      operations.push(`mkdir ${path}`)
+
+      for (let dir = path; dir !== dirname(dir); dir = dirname(dir)) directories.add(dir)
+    },
+    writeFile: (path, contents) => {
+      operations.push(`write ${path}`)
+
+      if (writeCount++ === faults.failOnWrite) throw new Error('synthetic write failure')
+
+      if (!directories.has(dirname(path)) || files.has(path)) throw new Error('synthetic EEXIST')
+
+      files.set(path, contents)
+    },
+    rename: (from, to) => {
+      operations.push(`rename ${from} -> ${to}`)
+
+      if (faults.failRename === true || directories.has(to))
+        throw new Error('synthetic rename failure')
+
+      for (const dir of [...directories].filter(dir => isUnder(dir, from))) {
+        directories.delete(dir)
+        directories.add(to + dir.slice(from.length))
+      }
+
+      for (const [path, contents] of [...files].filter(([path]) => isUnder(path, from))) {
+        files.delete(path)
+        files.set(to + path.slice(from.length), contents)
+      }
+    },
+    rm: path => {
+      operations.push(`rm ${path}`)
+
+      for (const dir of [...directories].filter(dir => isUnder(dir, path))) directories.delete(dir)
+
+      for (const file of [...files.keys()].filter(file => isUnder(file, path))) files.delete(file)
+    }
+  }
+
+  /** Directories and files strictly inside `recordingsRoot`. */
+  const entriesUnderRoot = () =>
+    [...directories, ...files.keys()].filter(path => path.startsWith(`${recordingsRoot}/`)).sort()
+
+  return { writer, files, operations, entriesUnderRoot }
+}
+
+const runId = recordingRunId(new Date('2026-09-30T12:34:56.789Z'), 'a1b2c3d4')
+
+const stagingDir = join(recordingsRoot, runId)
+
+const tempDir = join(recordingsRoot, `.tmp-${runId}`)
+
+const rangeId = microsoftCalendarListRangeFixture.caseId
+
+const folderId = microsoftOneDriveCreateFolderFixture.caseId
+
+const rangeRecorders = () =>
+  new Map([[rangeId, recorderOf(microsoftCalendarListRangeFixture.exchanges)]])
+
+const stage = (
+  recorders: ReadonlyMap<string, WireRecorderApi>,
+  writer: RecordingWriter,
+  dir: string = stagingDir
+) =>
+  Effect.runPromise(
+    stageRecordings(passedReport([...recorders.keys()]), recorders, recordInputs, {
+      writer,
+      stagingDir: dir,
+      recordedAt: '2026-09-30'
+    }).pipe(Effect.result)
+  )
+
+const failureMessage = (result: Awaited<ReturnType<typeof stage>>): string =>
+  Result.isFailure(result) ? result.failure.message : expect.fail('expected a refusal')
+
+describe('run-microsoft-conformance --record staging (offline)', () => {
+  it('keeps the staging directory gitignored and outside committed sources', () => {
+    const gitignore = readFileSync(join(repoRoot, '.gitignore'), 'utf8')
+
+    expect(gitignore.split('\n')).toContain('/.conformance-recordings/')
+    expect(recordingsRoot).toBe(join(repoRoot, '.conformance-recordings', 'microsoft'))
+  })
+
+  it('names each run directory by UTC date, time, and a random suffix', () => {
+    expect(runId).toBe('2026-09-30T123456Z-a1b2c3d4')
+  })
+
+  it('writes the whole batch into a temp directory, then publishes it with one rename', async () => {
+    const { writer, files, operations, entriesUnderRoot } = memoryWriter()
+
+    const result = await stage(
+      new Map([
+        [rangeId, recorderOf(microsoftCalendarListRangeFixture.exchanges)],
+        [folderId, recorderOf(microsoftOneDriveCreateFolderFixture.exchanges)]
+      ]),
+      writer
+    )
+
+    if (Result.isFailure(result) || result.success === undefined) {
+      return expect.fail('expected staged recordings')
+    }
+
+    const staged = [
+      join(stagingDir, 'calendar-list-range.ts'),
+      join(stagingDir, 'onedrive-create-folder.ts'),
+      join(stagingDir, 'seeds.ts')
+    ]
+
+    expect(operations).toEqual([
+      `mkdir ${tempDir}`,
+      `write ${join(tempDir, 'calendar-list-range.ts')}`,
+      `write ${join(tempDir, 'onedrive-create-folder.ts')}`,
+      `write ${join(tempDir, 'seeds.ts')}`,
+      `rename ${tempDir} -> ${stagingDir}`
+    ])
+    expect(entriesUnderRoot()).toEqual([stagingDir, ...staged].sort())
+    expect(files.get(staged[0] ?? '')).toContain(`"id": "${rangeId}.recorded"`)
+    expect(files.get(staged[0] ?? '')).toContain('"evidence": "verified"')
+    expect(files.get(staged[0] ?? '')).toContain('"account": "practice"')
+    expect(files.get(staged[2] ?? '')).toBe(renderSeedsModule(microsoftConformanceFixtureSeeds))
+    expect(result.success.files).toEqual(staged)
+    expect(result.success.checklist.join('\n')).toContain(
+      'names and subjects: "Synthetic planning session"'
+    )
+    expect(result.success.checklist.join('\n')).not.toContain('SHARED SEED')
+  })
+
+  it('leaves no run directory and removes the temp directory when a write fails mid-batch', async () => {
+    const { writer, operations, entriesUnderRoot } = memoryWriter({ failOnWrite: 1 })
+
+    const result = await stage(
+      new Map([
+        [rangeId, recorderOf(microsoftCalendarListRangeFixture.exchanges)],
+        [folderId, recorderOf(microsoftOneDriveCreateFolderFixture.exchanges)]
+      ]),
+      writer
+    )
+
+    expect(failureMessage(result)).toBe(
+      `Writing the staged recordings failed; nothing was staged in ${stagingDir}`
+    )
+    expect(operations.at(-1)).toBe(`rm ${tempDir}`)
+    expect(entriesUnderRoot()).toEqual([])
+  })
+
+  it('leaves no run directory when the publishing rename fails', async () => {
+    const { writer, entriesUnderRoot } = memoryWriter({ failRename: true })
+
+    expect(failureMessage(await stage(rangeRecorders(), writer))).toBe(
+      `Writing the staged recordings failed; nothing was staged in ${stagingDir}`
+    )
+    expect(entriesUnderRoot()).toEqual([])
+  })
+
+  it('refuses an existing run directory and writes nothing', async () => {
+    const { writer, operations } = memoryWriter()
+
+    writer.mkdir(stagingDir)
+    operations.length = 0
+
+    expect(failureMessage(await stage(rangeRecorders(), writer))).toBe(
+      `Refusing to overwrite ${stagingDir}; nothing was written`
+    )
+    expect(operations).toEqual([])
+  })
+
+  it('writes nothing when any recording fails replay verification', async () => {
+    const { writer, operations } = memoryWriter()
+
+    // The range recording no longer supports its claim: the populated range came back empty.
+    const contradicted = microsoftCalendarListRangeFixture.exchanges.map(exchange =>
+      !isWireStreamResponse(exchange.response) && !isWireBase64BodyResponse(exchange.response)
+        ? {
+            ...exchange,
+            response: {
+              status: exchange.response.status,
+              headers: exchange.response.headers,
+              body: JSON.stringify({ ...JSON.parse(exchange.response.body), value: [] })
+            }
+          }
+        : exchange
+    )
+
+    const result = await stage(
+      new Map([
+        [folderId, recorderOf(microsoftOneDriveCreateFolderFixture.exchanges)],
+        [rangeId, recorderOf(contradicted)]
+      ]),
+      writer
+    )
+
+    expect(failureMessage(result)).toBe(
+      `${rangeId} did not pass on replay of its recording; nothing was written`
+    )
+    expect(operations).toEqual([])
+  })
+
+  it('writes nothing when a recording fails the secret scan', async () => {
+    const { writer, operations } = memoryWriter()
+    const [first, ...rest] = microsoftCalendarListRangeFixture.exchanges
+
+    const leaky: ReadonlyArray<WireExchange> = [
+      {
+        ...first,
+        request: {
+          ...first.request,
+          headers: { ...first.request.headers, authorization: 'Bearer synthetic-leaked-token-0000' }
+        }
+      },
+      ...rest
+    ]
+
+    expect(failureMessage(await stage(new Map([[rangeId, recorderOf(leaky)]]), writer))).toBe(
+      `${rangeId}: recording rejected (WireFixtureSecretsFound); nothing was written`
+    )
+    expect(operations).toEqual([])
+  })
+
+  it('refuses a staging directory that is not a direct child of the recordings root', async () => {
+    for (const dir of [
+      join(repoRoot, 'packages/connectors/src/microsoft/conformance'),
+      join(repoRoot, '.conformance-recordings', 'fortnox', runId),
+      join(stagingDir, 'nested'),
+      recordingsRoot,
+      tempDir
+    ]) {
+      const { writer, operations } = memoryWriter()
+
+      expect(failureMessage(await stage(rangeRecorders(), writer, dir))).toBe(
+        `Refusing to stage recordings outside the recordings root (${recordingsRoot}); nothing was written`
+      )
+      expect(operations).toEqual([])
+    }
+  })
+
+  it('refuses a recordings root inside committed package sources', async () => {
+    const { writer, operations } = memoryWriter()
+    const root = join(repoRoot, 'packages/connectors/src/microsoft/conformance/recordings')
+
+    const result = await Effect.runPromise(
+      stageRecordings(passedReport([rangeId]), rangeRecorders(), recordInputs, {
+        writer,
+        recordingsRoot: root,
+        stagingDir: join(root, runId),
+        recordedAt: '2026-09-30'
+      }).pipe(Effect.result)
+    )
+
+    expect(failureMessage(result)).toBe(
+      `Refusing a recordings root inside committed package sources (${root}); nothing was written`
+    )
+    expect(operations).toEqual([])
+  })
+
+  it('writes nothing when no case passed', async () => {
+    const { writer, operations } = memoryWriter()
+
+    expect(await stage(new Map(), writer)).toMatchObject({ _tag: 'Success', success: undefined })
+    expect(operations).toEqual([])
+  })
+
+  it('lists foreign emails, tenant hosts, names, and body text for review', () => {
+    const [first, ...rest] = microsoftOutlookPagingNextLinkFixture.exchanges
+
+    const leaky: WireFixture = {
+      ...microsoftOutlookPagingNextLinkFixture,
+      exchanges: [
+        {
+          ...first,
+          response: {
+            status: 200,
+            headers: {},
+            body: '{"value":[{"id":"x","subject":"Quarterly numbers","bodyPreview":"Hi team","from":{"emailAddress":{"name":"Person","address":"person@practice.invalid"}},"toRecipients":[{"emailAddress":{"address":"ada@example.test"}}],"webLink":"https://practice-tenant-my.sharepoint.com/x"}]}'
+          }
+        },
+        ...rest
+      ]
+    }
+
+    const spec =
+      microsoftCaseSpecs.find(entry => entry.caseId === leaky.caseId) ??
+      expect.fail('missing paging spec')
+
+    const checklist = recordingReviewChecklist([{ spec, fixture: leaky }]).join('\n')
+
+    expect(checklist).toContain(
+      'emails outside example.test/example.com: "person@practice.invalid"'
+    )
+    expect(checklist).not.toContain('"ada@example.test"')
+    expect(checklist).toContain('tenant host names: "practice-tenant-my.sharepoint.com"')
+    expect(checklist).toContain('"Quarterly numbers"')
+    expect(checklist).toContain('body text: "Hi team"')
+  })
+})
+
+describe('run-microsoft-conformance CLI', () => {
+  it('dry-runs by default without a token', async () => {
+    const result = await new Promise<{ failed: boolean; stdout: string }>(resolvePromise => {
+      execFile(
+        process.execPath,
+        [tsxCli, runnerScript],
+        { cwd: repoRoot, env: { ...process.env, MICROSOFT_ACCESS_TOKEN: '' } },
+        (error, stdout) => {
+          resolvePromise({ failed: error !== null, stdout: String(stdout) })
+        }
+      )
+    })
+
+    expect(result.failed).toBe(false)
+    expect(result.stdout).toContain('DRY RUN: no network request was made')
+    expect(result.stdout).toContain(
+      'SKIP  microsoft.onedrive.copy-accepted-monitor  [write-reversible]  writes-not-allowed'
+    )
+  })
+})

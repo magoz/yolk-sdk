@@ -220,12 +220,13 @@ failure; the JSON case covers `stream: false`.
 `@yolk-sdk/connectors/conformance` provides the connector ports from an Effect `HttpClient`, so
 connector cases run the real connector actions over replay, an emulator, or a host's live client:
 
-| Export                                               | Purpose                                                                                                                                |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `connectorHttpClientFromEffectHttpClientLayer`       | `ConnectorHttpClient` over the `HttpClient` in context; keeps method, URL, headers, string body, content type, status, and body text   |
-| `connectorBinaryHttpClientFromEffectHttpClientLayer` | GET-only `ConnectorBinaryHttpClient`; buffers, then fails oversize 200s (`response_too_large`) and truncates error bodies              |
-| `connectorHttpClientsFromEffectHttpClientLayer`      | Both bridges                                                                                                                           |
-| `staticCredentialResolverLayer(credentials)`         | `CredentialResolver` returning one `RuntimeCredential` for every slot, or credentials keyed by slot id (missing: `credential_missing`) |
+| Export                                                    | Purpose                                                                                                                                                                                                                     |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connectorHttpClientFromEffectHttpClientLayer`            | `ConnectorHttpClient` over the `HttpClient` in context; keeps method, URL, headers, string body, content type, status, and body text                                                                                        |
+| `connectorBinaryHttpClientFromEffectHttpClientLayer`      | GET-only `ConnectorBinaryHttpClient`; buffers, then fails oversize 200s (`response_too_large`) and truncates error bodies                                                                                                   |
+| `connectorBinaryWriteHttpClientFromEffectHttpClientLayer` | `ConnectorBinaryWriteHttpClient` with `uploadSession`: POST/PUT bytes, and PUT ranges / empty DELETE cancellation to pre-authenticated session URLs; refuses bad requests and credential headers on sessions before sending |
+| `connectorHttpClientsFromEffectHttpClientLayer`           | All three bridges                                                                                                                                                                                                           |
+| `staticCredentialResolverLayer(credentials)`              | `CredentialResolver` returning one `RuntimeCredential` for every slot, or credentials keyed by slot id (missing: `credential_missing`)                                                                                      |
 
 These bridges are **not production adapters**. They enforce no streamed byte limits, redirect,
 DNS/IP, timeout, or TLS policy; binary limits are checked only after buffering. `redirect: 'manual'`
@@ -246,3 +247,16 @@ case restores nothing: it only confirms that the customer is absent before its w
 any invoice Fortnox unexpectedly creates for manual cancellation. See
 [Fortnox conformance cases](../connectors/fortnox#conformance-cases) for the case table, seeds, and
 claims.
+
+`@yolk-sdk/connectors/microsoft/conformance` exports eleven Microsoft Graph cases
+(`microsoftConformanceCases`), their synthetic fixtures (`microsoftConformanceFixtures`), and the
+seeds they replay with (`microsoftConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`,
+`CredentialResolver`, and `MicrosoftConformanceConfig` (seed identities in a Microsoft 365 practice
+tenant). Outlook and OneDrive cases run the real connector actions. The connector has no calendar
+actions yet, so the four calendar cases send raw Graph requests through the same ports and pin
+expected Graph behaviour (unverified until a live run) for hosts and the upcoming emulator. Write
+cases create their own event, draft, or folder and remove it again automatically when its id is
+recoverable, failing with `MicrosoftConformanceRestoreFailed` when the removal fails or a create
+returns no id. An ambiguous create (transport or decoding failure, no status, or HTTP 5xx) fails
+with `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry
+manual-recovery advice. The create is not interruptible and the runner has no request timeout. See [Microsoft conformance cases](../connectors/microsoft#conformance-cases).
