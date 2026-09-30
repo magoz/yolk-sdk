@@ -176,7 +176,6 @@ const addDays = (date: string, days: number): string | undefined => {
   return isIsoDate(iso) ? iso : undefined
 }
 
-/** The longest emulated `TermsOfPayment`, in days. */
 const maxTermsOfPaymentDays = 365
 
 /**

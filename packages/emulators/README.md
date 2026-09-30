@@ -561,7 +561,8 @@ instead of being ignored. Customer categorical values are limited to the emulate
 Fortnox's full enums): `VATType` `SEVAT`, `Type` `COMPANY` or `PRIVATE`, and `TermsOfPayment` as
 whole days from `0` to `365`. Other values (named terms such as `K`, export or reverse-charge VAT)
 get a 400 on a customer update, and a new invoice is rejected with a 400 before anything is
-written when the customer it inherits from (a seed can hold anything) carries one, or when its
+written when the customer it inherits from (a seed can hold anything) carries a `VATType` or
+`TermsOfPayment` outside the subset, or when its
 computed due date is not a representable `YYYY-MM-DD` date. An empty string still keeps the
 stored value. The list filter
 `lastmodified` (the connector's `lastModified` input) is not emulated: the emulator tracks no
