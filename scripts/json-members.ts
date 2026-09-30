@@ -21,7 +21,7 @@ export type JsonMember = {
   readonly text: string | undefined
 }
 
-// Deeper nesting is treated as unparseable, so callers fail closed instead of overflowing.
+// Deeper nesting is treated as unscannable, so callers refuse instead of overflowing.
 const maxDepth = 256
 
 const numberPattern = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y
@@ -31,8 +31,10 @@ class JsonScanError extends Error {}
 /**
  * Walk one JSON value in `text` (surrounding whitespace allowed) and call `visitObject` with the
  * members of each object, in wire order and including repeated keys; inner objects are visited
- * before the object that contains them. Returns false when `text` is not exactly one valid JSON
- * value (objects closed before the error were still visited), so callers can fail closed.
+ * before the object that contains them. Returns false when `text` cannot be fully scanned: it is
+ * not exactly one valid JSON value, it nests deeper than the depth limit, or the scan fails in any
+ * other way (objects closed before the failure were still visited). Callers must treat false as a
+ * refusal, never fall back to a textual check.
  */
 export const scanJsonObjects = (
   text: string,
@@ -184,10 +186,9 @@ export const scanJsonObjects = (
     skipWhitespace()
 
     return index === text.length
-  } catch (error) {
-    if (error instanceof JsonScanError) return false
-
-    throw error
+  } catch {
+    // A JSON error, the depth limit, or any other failure: the text was not fully scanned.
+    return false
   }
 }
 
@@ -195,7 +196,8 @@ export const scanJsonObjects = (
  * Keys among `fields` that carry anything but an allowed value in some object of `text`, or that
  * repeat within one object (a repeated sensitive key is refused whatever its values). Allowed
  * values are `null`, the empty string, and the string `placeholder`; any other string, number,
- * boolean, object, or array is reported. Returns undefined when `text` is not valid JSON.
+ * boolean, object, or array is reported. Returns undefined when `text` cannot be fully scanned
+ * (see `scanJsonObjects`); callers must refuse such text.
  */
 export const unredactedMembers = (
   text: string,

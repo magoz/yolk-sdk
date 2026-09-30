@@ -4,7 +4,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Streamed plain-text answer from the xAI Grok CLI proxy that ends with exactly one `response.completed` event (`response.status: completed`) as its last server-sent event.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:grok --live --owner-approved --account <label>`.
+ * replaces it. Regenerate with
+ * `pnpm conformance:grok --live --owner-approved --account <label> --client-version <version>`.
  */
 export const xAiGrokTerminalEventFixture: WireFixture = {
   id: 'xai.grok.stream.terminal-event.synthetic',
@@ -14,7 +15,7 @@ export const xAiGrokTerminalEventFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://cli-chat-proxy.grok.com/v1/responses',
   model: 'grok-build',
-  note: 'Synthetic placeholder shaped like OpenAI Responses SSE from the xAI Grok CLI proxy. Not recorded from a live service; replace with a verified recording from pnpm conformance:grok --live --owner-approved --account <label>.',
+  note: 'Synthetic placeholder shaped like OpenAI Responses SSE from the xAI Grok CLI proxy. Not recorded from a live service; replace with a verified recording from pnpm conformance:grok --live --owner-approved --account <label> --client-version <version>.',
   exchanges: [
     {
       request: {

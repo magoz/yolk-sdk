@@ -12,9 +12,10 @@
  * `--live`: the credentials are consumer subscription OAuth access tokens, so a live run spends
  * the owner's subscription allowance and must follow the provider's terms. **Live runs need the
  * repository owner's explicit approval**, confirmed with `--owner-approved`; never run them in
- * CI (`--live` is refused whenever the `CI` environment variable is set). A live run also needs an explicit `--account <label>` (a synthetic, non-identifying label
- * such as `synthetic`; never a real organization, workspace, or person name: it is committed in
- * public fixtures) and the family's token:
+ * CI (`--live` is refused whenever the `CI` environment variable is set to any non-empty value,
+ * `0` and `false` included). A live run also needs an explicit `--account <label>` (a synthetic,
+ * non-identifying label such as `synthetic`; never a real organization, workspace, or person
+ * name: it is committed in public fixtures) and the family's token:
  *
  * - codex: `OPENAI_CODEX_ACCESS_TOKEN` (a ChatGPT OAuth access token; the optional
  *   `OPENAI_CODEX_ACCOUNT_ID` is sent as `ChatGPT-Account-Id` and never recorded);
@@ -29,10 +30,12 @@
  * and encrypted JSON string fields (`responsesRedactedFields`) are redacted value by value in text
  * chunks only (never re-chunked); a value left in a base64 chunk or split across chunks, a
  * non-string value, or a repeated redacted key refuses the write (checked on every occurrence in
- * the reassembled wire text, never through `JSON.parse`, which collapses repeated keys). Each single recorded exchange becomes a `verified` fixture dated today, then the new
- * fixtures replay through the same cases. Nothing is written unless every case passes live,
- * records cleanly, is fully redacted, passes the secret scan, and passes again on replay; only
- * then are the family's fixture modules rewritten.
+ * the reassembled wire text, never through `JSON.parse`, which collapses repeated keys). So does
+ * any SSE `data:` payload or body the member scanner cannot fully scan (invalid JSON, nesting past
+ * its depth limit), except the `[DONE]` sentinel. Each single recorded exchange becomes a
+ * `verified` fixture dated today, then the new fixtures replay through the same cases. Nothing is
+ * written unless every case passes live, records cleanly, is fully redacted, passes the secret
+ * scan, and passes again on replay; only then are the family's fixture modules rewritten.
  *
  * Model ids are CLI flags defaulting to the family's conformance default models; confirm they are
  * still available on the subscription before a live probe.
@@ -140,6 +143,8 @@ export type ResponsesFamilySpec = {
   readonly family: ResponsesFamily
   readonly label: string
   readonly command: string
+  /** The full command that regenerates the family's fixtures, with every required live flag. */
+  readonly regenerateCommand: string
   readonly endpoint: string
   readonly tokenEnv: string
   readonly accountIdEnv: string | undefined
@@ -192,6 +197,7 @@ export const responsesFamilies: Readonly<Record<ResponsesFamily, ResponsesFamily
     family: 'codex',
     label: 'the ChatGPT Codex Responses endpoint',
     command: 'pnpm conformance:codex',
+    regenerateCommand: 'pnpm conformance:codex --live --owner-approved --account <label>',
     endpoint: openAiCodexConformanceResponsesUrl,
     tokenEnv: 'OPENAI_CODEX_ACCESS_TOKEN',
     accountIdEnv: 'OPENAI_CODEX_ACCOUNT_ID',
@@ -209,6 +215,8 @@ export const responsesFamilies: Readonly<Record<ResponsesFamily, ResponsesFamily
     family: 'grok',
     label: 'the xAI Grok CLI proxy',
     command: 'pnpm conformance:grok',
+    regenerateCommand:
+      'pnpm conformance:grok --live --owner-approved --account <label> --client-version <version>',
     endpoint: xAiGrokConformanceResponsesUrl,
     tokenEnv: 'XAI_GROK_ACCESS_TOKEN',
     accountIdEnv: undefined,
@@ -229,7 +237,8 @@ every case passes.
 
 The credentials are consumer subscription OAuth access tokens: live runs spend the owner's
 subscription allowance and need the repository owner's explicit approval (--owner-approved).
-Never run them in CI: --live is refused whenever the CI environment variable is set.
+Never run them in CI: --live is refused whenever the CI environment variable is set to any
+non-empty value (0 and false included).
 
 Options:
   --family codex|grok             required (set by the pnpm scripts)
@@ -279,17 +288,16 @@ export const ownerApprovalRequiredMessage =
   "--live requires --owner-approved: live runs spend a subscription OAuth allowance and need the repository owner's explicit approval"
 
 export const liveInCiMessage =
-  "--live is refused in CI (the CI environment variable is set): live runs spend a subscription OAuth allowance and must be run by hand with the repository owner's approval"
+  "--live is refused in CI (the CI environment variable is set to a non-empty value): live runs spend a subscription OAuth allowance and must be run by hand with the repository owner's approval"
 
 /** The environment the argument check reads (only `CI`). */
 export type ProbeEnv = Readonly<Record<string, string | undefined>>
 
-/** True when `CI` is set to anything but empty, `0`, or `false`. */
-export const isCiEnvironment = (env: ProbeEnv): boolean => {
-  const value = env.CI?.trim().toLowerCase()
-
-  return value !== undefined && value !== '' && value !== '0' && value !== 'false'
-}
+/**
+ * True when `CI` is set to any non-empty value, `0` and `false` included: only an unset or empty
+ * `CI` allows a live run.
+ */
+export const isCiEnvironment = (env: ProbeEnv): boolean => env.CI !== undefined && env.CI.length > 0
 
 export const clientVersionRequiredMessage =
   '--live --family grok requires --client-version <v>: the truthful host client version sent as x-grok-client-version'
@@ -676,14 +684,15 @@ const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
 // The JSON payloads a survivor check reads: every SSE event's `data:` of the whole stream (all
 // chunks, text and `{ base64 }`, reassembled as bytes and decoded, so a value inside a base64
-// chunk or split across chunks, even mid-character, is seen), or the whole decoded body.
+// chunk or split across chunks, even mid-character, is seen), or the whole decoded body. An empty
+// or whitespace-only body carries nothing to scan and yields no payload.
 const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
   if (!isWireStreamResponse(response)) {
-    return [
-      isWireBase64BodyResponse(response)
-        ? lossyText(base64Bytes(response.bodyBase64))
-        : response.body
-    ]
+    const body = isWireBase64BodyResponse(response)
+      ? lossyText(base64Bytes(response.bodyBase64))
+      : response.body
+
+    return body.trim().length > 0 ? [body] : []
   }
 
   return lossyText(concatBytes(response.chunks.map(chunkBytes)))
@@ -699,22 +708,42 @@ const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
     .filter(data => data.length > 0)
 }
 
+/**
+ * The only non-JSON payloads the survivor check lets through: the `[DONE]` stream sentinel, which
+ * the Responses stream parser ignores. Neither the Codex endpoint nor the Grok CLI proxy is known
+ * to send any other non-JSON `data:` payload; every other payload the member scanner cannot fully
+ * scan refuses the write.
+ */
+export const responsesPermittedNonJsonPayloads: ReadonlyArray<string> = ['[DONE]']
+
+type PayloadScan = { readonly fields: Set<string>; unscannable: number }
+
 // Every occurrence of every redacted field in the payload text, without `JSON.parse` (which keeps
 // only the last of repeated keys): any value but null, "", or the placeholder, and any repeat of a
-// redacted key within one object, is a survivor.
-const payloadSurvivors = (payload: string, found: Set<string>): void => {
+// redacted key within one object, is a survivor. A payload the scanner cannot fully scan (invalid
+// JSON, nesting past the depth limit) is counted as unscannable, never guessed at.
+const scanPayload = (payload: string, scan: PayloadScan): void => {
+  if (responsesPermittedNonJsonPayloads.includes(payload)) return
+
   const survivors = unredactedMembers(payload, responsesRedactedFields, responsesRedactedValue)
 
   if (survivors === undefined) {
-    // Not checkable as JSON: fail closed on any mention of a redacted field.
-    for (const field of responsesRedactedFields) {
-      if (payload.includes(`"${field}"`)) found.add(field)
-    }
+    scan.unscannable++
 
     return
   }
 
-  for (const field of survivors) found.add(field)
+  for (const field of survivors) scan.fields.add(field)
+}
+
+const scanExchanges = (exchanges: ReadonlyArray<WireExchange>): PayloadScan => {
+  const scan: PayloadScan = { fields: new Set(), unscannable: 0 }
+
+  for (const { response } of exchanges) {
+    for (const payload of responsePayloads(response)) scanPayload(payload, scan)
+  }
+
+  return scan
 }
 
 /**
@@ -724,24 +753,52 @@ const payloadSurvivors = (payload: string, found: Set<string>): void => {
  * scanned member by member without collapsing repeated keys: any value other than `null`, `""`,
  * or the placeholder (a string, number, boolean, object, or array), and any repeated redacted key
  * in one object, is reported. A value in a base64 chunk or body, or split across network chunks,
- * is therefore caught; a payload that is not JSON fails closed when it mentions a redacted field.
- * Empty when fully redacted.
+ * is therefore caught. Payloads the scanner cannot fully scan are not reported here but by
+ * `unscannableResponsesPayloads`; the write decision uses `responsesRedactionRefusal`, which
+ * checks both. Empty when fully redacted.
  */
 export const unredactedResponsesFields = (
   exchanges: ReadonlyArray<WireExchange>
 ): ReadonlyArray<string> => {
-  const found = new Set<string>()
+  const { fields } = scanExchanges(exchanges)
 
-  for (const { response } of exchanges) {
-    for (const payload of responsePayloads(response)) payloadSurvivors(payload, found)
-  }
-
-  return responsesRedactedFields.filter(field => found.has(field))
+  return responsesRedactedFields.filter(field => fields.has(field))
 }
+
+/**
+ * How many SSE `data:` payloads (or bodies) of the recorded responses the member scanner cannot
+ * fully scan: invalid JSON, JSON nested past the scanner's depth limit, or any other scan failure.
+ * Only `responsesPermittedNonJsonPayloads` are exempt. Any count above zero refuses the write,
+ * since an unscanned payload may hide a redacted field (for example under an escaped key).
+ */
+export const unscannableResponsesPayloads = (exchanges: ReadonlyArray<WireExchange>): number =>
+  scanExchanges(exchanges).unscannable
 
 /** Why the probe refuses to write a recording that still carries a redacted value. */
 export const unredactedMessage = (fields: ReadonlyArray<string>): string =>
   `could not redact ${fields.join(', ')} from the recording: a value survives inside a base64 body or chunk, split across network chunks, as a non-string value, or under a repeated key, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
+
+/** Why the probe refuses to write a recording with payloads the survivor check cannot scan. */
+export const unscannableMessage = (count: number): string =>
+  `could not check ${count} response payload(s) for redacted fields: not valid JSON, nested past the scanner's depth limit, or otherwise unscannable (only ${responsesPermittedNonJsonPayloads.join(', ')} may be non-JSON); refusing to write, re-record instead`
+
+/**
+ * Why the recorded exchanges must not be written, or undefined when every payload was scanned and
+ * no redacted field survives. Both the live recording step and the write gate use it.
+ */
+export const responsesRedactionRefusal = (
+  exchanges: ReadonlyArray<WireExchange>
+): string | undefined => {
+  const { fields, unscannable } = scanExchanges(exchanges)
+  const survivors = responsesRedactedFields.filter(field => fields.has(field))
+
+  const reasons = [
+    ...(unscannable > 0 ? [unscannableMessage(unscannable)] : []),
+    ...(survivors.length > 0 ? [unredactedMessage(survivors)] : [])
+  ]
+
+  return reasons.length === 0 ? undefined : reasons.join('; ')
+}
 
 export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
   readonly caseId: string
@@ -789,10 +846,10 @@ const recordCase = (
     }
 
     const redacted = exchanges.map(redactResponsesFields)
-    const unredacted = unredactedResponsesFields(redacted)
+    const refusal = responsesRedactionRefusal(redacted)
 
-    if (unredacted.length > 0) {
-      return yield* new ProbeFailed({ caseId, message: unredactedMessage(unredacted) })
+    if (refusal !== undefined) {
+      return yield* new ProbeFailed({ caseId, message: refusal })
     }
 
     return yield* makeWireFixture({
@@ -826,7 +883,7 @@ export const renderFixtureModule = (
     ` * ${fixtureModule.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}). Regenerate with`,
-    ` * \`${familySpecOf(options).command} --live --owner-approved --account <label>\`.`,
+    ` * \`${familySpecOf(options).regenerateCommand}\`.`,
     ' */',
     `export const ${fixtureModule.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''
@@ -857,7 +914,7 @@ export const defaultFixtureWriter: FixtureWriter = {
 
 /**
  * The write gate: refuse any recording that still carries a redacted field (checked across
- * base64 and split chunks), then replay `recorded` through every case and write the fixture
+ * base64 and split chunks) or has a payload the survivor check cannot scan, then replay `recorded` through every case and write the fixture
  * modules only when the report passes and every case has exactly one recording. On failure
  * nothing is written (the replay report is logged when replay failed). Returns the report and the
  * written paths.
@@ -872,12 +929,12 @@ export const writeVerifiedFixtures = (
     const fixtures = recorded.map(({ fixture }) => fixture)
 
     for (const fixture of fixtures) {
-      const unredacted = unredactedResponsesFields(fixture.exchanges)
+      const refusal = responsesRedactionRefusal(fixture.exchanges)
 
-      if (unredacted.length > 0) {
+      if (refusal !== undefined) {
         return yield* new ProbeFailed({
           caseId: fixture.caseId,
-          message: `${unredactedMessage(unredacted)}; no fixture was written`
+          message: `${refusal}; no fixture was written`
         })
       }
     }

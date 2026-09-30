@@ -40,8 +40,11 @@ import {
   renderFixtureModule,
   responsesFamilies,
   responsesFixtureModuleFor,
+  responsesPermittedNonJsonPayloads,
   responsesRedactedValue,
+  responsesRedactionRefusal,
   unredactedResponsesFields,
+  unscannableResponsesPayloads,
   verifyResponsesFixtures,
   writeVerifiedFixtures,
   type FixtureWriter,
@@ -116,14 +119,15 @@ describe('record-responses-fixtures arguments', () => {
     ).toMatchObject({ clientVersion: '1.2.3-host' })
   })
 
-  it('refuses --live whenever CI is set', () => {
+  it('refuses --live whenever CI is set to a non-empty value', () => {
     const live = ['--family', 'codex', '--live', '--owner-approved', '--account', 'synthetic']
 
-    for (const CI of ['true', '1', 'yes']) {
+    for (const CI of ['true', '1', 'yes', '0', 'false', 'FALSE', ' ']) {
       expect(() => parseProbeArgs(live, { CI })).toThrow(liveInCiMessage)
+      expect(isCiEnvironment({ CI })).toBe(true)
     }
 
-    for (const CI of [undefined, '', '0', 'false']) {
+    for (const CI of [undefined, '']) {
       expect(parseProbeArgs(live, { CI }).live).toBe(true)
     }
 
@@ -213,7 +217,22 @@ describe('record-responses-fixtures plan', () => {
 
     expect(source).toContain("import type { WireFixture } from '@yolk-sdk/conformance/fixture'")
     expect(source).toContain('export const xAiGrokPlainTextFixture: WireFixture = {')
-    expect(source).toContain('`pnpm conformance:grok --live --owner-approved --account <label>`')
+    expect(source).toContain(
+      '`pnpm conformance:grok --live --owner-approved --account <label> --client-version <version>`'
+    )
+
+    const codexModule = responsesFixtureModuleFor('codex', openAiCodexPlainTextFixture.caseId)
+
+    if (codexModule === undefined) {
+      expect.fail('missing Codex plain-text module')
+    }
+
+    const codexSource = renderFixtureModule(codexOptions, codexModule, openAiCodexPlainTextFixture)
+
+    expect(codexSource).toContain(
+      '`pnpm conformance:codex --live --owner-approved --account <label>`'
+    )
+    expect(codexSource).not.toContain('--client-version')
   })
 })
 
@@ -302,6 +321,25 @@ const withSplitDuplicateUser = (): WireExchange => {
     chunk.slice(0, cut),
     chunk.slice(cut),
     ...chunks.slice(index + 1)
+  ])
+}
+
+/**
+ * A response.created carrying `"us\u0065r"` (an escaped `user`, which chunk redaction never sees)
+ * plus a member nested past the scanner's depth limit, so the payload cannot be member-scanned.
+ */
+const withEscapedUserBehindDeepNesting = (): WireExchange =>
+  withCreatedMembers(
+    `${String.raw`"us\u0065r":"synthetic-private-user"`},"deep":${'['.repeat(300)}${']'.repeat(300)}`
+  )
+
+/** The committed Codex plain-text stream plus an invalid-JSON event naming a redacted field. */
+const withInvalidPayload = (): WireExchange => {
+  const [exchange] = openAiCodexPlainTextFixture.exchanges
+
+  return withChunks(exchange, [
+    ...streamChunks(exchange),
+    'event: response.created\ndata: {"safety_identifier": synthetic-private-id, "user"\n\n'
   ])
 }
 
@@ -440,15 +478,40 @@ describe('record-responses-fixtures redaction', () => {
     expect(unredactedResponsesFields([escaped])).toEqual(['user'])
   })
 
-  it('fails closed on a payload that is not JSON but mentions a redacted field', () => {
+  it('refuses a payload that is not JSON, never falling back to a textual check', () => {
+    const broken = withInvalidPayload()
+
+    expect(unredactedResponsesFields([broken])).toEqual([])
+    expect(unscannableResponsesPayloads([broken])).toBe(1)
+    expect(responsesRedactionRefusal([broken])).toContain('could not check 1 response payload')
+  })
+
+  it('refuses a payload nested past the scanner depth limit, whatever its keys', () => {
+    const nested = withEscapedUserBehindDeepNesting()
+
+    // JSON.parse reads it fine and finds the escaped `user`; the scanner stops at its depth limit.
+    expect(JSON.parse(createdPayload(nested))).toMatchObject({
+      response: { user: 'synthetic-private-user' }
+    })
+    expect(redactResponsesFields(nested)).toBe(nested)
+    expect(unscannableResponsesPayloads([nested])).toBe(1)
+    expect(responsesRedactionRefusal([nested])).toContain('could not check 1 response payload')
+  })
+
+  it('lets only the permitted non-JSON sentinels through', () => {
     const [exchange] = openAiCodexPlainTextFixture.exchanges
 
-    const broken = withChunks(exchange, [
-      ...streamChunks(exchange),
-      'event: response.created\ndata: {"safety_identifier": broken\n\n'
-    ])
+    const done = withChunks(exchange, [...streamChunks(exchange), 'data: [DONE]\n\n'])
 
-    expect(unredactedResponsesFields([broken])).toEqual(['safety_identifier'])
+    expect(responsesPermittedNonJsonPayloads).toEqual(['[DONE]'])
+    expect(unscannableResponsesPayloads([done])).toBe(0)
+    expect(responsesRedactionRefusal([done])).toBeUndefined()
+
+    for (const payload of ['[done]', 'DONE', '[DONE] trailing', 'ping']) {
+      const other = withChunks(exchange, [...streamChunks(exchange), `data: ${payload}\n\n`])
+
+      expect(unscannableResponsesPayloads([other]), payload).toBe(1)
+    }
   })
 })
 
@@ -715,6 +778,51 @@ describe('record-responses-fixtures write gate', () => {
 
     expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
       'could not redact user'
+    )
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when an escaped redacted key hides behind nesting past the depth limit', async () => {
+    const { calls, writer } = recordingWriter()
+    const recording = redactResponsesFields(withEscapedUserBehindDeepNesting())
+
+    const fixtures = openAiCodexConformanceFixtures.map((fixture): WireFixture =>
+      fixture.id === openAiCodexPlainTextFixture.id
+        ? { ...fixture, exchanges: [recording] }
+        : fixture
+    )
+
+    // Replay alone would pass: the provider never reads `user` or `deep`.
+    const report = await Effect.runPromise(verifyResponsesFixtures(fixtures, codexOptions))
+
+    expect(conformanceReportFailed(report)).toBe(false)
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(recordedFrom(codexOptions, fixtures), codexOptions, writer)
+    )
+
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'could not check 1 response payload'
+    )
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when an invalid JSON payload names a redacted field', async () => {
+    const { calls, writer } = recordingWriter()
+    const recording = redactResponsesFields(withInvalidPayload())
+
+    const fixtures = openAiCodexConformanceFixtures.map((fixture): WireFixture =>
+      fixture.id === openAiCodexPlainTextFixture.id
+        ? { ...fixture, exchanges: [recording] }
+        : fixture
+    )
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(recordedFrom(codexOptions, fixtures), codexOptions, writer)
+    )
+
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'could not check 1 response payload'
     )
     expect(calls).toEqual([])
   })

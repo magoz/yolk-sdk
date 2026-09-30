@@ -23,6 +23,7 @@ import {
   anthropicApiKeyEnv,
   anthropicFixtureModuleFor,
   anthropicFixtureModules,
+  anthropicPermittedNonJsonPayloads,
   casesWithoutSingleFixture,
   defaultProbeOptions,
   dryRunReport,
@@ -33,7 +34,9 @@ import {
   redactedThinkingData,
   redactThinkingSignatures,
   renderFixtureModule,
+  thinkingRedactionRefusal,
   unredactedThinkingFields,
+  unscannableThinkingPayloads,
   verifyAnthropicFixtures,
   writeVerifiedFixtures,
   type FixtureWriter,
@@ -348,6 +351,39 @@ const splitDuplicateSignatureRecording = (): WireExchange => {
   ])
 }
 
+// The committed thinking recording whose `signature_delta` spells its key `"sign\u0061ture"` (an
+// escaped `signature`, which chunk redaction never sees) and carries a member nested past the
+// scanner's depth limit, so the payload cannot be member-scanned.
+const escapedSignatureBehindDeepNesting = (): WireExchange => {
+  const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
+  const chunks = streamChunks(exchange)
+  const index = signatureChunkIndex(chunks)
+  const original = chunks[index]
+
+  if (!Predicate.isString(original)) {
+    return expect.fail('no signature_delta chunk')
+  }
+
+  const chunk = original.replace(
+    '"signature":"synthetic-thinking-signature"',
+    `${String.raw`"sign\u0061ture"`}:"synthetic-thinking-signature","deep":${'['.repeat(300)}${']'.repeat(300)}`
+  )
+
+  expect(chunk).not.toBe(original)
+
+  return withChunks(exchange, [...chunks.slice(0, index), chunk, ...chunks.slice(index + 1)])
+}
+
+// The committed thinking recording plus an invalid-JSON `signature_delta` event carrying a value.
+const invalidSignaturePayloadRecording = (): WireExchange => {
+  const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
+
+  return withChunks(exchange, [
+    ...streamChunks(exchange),
+    'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"synthetic-thinking-signature"\n\n'
+  ])
+}
+
 describe('record-anthropic-fixtures signature redaction', () => {
   it('redacts thinking signatures chunk by chunk, keeping every boundary and other byte', () => {
     const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
@@ -512,15 +548,40 @@ describe('record-anthropic-fixtures signature redaction', () => {
     ).toEqual([])
   })
 
-  it('fails closed on a payload that is not JSON but mentions a redacted field', () => {
+  it('refuses a payload that is not JSON, never falling back to a textual check', () => {
     const [exchange] = anthropicMessagesPlainTextFixture.exchanges
 
-    expect(
-      unredactedThinkingFields([
-        withChunks(exchange, ['data: {"signature":"synthetic-cut\n\n']),
-        withChunks(exchange, ['data: {"type":"redacted_thinking",\n\n'])
-      ])
-    ).toEqual(['signature', 'redacted_thinking.data'])
+    const broken = [
+      withChunks(exchange, ['data: {"signature":"synthetic-cut\n\n']),
+      withChunks(exchange, ['data: {"type":"redacted_thinking",\n\n'])
+    ]
+
+    expect(unredactedThinkingFields(broken)).toEqual([])
+    expect(unscannableThinkingPayloads(broken)).toBe(2)
+    expect(thinkingRedactionRefusal(broken)).toContain('could not check 2 response payload')
+  })
+
+  it('refuses a payload nested past the scanner depth limit, whatever its keys', () => {
+    const nested = escapedSignatureBehindDeepNesting()
+
+    expect(redactThinkingSignatures(nested)).toBe(nested)
+    expect(unscannableThinkingPayloads([nested])).toBe(1)
+    expect(thinkingRedactionRefusal([nested])).toContain('could not check 1 response payload')
+  })
+
+  it('lets only the permitted non-JSON sentinels through', () => {
+    const [exchange] = anthropicMessagesPlainTextFixture.exchanges
+    const done = withChunks(exchange, [...streamChunks(exchange), 'data: [DONE]\n\n'])
+
+    expect(anthropicPermittedNonJsonPayloads).toEqual(['[DONE]'])
+    expect(unscannableThinkingPayloads([done])).toBe(0)
+    expect(thinkingRedactionRefusal([done])).toBeUndefined()
+
+    for (const payload of ['[done]', 'DONE', '[DONE] trailing', 'ping']) {
+      const other = withChunks(exchange, [...streamChunks(exchange), `data: ${payload}\n\n`])
+
+      expect(unscannableThinkingPayloads([other]), payload).toBe(1)
+    }
   })
 })
 
@@ -743,6 +804,42 @@ describe('record-anthropic-fixtures write gate', () => {
 
     expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
       'could not redact redacted_thinking.data from the recording'
+    )
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when an escaped signature key hides behind nesting past the depth limit', async () => {
+    const { calls, writer } = recordingWriter()
+    const fixtures = withThinkingExchange(escapedSignatureBehindDeepNesting())
+
+    // Replay alone would pass: JSON.parse reads the escaped key and the deep member fine.
+    const report = await Effect.runPromise(verifyAnthropicFixtures(fixtures))
+
+    expect(conformanceReportFailed(report)).toBe(false)
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(recordedFrom(fixtures), defaultProbeOptions, writer)
+    )
+
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'could not check 1 response payload'
+    )
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when an invalid JSON payload carries a signature', async () => {
+    const { calls, writer } = recordingWriter()
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(
+        recordedFrom(withThinkingExchange(invalidSignaturePayloadRecording())),
+        defaultProbeOptions,
+        writer
+      )
+    )
+
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'could not check 1 response payload'
     )
     expect(calls).toEqual([])
   })

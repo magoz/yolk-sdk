@@ -16,7 +16,8 @@
  * `content-type`; failures are reported with the runner's sanitizer), redacts thinking-block
  * signatures and `redacted_thinking` data (text chunks only, never re-chunked; a value left in a
  * base64 chunk or split across chunks, a non-string value, or a repeated key refuses the write,
- * checked on every occurrence in the reassembled wire text), turns each single
+ * checked on every occurrence in the reassembled wire text; so does any SSE `data:` payload or
+ * body the member scanner cannot fully scan, except the `[DONE]` sentinel), turns each single
  * recorded exchange into a `verified` fixture dated today, then replays the new fixtures through
  * the same cases. Nothing is written unless every case passes live, records cleanly, is fully
  * redacted, passes the secret scan, and passes again on replay; only then are the
@@ -466,14 +467,15 @@ const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
 // The JSON payloads a survivor check reads: every SSE event's `data:` of the whole stream (all
 // chunks, text and `{ base64 }`, reassembled as bytes and decoded, so a value inside a base64
-// chunk or split across chunks, even mid-character, is seen), or the whole decoded body.
+// chunk or split across chunks, even mid-character, is seen), or the whole decoded body. An empty
+// or whitespace-only body carries nothing to scan and yields no payload.
 const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
   if (!isWireStreamResponse(response)) {
-    return [
-      isWireBase64BodyResponse(response)
-        ? lossyText(base64Bytes(response.bodyBase64))
-        : response.body
-    ]
+    const body = isWireBase64BodyResponse(response)
+      ? lossyText(base64Bytes(response.bodyBase64))
+      : response.body
+
+    return body.trim().length > 0 ? [body] : []
   }
 
   return lossyText(concatBytes(response.chunks.map(chunkBytes)))
@@ -518,17 +520,42 @@ const objectSurvivors = (
   }
 }
 
+/**
+ * The only non-JSON payloads the survivor check lets through: the `[DONE]` stream sentinel, which
+ * the Messages stream parser ignores. Anthropic sends every Messages event (`ping` included) as
+ * JSON; every other payload the member scanner cannot fully scan refuses the write.
+ */
+export const anthropicPermittedNonJsonPayloads: ReadonlyArray<string> = ['[DONE]']
+
+type PayloadScan = { readonly fields: Set<ThinkingRedactionField>; unscannable: number }
+
 // Scans the payload text itself, never through `JSON.parse` (which keeps only the last of
-// repeated keys), so an earlier value of a repeated key is still seen.
-const payloadSurvivors = (payload: string, found: Set<ThinkingRedactionField>): void => {
+// repeated keys), so an earlier value of a repeated key is still seen. A payload the scanner
+// cannot fully scan (invalid JSON, nesting past the depth limit) is counted as unscannable, never
+// guessed at.
+const scanPayload = (payload: string, scan: PayloadScan): void => {
+  if (anthropicPermittedNonJsonPayloads.includes(payload)) return
+
+  const found = new Set<ThinkingRedactionField>()
   const scanned = scanJsonObjects(payload, members => objectSurvivors(members, found))
 
   if (!scanned) {
-    // Not checkable as JSON: fail closed on any mention of a redacted field.
-    if (payload.includes('signature')) found.add('signature')
+    scan.unscannable++
 
-    if (payload.includes('redacted_thinking')) found.add('redacted_thinking.data')
+    return
   }
+
+  for (const field of found) scan.fields.add(field)
+}
+
+const scanExchanges = (exchanges: ReadonlyArray<WireExchange>): PayloadScan => {
+  const scan: PayloadScan = { fields: new Set(), unscannable: 0 }
+
+  for (const { response } of exchanges) {
+    for (const payload of responsePayloads(response)) scanPayload(payload, scan)
+  }
+
+  return scan
 }
 
 /**
@@ -538,24 +565,52 @@ const payloadSurvivors = (payload: string, found: Set<ThinkingRedactionField>): 
  * scanned member by member without collapsing repeated keys: any value other than `null`, `""`,
  * or the placeholder (a string, number, boolean, object, or array), and any repeated redacted key
  * in one object, is reported. A value in a base64 chunk or body, or split across network chunks,
- * is therefore caught; a payload that is not JSON fails closed when it mentions a redacted field.
- * Empty when fully redacted.
+ * is therefore caught. Payloads the scanner cannot fully scan are not reported here but by
+ * `unscannableThinkingPayloads`; the write decision uses `thinkingRedactionRefusal`, which checks
+ * both. Empty when fully redacted.
  */
 export const unredactedThinkingFields = (
   exchanges: ReadonlyArray<WireExchange>
 ): ReadonlyArray<ThinkingRedactionField> => {
-  const found = new Set<ThinkingRedactionField>()
+  const { fields } = scanExchanges(exchanges)
 
-  for (const { response } of exchanges) {
-    for (const payload of responsePayloads(response)) payloadSurvivors(payload, found)
-  }
-
-  return thinkingRedactionFields.filter(field => found.has(field))
+  return thinkingRedactionFields.filter(field => fields.has(field))
 }
+
+/**
+ * How many SSE `data:` payloads (or bodies) of the recorded responses the member scanner cannot
+ * fully scan: invalid JSON, JSON nested past the scanner's depth limit, or any other scan failure.
+ * Only `anthropicPermittedNonJsonPayloads` are exempt. Any count above zero refuses the write,
+ * since an unscanned payload may hide a redacted field (for example under an escaped key).
+ */
+export const unscannableThinkingPayloads = (exchanges: ReadonlyArray<WireExchange>): number =>
+  scanExchanges(exchanges).unscannable
 
 /** Why the probe refuses to write a recording that still carries a redacted value. */
 export const unredactedThinkingMessage = (fields: ReadonlyArray<ThinkingRedactionField>): string =>
   `could not redact ${fields.join(', ')} from the recording: a value survives inside a base64 body or chunk, split across network chunks, as a non-string value, or under a repeated key, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
+
+/** Why the probe refuses to write a recording with payloads the survivor check cannot scan. */
+export const unscannableThinkingMessage = (count: number): string =>
+  `could not check ${count} response payload(s) for thinking signatures or redacted_thinking data: not valid JSON, nested past the scanner's depth limit, or otherwise unscannable (only ${anthropicPermittedNonJsonPayloads.join(', ')} may be non-JSON); refusing to write, re-record instead`
+
+/**
+ * Why the recorded exchanges must not be written, or undefined when every payload was scanned and
+ * no redacted field survives. Both the live recording step and the write gate use it.
+ */
+export const thinkingRedactionRefusal = (
+  exchanges: ReadonlyArray<WireExchange>
+): string | undefined => {
+  const { fields, unscannable } = scanExchanges(exchanges)
+  const survivors = thinkingRedactionFields.filter(field => fields.has(field))
+
+  const reasons = [
+    ...(unscannable > 0 ? [unscannableThinkingMessage(unscannable)] : []),
+    ...(survivors.length > 0 ? [unredactedThinkingMessage(survivors)] : [])
+  ]
+
+  return reasons.length === 0 ? undefined : reasons.join('; ')
+}
 
 export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
   readonly caseId: string
@@ -608,10 +663,10 @@ const recordCase = (
     }
 
     const redacted = exchanges.map(redactThinkingSignatures)
-    const unredacted = unredactedThinkingFields(redacted)
+    const refusal = thinkingRedactionRefusal(redacted)
 
-    if (unredacted.length > 0) {
-      return yield* new ProbeFailed({ caseId, message: unredactedThinkingMessage(unredacted) })
+    if (refusal !== undefined) {
+      return yield* new ProbeFailed({ caseId, message: refusal })
     }
 
     return yield* makeWireFixture({
@@ -675,7 +730,8 @@ export const defaultFixtureWriter: FixtureWriter = {
 
 /**
  * The write gate: refuse any recording that still carries a thinking signature or
- * `redacted_thinking` data (checked across base64 and split chunks), then replay `recorded`
+ * `redacted_thinking` data (checked across base64 and split chunks) or has a payload the survivor
+ * check cannot scan, then replay `recorded`
  * through every case and write the fixture modules only when the report passes and every case
  * has exactly one recording. On failure nothing is written (the replay report is logged when
  * replay failed). Returns the report and the written paths.
@@ -689,12 +745,12 @@ export const writeVerifiedFixtures = (
     const fixtures = recorded.map(({ fixture }) => fixture)
 
     for (const fixture of fixtures) {
-      const unredacted = unredactedThinkingFields(fixture.exchanges)
+      const refusal = thinkingRedactionRefusal(fixture.exchanges)
 
-      if (unredacted.length > 0) {
+      if (refusal !== undefined) {
         return yield* new ProbeFailed({
           caseId: fixture.caseId,
-          message: `${unredactedThinkingMessage(unredacted)}; no fixture was written`
+          message: `${refusal}; no fixture was written`
         })
       }
     }
