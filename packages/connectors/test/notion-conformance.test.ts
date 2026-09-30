@@ -888,10 +888,9 @@ describe('Notion conformance run interruption', () => {
 
       const exit = yield* Fiber.await(fiber)
 
-      // (a) No further case starts after the interruption.
       expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-      // (b) The run ends with the case's own RestoreFailed, without an Interrupt in the cause.
+      // The run ends with the case's own RestoreFailed, without an Interrupt in the cause.
       if (Exit.isSuccess(exit)) {
         return expect.fail('expected the interrupted run to fail')
       }
@@ -899,7 +898,6 @@ describe('Notion conformance run interruption', () => {
       expect(Cause.hasInterrupts(exit.cause)).toBe(false)
       expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'NotionConformanceRestoreFailed' })
 
-      // (c) The reporter captured what to trash by hand.
       const reported = yield* Ref.get(warnings)
 
       expect(reported).toHaveLength(1)

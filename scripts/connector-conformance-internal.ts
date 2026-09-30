@@ -26,10 +26,12 @@
  *   `openat`/`O_NOFOLLOW`, so a check-then-write window remains.
  * - Live runs are interruptible: the first SIGINT/SIGTERM interrupts the run fiber, so the cases'
  *   uninterruptible cleanups are attempted; a cleanup that fails meanwhile prints a WARN line (the
- *   cases' `ConformanceCleanupReporter`), and after the interruption the read-only `leftovers`
- *   lookup runs again and lists what is still present. A duplicate signal within a second (one
- *   Ctrl-C reaches pnpm, tsx, and node) is ignored; a later one force-exits (cleanup may be
- *   skipped). Before any write case, the `leftovers` lookup warns about items earlier runs left
+ *   cases' `ConformanceCleanupReporter`). After an interrupt-only exit (130) the read-only
+ *   `leftovers` lookup runs again and lists what is still present; a cleanup failure ends the run
+ *   with exit 1. A duplicate signal within a second (one Ctrl-C reaches every process of the
+ *   foreground group, and the wrappers relay it) is ignored; a later one force-exits (cleanup may
+ *   be skipped). Under `pnpm exec tsx` the prompt returns at the first Ctrl-C; the first-signal
+ *   message names the pid to `kill -TERM`. Before any write case, the `leftovers` lookup warns about items earlier runs left
  *   behind; nothing is deleted automatically.
  *
  * Promotion is manual: scrub the staged files of practice-account data, copy them into
@@ -1343,10 +1345,10 @@ export type RunInterruptiblyOptions = {
  * second signal within `duplicateSignalWindowMs` of the first is ignored as a duplicate; a later
  * one force-exits with a message that cleanup may have been skipped. `pnpm exec tsx …` returns to
  * the prompt at the first Ctrl-C (observed; `pnpm <script>` and `tsx` itself wait), so the
- * first-signal message names the pid to `kill -TERM` from there. Resolves when the program ends: an interrupt-only exit prints a
- * not-confirmed note plus the `afterInterrupt` lines and sets exit code 130; any other failure
- * (including a cleanup failure raised during the interruption) prints its message and sets exit
- * code 1. The signal handlers stay installed until everything, `afterInterrupt` included, is done.
+ * first-signal message names the pid to `kill -TERM` from there. Resolves when the program ends:
+ * an interrupt-only exit prints a not-confirmed note plus the `afterInterrupt` lines and sets
+ * exit code 130; any other failure (including a cleanup failure raised during the interruption)
+ * prints its message and sets exit code 1. The signal handlers stay installed until everything, `afterInterrupt` included, is done.
  */
 export const runInterruptibly = <E>(
   program: Effect.Effect<void, E>,

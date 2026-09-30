@@ -394,8 +394,10 @@ When a case is interrupted, the run no longer produces a report, and no further 
 Dropbox and Notion write cases also hand a cleanup problem raised during the interruption (a
 failed cleanup, or a create whose outcome is unknown) to `ConformanceCleanupReporter` from
 `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
-`Effect.logWarning`. On effect 4.0.0-rc.115 such a run ends with that failure itself (no Interrupt
-in the cause); a run whose cleanup succeeded ends as a plain interruption. The live runners print
+`Effect.logWarning`. With the Effect version this repository pins, such a run ends with that
+failure itself (no Interrupt in the cause), and a run whose cleanup succeeded ends as a plain
+interruption; drills in the connector tests pin both, so an Effect upgrade that changes this fails
+visibly. The live runners print
 reported problems to stderr as WARN lines. Their first SIGINT/SIGTERM interrupts the run fiber so
 the cleanup is attempted; duplicates within a second (one Ctrl-C reaches every process of the
 foreground group, and the wrappers relay it) are ignored, and a later signal exits at once. Only

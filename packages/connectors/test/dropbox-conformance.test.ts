@@ -1677,10 +1677,9 @@ describe('Dropbox conformance run interruption', () => {
 
         const exit = yield* Fiber.await(fiber)
 
-        // (a) No further case starts after the interruption.
         expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-        // (b) Observed on effect 4.0.0-rc.115: the run ends with the case's own RestoreFailed, and
+        // Observed on effect 4.0.0-rc.115: the run ends with the case's own RestoreFailed, and
         // no Interrupt in the cause. Leaving the case's mask with a failure while an interruption
         // is pending, the failure exit skips every error continuation (runConformance's Effect.exit
         // included; finalizers still run), so the run produces no report and resumes no case.
@@ -1691,7 +1690,6 @@ describe('Dropbox conformance run interruption', () => {
         expect(Cause.hasInterrupts(exit.cause)).toBe(false)
         expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'DropboxConformanceRestoreFailed' })
 
-        // (c) The reporter captured the path to check by hand.
         const reported = yield* Ref.get(warnings)
 
         expect(reported).toHaveLength(1)
@@ -1699,4 +1697,62 @@ describe('Dropbox conformance run interruption', () => {
       })
     )
   }
+
+  // The CLI's exit-130 branch (and its after-interrupt leftover lookup) depends on this shape: a
+  // case whose cleanup succeeds under interruption ends the run interrupt-only.
+  it.effect(
+    'ends interrupt-only, without a report or a later case, when the cleanup succeeds',
+    () =>
+      Effect.gen(function* () {
+        const sent = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const sentinelRan = yield* Ref.make(false)
+        const { warnings, reporter } = yield* capturingReporter
+
+        const sentinel = defineConformanceCase({
+          id: 'test.sentinel.after-interrupted-case',
+          safety: 'read',
+          docs: 'Synthetic sentinel: records whether it ran.',
+          wire: 'Runs only if the run was not stopped.',
+          fixtures: [],
+          run: Ref.set(sentinelRan, true)
+        })
+
+        const { client } = yield* makeReplayHttpClient([dropboxCopyMoveMetadataFixture])
+
+        const holding = HttpClient.transform(client, (response, request) =>
+          request.url.endsWith('/files/copy_v2')
+            ? response.pipe(
+                Effect.tap(() => Deferred.succeed(sent, undefined)),
+                Effect.tap(() => Deferred.await(release))
+              )
+            : response
+        )
+
+        const fiber = yield* runConformance([dropboxCopyMoveMetadataCase, sentinel], {
+          target: { kind: 'replay' },
+          now,
+          layer: () => portsOver(Layer.succeed(HttpClient.HttpClient, holding))
+        }).pipe(Effect.provideService(ConformanceCleanupReporter, reporter), Effect.forkChild)
+
+        yield* Deferred.await(sent)
+
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(interrupting)
+
+        const exit = yield* Fiber.await(fiber)
+
+        expect(yield* Ref.get(sentinelRan)).toBe(false)
+
+        if (Exit.isSuccess(exit)) {
+          return expect.fail('expected the interrupted run to be interrupted')
+        }
+
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        expect(yield* Ref.get(warnings)).toEqual([])
+      })
+  )
 })
