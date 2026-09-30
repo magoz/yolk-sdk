@@ -15,7 +15,7 @@ experimental conformance cases only.
 `@yolk-sdk/conformance/runner`. Outlook and OneDrive cases run the real connector actions. **The
 connector has no calendar actions yet:** the calendar cases send raw Graph v1.0 requests through the
 same connector ports and pin expected Graph behaviour (unverified until a live run) for hosts and
-the upcoming emulator. The claims are as currently understood; none is observed live yet.
+the emulator. The claims are as currently understood; none is observed live yet.
 
 | Case id                                            | Safety             | Seeds                                                       | Claim (as currently understood)                                                                                                                                                                                                                   |
 | -------------------------------------------------- | ------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -62,3 +62,8 @@ permanently deleted drafts may be kept by retention policies. No case sends mail
 
 The shipped fixtures are synthetic (`evidence: 'unverified'`). See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental
+[Microsoft Graph emulator](../api-reference/emulators#microsoft-graph-emulator)
+(`@yolk-sdk/emulators/microsoft`) is a stateful stand-in that passes these cases through the real
+connector actions.

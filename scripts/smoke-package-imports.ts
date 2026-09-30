@@ -138,7 +138,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './opencode',
       './email',
       './node',
-      './fortnox'
+      './fortnox',
+      './microsoft'
     ]
   }
 ]
@@ -353,7 +354,15 @@ const main = async () => {
           'const fortnoxInvoices = await fortnoxEmulator.fetch(new Request("https://api.fortnox.se/3/invoices?limit=10", { headers: { authorization: "Bearer synthetic" } }))',
           'if (fortnoxInvoices.status !== 200 || fortnoxInvoices.headers.get("x-emulator-evidence") !== "unverified" || (await fortnoxInvoices.json()).MetaInformation["@TotalResources"] !== 5) throw new Error("Fortnox emulator smoke failed")',
           'if ((await fortnoxEmulator.fetch(new Request("https://api.fortnox.se/3/articles", { headers: { authorization: "Bearer synthetic" } }))).status !== 404) throw new Error("Fortnox emulator must fail closed")',
-          'await fortnoxEmulator.close()'
+          'await fortnoxEmulator.close()',
+          'const microsoftEmulatorModule = await import("@yolk-sdk/emulators/microsoft")',
+          'if (microsoftEmulatorModule.microsoftEmulatorRoutes.length !== 19 || !microsoftEmulatorModule.microsoftEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Microsoft emulator manifest mismatch")',
+          'const microsoftEmulator = await microsoftEmulatorModule.makeMicrosoftEmulator()',
+          'const microsoftMessages = await microsoftEmulator.fetch(new Request("https://graph.microsoft.com/v1.0/users/ada%40example.test/mailFolders/AAMkAGI2-synthetic-folder-0001%3D/messages?$top=2", { headers: { authorization: "Bearer synthetic", prefer: "IdType=\\"ImmutableId\\"" } }))',
+          'const microsoftPage = await microsoftMessages.json()',
+          'if (microsoftMessages.status !== 200 || microsoftMessages.headers.get("x-emulator-evidence") !== "unverified" || microsoftPage.value.length !== 2 || !microsoftPage["@odata.nextLink"].startsWith("https://graph.microsoft.com/v1.0/users/ada%40example.test/")) throw new Error("Microsoft emulator smoke failed")',
+          'if ((await microsoftEmulator.fetch(new Request("https://graph.microsoft.com/v1.0/me/messages", { headers: { authorization: "Bearer synthetic" } }))).status !== 404) throw new Error("Microsoft emulator must fail closed")',
+          'await microsoftEmulator.close()'
         ].join('\n')
     )
 

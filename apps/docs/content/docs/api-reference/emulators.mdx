@@ -11,8 +11,8 @@ routes an Effect `HttpClient` to them instead of the real service. The email emu
 port-level fake instead: a plain-JSON `EmailClient` backend. Emulators never import other
 `@yolk-sdk/*` code: their wire shapes follow the conformance fixtures (verified recordings for the
 Gateway, synthetic placeholders elsewhere), and each emulated route names the conformance cases it
-follows. The package depends on `effect`; the Node-only `fortnox` subpath also depends on the
-upstream `@emulators/core` runtime (Apache-2.0, pinned to exactly `0.12.0`).
+follows. The package depends on `effect`; the Node-only `fortnox` and `microsoft` subpaths also
+depend on the upstream `@emulators/core` runtime (Apache-2.0, pinned to exactly `0.12.0`).
 
 There is no root export. Import an explicit subpath.
 
@@ -388,6 +388,61 @@ const httpLayer = InProcessHttpClient.layer([
 ])
 ```
 
+## Microsoft Graph emulator
+
+`@yolk-sdk/emulators/microsoft`
+
+> **Experimental, Node only.** A stateful stand-in for the Microsoft Graph v1.0 routes the Microsoft
+> conformance cases use (calendar, Outlook mail, OneDrive) plus the OneDrive copy monitor URL,
+> built on the same `@emulators/core` runtime (loaded lazily when you create an emulator).
+
+| Export                                                                       | Purpose                                                                                                                              |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `makeMicrosoftEmulator(options?)`                                            | `Promise` of `{ fetch, baseUrl, sharePointOrigin, ledger, faults, monitors, reset, seed, snapshot, coverage, close }`                |
+| `microsoftEmulatorRoutes`                                                    | Route evidence manifest (19 routes, all `unverified`; eleven are connector write routes)                                             |
+| `MicrosoftEmulatorSeed`, `MicrosoftEmulatorProfile`                          | Typed seed schema (`profile`, `user`, `mailFolders`, `messages`, `attachments`, `calendars`, `events`, `drive`, `driveItems`)        |
+| `MicrosoftFault`                                                             | `{ kind: 'status', status, headers?, body?, match?: { method?, path? }, count? }`                                                    |
+| `microsoftEmulatorErrorCodes`                                                | Graph error codes (`ErrorItemNotFound`, `itemNotFound`, `ErrorIrresolvableConflict` from the fixtures; `Synthetic*` codes synthetic) |
+| `MicrosoftEmulatorInputInvalid`                                              | Invalid seed, fault, or option passed to the JS API                                                                                  |
+| `microsoftEmulatorDefaultOrigin`, `microsoftEmulatorDefaultSharePointOrigin` | `https://graph.microsoft.com` and `https://synthetic-my.sharepoint.com` (the copy monitor host)                                      |
+
+Route both origins to the same fetch handler (the paths never overlap, so one loopback server serves
+both):
+
+```ts
+import { makeMicrosoftEmulator } from '@yolk-sdk/emulators/microsoft'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const microsoft = await makeMicrosoftEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://graph.microsoft.com', microsoft.fetch),
+  EmulatorRoute.handler(microsoft.sharePointOrigin, microsoft.fetch)
+])
+```
+
+It serves, under `/v1.0`: `calendarView` (events overlapping `[startDateTime, endDateTime)`), event
+create, get, update, delete, and `cancel` (202; the event is removed, so later reads and deletes are
+404); folder message listing with `$top`/`$skip` and an opaque `@odata.nextLink`; draft create,
+message update, and move; attachment listing (inline included, never `contentId`) and retrieval
+(with `contentId`); `$batch` with `permanentDelete` subrequests only; and OneDrive item read,
+children listing, folder create, delete, and copy (202 with one monitor `Location`). The monitor
+URL needs no credential, answers `inProgress` for `copyInProgressPolls` polls (default 1), then
+`completed` with a `resourceId`. Graph routes need `Authorization: Bearer <non-empty>`; the token is
+never stored or ledgered. Everything else, including `/me` paths, fails closed with the Graph error
+envelope `{ error: { code, message, innerError } }`, and query keys, `$select` fields, or values it
+does not emulate get a 400 before anything is written.
+
+Messages keep their immutable id across moves (answered under `Prefer: IdType="ImmutableId"`; the
+default id changes). Event times are UTC with seven fractional digits. A message update or move
+holds its message for `conflictWindowMs` (default 25): an overlapping write to the same message
+loses with 409 `ErrorIrresolvableConflict`, the first arrival wins. The default seed is the
+synthetic fixture entities with the same ids as `microsoftConformanceFixtureSeeds`; profiles
+`default` and `empty`. Faults, the ledger (which also records the `Prefer` header), and the
+`/_emulate/*` control plane behave as in the Fortnox emulator; `reset` and `seed` also clear copy
+monitors. The `drills` option (`calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`,
+`omitNextLink`) is a test-only drill knob that makes the matching conformance case fail.
+
 ## Node server
 
 `@yolk-sdk/emulators/node`
@@ -408,11 +463,11 @@ Emulated routes carry evidence: `verified` routes follow a live observation date
 response from an unverified route with `x-emulator-evidence: unverified`; the email emulator's
 plain-JSON replies carry no header, so it records the evidence on each ledger entry instead. The Gateway route is verified (`observedAt: '2026-09-30'`): the
 emulator follows the verified live Gateway recordings, and the Yolk repository checks its response
-shapes against each recording. The OpenAI, Anthropic, Codex, Grok, OpenCode Go, subscription-usage, email, and Fortnox routes are unverified,
+shapes against each recording. The OpenAI, Anthropic, Codex, Grok, OpenCode Go, subscription-usage, email, Fortnox, and Microsoft routes are unverified,
 like the synthetic fixtures they follow. The email write routes are connector writes: until an
 owner-approved live run against a practice mailbox, through a host `EmailClient` implementation,
 verifies them, the repository lists them in a time-bounded allowlist
 (`scripts/emulator-evidence-pending.json`), and the evidence check reports them as PENDING
 warnings until each entry's expiry date and fails again after it. The four Fortnox
-write routes are held in the same pending list until a live run against a Fortnox test company
-verifies them.
+write routes and the eleven Microsoft write routes are held in the same pending list until a live
+run against a Fortnox test company or a Microsoft practice tenant verifies them.

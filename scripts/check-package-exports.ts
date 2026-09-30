@@ -232,7 +232,8 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './opencode',
       './email',
       './node',
-      './fortnox'
+      './fortnox',
+      './microsoft'
     ],
     root: 'none'
   }

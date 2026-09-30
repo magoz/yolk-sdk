@@ -14,7 +14,9 @@ emulator is not HTTP at all: a fixture-driven fake backend for the generic `Emai
 Emulators never import other `@yolk-sdk/*` code: their wire shapes follow conformance fixtures
 (verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
-`/3` API that reproduces the observed quirks the Fortnox conformance cases claim.
+`/3` API that reproduces the observed quirks the Fortnox conformance cases claim, and the Microsoft
+Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
+conformance cases use.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -40,6 +42,7 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/email`     | `makeEmailEmulator`, `emailEmulatorRoutes`, seed and fault schemas (plain-JSON `EmailClient` backend)       |
 | `@yolk-sdk/emulators/node`      | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
 | `@yolk-sdk/emulators/fortnox`   | `makeFortnoxEmulator`, `fortnoxEmulatorRoutes`, `fortnoxEmulatorQuirks`, seed and fault schemas (Node only) |
+| `@yolk-sdk/emulators/microsoft` | `makeMicrosoftEmulator`, `microsoftEmulatorRoutes`, seed and fault schemas (Node only)                      |
 
 ## Routing
 
@@ -612,18 +615,130 @@ quirk to the plausible-but-wrong behavior. They exist only to prove that the mat
 case catches a disagreement (it fails with `ConformanceMismatch` while the others pass); never use
 them to model Fortnox.
 
+## Microsoft Graph emulator
+
+> **Node only.** `@yolk-sdk/emulators/microsoft` runs on the same pinned `@emulators/core` runtime
+> as the Fortnox emulator, loaded lazily by `makeMicrosoftEmulator`, so importing the subpath has
+> no side effects.
+
+`await makeMicrosoftEmulator(options?)` returns
+`{ fetch, baseUrl, sharePointOrigin, ledger, faults, monitors, reset, seed, snapshot, coverage, close }`.
+Each call has its own state; `await close()` when done. It emulates only what the eleven Microsoft
+conformance cases need, so the Microsoft connector and the cases run unchanged against it.
+
+Route **two origins** to the same fetch handler: Graph (`https://graph.microsoft.com`) and the
+SharePoint host of the copy monitor URLs (`sharePointOrigin`, default
+`https://synthetic-my.sharepoint.com`, the fixtures' host; the connector only accepts monitor URLs on
+`*.sharepoint.com` or `api.onedrive.com`). The paths never overlap, so both origins may share one
+loopback server:
+
+```ts
+import { makeMicrosoftEmulator } from '@yolk-sdk/emulators/microsoft'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const microsoft = await makeMicrosoftEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://graph.microsoft.com', microsoft.fetch),
+  EmulatorRoute.handler(microsoft.sharePointOrigin, microsoft.fetch)
+])
+// With serveFetchHandler, use EmulatorRoute.url(origin, server.url) for both origins.
+// ...run the code under test, then:
+await microsoft.close()
+```
+
+Graph routes (JSON; `Authorization: Bearer <non-empty>`, whose value is never checked, stored,
+forwarded, or ledgered; a missing bearer gets 401 `InvalidAuthenticationToken`):
+
+| Route (`/v1.0` prefix)                                        | Behavior                                                                                                                |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `GET /users/{userId}/calendars/{calendarId}/calendarView`     | Events overlapping `[startDateTime, endDateTime)`, by start; `$select`, `$top`, `$skip`, `@odata.nextLink`              |
+| `POST /users/{userId}/calendars/{calendarId}/events`          | 201 with the new event and its `id`; attendee-free, single-instance, UTC only                                           |
+| `GET`, `PATCH`, `DELETE /users/{userId}/events/{eventId}`     | Read (`$select`), update, delete (204; later reads 404)                                                                 |
+| `POST /users/{userId}/events/{eventId}/cancel`                | 202 with an empty body; the event is removed, so a later GET or DELETE is a 404                                         |
+| `GET /users/{userId}/mailFolders/{folderId}/messages`         | Newest first; `$select`, `$top`, `$skip`; opaque `@odata.nextLink`                                                      |
+| `POST /users/{userId}/messages`                               | 201 draft in Drafts (never sent)                                                                                        |
+| `PATCH /users/{userId}/messages/{messageId}`                  | `isRead`, `flag`, `categories`; subject, body, and recipients on drafts only                                            |
+| `POST /users/{userId}/messages/{messageId}/move`              | 201 with the moved message (`destinationId` is a folder id or `inbox`/`drafts`/`deleteditems`)                          |
+| `GET /users/{userId}/messages/{messageId}/attachments[/{id}]` | Listing includes inline attachments, never `contentId`; retrieval returns `contentId` and `contentBytes`                |
+| `POST /$batch`                                                | Up to 20 `POST /users/{userId}/messages/{messageId}/permanentDelete` subrequests; anything else refuses the whole batch |
+| `GET /drives/{driveId}/items/{itemId}` and `/children`        | Item read (`$select`) and children by name (`$select`, `$top`, `$skip`)                                                 |
+| `POST /drives/{driveId}/items/{itemId}/children`              | 201 folder; `@microsoft.graph.conflictBehavior` `fail` (409 `nameAlreadyExists`) or `rename`                            |
+| `DELETE /drives/{driveId}/items/{itemId}`                     | 204; the item and its subtree are removed (no recycle bin), later reads 404                                             |
+| `POST /drives/{driveId}/items/{itemId}/copy`                  | 202, empty body, exactly one monitor `Location` on `sharePointOrigin`; conflict behavior `fail` or `rename`             |
+
+The copy monitor, `GET /personal/{site}/_api/v2.0/monitor/{monitorId}` on the SharePoint origin,
+needs no credential (like the real capability URL). It answers `inProgress` (202) for
+`copyInProgressPolls` polls (default 1), then runs the copy once and answers `completed` (200) with
+the new item's `resourceId` (or `failed` when the source, destination, or name no longer allows
+it). Monitors are runtime data like the ledger: not part of `snapshot()`, listed by `monitors()`
+and `/_emulate/state`, and cleared by `reset` and `seed`.
+
+Wire behavior the cases claim:
+
+- **Ids.** Every message has an immutable id (answered under `Prefer: IdType="ImmutableId"`) and a
+  default id that each move regenerates; either addresses the message while current, so a moved
+  message keeps its immutable id and the old default id stops resolving.
+- **Times.** Event `dateTime` values are UTC with seven fractional digits
+  (`2026-09-23T12:00:00.0000000`) and `timeZone: "UTC"`; calendar reads answer
+  `preference-applied: outlook.timezone="UTC"` when asked, and any other time zone is refused.
+- **Paging.** `@odata.nextLink` is the configured `baseUrl`, the request's raw path (so
+  `/users/ada%40example.test` keeps its `%40`), and `%24select`/`%24top`/`%24skip`, byte for byte
+  as the paging fixture.
+- **Concurrent writes.** A message update or move holds its message for `conflictWindowMs`
+  (default 25) before answering; another write to that message arriving in that window loses with
+  409 `ErrorIrresolvableConflict` and changes nothing, and the first arrival wins. Writes that do
+  not overlap both apply (last writer wins).
+
+Anything else fails closed with the Graph error envelope `{ error: { code, message, innerError } }`
+(`innerError` holds a synthetic `date`, `request-id`, and `client-request-id`): unknown routes and
+methods (including `/me` paths) get 404 `SyntheticRouteNotEmulated` and are ledgered; query keys a
+route does not emulate get 400 before the route runs (so a rejected write writes nothing), as do
+`$select` fields, body properties, and values it does not emulate (attendees, non-UTC times,
+send-as `from`, `replace` conflicts, cross-drive copies, file creation). Responses omit
+`@odata.context`, except the monitor. `microsoftEmulatorErrorCodes` lists the codes:
+`ErrorItemNotFound`, `itemNotFound`, and `ErrorIrresolvableConflict` come from the fixtures, a few
+are documented Graph codes, and the `Synthetic*` ones are emulator codes.
+
+State and seeds: the mailbox user, mail folders, messages, file attachments (inline and regular),
+calendars and events, the drive and its items, and id counters. The default seed is the synthetic
+fixture entities with the same ids as `microsoftConformanceFixtureSeeds` (mailbox
+`ada@example.test`, calendar, events, attachment message, paging folder with three messages, drive,
+parent folder, and copy source). Pass `seed: { profile?, user?, mailFolders?, messages?,
+attachments?, calendars?, events?, drive?, driveItems? }` (entity lists replace the profile's) with
+profiles `'default'` or `'empty'`. `reset()` restores the current seed and clears the ledger,
+faults, and monitors; `seed(next)` replaces the state; `snapshot()` returns a deep copy. Created
+ids come from counters that only advance, so after a reversible case removes what it created, the
+state equals the seed except the counters.
+
+Faults, the ledger, and the control plane mirror the Fortnox emulator: `status` faults (`match`
+by method and raw path, `count`) answer before the route runs and follow the shared status and
+header rules; the default body is a Graph error envelope (`TooManyRequests` for 429, so a 429 with
+`retry-after: 2` reaches the connector as `microsoft_rate_limited` with `retryAfterMs: 2000`). The
+ledger records method, raw path, route template, query, parsed body, the `Prefer` header, status,
+evidence, the applied fault, and any `responseError`. Control plane: `/_emulate/ledger`, `faults`,
+`reset`, `state`, `seed`, and `coverage`.
+
+**Drill knobs (tests only).** `drills: { calendarRangeEmpty: true }` (empty calendar views),
+`{ createOmitsId: true }` (event create answers without `id`), `{ timestampPrecisionDigits: 3 }`,
+and `{ omitNextLink: true }` each make the emulator disagree with one claim, only to prove the
+matching conformance case catches it. The timestamp and paging knobs fail only their case; an empty
+view also fails the timestamp case's precondition, and an id-less create also fails the cancel
+case, which creates its event the same way.
+
 ## Evidence
 
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
 `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
-`emailEmulatorRoutes`, and `fortnoxEmulatorRoutes` list every emulated route with `method`, `path`,
+`emailEmulatorRoutes`, `fortnoxEmulatorRoutes`, and `microsoftEmulatorRoutes` list every emulated
+route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route of a fetch-handler emulator carries
 `x-emulator-evidence: unverified`; the email emulator records evidence on each ledger entry
 instead, since its plain-JSON replies carry no header. The Gateway route is `verified`
 (`observedAt: '2026-09-30'`): its wire shapes are checked against the verified live recordings.
-Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, email, and
-Fortnox) is unverified, like the synthetic fixtures it follows.
+Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, email, Fortnox,
+and Microsoft) is unverified, like the synthetic fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes
@@ -636,8 +751,8 @@ live run against a practice mailbox verifies them, the repository lists them in 
 time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry
 date): the check reports them as PENDING warnings until that date and fails again after it.
 
-All Fortnox routes are currently `unverified` (no live recording yet), including four connector
-write routes. Until an owner-approved live run verifies them, the repository lists them in a
+All Fortnox and Microsoft routes are currently `unverified` (no live recording yet), including four
+Fortnox and eleven Microsoft connector write routes. Until an owner-approved live run verifies them, the repository lists them in a
 visible, time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each
 entry's expiry date): the check reports them as PENDING warnings until that date and fails again
 after it.
@@ -661,6 +776,6 @@ await server.close()
 
 ## License
 
-`@yolk-sdk/emulators` is MIT. The Fortnox emulator depends on (does not vendor or bundle) the
+`@yolk-sdk/emulators` is MIT. The Fortnox and Microsoft emulators depend on (does not vendor or bundle) the
 Apache-2.0 [`@emulators/core`](https://github.com/vercel-labs/emulate) package, which ships no
 `NOTICE` file.

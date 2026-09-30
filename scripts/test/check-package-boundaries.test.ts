@@ -393,7 +393,7 @@ describe('emulators import rules', () => {
     }
   })
 
-  it('allows node: builtins and @emulators/core only in src/node.ts and the Fortnox emulator', () => {
+  it('allows node: builtins and @emulators/core only in src/node.ts and the Fortnox and Microsoft emulators', () => {
     const root = fixtureDirectory()
 
     scaffoldEmulators(root)
@@ -404,7 +404,10 @@ describe('emulators import rules', () => {
       'packages/emulators/src/node.ts',
       'packages/emulators/src/fortnox.ts',
       'packages/emulators/src/fortnox/api.ts',
-      'packages/emulators/src/fortnox/nested/state.ts'
+      'packages/emulators/src/fortnox/nested/state.ts',
+      'packages/emulators/src/microsoft.ts',
+      'packages/emulators/src/microsoft/api.ts',
+      'packages/emulators/src/microsoft/nested/state.ts'
     ]
 
     const forbidden = [
@@ -412,7 +415,9 @@ describe('emulators import rules', () => {
       'packages/emulators/src/router.ts',
       'packages/emulators/src/nested/helper.ts',
       'packages/emulators/src/fortnox-helpers.ts',
-      'packages/emulators/src/fortnoxish/api.ts'
+      'packages/emulators/src/fortnoxish/api.ts',
+      'packages/emulators/src/microsoft-helpers.ts',
+      'packages/emulators/src/microsoftish/api.ts'
     ]
 
     for (const rel of [...allowed, ...forbidden]) {

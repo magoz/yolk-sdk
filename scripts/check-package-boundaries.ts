@@ -225,14 +225,17 @@ const rules: ReadonlyArray<BoundaryRule> = [
     forbiddenImports: emulatorsForbiddenImports
   },
   // Node builtins and the Node-only `@emulators/core` stay behind the Node subpaths: the loopback
-  // server (`src/node.ts`) and the stateful Fortnox emulator (`src/fortnox.ts`, `src/fortnox/**`).
+  // server (`src/node.ts`) and the stateful Fortnox and Microsoft emulators (`src/fortnox.ts`,
+  // `src/fortnox/**`, `src/microsoft.ts`, `src/microsoft/**`).
   {
     packageDir: 'packages/emulators/src',
     forbiddenImports: ['node:', '@emulators/core'],
     excludedDirs: [
       'packages/emulators/src/node.ts',
       'packages/emulators/src/fortnox.ts',
-      'packages/emulators/src/fortnox'
+      'packages/emulators/src/fortnox',
+      'packages/emulators/src/microsoft.ts',
+      'packages/emulators/src/microsoft'
     ]
   }
 ]
