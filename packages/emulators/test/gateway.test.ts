@@ -64,17 +64,30 @@ type Delta = {
   readonly content?: string | null
   readonly reasoning_content?: string
   readonly reasoning?: string
+  readonly reasoning_details?: ReadonlyArray<Schema.JsonObject>
   readonly tool_calls?: ReadonlyArray<ToolCallDelta>
+  readonly provider_metadata?: {
+    readonly gateway?: { readonly generationId?: string; readonly routing?: Schema.JsonObject }
+  } & Schema.JsonObject
 }
 
 type ChunkPayload = {
+  readonly id: string
   readonly object: string
-  readonly choices: ReadonlyArray<{ readonly delta: Delta; readonly finish_reason: string | null }>
+  readonly model: string
+  readonly choices: ReadonlyArray<{
+    readonly delta: Delta
+    readonly logprobs?: null
+    readonly finish_reason: string | null
+  }>
   readonly usage?: {
     readonly prompt_tokens: number
     readonly completion_tokens: number
     readonly completion_tokens_details?: { readonly reasoning_tokens: number }
   }
+  readonly system_fingerprint?: string
+  readonly service_tier?: string
+  readonly generationId?: string
 }
 
 type SseEvent = { readonly done: true } | { readonly done: false; readonly data: ChunkPayload }
@@ -118,34 +131,75 @@ const control = (emulator: GatewayEmulator, method: string, path: string, body?:
 }
 
 describe('gateway emulator defaults', () => {
-  it('streams chat.completion.chunk text deltas, a stop finish, usage, and [DONE]', async () => {
+  it('streams chat.completion.chunk text deltas, a stop finish event carrying usage, and [DONE]', async () => {
     const emulator = makeGatewayEmulator()
     const response = await chat(emulator, plainRequest())
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('text/event-stream')
-    expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+    // A verified route: responses carry no evidence tag.
+    expect(response.headers.get(emulatorEvidenceHeader)).toBeNull()
 
     const events = sseEvents(await response.text())
     const all = payloads(events)
     const text = deltas(events).flatMap(delta => (delta.content ? [delta.content] : []))
 
     expect(all.every(payload => payload.object === 'chat.completion.chunk')).toBe(true)
+    expect(all.every(payload => payload.system_fingerprint !== undefined)).toBe(true)
+    expect(all.every(payload => payload.choices.every(choice => choice.logprobs === null))).toBe(
+      true
+    )
+    expect(deltas(events)[0]).toEqual({ role: 'assistant' })
     expect(text.length).toBeGreaterThan(1)
     expect(text.join('')).toBe('Hello from the synthetic gateway.')
-    expect(finishReasons(events)).toContain('stop')
+    expect(finishReasons(events)).toEqual([null, null, null, null, 'stop'])
 
-    const usage = all.at(-1)
+    // Usage rides on the finish event itself, followed only by [DONE].
+    const finish = all.at(-1)
 
-    expect(usage?.choices).toEqual([])
-    expect(usage?.usage).toMatchObject({
+    expect(finish?.choices[0]?.finish_reason).toBe('stop')
+    expect(finish?.usage).toMatchObject({
       prompt_tokens: expect.any(Number),
-      completion_tokens: expect.any(Number)
+      completion_tokens: expect.any(Number),
+      completion_tokens_details: { reasoning_tokens: 0 }
     })
+    expect(finish?.generationId).toBe(finish?.id)
+    expect(finish?.service_tier).toBe('default')
+    expect(finish?.choices[0]?.delta.provider_metadata?.gateway?.generationId).toBe(finish?.id)
+    expect(finish?.choices[0]?.delta.provider_metadata?.gateway?.routing).toMatchObject({
+      originalModelId: 'openai/gpt-4.1-nano',
+      resolvedProvider: 'openai'
+    })
+    expect(all.filter(payload => payload.usage !== undefined)).toEqual([finish])
     expect(events.at(-1)).toEqual({ done: true })
+    expect(events).toHaveLength(all.length + 1)
   })
 
-  it('omits the usage chunk unless stream_options.include_usage is set', async () => {
+  it('sends service_tier only for openai/* models, and the recorded upstream entry per family', async () => {
+    const emulator = makeGatewayEmulator()
+
+    const events = sseEvents(
+      await (await chat(emulator, plainRequest({ model: 'deepseek/deepseek-v4.1-flash' }))).text()
+    )
+
+    const finish = payloads(events).at(-1)
+
+    expect(finish?.service_tier).toBeUndefined()
+    expect(finish?.generationId).toBe(finish?.id)
+    expect(finish?.choices[0]?.delta.provider_metadata).toMatchObject({
+      baseten: { acceptedPredictionTokens: 0, rejectedPredictionTokens: 0 }
+    })
+    expect(Object.keys(finish?.choices[0]?.delta.provider_metadata ?? {})).toEqual([
+      'baseten',
+      'gateway'
+    ])
+    expect(finish?.choices[0]?.delta.provider_metadata?.gateway?.routing).toMatchObject({
+      resolvedProvider: 'baseten',
+      finalProvider: 'baseten'
+    })
+  })
+
+  it('omits usage unless stream_options.include_usage is set', async () => {
     const emulator = makeGatewayEmulator()
 
     const events = sseEvents(
@@ -156,41 +210,50 @@ describe('gateway emulator defaults', () => {
     expect(events.at(-1)).toEqual({ done: true })
   })
 
-  it('sends reasoning_content deltas before text for reasoning models that ask for reasoning', async () => {
+  it('sends reasoning deltas with reasoning_details before text for reasoning models that ask for reasoning', async () => {
     const emulator = makeGatewayEmulator()
 
-    for (const reasoningFields of [
-      { reasoning_effort: 'high' },
-      { thinking: { type: 'enabled' } }
-    ]) {
-      const events = sseEvents(
-        await (
-          await chat(
-            emulator,
-            plainRequest({ model: 'deepseek/deepseek-v3.2', ...reasoningFields })
-          )
-        ).text()
-      )
+    for (const model of ['deepseek/deepseek-v4.1-flash', 'deepseek/deepseek-v3.2']) {
+      for (const reasoningFields of [
+        { reasoning_effort: 'high' },
+        { thinking: { type: 'enabled' } }
+      ]) {
+        const events = sseEvents(
+          await (await chat(emulator, plainRequest({ model, ...reasoningFields }))).text()
+        )
 
-      const kinds = deltas(events).flatMap(delta =>
-        delta.reasoning_content ? ['reasoning'] : delta.content ? ['text'] : []
-      )
+        const kinds = deltas(events).flatMap(delta =>
+          delta.reasoning ? ['reasoning'] : delta.content ? ['text'] : []
+        )
 
-      expect(kinds.filter(kind => kind === 'reasoning').length).toBeGreaterThan(0)
-      expect(kinds.lastIndexOf('reasoning')).toBeLessThan(kinds.indexOf('text'))
-      expect(
-        payloads(events).at(-1)?.usage?.completion_tokens_details?.reasoning_tokens
-      ).toBeGreaterThan(0)
+        expect(kinds.filter(kind => kind === 'reasoning').length).toBeGreaterThan(0)
+        expect(kinds.lastIndexOf('reasoning')).toBeLessThan(kinds.indexOf('text'))
+        expect(deltas(events).some(delta => delta.reasoning_content !== undefined)).toBe(false)
+
+        for (const delta of deltas(events).filter(candidate => candidate.reasoning)) {
+          expect(delta.reasoning_details).toEqual([
+            { type: 'reasoning.text', text: delta.reasoning, format: 'unknown', index: 0 }
+          ])
+        }
+
+        expect(
+          payloads(events).at(-1)?.usage?.completion_tokens_details?.reasoning_tokens
+        ).toBeGreaterThan(0)
+      }
     }
 
     for (const request of [
-      plainRequest({ model: 'deepseek/deepseek-v3.2' }),
-      plainRequest({ model: 'deepseek/deepseek-v3.2', thinking: { type: 'disabled' } }),
+      plainRequest({ model: 'deepseek/deepseek-v4.1-flash' }),
+      plainRequest({ model: 'deepseek/deepseek-v4.1-flash', thinking: { type: 'disabled' } }),
       plainRequest({ reasoning_effort: 'high' })
     ]) {
       const events = sseEvents(await (await chat(emulator, request)).text())
 
-      expect(deltas(events).some(delta => delta.reasoning_content !== undefined)).toBe(false)
+      expect(
+        deltas(events).some(
+          delta => delta.reasoning !== undefined || delta.reasoning_content !== undefined
+        )
+      ).toBe(false)
     }
   })
 
@@ -251,7 +314,11 @@ describe('gateway emulator defaults', () => {
 
     const response = await chat(
       emulator,
-      plainRequest({ stream: false, model: 'deepseek/deepseek-v3.2', reasoning_effort: 'low' })
+      plainRequest({
+        stream: false,
+        model: 'deepseek/deepseek-v4.1-flash',
+        reasoning_effort: 'low'
+      })
     )
 
     expect(response.headers.get('content-type')).toBe('application/json')
@@ -260,7 +327,7 @@ describe('gateway emulator defaults', () => {
 
     expect(body).toMatchObject({
       object: 'chat.completion',
-      model: 'deepseek/deepseek-v3.2',
+      model: 'deepseek/deepseek-v4.1-flash',
       choices: [
         {
           index: 0,
@@ -268,7 +335,7 @@ describe('gateway emulator defaults', () => {
           message: {
             role: 'assistant',
             content: 'Hello from the synthetic gateway.',
-            reasoning_content: expect.any(String)
+            reasoning: expect.any(String)
           }
         }
       ],
@@ -276,19 +343,20 @@ describe('gateway emulator defaults', () => {
     })
   })
 
-  it('rejects unknown models with the Gateway error envelope', async () => {
+  it('rejects unknown models with the recorded 404 Gateway envelope (no code)', async () => {
     const emulator = makeGatewayEmulator({ knownModels: ['example/model-a'] })
 
     for (const model of ['yolk-conformance/model-does-not-exist', 'openai/gpt-4.1-nano']) {
       const response = await chat(emulator, plainRequest({ model }))
 
-      expect(response.status).toBe(400)
-      expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(response.status).toBe(404)
+      expect(response.headers.get('content-type')).toBe('application/json')
+      expect(response.headers.get(emulatorEvidenceHeader)).toBeNull()
       expect(await response.json()).toEqual({
         error: {
-          message: expect.any(String),
-          type: 'invalid_request_error',
-          code: 'model_not_found'
+          message: `Model '${model}' not found`,
+          type: 'model_not_found',
+          param: { modelId: model }
         }
       })
     }
@@ -359,7 +427,7 @@ describe('gateway emulator ledger', () => {
       await chat(
         emulator,
         plainRequest({
-          model: 'deepseek/deepseek-v3.2',
+          model: 'deepseek/deepseek-v4.1-flash',
           reasoning_effort: 'high',
           thinking: { type: 'enabled' },
           tools: [{ type: 'function', function: { name: 'lookup_weather' } }]
@@ -373,15 +441,15 @@ describe('gateway emulator ledger', () => {
       seq: 1,
       method: 'POST',
       path: '/v1/chat/completions',
-      model: 'deepseek/deepseek-v3.2',
+      model: 'deepseek/deepseek-v4.1-flash',
       stream: true,
       reasoningEffort: 'high',
       thinking: { type: 'enabled' },
       toolNames: ['lookup_weather'],
-      evidence: 'unverified',
+      evidence: 'verified',
       status: 200
     })
-    expect(entry?.body).toMatchObject({ model: 'deepseek/deepseek-v3.2', stream: true })
+    expect(entry?.body).toMatchObject({ model: 'deepseek/deepseek-v4.1-flash', stream: true })
     expect(entry?.bodyChunks).toBeGreaterThan(1)
     expect(entry?.fault).toBeUndefined()
   })
@@ -398,6 +466,68 @@ describe('gateway emulator ledger', () => {
     expect(emulator.ledger.entries()[0]?.bodyChunks).toBe(1)
 
     await reader.cancel()
+  })
+})
+
+describe('gateway emulator chunk packing', () => {
+  const readChunks = async (response: Response): Promise<ReadonlyArray<string>> => {
+    const reader = bodyReader(response)
+    const decoder = new TextDecoder()
+    const chunks: Array<string> = []
+
+    for (;;) {
+      const next = await reader.read()
+
+      if (next.done) return chunks
+
+      chunks.push(decoder.decode(next.value))
+    }
+  }
+
+  const eventCount = (chunk: string) => sseEvents(chunk).length
+
+  it('packs two events per network chunk by default, finish and [DONE] together last', async () => {
+    const emulator = makeGatewayEmulator()
+    const chunks = await readChunks(await chat(emulator, plainRequest()))
+
+    // Six events (opening delta, three text deltas, finish with usage, [DONE]) in three chunks.
+    expect(chunks.map(eventCount)).toEqual([2, 2, 2])
+
+    const last = sseEvents(chunks.at(-1) ?? '')
+
+    expect(last.at(-1)).toEqual({ done: true })
+    expect(finishReasons(last)).toEqual(['stop'])
+    expect(emulator.ledger.entries()[0]?.bodyChunks).toBe(3)
+  })
+
+  it('counts packing from the end, so the first chunk may carry fewer events', async () => {
+    const emulator = makeGatewayEmulator({ eventsPerChunk: 4 })
+    const chunks = await readChunks(await chat(emulator, plainRequest()))
+
+    expect(chunks.map(eventCount)).toEqual([2, 4])
+  })
+
+  it('sends one event per chunk with eventsPerChunk: 1', async () => {
+    const emulator = makeGatewayEmulator({ eventsPerChunk: 1 })
+    const chunks = await readChunks(await chat(emulator, plainRequest()))
+
+    expect(chunks.map(eventCount)).toEqual([1, 1, 1, 1, 1, 1])
+  })
+
+  it('keeps a JSON body as one chunk', async () => {
+    const emulator = makeGatewayEmulator({ eventsPerChunk: 3 })
+
+    await (await chat(emulator, plainRequest({ stream: false }))).text()
+
+    expect(emulator.ledger.entries()[0]?.bodyChunks).toBe(1)
+  })
+
+  it('throws for an eventsPerChunk that is not a positive integer', () => {
+    for (const eventsPerChunk of [0, -1, 1.5, Number.NaN]) {
+      expect(() => makeGatewayEmulator({ eventsPerChunk }), String(eventsPerChunk)).toThrow(
+        GatewayEmulatorInputInvalid
+      )
+    }
   })
 })
 
@@ -418,7 +548,7 @@ describe('gateway emulator scripted turns', () => {
     const events = sseEvents(await (await chat(emulator, plainRequest())).text())
 
     const kinds = deltas(events).flatMap(delta =>
-      delta.reasoning_content ? ['reasoning'] : delta.content ? ['text'] : []
+      delta.reasoning ? ['reasoning'] : delta.content ? ['text'] : []
     )
 
     expect(kinds).toEqual(['text', 'text', 'reasoning'])
@@ -430,6 +560,22 @@ describe('gateway emulator scripted turns', () => {
     const next = sseEvents(await (await chat(emulator, plainRequest())).text())
 
     expect(payloads(next).at(-1)?.usage).toBeDefined()
+  })
+
+  it('sends scripted reasoning_content alone when asked for the DeepSeek-native field', async () => {
+    const emulator = makeGatewayEmulator()
+
+    emulator.script.enqueue({
+      reasoning: ['think'],
+      reasoningField: 'reasoning_content',
+      text: ['A']
+    })
+
+    const reasoning = deltas(sseEvents(await (await chat(emulator, plainRequest())).text())).filter(
+      delta => delta.reasoning_content !== undefined || delta.reasoning !== undefined
+    )
+
+    expect(reasoning).toEqual([{ reasoning_content: 'think' }])
   })
 
   it('streams scripted tool-call fragments as given', async () => {
@@ -499,13 +645,13 @@ describe('gateway emulator faults', () => {
     emulator.faults.add({
       kind: 'status',
       status: 500,
-      match: { model: 'deepseek/deepseek-v3.2', path: '/v1/*' }
+      match: { model: 'deepseek/deepseek-v4.1-flash', path: '/v1/*' }
     })
 
     expect((await chat(emulator, plainRequest())).status).toBe(200)
-    expect((await chat(emulator, plainRequest({ model: 'deepseek/deepseek-v3.2' }))).status).toBe(
-      500
-    )
+    expect(
+      (await chat(emulator, plainRequest({ model: 'deepseek/deepseek-v4.1-flash' }))).status
+    ).toBe(500)
   })
 
   it('errors the body stream after N chunks', async () => {
@@ -525,15 +671,20 @@ describe('gateway emulator faults', () => {
     })
   })
 
-  it('truncates cleanly after N chunks without [DONE]', async () => {
+  it('truncates cleanly after N network chunks (two events each by default) without [DONE]', async () => {
     const emulator = makeGatewayEmulator()
 
-    emulator.faults.add({ kind: 'truncate-after-chunks', chunks: 3 })
+    emulator.faults.add({ kind: 'truncate-after-chunks', chunks: 2 })
 
     const events = sseEvents(await (await chat(emulator, plainRequest())).text())
 
-    expect(events.length).toBe(3)
+    expect(events.length).toBe(4)
     expect(events.some(event => event.done)).toBe(false)
+    expect(finishReasons(events)).not.toContain('stop')
+    expect(emulator.ledger.entries()[0]).toMatchObject({
+      fault: 'truncate-after-chunks',
+      bodyChunks: 2
+    })
   })
 
   it('answers 500 instead of silently ignoring a chunk fault that cannot apply', async () => {
@@ -688,14 +839,15 @@ describe('gateway emulator error recovery', () => {
       const response = await withUnbuildableStatus(503, () => chat(emulator, plainRequest()))
 
       expect(response.status).toBe(500)
-      expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      // Answered through the verified route, so it carries no evidence tag.
+      expect(response.headers.get(emulatorEvidenceHeader)).toBeNull()
       expect((await response.json()).error.type).toBe('emulator_error')
 
       const [entry] = emulator.ledger.entries()
 
       expect(entry).toMatchObject({
         status: 500,
-        evidence: 'unverified',
+        evidence: 'verified',
         responseError: expect.any(String)
       })
       expect(entry?.fault).toBeUndefined()
@@ -809,7 +961,7 @@ describe('gateway emulator control plane', () => {
     const coverage = await (await control(emulator, 'GET', '/_emulate/coverage')).json()
 
     expect(coverage).toEqual({
-      routes: [{ ...gatewayEmulatorRoutes[0], observedAt: undefined, requests: 1 }].map(route =>
+      routes: [{ ...gatewayEmulatorRoutes[0], requests: 1 }].map(route =>
         JSON.parse(JSON.stringify(route))
       ),
       unknownRouteRequests: 1
@@ -882,7 +1034,7 @@ describe('route handler binding', () => {
 })
 
 describe('gatewayEmulatorRoutes', () => {
-  it('lists the chat completions route as unverified provider evidence for the Gateway cases', () => {
+  it('lists the chat completions route as verified provider evidence for the Gateway cases', () => {
     expect(gatewayEmulatorRoutes).toEqual([
       {
         method: 'POST',
@@ -895,8 +1047,8 @@ describe('gatewayEmulatorRoutes', () => {
           'vercel-ai-gateway.stream.tool-call-deltas',
           'vercel-ai-gateway.stream.error-envelope'
         ],
-        evidence: 'unverified',
-        observedAt: undefined
+        evidence: 'verified',
+        observedAt: '2026-09-30'
       }
     ])
   })

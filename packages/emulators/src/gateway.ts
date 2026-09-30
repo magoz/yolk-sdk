@@ -3,13 +3,22 @@
  * `POST /v1/chat/completions` endpoint, with scripted turns, wire faults, a
  * request ledger, and an `/_emulate/*` control plane.
  *
- * It never imports SDK code: its wire shapes follow the synthetic Gateway
- * conformance fixtures (`chat.completion.chunk` SSE, usage chunk,
- * `data: [DONE]`, and the `{ error: { message, type, code } }` envelope) and
- * are linked to those conformance case ids in `gatewayEmulatorRoutes`. The
- * Chat Completions machinery is shared with the OpenAI emulator
- * (`chat-completions.ts`); this module supplies the Gateway's paths, models,
- * envelope, and reasoning.
+ * It never imports SDK code: its wire shapes follow the verified live Gateway
+ * conformance recordings (2026-09-30), copied as data: `chat.completion.chunk`
+ * SSE with several events per network chunk, `delta.reasoning` plus
+ * `reasoning_details` for DeepSeek reasoning, a finish event carrying
+ * `provider_metadata`, `usage`, `system_fingerprint`, `service_tier`, and
+ * `generationId`, then `data: [DONE]`, and the 404 `model_not_found`
+ * envelope `{ error: { message, type, param: { modelId } } }` for unknown
+ * models. Ids, costs, and routing metadata are synthetic stand-ins. The route
+ * is linked to those conformance case ids in `gatewayEmulatorRoutes`
+ * (`verified`). The Chat Completions machinery is shared with the OpenAI
+ * emulator (`chat-completions.ts`); this module supplies the Gateway's paths,
+ * models, envelope, reasoning, and wire profile.
+ *
+ * Not covered by a recording (synthetic): the 401 error, default fault
+ * bodies, the non-streamed `chat.completion` body, and the answer to a request
+ * without a `model` (404 `Model '' not found` with `param.modelId: null`).
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`,
  * `TextEncoder`, `URL`); no Effect runtime is required to use it.
@@ -32,8 +41,11 @@ import {
   type ChatFaultKind,
   type ChatFaultState,
   type ChatLedgerEntry,
+  type ChatResponseIdentity,
   type ChatRouteCoverage,
-  type ChatWireError
+  type ChatUsageCounts,
+  type ChatWireError,
+  type ChatWireProfile
 } from './chat-completions.ts'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
 
@@ -47,17 +59,26 @@ export const gatewayChatCompletionsPath = '/v1/chat/completions'
 export const gatewayEmulatorDefaultModels: ReadonlyArray<string> = [
   'openai/gpt-4.1-nano',
   'openai/gpt-4.1-mini',
-  'deepseek/deepseek-v3.2'
+  'deepseek/deepseek-v3.2',
+  'deepseek/deepseek-v4.1-flash'
 ]
 
 /** Models that stream reasoning deltas when reasoning is requested. */
 export const gatewayEmulatorDefaultReasoningModels: ReadonlyArray<string> = [
-  'deepseek/deepseek-v3.2'
+  'deepseek/deepseek-v3.2',
+  'deepseek/deepseek-v4.1-flash'
 ]
 
 /**
+ * SSE events per network chunk by default. The live Gateway packs several
+ * events into one network chunk (the recordings carry one to four, always
+ * with the finish event and `data: [DONE]` together in the last chunk).
+ */
+export const gatewayEmulatorDefaultEventsPerChunk = 2
+
+/**
  * Route evidence manifest: every emulated Gateway route and the conformance
- * cases whose (currently synthetic, unverified) wire shapes it follows.
+ * cases whose verified live recordings (2026-09-30) its wire shapes follow.
  */
 export const gatewayEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
   {
@@ -71,8 +92,8 @@ export const gatewayEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
       'vercel-ai-gateway.stream.tool-call-deltas',
       'vercel-ai-gateway.stream.error-envelope'
     ],
-    evidence: 'unverified',
-    observedAt: undefined
+    evidence: 'verified',
+    observedAt: '2026-09-30'
   }
 ]
 
@@ -94,10 +115,12 @@ export type GatewayFaultMatch = ChatFaultMatch
  * - `truncate-after-chunks`: send `chunks` body chunks, then close the body
  *   cleanly (for example without `data: [DONE]`).
  *
- * A whole JSON body counts as one chunk. A chunk fault that cannot take
- * effect (`error-after-chunks` beyond the chunk count, or
- * `truncate-after-chunks` at or beyond it) answers 500 with an emulator error
- * instead of silently doing nothing, and is not consumed.
+ * Chunk faults count network chunks: a streamed chunk carries up to
+ * `eventsPerChunk` SSE events (default 2), and a whole JSON body counts as one
+ * chunk. A chunk fault that cannot take effect (`error-after-chunks` beyond
+ * the chunk count, or `truncate-after-chunks` at or beyond it) answers 500
+ * with an emulator error instead of silently doing nothing, and is not
+ * consumed.
  */
 export const GatewayFault = ChatFault
 
@@ -105,7 +128,11 @@ export type GatewayFault = ChatFault
 
 export type GatewayFaultKind = ChatFaultKind
 
-/** Usage for a scripted turn (sent as the wire `usage` object). */
+/**
+ * Usage for a scripted turn, sent as the Gateway `usage` object (token counts,
+ * `completion_tokens_details.reasoning_tokens` defaulting to 0, and synthetic
+ * zero costs).
+ */
 export const GatewayScriptedUsage = ChatScriptedUsage
 
 export type GatewayScriptedUsage = ChatScriptedUsage
@@ -120,7 +147,8 @@ export type GatewayScriptedToolCall = ChatScriptedToolCall
  * `usage` omitted is synthesized when the request asks for usage, and `null`
  * drops it; `finishReason` omitted is `tool_calls` with tool calls, else
  * `stop`. `order` defaults to `reasoning-first`; `reasoningField` defaults to
- * `reasoning_content` (the Gateway-normalized alternative is `reasoning`).
+ * `reasoning` (streamed with `reasoning_details`, as recorded live); the
+ * DeepSeek-native `reasoning_content` is sent alone.
  */
 export const GatewayScriptedCompletion = ChatScriptedReasoningCompletion
 
@@ -136,9 +164,12 @@ export const GatewayScriptedTurn = ChatScriptedReasoningTurn
 
 export type GatewayScriptedTurn = ChatScriptedReasoningTurn
 
-/** Thrown by the JS API (`faults.add`, `script.enqueue`) for invalid input; a programmer error. */
+/**
+ * Thrown by the JS API (`faults.add`, `script.enqueue`) for invalid input, and
+ * by `makeGatewayEmulator` for invalid options; a programmer error.
+ */
 export class GatewayEmulatorInputInvalid extends Data.TaggedError('GatewayEmulatorInputInvalid')<{
-  readonly input: 'fault' | 'turn'
+  readonly input: 'fault' | 'turn' | 'options'
   readonly reason: string
 }> {
   override get message(): string {
@@ -159,6 +190,14 @@ export type GatewayEmulatorOptions = {
   readonly knownModels?: ReadonlyArray<string>
   /** Model ids that stream reasoning. Defaults to `gatewayEmulatorDefaultReasoningModels`. */
   readonly reasoningModels?: ReadonlyArray<string>
+  /**
+   * SSE events per network chunk of a streamed body, a positive integer.
+   * Defaults to `gatewayEmulatorDefaultEventsPerChunk` (2); 1 sends one event
+   * per chunk. Events are packed counting from the end, so the last chunk
+   * holds the finish event and `data: [DONE]` together. Chunk faults count
+   * these network chunks.
+   */
+  readonly eventsPerChunk?: number
 }
 
 export type GatewayEmulator = ChatCompletionsEmulator<GatewayScriptedTurn>
@@ -167,21 +206,194 @@ const gatewayErrorEnvelope = (error: ChatWireError): Schema.Json => ({
   error: { message: error.message, type: error.type, code: error.code }
 })
 
+// Synthetic stand-ins for the metadata the live Gateway attaches to its chunks. Keys and value
+// types follow the recordings; every value is synthetic (no recorded id, fingerprint, or cost).
+const syntheticFingerprint = 'fp_synthetic'
+
+const syntheticAttemptTime = 1790000000000
+
+const syntheticCost = '0'
+
+const vendorOf = (model: string): string | undefined => {
+  const [vendor] = model.split('/')
+
+  return vendor === undefined || vendor.length === 0 || vendor === model ? undefined : vendor
+}
+
+// `service_tier` was recorded only for OpenAI models.
+const isOpenAiModel = (model: string): boolean => vendorOf(model) === 'openai'
+
+const syntheticResponseId = (identity: ChatResponseIdentity): string =>
+  `resp_synthetic_${identity.id}`
+
+type GatewayUpstream = { readonly provider: string; readonly entry?: Schema.JsonObject }
+
+/**
+ * The upstream provider the Gateway routes a model to, and its `provider_metadata` entry (keyed by
+ * that provider), per model family as recorded: `openai/*` routes to `openai` with
+ * `{ responseId, serviceTier }`; `deepseek/*` routes to `baseten` with
+ * `{ acceptedPredictionTokens, rejectedPredictionTokens }` (synthetic zero counts). Other families
+ * were not recorded: they route to their vendor prefix without an upstream entry.
+ */
+const upstreamOf = (identity: ChatResponseIdentity): GatewayUpstream => {
+  const vendor = vendorOf(identity.model)
+
+  if (vendor === 'openai') {
+    return {
+      provider: 'openai',
+      entry: { responseId: syntheticResponseId(identity), serviceTier: 'default' }
+    }
+  }
+
+  if (vendor === 'deepseek') {
+    return {
+      provider: 'baseten',
+      entry: { acceptedPredictionTokens: 0, rejectedPredictionTokens: 0 }
+    }
+  }
+
+  return { provider: vendor ?? 'synthetic' }
+}
+
+/** The `gateway` entry of `provider_metadata`: routing, costs, and the generation id. */
+const gatewayRoutingMetadata = (identity: ChatResponseIdentity): Schema.JsonObject => {
+  const { provider } = upstreamOf(identity)
+  const responseId = syntheticResponseId(identity)
+
+  return {
+    routing: {
+      originalModelId: identity.model,
+      resolvedProvider: provider,
+      fallbacksAvailable: ['synthetic-fallback'],
+      planningReasoning: 'Synthetic: routing planned by the emulator.',
+      canonicalSlug: identity.model,
+      finalProvider: provider,
+      modelAttemptCount: 1,
+      modelAttempts: [
+        {
+          canonicalSlug: identity.model,
+          success: true,
+          providerAttemptCount: 1,
+          providerAttempts: [
+            {
+              provider,
+              credentialType: 'system',
+              success: true,
+              startTime: syntheticAttemptTime,
+              endTime: syntheticAttemptTime + 1,
+              providerRequestId: `req_synthetic_${identity.id}`,
+              statusCode: 200,
+              providerResponseId: responseId
+            }
+          ]
+        }
+      ],
+      totalProviderAttemptCount: 1,
+      affinity: { outcome: 'skipped_below_min_prefix' },
+      clientSessionId: 'synthetic-client-session',
+      clientSessionIdSource: 'fingerprint'
+    },
+    cost: syntheticCost,
+    marketCost: syntheticCost,
+    surchargeCost: syntheticCost,
+    gatewayCost: syntheticCost,
+    inferenceCost: syntheticCost,
+    inputInferenceCost: syntheticCost,
+    outputInferenceCost: syntheticCost,
+    generationId: identity.id
+  }
+}
+
+/** `provider_metadata`: the upstream provider's entry first (when its family has one), then `gateway`. */
+const gatewayProviderMetadata = (identity: ChatResponseIdentity): Schema.JsonObject => {
+  const metadata: Record<string, Schema.Json> = {}
+  const upstream = upstreamOf(identity)
+
+  if (upstream.entry !== undefined) {
+    metadata[upstream.provider] = upstream.entry
+  }
+
+  metadata.gateway = gatewayRoutingMetadata(identity)
+
+  return metadata
+}
+
+const gatewayUsage = (counts: ChatUsageCounts): Schema.JsonObject => ({
+  prompt_tokens: counts.promptTokens,
+  completion_tokens: counts.completionTokens,
+  total_tokens: counts.promptTokens + counts.completionTokens,
+  cost: 0,
+  is_byok: false,
+  prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0, video_tokens: 0 },
+  cost_details: {
+    upstream_inference_cost: null,
+    upstream_inference_prompt_cost: 0,
+    upstream_inference_completions_cost: 0
+  },
+  completion_tokens_details: { reasoning_tokens: counts.reasoningTokens ?? 0, image_tokens: 0 },
+  cache_creation_input_tokens: 0,
+  market_cost: 0,
+  gateway_cost: 0
+})
+
+const gatewayWireProfile = (eventsPerChunk: number): ChatWireProfile => ({
+  eventsPerChunk,
+  streamUsage: 'finish-event',
+  openingDelta: { role: 'assistant' },
+  choiceFields: { logprobs: null },
+  reasoningField: 'reasoning',
+  reasoningDetails: true,
+  chunkFields: () => ({ system_fingerprint: syntheticFingerprint }),
+  finishFields: identity => {
+    const chunk: Record<string, Schema.Json> = {}
+
+    if (isOpenAiModel(identity.model)) {
+      chunk.service_tier = 'default'
+    }
+
+    chunk.generationId = identity.id
+
+    return { delta: { provider_metadata: gatewayProviderMetadata(identity) }, chunk }
+  },
+  usage: gatewayUsage
+})
+
+const validEventsPerChunk = (eventsPerChunk: number | undefined): number => {
+  const value = eventsPerChunk ?? gatewayEmulatorDefaultEventsPerChunk
+
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new GatewayEmulatorInputInvalid({
+      input: 'options',
+      reason: `eventsPerChunk must be a positive integer, got ${String(eventsPerChunk)}`
+    })
+  }
+
+  return value
+}
+
 /**
  * Create a Vercel AI Gateway emulator. Each call has independent ledger,
- * fault, and script state.
+ * fault, and script state. Throws `GatewayEmulatorInputInvalid` for an
+ * invalid `eventsPerChunk`.
  *
  * Without a script, `POST /v1/chat/completions` answers a known model with
- * synthetic text deltas (`stream: true`: `chat.completion.chunk` SSE, a finish
- * chunk, a usage chunk when `stream_options.include_usage` is set, and
- * `data: [DONE]`; `stream: false`: one `chat.completion` JSON body). Reasoning
- * models asked for reasoning (`reasoning_effort`, or `thinking.type:
- * 'enabled'`) stream `delta.reasoning_content` before the text. A request with
- * `tools` gets one tool call whose arguments are synthesized from the tool's
- * JSON Schema and streamed in fragments, finishing with `tool_calls`. Unknown
- * models get the Gateway error envelope (400, `model_not_found`); a missing
- * bearer credential gets a 401 envelope; unknown routes get a 404 JSON error.
- * The ledger records the `max_tokens` limit as `maxCompletionTokens`.
+ * synthetic text deltas. `stream: true` sends `chat.completion.chunk` SSE in
+ * the recorded Gateway shape: a `{ role: 'assistant' }` opening delta, content
+ * deltas, and a finish event whose delta carries `provider_metadata` and which
+ * carries `usage` (when `stream_options.include_usage` is set),
+ * `system_fingerprint`, `service_tier` (for `openai/*` models), and
+ * `generationId`, then `data: [DONE]`; every chunk carries
+ * `system_fingerprint` and `logprobs: null`, and events are packed
+ * `eventsPerChunk` per network chunk. `stream: false` answers one
+ * `chat.completion` JSON body. Reasoning models asked for reasoning
+ * (`reasoning_effort`, or `thinking.type: 'enabled'`) stream
+ * `delta.reasoning` with `delta.reasoning_details` before the text. A request
+ * with `tools` gets one tool call whose arguments are synthesized from the
+ * tool's JSON Schema and streamed in fragments, finishing with `tool_calls`.
+ * Unknown models get the recorded 404 envelope (`type: 'model_not_found'`,
+ * `param: { modelId }`, no `code`); a missing bearer credential gets a 401
+ * envelope; unknown routes get a 404 JSON error. The ledger records the
+ * `max_tokens` limit as `maxCompletionTokens`.
  *
  * Precedence per chat request: authentication and JSON validation, then the
  * first matching fault if it is a `status` fault, then the next scripted
@@ -196,14 +408,17 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
     knownModels: options.knownModels ?? gatewayEmulatorDefaultModels,
     reasoningModels: options.reasoningModels ?? gatewayEmulatorDefaultReasoningModels,
     errorEnvelope: gatewayErrorEnvelope,
-    // Copied data shape of the synthetic Gateway error-envelope fixture (unknown model id).
+    // Copied data shape of the verified Gateway error-envelope recording (unknown model id): its
+    // own envelope, with `param.modelId` and no `code`.
     unknownModel: {
-      status: 400,
-      error: {
-        message: 'Synthetic placeholder: the requested model is not available.',
-        type: 'invalid_request_error',
-        code: 'model_not_found'
-      }
+      status: 404,
+      body: model => ({
+        error: {
+          message: `Model '${model ?? ''}' not found`,
+          type: 'model_not_found',
+          param: { modelId: model ?? null }
+        }
+      })
     },
     auth: {
       unauthorized: {
@@ -216,5 +431,6 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
     responseIdPrefix: 'gen-synthetic',
     defaultText: ['Hello', ' from the', ' synthetic gateway.'],
     turnSchema: GatewayScriptedTurn,
-    inputInvalid: (input, reason) => new GatewayEmulatorInputInvalid({ input, reason })
+    inputInvalid: (input, reason) => new GatewayEmulatorInputInvalid({ input, reason }),
+    wire: gatewayWireProfile(validEventsPerChunk(options.eventsPerChunk))
   })

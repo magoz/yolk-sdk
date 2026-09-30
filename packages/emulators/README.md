@@ -93,33 +93,50 @@ passes through the route table.
 ## Gateway emulator
 
 `makeGatewayEmulator(options?)` returns `{ fetch, ledger, reset, faults, script, coverage }` for
-`POST /v1/chat/completions`. Each call has its own state.
+`POST /v1/chat/completions`. Each call has its own state. Its wire shapes follow the verified live
+Gateway recordings (2026-09-30) in `@yolk-sdk/agent/providers/vercel/conformance`, and its route is
+`verified`; ids, costs, and routing metadata are synthetic stand-ins.
 
 Defaults (no script):
 
-- `knownModels` defaults to a small synthetic-safe list including `openai/gpt-4.1-nano` and
-  `deepseek/deepseek-v3.2`; `reasoningModels` defaults to the DeepSeek id.
-- `stream: true` streams `chat.completion.chunk` server-sent events: several text deltas, a finish
-  chunk, a usage chunk when `stream_options.include_usage` is set, and `data: [DONE]`.
-  `stream: false` returns one `chat.completion` JSON body.
+- `knownModels` defaults to a small synthetic-safe list including `openai/gpt-4.1-nano`,
+  `deepseek/deepseek-v3.2`, and `deepseek/deepseek-v4.1-flash`; `reasoningModels` defaults to the
+  two DeepSeek ids.
+- `stream: true` streams `chat.completion.chunk` server-sent events as recorded: a
+  `{ role: 'assistant' }` opening delta, several text deltas, then one finish event whose `delta`
+  carries `provider_metadata` (the recorded upstream entry, `openai` for `openai/*` models or
+  `baseten` for `deepseek/*` models, then a `gateway` routing and cost entry, all synthetic) and
+  which carries `usage` (when `stream_options.include_usage` is set), `system_fingerprint`,
+  `service_tier` (`openai/*` models only), and `generationId`, followed only by `data: [DONE]`.
+  Every chunk carries `system_fingerprint`, and every choice `logprobs: null`.
+  `stream: false` returns one `chat.completion` JSON body (not covered by a recording).
+- Events are packed several per network chunk, as the live Gateway sends them: `eventsPerChunk`
+  (default 2, a positive integer; 1 sends one event per chunk) counted from the end, so the last
+  chunk carries the finish event and `data: [DONE]` together and the first chunk may carry fewer.
+  Chunk faults count these network chunks. An invalid `eventsPerChunk` throws
+  `GatewayEmulatorInputInvalid`.
 - A reasoning model asked for reasoning (`reasoning_effort`, or `thinking: { type: 'enabled' }`)
-  streams `delta.reasoning_content` before the text.
+  streams `delta.reasoning` with `delta.reasoning_details`
+  (`[{ type: 'reasoning.text', text, format, index }]`) before the text.
 - A request with `tools` gets one tool call whose arguments are synthesized from the tool's JSON
   Schema (required string properties get non-empty synthetic values), streamed as several
   `delta.tool_calls[].function.arguments` fragments, finishing with `tool_calls`. A `tool_choice`
   naming an offered function picks that tool (otherwise the first); `tool_choice: 'none'` answers
   with text.
-- An unknown model gets the Gateway error envelope `{ error: { message, type, code } }` with
-  status 400 and code `model_not_found`.
-- A missing `Authorization: Bearer <non-empty>` header gets a 401 envelope. The token is never
-  checked or stored.
+- An unknown model gets the recorded 404 envelope
+  `{ error: { message: "Model '<id>' not found", type: 'model_not_found', param: { modelId } } }`
+  (no `code`).
+- A missing `Authorization: Bearer <non-empty>` header gets a 401 envelope
+  `{ error: { message, type, code } }` (synthetic, not recorded). The token is never checked or
+  stored.
 - Unknown routes get a 404 JSON error (fail closed) and are written to the ledger.
 
 `script.enqueue(turn)` queues a turn for the next chat request, sent exactly as given:
 
 - a completion: `{ text?, reasoning?, reasoningField?, order?, toolCalls?, usage?, finishReason? }`
-  where each tool call is `{ name, argumentFragments }`, `usage: null` drops the usage chunk, and
-  `order: 'text-first'` sends reasoning after the text;
+  where each tool call is `{ name, argumentFragments }`, `usage: null` drops usage from the finish
+  event, `order: 'text-first'` sends reasoning after the text, and `reasoningField` defaults to
+  `reasoning` (with `reasoning_details`; `reasoning_content` sends the DeepSeek-native field alone);
 - an error: `{ error: { status, body, headers? } }`.
 
 Emulators never redirect, and every emulated response carries a body. Fault and scripted-error
@@ -136,9 +153,11 @@ throws `GatewayEmulatorInputInvalid` (the control plane answers 400).
 | `error-after-chunks`    | Send N body chunks, then error the body stream (a dropped connection)     |
 | `truncate-after-chunks` | Send N body chunks, then close cleanly (no `data: [DONE]`)                |
 
-A chunk fault that cannot take effect answers 500 instead of silently doing nothing. If the
-emulator cannot build a planned response, it answers an evidence-tagged 500, the ledger records
-500 with `responseError`, and the matching fault is not used up.
+Chunk faults count network chunks: with the default packing, `truncate-after-chunks` with N = 2
+sends up to four events (four for the default plain-text response). A chunk fault that cannot
+take effect answers 500 instead of silently doing nothing. If the emulator cannot build a planned
+response, it answers an evidence-tagged 500, the ledger records 500 with `responseError`, and the
+matching fault is not used up.
 
 `ledger.entries()` records every emulated API request (control-plane requests are not recorded):
 method, path, parsed JSON body, model, `stream`, the `max_tokens` limit (as `maxCompletionTokens`;
@@ -160,10 +179,13 @@ Control plane (same fetch handler):
 
 `makeOpenAiEmulator(options?)` returns the same `{ fetch, ledger, reset, faults, script, coverage }`
 shape for OpenAI Chat Completions: `POST /v1/chat/completions`, routed from
-`https://api.openai.com`. It shares the Gateway emulator's Chat Completions core, so framing,
-tool-call fragments, JSON mode, faults, scripted turns, the ledger, and the control plane behave
-the same. What differs:
+`https://api.openai.com`. It shares the Gateway emulator's Chat Completions core, so tool-call
+fragments, JSON mode, faults, scripted turns, the ledger, and the control plane behave the same.
+What differs:
 
+- Streaming uses the plain OpenAI framing: one event per network chunk, a
+  `{ role: 'assistant', content: '' }` opening delta, and usage in a trailing chunk with empty
+  `choices`, without the Gateway's metadata fields.
 - `knownModels` defaults to `openAiEmulatorDefaultModels` (`gpt-4.1-nano`, `gpt-4.1-mini`).
 - Errors use the OpenAI envelope `{ error: { message, type, param, code } }`; an unknown model gets
   404 with code `model_not_found`, and a missing `Authorization: Bearer <non-empty>` header gets
@@ -256,6 +278,9 @@ const httpLayer = InProcessHttpClient.layer([
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, and `anthropicEmulatorRoutes` list every emulated route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route carries `x-emulator-evidence: unverified`.
+The Gateway route is `verified` (`observedAt: '2026-09-30'`): its wire shapes are checked against
+the verified live recordings. The OpenAI and Anthropic routes are unverified, like the synthetic
+fixtures they follow.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes

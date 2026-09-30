@@ -2,14 +2,17 @@
  * OpenAI-compatible Chat Completions emulator core (internal; not a package export).
  *
  * One `POST .../chat/completions` route with request parsing, `chat.completion.chunk` SSE
- * framing (text, `reasoning_content`, tool-call argument fragments, a usage chunk, and
+ * framing (text, reasoning, tool-call argument fragments, a finish event, usage, and
  * `data: [DONE]`), the non-streamed `chat.completion` JSON body, and scripted turns. Faults, the
  * request ledger, the `/_emulate/*` control plane, evidence tagging, and route binding come from
  * the shared kernel (`emulator-kernel.ts`).
  *
  * Each emulator subpath (`gateway`, `openai`) supplies what differs: the path and route evidence
- * manifest, model lists, the error envelope and the unknown-model status, the 401 error, the
- * completion-token request field, whether reasoning is emulated, and its scripted-turn schema.
+ * manifest, model lists, the error envelope and the unknown-model status and error, the 401
+ * error, the completion-token request field, whether reasoning is emulated, its scripted-turn
+ * schema, and its wire profile (`ChatWireProfile`: events per network chunk, usage placement, the
+ * reasoning field, and extra per-chunk fields). Without a profile the plain OpenAI Chat
+ * Completions wire is sent.
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
  * no Node builtins and no SDK imports.
@@ -117,8 +120,8 @@ export const chatScriptedReasoningFields = {
  * filled in) except: `usage` omitted is synthesized when the request asks for
  * usage, and `null` drops it; `finishReason` omitted is `tool_calls` with tool
  * calls, else `stop`. `order` defaults to `reasoning-first`; `reasoningField`
- * defaults to `reasoning_content` (the Gateway-normalized alternative is
- * `reasoning`).
+ * defaults to the emulator's wire profile field (`reasoning` for the Gateway,
+ * as recorded live; `reasoning_content` is the DeepSeek-native alternative).
  */
 export const ChatScriptedReasoningCompletion = Schema.Struct({
   text: chatScriptedCompletionFields.text,
@@ -198,6 +201,51 @@ export type ChatWireError = {
   readonly code: string
 }
 
+/** The id and model every chunk of one emulated response repeats. */
+export type ChatResponseIdentity = { readonly id: string; readonly model: string }
+
+/** Token counts behind a wire `usage` object. */
+export type ChatUsageCounts = {
+  readonly promptTokens: number
+  readonly completionTokens: number
+  readonly reasoningTokens: number | undefined
+}
+
+/**
+ * Per-service response details on top of the shared framing. Every field is optional; an omitted
+ * field keeps the plain OpenAI Chat Completions wire (the `/openai` emulator passes no profile).
+ */
+export type ChatWireProfile = {
+  /**
+   * SSE events per network (body) chunk; default 1. Events are packed counting from the end, so
+   * the last chunk carries the finish event together with `data: [DONE]` and the first chunk may
+   * carry fewer. Chunk faults count these network chunks.
+   */
+  readonly eventsPerChunk?: number
+  /**
+   * Where streamed usage goes when `stream_options.include_usage` is set: a trailing chunk with
+   * empty `choices` (`usage-chunk`, default) or the finish event itself (`finish-event`).
+   */
+  readonly streamUsage?: 'usage-chunk' | 'finish-event'
+  /** The first streamed delta; default `{ role: 'assistant', content: '' }`. */
+  readonly openingDelta?: Schema.JsonObject
+  /** Extra fields on every streamed choice, placed before `finish_reason` (for example `logprobs`). */
+  readonly choiceFields?: Schema.JsonObject
+  /** The default reasoning field for default and scripted output; default `reasoning_content`. */
+  readonly reasoningField?: 'reasoning_content' | 'reasoning'
+  /** Streamed `reasoning` deltas also carry `reasoning_details` (`reasoning.text` entries). */
+  readonly reasoningDetails?: boolean
+  /** Extra top-level fields on every streamed chunk (for example `system_fingerprint`). */
+  readonly chunkFields?: (identity: ChatResponseIdentity) => Schema.JsonObject
+  /** Extra fields on the finish event: top-level (`chunk`) and inside its `delta`. */
+  readonly finishFields?: (identity: ChatResponseIdentity) => {
+    readonly chunk: Schema.JsonObject
+    readonly delta: Schema.JsonObject
+  }
+  /** Renders token counts as the wire `usage` object (streamed and JSON). */
+  readonly usage?: (counts: ChatUsageCounts) => Schema.JsonObject
+}
+
 /**
  * What differs between Chat Completions emulators. The core owns everything else (framing,
  * faults, scripting, ledger, control plane, evidence).
@@ -216,8 +264,14 @@ export type ChatCompletionsEmulatorConfig<Turn extends ChatScriptedReasoningTurn
   readonly reasoningModels: ReadonlyArray<string> | undefined
   /** Renders a wire error as the service's JSON error envelope. */
   readonly errorEnvelope: (error: ChatWireError) => Schema.Json
-  /** Status and error for an unknown model id. */
-  readonly unknownModel: { readonly status: number; readonly error: ChatWireError }
+  /**
+   * Status and answer for an unknown (or missing) model id: an `error` rendered with
+   * `errorEnvelope`, or a `body` built from the requested id (for a service whose unknown-model
+   * envelope differs from its other errors).
+   */
+  readonly unknownModel:
+    | { readonly status: number; readonly error: ChatWireError }
+    | { readonly status: number; readonly body: (model: string | undefined) => Schema.Json }
   /**
    * Requests authenticate with a non-empty `Authorization: Bearer` credential, never checked or
    * stored; anything else answers 401 with `unauthorized`.
@@ -233,6 +287,8 @@ export type ChatCompletionsEmulatorConfig<Turn extends ChatScriptedReasoningTurn
   readonly turnSchema: Schema.Decoder<Turn>
   /** Builds the error thrown by the JS API (`faults.add`, `script.enqueue`) for invalid input. */
   readonly inputInvalid: (input: 'fault' | 'turn', reason: string) => Error
+  /** Per-service wire details; omitted: the plain OpenAI Chat Completions wire. */
+  readonly wire?: ChatWireProfile
 }
 
 const ChatTool = Schema.Struct({
@@ -311,7 +367,8 @@ const defaultPlan = (
   request: ChatRequest,
   seq: number,
   reasoningModels: ReadonlyArray<string>,
-  defaultText: ReadonlyArray<string>
+  defaultText: ReadonlyArray<string>,
+  reasoningField: CompletionPlan['reasoningField']
 ): CompletionPlan => {
   const reasoning =
     request.model !== undefined &&
@@ -324,7 +381,7 @@ const defaultPlan = (
 
   const base: Pick<CompletionPlan, 'reasoning' | 'reasoningField' | 'order' | 'usage'> = {
     reasoning,
-    reasoningField: 'reasoning_content',
+    reasoningField,
     order: 'reasoning-first',
     usage: undefined
   }
@@ -351,7 +408,11 @@ const defaultPlan = (
   }
 }
 
-const scriptedPlan = (turn: ChatScriptedReasoningCompletion, seq: number): CompletionPlan => {
+const scriptedPlan = (
+  turn: ChatScriptedReasoningCompletion,
+  seq: number,
+  reasoningField: CompletionPlan['reasoningField']
+): CompletionPlan => {
   const toolCalls = (turn.toolCalls ?? []).map((call, index) => ({
     id: call.id ?? `call_synthetic_${seq}_${index}`,
     name: call.name,
@@ -360,7 +421,7 @@ const scriptedPlan = (turn: ChatScriptedReasoningCompletion, seq: number): Compl
 
   return {
     reasoning: turn.reasoning ?? [],
-    reasoningField: turn.reasoningField ?? 'reasoning_content',
+    reasoningField: turn.reasoningField ?? reasoningField,
     order: turn.order ?? 'reasoning-first',
     text: turn.text ?? [],
     toolCalls,
@@ -369,14 +430,8 @@ const scriptedPlan = (turn: ChatScriptedReasoningCompletion, seq: number): Compl
   }
 }
 
-// Wire shapes of the OpenAI-compatible Chat Completions responses the emulator sends.
-type WireUsage = {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
-  completion_tokens_details?: { readonly reasoning_tokens: number }
-}
-
+// Wire shapes of the OpenAI-compatible Chat Completions responses the emulator sends. Profile
+// fields (`ChatWireProfile`) add to them.
 type WireToolCallDelta = {
   readonly index: number
   readonly id?: string
@@ -384,27 +439,26 @@ type WireToolCallDelta = {
   readonly function: { readonly name?: string; readonly arguments: string }
 }
 
+type WireReasoningDetail = {
+  readonly type: 'reasoning.text'
+  readonly text: string
+  readonly format: 'unknown'
+  readonly index: number
+}
+
 type WireDelta = {
   readonly role?: 'assistant'
   readonly content?: string
   readonly reasoning_content?: string
   readonly reasoning?: string
+  readonly reasoning_details?: ReadonlyArray<WireReasoningDetail>
   readonly tool_calls?: ReadonlyArray<WireToolCallDelta>
 }
 
 type WireStreamChoice = {
   readonly index: number
-  readonly delta: WireDelta
+  readonly delta: WireDelta | Schema.JsonObject
   readonly finish_reason: string | null
-}
-
-type WireChunk = {
-  id: string
-  object: 'chat.completion.chunk'
-  created: number
-  model: string
-  choices: ReadonlyArray<WireStreamChoice>
-  usage?: WireUsage
 }
 
 type WireMessage = {
@@ -429,12 +483,63 @@ type WireCompletion = {
     readonly message: WireMessage
     readonly finish_reason: string
   }>
-  usage?: WireUsage
+  usage?: Schema.JsonObject
 }
 
-const wireUsage = (plan: CompletionPlan, requestText: string): WireUsage | undefined => {
+/** A wire profile with every default filled in. */
+type ResolvedWireProfile = {
+  readonly eventsPerChunk: number
+  readonly streamUsage: 'usage-chunk' | 'finish-event'
+  readonly openingDelta: Schema.JsonObject
+  readonly choiceFields: Schema.JsonObject
+  readonly reasoningField: 'reasoning_content' | 'reasoning'
+  readonly reasoningDetails: boolean
+  readonly chunkFields: (identity: ChatResponseIdentity) => Schema.JsonObject
+  readonly finishFields: (identity: ChatResponseIdentity) => {
+    readonly chunk: Schema.JsonObject
+    readonly delta: Schema.JsonObject
+  }
+  readonly usage: (counts: ChatUsageCounts) => Schema.JsonObject
+}
+
+/** The plain OpenAI Chat Completions usage object. */
+const openAiUsage = (counts: ChatUsageCounts): Schema.JsonObject => {
+  const usage = {
+    prompt_tokens: counts.promptTokens,
+    completion_tokens: counts.completionTokens,
+    total_tokens: counts.promptTokens + counts.completionTokens
+  }
+
+  return counts.reasoningTokens === undefined
+    ? usage
+    : { ...usage, completion_tokens_details: { reasoning_tokens: counts.reasoningTokens } }
+}
+
+const noFields = (): Schema.JsonObject => ({})
+
+const resolveWireProfile = (profile: ChatWireProfile = {}): ResolvedWireProfile => ({
+  eventsPerChunk: profile.eventsPerChunk ?? 1,
+  streamUsage: profile.streamUsage ?? 'usage-chunk',
+  openingDelta: profile.openingDelta ?? { role: 'assistant', content: '' },
+  choiceFields: profile.choiceFields ?? {},
+  reasoningField: profile.reasoningField ?? 'reasoning_content',
+  reasoningDetails: profile.reasoningDetails ?? false,
+  chunkFields: profile.chunkFields ?? noFields,
+  finishFields: profile.finishFields ?? (() => ({ chunk: {}, delta: {} })),
+  usage: profile.usage ?? openAiUsage
+})
+
+const usageCounts = (plan: CompletionPlan, requestText: string): ChatUsageCounts | undefined => {
   if (plan.usage === null) {
     return undefined
+  }
+
+  if (plan.usage !== undefined) {
+    return {
+      promptTokens: plan.usage.promptTokens,
+      completionTokens: plan.usage.completionTokens,
+      reasoningTokens: plan.usage.reasoningTokens
+    }
   }
 
   const reasoningText = plan.reasoning.join('')
@@ -445,83 +550,107 @@ const wireUsage = (plan: CompletionPlan, requestText: string): WireUsage | undef
     ...plan.toolCalls.flatMap(call => call.fragments)
   ].join('')
 
-  const usage = plan.usage ?? {
+  return {
     promptTokens: approximateTokens(requestText),
     completionTokens: approximateTokens(outputText),
     reasoningTokens: reasoningText.length > 0 ? approximateTokens(reasoningText) : undefined
   }
-
-  const wire: WireUsage = {
-    prompt_tokens: usage.promptTokens,
-    completion_tokens: usage.completionTokens,
-    total_tokens: usage.promptTokens + usage.completionTokens
-  }
-
-  if (usage.reasoningTokens !== undefined) {
-    wire.completion_tokens_details = { reasoning_tokens: usage.reasoningTokens }
-  }
-
-  return wire
 }
 
-type ResponseIdentity = { readonly id: string; readonly model: string }
+/** One SSE event from its `data:` text (a JSON payload, or `[DONE]`). */
+const sseEvent = (data: string): string => `data: ${data}\n\n`
 
-const sseEvent = (payload: WireChunk | '[DONE]'): string =>
-  `data: ${payload === '[DONE]' ? payload : JSON.stringify(payload)}\n\n`
-
-const chunkPayload = (
-  identity: ResponseIdentity,
-  choices: ReadonlyArray<WireStreamChoice>,
-  usage: WireUsage | undefined
-): WireChunk => {
-  const payload: WireChunk = {
-    id: identity.id,
-    object: 'chat.completion.chunk',
-    created: syntheticCreated,
-    model: identity.model,
-    choices
+/**
+ * Pack SSE events into network chunks of `perChunk` events, counting from the end: the last
+ * chunk always holds the final events (the finish event and `data: [DONE]` when `perChunk` is at
+ * least 2, as the live Gateway sends them), and the first chunk may hold fewer.
+ */
+const packEvents = (events: ReadonlyArray<string>, perChunk: number): ReadonlyArray<string> => {
+  if (perChunk <= 1) {
+    return events
   }
 
-  if (usage !== undefined) {
-    payload.usage = usage
+  const chunks: Array<string> = []
+  const first = events.length % perChunk
+
+  if (first > 0) {
+    chunks.push(events.slice(0, first).join(''))
   }
 
-  return payload
+  for (let index = first; index < events.length; index += perChunk) {
+    chunks.push(events.slice(index, index + perChunk).join(''))
+  }
+
+  return chunks
 }
 
-const deltaChoice = (delta: WireDelta, finishReason: string | null = null): WireStreamChoice => ({
-  index: 0,
-  delta,
-  finish_reason: finishReason
-})
+const reasoningDelta = (
+  field: CompletionPlan['reasoningField'],
+  text: string,
+  details: boolean
+): WireDelta =>
+  field === 'reasoning_content'
+    ? { reasoning_content: text }
+    : details
+      ? {
+          reasoning: text,
+          reasoning_details: [{ type: 'reasoning.text', text, format: 'unknown', index: 0 }]
+        }
+      : { reasoning: text }
 
-const reasoningDelta = (field: CompletionPlan['reasoningField'], text: string): WireDelta =>
-  field === 'reasoning' ? { reasoning: text } : { reasoning_content: text }
-
-/** SSE events for a streamed completion, one network chunk each. */
+/** SSE events for a streamed completion, one per array entry (packed into chunks later). */
 const streamEvents = (
   plan: CompletionPlan,
-  identity: ResponseIdentity,
-  usage: WireUsage | undefined
+  identity: ChatResponseIdentity,
+  usage: Schema.JsonObject | undefined,
+  wire: ResolvedWireProfile
 ): ReadonlyArray<string> => {
   const events: Array<string> = []
+  const extras = wire.chunkFields(identity)
 
-  const event = (choices: ReadonlyArray<WireStreamChoice>, eventUsage?: WireUsage) =>
-    events.push(sseEvent(chunkPayload(identity, choices, eventUsage)))
+  const event = (
+    choices: ReadonlyArray<WireStreamChoice>,
+    fields: Schema.JsonObject = {},
+    trailing: Schema.JsonObject = {}
+  ) =>
+    events.push(
+      sseEvent(
+        JSON.stringify({
+          id: identity.id,
+          object: 'chat.completion.chunk',
+          created: syntheticCreated,
+          model: identity.model,
+          choices,
+          ...fields,
+          ...extras,
+          ...trailing
+        })
+      )
+    )
+
+  const choice = (
+    delta: WireDelta | Schema.JsonObject,
+    finishReason: string | null = null
+  ): WireStreamChoice => ({
+    index: 0,
+    delta,
+    ...wire.choiceFields,
+    finish_reason: finishReason
+  })
 
   const reasoningEvents = () => {
     for (const text of plan.reasoning) {
-      event([deltaChoice(reasoningDelta(plan.reasoningField, text))])
+      event([choice(reasoningDelta(plan.reasoningField, text, wire.reasoningDetails))])
     }
   }
 
   const textEvents = () => {
     for (const text of plan.text) {
-      event([deltaChoice({ content: text })])
+      event([choice({ content: text })])
     }
   }
 
-  event([deltaChoice({ role: 'assistant', content: '' })])
+  event([choice(wire.openingDelta)])
 
   if (plan.order === 'reasoning-first') {
     reasoningEvents()
@@ -533,7 +662,7 @@ const streamEvents = (
 
   plan.toolCalls.forEach((call, index) => {
     event([
-      deltaChoice({
+      choice({
         tool_calls: [
           { index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }
         ]
@@ -541,14 +670,23 @@ const streamEvents = (
     ])
 
     for (const fragment of call.fragments) {
-      event([deltaChoice({ tool_calls: [{ index, function: { arguments: fragment } }] })])
+      event([choice({ tool_calls: [{ index, function: { arguments: fragment } }] })])
     }
   })
 
-  event([deltaChoice({}, plan.finishReason)])
+  const finish = wire.finishFields(identity)
+  const usageOnFinish = wire.streamUsage === 'finish-event' && usage !== undefined
 
-  if (usage !== undefined) {
-    event([], usage)
+  const finishFields: Record<string, Schema.Json> = {}
+
+  if (usageOnFinish) {
+    finishFields.usage = usage
+  }
+
+  event([choice({ ...finish.delta }, plan.finishReason)], finishFields, finish.chunk)
+
+  if (!usageOnFinish && usage !== undefined) {
+    event([], { usage })
   }
 
   events.push(sseEvent('[DONE]'))
@@ -559,8 +697,8 @@ const streamEvents = (
 /** The non-streamed `chat.completion` JSON body. */
 const completionBody = (
   plan: CompletionPlan,
-  identity: ResponseIdentity,
-  usage: WireUsage | undefined
+  identity: ChatResponseIdentity,
+  usage: Schema.JsonObject | undefined
 ): WireCompletion => {
   const message: WireMessage = {
     role: 'assistant',
@@ -623,6 +761,12 @@ export const makeChatCompletionsEmulator = <Turn extends ChatScriptedReasoningTu
 ): ChatCompletionsEmulator<Turn> => {
   const knownModels = [...config.knownModels]
   const reasoningModels = config.reasoningModels === undefined ? [] : [...config.reasoningModels]
+  const wire = resolveWireProfile(config.wire)
+
+  const unknownModelResponse = (model: string | undefined): Response =>
+    'body' in config.unknownModel
+      ? jsonResponse(config.unknownModel.status, config.unknownModel.body(model))
+      : errorResponse(config.unknownModel.status, config.unknownModel.error)
 
   const errorResponse = (status: number, error: ChatWireError): Response =>
     jsonResponse(status, config.errorEnvelope(error))
@@ -734,26 +878,33 @@ export const makeChatCompletionsEmulator = <Turn extends ChatScriptedReasoningTu
     if (turn === undefined && (chat.model === undefined || !knownModels.includes(chat.model))) {
       entry.status = config.unknownModel.status
 
-      return errorResponse(config.unknownModel.status, config.unknownModel.error)
+      return unknownModelResponse(chat.model)
     }
 
     if (turn !== undefined) entry.scripted = 'completion'
 
     const plan =
       turn === undefined
-        ? defaultPlan(chat, seq, reasoningModels, config.defaultText)
-        : scriptedPlan(turn, seq)
+        ? defaultPlan(chat, seq, reasoningModels, config.defaultText, wire.reasoningField)
+        : scriptedPlan(turn, seq, wire.reasoningField)
 
-    const identity = { id: `${config.responseIdPrefix}-${seq}`, model: chat.model ?? 'unknown' }
+    const identity: ChatResponseIdentity = {
+      id: `${config.responseIdPrefix}-${seq}`,
+      model: chat.model ?? 'unknown'
+    }
+
+    const counts = usageCounts(plan, text)
+    const usage = counts === undefined ? undefined : wire.usage(counts)
 
     if (chat.stream === true) {
-      const usage = chat.stream_options?.include_usage === true ? wireUsage(plan, text) : undefined
+      const streamUsage = chat.stream_options?.include_usage === true ? usage : undefined
 
+      // Chunk faults count these network chunks (several events each when packed).
       return kernel.respondWithBody(
         entry,
         200,
         { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
-        streamEvents(plan, identity, usage),
+        packEvents(streamEvents(plan, identity, streamUsage, wire), wire.eventsPerChunk),
         fault
       )
     }
@@ -762,7 +913,7 @@ export const makeChatCompletionsEmulator = <Turn extends ChatScriptedReasoningTu
       entry,
       200,
       { 'content-type': 'application/json' },
-      [JSON.stringify(completionBody(plan, identity, wireUsage(plan, text)))],
+      [JSON.stringify(completionBody(plan, identity, usage))],
       fault
     )
   }
