@@ -463,8 +463,8 @@ ports; no live R2 runner ships. See [R2 conformance cases](../connectors/r2-stor
 When a case is interrupted, the run no longer produces a report, and no further case starts. So
 Dropbox, Notion, Todoist, GitHub, and Microsoft write cases, the Fortnox row and customer mutation
 cases, the Telegram send, and the R2 puts also hand a cleanup problem raised during the interruption
-(a failed cleanup, or a create, send, or put whose outcome is unknown) to
-`@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
+(a failed cleanup, or a create, send, or put whose outcome is unknown) to `ConformanceCleanupReporter`
+from `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
 `Effect.logWarning`. The Fortnox rejection case and the Fortnox email send do not report. With the
 Effect version this repository pins, such a run ends with that failure itself (no Interrupt in the
 cause), and a run whose cleanup succeeded ends as a plain interruption; drills in the connector
