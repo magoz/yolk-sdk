@@ -12,7 +12,8 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Deferred, Effect, Result } from 'effect'
+import { Deferred, Effect, Layer, Result } from 'effect'
+import { HttpClient } from 'effect/unstable/http'
 import { describe, expect, it } from 'vitest'
 import {
   isWireBase64BodyResponse,
@@ -21,11 +22,14 @@ import {
   type WireFixture
 } from '../../packages/conformance/src/fixture.ts'
 import type { WireRecorderApi } from '../../packages/conformance/src/record.ts'
+import { makeReplayHttpClient } from '../../packages/conformance/src/replay.ts'
 import type { ConformanceReport } from '../../packages/conformance/src/runner.ts'
 import {
+  microsoftCalendarCreateEventFixture,
   microsoftCalendarListRangeFixture,
   microsoftConformanceCases,
   microsoftConformanceFixtureSeeds,
+  microsoftConformanceFixtures,
   microsoftOneDriveCreateFolderFixture,
   microsoftOutlookPagingNextLinkFixture
 } from '../../packages/connectors/src/microsoft/conformance/index.ts'
@@ -57,6 +61,7 @@ import {
   renderFixtureModule,
   renderSeedsModule,
   runMicrosoftInterruptibly,
+  runMicrosoftLive,
   stageRecordings,
   staleSharedSeeds,
   type LiveInputs
@@ -844,6 +849,9 @@ const fakeIo = () => {
   return { io, errors, exitCodes, forcedExits }
 }
 
+const exchangeAt = (fixture: WireFixture, index: number): WireExchange =>
+  fixture.exchanges[index] ?? expect.fail(`no exchange ${index} in ${fixture.id}`)
+
 /** A program that starts, then waits; its uninterruptible cleanup waits for `releaseCleanup`. */
 const runningProgram = () => {
   const started = Effect.runSync(Deferred.make<void>())
@@ -925,6 +933,102 @@ describe('run-microsoft-conformance live runs are interruptible', () => {
 
     running.releaseCleanup()
     await done
+  })
+
+  it('prints the case-specific WARN when a real write case is interrupted and its removal fails', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes, forcedExits } = fakeIo()
+    const out: Array<string> = []
+    const sent = Effect.runSync(Deferred.make<void>())
+    const release = Effect.runSync(Deferred.make<void>())
+
+    // The create-event case: its create (0) answers, its claim's GET (1) is held, and after the
+    // interruption only the removal's DELETE (3) follows, answering 500, so the removal fails.
+    const created = microsoftCalendarCreateEventFixture
+    const removal = exchangeAt(created, 3)
+
+    const failedRemoval: WireFixture = {
+      ...created,
+      exchanges: [
+        exchangeAt(created, 0),
+        exchangeAt(created, 1),
+        {
+          ...removal,
+          response: {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+            body: '{"error":{"code":"ErrorInternalServerError","message":"Synthetic placeholder: server error."}}'
+          }
+        }
+      ]
+    }
+
+    const { client } = await Effect.runPromise(
+      makeReplayHttpClient(
+        microsoftConformanceFixtures.map(fixture =>
+          fixture.id === created.id ? failedRemoval : fixture
+        )
+      )
+    )
+
+    // Hold the first GET after the first create (earlier read cases send GETs too).
+    let createSeen = false
+    let held = false
+
+    const holding = HttpClient.transform(client, (response, request) => {
+      if (request.method === 'POST') {
+        createSeen = true
+      } else if (request.method === 'GET' && createSeen && !held) {
+        held = true
+
+        return response.pipe(
+          Effect.tap(() => Deferred.succeed(sent, undefined)),
+          Effect.tap(() => Deferred.await(release))
+        )
+      }
+
+      return response
+    })
+
+    const done = runMicrosoftInterruptibly(
+      runMicrosoftLive(
+        {
+          ...defaultRunOptions,
+          live: true,
+          ownerApproved: true,
+          account: 'practice',
+          allowWrites: 'reversible'
+        },
+        recordInputs,
+        {
+          http: Layer.succeed(HttpClient.HttpClient, holding),
+          out: line => out.push(line),
+          // stderr: the WARN lines share the stream with the runner's own messages.
+          err: line => io.error(line)
+        }
+      ),
+      signals.source,
+      io,
+      { pid: 4242 }
+    )
+
+    await Effect.runPromise(Deferred.await(sent))
+    signals.emit('SIGINT')
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+    Effect.runSync(Deferred.succeed(release, undefined))
+    await done
+
+    const removalFailed =
+      'microsoft.calendar.create-returns-event-id: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance). Restore error: microsoft.conformance.delete_event microsoft_delete_e... 500. Claim failed first: interrupted'
+
+    expect(errors[0]).toContain('SIGINT: interrupting the run (pid 4242)')
+    expect(errors.filter(line => line.startsWith('WARN '))).toEqual([`WARN ${removalFailed}`])
+    // The run ends with the case's own RestoreFailed (not interrupt-only): exit 1, no report.
+    expect(errors.at(-1)).toBe(removalFailed)
+    expect(exitCodes).toEqual([1])
+    expect(forcedExits).toEqual([])
+    expect(out).toEqual([])
+    expect(signals.registered()).toBe(0)
   })
 
   it('reports a failed run with exit code 1 and no signal handlers left behind', async () => {

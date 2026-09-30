@@ -1283,10 +1283,10 @@ an ambiguous create's report starts with the case id. No case sends mail or invi
 `pnpm conformance:microsoft` in this repository dry-runs by default;
 `--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; with
 `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by hand (a first
-Ctrl-C interrupts the run so a running write case still removes its item),
-`--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or
-nothing in `.conformance-recordings/microsoft/<run>/` (gitignored) for manual scrubbing and
-promotion.
+Ctrl-C interrupts the run so a running write case still removes its item, and the reports above
+print on stderr as `WARN` lines), `--allow-writes reversible` adds the write cases, and `--record`
+stages verified recordings all or nothing in `.conformance-recordings/microsoft/<run>/` (gitignored)
+for manual scrubbing and promotion.
 
 ### Notion conformance cases (experimental)
 

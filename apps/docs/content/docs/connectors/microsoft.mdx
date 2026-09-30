@@ -56,9 +56,9 @@ also handed, with its full message, to `ConformanceCleanupReporter` from
 `@yolk-sdk/connectors/conformance` (default: `Effect.logWarning`), since the interruption may
 replace it (an ambiguous create's report starts with the case id, since several cases share one
 create action); a definitive create rejection created nothing and is not reported. The repository
-runner (`pnpm conformance:microsoft`) does not turn Ctrl-C into an interruption, so the reporter
-applies to hosts that interrupt the run fiber. Removed folders stay in the OneDrive recycle bin, and
-permanently deleted drafts may be kept by retention policies. No case sends mail or invitations.
+runner (`pnpm conformance:microsoft`) turns a first Ctrl-C into an interruption and prints these
+reports on stderr as `WARN` lines. Removed folders stay in the OneDrive recycle bin, and permanently
+deleted drafts may be kept by retention policies. No case sends mail or invitations.
 
 The shipped fixtures are synthetic (`evidence: 'unverified'`). See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

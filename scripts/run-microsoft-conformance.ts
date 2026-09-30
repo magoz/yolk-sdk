@@ -35,9 +35,10 @@
  *
  * Live runs are interruptible (the shared `runInterruptibly`): the first SIGINT/SIGTERM interrupts
  * the run fiber, so a running write case still attempts its uninterruptible removal of the event,
- * draft, or folder it created, and a removal that fails meanwhile prints a WARN line; a duplicate
- * signal within `duplicateSignalWindowMs` (one Ctrl-C reaches every process of the foreground
- * group) is ignored, and a later one force-exits. An interrupt-only exit is 130.
+ * draft, or folder it created, and a removal that fails meanwhile prints a WARN line naming the
+ * case (`ConformanceCleanupReporter`, provided by `runMicrosoftLive`); a duplicate signal within
+ * `duplicateSignalWindowMs` (one Ctrl-C reaches every process of the foreground group) is ignored,
+ * and a later one force-exits. An interrupt-only exit is 130.
  *
  * Microsoft keeps its own runner rather than the shared `ConnectorConformanceRunner`: its review
  * checklist flags practice-tenant SharePoint hosts, and its credential and seeds module differ.
@@ -58,7 +59,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Effect, Layer, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
-import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/unstable/http'
 import type { ConformanceSafety } from '../packages/conformance/src/case.ts'
 import {
   isWireBase64BodyResponse,
@@ -101,11 +102,13 @@ import {
   ownerApprovalRequiredMessage,
   physicallyContained,
   processCliIo,
+  processLiveRunIo,
   processSignals,
   runInterruptibly,
   stderrCleanupReporter,
   textContainsAccessToken,
   type CliIo,
+  type LiveRunIo,
   type RecordingWriter,
   type RunInterruptiblyOptions,
   type SignalSource
@@ -1117,8 +1120,17 @@ export const stageRecordings = (
     }
   })
 
-/** One live run over checked inputs: every case, the report, and the `--record` staging. */
-const live = (options: RunOptions, inputs: LiveInputs) =>
+/**
+ * One live run over checked inputs: every case (with the stderr WARN cleanup reporter provided
+ * around `runConformance`, so a removal that fails, or an id-less or ambiguous create answered,
+ * while the run is interrupted prints a WARN line naming the case or create), the report, and the
+ * `--record` staging. `io` is injectable so tests replay fixtures instead of calling Graph.
+ */
+export const runMicrosoftLive = (
+  options: RunOptions,
+  inputs: LiveInputs,
+  io: LiveRunIo = processLiveRunIo
+) =>
   Effect.gen(function* () {
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
@@ -1133,20 +1145,15 @@ const live = (options: RunOptions, inputs: LiveInputs) =>
 
               return Layer.succeed(HttpClient.HttpClient, client)
             })
-          ).pipe(Layer.provide(FetchHttpClient.layer))
-        : FetchHttpClient.layer
+          ).pipe(Layer.provide(io.http))
+        : io.http
 
     const report = yield* runConformance(microsoftConformanceCases, {
       target: liveTarget(options),
       layer: testCase => casePorts(httpFor(testCase), inputs.accessToken, inputs.seeds)
-    }).pipe(
-      Effect.provideService(
-        ConformanceCleanupReporter,
-        stderrCleanupReporter(line => console.error(line))
-      )
-    )
+    }).pipe(Effect.provideService(ConformanceCleanupReporter, stderrCleanupReporter(io.err)))
 
-    console.log(formatConformanceReport(report))
+    io.out(formatConformanceReport(report))
 
     if (options.record) {
       const now = new Date()
@@ -1158,9 +1165,9 @@ const live = (options: RunOptions, inputs: LiveInputs) =>
       })
 
       if (staged === undefined) {
-        console.log('No passed case to record.')
+        io.out('No passed case to record.')
       } else {
-        console.log(
+        io.out(
           [
             `Staged ${staged.files.length} files (gitignored) in ${relative(workspaceRoot, staged.stagingDir)}; nothing committed was changed.`,
             ...staged.checklist
@@ -1231,7 +1238,7 @@ const runCli = (options: RunOptions): void => {
       return
     }
 
-    void runMicrosoftInterruptibly(live(options, checked.inputs))
+    void runMicrosoftInterruptibly(runMicrosoftLive(options, checked.inputs))
   }
 }
 
