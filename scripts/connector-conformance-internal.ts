@@ -1958,7 +1958,7 @@ export type CliIo = {
   readonly forceExit: (code: number) => void
 }
 
-/** The process's own SIGINT/SIGTERM (also used by the Fortnox and Microsoft runners). */
+/** The process's own SIGINT/SIGTERM. */
 export const processSignals: SignalSource = {
   on: (signal, handler) => {
     process.on(signal, handler)
@@ -1968,7 +1968,6 @@ export const processSignals: SignalSource = {
   }
 }
 
-/** Console output and exit code of the running process. */
 export const processCliIo: CliIo = {
   error: message => console.error(message),
   setExitCode: code => {

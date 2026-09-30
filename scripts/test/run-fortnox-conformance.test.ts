@@ -31,7 +31,15 @@ import {
   fortnoxInvoiceRowDiscountFixture
 } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import { FortnoxDocumentNumber } from '../../packages/connectors/src/fortnox/index.ts'
-import type { CliIo, CliSignal, SignalSource } from '../connector-conformance-internal.ts'
+import {
+  liveInCiMessage,
+  nodeRecordingWriter,
+  ownerApprovalRequiredMessage,
+  type CliIo,
+  type CliSignal,
+  type RecordingWriter,
+  type SignalSource
+} from '../connector-conformance-internal.ts'
 import {
   accessTokenRequiredMessage,
   defaultRunOptions,
@@ -39,12 +47,9 @@ import {
   fortnoxCaseSpecs,
   fortnoxRecoveryAdvice,
   liveAccountRequiredMessage,
-  liveInCiMessage,
   liveInputs,
   liveTarget,
   mergedFixtureSeeds,
-  nodeRecordingWriter,
-  ownerApprovalRequiredMessage,
   parseRunArgs,
   planFortnoxRun,
   recordingReviewChecklist,
@@ -54,8 +59,7 @@ import {
   renderSeedsModule,
   runFortnoxInterruptibly,
   stageRecordings,
-  type LiveInputs,
-  type RecordingWriter
+  type LiveInputs
 } from '../run-fortnox-conformance.ts'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')

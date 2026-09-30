@@ -3,10 +3,10 @@
  * their replay (`@yolk-sdk/conformance/replay`).
  *
  * The current fixtures are synthetic placeholders (`evidence: 'unverified'`) shaped like the
- * Fortnox API wire. `pnpm conformance:fortnox --live --owner-approved --account <label> --record` stages verified
- * recordings from a Fortnox developer test company in a gitignored directory; a person scrubs them
- * and promotes them here, updating the tests together with them (fixture ids, `evidence`, and
- * `account` change).
+ * Fortnox API wire. `pnpm conformance:fortnox --live --owner-approved --account <label> --record`
+ * stages verified recordings from a Fortnox developer test company in a gitignored directory; a
+ * person scrubs them and promotes them here, updating the tests together with them (fixture ids,
+ * `evidence`, and `account` change).
  *
  * @experimental
  */

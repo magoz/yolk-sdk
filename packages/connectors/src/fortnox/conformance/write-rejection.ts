@@ -5,8 +5,9 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * `ErrorInformation` fields as in the responses guide.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:fortnox --live --owner-approved --account <label> --record` stages a replacement in a gitignored
- * directory; see the script header for the manual scrub-and-promote step.
+ * `pnpm conformance:fortnox --live --owner-approved --account <label> --record` stages a
+ * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
+ * step.
  */
 export const fortnoxWriteRejectionFixture: WireFixture = {
   id: 'fortnox.write.rejection-error-information.synthetic',

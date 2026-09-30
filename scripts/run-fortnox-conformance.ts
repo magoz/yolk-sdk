@@ -39,9 +39,9 @@
  *
  * Fortnox keeps its own runner rather than the shared `ConnectorConformanceRunner`: the preview
  * case records a PDF body, which the shared per-body access-token guard
- * (`inspectRecordingForAccessToken`) refuses as uninspectable, and the seeds module uses the branded
- * `FortnoxDocumentNumber` / `FortnoxCustomerNumber` constructors. The final check on the rendered
- * text still runs: there the PDF is `bodyBase64` text, searched at every byte alignment.
+ * (`inspectRecordingForAccessToken`) refuses as uninspectable, and the seeds module uses the
+ * branded `FortnoxDocumentNumber` / `FortnoxCustomerNumber` constructors. The final check on the
+ * rendered text still runs: there the PDF is `bodyBase64` text, searched at every byte alignment.
  *
  * Promotion is manual: scrub the staged files of practice-company data, copy them into
  * `packages/connectors/src/fortnox/conformance/`, run `pnpm format:fix`, and update
@@ -113,8 +113,6 @@ import {
   type SignalSource
 } from './connector-conformance-internal.ts'
 import { isCiEnvironment, workspaceRoot } from './fixture-probe-internal.ts'
-
-export { liveInCiMessage, nodeRecordingWriter, ownerApprovalRequiredMessage, type RecordingWriter }
 
 type SeedSource = {
   readonly key: FortnoxConformanceSeedKey
@@ -299,9 +297,9 @@ ${fortnoxSeedSources
   --help
 
 FORTNOX_ACCESS_TOKEN is read from the environment only. Use a Fortnox developer test company,
-never a real one, and never run live in CI. Recordings are never written over committed fixtures: scrub the staged files,
-copy them into packages/connectors/src/fortnox/conformance/, and update the Fortnox conformance
-tests in the same change (fixture ids, evidence, and account change).`
+never a real one, and never run live in CI. Recordings are never written over committed fixtures:
+scrub the staged files, copy them into packages/connectors/src/fortnox/conformance/, and update
+the Fortnox conformance tests in the same change (fixture ids, evidence, and account change).`
 
 /**
  * Parse CLI arguments (without the node/script prefix) and seed environment variables. Throws on
