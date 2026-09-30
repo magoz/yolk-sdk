@@ -139,7 +139,7 @@ Conformance import rule (canonical statement; other docs reference it): in `pack
 - Boundary script enforces the conformance import rule from [Dependency Direction](#dependency-direction).
 - Boundary script allows `@yolk-sdk/agent` in `packages/connectors/src` only from `src/agent.ts`.
 - Boundary script prevents emulators from importing other `@yolk-sdk/*` packages, React, or Next, and allows Node builtins only in `packages/emulators/src/node.ts`.
-- Evidence script (`scripts/check-emulator-evidence.ts`, `pnpm packages:evidence`) fails emulator route manifests that cite unknown conformance case ids, list a route twice, mark a connector write route without verified evidence or with a missing, unreadable, or future `observedAt`, or mark a route verified when none of its cited cases has a verified fixture; it warns on unverified and stale (over 30 days) evidence and on routes citing no cases.
+- Evidence script (`scripts/check-emulator-evidence.ts`, `pnpm packages:evidence`) fails emulator route manifests that cite unknown conformance case ids, list a route twice, mark a connector write route without verified evidence or with a missing, unreadable, or future `observedAt`, or mark a route verified when none of its cited cases has a verified fixture, or mark a connector write route verified while citing no cases; it warns on unverified and stale (over 30 days) evidence and on other routes citing no cases.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, tiny agent/MCP roots, and that `@yolk-sdk/conformance` and `@yolk-sdk/emulators` have no root export.
 - Vercel Workflow durable event helpers stay generic over JSON-serializable events; do not import `@yolk-sdk/agent/protocol` there.
 

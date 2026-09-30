@@ -160,8 +160,8 @@ maps to its own handler; an emulator whose manifest has a route without a handle
 constructed. The Yolk repository checks these manifests: unknown case ids, duplicate routes,
 connector write routes without verified evidence, verified connector write routes whose
 `observedAt` is missing, unreadable, or in the future, and verified routes whose cited cases have
-no verified fixture fail; unverified or stale (over 30 days) evidence and routes citing no cases
-warn.
+no verified fixture fail, as do verified connector write routes citing no cases; unverified or
+stale (over 30 days) evidence and other routes citing no cases warn.
 
 ## Node server
 

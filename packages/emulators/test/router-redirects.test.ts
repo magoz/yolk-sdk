@@ -138,6 +138,56 @@ describe('EmulatedHttpClient redirects', () => {
       }).pipe(Effect.scoped)
   )
 
+  it.effect(
+    'merges build-time and request-time RequestInit (request wins) and keeps other fields',
+    () =>
+      Effect.gen(function* () {
+        const seen: Array<Record<string, string | null>> = []
+
+        const echo = yield* serveFetchHandler(async request => {
+          seen.push({
+            shared: request.headers.get('x-synthetic-shared'),
+            build: request.headers.get('x-synthetic-build'),
+            request: request.headers.get('x-synthetic-request')
+          })
+          await request.text()
+
+          return new Response(null, {
+            status: 307,
+            headers: { location: 'https://api.example.test/x' }
+          })
+        })
+
+        const client = yield* HttpClient.HttpClient.pipe(
+          Effect.provide(
+            EmulatedHttpClient.layer([EmulatorRoute.url(realOrigin, echo.url)]).pipe(
+              Layer.provide(FetchHttpClient.layer),
+              Layer.provide(testEnv),
+              Layer.provide(
+                Layer.succeed(FetchHttpClient.RequestInit, {
+                  headers: { 'x-synthetic-shared': 'build', 'x-synthetic-build': 'kept' },
+                  redirect: 'follow'
+                })
+              )
+            )
+          )
+        )
+
+        const response = yield* client.execute(secretPost).pipe(
+          Effect.provideService(FetchHttpClient.RequestInit, {
+            headers: new Headers({
+              'X-Synthetic-Shared': 'request',
+              'x-synthetic-request': 'kept'
+            }),
+            redirect: 'follow'
+          })
+        )
+
+        expect(response.status).toBe(307)
+        expect(seen).toEqual([{ shared: 'request', build: 'kept', request: 'kept' }])
+      }).pipe(Effect.scoped)
+  )
+
   it.effect('fails closed when followRedirects on top follows the 307 to an unrouted origin', () =>
     Effect.gen(function* () {
       const { unroutedHits, routedUrl } = yield* redirectingServers

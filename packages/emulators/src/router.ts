@@ -16,6 +16,7 @@
 import { Config, Data, Effect, Layer, Match, Option, Predicate } from 'effect'
 import {
   FetchHttpClient,
+  Headers as HttpHeaders,
   HttpClient,
   HttpClientError,
   HttpClientRequest,
@@ -253,20 +254,43 @@ const rewriteToBase = (requestUrl: string, base: URL): string => {
 /**
  * Merge `RequestInit` values (later wins; `headers` are merged, not replaced).
  */
+/** Name/value pairs of any `HeadersInit` shape (web `Headers`, pair list, or record). */
+const requestInitHeaderPairs = (headers: HeadersInit): ReadonlyArray<readonly [string, string]> => {
+  if (headers instanceof Headers) return [...headers.entries()]
+
+  if (Array.isArray(headers)) {
+    return headers.flatMap(pair => {
+      const [name, value] = pair
+
+      return name === undefined || value === undefined ? [] : [[name, value] as const]
+    })
+  }
+
+  return Object.entries(headers)
+}
+
 const mergeRequestInit = (
   ...inits: ReadonlyArray<globalThis.RequestInit | undefined>
 ): globalThis.RequestInit => {
   const merged: globalThis.RequestInit = {}
-  const headers = new Headers()
+  // Effect's `Headers.fromInput` never throws (unlike web `Headers`), so an invalid host default
+  // surfaces from fetch as a typed transport error instead of a defect here.
+  let headers = HttpHeaders.empty
 
   for (const init of inits) {
     if (init === undefined) continue
 
     Object.assign(merged, init)
-    new Headers(init.headers).forEach((value, name) => headers.set(name, value))
+
+    if (init.headers !== undefined) {
+      headers = HttpHeaders.merge(
+        headers,
+        HttpHeaders.fromInput(requestInitHeaderPairs(init.headers))
+      )
+    }
   }
 
-  return [...headers.keys()].length === 0 ? merged : { ...merged, headers }
+  return Object.keys(headers).length === 0 ? merged : { ...merged, headers: { ...headers } }
 }
 
 /**
