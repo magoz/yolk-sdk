@@ -32,10 +32,12 @@
  * non-string value, or a repeated redacted key refuses the write (checked on every occurrence in
  * the reassembled wire text, never through `JSON.parse`, which collapses repeated keys). So does
  * any SSE `data:` payload or body the member scanner cannot fully scan (invalid JSON, nesting past
- * its depth limit), except the `[DONE]` sentinel. Each single recorded exchange becomes a
- * `verified` fixture dated today, then the new fixtures replay through the same cases. Nothing is
- * written unless every case passes live, records cleanly, is fully redacted, passes the secret
- * scan, and passes again on replay; only then are the family's fixture modules rewritten.
+ * its depth limit), except a `[DONE]` `data:` sentinel; any SSE line the stream parser ignores
+ * (even one that parses as JSON) and any base64 that does not decode also refuse the write. Each
+ * single recorded exchange becomes a `verified` fixture dated today, then the new fixtures replay
+ * through the same cases. Nothing is written unless every case passes live, records cleanly, is
+ * fully redacted, passes the secret scan, and passes again on replay; only then are the family's
+ * fixture modules rewritten.
  *
  * Model ids are CLI flags defaulting to the family's conformance default models; confirm they are
  * still available on the subscription before a live probe.
@@ -660,11 +662,12 @@ export const redactResponsesFields = (exchange: WireExchange): WireExchange => {
   return body === response.body ? exchange : { ...exchange, response: { ...response, body } }
 }
 
-// Exact bytes of base64 text; undecodable base64 yields no bytes (the recorder never writes it).
-const base64Bytes = (base64: string): Uint8Array =>
-  Result.getOrElse(Encoding.decodeBase64(base64), () => new Uint8Array())
+// Exact bytes of base64 text, or undefined when it does not decode (the payload is then
+// unscannable, never read as empty).
+const base64Bytes = (base64: string): Uint8Array | undefined =>
+  Result.getOrUndefined(Encoding.decodeBase64(base64))
 
-const chunkBytes = (chunk: WireChunk): Uint8Array =>
+const chunkBytes = (chunk: WireChunk): Uint8Array | undefined =>
   Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)
 
 const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
@@ -682,39 +685,56 @@ const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
 // Non-fatal UTF-8 decode: invalid bytes become U+FFFD, the rest of the text stays checkable.
 const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
-// The JSON payloads a survivor check reads: every SSE event's `data:` of the whole stream (all
-// chunks, text and `{ base64 }`, reassembled as bytes and decoded, so a value inside a base64
-// chunk or split across chunks, even mid-character, is seen), or the whole decoded body. An empty
-// or whitespace-only body carries nothing to scan and yields no payload.
-const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
-  if (!isWireStreamResponse(response)) {
-    const body = isWireBase64BodyResponse(response)
-      ? lossyText(base64Bytes(response.bodyBase64))
-      : response.body
+// What a survivor check reads from one response: every SSE event's `data:` payload of the whole
+// stream (all chunks, text and `{ base64 }`, reassembled as bytes and decoded, so a value inside a
+// base64 chunk or split across chunks, even mid-character, is seen), or the whole body (a text
+// body unchanged, never re-decoded; a base64 body decoded), plus how many parts are unscannable
+// outright. An empty or whitespace-only body carries nothing to scan and yields no payload.
+// The `responsesPermittedNonJsonPayloads` sentinels are dropped here, as SSE `data:` payloads
+// only: a body equal to one is scanned like any other body and refused.
+type ResponsePayloads = { readonly payloads: ReadonlyArray<string>; readonly unscannable: number }
 
-    return body.trim().length > 0 ? [body] : []
+const responsePayloads = (response: WireResponse): ResponsePayloads => {
+  if (!isWireStreamResponse(response)) {
+    if (!isWireBase64BodyResponse(response)) {
+      return { payloads: response.body.trim().length > 0 ? [response.body] : [], unscannable: 0 }
+    }
+
+    const bytes = base64Bytes(response.bodyBase64)
+
+    if (bytes === undefined) return { payloads: [], unscannable: 1 }
+
+    const text = lossyText(bytes)
+
+    return { payloads: text.trim().length > 0 ? [text] : [], unscannable: 0 }
   }
 
-  return lossyText(concatBytes(response.chunks.map(chunkBytes)))
-    .replace(/\r\n?/g, '\n')
-    .split('\n\n')
-    .flatMap(event => {
-      const lines = event.split('\n')
+  // A chunk whose base64 does not decode cannot be scanned: it is counted, never read as empty,
+  // and the rest of the stream is still scanned so real survivors are reported too.
+  const chunks = response.chunks.map(chunkBytes)
+  const decoded = chunks.filter(Predicate.isNotUndefined)
+  const payloads: Array<string> = []
+  let unscannable = chunks.length - decoded.length
 
-      const data = lines
-        .filter(line => line.startsWith('data:'))
-        .map(line => line.slice('data:'.length).trim())
-        .join('\n')
+  for (const event of lossyText(concatBytes(decoded)).replace(/\r\n?/g, '\n').split('\n\n')) {
+    const lines = event.split('\n')
 
-      // Comments, unknown fields and malformed lines are ignored by the stream parser but would
-      // still be written to the public fixture, so each one is returned as its own payload: the
-      // member scanner cannot parse it and the write is refused.
-      const unparsedLines = lines.filter(
-        line => line.trim().length > 0 && !sseFieldLinePattern.test(line)
-      )
+    const data = lines
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice('data:'.length).trim())
+      .join('\n')
 
-      return data.length > 0 ? [data, ...unparsedLines] : unparsedLines
-    })
+    if (data.length > 0 && !responsesPermittedNonJsonPayloads.includes(data)) payloads.push(data)
+
+    // Comments, unknown fields and malformed lines are ignored by the stream parser but would
+    // still be written to the public fixture. Each one is unscannable outright, even when it
+    // parses as JSON or is a bare `[DONE]`.
+    unscannable += lines.filter(
+      line => line.trim().length > 0 && !sseFieldLinePattern.test(line)
+    ).length
+  }
+
+  return { payloads, unscannable }
 }
 
 /** SSE field lines the stream parsers understand; any other non-blank line is unscannable. */
@@ -735,8 +755,6 @@ type PayloadScan = { readonly fields: Set<string>; unscannable: number }
 // redacted key within one object, is a survivor. A payload the scanner cannot fully scan (invalid
 // JSON, nesting past the depth limit) is counted as unscannable, never guessed at.
 const scanPayload = (payload: string, scan: PayloadScan): void => {
-  if (responsesPermittedNonJsonPayloads.includes(payload)) return
-
   const survivors = unredactedMembers(payload, responsesRedactedFields, responsesRedactedValue)
 
   if (survivors === undefined) {
@@ -752,7 +770,11 @@ const scanExchanges = (exchanges: ReadonlyArray<WireExchange>): PayloadScan => {
   const scan: PayloadScan = { fields: new Set(), unscannable: 0 }
 
   for (const { response } of exchanges) {
-    for (const payload of responsePayloads(response)) scanPayload(payload, scan)
+    const { payloads, unscannable } = responsePayloads(response)
+
+    scan.unscannable += unscannable
+
+    for (const payload of payloads) scanPayload(payload, scan)
   }
 
   return scan
@@ -780,7 +802,9 @@ export const unredactedResponsesFields = (
 /**
  * How many SSE `data:` payloads (or bodies) of the recorded responses the member scanner cannot
  * fully scan: invalid JSON, JSON nested past the scanner's depth limit, or any other scan failure.
- * Only `responsesPermittedNonJsonPayloads` are exempt. Any count above zero refuses the write,
+ * Also counted: every SSE line the stream parser ignores (even valid JSON or a bare `[DONE]`) and
+ * every base64 chunk or body that does not decode. Only `responsesPermittedNonJsonPayloads`, as SSE
+ * `data:` payloads, are exempt. Any count above zero refuses the write,
  * since an unscanned payload may hide a redacted field (for example under an escaped key).
  */
 export const unscannableResponsesPayloads = (exchanges: ReadonlyArray<WireExchange>): number =>
@@ -792,7 +816,7 @@ export const unredactedMessage = (fields: ReadonlyArray<string>): string =>
 
 /** Why the probe refuses to write a recording with payloads the survivor check cannot scan. */
 export const unscannableMessage = (count: number): string =>
-  `could not check ${count} response payload(s) for redacted fields: not valid JSON, nested past the scanner's depth limit, or otherwise unscannable (only ${responsesPermittedNonJsonPayloads.join(', ')} may be non-JSON); refusing to write, re-record instead`
+  `could not check ${count} response payload(s) for redacted fields: not valid JSON, nested past the scanner's depth limit, an SSE line the stream parser ignores, undecodable base64, or otherwise unscannable (only ${responsesPermittedNonJsonPayloads.join(', ')} may be non-JSON, and only as an SSE data: payload); refusing to write, re-record instead`
 
 /**
  * Why the recorded exchanges must not be written, or undefined when every payload was scanned and
