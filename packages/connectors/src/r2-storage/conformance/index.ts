@@ -13,9 +13,9 @@
  * URLs in them carry only `r2ConformanceSyntheticSignature` and
  * `r2ConformanceSyntheticCredential`, the exact SigV4 entries of the shared, frozen
  * `syntheticPortCredentialParams`. Run both `scanPortFixtureForSecrets` and
- * `findR2PortFixtureSecrets` (raw or encoded names, whole raw values against the exact
- * placeholders) on every fixture; `scrubR2PortFixture` rewrites a fixture recorded from a live
- * host, except escaped URLs, before a person promotes it.
+ * `findR2PortFixtureSecrets` (fail-closed: any credential name outside an exact canonical
+ * placeholder occurrence) on every fixture; `scrubR2PortFixture` rewrites a fixture recorded from
+ * a live host, except escaped URLs, before a person promotes it.
  *
  * @experimental
  */

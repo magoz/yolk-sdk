@@ -459,9 +459,9 @@ request) }` into both port layers (requests never carry the credentials or the i
 **write-irreversible**: the connector cannot delete R2 objects, so they run only when named by exact
 id, write only under `yolk-conformance/<runId>/`, and report an ambiguous put (any port failure but
 `conflict`) with the exact bucket and key. Presigned URLs in fixtures carry only synthetic
-credential placeholders: next to the shared `scanPortFixtureForSecrets`, `findR2PortFixtureSecrets`
-refuses escaped and percent-encoded live `X-Amz-*` credentials and anything but the exact
-placeholders, and `scrubR2PortFixture` rewrites a recorded fixture to the placeholders (not escaped
+credential placeholders: next to the shared `scanPortFixtureForSecrets`, the fail-closed
+`findR2PortFixtureSecrets` refuses any `X-Amz-*` credential name, in any spelling or encoding and
+even in prose, outside an exact canonical placeholder occurrence, and `scrubR2PortFixture` rewrites a recorded fixture to the placeholders (not escaped
 URLs: rerun both scans). Live verification needs a host implementation of both ports; no live R2
 runner ships. See [R2 conformance cases](../connectors/r2-storage#conformance-cases).
 

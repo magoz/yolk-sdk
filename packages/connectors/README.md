@@ -1454,7 +1454,8 @@ fixtures. The two write cases are **write-irreversible** (the connector cannot d
 they write only under `yolk-conformance/<runId>/` and report an ambiguous put with the exact bucket
 and key; a live host must generate a fresh `run-<hex>` per invocation. Presigned URLs in fixtures
 carry only synthetic credential placeholders: run both `scanPortFixtureForSecrets` and
-`findR2PortFixtureSecrets` (escaped and percent-encoded parameters, exact placeholders);
+`findR2PortFixtureSecrets` (fail-closed: any credential name, in any spelling or encoding, outside
+an exact canonical placeholder occurrence);
 `scrubR2PortFixture` rewrites live ones except escaped URLs, so rerun both scans after it. Live
 verification needs a host implementation of both ports; no live R2 runner ships. The case table
 lives in the

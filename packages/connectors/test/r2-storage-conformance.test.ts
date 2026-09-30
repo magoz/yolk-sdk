@@ -835,12 +835,106 @@ describe('R2 presigned URL guard', () => {
       })
     }
 
-    // The same name with the exact placeholder is accepted.
+    // Fail closed: an encoded name is never canonical, even with the exact placeholder.
     expect(
       bothScans(
         `https://storage.example.test/b/k?${encodedName}=${r2ConformanceSyntheticSignature}&x-id=PutObject`
       )
-    ).toEqual({ shared: [], r2: [] })
+    ).toEqual({ shared: [], r2: ['response.uploadUrl: a live X-Amz-Signature'] })
+  })
+
+  it('refuses a doubly encoded live URL, and a fully encoded synthetic one', () => {
+    const live = withParam('X-Amz-Signature', liveSignature)
+
+    for (const text of [
+      `from ${encodeURIComponent(encodeURIComponent(live))}`,
+      `from ${encodeURIComponent(encodeURIComponent(encodeURIComponent(live)))}`
+    ]) {
+      expect(findR2PortFixtureSecrets(failingWith(text))).toEqual([
+        'failure.message: a live X-Amz-Credential',
+        'failure.message: a live X-Amz-Signature'
+      ])
+    }
+
+    expect(bothScans(encodeURIComponent(presignedUrl))).toEqual({
+      shared: [],
+      r2: [
+        'response.uploadUrl: a live X-Amz-Credential',
+        'response.uploadUrl: a live X-Amz-Signature'
+      ]
+    })
+  })
+
+  it('refuses encoded letters in any credential name, with any value, the exact one included', () => {
+    const cases = [
+      ['%58-Amz-Signature', 'a live X-Amz-Signature'],
+      ['%2558-Amz-Signature', 'a live X-Amz-Signature'],
+      ['%78-amz-signature', 'a live X-Amz-Signature'],
+      ['X-%41mz-Signature', 'a live X-Amz-Signature'],
+      ['X-Amz-%43redential', 'a live X-Amz-Credential'],
+      ['X-Amz-Cr%2545dential', 'a live X-Amz-Credential'],
+      ['X-Amz-%53ecurity-Token', 'X-Amz-Security-Token'],
+      ['X-Amz-Security-%54oken', 'X-Amz-Security-Token']
+    ] as const
+
+    for (const [name, finding] of cases) {
+      const exact = name.toLowerCase().includes('credential')
+        ? encodeURIComponent(r2ConformanceSyntheticCredential)
+        : r2ConformanceSyntheticSignature
+
+      for (const value of [
+        exact,
+        `${r2ConformanceSyntheticSignature}%3F0123abcdef`,
+        liveSignature
+      ]) {
+        const uploadUrl = `https://storage.example.test/b/k?${name}=${value}&x-id=PutObject`
+
+        expect(
+          findR2PortFixtureSecrets(answering({ uploadUrl })(fixtureById(presignId))),
+          `${name}=${value}`
+        ).toEqual([`response.uploadUrl: ${finding}`])
+      }
+    }
+  })
+
+  it('accepts a mixed-case raw name with the exact placeholder, and refuses one in prose', () => {
+    const mixed = presignedUrl
+      .replace('X-Amz-Signature=', 'x-AMZ-signature=')
+      .replace('X-Amz-Credential=', 'X-AMZ-CREDENTIAL=')
+
+    expect(bothScans(mixed)).toEqual({ shared: [], r2: [] })
+    expect(bothScans(`${presignedUrl}&other=1`)).toEqual({ shared: [], r2: [] })
+    // The raw (unencoded) credential spelling is not what the fixtures or scrubber write: refused.
+    expect(
+      bothScans(
+        presignedUrl.replace(
+          encodeURIComponent(r2ConformanceSyntheticCredential),
+          r2ConformanceSyntheticCredential
+        )
+      ).r2
+    ).toEqual(['response.uploadUrl: a live X-Amz-Credential'])
+    expect(
+      findR2PortFixtureSecrets({
+        ...fixtureById(presignId),
+        note: 'The URL carries an X-Amz-Signature parameter.'
+      })
+    ).toEqual(['note: a live X-Amz-Signature'])
+    expect(
+      findR2PortFixtureSecrets({
+        ...fixtureById(presignId),
+        request: { 'X-Amz-Security-Token': null }
+      })
+    ).toEqual(['request.X-Amz-Security-Token: X-Amz-Security-Token'])
+  })
+
+  it('refuses a JSON-escaped live parameter', () => {
+    expect(
+      findR2PortFixtureSecrets(
+        failingWith(
+          `{"url":"https://h.example.test/b/k?x=1\\u0026X-Amz-Signature=${liveSignature}"}`
+        )
+      )
+    ).toEqual(['failure.message: a live X-Amz-Signature'])
   })
 
   it('accepts a clean placeholder followed by another parameter, and refuses a later live one', () => {

@@ -56,8 +56,9 @@ There is no root export or barrel.
   own. `scanFixtureForSecrets` exempts nothing and keeps main's pattern. Never add a prefix rule,
   and never build a placeholder by prefixing or suffixing a real value. Parameters with escaped
   names (`&amp;` before them, percent-encoded names) are not found by the shared scans; port owners
-  that can meet them add their own check (R2: `findR2PortFixtureSecrets`, which applies the same
-  value rule to raw or encoded names). Replaying port fixtures belongs to the port owner (for
+  that can meet them add their own check (R2: `findR2PortFixtureSecrets`, which blanks out only the
+  canonical raw placeholder occurrences and refuses any credential name left in any decoding
+  layer). Replaying port fixtures belongs to the port owner (for
   example the connectors email bridge), not this package. `WireFixture` and HTTP replay are
   unchanged.
 - Recording is lossless: `body` (valid UTF-8) or `bodyBase64`; stream `chunks` entries are strings

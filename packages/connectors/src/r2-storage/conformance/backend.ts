@@ -355,8 +355,10 @@ export const makeR2ReplayBackend = (fixtures: ReadonlyArray<PortFixture>): R2Rep
 // `syntheticPortCredentialParams` (one source: the shared `scanPortFixtureForSecrets` exempts only
 // those exact values, under their own parameter names, and refuses every other credential
 // parameter and any `accessKeyId` / `secretAccessKey` / `sessionToken` field).
-// `findR2PortFixtureSecrets` adds what the shared scan cannot see (escaped and percent-encoded
-// parameters) with the same exact values. `scrubR2PortFixture` rewrites a recorded fixture to them.
+// `findR2PortFixtureSecrets` is the fail-closed backstop for what the shared scan cannot read
+// (encoded or escaped names): it blanks the canonical placeholder occurrences out and refuses any
+// credential name left in any decoding layer. `scrubR2PortFixture` rewrites a recorded fixture to
+// the placeholders.
 
 /** The only `X-Amz-Signature` value a committed fixture may carry. */
 export const r2ConformanceSyntheticSignature = syntheticPortCredentialParams['x-amz-signature']
@@ -383,77 +385,80 @@ const credentialParam = 'x-amz-credential'
 
 const sessionTokenParam = 'x-amz-security-token'
 
-const percentDecoded = (text: string): string => {
-  let current = text
+/**
+ * `text` with one layer of `%XX` escapes decoded. The guard searches three layers, the same depth
+ * as the shared scan's `percentDecodedLayers` (`@yolk-sdk/conformance`, internal): keep them in step.
+ */
+const decodedOnce = (text: string): string =>
+  text.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16))
+  )
 
-  for (let round = 0; round < 3 && /%[0-9A-Fa-f]{2}/.test(current); round++) {
-    current = current.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16))
-    )
+// The only credential parameters a committed fixture may spell out, each exactly as the fixtures
+// and `scrubR2PortFixture` write it: `URLSearchParams` leaves the signature as it is and encodes
+// the credential's `/` as `%2F`. Nothing else is exempt.
+const canonicalPlaceholders = new Map<string, string>([
+  [signatureParam, r2ConformanceSyntheticSignature],
+  [credentialParam, encodeURIComponent(r2ConformanceSyntheticCredential)]
+])
+
+// A canonical placeholder occurrence: `?` or `&` (or the start), a raw ASCII name (any case), `=`,
+// then the exact canonical value, followed by `&`, `#`, whitespace, `"`, `<`, `>`, or the end.
+const canonicalNamesAt = /(^|[?&])(x-amz-signature|x-amz-credential)=/gi
+
+const canonicalValueEnd = /^(?:[&#\s"<>]|$)/
+
+/** `text` with every canonical placeholder occurrence (name, `=`, and value) blanked out. */
+const withoutCanonicalPlaceholders = (text: string): string => {
+  let masked = text
+
+  for (const match of text.matchAll(canonicalNamesAt)) {
+    const nameStart = match.index + (match[1] ?? '').length
+    const valueStart = match.index + match[0].length
+    const placeholder = canonicalPlaceholders.get((match[2] ?? '').toLowerCase()) ?? ''
+    const valueEnd = valueStart + placeholder.length
+
+    if (
+      placeholder.length > 0 &&
+      text.startsWith(placeholder, valueStart) &&
+      canonicalValueEnd.test(text.slice(valueEnd))
+    ) {
+      masked = `${masked.slice(0, nameStart)}${' '.repeat(valueEnd - nameStart)}${masked.slice(valueEnd)}`
+    }
   }
 
-  return current
+  return masked
 }
 
-/** `literal` as a case-insensitive pattern whose every character may also be `%XX` or `%25XX`. */
-const encodable = (literal: string): string =>
-  Array.from(literal, character => {
-    const hex = character.charCodeAt(0).toString(16).padStart(2, '0')
-    const plain = /[A-Za-z0-9]/.test(character) ? character : `\\${character}`
-
-    return `(?:${plain}|%${hex}|%25${hex})`
-  }).join('')
+// The credential names the guard reports, in report order.
+const credentialNames = [
+  [credentialParam, 'a live X-Amz-Credential'],
+  [signatureParam, 'a live X-Amz-Signature'],
+  [sessionTokenParam, 'X-Amz-Security-Token']
+] as const
 
 /**
- * Every `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token` name in `text`, raw or
- * percent-encoded (once or twice), each followed by `=` (raw or encoded), wherever no name
- * character precedes it (so `&amp;X-Amz-Credential=` in an echoed S3 XML error counts), or right
- * after a `%XX` escape (an encoded `&` or `?`). Only the name and its `=` are matched: the value is
- * never consumed, so every later occurrence is found on its own.
+ * Why a string may not be committed: one finding per credential name it still carries once the
+ * canonical placeholder occurrences are blanked out. The masked text is searched raw and after one,
+ * two, and three layers of percent-decoding (each also with its letters lower-cased first), for
+ * each name anywhere, case-insensitively, with no `=` or value needed: any spelling or encoding
+ * of a credential name outside an exact canonical placeholder is refused, prose included.
  */
-const credentialNamesAt = new RegExp(
-  `(?:(?<![A-Za-z0-9_-])|(?<=%[0-9a-f]{2}))(${[signatureParam, credentialParam, sessionTokenParam]
-    .map(encodable)
-    .join('|')})${encodable('=')}`,
-  'gi'
-)
+const stringFindings = (text: string): ReadonlyArray<string> => {
+  const layers: Array<string> = [withoutCanonicalPlaceholders(text)]
 
-/**
- * `[name, value]` of every `X-Amz-*` credential parameter in `text`: the name decoded and
- * lower-cased; the value taken RAW, up to a structural boundary only (`&`, `#`, whitespace, `"`,
- * `<`, `>`, or the end; a raw `?` or `'` and encoded delimiters such as `%3F`, `%26`, `%23`, `%20`
- * stay inside it), then percent-decoded as a whole. So only an exact whole value can match a
- * placeholder.
- */
-const queryParams = (text: string): ReadonlyArray<readonly [string, string]> =>
-  [...text.matchAll(credentialNamesAt)].map(match => {
-    const start = match.index + match[0].length
-    const rest = text.slice(start)
-    const end = rest.search(/[&#\s"<>]/)
-    const raw = end === -1 ? rest : rest.slice(0, end)
+  for (let depth = 1; depth <= 3; depth++) {
+    layers.push(decodedOnce(layers[depth - 1] ?? ''))
+  }
 
-    return [percentDecoded(match[1] ?? '').toLowerCase(), percentDecoded(raw)] as const
-  })
+  const searched = [...layers, ...layers.map(layer => decodedOnce(layer.toLowerCase()))].map(
+    layer => layer.toLowerCase()
+  )
 
-const isSyntheticCredential = (value: string) => value === r2ConformanceSyntheticCredential
-
-/** Why a string may not be committed: one finding per live credential parameter it carries. */
-const stringFindings = (text: string): ReadonlyArray<string> =>
-  queryParams(text).flatMap(([name, value]) => {
-    if (name === sessionTokenParam) {
-      return ['X-Amz-Security-Token']
-    }
-
-    if (name === signatureParam && value !== r2ConformanceSyntheticSignature) {
-      return ['a live X-Amz-Signature']
-    }
-
-    if (name === credentialParam && !isSyntheticCredential(value)) {
-      return ['a live X-Amz-Credential']
-    }
-
-    return []
-  })
+  return credentialNames.flatMap(([name, finding]) =>
+    searched.some(layer => layer.includes(name)) ? [finding] : []
+  )
+}
 
 const isJsonRecord = (value: Schema.Json): value is Schema.JsonObject =>
   value !== null && Predicate.isObject(value) && !Array.isArray(value)
@@ -471,18 +476,25 @@ const findingsIn = (value: Schema.Json, location: string): ReadonlyArray<string>
     return []
   }
 
-  return Object.entries(value).flatMap(([key, item]) => findingsIn(item, `${location}.${key}`))
+  // Keys are searched too: a credential name spelled as a JSON key is refused like any other.
+  return Object.entries(value).flatMap(([key, item]) => [
+    ...stringFindings(key).map(finding => `${location}.${key}: ${finding}`),
+    ...findingsIn(item, `${location}.${key}`)
+  ])
 }
 
 /**
  * Why an R2 `PortFixture` may not be committed, beyond the shared `scanPortFixtureForSecrets` (run
- * both): every `X-Amz-Signature`, `X-Amz-Credential`, or `X-Amz-Security-Token` whose name appears
- * raw, percent-encoded, or after an HTML escape (`&amp;`), anywhere in the request, the response,
- * the note, or the failure message, unless its whole raw value (up to `&`, `#`, whitespace, `"`,
- * `<`, `>`, or the end; never `?`, `'`, or an encoded delimiter), percent-decoded, is exactly
- * `r2ConformanceSyntheticSignature` or `r2ConformanceSyntheticCredential` for that name (a session
- * token is always refused). Findings are `location: finding` lines that never echo the value.
- * Empty when clean.
+ * both). Fail-closed: in every string (and JSON key) of the request, the response, the note, and
+ * the failure message, the canonical placeholder occurrences are blanked out first: `?` or `&` (or
+ * the start of the string), `X-Amz-Signature` or `X-Amz-Credential` spelled in raw ASCII (any
+ * case), `=`, and exactly the value the fixtures and the scrubber write (`r2ConformanceSyntheticSignature`,
+ * or `encodeURIComponent(r2ConformanceSyntheticCredential)`), followed by `&`, `#`, whitespace, `"`,
+ * `<`, `>`, or the end. Whatever remains is searched raw and after one, two, and three layers of
+ * percent-decoding, and ANY case-insensitive occurrence of `x-amz-credential`, `x-amz-signature`,
+ * or `x-amz-security-token` is a finding (one per name and string, as `location: finding` lines
+ * that never echo a value): another value, an encoded or escaped name (even with the exact
+ * placeholder), a fully encoded URL, or a credential name in prose. Empty when clean.
  */
 export const findR2PortFixtureSecrets = (fixture: PortFixture): ReadonlyArray<string> => [
   ...findingsIn(fixture.request, 'request'),
@@ -525,13 +537,14 @@ const scrubUrl = (text: string): string => {
 
 /**
  * `text` with every presigned URL in it (the whole string, or an `http(s)://` URL embedded in a
- * message, up to whitespace or a quote) scrubbed: `X-Amz-Signature` becomes
+ * message, up to whitespace, `"`, `'`, `<`, or `>`) scrubbed: `X-Amz-Signature` becomes
  * `r2ConformanceSyntheticSignature`, the whole `X-Amz-Credential` becomes
  * `r2ConformanceSyntheticCredential` (the live date and region are not kept, since the shared scan
  * accepts only the exact placeholder), and
  * `X-Amz-Security-Token` is removed. Percent-encoded or `&amp;`-escaped URLs are NOT rewritten:
  * rerun `scanPortFixtureForSecrets` and `findR2PortFixtureSecrets` after scrubbing and remove what
- * they still find by hand.
+ * they still find by hand. A URL quoted in `'` keeps its closing quote right after the scrubbed
+ * value, which both scans then refuse (`'` continues a query value): remove the quote by hand.
  */
 export const scrubR2PresignedUrl = (text: string): string =>
   text.replace(/https?:\/\/[^\s"'<>]+/g, scrubUrl)

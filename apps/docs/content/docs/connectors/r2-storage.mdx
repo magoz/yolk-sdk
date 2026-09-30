@@ -100,11 +100,18 @@ on every R2 fixture:
   parameter such as `token=`, or with another date or region is refused; text after a boundary is
   not part of the value and is judged on its own. It also refuses any `accessKeyId`,
   `secretAccessKey`, or `sessionToken` field.
-- `findR2PortFixtureSecrets` adds what the shared scan cannot see: names that are percent-encoded
-  (once or twice) or follow an HTML escape (`&amp;X-Amz-Credential=`, for example in an S3 XML error
-  echoed in a message). It applies the same rule to the whole raw value, so
-  `X%2DAmz%2DSignature=yolk-synthetic-signature%3F…` is refused, and a fully percent-encoded URL is
-  refused as a whole (its `&` is `%26`, so the rest of the URL is one value).
+- `findR2PortFixtureSecrets` is the fail-closed backstop for what the shared scan cannot read
+  (percent-encoded or escaped names). In every string (and JSON key) it first blanks out the
+  canonical placeholder occurrences: `?` or `&` (or the start of the string), `X-Amz-Signature` or
+  `X-Amz-Credential` spelled in raw ASCII (any letter case), `=`, and exactly the value the fixtures
+  and the scrubber write (`yolk-synthetic-signature`, or the credential with its `/` encoded as
+  `%2F`), followed by `&`, `#`, whitespace, `"`, `<`, `>`, or the end. It then searches what remains
+  raw and after one, two, and three layers of percent-decoding, and refuses ANY case-insensitive
+  occurrence of `x-amz-signature`, `x-amz-credential`, or `x-amz-security-token`, with or without
+  `=` or a value. So any other value, an encoded or escaped name (even with the exact placeholder),
+  a fully or doubly percent-encoded URL, a JSON-escaped (`\u0026`) parameter, and a credential name
+  mentioned in prose (a note or a failure message) are all refused. Keep committed notes and
+  messages free of those names.
 
 `scrubR2PortFixture` rewrites a fixture recorded from a live host before a person promotes it: it
 removes credential fields and rewrites every presigned URL in the request, the response, the note,
