@@ -10,14 +10,14 @@ import {
   LLMUsage
 } from '@yolk-sdk/agent/loop'
 import {
-  AgentReasoningEffort,
   DocumentPart,
   ToolCall,
   ToolResult,
   TextPart,
   UserMessage,
   inlineBase64Source,
-  type AgentMessage
+  type AgentMessage,
+  type AgentReasoningEffort
 } from '@yolk-sdk/agent/protocol'
 import { makeTool } from '@yolk-sdk/agent/tools'
 import {
@@ -38,6 +38,12 @@ import {
   vercelAiGatewayPlainTextFixture,
   vercelAiGatewayToolCallDeltasFixture
 } from '../../../src/providers/vercel/conformance/index.ts'
+import {
+  pickRecordedRequestFields,
+  recordedNumber,
+  recordedReasoningEffort,
+  recordedRequestBody
+} from './recorded-gateway-request.ts'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest
@@ -698,40 +704,6 @@ const oneEventPerChunkFixture = (fixture: WireFixture): WireFixture => {
   return derived
 }
 
-const recordedReasoningEffort = (fixture: WireFixture) =>
-  Schema.decodeUnknownEffect(AgentReasoningEffort)(
-    Predicate.hasProperty(fixture.exchanges[0].request.body, 'reasoning_effort')
-      ? fixture.exchanges[0].request.body.reasoning_effort
-      : undefined
-  )
-
-const recordedRequestBody = (fixture: WireFixture): unknown => fixture.exchanges[0].request.body
-
-const recordedMaxTokens = (fixture: WireFixture): number => {
-  const body = recordedRequestBody(fixture)
-
-  return Predicate.hasProperty(body, 'max_tokens') && Predicate.isNumber(body.max_tokens)
-    ? body.max_tokens
-    : expect.fail(`${fixture.id} recorded no numeric \`max_tokens\``)
-}
-
-// Replay matches requests by method and URL only; these request fields must also equal the
-// recording, so a fixture-backed test sends the request its fixture recorded.
-const recordedRequestFields = [
-  'model',
-  'reasoning_effort',
-  'thinking',
-  'max_tokens',
-  'stream',
-  'tools'
-] as const
-
-// Only the fields present, so a field sent but never recorded (or the reverse) is a mismatch.
-const pickRecordedRequestFields = (body: unknown) =>
-  recordedRequestFields.flatMap(field =>
-    Predicate.hasProperty(body, field) ? [{ field, value: body[field] }] : []
-  )
-
 const streamingGatewayConfig: Parameters<typeof makeVercelAiGatewayProviderLayer>[0] = {
   ...defaultGatewayConfig,
   streaming: true
@@ -750,8 +722,23 @@ const recordedGatewayConfig = (
   fixture: WireFixture
 ): Parameters<typeof makeVercelAiGatewayProviderLayer>[0] => ({
   ...config,
-  maxCompletionTokens: recordedMaxTokens(fixture)
+  maxCompletionTokens: recordedNumber(fixture, 'max_tokens')
 })
+
+// Every request the replay ledger saw (injected faults included) sent the request fields the
+// fixture recorded.
+const expectRecordedRequests = (fixture: WireFixture) =>
+  Effect.gen(function* () {
+    const entries = yield* (yield* ReplayLedger).entries
+
+    expect(entries.length).toBeGreaterThan(0)
+
+    for (const entry of entries) {
+      expect(pickRecordedRequestFields(entry.bodyJson)).toEqual(
+        pickRecordedRequestFields(recordedRequestBody(fixture))
+      )
+    }
+  })
 
 const replayGatewayLayer = (
   config: Parameters<typeof makeVercelAiGatewayProviderLayer>[0],
@@ -906,7 +893,15 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
 
       expect(expected.content).toBe(`${multibyteChar}${recorded.content}`)
       expect(textOf(events)).toBe(expected.content)
-    }).pipe(Effect.provide(replayGatewayLayer(streamingGatewayConfig, [splitMultibyteFixture()])))
+      yield* expectRecordedRequests(fixture)
+    }).pipe(
+      Effect.provide(
+        replayGatewayLayer(
+          recordedGatewayConfig(streamingGatewayConfig, vercelAiGatewayPlainTextFixture),
+          [splitMultibyteFixture()]
+        )
+      )
+    )
   )
 
   it.effect('streams plain text deltas, done, and usage with a streaming request', () =>
@@ -939,7 +934,7 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
           model,
           stream: true,
           stream_options: { include_usage: true },
-          max_tokens: recordedMaxTokens(fixture)
+          max_tokens: recordedNumber(fixture, 'max_tokens')
         }
       })
       expect(pickRecordedRequestFields(entry?.bodyJson)).toEqual(
@@ -999,10 +994,11 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
 
         expect(textOf(events)).toBe((yield* fixtureDeltas(fixture)).content)
         expect(yield* Ref.get(done)).toBe(true)
+        yield* expectRecordedRequests(fixture)
       }).pipe(
         Effect.provide(
           replayGatewayLayer(
-            streamingGatewayConfig,
+            recordedGatewayConfig(streamingGatewayConfig, fixture),
             [fixture],
             [WireFault.HoldAfterChunks({ chunks: holdAfter, release: Deferred.await(release) })]
           )
@@ -1017,7 +1013,7 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
       Effect.gen(function* () {
         const fixture = vercelAiGatewayDeepSeekReasoningFixture
         const model = fixtureModel(fixture)
-        const reasoningEffort = yield* recordedReasoningEffort(fixture)
+        const reasoningEffort = recordedReasoningEffort(fixture)
 
         const events = Array.from(
           yield* gatewayStream({ model, reasoningEffort }).pipe(Stream.runCollect)
@@ -1068,18 +1064,23 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
       const events = Array.from(
         yield* gatewayStream({
           model: fixtureModel(fixture),
-          reasoningEffort: yield* recordedReasoningEffort(fixture)
+          reasoningEffort: recordedReasoningEffort(fixture)
         }).pipe(Stream.runCollect)
       )
 
       expect(expected.reasoning.length).toBeGreaterThan(0)
       expect(events.some(event => event instanceof LLMReasoningDelta)).toBe(false)
       expect(textOf(events)).toBe(expected.content)
+      yield* expectRecordedRequests(fixture)
     }).pipe(
       Effect.provide(
-        replayGatewayLayer({ ...deepSeekGatewayConfig, reasoningContent: false }, [
-          vercelAiGatewayDeepSeekReasoningFixture
-        ])
+        replayGatewayLayer(
+          recordedGatewayConfig(
+            { ...deepSeekGatewayConfig, reasoningContent: false },
+            vercelAiGatewayDeepSeekReasoningFixture
+          ),
+          [vercelAiGatewayDeepSeekReasoningFixture]
+        )
       )
     )
   )
@@ -1241,6 +1242,8 @@ const usageAfterFinishFixture = (): WireFixture => {
 
 describe('Vercel AI Gateway streaming under wire faults', () => {
   const fixture = vercelAiGatewayPlainTextFixture
+  // The recorded request (token limit included): faults vary only the response.
+  const config = recordedGatewayConfig(streamingGatewayConfig, fixture)
 
   const collectUntilFailure = (model: string) =>
     Effect.gen(function* () {
@@ -1276,10 +1279,11 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
         [1, 'injected', 'StatusOnAttempt'],
         [2, 'matched', undefined]
       ])
+      yield* expectRecordedRequests(fixture)
     }).pipe(
       Effect.provide(
         replayGatewayLayer(
-          streamingGatewayConfig,
+          config,
           [fixture],
           [
             WireFault.StatusOnAttempt({
@@ -1315,10 +1319,11 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
       const retried = Array.from(yield* gatewayStream({ model }).pipe(Stream.runCollect))
 
       expect(retried.some(event => event instanceof LLMDone)).toBe(true)
+      yield* expectRecordedRequests(fixture)
     }).pipe(
       Effect.provide(
         replayGatewayLayer(
-          streamingGatewayConfig,
+          config,
           [fixture],
           [
             WireFault.StatusOnAttempt({
@@ -1351,10 +1356,11 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
       expect(error.message).toContain('Vercel AI Gateway request failed')
       expect(textOf(seen).length).toBeGreaterThan(0)
       expect(seen.some(event => event instanceof LLMDone)).toBe(false)
+      yield* expectRecordedRequests(fixture)
     }).pipe(
       Effect.provide(
         replayGatewayLayer(
-          streamingGatewayConfig,
+          config,
           [fixture],
           [WireFault.FailAfterChunks({ chunks: firstChunkIndexWhere(fixture, hasContent) + 1 })]
         )
@@ -1390,10 +1396,11 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
           }
         })
         expect(seen.some(event => event instanceof LLMDone)).toBe(false)
+        yield* expectRecordedRequests(fixture)
       }).pipe(
         Effect.provide(
           replayGatewayLayer(
-            streamingGatewayConfig,
+            config,
             [fixture],
             [
               WireFault.TruncateAfterChunks({
@@ -1435,10 +1442,11 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
       expect(entries.map(entry => [entry.match.outcome, entry.fault])).toEqual([
         ['matched', 'TruncateAfterChunks']
       ])
+      yield* expectRecordedRequests(fixture)
     }).pipe(
       Effect.provide(
         replayGatewayLayer(
-          streamingGatewayConfig,
+          config,
           [split],
           [WireFault.TruncateAfterChunks({ chunks: finishEvent.chunkIndex + 1 })]
         )
@@ -1476,10 +1484,11 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
         expect(entries.map(entry => [entry.match.outcome, entry.fault])).toEqual([
           ['matched', 'TruncateAfterChunks']
         ])
+        yield* expectRecordedRequests(fixture)
       }).pipe(
         Effect.provide(
           replayGatewayLayer(
-            streamingGatewayConfig,
+            config,
             [derived],
             [WireFault.TruncateAfterChunks({ chunks: finishEvent.chunkIndex + 1 })]
           )
@@ -1500,6 +1509,7 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
         LLMDone.make({ stopReason: 'stop' })
       ])
       expect(streamed.some(event => event instanceof LLMUsage)).toBe(true)
-    }).pipe(Effect.provide(replayGatewayLayer(streamingGatewayConfig, [usageAfterFinishFixture()])))
+      yield* expectRecordedRequests(fixture)
+    }).pipe(Effect.provide(replayGatewayLayer(config, [usageAfterFinishFixture()])))
   )
 })

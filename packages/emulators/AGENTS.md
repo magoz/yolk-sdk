@@ -46,7 +46,8 @@ There is no root export or barrel.
   time; `followRedirects` belongs on top, never underneath; any other underlying client must not
   follow redirects by itself (documented for hosts). `test/router-redirects.test.ts` guards this.
 - Wire shapes come from the recorded conformance fixtures (the Gateway ones are now verified live
-  recordings the emulator is not yet aligned with; the OpenAI ones are synthetic), copied as data,
+  recordings the emulator is not yet aligned with, so the Gateway route stays `unverified` until
+  aligned; the OpenAI ones are synthetic), copied as data,
   never imported. Each emulated route lists the conformance case ids it follows in its manifest
   (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`). Each manifest route needs its own handler: `bindRouteHandlers`
   (`src/route-evidence.ts`) pairs them at construction and throws `EmulatorRouteUnmapped` for a

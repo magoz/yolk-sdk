@@ -29,7 +29,7 @@ import { writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { Data, Effect, Layer, Predicate, Redacted } from 'effect'
+import { Data, Effect, Encoding, Layer, Predicate, Redacted, Result } from 'effect'
 import type * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
@@ -45,6 +45,7 @@ import {
 import {
   isWireBase64BodyResponse,
   isWireStreamResponse,
+  type WireChunk,
   type WireExchange,
   type WireFixture,
   type WireResponse
@@ -435,19 +436,47 @@ const redactResponse = (response: WireResponse, redactions: JsonFieldRedactions)
     : { ...response, body: redactJsonText(response.body, redactions) }
 }
 
-// The response text a redaction applies to: the text body, or the text chunks joined.
-const responseText = (response: WireResponse): string => {
-  if (isWireStreamResponse(response)) {
-    return response.chunks.filter(Predicate.isString).join('')
+// Exact bytes of base64 text; undecodable base64 yields no bytes (the recorder never writes it).
+const base64Bytes = (base64: string): Uint8Array =>
+  Result.getOrElse(Encoding.decodeBase64(base64), () => new Uint8Array())
+
+const chunkBytes = (chunk: WireChunk): Uint8Array =>
+  Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)
+
+const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
+  const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
+  let offset = 0
+
+  for (const part of parts) {
+    joined.set(part, offset)
+    offset += part.length
   }
 
-  return isWireBase64BodyResponse(response) ? '' : response.body
+  return joined
+}
+
+// Non-fatal UTF-8 decode: invalid bytes become U+FFFD, the rest of the text stays checkable.
+const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
+
+// The whole response text a survivor check reads: the text body, the decoded `bodyBase64`, or
+// every stream chunk (text and `{ base64 }`) reassembled into one byte stream and decoded, so a
+// value inside a base64 chunk, or split across chunks (even mid-character), is still seen.
+const responseText = (response: WireResponse): string => {
+  if (isWireStreamResponse(response)) {
+    return lossyText(concatBytes(response.chunks.map(chunkBytes)))
+  }
+
+  return isWireBase64BodyResponse(response)
+    ? lossyText(base64Bytes(response.bodyBase64))
+    : response.body
 }
 
 /**
  * Replace the string value of every redacted JSON field in recorded exchanges: request bodies
  * (parsed JSON, or JSON text), text response bodies, and text stream chunks (SSE `data:` JSON).
- * Chunk boundaries and all other bytes are kept. Base64 bodies and chunks are left untouched.
+ * Chunk boundaries and all other bytes are kept. Base64 bodies and `{ base64 }` chunks are never
+ * rewritten, and chunks are never merged or re-split: a value there, or split across chunks, is
+ * left in place and reported by `unredactedJsonFields`, so the probe refuses to write it.
  */
 export const redactJsonFields = (
   exchanges: ReadonlyArray<WireExchange>,
@@ -462,8 +491,10 @@ export const redactJsonFields = (
   }))
 
 /**
- * Redacted fields still carrying another value, checked on each exchange's whole text (stream
- * chunks joined), so a value split across network chunks is caught. Empty when fully redacted.
+ * Redacted fields still carrying another value, checked on each exchange's whole text: request
+ * body, text or decoded base64 response body, and every stream chunk (text and base64) reassembled
+ * as bytes and decoded non-fatally. A value in a base64 chunk or body, or split across network
+ * chunks, is therefore caught. Empty when fully redacted.
  */
 export const unredactedJsonFields = (
   exchanges: ReadonlyArray<WireExchange>,
@@ -498,6 +529,10 @@ export const redactRecording = (
     unredactedFields: unredactedJsonFields(redacted, redactions)
   }
 }
+
+/** Why the probe refuses to write a recording that still carries a redacted field's value. */
+export const unredactedRecordingMessage = (fields: ReadonlyArray<string>): string =>
+  `could not redact ${fields.join(', ')} from the recording: the value is inside a base64 body or chunk, or split across network chunks, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
 
 /** The note written into every recorded fixture, naming the fields redacted from it. */
 export const gatewayFixtureNote = (redactedFields: ReadonlyArray<string>): string =>
@@ -561,7 +596,7 @@ const recordCase = (
     if (redacted.unredactedFields.length > 0) {
       return yield* new ProbeFailed({
         caseId,
-        message: `could not redact ${redacted.unredactedFields.join(', ')} from the recording`
+        message: unredactedRecordingMessage(redacted.unredactedFields)
       })
     }
 
@@ -619,9 +654,11 @@ export const defaultFixtureWriter: FixtureWriter = {
 }
 
 /**
- * The write gate: replay `recorded` through every case and write the fixture modules only when
- * the report passes and every case has exactly one recording. On failure nothing is written and
- * the formatted report is logged. Returns the report and the written paths.
+ * The write gate: refuse any recording that still carries a redacted field's value
+ * (`gatewayJsonRedactions`, checked across base64 and split chunks), then replay `recorded`
+ * through every case and write the fixture modules only when the report passes and every case
+ * has exactly one recording. On failure nothing is written (the replay report is logged when
+ * replay failed). Returns the report and the written paths.
  */
 export const writeVerifiedFixtures = (
   recorded: ReadonlyArray<RecordedGatewayFixture>,
@@ -630,6 +667,18 @@ export const writeVerifiedFixtures = (
 ) =>
   Effect.gen(function* () {
     const fixtures = recorded.map(({ fixture }) => fixture)
+
+    for (const fixture of fixtures) {
+      const unredactedFields = unredactedJsonFields(fixture.exchanges, gatewayJsonRedactions)
+
+      if (unredactedFields.length > 0) {
+        return yield* new ProbeFailed({
+          caseId: fixture.caseId,
+          message: `${unredactedRecordingMessage(unredactedFields)}; no fixture was written`
+        })
+      }
+    }
+
     const report = yield* verifyGatewayFixtures(fixtures, options)
     const unmatched = casesWithoutSingleFixture(fixtures)
 

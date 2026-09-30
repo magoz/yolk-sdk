@@ -1,7 +1,6 @@
-import { Effect, Layer, Predicate, Redacted, Ref, Schema } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref } from 'effect'
 import { HttpClient } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import { isWireStreamResponse, type WireFixture } from '@yolk-sdk/conformance/fixture'
 import {
@@ -30,55 +29,15 @@ import {
   type VercelAiGatewayConformanceCase,
   type VercelAiGatewayConformanceSettings
 } from '../../../src/providers/vercel/conformance/index.ts'
+import {
+  pickRecordedRequestFields,
+  recordedNumber,
+  recordedReasoningEffort,
+  recordedRequestBody,
+  recordedString
+} from './recorded-gateway-request.ts'
 
 const now = new Date('2026-09-30T12:00:00.000Z')
-
-// The request fields a replayed case must send exactly as the fixture recorded them. Replay
-// matches requests by method and URL only, so the ledger check below pins the rest.
-const recordedRequestFields = [
-  'model',
-  'reasoning_effort',
-  'thinking',
-  'max_tokens',
-  'stream',
-  'tools'
-] as const
-
-const recordedRequestBody = (fixture: WireFixture): unknown => fixture.exchanges[0].request.body
-
-const recordedField = (fixture: WireFixture, field: string): unknown => {
-  const body = recordedRequestBody(fixture)
-
-  return Predicate.hasProperty(body, field)
-    ? body[field]
-    : expect.fail(`${fixture.id} recorded no request \`${field}\``)
-}
-
-const recordedString = (fixture: WireFixture, field: string): string => {
-  const value = recordedField(fixture, field)
-
-  return Predicate.isString(value) ? value : expect.fail(`${fixture.id} \`${field}\` is no string`)
-}
-
-const recordedNumber = (fixture: WireFixture, field: string): number => {
-  const value = recordedField(fixture, field)
-
-  return Predicate.isNumber(value) ? value : expect.fail(`${fixture.id} \`${field}\` is no number`)
-}
-
-// Only the fields present, so a field sent but never recorded (or the reverse) is a mismatch.
-const pickRecordedRequestFields = (body: unknown) =>
-  recordedRequestFields.flatMap(field =>
-    Predicate.hasProperty(body, field) ? [{ field, value: body[field] }] : []
-  )
-
-const recordedReasoningEffort = (fixture: WireFixture): AgentReasoningEffort => {
-  const value = recordedField(fixture, 'reasoning_effort')
-
-  return Schema.is(AgentReasoningEffort)(value)
-    ? value
-    : expect.fail(`${fixture.id} \`reasoning_effort\` is no reasoning effort`)
-}
 
 // Replay-only settings: every model, limit, and effort comes from the recorded request bodies,
 // so each case sends the request its fixture recorded (the DeepSeek fixture, for example, was
