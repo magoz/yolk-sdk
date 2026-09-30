@@ -9,6 +9,8 @@
     "dropbox",
     "notion",
     "todoist",
-    "telegram"
+    "telegram",
+    "github",
+    "r2-storage"
   ]
 }

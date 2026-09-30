@@ -421,10 +421,43 @@ message cannot be deleted through the connector, so it runs only when a person n
 chat. There is no leftover lookup.
 See [Telegram conformance cases](../connectors/telegram#conformance-cases).
 
+`@yolk-sdk/connectors/github/conformance` exports seven GitHub cases (`githubConformanceCases`),
+their synthetic fixtures (`githubConformanceFixtures`), and the seeds they replay with
+(`githubConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `CredentialResolver`, and
+`GithubConformanceConfig` (the practice repository's `owner` and `repo`, a work issue, a label, a
+text file, and the run id). Every case runs the real connector actions; claims about response bodies
+the actions only partly read are observed at the `ConnectorHttpClient` port. The comment and label
+cases are write-reversible: each write names the invocation-unique `runId` or works only on the
+seeded work issue and label, is not interruptible, and is undone by id and verified, failing with
+`GithubConformanceRestoreFailed` when that fails. A definitive rejection undoes nothing; an ambiguous
+write fails with `GithubConformanceActionFailed` (`writeOutcome: 'unknown'`) naming the exact item;
+an answer outside the run namespace is never adopted (`GithubConformanceCleanupRefused`). The issue
+lifecycle case is **write-irreversible**: GitHub issues cannot be deleted through the REST API, so
+the issue it opens stays in the repository, closed, and it runs only when a person names its exact
+id. `findGithubConformanceLeftovers` lists, read-only and bounded, open `yolk-conformance run-*`
+issues, run comments on the work issue, and the seeded label on it. See
+[GitHub conformance cases](../connectors/github#conformance-cases).
+
+`@yolk-sdk/connectors/r2-storage/conformance` exports six port-level R2 cases
+(`r2ConformanceCases`), their synthetic `PortFixture`s (`r2ConformanceFixtures`), and the seeds they
+replay with (`r2ConformanceFixtureSeeds`). The connector never talks to R2 itself: the cases run
+`r2_storage.upload_url` over the host `R2Presigner` and the host-only `getR2Object` /
+`createR2Object` / `updateR2Object` over the host `R2ObjectClient`, plus `CredentialResolver` and
+`R2ConformanceConfig`. `r2PortsLayerFromBackend` turns any plain-JSON backend
+`{ call(port, method, request) }` into both port layers (requests never carry the credentials or
+the integration; `notEmulated` fails closed), and `makeR2ReplayBackend` replays the fixtures. The
+two write cases are **write-irreversible**: the connector cannot delete R2 objects, so they run
+only when named by exact id, write only under `yolk-conformance/<runId>/`, and report an ambiguous
+put (any port failure but `conflict`) with the exact bucket and key. Presigned URLs in fixtures
+carry only synthetic credential placeholders: `findR2PortFixtureSecrets` refuses a live
+`X-Amz-Signature`, `X-Amz-Credential`, or `X-Amz-Security-Token`, and `scrubR2PortFixture` rewrites
+a recorded fixture to the placeholders. Live verification needs a host implementation of both
+ports; no live R2 runner ships. See [R2 conformance cases](../connectors/r2-storage#conformance-cases).
+
 When a case is interrupted, the run no longer produces a report, and no further case starts. So
-Dropbox, Notion, Todoist, and Microsoft write cases, the Fortnox row and customer mutation cases,
-and the Telegram send also hand a cleanup problem raised during the interruption (a failed cleanup,
-or a create or send whose outcome is unknown) to `ConformanceCleanupReporter` from
+Dropbox, Notion, Todoist, GitHub, and Microsoft write cases, the Fortnox row and customer mutation
+cases, the Telegram send, and the R2 puts also hand a cleanup problem raised during the interruption
+(a failed cleanup, or a create, send, or put whose outcome is unknown) to
 `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
 `Effect.logWarning`. The Fortnox rejection case and the Fortnox email send do not report. With the
 Effect version this repository pins, such a run ends with that failure itself (no Interrupt in the

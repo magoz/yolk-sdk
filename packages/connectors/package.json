@@ -74,6 +74,10 @@
       "types": "./src/github/index.ts",
       "default": "./src/github/index.ts"
     },
+    "./github/conformance": {
+      "types": "./src/github/conformance/index.ts",
+      "default": "./src/github/conformance/index.ts"
+    },
     "./google": {
       "types": "./src/google/index.ts",
       "default": "./src/google/index.ts"
@@ -101,6 +105,10 @@
     "./r2-storage": {
       "types": "./src/r2-storage/index.ts",
       "default": "./src/r2-storage/index.ts"
+    },
+    "./r2-storage/conformance": {
+      "types": "./src/r2-storage/conformance/index.ts",
+      "default": "./src/r2-storage/conformance/index.ts"
     },
     "./telegram": {
       "types": "./src/telegram/index.ts",
@@ -191,6 +199,11 @@
         "import": "./dist/github/index.mjs",
         "default": "./dist/github/index.mjs"
       },
+      "./github/conformance": {
+        "types": "./dist/github/conformance/index.d.mts",
+        "import": "./dist/github/conformance/index.mjs",
+        "default": "./dist/github/conformance/index.mjs"
+      },
       "./google": {
         "types": "./dist/google/index.d.mts",
         "import": "./dist/google/index.mjs",
@@ -225,6 +238,11 @@
         "types": "./dist/r2-storage/index.d.mts",
         "import": "./dist/r2-storage/index.mjs",
         "default": "./dist/r2-storage/index.mjs"
+      },
+      "./r2-storage/conformance": {
+        "types": "./dist/r2-storage/conformance/index.d.mts",
+        "import": "./dist/r2-storage/conformance/index.mjs",
+        "default": "./dist/r2-storage/conformance/index.mjs"
       },
       "./telegram": {
         "types": "./dist/telegram/index.d.mts",
