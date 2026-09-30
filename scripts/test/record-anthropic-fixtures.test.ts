@@ -584,6 +584,37 @@ describe('record-anthropic-fixtures signature redaction', () => {
     }
   })
 
+  it('refuses unknown SSE lines even when they parse as JSON, and a bare [DONE] line', () => {
+    const [exchange] = anthropicMessagesPlainTextFixture.exchanges
+
+    for (const line of [
+      '{"note":"synthetic-private-note"}',
+      '"synthetic-private-note"',
+      '[DONE]',
+      '42'
+    ]) {
+      const withLine = withChunks(exchange, [...streamChunks(exchange), `${line}\n\n`])
+
+      expect(unscannableThinkingPayloads([withLine]), line).toBe(1)
+      expect(thinkingRedactionRefusal([withLine]), line).toBeDefined()
+    }
+  })
+
+  it('refuses base64 chunks and bodies that do not decode', () => {
+    const [exchange] = anthropicMessagesPlainTextFixture.exchanges
+    const badChunk = withChunks(exchange, [...streamChunks(exchange), { base64: '%%%' }])
+
+    const badBody: WireExchange = {
+      request: exchange.request,
+      response: { status: 200, headers: exchange.response.headers, bodyBase64: '%%%' }
+    }
+
+    for (const bad of [badChunk, badBody]) {
+      expect(unscannableThinkingPayloads([bad])).toBe(1)
+      expect(thinkingRedactionRefusal([bad])).toBeDefined()
+    }
+  })
+
   it('refuses SSE comments, unknown fields, and malformed lines the parser would ignore', () => {
     const [exchange] = anthropicMessagesPlainTextFixture.exchanges
 

@@ -514,6 +514,37 @@ describe('record-responses-fixtures redaction', () => {
     }
   })
 
+  it('refuses unknown SSE lines even when they parse as JSON, and a bare [DONE] line', () => {
+    const [exchange] = openAiCodexPlainTextFixture.exchanges
+
+    for (const line of [
+      '{"note":"synthetic-private-note"}',
+      '"synthetic-private-note"',
+      '[DONE]',
+      '42'
+    ]) {
+      const withLine = withChunks(exchange, [...streamChunks(exchange), `${line}\n\n`])
+
+      expect(unscannableResponsesPayloads([withLine]), line).toBe(1)
+      expect(responsesRedactionRefusal([withLine]), line).toBeDefined()
+    }
+  })
+
+  it('refuses base64 chunks and bodies that do not decode', () => {
+    const [exchange] = openAiCodexPlainTextFixture.exchanges
+    const badChunk = withChunks(exchange, [...streamChunks(exchange), { base64: '%%%' }])
+
+    const badBody: WireExchange = {
+      request: exchange.request,
+      response: { status: 200, headers: exchange.response.headers, bodyBase64: '%%%' }
+    }
+
+    for (const bad of [badChunk, badBody]) {
+      expect(unscannableResponsesPayloads([bad])).toBe(1)
+      expect(responsesRedactionRefusal([bad])).toBeDefined()
+    }
+  })
+
   it('refuses SSE comments, unknown fields, and malformed lines the parser would ignore', () => {
     const [exchange] = openAiCodexPlainTextFixture.exchanges
 

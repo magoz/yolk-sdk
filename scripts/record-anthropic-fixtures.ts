@@ -17,7 +17,9 @@
  * signatures and `redacted_thinking` data (text chunks only, never re-chunked; a value left in a
  * base64 chunk or split across chunks, a non-string value, or a repeated key refuses the write,
  * checked on every occurrence in the reassembled wire text; so does any SSE `data:` payload or
- * body the member scanner cannot fully scan, except the `[DONE]` sentinel), turns each single
+ * body the member scanner cannot fully scan, except a `[DONE]` `data:` sentinel, any SSE line the
+ * stream parser ignores, even one that parses as JSON, and any base64 that does not decode),
+ * turns each single
  * recorded exchange into a `verified` fixture dated today, then replays the new fixtures through
  * the same cases. Nothing is written unless every case passes live, records cleanly, is fully
  * redacted, passes the secret scan, and passes again on replay; only then are the
@@ -444,10 +446,11 @@ export const redactThinkingSignatures = (exchange: WireExchange): WireExchange =
 }
 
 // Exact bytes of base64 text; undecodable base64 yields no bytes (the recorder never writes it).
-const base64Bytes = (base64: string): Uint8Array =>
-  Result.getOrElse(Encoding.decodeBase64(base64), () => new Uint8Array())
+// Undefined when the base64 does not decode: the payload is then unscannable, never read as empty.
+const base64Bytes = (base64: string): Uint8Array | undefined =>
+  Result.getOrElse(Encoding.decodeBase64(base64), (): Uint8Array | undefined => undefined)
 
-const chunkBytes = (chunk: WireChunk): Uint8Array =>
+const chunkBytes = (chunk: WireChunk): Uint8Array | undefined =>
   Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)
 
 const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
@@ -465,39 +468,56 @@ const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
 // Non-fatal UTF-8 decode: invalid bytes become U+FFFD, the rest of the text stays checkable.
 const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
-// The JSON payloads a survivor check reads: every SSE event's `data:` of the whole stream (all
-// chunks, text and `{ base64 }`, reassembled as bytes and decoded, so a value inside a base64
-// chunk or split across chunks, even mid-character, is seen), or the whole decoded body. An empty
-// or whitespace-only body carries nothing to scan and yields no payload.
-const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
+// What a survivor check reads from one response: every SSE event's `data:` payload of the whole
+// stream (all chunks, text and `{ base64 }`, reassembled as bytes and decoded, so a value inside a
+// base64 chunk or split across chunks, even mid-character, is seen), or the whole decoded body,
+// plus how many parts are unscannable outright. An empty or whitespace-only body carries nothing
+// to scan and yields no payload.
+type ResponsePayloads = { readonly payloads: ReadonlyArray<string>; readonly unscannable: number }
+
+const responsePayloads = (response: WireResponse): ResponsePayloads => {
   if (!isWireStreamResponse(response)) {
     const body = isWireBase64BodyResponse(response)
-      ? lossyText(base64Bytes(response.bodyBase64))
-      : response.body
+      ? base64Bytes(response.bodyBase64)
+      : new TextEncoder().encode(response.body)
 
-    return body.trim().length > 0 ? [body] : []
+    if (body === undefined) return { payloads: [], unscannable: 1 }
+
+    const text = lossyText(body)
+
+    return { payloads: text.trim().length > 0 ? [text] : [], unscannable: 0 }
   }
 
-  return lossyText(concatBytes(response.chunks.map(chunkBytes)))
-    .replace(/\r\n?/g, '\n')
-    .split('\n\n')
-    .flatMap(event => {
-      const lines = event.split('\n')
+  const chunks = response.chunks.map(chunkBytes)
+  const decoded = chunks.filter(Predicate.isNotUndefined)
 
-      const data = lines
-        .filter(line => line.startsWith('data:'))
-        .map(line => line.slice('data:'.length).trim())
-        .join('\n')
+  // A chunk whose base64 does not decode cannot be scanned: refuse rather than read it as empty.
+  if (decoded.length !== chunks.length) {
+    return { payloads: [], unscannable: chunks.length - decoded.length }
+  }
 
-      // Comments, unknown fields and malformed lines are ignored by the stream parser but would
-      // still be written to the public fixture, so each one is returned as its own payload: the
-      // member scanner cannot parse it and the write is refused.
-      const unparsedLines = lines.filter(
-        line => line.trim().length > 0 && !sseFieldLinePattern.test(line)
-      )
+  const payloads: Array<string> = []
+  let unscannable = 0
 
-      return data.length > 0 ? [data, ...unparsedLines] : unparsedLines
-    })
+  for (const event of lossyText(concatBytes(decoded)).replace(/\r\n?/g, '\n').split('\n\n')) {
+    const lines = event.split('\n')
+
+    const data = lines
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice('data:'.length).trim())
+      .join('\n')
+
+    if (data.length > 0) payloads.push(data)
+
+    // Comments, unknown fields and malformed lines are ignored by the stream parser but would
+    // still be written to the public fixture. Each one is unscannable outright, even when it
+    // parses as JSON, and the `[DONE]` exemption applies only to a `data:` payload.
+    unscannable += lines.filter(
+      line => line.trim().length > 0 && !sseFieldLinePattern.test(line)
+    ).length
+  }
+
+  return { payloads, unscannable }
 }
 
 /** SSE field lines the stream parsers understand; any other non-blank line is unscannable. */
@@ -564,7 +584,11 @@ const scanExchanges = (exchanges: ReadonlyArray<WireExchange>): PayloadScan => {
   const scan: PayloadScan = { fields: new Set(), unscannable: 0 }
 
   for (const { response } of exchanges) {
-    for (const payload of responsePayloads(response)) scanPayload(payload, scan)
+    const { payloads, unscannable } = responsePayloads(response)
+
+    scan.unscannable += unscannable
+
+    for (const payload of payloads) scanPayload(payload, scan)
   }
 
   return scan
