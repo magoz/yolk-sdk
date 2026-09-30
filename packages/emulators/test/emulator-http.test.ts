@@ -26,14 +26,12 @@ const conformanceFinds = (
     ]
   }).some(issue => issue.kind === kind)
 
-// A credential-named request header.
 const conformanceCallsCredential = (name: string): boolean =>
   conformanceFinds('credential_header', {
     url: 'https://example.test/',
     headers: { [name]: 'synthetic' }
   })
 
-// A credential query parameter.
 const conformanceCallsCredentialQuery = (name: string): boolean =>
   conformanceFinds('credential_query_param', {
     url: `https://example.test/?${encodeURIComponent(name)}=synthetic`,

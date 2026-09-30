@@ -566,7 +566,7 @@ export const moveMessage: RouteHandler = (state, request, env) => {
   if (fields instanceof Response) return fields
 
   if (!Predicate.isString(fields.destinationId)) {
-    return invalidValue(request, 'destinationId must be a folder id or well-known name.')
+    return invalidValue(request, 'destinationId must be a string (only deleteditems is emulated).')
   }
 
   if (fields.destinationId !== moveDestination) {

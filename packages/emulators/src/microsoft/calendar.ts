@@ -111,9 +111,7 @@ const timezoneProblem = (request: RouteRequest): Response | undefined => {
 }
 
 /** `preference-applied` on reads (which asked for UTC), as the fixtures record it. */
-const readHeaders = (request: RouteRequest): HeadersInit => ({
-  'preference-applied': `outlook.timezone="${request.prefer.timezone ?? 'UTC'}"`
-})
+const readHeaders: HeadersInit = { 'preference-applied': 'outlook.timezone="UTC"' }
 
 const findCalendar = (state: MicrosoftEmulatorState, request: RouteRequest) =>
   state.calendars.find(calendar => calendar.id === request.params.calendarId)
@@ -195,7 +193,7 @@ export const calendarView: RouteHandler = (state, request, env) => {
       page.map(event => project(renderEvent(env, event), fields)),
       undefined
     ),
-    readHeaders(request)
+    readHeaders
   )
 }
 
@@ -395,11 +393,7 @@ export const getEvent: RouteHandler = (state, request, env) => {
 
   return event === undefined
     ? eventNotFound(request)
-    : jsonResponse(
-        200,
-        entity(context, project(renderEvent(env, event), fields)),
-        readHeaders(request)
-      )
+    : jsonResponse(200, entity(context, project(renderEvent(env, event), fields)), readHeaders)
 }
 
 /** `PATCH /users/{userId}/events/{eventId}`: update `subject`; 200 with the event. */

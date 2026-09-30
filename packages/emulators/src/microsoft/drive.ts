@@ -8,8 +8,8 @@
  * a name that is free: no fixture records a name conflict, so one fails closed (400). Children
  * listings need `$top` and answer one page (no `$skip`, no `@odata.nextLink`), as the fixtures
  * record them. A copy takes what the copy fixture sends (a file, `parentReference { driveId, id }`
- * on the same drive, no new `name`; anything else is not emulated) and answers 202 with one monitor `Location` on the SharePoint origin; the monitor needs no
- * credentials, answers `inProgress` (202) for `copyInProgressPolls` polls (default 0), then runs
+ * on the same drive, no new `name`; anything else is not emulated) and answers 202 with one
+ * monitor `Location` on the SharePoint origin; the monitor needs no credentials, answers `inProgress` (202) for `copyInProgressPolls` polls (default 0), then runs
  * the copy and answers `completed` (200) with the new item's `resourceId`, as the fixture's first
  * poll does. No fixture records a failed copy: when the copy can no longer run (source or
  * destination gone, or the name taken), the monitor answers 400 not emulated.
