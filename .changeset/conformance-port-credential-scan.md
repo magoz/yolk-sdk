@@ -1,0 +1,5 @@
+---
+'@yolk-sdk/conformance': patch
+---
+
+`scanPortFixtureForSecrets` now flags credential query and form parameters inside every JSON string value, the note, and the failure message of a `PortFixture` (a signed URL a port answered, such as an S3 presigned URL's `X-Amz-Signature`, `X-Amz-Credential`, or `X-Amz-Security-Token`), and `redactPortPayload` / `isPortCredentialKey` (and the credential-field scan) also cover AWS-style `accessKeyId`, `secretAccessKey`, and `sessionToken` fields, camelCase or snake_case. The port scan finds every `name=` on its own (so no later parameter is skipped) and exempts only a value from the new frozen `syntheticPortCredentialParams` (the SigV4 `x-amz-signature` and `x-amz-credential` placeholders) under its own parameter name: the whole raw value, taken up to `&`, `#`, whitespace, `"`, `<`, `>`, or the end (a raw `?` or `'` and encoded delimiters stay inside it), percent-decoded, must equal the placeholder exactly. A placeholder with anything appended inside the value, under another parameter, or with another scope is flagged. `scanFixtureForSecrets` is unchanged and exempts nothing.

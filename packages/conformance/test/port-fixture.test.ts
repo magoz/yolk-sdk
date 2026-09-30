@@ -8,6 +8,7 @@ import {
   isPortFixture,
   redactPortPayload,
   scanPortFixtureForSecrets,
+  syntheticPortCredentialParams,
   type PortFixture,
   type WireFixture
 } from '../src/fixture.ts'
@@ -130,6 +131,41 @@ describe('port payload redaction', () => {
       expect(isPortCredentialKey(key)).toBe(false)
     }
   })
+
+  it('drops AWS-style signing credentials in camelCase and snake_case', () => {
+    const keys = [
+      'accessKeyId',
+      'AccessKeyId',
+      'access_key_id',
+      'secretAccessKey',
+      'SecretAccessKey',
+      'secret_access_key',
+      'sessionToken',
+      'SessionToken',
+      'session_token'
+    ]
+
+    for (const key of keys) {
+      expect(isPortCredentialKey(key)).toBe(true)
+    }
+
+    expect(
+      redactPortPayload({
+        endpoint: 'https://storage.example.test',
+        ...Object.fromEntries(keys.map(key => [key, 'synthetic-value'])),
+        bucket: 'kept',
+        nested: [{ secret_access_key: 'x', key: 'kept/object.txt' }]
+      })
+    ).toEqual({
+      endpoint: 'https://storage.example.test',
+      bucket: 'kept',
+      nested: [{ key: 'kept/object.txt' }]
+    })
+
+    for (const key of ['accessKey', 'bucket', 'key', 'contentType', 'etag']) {
+      expect(isPortCredentialKey(key)).toBe(false)
+    }
+  })
 })
 
 describe('scanPortFixtureForSecrets', () => {
@@ -164,6 +200,175 @@ describe('scanPortFixtureForSecrets', () => {
     )
     expect(JSON.stringify(issues)).not.toContain('hunter2')
     expect(JSON.stringify(issues)).not.toContain('abcdefghijklmnop')
+  })
+
+  it('flags credential query parameters inside JSON strings, notes, and failure messages', () => {
+    const signed =
+      'https://storage.example.test/bucket/key.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=LIVEKEYID%2F20260930%2Fauto%2Fs3%2Faws4_request&X-Amz-Signature=a1b2c3d4e5f6'
+
+    expect(
+      scanPortFixtureForSecrets({
+        ...valueFixture,
+        note: `recorded from ${signed}`,
+        request: { links: [`?token=live-token-value`] },
+        response: { uploadUrl: signed }
+      })
+    ).toEqual([
+      { kind: 'credential_query_param', location: 'note' },
+      { kind: 'credential_query_param', location: 'request.links[0]' },
+      { kind: 'credential_query_param', location: 'response.uploadUrl' }
+    ])
+    expect(
+      scanPortFixtureForSecrets({
+        ...failureFixture,
+        failure: { kind: 'error', code: 'transport_failed', message: `redirected to ${signed}` }
+      })
+    ).toEqual([{ kind: 'credential_query_param', location: 'failure.message' }])
+    expect(
+      scanPortFixtureForSecrets({
+        ...valueFixture,
+        response: { uploadUrl: signed.replace('&X-Amz-Signature', '&X-Amz-Security-Token=live&x') }
+      })
+    ).toEqual([{ kind: 'credential_query_param', location: 'response.uploadUrl' }])
+  })
+
+  const signature = syntheticPortCredentialParams['x-amz-signature']
+  const credential = syntheticPortCredentialParams['x-amz-credential']
+  const encodedCredential = encodeURIComponent(credential)
+  const signedUrl = `https://storage.example.test/bucket/key.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=${encodedCredential}&X-Amz-Signature=${signature}`
+  const flaggedAt = (location: string) => [{ kind: 'credential_query_param', location }]
+
+  const scanUploadUrl = (uploadUrl: string) =>
+    scanPortFixtureForSecrets({ ...valueFixture, response: { uploadUrl } })
+
+  it('accepts only the exact synthetic placeholders, under their own parameter names', () => {
+    expect(Object.isFrozen(syntheticPortCredentialParams)).toBe(true)
+    expect(Object.keys(syntheticPortCredentialParams)).toEqual([
+      'x-amz-signature',
+      'x-amz-credential'
+    ])
+    expect(scanUploadUrl(signedUrl)).toEqual([])
+    // Parameter names match case-insensitively; values must match exactly after decoding.
+    expect(scanUploadUrl(signedUrl.replace('X-Amz-Signature', 'x-amz-signature'))).toEqual([])
+    // Prose that mentions a parameter without a query boundary is not a parameter.
+    expect(
+      scanPortFixtureForSecrets({
+        ...valueFixture,
+        response: { text: 'set the token= value in settings' }
+      })
+    ).toEqual([])
+  })
+
+  it('flags a placeholder with anything appended, raw or percent-encoded', () => {
+    for (const uploadUrl of [
+      signedUrl.replace(`X-Amz-Signature=${signature}`, `X-Amz-Signature=${signature}0123abcdef`),
+      signedUrl.replace(
+        `X-Amz-Signature=${signature}`,
+        `X-Amz-Signature=${encodeURIComponent(signature)}%2Da1b2c3d4`
+      ),
+      signedUrl.replace(encodedCredential, `${encodedCredential}%2Fextra`),
+      signedUrl.replace(encodedCredential, encodedCredential.replace('20260930', '20261001')),
+      `${signedUrl}&api_key=synthetic`,
+      `${signedUrl}&X-Amz-Security-Token=${signature}`
+    ]) {
+      expect(scanUploadUrl(uploadUrl), uploadUrl).toEqual(flaggedAt('response.uploadUrl'))
+    }
+  })
+
+  it('judges every parameter on its own: a synthetic URL never hides a later live one', () => {
+    for (const separator of [' ', '"', "'", '<', '>', ' then ', '\n']) {
+      const text = `${signedUrl}${separator}https://storage.example.test/other?token=0123456789abcdef0123456789abcdef`
+
+      expect(scanUploadUrl(text), JSON.stringify(separator)).toEqual(
+        flaggedAt('response.uploadUrl')
+      )
+    }
+
+    // A raw `?` stays inside the value, and the later `?X-Amz-Signature=` is found on its own too.
+    expect(scanUploadUrl(`${signedUrl}?X-Amz-Signature=a1b2c3d4e5f6`)).toEqual(
+      flaggedAt('response.uploadUrl')
+    )
+    expect(
+      scanPortFixtureForSecrets({
+        ...failureFixture,
+        failure: {
+          kind: 'error',
+          code: 'transport_failed',
+          message: `PUT ${signedUrl} failed; retried /bucket/key.txt?X-Amz-Signature=a1b2c3d4e5f6`
+        }
+      })
+    ).toEqual(flaggedAt('failure.message'))
+  })
+
+  const withSignatureSuffix = (suffix: string) =>
+    signedUrl.replace(`X-Amz-Signature=${signature}`, `X-Amz-Signature=${signature}${suffix}`)
+
+  it('keeps a raw `?` and every encoded delimiter inside the value: never exact', () => {
+    for (const suffix of [
+      '?0123abcdef0123abcdef',
+      '%3F0123abcdef',
+      '%260123abcdef',
+      '%23x',
+      '%20x'
+    ]) {
+      expect(scanUploadUrl(withSignatureSuffix(suffix)), suffix).toEqual(
+        flaggedAt('response.uploadUrl')
+      )
+    }
+
+    expect(scanUploadUrl(withSignatureSuffix(`?X-Amz-Signature=a1b2c3d4e5f6`))).toEqual(
+      flaggedAt('response.uploadUrl')
+    )
+  })
+
+  it('ends a value only where a URL query value cannot continue: `&`, `#`, whitespace, `"`, `<`, `>`', () => {
+    // After a boundary the text is not part of the value: an exact placeholder stays exempt, and
+    // what follows is judged on its own (a later credential parameter is still flagged).
+    for (const suffix of ['>x', '"x', ' x', '<x', '&other=1', '#section']) {
+      expect(scanUploadUrl(withSignatureSuffix(suffix)), suffix).toEqual([])
+    }
+
+    // `'` is legal raw inside a query value (RFC 3986), so it continues the value: not exact.
+    expect(scanUploadUrl(withSignatureSuffix("'x")), "'x").toEqual(flaggedAt('response.uploadUrl'))
+
+    for (const suffix of ["'x?token=live-value", '>x&token=live-value']) {
+      expect(scanUploadUrl(withSignatureSuffix(suffix)), suffix).toEqual(
+        flaggedAt('response.uploadUrl')
+      )
+    }
+  })
+
+  it('flags a credential name with an empty value followed by anything but `&` or `#`', () => {
+    for (const query of ['token="x"', 'token= x', 'token=?', "token='x'"]) {
+      expect(scanUploadUrl(`https://storage.example.test/b/k?${query}`), query).toEqual(
+        flaggedAt('response.uploadUrl')
+      )
+    }
+
+    for (const query of ['token=&page=2', 'token=#top']) {
+      expect(scanUploadUrl(`https://storage.example.test/b/k?${query}`), query).toEqual([])
+    }
+  })
+
+  it('never exempts a placeholder under another parameter name, or a look-alike password', () => {
+    for (const query of [
+      `token=${signature}`,
+      `X-Amz-Signature=${credential}`,
+      `X-Amz-Security-Token=${signature}`,
+      'password=yolk-synthetic-Hunter2!',
+      'client_secret=yolk-synthetic-signature-plus'
+    ]) {
+      expect(scanUploadUrl(`https://storage.example.test/b/k?${query}`), query).toEqual(
+        flaggedAt('response.uploadUrl')
+      )
+    }
+
+    expect(
+      scanPortFixtureForSecrets({
+        ...valueFixture,
+        note: 'password=yolk-synthetic-pw&username=ada'
+      })
+    ).toEqual(flaggedAt('note'))
   })
 
   it('scans failure messages and observation labels', () => {

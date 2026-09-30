@@ -1,0 +1,166 @@
+---
+title: GitHub conformance
+description: Experimental GitHub conformance cases for tests and hand-run practice-repository checks.
+---
+
+GitHub actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#github). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice GitHub repository.
+
+`@yolk-sdk/connectors/github/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Every case runs the real connector actions over the connector ports
+against the GitHub REST API (`https://api.github.com`, `X-GitHub-Api-Version: 2026-03-10`), and
+checks one wire claim the connector relies on. Where an action reads only part of a response body
+(error envelopes, the base64 file content), the case observes the body at the `ConnectorHttpClient`
+port the host provides; it sends no request of its own. The claims are as currently understood;
+none is observed live yet.
+
+| Case id                             | Safety               | Seeds                                           | Claim (as currently understood)                                                                                                                                                                             |
+| ----------------------------------- | -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github.labels.list-link-paging`    | `read`               | `owner`, `repo`                                 | `per_page=2` label pages carry `Link` `rel="next"` while labels remain; `page` numbers continue the list with no repeat within or across pages; the page after the last is empty                            |
+| `github.errors.not-found-envelope`  | `read`               | `owner`, `repo`                                 | An unused issue number maps to `github_not_found`; the JSON `message` follows the connector's message prefix and `documentation_url` reaches `underlying` (status unverified)                               |
+| `github.errors.validation-envelope` | `read`               | `owner`, `repo`                                 | A search over 256 characters maps to `github_validation` with a `message` and `errors` entries the connector reads (the trigger is unverified)                                                              |
+| `github.contents.base64-file`       | `read`               | `owner`, `repo`, `filePath`                     | A text file answers base64 broken into lines (unverified) that decodes to exactly `size` UTF-8 bytes                                                                                                        |
+| `github.comments.create-delete`     | `write-reversible`   | `owner`, `repo`, `workIssueNumber`, `runId`     | A run-scoped comment is listed `since` its `created_at`, deleted by id, then no longer listed; a second delete answers not found (both unverified); residue: a notification to the work issue's subscribers |
+| `github.labels.add-remove`          | `write-reversible`   | `owner`, `repo`, `workIssueNumber`, `labelName` | Adding and removing the seeded label answer the issue's label names with and without it, and `get_issue` agrees; a second remove answers not found; residue: two timeline events                            |
+| `github.issues.lifecycle-close`     | `write-irreversible` | `owner`, `repo`, `runId`                        | A run-scoped issue is created open, read, renamed, and closed as `completed`, and reads back closed; the closed issue stays                                                                                 |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- An issue number the repository has not reached answers 404 (the connector maps 404 and 410 alike,
+  so the case accepts either).
+- GitHub refuses a search longer than 256 characters with 422 and an `errors` array, rather than
+  answering 200. The case reads no search results, so search index consistency (search is
+  eventually consistent) does not matter to it.
+- GitHub folds the base64 `content` of a file every 60 characters; the connector strips all
+  whitespace before decoding, and the case requires at least one line break so that path is
+  exercised.
+- `list_issue_comments` with `since` set to a comment's `created_at` still lists that comment. The
+  comment case checks this before the delete, so a `since` that excluded it would fail the case
+  rather than make the later absence check pass vacuously.
+- Deleting an already deleted comment answers 404, and removing a label that is not on the issue
+  answers 404. Both cleanups rely on it: a not-found answer to the undo counts as undone.
+
+Claims are narrowed to what the connector reads. The error cases check the status class the
+connector maps, that the connector message starts with the body `message`, that
+`documentation_url` reaches `underlying`, and (validation case only) that the `errors` entries have
+a shape the connector can turn into details (a string, or an object with a string `resource`,
+`field`, `code`, or `message`); they do not pin GitHub's exact wording, the not-found `errors`, or
+the body `status` field. The paging case checks `rel="next"` only (the connector never follows the
+`Link` URL, it asks for the next `page` number) and requires each page to list every label once.
+
+`GithubConformanceConfig` holds the seeds: `owner` and `repo` (the practice repository, as
+integration config; it must have 3 to 20 labels, since the paging case pages by two and gives up
+after ten pages), `workIssueNumber` (an open practice issue, not a pull request, that **nobody else
+watches**, which the comment and label cases write to), `labelName` (an existing repository label
+that is not on the work issue), `filePath` (a UTF-8 text file in the default branch, more than 45
+bytes, with at least one non-ASCII character, and under 100,000 characters, beyond which the
+connector truncates the content), and `runId`. Cases never hard-code
+account data, and a missing seed fails the case with a `precondition:` mismatch before any request.
+Credentials bind through `githubConformanceIntegration(owner, repo)` (`github.token`, credential ref
+`github.conformance`).
+
+### Write ownership and cleanup
+
+The `runId` seed is a per-invocation `run-<hex>` value: the fixtures replay with `run-synthetic`, and
+the live runner generates a fresh one every time and never takes it as a flag. Every comment body
+and issue title a case writes starts with `yolk-conformance <runId>`.
+
+- The create request (comment create, label add, issue create), its decoding, its classification,
+  and the registration of what it created run together without interruption, and so does every
+  later write (deletes, removes, renames, closes). Neither the runner nor the bridges set a request
+  timeout, so a hanging request delays an interruption until it answers.
+- A definitive rejection (HTTP 4xx other than 408) changed nothing: the case fails and undoes
+  **nothing**.
+- An ambiguous outcome (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) may have
+  written anyway, and the case never learned what: it fails with `GithubConformanceActionFailed`
+  (`writeOutcome: 'unknown'`) naming the exact comment text, label, or issue title to check by hand,
+  and undoes nothing.
+- A create that answers an item outside the run namespace (a comment without the requested body, an
+  issue without the requested title, a pull request, or the seeded work issue's number) is never
+  adopted: the case fails with `GithubConformanceCleanupRefused` naming it.
+- After a successful create, the cleanup undoes the item **by id** (the comment id, the issue
+  number) or by the seeded issue and label, also after a failed claim or an interruption, and then
+  verifies it: the comment is no longer listed, the label is no longer on the issue, the issue reads
+  closed. A failed cleanup fails with `GithubConformanceRestoreFailed` naming the item and what to
+  do by hand.
+- The label case starts only when the label is **not** on the work issue (so it never removes a
+  label it did not add) and when the label already exists in the repository (adding a missing label
+  creates it, and the connector cannot delete repository labels). It adds and removes the same
+  seeded label on the same seeded issue, so **concurrent runs of the label case are not supported**:
+  a second run refuses to start while the first holds the label.
+
+### What the reversible cases leave behind
+
+The comment and label cases undo the **state** they change: the comment is deleted, and the label
+is off the issue again. They cannot undo what that state change triggered:
+
+- **Notifications.** Creating the comment notifies the work issue's subscribers (web, email, and
+  mobile); deleting it does not recall them.
+- **Timeline events.** Adding and removing the label leave permanent `labeled` and `unlabeled`
+  events on the issue timeline.
+
+This residue is why the work issue must be a practice issue **nobody else watches**. The cases stay
+`write-reversible` because nothing they create outlives the run; the lifecycle case is
+`write-irreversible` because it leaves state behind (a closed issue), not only notifications or
+timeline events.
+
+### The issue lifecycle is irreversible
+
+**GitHub issues cannot be deleted through the REST API**, and the connector has no delete action:
+closing is the only undo, and the closed issue stays in the repository: state, not only a
+notification or a timeline event. `github.issues.lifecycle-close` is therefore `write-irreversible`: it never runs under
+`allowWrites: 'reversible'`, and a runner starts it only when a person names its exact id
+(`allowIrreversible: ['github.issues.lifecycle-close']`; the live runner's
+`--allow-irreversible github.issues.lifecycle-close`). Every run leaves one closed issue titled
+`yolk-conformance <runId> lifecycle renamed: ...`. If a step fails after the create, the cleanup
+closes the issue as `not_planned` and verifies that it reads closed; if that fails, the error names
+the issue number to close by hand. When the lifecycle case will run, the live runner prints the run
+id before any case.
+
+### Leftovers and interruptions
+
+Before any write case, and again after an interrupt-only exit, the live runner calls
+`findGithubConformanceLeftovers` and prints a WARN line for each open issue titled
+`yolk-conformance run-*` (at most 10 pages of 100 open issues), each `yolk-conformance run-*`
+comment on the work issue (at most 10 pages of 100), and the seeded label when it is on the work
+issue. The lookup is read-only and bounded; nothing is changed automatically. Closed
+`yolk-conformance run-*` issues are the lifecycle case's documented leftover and are not listed.
+
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber; the running
+case's cleanup is attempted before the process exits, and no further case starts. A cleanup that
+fails, or a write whose outcome is unknown, while the case is being interrupted prints its full
+message as a WARN line (through the case's `ConformanceCleanupReporter`), and the run ends with that
+error (exit code 1); a plain interruption ends with exit code 130 after the leftover lookup runs
+again. Further signals within a second count as the same keypress; a later one exits at once and may
+skip the cleanup. Run live runs as `pnpm conformance:github …` or
+`./node_modules/.bin/tsx scripts/run-github-conformance.ts …`, not `pnpm exec tsx …`, which returns
+to the prompt at once on Ctrl-C.
+
+### Token safety and recording
+
+The token travels only in the `Authorization: Bearer` header, which the conformance recorder never
+records (credential headers are always dropped); the replay ledger redacts it. The live runner
+refuses a `GITHUB_TOKEN` that is not 20 to 255 letters, digits, and underscores (every GitHub token
+format) before any request, without printing it. `--record` still refuses to stage, or print a
+review checklist for, any recording in which the live token survives anywhere (an echo in a body or
+header; raw, percent-encoded, escaped, or base64-encoded) or that holds a body outside the guard's
+inspectable allowlist (strict UTF-8 text without NUL characters), and the fixture secret scan refuses
+credential query parameters. A private repository's contents answer carries a temporary `token` in
+its `download_url`, so record the contents case against a **public** practice repository.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`). In this repository,
+`pnpm conformance:github` dry-runs by default; `--live --owner-approved --account <label>` (refused
+whenever `CI` is non-empty) needs `GITHUB_TOKEN` (a token for the practice repository only; a
+fine-grained token with Issues read/write and Contents read is enough) and the seeds (`--owner`,
+`--repo`, `--work-issue`, `--label`, `--file-path`). `--allow-writes reversible` adds the comment
+and label cases; `--allow-irreversible github.issues.lifecycle-close` adds the lifecycle case.
+`--record` keeps the `link` response header and the `x-github-api-version` request header and stages
+verified recordings only in the gitignored `.conformance-recordings/github/` for manual scrubbing
+(owner, repository, numeric repository ids in `Link` URLs, logins, ids, titles, bodies, label names,
+file contents) and promotion. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

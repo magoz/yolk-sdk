@@ -18,21 +18,22 @@ There is no root export. Import an explicit subpath.
 
 `@yolk-sdk/conformance/fixture`
 
-| Export                                                                                                   | Purpose                                                                                                                                                             |
-| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WireFixture`                                                                                            | Schema and type: `id`, `caseId`, `evidence`, `recordedAt` (`YYYY-MM-DD`), `account`, `endpoint`, `model?`, `note?`, `exchanges`                                     |
-| `WireExchange`, `WireRequest`, `WireResponse`                                                            | One request (method, absolute URL, allowlisted headers, JSON or text body) and its response                                                                         |
-| `WireBodyResponse`, `WireTextBodyResponse`, `WireBase64BodyResponse`                                     | Whole body: exactly one of `body` (valid UTF-8 string) or `bodyBase64` (exact bytes, for example a PDF)                                                             |
-| `WireStreamResponse`, `WireChunk`                                                                        | Streamed `chunks` with original boundaries; each entry is a string (valid UTF-8 on its own, empty chunks `""`) or `{ base64 }` with the exact bytes                 |
-| `WireFixtureEvidence`, `WireHeaders`                                                                     | `verified` / `unverified`; lowercase header record                                                                                                                  |
-| `decodeWireFixture`                                                                                      | Decode unknown input (for example a JSON file) into a fixture                                                                                                       |
-| `isWireStreamResponse`, `isWireBase64BodyResponse`                                                       | Narrow a response to the streamed or base64 body shape                                                                                                              |
-| `fixtureAgeDays`, `isFixtureStale`                                                                       | Whole UTC days since `recordedAt`; stale after `maxAgeDays` (default 30)                                                                                            |
-| `PortFixture`, `PortFailure`, `decodePortFixture`                                                        | One non-HTTP port call: `id`, `port`, `method`, credential-free JSON `request`, exactly one of `response` or `failure` (`expected` / `error`), `observed?`, `note?` |
-| `redactPortPayload`, `scanPortFixtureForSecrets`                                                         | Drop credential fields from a port payload; scan a port fixture (token patterns, credential fields, any non-null `credential(s)`)                                   |
-| `PortValueFixture`, `PortFailureFixture`, `isPortFixture`, `isPortFailureFixture`, `isPortCredentialKey` | The two port fixture branches, their narrowing helpers, and the credential-key predicate `redactPortPayload` uses                                                   |
-| `ConformanceFixture`, `conformanceFixtureEvidence`                                                       | `WireFixture \| PortFixture`; evidence and date (a port fixture is `verified` only with `observed`)                                                                 |
-| `scanFixtureForSecrets`, `FixtureSecretIssue`                                                            | Pure scan for credential headers, bearer tokens, API-key prefixes, JWTs, credential query/form params and JSON fields                                               |
+| Export                                                                                                   | Purpose                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WireFixture`                                                                                            | Schema and type: `id`, `caseId`, `evidence`, `recordedAt` (`YYYY-MM-DD`), `account`, `endpoint`, `model?`, `note?`, `exchanges`                                                                                                                                                                                                           |
+| `WireExchange`, `WireRequest`, `WireResponse`                                                            | One request (method, absolute URL, allowlisted headers, JSON or text body) and its response                                                                                                                                                                                                                                               |
+| `WireBodyResponse`, `WireTextBodyResponse`, `WireBase64BodyResponse`                                     | Whole body: exactly one of `body` (valid UTF-8 string) or `bodyBase64` (exact bytes, for example a PDF)                                                                                                                                                                                                                                   |
+| `WireStreamResponse`, `WireChunk`                                                                        | Streamed `chunks` with original boundaries; each entry is a string (valid UTF-8 on its own, empty chunks `""`) or `{ base64 }` with the exact bytes                                                                                                                                                                                       |
+| `WireFixtureEvidence`, `WireHeaders`                                                                     | `verified` / `unverified`; lowercase header record                                                                                                                                                                                                                                                                                        |
+| `decodeWireFixture`                                                                                      | Decode unknown input (for example a JSON file) into a fixture                                                                                                                                                                                                                                                                             |
+| `isWireStreamResponse`, `isWireBase64BodyResponse`                                                       | Narrow a response to the streamed or base64 body shape                                                                                                                                                                                                                                                                                    |
+| `fixtureAgeDays`, `isFixtureStale`                                                                       | Whole UTC days since `recordedAt`; stale after `maxAgeDays` (default 30)                                                                                                                                                                                                                                                                  |
+| `PortFixture`, `PortFailure`, `decodePortFixture`                                                        | One non-HTTP port call: `id`, `port`, `method`, credential-free JSON `request`, exactly one of `response` or `failure` (`expected` / `error`), `observed?`, `note?`                                                                                                                                                                       |
+| `redactPortPayload`, `scanPortFixtureForSecrets`                                                         | Drop credential fields (AWS-style `accessKeyId` / `secretAccessKey` / `sessionToken` included) from a port payload; scan a port fixture (token patterns, credential fields, any non-null `credential(s)`, credential query parameters inside JSON strings, `note`, and `failure.message`)                                                 |
+| `PortValueFixture`, `PortFailureFixture`, `isPortFixture`, `isPortFailureFixture`, `isPortCredentialKey` | The two port fixture branches, their narrowing helpers, and the credential-key predicate `redactPortPayload` uses                                                                                                                                                                                                                         |
+| `ConformanceFixture`, `conformanceFixtureEvidence`                                                       | `WireFixture \| PortFixture`; evidence and date (a port fixture is `verified` only with `observed`)                                                                                                                                                                                                                                       |
+| `scanFixtureForSecrets`, `FixtureSecretIssue`                                                            | Pure scan for credential headers, bearer tokens, API-key prefixes, JWTs, credential query/form params and JSON fields                                                                                                                                                                                                                     |
+| `syntheticPortCredentialParams`                                                                          | Frozen exact synthetic placeholders, keyed by parameter name (SigV4 `x-amz-signature`, `x-amz-credential`): the only values `scanPortFixtureForSecrets` accepts, compared with the whole raw value (up to `&`, `#`, whitespace, `"`, `<`, `>`, or the end; never `?` or `'`) after percent-decoding; `scanFixtureForSecrets` accepts none |
 
 Fixtures must contain synthetic or scrubbed data only. The scan covers metadata strings, URLs,
 headers, request and response bodies (including decodable `bodyBase64` text), each chunk, and the
@@ -46,9 +47,16 @@ never secret values, and is a safety net rather than a guarantee.
 A `PortFixture` records one call through a host port that is not HTTP, such as the generic
 `EmailClient`. Without `observed` it is a synthetic placeholder (`unverified`, no date); with
 `observed: { account, date }` it is `verified` as of that date. Record requests through
-`redactPortPayload` and scan them with `scanPortFixtureForSecrets`. Replaying port fixtures belongs to
-the port owner (for example `makeEmailReplayBackend`); the runner accepts both fixture kinds for its
-fixture warnings.
+`redactPortPayload` and scan them with `scanPortFixtureForSecrets`, which also flags credential
+query parameters inside any JSON string, the note, or the failure message (a signed URL a port
+answered, such as an S3 presigned URL's `X-Amz-Signature`). Every `name=` is found and judged on its
+own. The only exemption: the raw value, up to a structural boundary (`&`, `#`, whitespace, `"`,
+`<`, `>`, or the end; a raw `?` or `'` and encoded delimiters such as `%3F` or `%26` stay inside it),
+percent-decoded, exactly equals that parameter's entry in `syntheticPortCredentialParams`. It does
+not see parameters with escaped names (`&amp;` before them, percent-encoded names), which port
+owners check themselves (the R2 port cases ship `findR2PortFixtureSecrets`). Replaying port fixtures
+belongs to the port owner (for example `makeEmailReplayBackend`); the runner accepts both fixture
+kinds for its fixture warnings.
 
 ## Replay
 
@@ -421,11 +429,51 @@ message cannot be deleted through the connector, so it runs only when a person n
 chat. There is no leftover lookup.
 See [Telegram conformance cases](../connectors/telegram#conformance-cases).
 
+`@yolk-sdk/connectors/github/conformance` exports seven GitHub cases (`githubConformanceCases`),
+their synthetic fixtures (`githubConformanceFixtures`), and the seeds they replay with
+(`githubConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `CredentialResolver`, and
+`GithubConformanceConfig` (the practice repository's `owner` and `repo`, a work issue, a label, a
+text file, and the run id). Every case runs the real connector actions; claims about response bodies
+the actions only partly read are observed at the `ConnectorHttpClient` port. The comment and label
+cases are write-reversible: each write names the invocation-unique `runId` or works only on the
+seeded work issue and label, is not interruptible, and is undone by id and verified, failing with
+`GithubConformanceRestoreFailed` when that fails; they cannot undo the notification to the work
+issue's subscribers or the label timeline events, so the work issue must be a practice issue nobody
+else watches. A definitive rejection undoes nothing; an ambiguous write fails with
+`GithubConformanceActionFailed` (`writeOutcome: 'unknown'`) naming the exact item; an answer outside
+the run namespace is never adopted (`GithubConformanceCleanupRefused`). The issue lifecycle case is
+**write-irreversible**: GitHub issues cannot be deleted through the REST API, so the issue it opens
+stays in the repository, closed, and it runs only when a person names its exact id.
+`findGithubConformanceLeftovers` lists, read-only and bounded, open `yolk-conformance run-*` issues,
+run comments on the work issue, and the seeded label on it. See [GitHub conformance
+cases](../connectors/github#conformance-cases).
+
+`@yolk-sdk/connectors/r2-storage/conformance` exports six port-level R2 cases
+(`r2ConformanceCases`), their synthetic `PortFixture`s (`r2ConformanceFixtures`), and the seeds they
+replay with (`r2ConformanceFixtureSeeds`). The connector never talks to R2 itself: the cases run
+`r2_storage.upload_url` over the host `R2Presigner` and the host-only `getR2Object` /
+`createR2Object` / `updateR2Object` over the host `R2ObjectClient`, plus `CredentialResolver` and
+`R2ConformanceConfig`. `r2PortsLayerFromBackend` turns any plain-JSON backend `{ call(port, method,
+request) }` into both port layers (requests never carry the credentials or the integration;
+`notEmulated` fails closed), and `makeR2ReplayBackend` replays the fixtures. The two write cases are
+**write-irreversible**: the connector cannot delete R2 objects, so they run only when named by exact
+id, write only under `yolk-conformance/<runId>/`, and report an ambiguous put (any port failure but
+`conflict`) with the exact bucket and key. Presigned URLs in fixtures carry only synthetic
+credential placeholders: next to the shared `scanPortFixtureForSecrets`, the fail-closed
+`findR2PortFixtureSecrets` refuses any `X-Amz-Signature`, `X-Amz-Credential`, or
+`X-Amz-Security-Token` name outside an exact canonical placeholder occurrence, in any letter case,
+raw or in any variant reachable with up to three rounds of percent-decoding and three of
+escape-decoding (JSON `\uXXXX`, `\xXX`, `\\`, numeric HTML character references), in any order,
+prose included (deliberate obfuscation is out of scope: a person reviews every recording), and
+`scrubR2PortFixture` rewrites a recorded fixture to the placeholders (not escaped URLs: rerun both
+scans). Live verification needs a host implementation of both ports; no live R2 runner ships. See
+[R2 conformance cases](../connectors/r2-storage#conformance-cases).
+
 When a case is interrupted, the run no longer produces a report, and no further case starts. So
-Dropbox, Notion, Todoist, and Microsoft write cases, the Fortnox row and customer mutation cases,
-and the Telegram send also hand a cleanup problem raised during the interruption (a failed cleanup,
-or a create or send whose outcome is unknown) to `ConformanceCleanupReporter` from
-`@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
+Dropbox, Notion, Todoist, GitHub, and Microsoft write cases, the Fortnox row and customer mutation
+cases, the Telegram send, and the R2 puts also hand a cleanup problem raised during the interruption
+(a failed cleanup, or a create, send, or put whose outcome is unknown) to `ConformanceCleanupReporter`
+from `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
 `Effect.logWarning`. The Fortnox rejection case and the Fortnox email send do not report. With the
 Effect version this repository pins, such a run ends with that failure itself (no Interrupt in the
 cause), and a run whose cleanup succeeded ends as a plain interruption; drills in the connector

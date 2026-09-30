@@ -1,0 +1,151 @@
+---
+title: Cloudflare R2 conformance
+description: Experimental port-level R2 conformance cases over the host R2Presigner and R2ObjectClient.
+---
+
+The R2 action and host-only object helpers are documented in the
+[connectors package guide](./index), [Transfer connector files](./files), and the
+[integrations reference](../integrations/connectors#cloudflare-r2). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice bucket through a host
+> implementation of the R2 ports.
+
+The R2 connector never talks to R2 itself: `r2_storage.upload_url` asks the host `R2Presigner` for a
+presigned PUT URL, and the host-only `getR2Object`, `createR2Object`, and `updateR2Object` go
+through the host `R2ObjectClient`. `@yolk-sdk/connectors/r2-storage/conformance` exports port-level
+cases for `@yolk-sdk/conformance/runner` that run that real connector code over those ports, plus
+`CredentialResolver` and `R2ConformanceConfig` seeds, and check one port claim the connector
+relies on each. Port calls are observed by wrapping the ports the host provides. The claims are as
+currently understood; none is observed live yet, and the fixtures are synthetic `PortFixture`s.
+
+| Case id                            | Safety               | Seeds                             | Claim (as currently understood)                                                                                                                                                                                                                                                                              |
+| ---------------------------------- | -------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `r2.presign.put-upload-url`        | `read`               | `endpoint`, `bucket`, `runId`     | One `presignPutObject` call with the configured endpoint and bucket, the key, the content type, and both credentials; the URL is an https SigV4 URL for that bucket and key, signed for the access key id the connector passed, with `X-Amz-Expires` from 1 to 604800 and `content-type` signed (unverified) |
+| `r2.objects.get-max-bytes`         | `read`               | `endpoint`, `bucket`, `objectKey` | `get` receives the budget's `maxBytes`; below the object size the port itself fails `response_too_large` (code unverified) instead of answering the bytes                                                                                                                                                    |
+| `r2.objects.get-expected-etag`     | `read`               | `endpoint`, `bucket`, `objectKey` | `get` with the current etag answers exactly the same bytes; with a stale etag the port fails `conflict`, never the object or an empty success                                                                                                                                                                |
+| `r2.objects.get-missing-not-found` | `read`               | `endpoint`, `bucket`, `runId`     | `get` of a key nothing wrote fails `not_found` at the port, never an empty success                                                                                                                                                                                                                           |
+| `r2.objects.create-if-absent`      | `write-irreversible` | `endpoint`, `bucket`, `runId`     | `put` with `condition: absent` creates the object; a second create of the same key fails `conflict` instead of overwriting                                                                                                                                                                                   |
+| `r2.objects.update-if-match`       | `write-irreversible` | `endpoint`, `bucket`, `runId`     | `put` with a stale etag condition fails `conflict`; with the current etag it answers a new etag (unverified) and the new bytes                                                                                                                                                                               |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- An R2 host signs path-style URLs (`https://<endpoint host>/<bucket>/<key>`); the case also
+  accepts the bucket as a subdomain of the endpoint host.
+- The host signs the content type (`X-Amz-SignedHeaders` lists `content-type`), so an upload with
+  another type is refused. The connector passes `contentType` to the presigner for exactly this;
+  the AWS SDK v3 presigner signs it when the command sets it.
+- A host enforcing `maxBytes` fails with `response_too_large`. The port contract only says hosts
+  enforce the actual streamed bytes; the connector's own post-buffer check uses that code.
+- R2 answers a different ETag when the content of a single PUT changes (the MD5 ETag).
+
+What the presign case cannot observe: a SigV4 query-signed URL does not name its HTTP method, so
+"PUT" is only the port's own method (`presignPutObject`, the only one it has); only an upload
+through the URL would prove it, and no connector port uploads through a presigned URL. The port
+takes no expiry, so the host chooses it; the case checks only that `X-Amz-Expires` is within the
+SigV4 limit (7 days). Presigning is local signing: nothing is sent to R2.
+
+`R2ConformanceConfig` holds the seeds: `endpoint` (the S3-compatible endpoint origin, `https`
+only), `bucket`, `objectKey` (an existing object of 2 bytes to 1 MB), and `runId`. Cases never
+hard-code account data, and a missing seed fails the case with a `precondition:` mismatch before
+any port call. Credentials bind through `r2ConformanceIntegration(endpoint, bucket)` (the
+`r2-storage.access_key_id` and `r2-storage.secret_access_key` slots, credential refs
+`r2ConformanceCredentialRefs`); the presign case sets a synthetic `publicUrl`
+(`r2ConformancePublicUrl`).
+
+### Writes are irreversible
+
+**The connector has no delete for R2 objects**, so an object a case writes cannot be removed
+through it. Both write cases are therefore `write-irreversible`: they never run under
+`allowWrites: 'reversible'`, and a runner starts them only when a person names their exact ids.
+
+- They write only keys under `yolk-conformance/<runId>/`, never a seeded key. The fixtures replay
+  with `run-synthetic`. No R2 runner ships, so **the host running the cases live must generate a
+  fresh `run-<hex>` for every invocation** (for example `run-` plus 8 random hex digits), never take
+  it from a flag or reuse one: a reused id makes the absent-only create answer `conflict`, so the
+  write cases fail without writing (definitive). Each run leaves `create-if-absent.txt` and
+  `update-if-match.txt` there; delete them by hand when no run is using them.
+- Stored bytes are compared exactly (length and every byte), never through a text decoder.
+- Each put, the decoding of its answer, and its classification run together without interruption.
+  A put counts as having reached the port as soon as the host's `put` is invoked (even when it
+  throws), so only a refusal by the connector itself counts as "nothing sent".
+- Port failures carry no HTTP status (the connector keeps only the code), so the case classifies a
+  put through the shared write-exit classifier this way: a failure before the port was called (the
+  connector refused the input) and a port `conflict` (the condition failed: HTTP 412, or a binding
+  answering `null`) are definitive, nothing was written; **any other port failure is ambiguous**:
+  the object may have been written anyway, and the case fails with `R2ConformanceActionFailed`
+  (`writeOutcome: 'unknown'`) naming the exact bucket and key to check by hand, also through
+  `ConformanceCleanupReporter` when the case is being interrupted.
+
+There is nothing to clean up and no leftover lookup: `R2ObjectClient` cannot list keys. Look under
+`yolk-conformance/` in the practice bucket by hand.
+
+### Presigned URLs in fixtures
+
+A presigned URL carries its credential in the query string (`X-Amz-Credential` names the access key
+id, `X-Amz-Signature` is the signature, `X-Amz-Security-Token` a session token). Committed fixtures
+may carry only the synthetic placeholders `r2ConformanceSyntheticSignature` and the whole
+`r2ConformanceSyntheticCredential` (`yolk-synthetic-access-key-id/20260930/auto/s3/aws4_request`),
+which are exactly the SigV4 entries of the frozen `syntheticPortCredentialParams` of
+`@yolk-sdk/conformance/fixture` (one source: the R2 constants are read from it). Run **both** scans
+on every R2 fixture:
+
+- The shared `scanPortFixtureForSecrets` finds every credential query parameter in a JSON string,
+  the note, or the failure message on its own, and refuses it unless its whole raw value (up to
+  `&`, `#`, whitespace, `"`, `<`, `>`, or the end; a raw `?` or `'` and encoded delimiters such as
+  `%3F`, `%26`, `%23`, or `%20` stay inside it), percent-decoded, is exactly the placeholder for
+  that parameter name. A placeholder with anything appended inside the value, under another
+  parameter such as `token=`, or with another date or region is refused; text after a boundary is
+  not part of the value and is judged on its own. It also refuses any `accessKeyId`,
+  `secretAccessKey`, or `sessionToken` field.
+- `findR2PortFixtureSecrets` is the fail-closed backstop for what the shared scan cannot read
+  (percent-encoded or escaped names). In every string (and JSON key) it first blanks out the
+  canonical placeholder occurrences: `?` or `&` (or the start of the string), `X-Amz-Signature` or
+  `X-Amz-Credential` spelled in raw ASCII (any letter case), `=`, and exactly the value the fixtures
+  and the scrubber write (`yolk-synthetic-signature`, or the credential with its `/` encoded as
+  `%2F`), followed by `&`, `#`, whitespace, `"`, `<`, `>`, or the end. It then searches what remains
+  raw and in every variant reachable with up to three rounds of percent-decoding and up to three
+  rounds of escape-decoding (JSON `\uXXXX`, `\xXX`, `\\` as one backslash, and numeric HTML
+  character references such as `&#88;`), in any order, and refuses ANY case-insensitive occurrence
+  of `x-amz-signature`, `x-amz-credential`, or `x-amz-security-token`, with or without `=` or a
+  value. So any other value, an encoded or escaped name (even with the exact placeholder), a fully
+  or doubly percent-encoded URL, a name escaped by `JSON.stringify` (once or twice) or by an HTML
+  serializer, and a credential name mentioned in prose are all refused. It searches every string of
+  the fixture (`id`, `port`, `method`, `note`, `observed.account`, the request, the response, and
+  the failure code and message), JSON keys included. Deliberate obfuscation (base64, other
+  encodings, deeper nesting) is out of scope: a person reviews every recording before promoting it.
+  Keep committed notes and messages free of credential names.
+
+`scrubR2PortFixture` rewrites a fixture recorded from a live host before a person promotes it: it
+removes credential fields and rewrites every presigned URL in the request, the response, the note,
+and the failure message (whole strings and `http(s)://` URLs embedded in text) to the placeholders
+(the whole credential is replaced, so a recorded date and region are not kept).
+**It does not rewrite percent-encoded or `&amp;`-escaped URLs**, so rerun both scans after
+scrubbing and remove whatever they still find by hand. The replayed presign case resolves the
+access key credential to `r2ConformanceSyntheticAccessKeyId`, so a scrubbed URL still names the key
+the connector passed. The bridge never hands the credentials to a backend: presigner requests are
+built without `accessKeyId` and `secretAccessKey` (and `redactPortPayload` strips those names too),
+and object requests drop the integration.
+
+For tests, `r2PortsLayerFromBackend` turns any plain-JSON backend
+`{ call(port, method, request) }` into both port layers, and `makeR2ReplayBackend(fixtures)`
+returns `{ backend, ledger }`:
+
+```ts
+import {
+  makeR2ReplayBackend,
+  r2ConformanceFixtures,
+  r2PortsLayerFromBackend
+} from '@yolk-sdk/connectors/r2-storage/conformance'
+
+const replay = makeR2ReplayBackend(r2ConformanceFixtures)
+const r2Layer = r2PortsLayerFromBackend(replay.backend)
+```
+
+Neither is a production adapter. Live verification needs a host implementation of `R2Presigner`
+and `R2ObjectClient` connected to a practice bucket: the connectors package ships no SigV4 signer
+or S3 client, and the shared connector runner records HTTP wire fixtures, not port fixtures, so no
+live R2 runner ships in the repository. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the fixture type.

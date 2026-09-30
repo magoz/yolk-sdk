@@ -1,7 +1,7 @@
 /**
- * Shared pieces of the Dropbox, Notion, Todoist, and Telegram connector conformance runners
- * (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`, `run-todoist-conformance.ts`,
- * `run-telegram-conformance.ts`; not a CLI). Each runner supplies a
+ * Shared pieces of the Dropbox, Notion, Todoist, Telegram, and GitHub connector conformance
+ * runners (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`, `run-todoist-conformance.ts`,
+ * `run-telegram-conformance.ts`, `run-github-conformance.ts`; not a CLI). Each runner supplies a
  * `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential, and ports)
  * and gets the same behaviour as the Microsoft runner, plus the owner-approval and CI gates:
  *
@@ -15,7 +15,7 @@
  *   always run; `--allow-writes reversible` adds the write-reversible cases. A write-irreversible
  *   case runs only when named by its exact id with `--allow-irreversible <case-id>` (repeatable),
  *   independent of `--allow-writes`; the flag exists only for runners that have such a case (today
- *   only Telegram), and is an unknown argument everywhere else.
+ *   Telegram and GitHub), and is an unknown argument everywhere else.
  * - A runner whose provider puts the credential in request URLs (Telegram's `/bot<token>/`)
  *   supplies `scrubRecording` and `replayAccessToken`: recorded exchanges have the live token
  *   replaced before the fixture is built, and replay verification resolves the replay token.
@@ -75,8 +75,10 @@ import {
 } from '../packages/conformance/src/fixture.ts'
 import {
   defaultRecordedRequestHeaders,
+  defaultRecordedResponseHeaders,
   makeRecordingHttpClient,
   makeWireFixture,
+  type WireRecorderOptions,
   type WireRecorderApi
 } from '../packages/conformance/src/record.ts'
 import { ReplayHttpClient } from '../packages/conformance/src/replay.ts'
@@ -174,6 +176,11 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   ) => Layer.Layer<R>
   /** Extra request headers the recorder keeps (credential headers are always dropped). */
   readonly recordedRequestHeaders: ReadonlyArray<string>
+  /**
+   * Extra response headers the recorder keeps beyond `defaultRecordedResponseHeaders` (credential
+   * headers are always dropped), for claims that read a header, such as GitHub's `link` paging.
+   */
+  readonly recordedResponseHeaders?: ReadonlyArray<string>
   /**
    * Rewrites recorded exchanges before the fixture is built, for providers that put the live
    * credential where the recorder cannot drop it (Telegram's `/bot<token>/` URL path). Staging
@@ -1656,6 +1663,21 @@ export const stderrCleanupReporter = (
 })
 
 /**
+ * What the `--record` recorder keeps: the default request and response header allowlists plus the
+ * runner's extras. Credential headers (`authorization`, cookies, API-key headers) are always dropped
+ * by the recorder, whatever the lists say.
+ */
+export const recorderOptionsFor = <K extends string, S extends SeedRecord<K>, E, R>(
+  runner: Pick<
+    ConnectorConformanceRunner<K, S, E, R>,
+    'recordedRequestHeaders' | 'recordedResponseHeaders'
+  >
+): WireRecorderOptions => ({
+  requestHeaders: [...defaultRecordedRequestHeaders, ...runner.recordedRequestHeaders],
+  responseHeaders: [...defaultRecordedResponseHeaders, ...(runner.recordedResponseHeaders ?? [])]
+})
+
+/**
  * One live run: the leftover warnings, every case (with the WARN cleanup reporter provided around
  * `runConformance`), the report, and the `--record` staging.
  */
@@ -1668,9 +1690,7 @@ export const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
   Effect.gen(function* () {
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
-    const recorderOptions = {
-      requestHeaders: [...defaultRecordedRequestHeaders, ...runner.recordedRequestHeaders]
-    }
+    const recorderOptions = recorderOptionsFor(runner)
 
     const httpFor = (testCase: ConformanceCase<E, R>): Layer.Layer<HttpClient.HttpClient> =>
       options.record

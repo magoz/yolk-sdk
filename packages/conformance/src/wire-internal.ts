@@ -79,10 +79,81 @@ const credentialParamNames =
  */
 export const credentialParamPattern = new RegExp(`(?:^|[?&])(${credentialParamNames})=[^&#]+`, 'i')
 
-// Singular credential field names (snake, kebab, or camel case). Plural usage
+// Every `name=` of a credential parameter, found on its own: the pattern stops at `=` and never
+// consumes the value, so a later `?name=` or `&name=` is always found, whatever the value holds.
+const credentialParamNamesAt = new RegExp(`(?:^|[?&])(${credentialParamNames})=`, 'gi')
+
+// What ends a raw parameter value: a character that cannot appear raw inside a URL query value
+// (RFC 3986): `&`, `#`, whitespace, `"`, `<`, `>`. `?` and `'` are NOT boundaries (both are legal
+// raw inside a query value), and neither is any percent-encoded delimiter.
+const valueBoundary = /[&#\s"<>]/
+
+/**
+ * The exact synthetic credential values a `PortFixture` may carry, keyed by lower-case parameter
+ * name: SigV4 presigned-URL placeholders for S3-compatible ports (the R2 conformance fixtures sign
+ * with them). `scanPortFixtureForSecrets` exempts a credential parameter only when its name is a
+ * key here and its whole raw value (up to `&`, `#`, whitespace, `"`, `<`, `>`, or the end),
+ * percent-decoded, equals that key's value exactly; anything else inside the value (a raw `?`, an
+ * encoded delimiter, any suffix), another parameter name, or another scope is flagged.
+ * `scanFixtureForSecrets` exempts nothing. Never build a placeholder by prefixing or suffixing a
+ * real value.
+ */
+export const syntheticPortCredentialParams = Object.freeze({
+  'x-amz-signature': 'yolk-synthetic-signature',
+  'x-amz-credential': 'yolk-synthetic-access-key-id/20260930/auto/s3/aws4_request'
+})
+
+const exactPlaceholders = new Map<string, string>(Object.entries(syntheticPortCredentialParams))
+
+/**
+ * `text` with `%XX` escapes decoded, repeatedly (at most three layers, then left as it is). The R2
+ * guard (`findR2PortFixtureSecrets` in `@yolk-sdk/connectors`) applies at most the same three
+ * percent-decoding rounds (plus its escape rounds): keep the percent depth in step.
+ */
+const percentDecodedLayers = (text: string): string => {
+  let current = text
+
+  for (let round = 0; round < 3 && /%[0-9A-Fa-f]{2}/.test(current); round++) {
+    current = current.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+  }
+
+  return current
+}
+
+/** The raw, undecoded value starting at `start`: up to the first structural boundary. */
+const rawParamValueAt = (text: string, start: number): string => {
+  const rest = text.slice(start)
+  const end = rest.search(valueBoundary)
+
+  return end === -1 ? rest : rest.slice(0, end)
+}
+
+/**
+ * True when `text` carries a credential query or form parameter that is not an exact synthetic
+ * placeholder (`syntheticPortCredentialParams`). Every `name=` is found and judged on its own: its
+ * raw value runs to the next structural boundary (see `rawParamValueAt`), is percent-decoded
+ * (`percentDecodedLayers`), and is exempt only when it equals that name's placeholder exactly. It
+ * flags at least whatever `credentialParamPattern` flags (a `name=` followed by any character but
+ * `&` or `#`), except the exact placeholders.
+ */
+export const hasLiveCredentialParam = (text: string): boolean =>
+  [...text.matchAll(credentialParamNamesAt)].some(match => {
+    const name = (match[1] ?? '').toLowerCase()
+    const start = match.index + match[0].length
+    const value = rawParamValueAt(text, start)
+    const next = text.charAt(start)
+    const present = value.length > 0 || (next !== '' && next !== '&' && next !== '#')
+
+    return present && exactPlaceholders.get(name) !== percentDecodedLayers(value)
+  })
+
+// Singular credential field names (snake, kebab, or camel case), including the AWS-style
+// `accessKeyId` / `secretAccessKey` / `sessionToken` of S3-compatible signing inputs. Plural usage
 // counters such as `max_tokens` or `prompt_tokens` never match.
 const credentialFieldNames =
-  '(?:access|refresh|id|auth|api|session|private|bearer|oauth)[_-]?token|token|client[_-]?secret|secret(?:[_-]?key)?|private[_-]?key|password|passwd|api[_-]?key|authorization'
+  '(?:access|refresh|id|auth|api|session|private|bearer|oauth)[_-]?token|token|client[_-]?secret|secret(?:[_-]?key)?|private[_-]?key|password|passwd|api[_-]?key|access[_-]?key[_-]?id|secret[_-]?access[_-]?key|authorization'
 
 /** A JSON object key (or similar field name) that holds a credential. */
 export const credentialFieldPattern = new RegExp(`^(${credentialFieldNames})$`, 'i')
