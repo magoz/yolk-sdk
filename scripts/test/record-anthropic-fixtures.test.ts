@@ -318,6 +318,36 @@ const splitValueRecording = (): WireExchange => {
   ])
 }
 
+// The committed thinking recording whose `signature_delta` carries `signature` twice: the real
+// value first, cut across two text chunks (so chunk-by-chunk redaction cannot rewrite it), then
+// the placeholder, the only value `JSON.parse` of the reassembled payload keeps.
+const splitDuplicateSignatureRecording = (): WireExchange => {
+  const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
+  const chunks = streamChunks(exchange)
+  const index = signatureChunkIndex(chunks)
+  const original = chunks[index]
+
+  if (!Predicate.isString(original)) {
+    return expect.fail('no signature_delta chunk')
+  }
+
+  const chunk = original.replace(
+    '"signature":"synthetic-thinking-signature"',
+    `"signature":"synthetic-thinking-signature","signature":"${redactedSignature}"`
+  )
+
+  expect(chunk).not.toBe(original)
+
+  const cut = chunk.indexOf('synthetic-thinking-signature') + 'synthetic-thinking'.length
+
+  return withChunks(exchange, [
+    ...chunks.slice(0, index),
+    chunk.slice(0, cut),
+    chunk.slice(cut),
+    ...chunks.slice(index + 1)
+  ])
+}
+
 describe('record-anthropic-fixtures signature redaction', () => {
   it('redacts thinking signatures chunk by chunk, keeping every boundary and other byte', () => {
     const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
@@ -421,6 +451,65 @@ describe('record-anthropic-fixtures signature redaction', () => {
       expect(streamChunks(redacted)).toEqual(streamChunks(recording))
       expect(unredactedThinkingFields([redacted])).toEqual(['signature'])
     }
+  })
+
+  it('refuses a repeated signature whose first value crossed a chunk boundary', () => {
+    const redacted = redactThinkingSignatures(splitDuplicateSignatureRecording())
+
+    const payload =
+      streamChunks(redacted)
+        .map(chunk => (Predicate.isString(chunk) ? chunk : expect.fail('text chunks only')))
+        .join('')
+        .split('\n')
+        .find(line => line.includes('"signature_delta"'))
+        ?.slice('data: '.length) ?? expect.fail('no signature_delta payload')
+
+    // The first value survives on the wire, yet JSON.parse only keeps the trailing placeholder.
+    expect(payload).toContain('"signature":"synthetic-thinking-signature"')
+    expect(JSON.parse(payload)).toMatchObject({ delta: { signature: redactedSignature } })
+    expect(unredactedThinkingFields([redacted])).toEqual(['signature'])
+  })
+
+  it('refuses repeated or non-string redacted values, and allows null, "", and placeholders', () => {
+    const body = (text: string): WireExchange => ({
+      request: anthropicMessagesPlainTextFixture.exchanges[0].request,
+      response: { status: 200, headers: { 'content-type': 'application/json' }, body: text }
+    })
+
+    const signature = JSON.stringify(redactedSignature)
+    const data = JSON.stringify(redactedThinkingData)
+
+    expect(
+      unredactedThinkingFields([
+        body(`{"content":[{"type":"thinking","signature":${signature},"signature":${signature}}]}`)
+      ])
+    ).toEqual(['signature'])
+    expect(
+      unredactedThinkingFields([
+        body(`{"content":[{"type":"redacted_thinking","data":${data},"data":${data}}]}`)
+      ])
+    ).toEqual(['redacted_thinking.data'])
+    expect(
+      unredactedThinkingFields([
+        body('{"content":[{"type":"thinking","signature":{"value":"synthetic"}}]}'),
+        body('{"content":[{"type":"redacted_thinking","data":12345}]}')
+      ])
+    ).toEqual(['signature', 'redacted_thinking.data'])
+    // A repeated `type` cannot hide a redacted_thinking block's data either.
+    expect(
+      unredactedThinkingFields([
+        body(
+          '{"content":[{"type":"redacted_thinking","data":"synthetic-encrypted","type":"text"}]}'
+        )
+      ])
+    ).toEqual(['redacted_thinking.data'])
+    expect(
+      unredactedThinkingFields([
+        body(
+          `{"content":[{"type":"thinking","signature":null},{"type":"thinking","signature":""},{"type":"thinking","signature":${signature}},{"type":"redacted_thinking","data":${data}},{"type":"text","data":"not redacted thinking"}]}`
+        )
+      ])
+    ).toEqual([])
   })
 
   it('fails closed on a payload that is not JSON but mentions a redacted field', () => {
@@ -606,6 +695,25 @@ describe('record-anthropic-fixtures write gate', () => {
       )
       expect(calls).toEqual([])
     }
+  })
+
+  it('writes nothing when a repeated signature hides a value split across chunks', async () => {
+    const { calls, writer } = recordingWriter()
+    const fixtures = withThinkingExchange(splitDuplicateSignatureRecording())
+
+    // Replay alone would pass: the provider keeps whichever signature JSON.parse returns.
+    const report = await Effect.runPromise(verifyAnthropicFixtures(fixtures))
+
+    expect(conformanceReportFailed(report)).toBe(false)
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(recordedFrom(fixtures), defaultProbeOptions, writer)
+    )
+
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'could not redact signature from the recording'
+    )
+    expect(calls).toEqual([])
   })
 
   it('writes nothing when redacted_thinking data survives in a base64 chunk', async () => {

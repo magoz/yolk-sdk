@@ -12,7 +12,7 @@
  * `--live`: the credentials are consumer subscription OAuth access tokens, so a live run spends
  * the owner's subscription allowance and must follow the provider's terms. **Live runs need the
  * repository owner's explicit approval**, confirmed with `--owner-approved`; never run them in
- * CI. A live run also needs an explicit `--account <label>` (a synthetic, non-identifying label
+ * CI (`--live` is refused whenever the `CI` environment variable is set). A live run also needs an explicit `--account <label>` (a synthetic, non-identifying label
  * such as `synthetic`; never a real organization, workspace, or person name: it is committed in
  * public fixtures) and the family's token:
  *
@@ -27,8 +27,9 @@
  * `accept` only, response headers `content-type` only, so credentials, account ids, and the Grok
  * headers are never recorded; failures are reported with the runner's sanitizer). Account-derived
  * and encrypted JSON string fields (`responsesRedactedFields`) are redacted value by value in text
- * chunks only (never re-chunked); a value left in a base64 chunk or split across chunks refuses
- * the write. Each single recorded exchange becomes a `verified` fixture dated today, then the new
+ * chunks only (never re-chunked); a value left in a base64 chunk or split across chunks, a
+ * non-string value, or a repeated redacted key refuses the write (checked on every occurrence in
+ * the reassembled wire text, never through `JSON.parse`, which collapses repeated keys). Each single recorded exchange becomes a `verified` fixture dated today, then the new
  * fixtures replay through the same cases. Nothing is written unless every case passes live,
  * records cleanly, is fully redacted, passes the secret scan, and passes again on replay; only
  * then are the family's fixture modules rewritten.
@@ -77,6 +78,7 @@ import {
   type ConformanceReport,
   type ConformanceTarget
 } from '../packages/conformance/src/runner.ts'
+import { unredactedMembers } from './json-members.ts'
 
 export type ResponsesFamily = 'codex' | 'grok'
 
@@ -111,7 +113,9 @@ export const defaultProbeOptions: ProbeOptions = {
   help: false,
   ownerApproved: false,
   models: {},
-  maxOutputTokens: 64,
+  // Room for a reasoning model to think before its short answer (a smaller limit can end the
+  // stream with `response.incomplete`, which fails the live cases and writes nothing).
+  maxOutputTokens: 512,
   clientVersion: undefined,
   account: undefined
 }
@@ -225,7 +229,7 @@ every case passes.
 
 The credentials are consumer subscription OAuth access tokens: live runs spend the owner's
 subscription allowance and need the repository owner's explicit approval (--owner-approved).
-Never run them in CI.
+Never run them in CI: --live is refused whenever the CI environment variable is set.
 
 Options:
   --family codex|grok             required (set by the pnpm scripts)
@@ -274,15 +278,28 @@ export const liveAccountRequiredMessage =
 export const ownerApprovalRequiredMessage =
   "--live requires --owner-approved: live runs spend a subscription OAuth allowance and need the repository owner's explicit approval"
 
+export const liveInCiMessage =
+  "--live is refused in CI (the CI environment variable is set): live runs spend a subscription OAuth allowance and must be run by hand with the repository owner's approval"
+
+/** The environment the argument check reads (only `CI`). */
+export type ProbeEnv = Readonly<Record<string, string | undefined>>
+
+/** True when `CI` is set to anything but empty, `0`, or `false`. */
+export const isCiEnvironment = (env: ProbeEnv): boolean => {
+  const value = env.CI?.trim().toLowerCase()
+
+  return value !== undefined && value !== '' && value !== '0' && value !== 'false'
+}
+
 export const clientVersionRequiredMessage =
   '--live --family grok requires --client-version <v>: the truthful host client version sent as x-grok-client-version'
 
 /**
  * Parse CLI arguments (without the node/script prefix). Throws on unknown flags, a missing or
- * unknown family, and on `--live` without `--owner-approved`, `--account`, or (Grok)
- * `--client-version`.
+ * unknown family, on `--live` in CI (`env.CI` set), and on `--live` without `--owner-approved`,
+ * `--account`, or (Grok) `--client-version`.
  */
-export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
+export const parseProbeArgs = (argv: ReadonlyArray<string>, env: ProbeEnv = {}): ProbeOptions => {
   const options: MutableProbeOptions = { ...defaultProbeOptions }
 
   const setModel = (key: keyof ResponsesProbeModels, model: string) => {
@@ -348,6 +365,10 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
 
   if (options.family === undefined) {
     throw new Error(familyRequiredMessage)
+  }
+
+  if (options.live && isCiEnvironment(env)) {
+    throw new Error(liveInCiMessage)
   }
 
   if (options.live && !options.ownerApproved) {
@@ -437,6 +458,11 @@ export const dryRunReport = (options: ProbeOptions): string => {
     `DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to record (needs ${credentials}).`,
     `Endpoint: ${spec.endpoint} (${spec.label}; subscription OAuth bearer)`,
     "Live runs spend the owner's subscription allowance and need the repository owner's explicit approval; never run them in CI.",
+    ...(spec.family === 'grok'
+      ? [
+          `Grok cases send max_output_tokens ${options.maxOutputTokens}; raise it with --max-output-tokens <n> if a live case ends with response.incomplete.`
+        ]
+      : []),
     'Conformance cases:',
     ...planResponsesProbe(options).map(entry =>
       [
@@ -568,14 +594,6 @@ export const casesWithoutSingleFixture = (
     .map(testCase => testCase.id)
     .filter(caseId => fixtures.filter(fixture => fixture.caseId === caseId).length !== 1)
 
-// Parsed JSON, read-only.
-type Json = null | boolean | number | string | ReadonlyArray<Json> | JsonRecord
-
-type JsonRecord = { readonly [key: string]: Json }
-
-const isRecord = (value: unknown): value is JsonRecord =>
-  Predicate.isObject(value) && !Array.isArray(value)
-
 /**
  * JSON string fields the probe redacts in recorded responses: encrypted reasoning
  * (`encrypted_content`) and account-derived identifiers (`safety_identifier`, `prompt_cache_key`,
@@ -681,35 +699,13 @@ const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
     .filter(data => data.length > 0)
 }
 
-const collectSurvivors = (value: unknown, found: Set<string>): void => {
-  if (Array.isArray(value)) {
-    for (const item of value) collectSurvivors(item, found)
-
-    return
-  }
-
-  if (!isRecord(value)) return
-
-  for (const [key, item] of Object.entries(value)) {
-    if (
-      responsesRedactedFields.includes(key) &&
-      Predicate.isString(item) &&
-      item.length > 0 &&
-      item !== responsesRedactedValue
-    ) {
-      found.add(key)
-    }
-
-    collectSurvivors(item, found)
-  }
-}
-
+// Every occurrence of every redacted field in the payload text, without `JSON.parse` (which keeps
+// only the last of repeated keys): any value but null, "", or the placeholder, and any repeat of a
+// redacted key within one object, is a survivor.
 const payloadSurvivors = (payload: string, found: Set<string>): void => {
-  let json: unknown
+  const survivors = unredactedMembers(payload, responsesRedactedFields, responsesRedactedValue)
 
-  try {
-    json = JSON.parse(payload)
-  } catch {
+  if (survivors === undefined) {
     // Not checkable as JSON: fail closed on any mention of a redacted field.
     for (const field of responsesRedactedFields) {
       if (payload.includes(`"${field}"`)) found.add(field)
@@ -718,15 +714,18 @@ const payloadSurvivors = (payload: string, found: Set<string>): void => {
     return
   }
 
-  collectSurvivors(json, found)
+  for (const field of survivors) found.add(field)
 }
 
 /**
- * Redacted fields still carrying a real value in recorded responses, checked structurally on
- * each response's whole decoded text: every stream chunk (text and base64) reassembled as bytes
- * and decoded non-fatally, or the text or decoded base64 body. A value in a base64 chunk or body,
- * or split across network chunks, is therefore caught; a JSON payload that does not parse fails
- * closed when it mentions a redacted field. Empty when fully redacted.
+ * Redacted fields still carrying a real value in recorded responses, checked on each response's
+ * whole decoded text: every stream chunk (text and base64) reassembled as bytes and decoded
+ * non-fatally, or the text or decoded base64 body. Every SSE `data:` payload (or the body) is
+ * scanned member by member without collapsing repeated keys: any value other than `null`, `""`,
+ * or the placeholder (a string, number, boolean, object, or array), and any repeated redacted key
+ * in one object, is reported. A value in a base64 chunk or body, or split across network chunks,
+ * is therefore caught; a payload that is not JSON fails closed when it mentions a redacted field.
+ * Empty when fully redacted.
  */
 export const unredactedResponsesFields = (
   exchanges: ReadonlyArray<WireExchange>
@@ -742,7 +741,7 @@ export const unredactedResponsesFields = (
 
 /** Why the probe refuses to write a recording that still carries a redacted value. */
 export const unredactedMessage = (fields: ReadonlyArray<string>): string =>
-  `could not redact ${fields.join(', ')} from the recording: the value is inside a base64 body or chunk, or split across network chunks, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
+  `could not redact ${fields.join(', ')} from the recording: a value survives inside a base64 body or chunk, split across network chunks, as a non-string value, or under a repeated key, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
 
 export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
   readonly caseId: string
@@ -915,6 +914,10 @@ const live = (options: ProbeOptions, writer: FixtureWriter = defaultFixtureWrite
     const spec = familySpecOf(options)
     const account = options.account
 
+    if (isCiEnvironment(process.env)) {
+      return yield* new ProbeFailed({ caseId: '*', message: liveInCiMessage })
+    }
+
     if (!options.ownerApproved) {
       return yield* new ProbeFailed({ caseId: '*', message: ownerApprovalRequiredMessage })
     }
@@ -979,7 +982,7 @@ const invokedAsCli = (): boolean => {
 
 const parseCliArgs = (): ProbeOptions | undefined => {
   try {
-    return parseProbeArgs(process.argv.slice(2))
+    return parseProbeArgs(process.argv.slice(2), process.env)
   } catch (error) {
     console.error(error instanceof Error ? error.message : error)
     process.exitCode = 1

@@ -29,7 +29,9 @@ import {
   defaultProbeOptions,
   dryRunReport,
   familyRequiredMessage,
+  isCiEnvironment,
   liveAccountRequiredMessage,
+  liveInCiMessage,
   ownerApprovalRequiredMessage,
   parseProbeArgs,
   planResponsesProbe,
@@ -114,6 +116,22 @@ describe('record-responses-fixtures arguments', () => {
     ).toMatchObject({ clientVersion: '1.2.3-host' })
   })
 
+  it('refuses --live whenever CI is set', () => {
+    const live = ['--family', 'codex', '--live', '--owner-approved', '--account', 'synthetic']
+
+    for (const CI of ['true', '1', 'yes']) {
+      expect(() => parseProbeArgs(live, { CI })).toThrow(liveInCiMessage)
+    }
+
+    for (const CI of [undefined, '', '0', 'false']) {
+      expect(parseProbeArgs(live, { CI }).live).toBe(true)
+    }
+
+    expect(parseProbeArgs(['--family', 'codex'], { CI: 'true' }).live).toBe(false)
+    expect(isCiEnvironment({ CI: 'true' })).toBe(true)
+    expect(isCiEnvironment({})).toBe(false)
+  })
+
   it('overrides models and the output limit, and rejects bad input', () => {
     const options = parseProbeArgs([
       '--family=grok',
@@ -176,6 +194,12 @@ describe('record-responses-fixtures plan', () => {
         expect(report).toContain(testCase.id)
       }
     }
+
+    expect(defaultProbeOptions.maxOutputTokens).toBe(512)
+    expect(dryRunReport(grokOptions)).toContain(
+      'Grok cases send max_output_tokens 512; raise it with --max-output-tokens <n>'
+    )
+    expect(dryRunReport(codexOptions)).not.toContain('max_output_tokens')
   })
 
   it('renders a fixture module typed with the conformance fixture type', () => {
@@ -234,6 +258,62 @@ const withIdentifiers = (): WireExchange => {
 
 const identifierChunkIndex = (chunks: ReadonlyArray<WireChunk>) =>
   chunks.findIndex(chunk => Predicate.isString(chunk) && chunk.includes('synthetic-safety-id'))
+
+/** The committed Codex plain-text stream with `members` spliced into response.created. */
+const withCreatedMembers = (members: string): WireExchange => {
+  const [exchange] = openAiCodexPlainTextFixture.exchanges
+
+  return withChunks(
+    exchange,
+    streamChunks(exchange).map(chunk =>
+      Predicate.isString(chunk) && chunk.startsWith('event: response.created')
+        ? chunk.replace('"metadata":{}', `"metadata":{},${members}`)
+        : chunk
+    )
+  )
+}
+
+/**
+ * A response.created carrying `"user"` twice: a real value first, then the placeholder. The chunk
+ * is cut inside the first value, so chunk-by-chunk redaction cannot rewrite it, while
+ * `JSON.parse` of the reassembled payload keeps only the trailing placeholder.
+ */
+const withSplitDuplicateUser = (): WireExchange => {
+  const exchange = withCreatedMembers(
+    `"user":"synthetic-private-user","user":"${responsesRedactedValue}"`
+  )
+
+  const chunks = streamChunks(exchange)
+
+  const index = chunks.findIndex(
+    chunk => Predicate.isString(chunk) && chunk.includes('synthetic-private-user')
+  )
+
+  const chunk = chunks[index]
+
+  if (!Predicate.isString(chunk)) {
+    return expect.fail('no duplicate-user chunk')
+  }
+
+  const cut = chunk.indexOf('synthetic-private-user') + 'synthetic'.length
+
+  return withChunks(exchange, [
+    ...chunks.slice(0, index),
+    chunk.slice(0, cut),
+    chunk.slice(cut),
+    ...chunks.slice(index + 1)
+  ])
+}
+
+/** The reassembled text `data:` payload of the response.created event. */
+const createdPayload = (exchange: WireExchange): string =>
+  streamChunks(exchange)
+    .map(chunk => (Predicate.isString(chunk) ? chunk : expect.fail('text chunks only')))
+    .join('')
+    .split('\n\n')
+    .flatMap(block => (block.startsWith('event: response.created') ? block.split('\n') : []))
+    .find(line => line.startsWith('data: '))
+    ?.slice('data: '.length) ?? expect.fail('no response.created payload')
 
 describe('record-responses-fixtures redaction', () => {
   it('redacts account-derived and encrypted fields chunk by chunk, keeping every boundary', () => {
@@ -316,6 +396,50 @@ describe('record-responses-fixtures redaction', () => {
     expect(unredactedResponsesFields([redactResponsesFields(split)])).toContain('safety_identifier')
   })
 
+  it('refuses a repeated redacted key whose first value crossed a chunk boundary', () => {
+    const redacted = redactResponsesFields(withSplitDuplicateUser())
+    const payload = createdPayload(redacted)
+
+    // The first value survives on the wire, yet JSON.parse only keeps the trailing placeholder.
+    expect(payload).toContain('"user":"synthetic-private-user"')
+    expect(JSON.parse(payload)).toMatchObject({ response: { user: responsesRedactedValue } })
+    expect(unredactedResponsesFields([redacted])).toEqual(['user'])
+  })
+
+  it('refuses a repeated redacted key even when every value is the placeholder', () => {
+    const placeholder = JSON.stringify(responsesRedactedValue)
+
+    expect(
+      unredactedResponsesFields([withCreatedMembers(`"user":${placeholder},"user":${placeholder}`)])
+    ).toEqual(['user'])
+  })
+
+  it('refuses non-string values of redacted fields and allows null and the placeholder', () => {
+    const nonStrings = withCreatedMembers(
+      '"safety_identifier":12345,"prompt_cache_key":{"id":"synthetic"},"user":["synthetic"],"encrypted_content":true'
+    )
+
+    expect(unredactedResponsesFields([redactResponsesFields(nonStrings)])).toEqual([
+      'encrypted_content',
+      'safety_identifier',
+      'prompt_cache_key',
+      'user'
+    ])
+
+    const allowed = withCreatedMembers(
+      `"safety_identifier":null,"prompt_cache_key":"","user":${JSON.stringify(responsesRedactedValue)}`
+    )
+
+    expect(unredactedResponsesFields([allowed])).toEqual([])
+  })
+
+  it('sees a redacted key written with JSON escapes', () => {
+    const escaped = withCreatedMembers(String.raw`"us\u0065r":"synthetic-private-user"`)
+
+    expect(redactResponsesFields(escaped)).toBe(escaped)
+    expect(unredactedResponsesFields([escaped])).toEqual(['user'])
+  })
+
   it('fails closed on a payload that is not JSON but mentions a redacted field', () => {
     const [exchange] = openAiCodexPlainTextFixture.exchanges
 
@@ -328,29 +452,120 @@ describe('record-responses-fixtures redaction', () => {
   })
 })
 
-/** Drop every function_call argument, so the function-call case no longer sees a city. */
-const withoutArguments = (fixture: WireFixture): WireFixture => {
-  const [exchange] = fixture.exchanges
+type SsePayload = { readonly event: string | undefined; readonly json: unknown }
 
-  return {
-    ...fixture,
-    exchanges: [
-      withChunks(
-        exchange,
-        streamChunks(exchange).map(chunk =>
-          Predicate.isString(chunk)
-            ? chunk.replaceAll('"arguments":"{\\"city\\":\\"Springfield\\"}"', '"arguments":"{}"')
-            : chunk
-        )
-      )
-    ]
+/**
+ * The SSE events of a recorded stream: every chunk (text and `{ base64 }`) reassembled, split into
+ * events, and each `data:` payload parsed, so edits never depend on chunk boundaries or spacing.
+ */
+const ssePayloads = (exchange: WireExchange): Array<SsePayload> =>
+  streamChunks(exchange)
+    .map(chunk =>
+      Predicate.isString(chunk) ? chunk : Buffer.from(chunk.base64, 'base64').toString('utf8')
+    )
+    .join('')
+    .replace(/\r\n?/g, '\n')
+    .split('\n\n')
+    .flatMap(block => {
+      const lines = block.split('\n')
+
+      const data = lines
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice('data:'.length).trim())
+        .join('\n')
+
+      const event = lines
+        .find(line => line.startsWith('event:'))
+        ?.slice('event:'.length)
+        .trim()
+
+      return data.length === 0 ? [] : [{ event, json: JSON.parse(data) }]
+    })
+
+/** One text chunk per event, re-serialized from the parsed payloads. */
+const sseChunks = (payloads: ReadonlyArray<SsePayload>): Array<WireChunk> =>
+  payloads.map(
+    ({ event, json }) =>
+      `${event === undefined ? '' : `event: ${event}\n`}data: ${JSON.stringify(json)}\n\n`
+  )
+
+type Json = null | boolean | number | string | Array<Json> | MutableJson
+
+type MutableJson = { [key: string]: Json }
+
+const isJsonObject = (value: unknown): value is MutableJson =>
+  Predicate.isObject(value) && !Array.isArray(value)
+
+const visitObjects = (value: unknown, visit: (record: MutableJson) => void): void => {
+  if (Array.isArray(value)) {
+    for (const item of value) visitObjects(item, visit)
+
+    return
   }
+
+  if (!isJsonObject(value)) return
+
+  visit(value)
+
+  for (const item of Object.values(value)) visitObjects(item, visit)
 }
 
-const tampered = () =>
-  openAiCodexConformanceFixtures.map(fixture =>
-    fixture.id === openAiCodexFunctionCallArgumentsFixture.id ? withoutArguments(fixture) : fixture
+/**
+ * Rename the tool argument in every function-call argument field, structurally: the first
+ * `response.function_call_arguments.delta` of each item carries `{"town":...}` (later deltas are
+ * emptied), and `response.function_call_arguments.done` and every completed `function_call` item
+ * carry the same text, so the stream stays self-consistent but lacks the claimed `city`. Returns
+ * how many fields changed.
+ */
+const withoutCityArgument = (fixture: WireFixture) => {
+  const [exchange] = fixture.exchanges
+  const renamed = JSON.stringify({ town: 'Springfield' })
+  const seenItems = new Set<unknown>()
+  let changed = 0
+
+  const set = (record: MutableJson, key: string, value: string) => {
+    if (record[key] !== value) changed++
+
+    record[key] = value
+  }
+
+  const payloads = ssePayloads(exchange).map(({ event, json }) => {
+    const edited: unknown = structuredClone(json)
+
+    visitObjects(edited, record => {
+      if (record.type === 'response.function_call_arguments.delta') {
+        set(record, 'delta', seenItems.has(record.item_id) ? '' : renamed)
+        seenItems.add(record.item_id)
+      }
+
+      if (record.type === 'response.function_call_arguments.done') set(record, 'arguments', renamed)
+
+      if (record.type === 'function_call' && Predicate.isString(record.arguments)) {
+        set(record, 'arguments', record.status === 'in_progress' ? '' : renamed)
+      }
+    })
+
+    return { event, json: edited }
+  })
+
+  const edited: WireFixture = {
+    ...fixture,
+    exchanges: [withChunks(exchange, sseChunks(payloads))]
+  }
+
+  return { fixture: edited, changed }
+}
+
+const tampered = () => {
+  const edit = withoutCityArgument(openAiCodexFunctionCallArgumentsFixture)
+
+  // A no-op edit would make every drill below vacuous.
+  expect(edit.changed).toBeGreaterThan(0)
+
+  return openAiCodexConformanceFixtures.map(fixture =>
+    fixture.id === openAiCodexFunctionCallArgumentsFixture.id ? edit.fixture : fixture
   )
+}
 
 describe('record-responses-fixtures replay verification', () => {
   it('passes every case of both families against the committed fixtures', async () => {
@@ -479,6 +694,31 @@ describe('record-responses-fixtures write gate', () => {
     expect(calls).toEqual([])
   })
 
+  it('writes nothing when a repeated redacted key hides a value split across chunks', async () => {
+    const { calls, writer } = recordingWriter()
+    const recording = redactResponsesFields(withSplitDuplicateUser())
+
+    const fixtures = openAiCodexConformanceFixtures.map((fixture): WireFixture =>
+      fixture.id === openAiCodexPlainTextFixture.id
+        ? { ...fixture, exchanges: [recording] }
+        : fixture
+    )
+
+    // Replay alone would pass: the provider never reads `user`.
+    const report = await Effect.runPromise(verifyResponsesFixtures(fixtures, codexOptions))
+
+    expect(conformanceReportFailed(report)).toBe(false)
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(recordedFrom(codexOptions, fixtures), codexOptions, writer)
+    )
+
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'could not redact user'
+    )
+    expect(calls).toEqual([])
+  })
+
   it('writes nothing when a case has no recording', async () => {
     const { calls, writer } = recordingWriter()
 
@@ -495,7 +735,7 @@ describe('record-responses-fixtures write gate', () => {
   })
 })
 
-const runCli = (args: ReadonlyArray<string>) =>
+const runCli = (args: ReadonlyArray<string>, env: Readonly<Record<string, string>> = {}) =>
   new Promise<{ failed: boolean; stdout: string; stderr: string }>(resolvePromise => {
     execFile(
       process.execPath,
@@ -504,9 +744,11 @@ const runCli = (args: ReadonlyArray<string>) =>
         cwd: repoRoot,
         env: {
           ...process.env,
+          CI: '',
           OPENAI_CODEX_ACCESS_TOKEN: '',
           OPENAI_CODEX_ACCOUNT_ID: '',
-          XAI_GROK_ACCESS_TOKEN: ''
+          XAI_GROK_ACCESS_TOKEN: '',
+          ...env
         }
       },
       (error, stdout, stderr) => {
@@ -534,6 +776,22 @@ describe('record-responses-fixtures CLI', () => {
 
     expect(result.failed).toBe(true)
     expect(result.stderr).toContain('--live requires --owner-approved')
+  })
+
+  it('refuses --live in CI, even when approved and given a token', async () => {
+    const result = await runCli(
+      ['--family', 'codex', '--live', '--owner-approved', '--account', 'synthetic'],
+      { CI: 'true', OPENAI_CODEX_ACCESS_TOKEN: 'synthetic-not-a-token' }
+    )
+
+    expect(result.failed).toBe(true)
+    expect(result.stderr).toContain(liveInCiMessage)
+
+    // A dry run is still fine in CI.
+    const dryRun = await runCli(['--family', 'codex'], { CI: 'true' })
+
+    expect(dryRun.failed).toBe(false)
+    expect(dryRun.stdout).toContain('DRY RUN: no network request was made')
   })
 
   it('refuses an approved live run without the token, before any network call', async () => {

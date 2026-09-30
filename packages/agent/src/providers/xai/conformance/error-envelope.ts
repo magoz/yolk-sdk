@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Non-2xx JSON error envelope (`{ error: { message, type, param, code } }`, 400 `model_not_found`) from the xAI Grok CLI proxy for a request with an unknown model id.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:grok --live --account <label>`.
+ * replaces it. Regenerate with `pnpm conformance:grok --live --owner-approved --account <label>`.
  */
 export const xAiGrokErrorEnvelopeFixture: WireFixture = {
   id: 'xai.grok.stream.error-envelope.synthetic',
@@ -14,7 +14,7 @@ export const xAiGrokErrorEnvelopeFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://cli-chat-proxy.grok.com/v1/responses',
   model: 'yolk-conformance-model-does-not-exist',
-  note: 'Synthetic placeholder for a non-2xx error envelope returned by the xAI Grok CLI proxy for an unknown model id. Not recorded from a live service; replace with a verified recording from pnpm conformance:grok --live --account <label>.',
+  note: 'Synthetic placeholder for a non-2xx error envelope returned by the xAI Grok CLI proxy for an unknown model id. Not recorded from a live service; replace with a verified recording from pnpm conformance:grok --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

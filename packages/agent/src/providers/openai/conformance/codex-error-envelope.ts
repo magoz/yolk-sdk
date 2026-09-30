@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Non-2xx JSON error envelope (`{ error: { message, type, param, code } }`, 400 `model_not_found`) from the ChatGPT Codex Responses endpoint for a request with an unknown model id.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:codex --live --account <label>`.
+ * replaces it. Regenerate with `pnpm conformance:codex --live --owner-approved --account <label>`.
  */
 export const openAiCodexErrorEnvelopeFixture: WireFixture = {
   id: 'openai.codex.stream.error-envelope.synthetic',
@@ -14,7 +14,7 @@ export const openAiCodexErrorEnvelopeFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://chatgpt.com/backend-api/codex/responses',
   model: 'yolk-conformance-model-does-not-exist',
-  note: 'Synthetic placeholder for a non-2xx error envelope returned by the ChatGPT Codex Responses endpoint for an unknown model id. Not recorded from a live service; replace with a verified recording from pnpm conformance:codex --live --account <label>.',
+  note: 'Synthetic placeholder for a non-2xx error envelope returned by the ChatGPT Codex Responses endpoint for an unknown model id. Not recorded from a live service; replace with a verified recording from pnpm conformance:codex --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

@@ -391,7 +391,6 @@ const scriptedPlan = (turn: ResponsesScriptedResponse, seq: number): ResponsePla
   }
 }
 
-// Wire shapes of the Responses payloads the emulator sends.
 type WireUsage = {
   readonly input_tokens: number
   readonly input_tokens_details: { readonly cached_tokens: number }

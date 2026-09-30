@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Streamed plain-text answer from the ChatGPT Codex Responses endpoint that ends with exactly one `response.completed` event (`response.status: completed`) as its last server-sent event.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:codex --live --account <label>`.
+ * replaces it. Regenerate with `pnpm conformance:codex --live --owner-approved --account <label>`.
  */
 export const openAiCodexTerminalEventFixture: WireFixture = {
   id: 'openai.codex.stream.terminal-event.synthetic',
@@ -14,7 +14,7 @@ export const openAiCodexTerminalEventFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://chatgpt.com/backend-api/codex/responses',
   model: 'gpt-5.4',
-  note: 'Synthetic placeholder shaped like OpenAI Responses SSE from the ChatGPT Codex Responses endpoint. Not recorded from a live service; replace with a verified recording from pnpm conformance:codex --live --account <label>.',
+  note: 'Synthetic placeholder shaped like OpenAI Responses SSE from the ChatGPT Codex Responses endpoint. Not recorded from a live service; replace with a verified recording from pnpm conformance:codex --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

@@ -533,6 +533,91 @@ const describeFamily = <Req>(family: Family<Req>) => {
       })
     )
 
+    it.effect('fails the function-call case when only the argument deltas disagree', () =>
+      Effect.gen(function* () {
+        const events = sseEvents(family.functionCall.fixture)
+        const isDelta = (json: JsonRecord) => json.type === 'response.function_call_arguments.delta'
+        const seenItems = new Set<unknown>()
+        let changed = 0
+
+        // Only the deltas change: the first fragment of each item carries other arguments, the
+        // rest are emptied; `done`, `output_item.done`, and `response.completed` keep theirs.
+        const corrupted = events.map(event =>
+          mapJson(event, json => {
+            if (!isDelta(json)) return
+
+            const first = !seenItems.has(json.item_id)
+            const delta = first ? JSON.stringify({ town: 'Shelbyville' }) : ''
+
+            seenItems.add(json.item_id)
+
+            if (json.delta !== delta) changed++
+
+            json.delta = delta
+          })
+        )
+
+        const withoutDeltas = events.filter(event => !isRecord(event.json) || !isDelta(event.json))
+
+        expect(changed).toBeGreaterThan(0)
+        expect(withoutDeltas.length).toBeLessThan(events.length)
+
+        // The provider reads the completed items, so it still assembles the claimed call.
+        const result = yield* drill(
+          family.functionCall.testCase,
+          withEvents(family.functionCall.fixture, corrupted, 'corrupt-deltas')
+        )
+
+        expect(result?.failure).toEqual(
+          mismatch('expected the argument deltas to assemble into the completed arguments')
+        )
+        expect(
+          yield* failedDrill(
+            family.functionCall.testCase,
+            withEvents(family.functionCall.fixture, withoutDeltas, 'no-deltas')
+          )
+        ).toEqual(mismatch('expected the argument deltas to assemble into the completed arguments'))
+      })
+    )
+
+    it.effect('fails the function-call case when a delta belongs to no completed item', () =>
+      Effect.gen(function* () {
+        const events = sseEvents(family.functionCall.fixture)
+
+        const delta = events.find(
+          event => typeOf(event) === 'response.function_call_arguments.delta'
+        )
+
+        expect(delta).toBeDefined()
+
+        const stray =
+          delta === undefined
+            ? []
+            : [
+                mapJson(delta, json => {
+                  json.item_id = 'fc_unknown_item'
+                })
+              ]
+
+        const completedIndex = events.findIndex(event => completedResponseOf(event) !== undefined)
+
+        expect(completedIndex).toBeGreaterThan(0)
+
+        expect(
+          yield* failedDrill(
+            family.functionCall.testCase,
+            withEvents(
+              family.functionCall.fixture,
+              [...events.slice(0, completedIndex), ...stray, ...events.slice(completedIndex)],
+              'stray-delta'
+            )
+          )
+        ).toEqual(
+          mismatch('expected every argument delta to belong to a completed function_call item')
+        )
+      })
+    )
+
     it.effect('fails the function-call case when the answer is text only', () =>
       Effect.gen(function* () {
         const textOnly: WireFixture = {
@@ -738,9 +823,26 @@ const describeFamily = <Req>(family: Family<Req>) => {
         : expect.fail('error fixture has no text body')
     }
 
-    it('records the model_not_found envelope in the error fixture', () => {
-      expect(family.errorEnvelope.fixture.exchanges[0].response.status).toBe(400)
-      expect(parseJson(errorBody())).toMatchObject({ error: { code: 'model_not_found' } })
+    it('records an accepted model-rejection envelope in the error fixture', () => {
+      const fixture = family.errorEnvelope.fixture
+      const status = fixture.exchanges[0].response.status
+      const body = parseJson(errorBody())
+
+      // The statuses and body shapes the error-envelope case accepts.
+      expect([400, 404]).toContain(status)
+      expect(
+        isRecord(body) &&
+          ((isRecord(body.error) && Predicate.isString(body.error.message)) ||
+            Predicate.isString(body.error) ||
+            Predicate.isString(body.detail))
+      ).toBe(true)
+
+      // Only the synthetic placeholder pins the exact OpenAI envelope; a live recording may use
+      // any accepted status and shape.
+      if (fixture.evidence === 'unverified') {
+        expect(status).toBe(400)
+        expect(body).toMatchObject({ error: { code: 'model_not_found' } })
+      }
     })
 
     for (const status of [401, 403]) {

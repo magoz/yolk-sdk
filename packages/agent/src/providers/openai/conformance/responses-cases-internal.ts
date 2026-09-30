@@ -4,17 +4,17 @@
  * The Responses-based subscription providers (OpenAI Codex, xAI Grok) share one wire and one
  * private parser (`openai-responses-provider-internal.ts`), so their conformance cases share one
  * shape: streamed plain text, `function_call` argument assembly, the unknown-model error
- * envelope, and the terminal `response.completed` event. Each vendor's `conformance/cases.ts`
- * builds its cases here with its own id prefix, config service, public provider layer, fixtures,
- * and terminal-event wording (Grok requires the terminal event; Codex keeps EOF-completion
- * compatibility).
+ * envelope, and the terminal `response.completed` event. Each vendor's cases module
+ * (`openai/conformance/codex-cases.ts`, `xai/conformance/cases.ts`) builds its cases here with its
+ * own id prefix, config service, public provider layer, fixtures, and terminal-event wording (Grok
+ * requires the terminal event; Codex keeps EOF-completion compatibility).
  *
- * Two cases read the raw HTTP body at their own `HttpClient` boundary (a conformance-local
+ * Three cases read the raw HTTP body at their own `HttpClient` boundary (a conformance-local
  * wrapper; the providers are unchanged): the error case reads the error body, and the
- * terminal-event case tees the streamed body while the provider consumes it, chunk for chunk.
- * Only shapes are reported, never upstream body text.
+ * function-call and terminal-event cases tee the streamed body while the provider consumes it,
+ * chunk for chunk. Only shapes are reported, never upstream body text.
  */
-import { Effect, Option, Predicate, Ref, Result, Stream, type Layer } from 'effect'
+import { Effect, Equal, Option, Predicate, Ref, Result, Stream, type Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
 import {
@@ -44,9 +44,9 @@ export type ResponsesConformanceModels = {
 }
 
 /** The instructions every Responses case sends. */
-export const responsesConformanceInstructions = 'Reply in one short sentence.'
+const responsesConformanceInstructions = 'Reply in one short sentence.'
 
-export const responsesConformanceLookupWeatherTool = ToolDef.make({
+const responsesConformanceLookupWeatherTool = ToolDef.make({
   name: 'lookup_weather',
   description: 'Look up the current weather for a city.',
   parameters: {
@@ -210,7 +210,7 @@ const bodyText = (body: CapturedBody): string => {
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 /** The `data:` payload of every server-sent event in a body, parsed when it is JSON. */
-export const responsesSseData = (text: string): ReadonlyArray<Schema.Json | undefined> =>
+const responsesSseData = (text: string): ReadonlyArray<Schema.Json | undefined> =>
   text
     .replace(/\r\n?/g, '\n')
     .split('\n\n')
@@ -230,6 +230,71 @@ const isRecord = (value: Schema.Json | undefined): value is Schema.JsonObject =>
 
 const eventType = (data: Schema.Json | undefined): unknown =>
   isRecord(data) ? data.type : undefined
+
+/** A completed `function_call` item's identity and complete argument text. */
+type CompletedFunctionCall = {
+  readonly itemId: string
+  readonly callId: string | undefined
+  readonly arguments: string
+}
+
+const completedFunctionCall = (item: Schema.Json | undefined): Array<CompletedFunctionCall> =>
+  isRecord(item) &&
+  item.type === 'function_call' &&
+  Predicate.isString(item.id) &&
+  Predicate.isString(item.arguments)
+    ? [
+        {
+          itemId: item.id,
+          callId: Predicate.isString(item.call_id) ? item.call_id : undefined,
+          arguments: item.arguments
+        }
+      ]
+    : []
+
+/**
+ * Every completed `function_call` copy in a stream: the item of each `response.output_item.done`
+ * and each `function_call` in `response.completed`'s `output` (so one call usually appears twice).
+ */
+const completedFunctionCalls = (
+  data: ReadonlyArray<Schema.Json | undefined>
+): Array<CompletedFunctionCall> =>
+  data.flatMap(item => {
+    if (!isRecord(item)) return []
+
+    if (item.type === 'response.output_item.done') return completedFunctionCall(item.item)
+
+    const response = item.type === 'response.completed' ? item.response : undefined
+
+    return isRecord(response) && Array.isArray(response.output)
+      ? response.output.flatMap(completedFunctionCall)
+      : []
+  })
+
+/**
+ * The `response.function_call_arguments.delta` fragments of a stream joined per `item_id`, in
+ * stream order. A delta without a string `item_id` or `delta` is kept under an empty id, so it can
+ * never match a completed item.
+ */
+const assembledArgumentDeltas = (
+  data: ReadonlyArray<Schema.Json | undefined>
+): ReadonlyMap<string, string> => {
+  const assembled = new Map<string, string>()
+
+  for (const item of data) {
+    if (!isRecord(item) || item.type !== 'response.function_call_arguments.delta') continue
+
+    const { item_id: itemId, delta } = item
+    const key = Predicate.isString(itemId) && Predicate.isString(delta) ? itemId : ''
+
+    assembled.set(key, `${assembled.get(key) ?? ''}${Predicate.isString(delta) ? delta : ''}`)
+  }
+
+  return assembled
+}
+
+const parseArguments = (text: string | undefined): Option.Option<Schema.Json> =>
+  text === undefined ? Option.none() : decodeJson(text)
 
 /**
  * A JSON error body carrying a message: the OpenAI envelope `{ error: { message } }`, or the
@@ -288,15 +353,17 @@ export const makeResponsesConformanceCases = <Settings, R>(
     title: 'Streamed function_call arguments assemble into tool calls',
     safety: 'read',
     docs: `A streamed Responses \`function_call\` output item is announced by \`response.output_item.added\` (with its \`call_id\`, \`name\`, and empty \`arguments\`), its JSON arguments stream as \`response.function_call_arguments.delta\` fragments, and \`response.function_call_arguments.done\` and \`response.output_item.done\` carry the complete arguments; \`response.completed\` repeats the item in \`output\`. The provider offers the tool without forcing it (it sends no \`tool_choice\`) and allows parallel calls.`,
-    wire: 'For a single offered tool and a prompt that asks for it, the stream yields at least one ToolCall and every ToolCall is named after the tool (native name), has a distinct call id (a call replayed in `response.completed` is not emitted twice), and has params that are a JSON object with a non-empty string `city`; the stream ends with exactly one Done(tool_use). How the arguments are split into deltas is not asserted.',
+    wire: "For a single offered tool and a prompt that asks for it, the stream yields at least one ToolCall and every ToolCall is named after the tool (native name), has a distinct call id (a call replayed in `response.completed` is not emitted twice), and has params that are a JSON object with a non-empty string `city`; the stream ends with exactly one Done(tool_use). The case also reads the streamed body at its own HttpClient boundary (teed chunk for chunk while the provider consumes it): it carries at least one completed `function_call` item, the `response.function_call_arguments.delta` fragments joined per `item_id` equal the complete `arguments` of every completed copy of that item (`response.output_item.done` and `response.completed`) and parse to the same JSON object, every delta belongs to a completed item, and each ToolCall's params equal the arguments of the item with its call id. How many fragments carry the arguments is not asserted.",
     fixtures: [spec.fixtures.functionCallArguments],
     run: Effect.gen(function* () {
       const settings = yield* spec.settings
+      const client = yield* HttpClient.HttpClient
+      const bodies = yield* Ref.make<ReadonlyArray<CapturedBody>>([])
 
       const events = yield* collectEvents(spec.providerLayer(settings), {
         ...userRequest(spec.models(settings).toolCall, functionCallPrompt),
         tools: [responsesConformanceLookupWeatherTool]
-      })
+      }).pipe(Effect.provideService(HttpClient.HttpClient, capturingBodies(client, bodies)))
 
       const calls = events.flatMap(event => (event instanceof LLMToolCall ? [event.call] : []))
 
@@ -329,6 +396,63 @@ export const makeResponsesConformanceCases = <Settings, R>(
       }
 
       yield* expectEqual(doneReasons(events), ['tool_use'], 'expected exactly one Done(tool_use)')
+
+      const [body, ...rest] = yield* Ref.get(bodies)
+
+      yield* expectConformance(
+        body !== undefined && rest.length === 0,
+        'expected exactly one response body'
+      )
+
+      const data = body === undefined ? [] : responsesSseData(bodyText(body))
+      const completed = completedFunctionCalls(data)
+      const assembled = assembledArgumentDeltas(data)
+      const completedIds = new Set(completed.map(item => item.itemId))
+
+      yield* expectConformance(
+        completed.length > 0,
+        'expected the stream to carry a completed function_call item'
+      )
+
+      // Only shapes are reported, never the upstream argument text.
+      for (const item of completed) {
+        const joined = assembled.get(item.itemId)
+        const fromDeltas = parseArguments(joined)
+        const fromItem = parseArguments(item.arguments)
+
+        yield* expectConformance(
+          joined === item.arguments,
+          'expected the argument deltas to assemble into the completed arguments',
+          { actual: { itemHasDeltas: joined !== undefined } }
+        )
+        yield* expectConformance(
+          Option.isSome(fromDeltas) &&
+            Option.isSome(fromItem) &&
+            isRecord(fromDeltas.value) &&
+            Equal.equals(fromDeltas.value, fromItem.value),
+          'expected the assembled arguments to parse to the completed arguments object'
+        )
+      }
+
+      yield* expectConformance(
+        Array.from(assembled.keys()).every(itemId => completedIds.has(itemId)),
+        'expected every argument delta to belong to a completed function_call item'
+      )
+
+      for (const call of calls) {
+        const matching = completed.filter(item => item.callId === call.id)
+
+        yield* expectConformance(
+          matching.length > 0 &&
+            matching.every(item =>
+              Option.match(parseArguments(item.arguments), {
+                onNone: () => false,
+                onSome: parsed => Equal.equals(parsed, call.params)
+              })
+            ),
+          'expected each tool call to carry the arguments of its completed function_call item'
+        )
+      }
     })
   })
 

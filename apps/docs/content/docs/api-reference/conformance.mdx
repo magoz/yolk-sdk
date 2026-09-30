@@ -241,7 +241,9 @@ the public Codex provider, and `@yolk-sdk/agent/providers/xai/conformance` cover
 synthetic fixtures and four `read` cases: streamed plain text (non-empty text, one `Done(stop)`, and
 usage from `response.completed`), `function_call` argument assembly (at least one call, every call
 named `lookup_weather` with distinct call ids and a non-empty string `city`, then one
-`Done(tool_use)`; the providers send no `tool_choice`), the unknown-model error envelope (a
+`Done(tool_use)`; the providers send no `tool_choice`; the body, teed at the case's `HttpClient`
+boundary, must assemble its `response.function_call_arguments.delta` fragments per item into the
+completed item's `arguments`, since the providers read only the completed items), the unknown-model error envelope (a
 non-retryable 400 or 404 that is not an `auth` failure, a status-only message, and a JSON error body
 with a message read at the case's `HttpClient` boundary), and the terminal event (the body, teed
 chunk for chunk at the case's `HttpClient` boundary, ends with exactly one `response.completed` whose
@@ -255,7 +257,7 @@ provider's behaviour: Grok fails a stream without `response.completed` as a non-
 `invalid_response`, while Codex keeps EOF-completion compatibility, so only the body check catches
 it. `pnpm conformance:codex` and `pnpm conformance:grok` are dry-run probes; live runs use
 subscription OAuth tokens (`OPENAI_CODEX_ACCESS_TOKEN`, `XAI_GROK_ACCESS_TOKEN`) and need the
-repository owner's approval (`--owner-approved`).
+repository owner's approval (`--owner-approved`); `--live` is refused whenever `CI` is set.
 
 ## Connector conformance
 

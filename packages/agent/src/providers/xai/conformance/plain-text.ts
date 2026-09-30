@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Streamed plain-text answer from the xAI Grok CLI proxy: `response.created`, `response.in_progress`, a `message` item (`response.output_text.delta` events, one split across two network chunks), and `response.completed` with the output and usage.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:grok --live --account <label>`.
+ * replaces it. Regenerate with `pnpm conformance:grok --live --owner-approved --account <label>`.
  */
 export const xAiGrokPlainTextFixture: WireFixture = {
   id: 'xai.grok.stream.plain-text.synthetic',
@@ -14,7 +14,7 @@ export const xAiGrokPlainTextFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://cli-chat-proxy.grok.com/v1/responses',
   model: 'grok-build',
-  note: 'Synthetic placeholder shaped like OpenAI Responses SSE from the xAI Grok CLI proxy. Not recorded from a live service; replace with a verified recording from pnpm conformance:grok --live --account <label>.',
+  note: 'Synthetic placeholder shaped like OpenAI Responses SSE from the xAI Grok CLI proxy. Not recorded from a live service; replace with a verified recording from pnpm conformance:grok --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

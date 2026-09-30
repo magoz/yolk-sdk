@@ -4,7 +4,7 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Streamed `function_call` item from the ChatGPT Codex Responses endpoint: `response.output_item.added` with the call id and name, `response.function_call_arguments.delta` fragments, `response.function_call_arguments.done`, `response.output_item.done`, and `response.completed` repeating the call in `output`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
- * replaces it. Regenerate with `pnpm conformance:codex --live --account <label>`.
+ * replaces it. Regenerate with `pnpm conformance:codex --live --owner-approved --account <label>`.
  */
 export const openAiCodexFunctionCallArgumentsFixture: WireFixture = {
   id: 'openai.codex.stream.function-call-arguments.synthetic',
@@ -14,7 +14,7 @@ export const openAiCodexFunctionCallArgumentsFixture: WireFixture = {
   account: 'synthetic',
   endpoint: 'https://chatgpt.com/backend-api/codex/responses',
   model: 'gpt-5.4',
-  note: 'Synthetic placeholder shaped like OpenAI Responses SSE from the ChatGPT Codex Responses endpoint. Not recorded from a live service; replace with a verified recording from pnpm conformance:codex --live --account <label>.',
+  note: 'Synthetic placeholder shaped like OpenAI Responses SSE from the ChatGPT Codex Responses endpoint. Not recorded from a live service; replace with a verified recording from pnpm conformance:codex --live --owner-approved --account <label>.',
   exchanges: [
     {
       request: {

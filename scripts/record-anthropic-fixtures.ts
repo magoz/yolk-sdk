@@ -14,7 +14,9 @@
  * conformance case with `runConformance` on a live target against the real Anthropic API, through
  * the conformance recorder wrapped around a real fetch `HttpClient` (response headers limited to
  * `content-type`; failures are reported with the runner's sanitizer), redacts thinking-block
- * signatures and `redacted_thinking` data (text chunks only, never re-chunked), turns each single
+ * signatures and `redacted_thinking` data (text chunks only, never re-chunked; a value left in a
+ * base64 chunk or split across chunks, a non-string value, or a repeated key refuses the write,
+ * checked on every occurrence in the reassembled wire text), turns each single
  * recorded exchange into a `verified` fixture dated today, then replays the new fixtures through
  * the same cases. Nothing is written unless every case passes live, records cleanly, is fully
  * redacted, passes the secret scan, and passes again on replay; only then are the
@@ -58,6 +60,7 @@ import {
   runConformance,
   type ConformanceReport
 } from '../packages/conformance/src/runner.ts'
+import { isAllowedMember, scanJsonObjects, type JsonMember } from './json-members.ts'
 
 export type ProbeOptions = {
   readonly live: boolean
@@ -364,14 +367,6 @@ export const casesWithoutSingleFixture = (
     .map(testCase => testCase.id)
     .filter(caseId => fixtures.filter(fixture => fixture.caseId === caseId).length !== 1)
 
-// Parsed JSON, read-only.
-type Json = null | boolean | number | string | ReadonlyArray<Json> | JsonRecord
-
-type JsonRecord = { readonly [key: string]: Json }
-
-const isRecord = (value: unknown): value is JsonRecord =>
-  Predicate.isObject(value) && !Array.isArray(value)
-
 /** Placeholder written over every recorded thinking-block signature. */
 export const redactedSignature = 'redacted-thinking-signature'
 
@@ -494,56 +489,57 @@ const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
     .filter(data => data.length > 0)
 }
 
-const collectSurvivors = (value: unknown, found: Set<ThinkingRedactionField>): void => {
-  if (Array.isArray(value)) {
-    for (const item of value) collectSurvivors(item, found)
+// One object's members, repeats included: every `signature`, and every `data` of an object
+// whose `type` (any of its `type` members) is `redacted_thinking`, must be null, "", or the
+// placeholder, and neither key may repeat within the object.
+const objectSurvivors = (
+  members: ReadonlyArray<JsonMember>,
+  found: Set<ThinkingRedactionField>
+): void => {
+  const signatures = members.filter(member => member.key === 'signature')
+  const data = members.filter(member => member.key === 'data')
 
-    return
-  }
+  const redactedThinking = members.some(
+    member => member.key === 'type' && member.text === 'redacted_thinking'
+  )
 
-  if (!isRecord(value)) return
-
-  const { signature, data } = value
-
-  if (Predicate.isString(signature) && signature.length > 0 && signature !== redactedSignature) {
+  if (
+    signatures.length > 1 ||
+    signatures.some(member => !isAllowedMember(member, redactedSignature))
+  ) {
     found.add('signature')
   }
 
   if (
-    value.type === 'redacted_thinking' &&
-    Predicate.isString(data) &&
-    data.length > 0 &&
-    data !== redactedThinkingData
+    redactedThinking &&
+    (data.length > 1 || data.some(member => !isAllowedMember(member, redactedThinkingData)))
   ) {
     found.add('redacted_thinking.data')
   }
-
-  for (const item of Object.values(value)) collectSurvivors(item, found)
 }
 
+// Scans the payload text itself, never through `JSON.parse` (which keeps only the last of
+// repeated keys), so an earlier value of a repeated key is still seen.
 const payloadSurvivors = (payload: string, found: Set<ThinkingRedactionField>): void => {
-  let json: unknown
+  const scanned = scanJsonObjects(payload, members => objectSurvivors(members, found))
 
-  try {
-    json = JSON.parse(payload)
-  } catch {
+  if (!scanned) {
     // Not checkable as JSON: fail closed on any mention of a redacted field.
     if (payload.includes('signature')) found.add('signature')
 
     if (payload.includes('redacted_thinking')) found.add('redacted_thinking.data')
-
-    return
   }
-
-  collectSurvivors(json, found)
 }
 
 /**
- * Redacted fields still carrying a real value in recorded responses, checked structurally on
- * each response's whole decoded text: every stream chunk (text and base64) reassembled as bytes
- * and decoded non-fatally, or the text or decoded base64 body. A value in a base64 chunk or body,
- * or split across network chunks, is therefore caught; a JSON payload that does not parse fails
- * closed when it mentions a redacted field. Empty when fully redacted.
+ * Redacted fields still carrying a real value in recorded responses, checked on each response's
+ * whole decoded text: every stream chunk (text and base64) reassembled as bytes and decoded
+ * non-fatally, or the text or decoded base64 body. Every SSE `data:` payload (or the body) is
+ * scanned member by member without collapsing repeated keys: any value other than `null`, `""`,
+ * or the placeholder (a string, number, boolean, object, or array), and any repeated redacted key
+ * in one object, is reported. A value in a base64 chunk or body, or split across network chunks,
+ * is therefore caught; a payload that is not JSON fails closed when it mentions a redacted field.
+ * Empty when fully redacted.
  */
 export const unredactedThinkingFields = (
   exchanges: ReadonlyArray<WireExchange>
@@ -559,7 +555,7 @@ export const unredactedThinkingFields = (
 
 /** Why the probe refuses to write a recording that still carries a redacted value. */
 export const unredactedThinkingMessage = (fields: ReadonlyArray<ThinkingRedactionField>): string =>
-  `could not redact ${fields.join(', ')} from the recording: the value is inside a base64 body or chunk, or split across network chunks, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
+  `could not redact ${fields.join(', ')} from the recording: a value survives inside a base64 body or chunk, split across network chunks, as a non-string value, or under a repeated key, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
 
 export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
   readonly caseId: string
