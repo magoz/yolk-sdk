@@ -277,19 +277,19 @@ What the write cases guarantee differs:
   a failed assertion or an interruption), and verify the restore by reading back. The row case
   compares every written row field plus `VATCode`, and the invoice `Total`, `TotalVAT`, `Net`, and
   `Gross`, exactly. A failed restore fails the case with `FortnoxConformanceRestoreFailed`, which
-  summarizes the original failure; check the account and restore it by hand if it still differs.
+  summarizes the original failure when the claim failed; check the account and restore it by hand
+  if it still differs.
 - **The rejection case** does not restore anything. It first confirms that the customer is absent: a
   404, or another 4xx with a customer-not-found `ErrorInformation` code (`2000204`, `2000433`).
   401, 403, and every other failure abort before the write. If Fortnox unexpectedly accepted the
   create, the case fails and names the invoice to cancel by hand.
 - **The email case** reads the invoice first and aborts unless `EmailInformation.EmailAddressTo`
-  equals the `emailRecipient` seed exactly and no CC or BCC address is set. It is never automated.
+  equals the `emailRecipient` seed exactly and no CC or BCC address is set. It sends with
+  `redirect: 'manual'` and `credentials: 'omit'`, and fails on any 3xx rather than treating it as
+  sent. It is never automated.
 
-The shipped fixtures are synthetic (`evidence: 'unverified'`). The repository's
-`pnpm conformance:fortnox --live --record` stages verified recordings in a gitignored directory and
-never writes committed sources. Promoted recordings change the fixture ids (`.recorded`), `evidence`,
-`account`, and the recorded exchanges, so update the Fortnox conformance tests together with them.
-See [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+The shipped fixtures are synthetic (`evidence: 'unverified'`). See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
 
 ## Official Fortnox references
 

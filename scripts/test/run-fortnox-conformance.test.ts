@@ -33,6 +33,7 @@ import {
   parseRunArgs,
   planFortnoxRun,
   recordingReviewChecklist,
+  recordingRunId,
   recordingsRoot,
   renderFixtureModule,
   renderSeedsModule,
@@ -281,8 +282,8 @@ describe('run-fortnox-conformance rendering', () => {
   })
 })
 
-// Offline `--record` gate: fake recorders hand back synthetic exchanges; a fake writer records
-// every write. Nothing touches the filesystem or the network.
+// Offline `--record` gate: fake recorders hand back synthetic exchanges; an in-memory writer stands
+// in for the filesystem. Nothing touches the disk or the network.
 
 const recorderOf = (exchanges: ReadonlyArray<WireExchange>): WireRecorderApi => ({
   drain: Effect.succeed(exchanges)
@@ -307,27 +308,80 @@ const recordInputs: LiveInputs = {
   seeds: fortnoxConformanceFixtureSeeds
 }
 
-const fakeWriter = () => {
-  const writes: Array<{ readonly path: string; readonly contents: string }> = []
-  const directories: Array<string> = []
+const isUnder = (path: string, dir: string) => path === dir || path.startsWith(`${dir}/`)
+
+/**
+ * In-memory directory tree behind `RecordingWriter`. `failOnWrite` throws on that (0-based)
+ * `writeFile` call; `failRename` throws on the rename.
+ */
+const memoryWriter = (
+  faults: { readonly failOnWrite?: number; readonly failRename?: boolean } = {}
+) => {
+  const directories = new Set<string>()
+  const files = new Map<string, string>()
+  const operations: Array<string> = []
+  let writeCount = 0
 
   const writer: RecordingWriter = {
-    makeDirectory: path => {
-      directories.push(path)
+    exists: path => directories.has(path) || files.has(path),
+    mkdir: path => {
+      operations.push(`mkdir ${path}`)
+
+      for (let dir = path; dir !== dirname(dir); dir = dirname(dir)) directories.add(dir)
     },
     writeFile: (path, contents) => {
-      writes.push({ path, contents })
+      operations.push(`write ${path}`)
+
+      if (writeCount++ === faults.failOnWrite) throw new Error('synthetic write failure')
+
+      if (!directories.has(dirname(path)) || files.has(path)) throw new Error('synthetic EEXIST')
+
+      files.set(path, contents)
+    },
+    rename: (from, to) => {
+      operations.push(`rename ${from} -> ${to}`)
+
+      if (faults.failRename === true || directories.has(to))
+        throw new Error('synthetic rename failure')
+
+      for (const dir of [...directories].filter(dir => isUnder(dir, from))) {
+        directories.delete(dir)
+        directories.add(to + dir.slice(from.length))
+      }
+
+      for (const [path, contents] of [...files].filter(([path]) => isUnder(path, from))) {
+        files.delete(path)
+        files.set(to + path.slice(from.length), contents)
+      }
+    },
+    rm: path => {
+      operations.push(`rm ${path}`)
+
+      for (const dir of [...directories].filter(dir => isUnder(dir, path))) directories.delete(dir)
+
+      for (const file of [...files.keys()].filter(file => isUnder(file, path))) files.delete(file)
     }
   }
 
-  return { writer, writes, directories }
+  /** Directories and files strictly inside `recordingsRoot`. */
+  const entriesUnderRoot = () =>
+    [...directories, ...files.keys()].filter(path => path.startsWith(`${recordingsRoot}/`)).sort()
+
+  return { writer, files, operations, entriesUnderRoot }
 }
 
-const stagingDir = join(recordingsRoot, '2026-09-29')
+const runId = recordingRunId(new Date('2026-09-29T12:34:56.789Z'), 'a1b2c3d4')
+
+const stagingDir = join(recordingsRoot, runId)
+
+const tempDir = join(recordingsRoot, `.tmp-${runId}`)
 
 const listId = fortnoxInvoiceListPopulatedFixture.caseId
 
 const discountId = fortnoxInvoiceRowDiscountFixture.caseId
+
+const listRecorders = () =>
+  new Map([[listId, recorderOf(fortnoxInvoiceListPopulatedFixture.exchanges)]])
 
 const stage = (
   recorders: ReadonlyMap<string, WireRecorderApi>,
@@ -353,8 +407,13 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
     expect(recordingsRoot).toBe(join(repoRoot, '.conformance-recordings', 'fortnox'))
   })
 
-  it('writes every verified recording and the seeds only to the staging directory', async () => {
-    const { writer, writes, directories } = fakeWriter()
+  it('names each run directory by UTC date, time, and a random suffix', () => {
+    expect(runId).toBe('2026-09-29T123456Z-a1b2c3d4')
+    expect(recordingRunId(new Date('2026-09-29T12:34:56.789Z'), 'e5f6a7b8')).not.toBe(runId)
+  })
+
+  it('writes the whole batch into a temp directory, then publishes it with one rename', async () => {
+    const { writer, files, operations, entriesUnderRoot } = memoryWriter()
 
     const result = await stage(
       new Map([
@@ -368,18 +427,26 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
       return expect.fail('expected staged recordings')
     }
 
-    expect(directories).toEqual([stagingDir])
-    expect(writes.map(write => write.path)).toEqual([
+    const staged = [
       join(stagingDir, 'invoice-list-populated.ts'),
       join(stagingDir, 'invoice-row-discount.ts'),
       join(stagingDir, 'seeds.ts')
+    ]
+
+    expect(operations).toEqual([
+      `mkdir ${tempDir}`,
+      `write ${join(tempDir, 'invoice-list-populated.ts')}`,
+      `write ${join(tempDir, 'invoice-row-discount.ts')}`,
+      `write ${join(tempDir, 'seeds.ts')}`,
+      `rename ${tempDir} -> ${stagingDir}`
     ])
-    expect(writes.every(write => write.path.startsWith(`${stagingDir}/`))).toBe(true)
-    expect(writes[0]?.contents).toContain(`"id": "${listId}.recorded"`)
-    expect(writes[0]?.contents).toContain('"evidence": "verified"')
-    expect(writes[0]?.contents).toContain('"account": "practice"')
-    expect(writes[2]?.contents).toBe(renderSeedsModule(fortnoxConformanceFixtureSeeds))
-    expect(result.success.files).toEqual(writes.map(write => write.path))
+    expect(entriesUnderRoot()).toEqual([stagingDir, ...staged].sort())
+    expect(files.get(staged[0] ?? '')).toContain(`"id": "${listId}.recorded"`)
+    expect(files.get(staged[0] ?? '')).toContain('"evidence": "verified"')
+    expect(files.get(staged[0] ?? '')).toContain('"account": "practice"')
+    expect(files.get(staged[2] ?? '')).toBe(renderSeedsModule(fortnoxConformanceFixtureSeeds))
+    expect(result.success.stagingDir).toBe(stagingDir)
+    expect(result.success.files).toEqual(staged)
     expect(result.success.checklist).toContain('  invoice-list-populated.ts:')
     expect(result.success.checklist.join('\n')).toContain('names: "Example Customer AB"')
     expect(result.success.checklist.at(-2)).toContain(
@@ -387,8 +454,78 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
     )
   })
 
+  it('leaves no run directory and removes the temp directory when a write fails mid-batch', async () => {
+    const { writer, operations, entriesUnderRoot } = memoryWriter({ failOnWrite: 1 })
+
+    const result = await stage(
+      new Map([
+        [listId, recorderOf(fortnoxInvoiceListPopulatedFixture.exchanges)],
+        [discountId, recorderOf(fortnoxInvoiceRowDiscountFixture.exchanges)]
+      ]),
+      writer
+    )
+
+    expect(failureMessage(result)).toBe(
+      `Writing the staged recordings failed; nothing was staged in ${stagingDir}`
+    )
+    expect(operations).toEqual([
+      `mkdir ${tempDir}`,
+      `write ${join(tempDir, 'invoice-list-populated.ts')}`,
+      `write ${join(tempDir, 'invoice-row-discount.ts')}`,
+      `rm ${tempDir}`
+    ])
+    expect(entriesUnderRoot()).toEqual([])
+  })
+
+  it('leaves no run directory when the publishing rename fails', async () => {
+    const { writer, entriesUnderRoot } = memoryWriter({ failRename: true })
+
+    const result = await stage(listRecorders(), writer)
+
+    expect(failureMessage(result)).toBe(
+      `Writing the staged recordings failed; nothing was staged in ${stagingDir}`
+    )
+    expect(entriesUnderRoot()).toEqual([])
+  })
+
+  it('stages two same-day runs in two distinct directories', async () => {
+    const { writer, entriesUnderRoot } = memoryWriter()
+
+    const first = join(recordingsRoot, recordingRunId(new Date('2026-09-29T09:00:00Z'), 'aaaa1111'))
+
+    const second = join(
+      recordingsRoot,
+      recordingRunId(new Date('2026-09-29T15:30:00Z'), 'bbbb2222')
+    )
+
+    expect(Result.isSuccess(await stage(listRecorders(), writer, first))).toBe(true)
+    expect(Result.isSuccess(await stage(listRecorders(), writer, second))).toBe(true)
+    expect(entriesUnderRoot()).toEqual(
+      [
+        first,
+        join(first, 'invoice-list-populated.ts'),
+        join(first, 'seeds.ts'),
+        second,
+        join(second, 'invoice-list-populated.ts'),
+        join(second, 'seeds.ts')
+      ].sort()
+    )
+  })
+
+  it('refuses an existing run directory and writes nothing', async () => {
+    const { writer, operations } = memoryWriter()
+
+    writer.mkdir(stagingDir)
+    operations.length = 0
+
+    const result = await stage(listRecorders(), writer)
+
+    expect(failureMessage(result)).toBe(`Refusing to overwrite ${stagingDir}; nothing was written`)
+    expect(operations).toEqual([])
+  })
+
   it('writes nothing when any recording fails replay verification', async () => {
-    const { writer, writes, directories } = fakeWriter()
+    const { writer, operations } = memoryWriter()
 
     // The row-discount recording no longer supports its claim: the omitted discount reset to 0.
     const contradicted = fortnoxInvoiceRowDiscountFixture.exchanges.map((exchange, index) =>
@@ -417,12 +554,11 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
     expect(failureMessage(result)).toBe(
       `${discountId} did not pass on replay of its recording; nothing was written`
     )
-    expect(writes).toEqual([])
-    expect(directories).toEqual([])
+    expect(operations).toEqual([])
   })
 
   it('writes nothing when a recording fails the secret scan', async () => {
-    const { writer, writes, directories } = fakeWriter()
+    const { writer, operations } = memoryWriter()
     const [first, ...rest] = fortnoxInvoiceListPopulatedFixture.exchanges
 
     const leaky: ReadonlyArray<WireExchange> = [
@@ -441,32 +577,36 @@ describe('run-fortnox-conformance --record staging (offline)', () => {
     expect(failureMessage(result)).toBe(
       `${listId}: recording rejected (WireFixtureSecretsFound); nothing was written`
     )
-    expect(writes).toEqual([])
-    expect(directories).toEqual([])
+    expect(operations).toEqual([])
   })
 
-  it('refuses a staging directory inside the committed package sources', async () => {
-    const { writer, writes } = fakeWriter()
+  it('refuses a staging directory that is not a direct child of the recordings root', async () => {
+    for (const dir of [
+      join(repoRoot, 'packages/connectors/src/fortnox/conformance'),
+      join(repoRoot, '.conformance-recordings', 'other', runId),
+      join(stagingDir, 'nested'),
+      join(recordingsRoot, '..', runId),
+      recordingsRoot,
+      tempDir
+    ]) {
+      const { writer, operations } = memoryWriter()
 
-    const result = await stage(
-      new Map([[listId, recorderOf(fortnoxInvoiceListPopulatedFixture.exchanges)]]),
-      writer,
-      join(repoRoot, 'packages/connectors/src/fortnox/conformance')
-    )
+      const result = await stage(listRecorders(), writer, dir)
 
-    expect(failureMessage(result)).toContain(
-      'Refusing to stage recordings inside committed sources'
-    )
-    expect(writes).toEqual([])
+      expect(failureMessage(result)).toBe(
+        `Refusing to stage recordings outside the recordings root (${recordingsRoot}); nothing was written`
+      )
+      expect(operations).toEqual([])
+    }
   })
 
   it('writes nothing when no case passed', async () => {
-    const { writer, writes } = fakeWriter()
+    const { writer, operations } = memoryWriter()
 
     const result = await stage(new Map(), writer)
 
     expect(result).toMatchObject({ _tag: 'Success', success: undefined })
-    expect(writes).toEqual([])
+    expect(operations).toEqual([])
   })
 
   it('lists foreign emails, names, Comments values, and PDF bodies for review', () => {

@@ -19,21 +19,27 @@
  * run it builds `verified` fixtures (today's date, the account label) for the cases that passed,
  * re-runs each case on replay against its new fixture, and renders every fixture module plus the
  * seeds module. Only if every recorded case verified and passed the secret scan does it write them,
- * all together, to the GITIGNORED staging directory `.conformance-recordings/fortnox/<date>/`. It
- * never writes committed sources. It then prints a review checklist (email-like strings outside
- * `example.test`/`example.com`, names, `Comments` values, and any PDF body).
+ * all or nothing, to a NEW run directory under the GITIGNORED root
+ * `.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`: it writes the whole batch into
+ * a sibling temp directory and publishes it with one rename, refuses an existing destination, and
+ * leaves no run directory when anything fails. It never writes committed sources. It then prints a
+ * review checklist (email-like strings outside `example.test`/`example.com`, names, `Comments`
+ * values, and any PDF body).
  *
  * Promotion is manual: scrub the staged files of practice-company data, copy them into
  * `packages/connectors/src/fortnox/conformance/`, run `pnpm format:fix`, and update
  * `packages/connectors/test/fortnox-conformance.test.ts` and
  * `scripts/test/run-fortnox-conformance.test.ts` in the same change: promoted fixtures change the
  * fixture ids (`.recorded`), `evidence` (`verified`), `account`, and the exchange indices and
- * bodies the drills rely on.
+ * bodies the drills rely on. A promoted payment-filter recording also needs the tests' fixed clock
+ * (`atTestNow` in `packages/connectors/test/fortnox-conformance.test.ts`) moved past the recorded
+ * overdue invoice's `DueDate`, or the case aborts with its overdue precondition.
  *
  * Never run live in CI.
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Effect, Layer, Option, Predicate, Ref } from 'effect'
@@ -240,8 +246,9 @@ Options:
   --allow-irreversible <case-id>  run this exact write-irreversible case (repeatable):
                                   ${irreversibleCaseIds.join(', ')}
   --record                        with --live: record the cases that passed, verify on replay,
-                                  and stage them in .conformance-recordings/fortnox/<date>/
-                                  (gitignored) for manual scrubbing and promotion
+                                  and stage them in a new run directory under
+                                  .conformance-recordings/fortnox/ (gitignored) for manual
+                                  scrubbing and promotion
 ${fortnoxSeedSources
   .map(
     source =>
@@ -480,12 +487,10 @@ export class FortnoxRunFailed extends Schema.TaggedError<FortnoxRunFailed>()('Fo
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** Gitignored root of staged recordings; one directory per recording date. */
+/** Gitignored root of staged recordings; one new directory per `--record` run. */
 export const recordingsRoot = join(workspaceRoot, '.conformance-recordings', 'fortnox')
 
 const committedSources = join(workspaceRoot, 'packages')
-
-const today = () => new Date().toISOString().slice(0, 10)
 
 const isInside = (child: string, parent: string): boolean => {
   const path = relative(resolve(parent), resolve(child))
@@ -649,24 +654,57 @@ const verifiedFixture = (
     )
   )
 
-/** File side effects of `--record`; injectable so the staging gate is tested without writing. */
+/**
+ * Directory-level file side effects of `--record`; injectable so the staging gate is tested
+ * offline without touching the filesystem.
+ */
 export type RecordingWriter = {
-  readonly makeDirectory: (path: string) => void
+  readonly exists: (path: string) => boolean
+  /** Create a directory and any missing parents. */
+  readonly mkdir: (path: string) => void
   readonly writeFile: (path: string, contents: string) => void
+  /** Rename a directory in one step (same filesystem). */
+  readonly rename: (from: string, to: string) => void
+  /** Remove a directory and everything in it. */
+  readonly rm: (path: string) => void
 }
 
 export const nodeRecordingWriter: RecordingWriter = {
-  makeDirectory: path => {
+  exists: path => existsSync(path),
+  mkdir: path => {
     mkdirSync(path, { recursive: true })
   },
   writeFile: (path, contents) => {
-    writeFileSync(path, contents)
+    writeFileSync(path, contents, { flag: 'wx' })
+  },
+  rename: (from, to) => {
+    renameSync(from, to)
+  },
+  rm: path => {
+    rmSync(path, { recursive: true, force: true })
   }
 }
 
+/**
+ * A unique run directory name, `<YYYY-MM-DD>T<HHMMSS>Z-<suffix>` (UTC), so two recordings on the
+ * same day never share a directory.
+ */
+export const recordingRunId = (now: Date, suffix: string): string => {
+  const iso = now.toISOString()
+
+  return `${iso.slice(0, 10)}T${iso.slice(11, 19).replaceAll(':', '')}Z-${suffix}`
+}
+
+const randomRunSuffix = (): string => randomBytes(4).toString('hex')
+
 export type StageRecordingsOptions = {
   readonly writer: RecordingWriter
-  /** Staging directory; must not be inside the committed `packages/` sources. */
+  /** The gitignored recordings root (defaults to `recordingsRoot`). */
+  readonly recordingsRoot?: string
+  /**
+   * The run directory to publish; must be a new, direct child of the recordings root (for example
+   * `join(recordingsRoot, recordingRunId(now, suffix))`).
+   */
   readonly stagingDir: string
   /** `recordedAt` of the staged fixtures (`YYYY-MM-DD`). */
   readonly recordedAt: string
@@ -799,9 +837,12 @@ export const recordingReviewChecklist = (
 
 /**
  * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan), then
- * renders every fixture module and the seeds module, and only then writes them all to
- * `options.stagingDir`. Any failure before writing leaves zero files; a staging directory inside
- * the committed `packages/` sources is refused. Returns `undefined` when no case passed.
+ * renders every fixture module and the seeds module, writes them all into a sibling temp directory
+ * (`<root>/.tmp-<run>`), and publishes that directory to `options.stagingDir` with one rename.
+ * All or nothing: any failure (verification, a write, or the rename) leaves no staging directory,
+ * and the temp directory is removed (best effort). A staging directory that is not a direct child
+ * of the recordings root, or that already exists, is refused. Returns `undefined` when no case
+ * passed.
  */
 export const stageRecordings = (
   report: ConformanceReport,
@@ -810,13 +851,34 @@ export const stageRecordings = (
   options: StageRecordingsOptions
 ) =>
   Effect.gen(function* () {
+    const root = resolve(options.recordingsRoot ?? recordingsRoot)
     const stagingDir = resolve(options.stagingDir)
+    const runName = basename(stagingDir)
 
-    if (isInside(stagingDir, committedSources)) {
+    if (
+      dirname(stagingDir) !== root ||
+      runName.startsWith('.') ||
+      isInside(root, committedSources)
+    ) {
       return yield* new FortnoxRunFailed({
-        message: `Refusing to stage recordings inside committed sources (${committedSources}); nothing was written`
+        message: `Refusing to stage recordings outside the recordings root (${root}); nothing was written`
       })
     }
+
+    const { writer } = options
+    const tempDir = join(root, `.tmp-${runName}`)
+
+    const refuseExisting = Effect.suspend(() =>
+      writer.exists(stagingDir) || writer.exists(tempDir)
+        ? Effect.fail(
+            new FortnoxRunFailed({
+              message: `Refusing to overwrite ${stagingDir}; nothing was written`
+            })
+          )
+        : Effect.void
+    )
+
+    yield* refuseExisting
 
     const passed = report.results.filter(result => result.status === 'passed')
     const recorded: Array<RecordedFixture> = []
@@ -839,11 +901,11 @@ export const stageRecordings = (
     // Everything verified: render every file before writing any of them.
     const files = [
       ...recorded.map(({ spec, fixture }) => ({
-        path: join(stagingDir, spec.fileName),
+        name: spec.fileName,
         contents: renderFixtureModule(spec, fixture)
       })),
       {
-        path: join(stagingDir, 'seeds.ts'),
+        name: 'seeds.ts',
         contents: renderSeedsModule(
           mergedFixtureSeeds(
             fortnoxConformanceFixtureSeeds,
@@ -854,23 +916,35 @@ export const stageRecordings = (
       }
     ]
 
+    yield* refuseExisting
+
     yield* Effect.try({
       try: () => {
-        options.writer.makeDirectory(stagingDir)
+        writer.mkdir(tempDir)
 
         for (const file of files) {
-          options.writer.writeFile(file.path, file.contents)
+          writer.writeFile(join(tempDir, file.name), file.contents)
         }
+
+        // Publish the complete batch in one step, only after every file is written.
+        writer.rename(tempDir, stagingDir)
       },
-      catch: () =>
-        new FortnoxRunFailed({
-          message: `Writing the staged recordings failed; delete ${stagingDir} and record again`
+      catch: () => {
+        try {
+          writer.rm(tempDir)
+        } catch {
+          // Best effort: the temp directory is gitignored and never read as a staged run.
+        }
+
+        return new FortnoxRunFailed({
+          message: `Writing the staged recordings failed; nothing was staged in ${stagingDir}`
         })
+      }
     })
 
     return {
       stagingDir,
-      files: files.map(file => file.path),
+      files: files.map(file => join(stagingDir, file.name)),
       checklist: recordingReviewChecklist(recorded)
     }
   })
@@ -908,12 +982,12 @@ const live = (options: RunOptions, env: Readonly<Record<string, string | undefin
     console.log(formatConformanceReport(report))
 
     if (options.record) {
-      const recordedAt = today()
+      const now = new Date()
 
       const staged = yield* stageRecordings(report, yield* Ref.get(recorders), inputs, {
         writer: nodeRecordingWriter,
-        stagingDir: join(recordingsRoot, recordedAt),
-        recordedAt
+        stagingDir: join(recordingsRoot, recordingRunId(now, randomRunSuffix())),
+        recordedAt: now.toISOString().slice(0, 10)
       })
 
       if (staged === undefined) {

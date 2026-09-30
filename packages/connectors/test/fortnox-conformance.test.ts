@@ -2,7 +2,7 @@ import { describe, expect, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient } from 'effect/unstable/http'
-import type { ConformanceCase } from '@yolk-sdk/conformance/case'
+import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,
   isWireBase64BodyResponse,
@@ -24,13 +24,20 @@ import {
   runConformance,
   type ConformanceTarget
 } from '@yolk-sdk/conformance/runner'
-import { OAuthCredential } from '@yolk-sdk/connectors'
+import {
+  ConnectorBinaryHttpClient,
+  ConnectorHttpClient,
+  ConnectorHttpResponse,
+  OAuthCredential,
+  type ConnectorHttpRequest
+} from '@yolk-sdk/connectors'
 import {
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
 import {
   FortnoxConformanceConfig,
+  FortnoxConformanceRestoreFailed,
   fortnoxConformanceCases,
   fortnoxConformanceCommentsMarker,
   fortnoxConformanceFixtureSeeds,
@@ -343,6 +350,83 @@ describe('Fortnox conformance cases', () => {
         'GET https://api.fortnox.se/3/invoices/104',
         'GET https://api.fortnox.se/3/invoices/104/email'
       ])
+    })
+  )
+})
+
+/**
+ * Ports over a fake `ConnectorHttpClient` that records every `ConnectorHttpRequest` and answers it
+ * with the next recorded response of `fixture`.
+ */
+const capturingPorts = (fixture: WireFixture, captured: Array<ConnectorHttpRequest>) => {
+  const responses = fixture.exchanges.map(exchange => exchange.response)
+
+  return Layer.mergeAll(
+    Layer.succeed(ConnectorHttpClient, {
+      request: request =>
+        Effect.suspend(() => {
+          const response = responses[captured.length]
+
+          captured.push(request)
+
+          return response === undefined
+            ? Effect.die(`unexpected request ${request.method} ${request.url}`)
+            : Effect.succeed(
+                ConnectorHttpResponse.make({
+                  status: response.status,
+                  headers: { ...response.headers },
+                  body: textBody(response)
+                })
+              )
+        })
+    }),
+    Layer.succeed(ConnectorBinaryHttpClient, {
+      request: () => Effect.die('the binary port is not used')
+    }),
+    credentialLayer,
+    Layer.succeed(FortnoxConformanceConfig, fortnoxConformanceFixtureSeeds)
+  )
+}
+
+describe('Fortnox conformance request transport options', () => {
+  it.effect('sends the email with manual redirects and no ambient credentials', () =>
+    Effect.gen(function* () {
+      const captured: Array<ConnectorHttpRequest> = []
+
+      yield* fortnoxInvoiceSendEmailCase.run.pipe(
+        Effect.provide(capturingPorts(fortnoxInvoiceSendEmailFixture, captured))
+      )
+
+      expect(captured.map(request => `${request.method} ${request.url}`)).toEqual([
+        'GET https://api.fortnox.se/3/invoices/104',
+        'GET https://api.fortnox.se/3/invoices/104/email'
+      ])
+
+      const [read, send] = captured
+
+      expect(send).toMatchObject({ redirect: 'manual', credentials: 'omit' })
+      expect(send?.headers?.authorization).toBe('Bearer synthetic-fortnox-access-token')
+      // The recipient read goes through the shared helper without the flags.
+      expect(read === undefined ? [] : Object.keys(read)).not.toContain('redirect')
+      expect(read === undefined ? [] : Object.keys(read)).not.toContain('credentials')
+    })
+  )
+
+  it.effect('leaves connector action requests without the email transport options', () =>
+    Effect.gen(function* () {
+      const captured: Array<ConnectorHttpRequest> = []
+
+      yield* fortnoxInvoiceRowDiscountCase.run.pipe(
+        Effect.provide(capturingPorts(fortnoxInvoiceRowDiscountFixture, captured))
+      )
+
+      expect(captured).toHaveLength(fortnoxInvoiceRowDiscountFixture.exchanges.length)
+      expect(new Set(captured.map(request => request.method))).toEqual(new Set(['GET', 'PUT']))
+
+      for (const request of captured) {
+        expect(Object.keys(request)).not.toContain('redirect')
+        expect(Object.keys(request)).not.toContain('credentials')
+      }
     })
   )
 })
@@ -845,6 +929,35 @@ describe('Fortnox conformance disagreement drills', () => {
     })
   )
 
+  it.effect('fails the email case on a redirect instead of treating it as sent', () =>
+    Effect.gen(function* () {
+      for (const status of [301, 302, 303, 307, 308]) {
+        const redirected = replaceResponse(fortnoxInvoiceSendEmailFixture, 1, response => ({
+          status,
+          headers: { ...response.headers, location: 'https://api.fortnox.se/3/invoices/104' },
+          body: ''
+        }))
+
+        const { failure, entries, remaining } = yield* drill(
+          fortnoxInvoiceSendEmailCase,
+          redirected
+        )
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'ConformanceMismatch',
+          message: 'expected no redirect from the email send; a 3xx is not treated as sent'
+        })
+        // The Location is never requested.
+        expect(methodsAndUrls(entries)).toEqual([
+          'GET https://api.fortnox.se/3/invoices/104',
+          'GET https://api.fortnox.se/3/invoices/104/email'
+        ])
+        expect(remaining).toEqual([])
+      }
+    })
+  )
+
   it.effect('aborts the email case before any request without an emailRecipient seed', () =>
     Effect.gen(function* () {
       const { emailRecipient: _omitted, ...seeds } = fortnoxConformanceFixtureSeeds
@@ -899,7 +1012,7 @@ describe('Fortnox conformance disagreement drills', () => {
 
         expect(failure?.tag).toBe('FortnoxConformanceRestoreFailed')
         expect(failure?.message).toBe(
-          `fortnox.invoice.row-discount-sticky: restore failed (${reason}). The claim held before the restore. Restore the account by hand if it still differs from its original state.`
+          `fortnox.invoice.row-discount-sticky: restore failed; restore the account by hand if it still differs from its original state. Restore error: ${reason}. Claim held first.`
         )
         expect(exchangeIndices(entries).slice(-2)).toEqual(['PUT 7', 'GET 8'])
       }
@@ -922,9 +1035,89 @@ describe('Fortnox conformance disagreement drills', () => {
         kind: 'failure',
         tag: 'FortnoxConformanceRestoreFailed',
         message:
-          'fortnox.invoice.row-discount-sticky: restore failed (expected the original invoice rows back after restoring). The claim failed before the restore (expected the omitted Discount to keep its previous value (10)). Restore the account by hand if it still differs from its original state.'
+          'fortnox.invoice.row-discount-sticky: restore failed; restore the account by hand if it still differs from its original state. Restore error: expected the original invoice rows back after restoring. Claim failed first: expected the omitted Discount to keep its previous value...'
       })
     })
+  )
+
+  it.effect(
+    'keeps the restore-by-hand advice within the report cap for a long restore failure',
+    () =>
+      Effect.gen(function* () {
+        // The claim fails (4: "" cleared Comments), then the restore PUT (5) is rejected with a
+        // long provider message: both summaries are capped, and the advice comes first.
+        const tampered = replaceResponse(
+          replaceResponse(fortnoxCustomerEmptyStringFixture, 4, response =>
+            withBody(
+              response,
+              textBody(response).replace(
+                `"Comments":"${fortnoxConformanceCommentsMarker}"`,
+                '"Comments":""'
+              )
+            )
+          ),
+          5,
+          response =>
+            jsonResponse(
+              response,
+              400,
+              `{"ErrorInformation":{"error":1,"message":"${'Synthetic placeholder: rejected. '.repeat(8)}","code":2000359}}`
+            )
+        )
+
+        const { failure } = yield* drill(fortnoxCustomerEmptyStringCase, tampered)
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'FortnoxConformanceRestoreFailed',
+          message:
+            'fortnox.customer.empty-string-keeps-value: restore failed; restore the account by hand if it still differs from its original state. Restore error: FortnoxConformanceActionFailed: fortnox.update_customer f... Claim failed first: expected an empty-string Comments update to keep the stor...'
+        })
+      })
+  )
+
+  it.effect(
+    'fits a restore failure with the longest case id and maximal summaries in the report',
+    () =>
+      Effect.gen(function* () {
+        const caseId = fortnoxConformanceCases
+          .map(testCase => testCase.id)
+          .reduce((longest, id) => (id.length > longest.length ? id : longest))
+
+        // A summary at its cap (60 characters, ending in "...").
+        const summary = `${'Synthetic failure summary; '.repeat(3).slice(0, 57)}...`
+
+        expect(summary).toHaveLength(60)
+
+        const failing = defineConformanceCase({
+          id: caseId,
+          safety: 'read',
+          docs: 'Synthetic.',
+          wire: 'Synthetic.',
+          fixtures: [],
+          run: Effect.fail(
+            new FortnoxConformanceRestoreFailed({
+              caseId,
+              reason: summary,
+              caseOutcome: 'claim failed',
+              claimFailure: summary
+            })
+          )
+        })
+
+        const report = yield* runConformance([failing], {
+          target: { kind: 'replay' },
+          now,
+          layer: () => Layer.empty
+        })
+
+        const message = report.results[0]?.failure?.message ?? expect.fail('expected a failure')
+
+        expect(message).toBe(
+          `${caseId}: restore failed; restore the account by hand if it still differs from its original state. Restore error: ${summary} Claim failed first: ${summary}`
+        )
+        expect(message.length).toBeLessThanOrEqual(300)
+      })
   )
 
   it.effect('fails with a precondition before any request when a seed is missing', () =>

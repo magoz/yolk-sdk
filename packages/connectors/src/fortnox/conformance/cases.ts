@@ -134,6 +134,12 @@ export class FortnoxConformanceActionFailed extends Data.TaggedError(
   }
 }
 
+const restoreByHandAdvice =
+  'restore the account by hand if it still differs from its original state.'
+
+/** `text` ending in a period (a truncated `...` summary already does). */
+const sentence = (text: string): string => (text.endsWith('.') ? text : `${text}.`)
+
 /**
  * Restoring the practice account after a write case failed. `caseOutcome` says whether the claim
  * itself held before restoring; `claimFailure` is a sanitized summary of why it failed. The account
@@ -150,12 +156,16 @@ export class FortnoxConformanceRestoreFailed extends Data.TaggedError(
 }> {
   override get message(): string {
     const claim =
-      this.claimFailure === undefined
-        ? `The ${this.caseOutcome} before the restore.`
-        : `The ${this.caseOutcome} before the restore (${this.claimFailure}).`
+      this.caseOutcome === 'claim held'
+        ? 'Claim held first.'
+        : this.claimFailure === undefined
+          ? 'Claim failed first.'
+          : `Claim failed first: ${this.claimFailure}`
 
-    // Kept short: conformance reports cap failure messages at 300 characters.
-    return `${this.caseId}: restore failed (${this.reason}). ${claim} Restore the account by hand if it still differs from its original state.`
+    // Conformance reports cap failure messages at 300 characters: the advice comes first so it
+    // always survives, and each summary is capped at `failureSummaryLength`, so the whole message
+    // fits even for the longest case id.
+    return `${this.caseId}: restore failed; ${restoreByHandAdvice} Restore error: ${sentence(this.reason)} ${claim}`
   }
 }
 
@@ -271,7 +281,7 @@ const listAllInvoices = (filter: InvoiceListFilter) =>
   })
 
 /** Longest failure summary embedded in a `FortnoxConformanceRestoreFailed` message. */
-const failureSummaryLength = 80
+const failureSummaryLength = 60
 
 /** Short, sanitized `Tag: message` summary of a failure (credential patterns redacted). */
 const failureSummary = (cause: Cause.Cause<unknown>): string => {
@@ -295,7 +305,7 @@ const failureSummary = (cause: Cause.Cause<unknown>): string => {
   const summary = sanitizeConformanceMessage(raw)
 
   return summary.length > failureSummaryLength
-    ? `${summary.slice(0, failureSummaryLength - 3)}...`
+    ? `${summary.slice(0, failureSummaryLength - 3).trimEnd()}...`
     : summary
 }
 
@@ -889,7 +899,7 @@ export const fortnoxInvoiceSendEmailCase: FortnoxConformanceCase = defineConform
   title: 'Sending an invoice by email answers with the invoice',
   safety: 'write-irreversible',
   docs: 'GET /3/invoices/{DocumentNumber}/email sends the invoice by email to the customer invoice address and returns the invoice.',
-  wire: 'The send request answers 2xx with an `Invoice` envelope for the same DocumentNumber. Whether a test (practice) company actually delivers the email is not established: record delivery evidence by hand. Before sending, the case reads the invoice and aborts unless `EmailInformation.EmailAddressTo` equals the host-supplied `emailRecipient` seed exactly and no CC/BCC address is set. The connector has no send action, so the send is a raw GET through the shared Fortnox request helper, and the case never runs live unless a person allows its exact id.',
+  wire: 'The send request answers 2xx with an `Invoice` envelope for the same DocumentNumber. Whether a test (practice) company actually delivers the email is not established: record delivery evidence by hand. Before sending, the case reads the invoice and aborts unless `EmailInformation.EmailAddressTo` equals the host-supplied `emailRecipient` seed exactly and no CC/BCC address is set. The connector has no send action, so the send is a raw GET through the shared Fortnox request helper with manual redirects and no ambient credentials (any 3xx fails the case), and the case never runs live unless a person allows its exact id.',
   fixtures: [fortnoxInvoiceSendEmailFixture.id],
   run: Effect.gen(function* () {
     const documentNumber = yield* requireSeed('emailInvoiceDocumentNumber')
@@ -915,12 +925,20 @@ export const fortnoxInvoiceSendEmailCase: FortnoxConformanceCase = defineConform
       'precondition: the email invoice has an EmailAddressCC or EmailAddressBCC; clear them so only emailRecipient is addressed; nothing was sent'
     )
 
+    // Manual redirects and no ambient credentials: a redirect must never be followed (or count as
+    // sent) on this irreversible request.
     const response = yield* getFortnoxResponse(
       integration,
       FortnoxInvoiceOAuthCredentialSlot,
-      `${invoicePath(documentNumber)}/email`
+      `${invoicePath(documentNumber)}/email`,
+      { redirect: 'manual', credentials: 'omit' }
     )
 
+    yield* expectConformance(
+      response.status < 300 || response.status >= 400,
+      'expected no redirect from the email send; a 3xx is not treated as sent',
+      { actual: response.status }
+    )
     yield* expectConformance(
       response.status >= 200 && response.status < 300,
       'expected a 2xx response to the email send',

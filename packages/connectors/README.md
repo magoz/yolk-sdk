@@ -668,10 +668,12 @@ seed exactly; the runner never runs it live unless its exact id is allowed.
 `fortnoxConformanceFixtures` are synthetic placeholders (`evidence: 'unverified'`) that replay with
 `fortnoxConformanceFixtureSeeds`. `pnpm conformance:fortnox` in this repository dry-runs by default;
 its `--live --account <label>` mode is for owners running a practice account by hand. `--record`
-stages verified recordings in the gitignored `.conformance-recordings/fortnox/<date>/` and never
-writes committed sources. Promotion is manual: scrub, copy into `src/fortnox/conformance/`, and
-update the tests in the same change, because promoted fixtures change fixture ids, `evidence`, and
-`account`.
+stages verified recordings all or nothing in a new gitignored run directory,
+`.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`, and never writes committed
+sources. Promotion is manual: scrub, copy into `src/fortnox/conformance/`, and update the tests in
+the same change, because promoted fixtures change fixture ids, `evidence`, and `account`. A promoted
+payment-filter recording also needs the tests' fixed clock (`atTestNow`) moved past the recorded
+`DueDate`.
 
 `@yolk-sdk/connectors/conformance` supplies the ports for such runs:
 `connectorHttpClientFromEffectHttpClientLayer`, `connectorBinaryHttpClientFromEffectHttpClientLayer`
