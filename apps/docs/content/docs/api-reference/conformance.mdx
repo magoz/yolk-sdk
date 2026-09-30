@@ -1,13 +1,15 @@
 ---
 title: Conformance APIs
-description: Experimental wire-fixture record, replay, and fault-injection subpaths.
+description: Experimental wire-fixture record, replay, fault-injection, conformance case, and runner subpaths.
 ---
 
 > **Experimental.** `@yolk-sdk/conformance` may change in any canary release. It is new after
 > `0.1.0-canary.95`; keep it on the same lockstep version as the other public packages.
 
 `@yolk-sdk/conformance` records real HTTP exchanges with outside services, replays them in tests
-offline (fail closed), and injects wire faults. It depends only on `effect` and never performs
+offline (fail closed), and injects wire faults. It also defines conformance cases, each proving one
+claim about how a service really behaves on the wire, and a runner that gates cases by safety and
+reports. It depends only on `effect` and never performs
 network I/O itself: for live recording, your host supplies the real `HttpClient`.
 
 There is no root export. Import an explicit subpath.
@@ -106,6 +108,78 @@ valid UTF-8, otherwise as `{ base64 }`. Other bodies are recorded as `body` or `
 request still pending when `drain` runs is reported by that drain and then dropped; it never lands
 in a later drain.
 
+## Case
+
+`@yolk-sdk/conformance/case`
+
+| Export                                            | Purpose                                                                                                                                               |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ConformanceCase<E, R>`                           | `id`, `title?`, `safety`, `docs` (what the docs claim), `wire` (what the wire does), `observed?`, `fixtures` (fixture ids), `run: Effect<void, E, R>` |
+| `defineConformanceCase`                           | Validates case metadata; throws `ConformanceCaseInvalid` for an invalid definition                                                                    |
+| `ConformanceSafety`                               | Schema and type: `read`, `write-reversible` (leaves the account as it found it), `write-irreversible` (never automated)                               |
+| `ConformanceObservation`                          | Schema and type: `{ account, date }`, a synthetic account label and `YYYY-MM-DD`; absent on a case means unverified                                   |
+| `ConformanceCaseId`                               | Schema: dotted lower-case id, two or more segments                                                                                                    |
+| `expectConformance(condition, message, details?)` | Fails with `ConformanceMismatch` when `condition` is false                                                                                            |
+| `expectEqual(actual, expected, message)`          | Structural JSON equality (`Equal.equals`); fails with `ConformanceMismatch` carrying both values                                                      |
+| `ConformanceMismatch`, `ConformanceCaseInvalid`   | Typed mismatch (`message`, optional JSON `expected` / `actual`); invalid-definition error                                                             |
+
+## Runner
+
+`@yolk-sdk/conformance/runner`
+
+| Export                                               | Purpose                                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runConformance(cases, options)`                     | `Effect<ConformanceReport, never, LR>`; runs allowed cases one at a time by default, each with a freshly built `options.layer(case)`                    |
+| `ConformanceRunOptions`                              | `target`, `layer`, `fixtures?`, `now?` (default `Clock`), `maxFixtureAgeDays?` (default 30), `concurrency?` (default 1)                                 |
+| `ConformanceTarget`                                  | `replay`, `in-process`, `emulated`, or `live` with `account`, `allowWrites?` (`none` default / `reversible`), and `allowIrreversible?` (exact ids)      |
+| `conformanceSkipReason`                              | The safety policy: `undefined` (runs), `writes-not-allowed`, or `manual-only`                                                                           |
+| `conformanceCaseWarnings`, `ConformanceWarning`      | `unverified-case`, `stale-observation`, `unverified-fixture`, `stale-fixture`, `missing-fixture`                                                        |
+| `ConformanceReport`, `ConformanceCaseResult`         | Target, `startedAt`, per-case `status` / `skipReason` / sanitized `failure` / `durationMs` / `warnings`, and a summary                                  |
+| `formatConformanceReport`, `conformanceReportFailed` | Plain-text report (one line per case plus a summary, no colors); true when any case failed                                                              |
+| `sanitizeConformanceMessage`                         | Best-effort message sanitizer the runner applies to non-mismatch failures (credentials and credential header lines redacted, JSON spans elided, capped) |
+| `ConformanceCaseRequirements`                        | Requirements of a case type (or union); what `layer` must provide                                                                                       |
+
+| Target                             | `read` | `write-reversible`                                                    | `write-irreversible`                                                    |
+| ---------------------------------- | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `replay`, `in-process`, `emulated` | runs   | runs                                                                  | runs                                                                    |
+| `live`                             | runs   | runs only with `allowWrites: 'reversible'`, else `writes-not-allowed` | runs only if its exact id is in `allowIrreversible`, else `manual-only` |
+
+Skipped cases never build their layer. Each running case calls `options.layer(case)` and builds
+the result fresh (fresh memo map and scope), so state a layer allocates when it is built (replay
+consumption, ledgers, emulator state) never leaks between cases. Layers must allocate their
+mutable state when built: a service captured in a shared value (one `Layer.succeed(service,
+instance)` reused across cases) or provided by the caller's environment is not rebuilt and stays
+shared. Failures, layer build failures, a throwing `layer` factory, and defects become `failed`
+results; interruption still interrupts the run.
+
+Failure reports carry an identifier-like, non-credential-shaped error tag (other tags are omitted)
+and a message, never request bodies, headers, or mismatch `expected` / `actual` details. A
+`ConformanceMismatch` keeps its case-authored message with credential patterns redacted. Every
+other message is sanitized best-effort by `sanitizeConformanceMessage`: credential patterns shared
+with the fixture secret scan and credential header lines (`Cookie:`, `X-Api-Key:`,
+`Proxy-Authorization:`, ...) are redacted, JSON-looking spans become `[json]`, whitespace is
+collapsed, and the length is capped at 300 characters. Hosts should still keep secrets out of error
+messages.
+
+Live targets omit all fixture-level warnings (`unverified-fixture`, `stale-fixture`,
+`missing-fixture`) because fixtures are not used live; case-level warnings always apply. On other
+targets fixture warnings need `fixtures`.
+
+```ts
+import { Effect } from 'effect'
+import { ReplayHttpClient } from '@yolk-sdk/conformance/replay'
+import { formatConformanceReport, runConformance } from '@yolk-sdk/conformance/runner'
+
+const report = runConformance(hostCases, {
+  target: { kind: 'replay' },
+  fixtures: hostFixtures,
+  layer: testCase =>
+    ReplayHttpClient.layer(hostFixtures.filter(fixture => testCase.fixtures.includes(fixture.id)))
+}).pipe(Effect.map(formatConformanceReport))
+```
+
+`hostCases` and `hostFixtures` are placeholders for your own cases and fixtures.
+
 ## Provider fixtures
 
 `@yolk-sdk/agent/providers/vercel/conformance` exports Vercel AI Gateway fixtures for replay tests:
@@ -113,3 +187,11 @@ in a later drain.
 `vercelAiGatewayToolCallDeltasFixture`, `vercelAiGatewayErrorEnvelopeFixture`, and
 `vercelAiGatewayConformanceFixtures`. They are synthetic placeholders (`evidence: 'unverified'`)
 until replaced by verified recordings.
+
+The same subpath exports four `read` conformance cases backed by those fixtures
+(`vercelAiGatewayPlainTextCase`, `vercelAiGatewayDeepSeekReasoningCase`,
+`vercelAiGatewayToolCallDeltasCase`, `vercelAiGatewayErrorEnvelopeCase`, and
+`vercelAiGatewayConformanceCases`). They require only an `HttpClient` and the
+`VercelAiGatewayConformanceConfig` service (API key, output limits, reasoning effort, and model ids;
+`vercelAiGatewayConformanceDefaultModels` holds the fixture model ids), so they run against replay
+or a host's live client. None is observed live yet, so reports warn `unverified-case`.

@@ -1,49 +1,59 @@
 /**
  * Vercel AI Gateway wire-fixture probe.
  *
- * Default: DRY RUN. Prints the four planned requests and exits without any
- * network call.
+ * The Gateway conformance cases (`vercelAiGatewayConformanceCases`) are the single source of
+ * truth: this script defines no requests of its own.
  *
- * `--live`: requires `AI_GATEWAY_API_KEY` and an explicit `--account <label>`
- * (a synthetic, non-identifying label such as `synthetic`; never a real team,
- * project, or person name: it is committed in public fixtures). Runs the real
- * Gateway provider over
- * the conformance recorder wrapped around a real fetch `HttpClient`, and
- * rewrites the fixture modules under
- * `packages/agent/src/providers/vercel/conformance/` as `verified` recordings
- * dated today. Nothing is written unless all four cases record cleanly and
- * pass the secret scan. Live runs spend Gateway credits: never run in CI.
+ * Default: DRY RUN. Prints, per conformance case, the model, token limit, and reasoning effort it
+ * would use, and exits without any network call.
  *
- * Model ids are CLI flags; confirm the defaults are still available on the
- * Gateway before a live probe.
+ * `--live`: requires `AI_GATEWAY_API_KEY` and an explicit `--account <label>` (a synthetic,
+ * non-identifying label such as `synthetic`; never a real team, project, or person name: it is
+ * committed in public fixtures). Runs each conformance case with `runConformance` on a live target
+ * against the real Gateway, through the conformance recorder wrapped around a real fetch
+ * `HttpClient` (failures are reported with the runner's sanitizer), turns each single recorded
+ * exchange into a `verified` fixture dated today, then replays the new fixtures through the same
+ * cases. Nothing is written unless every case passes live, records cleanly, passes the secret
+ * scan, and passes again on replay; only then are the fixture modules under
+ * `packages/agent/src/providers/vercel/conformance/` rewritten. Live runs spend Gateway credits:
+ * never run in CI.
+ *
+ * Model ids are CLI flags defaulting to `vercelAiGatewayConformanceDefaultModels`; confirm they
+ * are still available on the Gateway before a live probe.
  */
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { Effect, Layer, Redacted, Result, Stream } from 'effect'
-import * as Schema from 'effect/Schema'
-import { FetchHttpClient } from 'effect/unstable/http'
-import { LLMProvider } from '@yolk-sdk/agent/loop'
+import { Data, Effect, Layer, Redacted } from 'effect'
+import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
-import { UserMessage, ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeTool } from '@yolk-sdk/agent/tools'
+import { vercelAiGatewayChatCompletionsUrl } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
 import {
-  makeVercelAiGatewayProviderLayer,
-  vercelAiGatewayChatCompletionsUrl,
-  type VercelAiGatewayProviderConfig
-} from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
+  VercelAiGatewayConformanceConfig,
+  vercelAiGatewayConformanceCases,
+  vercelAiGatewayConformanceDefaultModels,
+  type VercelAiGatewayConformanceCase,
+  type VercelAiGatewayConformanceModels,
+  type VercelAiGatewayConformanceSettings
+} from '@yolk-sdk/agent/providers/vercel/conformance'
 import type { WireFixture } from '../packages/conformance/src/fixture.ts'
 import { makeWireFixture, WireRecorder } from '../packages/conformance/src/record.ts'
+import { ReplayHttpClient } from '../packages/conformance/src/replay.ts'
+import {
+  conformanceReportFailed,
+  conformanceSkipReason,
+  formatConformanceReport,
+  runConformance,
+  type ConformanceReport
+} from '../packages/conformance/src/runner.ts'
 
 export type ProbeOptions = {
   readonly live: boolean
   readonly help: boolean
-  readonly plainModel: string
-  readonly reasoningModel: string
-  readonly toolModel: string
-  readonly invalidModel: string
+  /** Model ids per case; default `vercelAiGatewayConformanceDefaultModels`. */
+  readonly models: VercelAiGatewayConformanceModels
   readonly maxTokens: number
   readonly reasoningMaxTokens: number
   readonly reasoningEffort: AgentReasoningEffort
@@ -56,10 +66,7 @@ type MutableProbeOptions = { -readonly [Key in keyof ProbeOptions]: ProbeOptions
 export const defaultProbeOptions: ProbeOptions = {
   live: false,
   help: false,
-  plainModel: 'openai/gpt-4.1-nano',
-  reasoningModel: 'deepseek/deepseek-v3.2',
-  toolModel: 'openai/gpt-4.1-nano',
-  invalidModel: 'yolk-conformance/model-does-not-exist',
+  models: vercelAiGatewayConformanceDefaultModels,
   maxTokens: 64,
   reasoningMaxTokens: 512,
   reasoningEffort: 'low',
@@ -74,16 +81,20 @@ const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = [
   'xhigh'
 ]
 
+const defaultModels = defaultProbeOptions.models
+
 const usage = `Usage: pnpm conformance:gateway [--live --account <label>] [options]
 
-Dry run by default: prints the planned requests and performs no network I/O.
+Dry run by default: lists the Gateway conformance cases it would run and performs no network I/O.
+--live runs each conformance case against the Gateway through the wire recorder, replays the new
+fixtures through the same cases, and writes the fixture modules only if every case passes.
 
 Options:
   --live                          Record against the real Gateway (needs AI_GATEWAY_API_KEY and --account)
-  --plain-model <id>              default ${defaultProbeOptions.plainModel}
-  --reasoning-model <id>          default ${defaultProbeOptions.reasoningModel} (DeepSeek-style reasoning_content)
-  --tool-model <id>               default ${defaultProbeOptions.toolModel}
-  --invalid-model <id>            default ${defaultProbeOptions.invalidModel} (must NOT exist)
+  --plain-model <id>              default ${defaultModels.plainText}
+  --reasoning-model <id>          default ${defaultModels.reasoning} (DeepSeek-style streamed reasoning)
+  --tool-model <id>               default ${defaultModels.toolCall}
+  --invalid-model <id>            default ${defaultModels.invalid} (must NOT exist)
   --max-tokens <n>                default ${defaultProbeOptions.maxTokens}
   --reasoning-max-tokens <n>      default ${defaultProbeOptions.reasoningMaxTokens}
   --reasoning-effort <effort>     default ${defaultProbeOptions.reasoningEffort}
@@ -115,6 +126,10 @@ export const liveAccountRequiredMessage =
 export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
   const options: MutableProbeOptions = { ...defaultProbeOptions }
 
+  const setModel = (key: keyof VercelAiGatewayConformanceModels, model: string) => {
+    options.models = { ...options.models, [key]: model }
+  }
+
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index] ?? ''
     const equals = argument.indexOf('=')
@@ -140,16 +155,16 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
         options.help = true
         break
       case '--plain-model':
-        options.plainModel = value()
+        setModel('plainText', value())
         break
       case '--reasoning-model':
-        options.reasoningModel = value()
+        setModel('reasoning', value())
         break
       case '--tool-model':
-        options.toolModel = value()
+        setModel('toolCall', value())
         break
       case '--invalid-model':
-        options.invalidModel = value()
+        setModel('invalid', value())
         break
       case '--max-tokens':
         options.maxTokens = positiveInteger(flag, value())
@@ -184,110 +199,162 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>): ProbeOptions => {
   return options
 }
 
-export type ProbeCase = {
+/**
+ * Where a conformance case's recording is written. File and export names are stable so the
+ * fixture modules and the conformance `index.ts` never change shape. `model` names the
+ * `VercelAiGatewayConformanceModels` entry the case uses; `reasoning` marks the case that uses the
+ * reasoning token limit and effort.
+ */
+export type GatewayFixtureModule = {
   readonly caseId: string
-  readonly exportName: string
   readonly fileName: string
+  readonly exportName: string
   readonly doc: string
-  readonly expect: 'success' | 'error'
-  readonly model: string
-  readonly reasoningEffort?: AgentReasoningEffort
-  readonly withTool: boolean
-  readonly prompt: string
-  /** Provider config without the credential. */
-  readonly config: Omit<VercelAiGatewayProviderConfig, 'apiKey'>
+  readonly model: keyof VercelAiGatewayConformanceModels
+  readonly reasoning: boolean
 }
 
-const systemPrompt = 'Reply in one short sentence.'
-
-/** The four planned Gateway requests. Pure: used by the dry run and the live probe. */
-export const plannedGatewayProbeCases = (options: ProbeOptions): ReadonlyArray<ProbeCase> => [
+export const gatewayFixtureModules: ReadonlyArray<GatewayFixtureModule> = [
   {
     caseId: 'vercel-ai-gateway.stream.plain-text',
-    exportName: 'vercelAiGatewayPlainTextFixture',
     fileName: 'plain-text.ts',
+    exportName: 'vercelAiGatewayPlainTextFixture',
     doc: 'Streamed plain-text answer: text deltas, a finish chunk, a usage chunk, and `data: [DONE]`.',
-    expect: 'success',
-    model: options.plainModel,
-    withTool: false,
-    prompt: 'Say hello.',
-    config: { maxCompletionTokens: options.maxTokens, streaming: true }
+    model: 'plainText',
+    reasoning: false
   },
   {
     caseId: 'vercel-ai-gateway.stream.deepseek-reasoning',
-    exportName: 'vercelAiGatewayDeepSeekReasoningFixture',
     fileName: 'deepseek-reasoning.ts',
-    doc: 'DeepSeek-style streamed reasoning (`delta.reasoning_content`) before the answer text, requested with `reasoning_effort` and a `thinking` toggle.',
-    expect: 'success',
-    model: options.reasoningModel,
-    reasoningEffort: options.reasoningEffort,
-    withTool: false,
-    prompt: 'Say hello.',
-    config: {
-      maxCompletionTokens: options.reasoningMaxTokens,
-      streaming: true,
-      reasoningContent: true,
-      reasoningEffortFormat: 'reasoning-effort',
-      thinking: { type: 'enabled' }
-    }
+    exportName: 'vercelAiGatewayDeepSeekReasoningFixture',
+    doc: 'DeepSeek-style streamed reasoning (`delta.reasoning_content`, or the Gateway-normalized `delta.reasoning`) before the answer text, requested with `reasoning_effort` and a `thinking` toggle.',
+    model: 'reasoning',
+    reasoning: true
   },
   {
     caseId: 'vercel-ai-gateway.stream.tool-call-deltas',
-    exportName: 'vercelAiGatewayToolCallDeltasFixture',
     fileName: 'tool-call-deltas.ts',
-    doc: 'Streamed tool call whose JSON arguments arrive across several `delta.tool_calls` chunks.',
-    expect: 'success',
-    model: options.toolModel,
-    withTool: true,
-    prompt: 'What is the weather in Springfield? Use the tool.',
-    config: { maxCompletionTokens: options.maxTokens, streaming: true }
+    exportName: 'vercelAiGatewayToolCallDeltasFixture',
+    doc: 'Streamed tool call whose JSON arguments arrive as `delta.tool_calls` fragments that assemble into one call.',
+    model: 'toolCall',
+    reasoning: false
   },
   {
     caseId: 'vercel-ai-gateway.stream.error-envelope',
-    exportName: 'vercelAiGatewayErrorEnvelopeFixture',
     fileName: 'error-envelope.ts',
+    exportName: 'vercelAiGatewayErrorEnvelopeFixture',
     doc: 'Non-2xx JSON error envelope for a request with an invalid model id.',
-    expect: 'error',
-    model: options.invalidModel,
-    withTool: false,
-    prompt: 'Say hello.',
-    config: { maxCompletionTokens: options.maxTokens, streaming: true }
+    model: 'invalid',
+    reasoning: false
   }
 ]
+
+export const gatewayFixtureModuleFor = (caseId: string): GatewayFixtureModule | undefined =>
+  gatewayFixtureModules.find(fixtureModule => fixtureModule.caseId === caseId)
+
+/** One conformance case with everything the probe needs to run, record, and write it. */
+export type GatewayProbePlanEntry = {
+  readonly testCase: VercelAiGatewayConformanceCase
+  readonly fixtureModule: GatewayFixtureModule
+  readonly model: string
+  readonly maxTokens: number
+  /** Only for the reasoning case. */
+  readonly reasoningEffort: AgentReasoningEffort | undefined
+}
+
+/**
+ * Pair every Gateway conformance case with its fixture module and settings. Throws when a case
+ * has no module: a new case needs a new entry in `gatewayFixtureModules` (a programmer error).
+ */
+export const planGatewayProbe = (options: ProbeOptions): ReadonlyArray<GatewayProbePlanEntry> =>
+  vercelAiGatewayConformanceCases.map(testCase => {
+    const fixtureModule = gatewayFixtureModuleFor(testCase.id)
+
+    if (fixtureModule === undefined) {
+      throw new Error(`No fixture module mapped for conformance case ${testCase.id}`)
+    }
+
+    return {
+      testCase,
+      fixtureModule,
+      model: options.models[fixtureModule.model],
+      maxTokens: fixtureModule.reasoning ? options.reasoningMaxTokens : options.maxTokens,
+      reasoningEffort: fixtureModule.reasoning ? options.reasoningEffort : undefined
+    }
+  })
+
+/** Conformance settings for the given credential; every case reads its models and limits here. */
+export const gatewayConformanceSettings = (
+  options: ProbeOptions,
+  apiKey: Redacted.Redacted<string>
+): VercelAiGatewayConformanceSettings => ({
+  apiKey,
+  maxCompletionTokens: options.maxTokens,
+  reasoningMaxCompletionTokens: options.reasoningMaxTokens,
+  reasoningEffort: options.reasoningEffort,
+  models: options.models
+})
 
 export const dryRunReport = (options: ProbeOptions): string =>
   [
     'DRY RUN: no network request was made. Pass --live --account <label> to record (needs AI_GATEWAY_API_KEY).',
     `Endpoint: ${vercelAiGatewayChatCompletionsUrl}`,
-    ...plannedGatewayProbeCases(options).map(probe =>
-      JSON.stringify(
-        {
-          caseId: probe.caseId,
-          model: probe.model,
-          expect: probe.expect,
-          reasoningEffort: probe.reasoningEffort,
-          tools: probe.withTool ? ['lookup_weather'] : [],
-          config: probe.config
-        },
-        null,
-        2
-      )
+    'Conformance cases:',
+    ...planGatewayProbe(options).map(entry =>
+      [
+        `- ${entry.testCase.id} [${entry.testCase.safety}]`,
+        `model ${entry.model}`,
+        `max tokens ${entry.maxTokens}`,
+        `reasoning effort ${entry.reasoningEffort ?? 'none'}`,
+        `-> ${entry.fixtureModule.fileName}`
+      ].join('  ')
     ),
+    'With --live, each case runs against the Gateway through the wire recorder, then all new fixtures',
+    'are verified by running the same cases on replay; nothing is written unless every case passes.',
     'Confirm model ids are available on the Gateway before a live probe.'
   ].join('\n')
 
-const lookupWeatherTool = makeTool({
-  name: 'lookup_weather',
-  description: 'Look up the current weather for a city.',
-  parameters: Schema.Struct({ city: Schema.String }),
-  access: 'read',
-  execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'sunny' }))
-})
+/**
+ * Run every Gateway conformance case on replay against `fixtures` (matched by `caseId`), with a
+ * synthetic credential and the same models and limits as the recording. Each case references the
+ * fixtures it replays, so the report's fixture warnings describe `fixtures`. A case without a
+ * fixture replays nothing and fails, so a missing recording fails the report.
+ */
+export const verifyGatewayFixtures = (
+  fixtures: ReadonlyArray<WireFixture>,
+  options: ProbeOptions = defaultProbeOptions
+): Effect.Effect<ConformanceReport> => {
+  const configLayer = Layer.succeed(
+    VercelAiGatewayConformanceConfig,
+    gatewayConformanceSettings(options, Redacted.make('synthetic-replay-key'))
+  )
 
-class ProbeCaseFailed extends Schema.TaggedError<ProbeCaseFailed>()('ProbeCaseFailed', {
-  caseId: Schema.String,
-  message: Schema.String
-}) {}
+  const fixturesFor = (caseId: string) => fixtures.filter(fixture => fixture.caseId === caseId)
+
+  const cases = vercelAiGatewayConformanceCases.map((testCase): VercelAiGatewayConformanceCase => ({
+    ...testCase,
+    fixtures: fixturesFor(testCase.id).map(fixture => fixture.id)
+  }))
+
+  return runConformance(cases, {
+    target: { kind: 'replay' },
+    fixtures,
+    layer: testCase => Layer.mergeAll(ReplayHttpClient.layer(fixturesFor(testCase.id)), configLayer)
+  })
+}
+
+/** Case ids with no fixture, or with more than one (a recording must map to exactly one case). */
+export const casesWithoutSingleFixture = (
+  fixtures: ReadonlyArray<WireFixture>
+): ReadonlyArray<string> =>
+  vercelAiGatewayConformanceCases
+    .map(testCase => testCase.id)
+    .filter(caseId => fixtures.filter(fixture => fixture.caseId === caseId).length !== 1)
+
+export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
+  readonly caseId: string
+  readonly message: string
+}> {}
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -295,120 +362,178 @@ const fixtureDir = join(workspaceRoot, 'packages/agent/src/providers/vercel/conf
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-const recordCase = (probe: ProbeCase, apiKey: Redacted.Redacted<string>, account: string) =>
+// Runs the case through `runConformance` on the live target (same safety policy and sanitized
+// failure report as any conformance run) with the recording client, then turns the single
+// recorded exchange into a verified fixture.
+const recordCase = (
+  entry: GatewayProbePlanEntry,
+  settings: VercelAiGatewayConformanceSettings,
+  account: string
+) =>
   Effect.gen(function* () {
-    const provider = yield* LLMProvider
+    const caseId = entry.testCase.id
     const recorder = yield* WireRecorder
+    const client = yield* HttpClient.HttpClient
 
-    const request = {
-      model: probe.model,
-      systemPrompt,
-      messages: [UserMessage.make({ content: probe.prompt })],
-      tools: probe.withTool ? [lookupWeatherTool.def] : []
+    const report = yield* runConformance([entry.testCase], {
+      target: { kind: 'live', account },
+      layer: () =>
+        Layer.mergeAll(
+          Layer.succeed(HttpClient.HttpClient, client),
+          Layer.succeed(VercelAiGatewayConformanceConfig, settings)
+        )
+    })
+
+    if (report.summary.passed !== 1) {
+      const [line] = formatConformanceReport(report).split('\n')
+
+      return yield* new ProbeFailed({ caseId, message: `conformance case failed live: ${line}` })
     }
 
-    const outcome = yield* provider
-      .stream(
-        probe.reasoningEffort === undefined
-          ? request
-          : { ...request, reasoningEffort: probe.reasoningEffort }
-      )
-      .pipe(Stream.runCollect, Effect.result)
-
-    if (probe.expect === 'success' && Result.isFailure(outcome)) {
-      return yield* new ProbeCaseFailed({
-        caseId: probe.caseId,
-        message: `expected success, got ${outcome.failure.cause}: ${outcome.failure.message}`
-      })
-    }
-
-    if (probe.expect === 'error' && Result.isSuccess(outcome)) {
-      return yield* new ProbeCaseFailed({
-        caseId: probe.caseId,
-        message: 'expected an error envelope but the request succeeded'
-      })
-    }
-
-    const exchanges = yield* recorder.drain
+    const exchanges = yield* recorder.drain.pipe(
+      Effect.mapError(error => new ProbeFailed({ caseId, message: error.message }))
+    )
 
     if (exchanges.length !== 1) {
-      return yield* new ProbeCaseFailed({
-        caseId: probe.caseId,
+      return yield* new ProbeFailed({
+        caseId,
         message: `expected exactly one exchange, recorded ${exchanges.length}`
       })
     }
 
     return yield* makeWireFixture({
-      id: `${probe.caseId}.recorded`,
-      caseId: probe.caseId,
+      id: `${caseId}.recorded`,
+      caseId,
       evidence: 'verified',
       recordedAt: today(),
       account,
       endpoint: vercelAiGatewayChatCompletionsUrl,
-      model: probe.model,
-      note: 'Recorded from the live Vercel AI Gateway by pnpm conformance:gateway --live. Prompts and outputs are synthetic.',
+      model: entry.model,
+      note: 'Recorded from the live Vercel AI Gateway by running its conformance case through pnpm conformance:gateway --live. Prompts and outputs are synthetic.',
       exchanges
-    })
-  }).pipe(
-    Effect.provide(
-      makeVercelAiGatewayProviderLayer({ ...probe.config, apiKey }).pipe(
-        Layer.provideMerge(WireRecorder.layer().pipe(Layer.provide(FetchHttpClient.layer)))
-      )
-    )
-  )
+    }).pipe(Effect.mapError(error => new ProbeFailed({ caseId, message: error.message })))
+  }).pipe(Effect.provide(WireRecorder.layer().pipe(Layer.provide(FetchHttpClient.layer))))
 
-export const renderFixtureModule = (probe: ProbeCase, fixture: WireFixture): string =>
+export const renderFixtureModule = (
+  fixtureModule: GatewayFixtureModule,
+  fixture: WireFixture
+): string =>
   [
     "import type { WireFixture } from '@yolk-sdk/conformance/fixture'",
     '',
     '/**',
-    ` * ${probe.doc}`,
+    ` * ${fixtureModule.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}). Regenerate with`,
     ' * `pnpm conformance:gateway --live --account <label>`.',
     ' */',
-    `export const ${probe.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
+    `export const ${fixtureModule.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''
   ].join('\n')
 
-const live = (options: ProbeOptions) =>
+/** A live recording paired with the plan entry (and so the fixture module) it belongs to. */
+export type RecordedGatewayFixture = {
+  readonly entry: GatewayProbePlanEntry
+  readonly fixture: WireFixture
+}
+
+/** File side effects of the probe; injectable so the write gate can be tested without writing. */
+export type FixtureWriter = {
+  readonly writeFile: (path: string, contents: string) => void
+  /** Formats the written files (default: `pnpm exec oxfmt --write`). */
+  readonly formatFiles: (paths: ReadonlyArray<string>) => void
+}
+
+export const defaultFixtureWriter: FixtureWriter = {
+  writeFile: (path, contents) => writeFileSync(path, contents),
+  formatFiles: paths => {
+    execFileSync('pnpm', ['exec', 'oxfmt', '--write', ...paths], {
+      cwd: workspaceRoot,
+      stdio: 'inherit'
+    })
+  }
+}
+
+/**
+ * The write gate: replay `recorded` through every case and write the fixture modules only when
+ * the report passes and every case has exactly one recording. On failure nothing is written and
+ * the formatted report is logged. Returns the report and the written paths.
+ */
+export const writeVerifiedFixtures = (
+  recorded: ReadonlyArray<RecordedGatewayFixture>,
+  options: ProbeOptions,
+  writer: FixtureWriter = defaultFixtureWriter
+) =>
+  Effect.gen(function* () {
+    const fixtures = recorded.map(({ fixture }) => fixture)
+    const report = yield* verifyGatewayFixtures(fixtures, options)
+    const unmatched = casesWithoutSingleFixture(fixtures)
+
+    if (conformanceReportFailed(report) || unmatched.length > 0) {
+      yield* Effect.sync(() => console.error(formatConformanceReport(report)))
+
+      return yield* new ProbeFailed({
+        caseId: unmatched.length === 0 ? '*' : unmatched.join(', '),
+        message: 'recorded fixtures failed replay verification; no fixture was written'
+      })
+    }
+
+    const files = yield* Effect.sync(() =>
+      recorded.map(({ entry, fixture }) => {
+        const file = join(fixtureDir, entry.fixtureModule.fileName)
+
+        writer.writeFile(file, renderFixtureModule(entry.fixtureModule, fixture))
+
+        return file
+      })
+    )
+
+    yield* Effect.sync(() => writer.formatFiles(files))
+
+    return { report, files }
+  })
+
+const live = (options: ProbeOptions, writer: FixtureWriter = defaultFixtureWriter) =>
   Effect.gen(function* () {
     const account = options.account
 
     if (account === undefined) {
-      return yield* new ProbeCaseFailed({ caseId: '*', message: liveAccountRequiredMessage })
+      return yield* new ProbeFailed({ caseId: '*', message: liveAccountRequiredMessage })
     }
 
     const key = process.env.AI_GATEWAY_API_KEY
 
     if (key === undefined || key.trim().length === 0) {
-      return yield* new ProbeCaseFailed({
+      return yield* new ProbeFailed({
         caseId: '*',
         message: 'AI_GATEWAY_API_KEY is required for --live'
       })
     }
 
-    const apiKey = Redacted.make(key)
-    const cases = plannedGatewayProbeCases(options)
+    const plan = planGatewayProbe(options)
 
-    // Record everything first; write nothing unless every case succeeded.
-    const recorded = yield* Effect.forEach(cases, probe =>
-      recordCase(probe, apiKey, account).pipe(Effect.map(fixture => ({ probe, fixture })))
+    // Refuse before any network call if the live safety policy would skip a case.
+    for (const entry of plan) {
+      const skipReason = conformanceSkipReason({ kind: 'live', account }, entry.testCase)
+
+      if (skipReason !== undefined) {
+        return yield* new ProbeFailed({
+          caseId: entry.testCase.id,
+          message: `refusing to run a case the live safety policy skips (${skipReason})`
+        })
+      }
+    }
+
+    const settings = gatewayConformanceSettings(options, Redacted.make(key))
+
+    // Record everything first; write nothing unless every case recorded and verified.
+    const recorded = yield* Effect.forEach(plan, entry =>
+      recordCase(entry, settings, account).pipe(Effect.map(fixture => ({ entry, fixture })))
     )
 
-    const files = recorded.map(({ probe, fixture }) => {
-      const file = join(fixtureDir, probe.fileName)
+    const { report, files } = yield* writeVerifiedFixtures(recorded, options, writer)
 
-      writeFileSync(file, renderFixtureModule(probe, fixture))
-
-      return file
-    })
-
-    execFileSync('pnpm', ['exec', 'oxfmt', '--write', ...files], {
-      cwd: workspaceRoot,
-      stdio: 'inherit'
-    })
-
+    console.log(formatConformanceReport(report))
     console.log(`Wrote ${files.length} verified fixtures. Review them before committing.`)
   })
 
@@ -436,7 +561,9 @@ const runCli = (options: ProbeOptions): void => {
     console.log(dryRunReport(options))
   } else {
     Effect.runPromise(live(options)).catch(error => {
-      console.error(error instanceof Error ? error.message : error)
+      const scope = error instanceof ProbeFailed && error.caseId !== '*' ? `${error.caseId}: ` : ''
+
+      console.error(`${scope}${error instanceof Error ? error.message : error}`)
       process.exitCode = 1
     })
   }

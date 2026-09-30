@@ -1,8 +1,8 @@
 # Conformance Package
 
 `@yolk-sdk/conformance` is an **experimental** Effect-only toolkit for wire fixtures: record real
-HTTP exchanges, replay them offline (fail closed), and inject wire faults. Conformance case
-definitions and runners are not part of this package yet.
+HTTP exchanges, replay them offline (fail closed), and inject wire faults. It also defines
+conformance cases (one wire claim each) and the runner that gates them by safety and reports.
 
 ## Subpaths
 
@@ -11,6 +11,8 @@ definitions and runners are not part of this package yet.
 | `@yolk-sdk/conformance/fixture` | `src/fixture.ts`       | Fixture/exchange schemas and types, decode, staleness, `scanFixtureForSecrets` |
 | `@yolk-sdk/conformance/replay`  | `src/replay.ts`        | Replay `HttpClient` layer, `ReplayLedger`, `WireFault`                         |
 | `@yolk-sdk/conformance/record`  | `src/record.ts`        | Recording wrapper over a host `HttpClient`, `WireRecorder`, `makeWireFixture`  |
+| `@yolk-sdk/conformance/case`    | `src/case.ts`          | `ConformanceCase`, `defineConformanceCase`, safety, assertion helpers          |
+| `@yolk-sdk/conformance/runner`  | `src/runner.ts`        | `runConformance`, safety policy, warnings, report + plain-text format          |
 | (internal)                      | `src/wire-internal.ts` | Shared header/URL/body helpers; not exported                                   |
 
 There is no root export or barrel.
@@ -58,7 +60,46 @@ There is no root export or barrel.
   completion is dropped, never settling another entry.
 - Ledger headers redact credential header values.
 
+## Cases and runner
+
+- A case is a pure Effect program proving one wire claim; it names only its requirements so the
+  same case runs against replay, in-process/local emulators, or a live practice account. Case
+  metadata (`id`, `safety`, `docs`, `wire`, `observed`, `fixtures`) is plain data.
+- `defineConformanceCase` throws `ConformanceCaseInvalid` for invalid metadata (programmer error at
+  module load, like `makeTool`); ids are dotted lower-case.
+- `ConformanceMismatch` is model-free: `message` plus optional JSON `expected` / `actual`.
+  `expectEqual` takes JSON values and compares with `Equal.equals`.
+- Safety policy (`conformanceSkipReason`) is the core rule and is unit-tested per cell: non-live
+  targets run everything; live runs `read`, runs `write-reversible` only with
+  `allowWrites: 'reversible'` (else `writes-not-allowed`), and runs `write-irreversible` only for
+  exact ids in `allowIrreversible` (else `manual-only`), independent of `allowWrites`. Never weaken
+  a live default: `allowWrites` defaults to `none`.
+- Skipped cases never build their layer. Running cases call `options.layer(case)` inside the
+  per-case exit boundary (`Effect.suspend`) and build it with a fresh memo map
+  (`Effect.provide(layer, { local: true })`), so state allocated at build time never leaks between
+  cases. Services captured in a shared `Layer.succeed` value or provided by the caller's
+  environment stay shared; document that limit wherever isolation is promised.
+- Each case runs under `Effect.exit`; failures, layer build failures, throwing layer factories,
+  and defects become `failed` results. Interrupt-only causes re-interrupt the run instead of
+  becoming results.
+- Reports carry only an identifier-like, non-credential-shaped error `_tag` and a message.
+  `ConformanceMismatch` messages keep the case-authored text with credential patterns redacted;
+  every other message is sanitized best-effort by `sanitizeConformanceMessage` (credential patterns
+  and credential header lines redacted, JSON spans elided, whitespace collapsed, capped at 300).
+  Hosts should still keep secrets out of error messages. Never copy request bodies, headers, or
+  mismatch details into reports.
+- Credential patterns live once in `wire-internal.ts`; the fixture secret scan and the report
+  sanitizer both use them. Change them there, never in a copy.
+- Live targets omit all fixture-level warnings (`unverified-fixture`, `stale-fixture`,
+  `missing-fixture`) because fixtures are not used live; elsewhere they need supplied fixtures.
+  Case warnings (`unverified-case`, `stale-observation`) always apply. `formatConformanceReport`
+  output is plain text without ANSI colors.
+- `runConformance` has a public overload inferring the case union `C` (layer must provide
+  `ConformanceCaseRequirements<C>`) over a single-`<E, R>` implementation signature; keep them in
+  sync.
+
 ## Tests
 
-`test/fixture.test.ts`, `test/replay.test.ts`, `test/record.test.ts`. Use synthetic hosts such as
+`test/fixture.test.ts`, `test/replay.test.ts`, `test/record.test.ts`, `test/case.test.ts`,
+`test/runner.test.ts`. Use synthetic hosts such as
 `api.example.test`; never call real services.

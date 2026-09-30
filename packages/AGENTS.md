@@ -4,16 +4,16 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 
 ## Package map
 
-| Package                      | Role                                                                                                                 | Local docs                            |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `@yolk-sdk/agent`            | Agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice | `packages/agent/AGENTS.md`            |
-| `@yolk-sdk/mcp`              | MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility                                   | `packages/mcp/AGENTS.md`              |
-| `@yolk-sdk/knowledge`        | Knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers                     | `packages/knowledge/AGENTS.md`        |
-| `@yolk-sdk/connectors`       | Effect-native connector primitives and reusable provider actions                                                     | `packages/connectors/AGENTS.md`       |
-| `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel client/layer adapter, and testing fakes                                  | `packages/sandbox/AGENTS.md`          |
-| `@yolk-sdk/vercel-workflows` | Workflow loop contract, generic durable stream helpers, and Effect Workflow client/layer                             | `packages/vercel-workflows/AGENTS.md` |
-| `@yolk-sdk/harness`          | Run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)                                 | `packages/harness/AGENTS.md`          |
-| `@yolk-sdk/conformance`      | Experimental wire fixtures, offline fail-closed replay, wire faults, and recording over a host `HttpClient`          | `packages/conformance/AGENTS.md`      |
+| Package                      | Role                                                                                                                  | Local docs                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `@yolk-sdk/agent`            | Agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice  | `packages/agent/AGENTS.md`            |
+| `@yolk-sdk/mcp`              | MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility                                    | `packages/mcp/AGENTS.md`              |
+| `@yolk-sdk/knowledge`        | Knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers                      | `packages/knowledge/AGENTS.md`        |
+| `@yolk-sdk/connectors`       | Effect-native connector primitives and reusable provider actions                                                      | `packages/connectors/AGENTS.md`       |
+| `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel client/layer adapter, and testing fakes                                   | `packages/sandbox/AGENTS.md`          |
+| `@yolk-sdk/vercel-workflows` | Workflow loop contract, generic durable stream helpers, and Effect Workflow client/layer                              | `packages/vercel-workflows/AGENTS.md` |
+| `@yolk-sdk/harness`          | Run lifecycle: coordinator, store, inbox, and pluggable drivers (not the agent loop)                                  | `packages/harness/AGENTS.md`          |
+| `@yolk-sdk/conformance`      | Experimental wire fixtures, fail-closed replay, wire faults, host-`HttpClient` recording, and conformance case runner | `packages/conformance/AGENTS.md`      |
 
 ## Dependency direction
 

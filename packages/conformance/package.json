@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/conformance",
   "version": "0.1.0-canary.95",
-  "description": "Experimental Effect toolkit to record, replay, and fault-inject HTTP wire fixtures for conformance tests.",
+  "description": "Experimental Effect toolkit to record, replay, and fault-inject HTTP wire fixtures, and to define and run conformance cases.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -37,6 +37,14 @@
     "./record": {
       "types": "./src/record.ts",
       "default": "./src/record.ts"
+    },
+    "./case": {
+      "types": "./src/case.ts",
+      "default": "./src/case.ts"
+    },
+    "./runner": {
+      "types": "./src/runner.ts",
+      "default": "./src/runner.ts"
     }
   },
   "files": [
@@ -65,6 +73,16 @@
         "types": "./dist/record.d.mts",
         "import": "./dist/record.mjs",
         "default": "./dist/record.mjs"
+      },
+      "./case": {
+        "types": "./dist/case.d.mts",
+        "import": "./dist/case.mjs",
+        "default": "./dist/case.mjs"
+      },
+      "./runner": {
+        "types": "./dist/runner.d.mts",
+        "import": "./dist/runner.mjs",
+        "default": "./dist/runner.mjs"
       }
     }
   },

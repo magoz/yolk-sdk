@@ -107,7 +107,10 @@ const packages: ReadonlyArray<PackageManifest> = [
       './outcome'
     ]
   },
-  { name: '@yolk-sdk/conformance', exports: ['./fixture', './replay', './record'] }
+  {
+    name: '@yolk-sdk/conformance',
+    exports: ['./fixture', './replay', './record', './case', './runner']
+  }
 ]
 
 const extractTarballName = (output: string) => {
@@ -225,7 +228,12 @@ const main = async () => {
           'const replay = await import("@yolk-sdk/conformance/replay")',
           'if (typeof replay.ReplayHttpClient.layer !== "function" || typeof replay.WireFault.FailAfterChunks !== "function") throw new Error("Missing conformance replay exports")',
           'const gatewayFixtures = await import("@yolk-sdk/agent/providers/vercel/conformance")',
-          'if (gatewayFixtures.vercelAiGatewayConformanceFixtures.length !== 4) throw new Error("Missing Gateway conformance fixtures")'
+          'if (gatewayFixtures.vercelAiGatewayConformanceFixtures.length !== 4) throw new Error("Missing Gateway conformance fixtures")',
+          'const conformanceCase = await import("@yolk-sdk/conformance/case")',
+          'const runner = await import("@yolk-sdk/conformance/runner")',
+          'if (typeof conformanceCase.defineConformanceCase !== "function" || typeof conformanceCase.expectEqual !== "function" || typeof runner.runConformance !== "function" || typeof runner.formatConformanceReport !== "function") throw new Error("Missing conformance case/runner exports")',
+          'if (runner.conformanceSkipReason({ kind: "live", account: "synthetic" }, { id: "example.case.write", safety: "write-reversible" }) !== "writes-not-allowed") throw new Error("Conformance safety policy mismatch")',
+          'if (gatewayFixtures.vercelAiGatewayConformanceCases.length !== 4 || !gatewayFixtures.vercelAiGatewayConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Gateway conformance cases")'
         ].join('\n')
     )
 

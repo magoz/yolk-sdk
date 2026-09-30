@@ -200,7 +200,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/conformance',
     packageName: '@yolk-sdk/conformance',
-    expectedExports: ['./package.json', './fixture', './replay', './record'],
+    expectedExports: ['./package.json', './fixture', './replay', './record', './case', './runner'],
     root: 'none'
   }
 ]

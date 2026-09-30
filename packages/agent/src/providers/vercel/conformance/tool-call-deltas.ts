@@ -1,8 +1,9 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * Streamed tool call whose JSON arguments are split across several `delta.tool_calls` chunks,
- * finishing with `tool_calls`, a usage chunk, and `data: [DONE]`.
+ * Streamed tool call whose JSON arguments arrive as `delta.tool_calls` fragments that assemble
+ * into one call (this placeholder splits them across several chunks), finishing with
+ * `tool_calls`, a usage chunk, and `data: [DONE]`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
  * replaces it. Regenerate with `pnpm conformance:gateway --live --account <label>`.

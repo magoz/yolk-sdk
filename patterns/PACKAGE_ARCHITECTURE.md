@@ -55,8 +55,8 @@ metadata.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, `./testing` exports the `TestWorkflowWorld` behavioral emulator, and hosts own concrete Workflow directives.
 - `@yolk-sdk/harness` owns run lifecycle (coordinator, store, inbox, driver, outcome). Public subpaths: `./coordinator`, `./store`, `./inbox`, `./driver`, `./driver/memory`, `./driver/durable-object`, and `./outcome`. It does not replace `@yolk-sdk/agent/loop`.
-- `@yolk-sdk/conformance` (experimental) owns wire fixtures, offline fail-closed replay, wire faults, and recording over a host-provided `HttpClient`. Public subpaths: `./fixture`, `./replay`, and `./record`; there is no root export. It performs no network I/O itself.
-- Provider wire fixtures live under `@yolk-sdk/agent/providers/<vendor>/conformance` (currently `vercel`); see the conformance import rule under [Dependency Direction](#dependency-direction).
+- `@yolk-sdk/conformance` (experimental) owns wire fixtures, offline fail-closed replay, wire faults, recording over a host-provided `HttpClient`, conformance case definitions, and the safety-gated case runner. Public subpaths: `./fixture`, `./replay`, `./record`, `./case`, and `./runner`; there is no root export. It performs no network I/O itself.
+- Provider wire fixtures and conformance cases live under `@yolk-sdk/agent/providers/<vendor>/conformance` (currently `vercel`); see the conformance import rule under [Dependency Direction](#dependency-direction).
 - OpenAI/Codex, Vercel AI Gateway, OpenCode Go, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, Grok, and OpenCode Go also expose best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 

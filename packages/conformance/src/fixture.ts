@@ -9,7 +9,14 @@
  */
 import { Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
-import { decodeBase64Bytes, isCredentialHeaderName } from './wire-internal.ts'
+import {
+  apiKeyPatterns,
+  bearerPattern,
+  credentialFieldPattern,
+  credentialParamPattern,
+  decodeBase64Bytes,
+  isCredentialHeaderName
+} from './wire-internal.ts'
 
 /** `verified` = recorded from a live service; `unverified` = synthetic placeholder. */
 export const WireFixtureEvidence = Schema.Literals(['verified', 'unverified'])
@@ -181,34 +188,6 @@ export type FixtureSecretIssue = {
   readonly kind: FixtureSecretIssueKind
   readonly location: string
 }
-
-const bearerPattern = /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/i
-
-const apiKeyPatterns: ReadonlyArray<RegExp> = [
-  // OpenAI/Anthropic/DeepSeek-style secret keys (sk-..., sk-ant-..., sk-proj-...)
-  /\bsk-[A-Za-z0-9_-]{16,}/,
-  /\b[sr]k_(live|test)_[A-Za-z0-9]{16,}/,
-  /\bxai-[A-Za-z0-9]{20,}/,
-  /\bvck_[A-Za-z0-9]{16,}/,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/,
-  /\bAKIA[0-9A-Z]{16}\b/,
-  /\bAIza[0-9A-Za-z_-]{35}/,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
-  // JSON Web Tokens (OIDC/OAuth access tokens)
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/
-]
-
-// Query-string or form-encoded credential parameter, anchored at the start of
-// the text or after `?`/`&` (URLs and `application/x-www-form-urlencoded` bodies).
-const credentialParamPattern =
-  /(?:^|[?&])(api[_-]?key|key|token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth|secret|password|client[_-]?secret|x-amz-signature|x-amz-credential|x-amz-security-token)=[^&#]+/i
-
-// Singular credential field names (snake, kebab, or camel case). Plural usage
-// counters such as `max_tokens` or `prompt_tokens` never match.
-const credentialFieldPattern =
-  /^((access|refresh|id|auth|api|session|private|bearer|oauth)[_-]?token|token|client[_-]?secret|secret([_-]?key)?|private[_-]?key|password|passwd|api[_-]?key|authorization)$/i
 
 type IssueSink = Array<FixtureSecretIssue>
 
