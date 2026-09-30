@@ -26,6 +26,7 @@ import {
 } from '@yolk-sdk/conformance/runner'
 import { ApiKeyCredential } from '@yolk-sdk/connectors'
 import {
+  ConformanceCleanupReporter,
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
@@ -762,6 +763,66 @@ describe('Notion conformance restore', () => {
         mismatch('precondition: NotionConformanceConfig.searchQuery is not configured')
       )
       expect(entries).toEqual([])
+    })
+  )
+})
+
+describe('Notion conformance interruption reporting', () => {
+  it.effect('reports a failed archive restore when the case is interrupted mid-archive', () =>
+    Effect.gen(function* () {
+      const archiveSent = yield* Deferred.make<void>()
+      const releaseArchive = yield* Deferred.make<void>()
+      const warnings = yield* Ref.make<ReadonlyArray<string>>([])
+
+      const failedArchive = {
+        ...archiveExchange,
+        response: withStatus(500, serverError)(archiveExchange.response)
+      }
+
+      // The claim's archive (1) and the restore's archive (3) both answer 500.
+      const { client } = yield* makeReplayHttpClient([
+        {
+          ...notionArchiveInTrashFixture,
+          exchanges: [createExchange, failedArchive, untrashedRead, failedArchive]
+        }
+      ])
+
+      let archives = 0
+
+      // Hold the claim's archive response until the case fiber has been asked to stop.
+      const holdingArchive = HttpClient.transform(client, (response, request) =>
+        request.method === 'PATCH' && archives++ === 0
+          ? response.pipe(
+              Effect.tap(() => Deferred.succeed(archiveSent, undefined)),
+              Effect.tap(() => Deferred.await(releaseArchive))
+            )
+          : response
+      )
+
+      const fiber = yield* notionArchiveInTrashCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holdingArchive))),
+        Effect.provideService(ConformanceCleanupReporter, {
+          warn: message => Ref.update(warnings, list => [...list, message])
+        }),
+        Effect.forkChild
+      )
+
+      yield* Deferred.await(archiveSent)
+
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseArchive, undefined)
+      yield* Fiber.join(interrupting)
+      yield* Fiber.await(fiber)
+
+      const reported = yield* Ref.get(warnings)
+
+      // Whatever the fiber's exit, the owner sees the failed restore and what to do by hand.
+      expect(reported).toHaveLength(1)
+      expect(reported[0]).toContain(
+        'notion.pages.archive-in-trash: restore failed; trash the case-created page by hand if it is not trashed yet'
+      )
     })
   )
 })

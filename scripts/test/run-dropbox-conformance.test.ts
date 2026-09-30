@@ -917,10 +917,10 @@ describe('connector conformance live runs are interruptible', () => {
 
       expect(running.cleaned).toEqual(['cleaned'])
       expect(errors[0]).toBe(
-        `${signal}: interrupting the run; cleanup of case-created items still runs. Send ${signal} again to exit without waiting.`
+        `${signal}: interrupting the run; the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line. Send ${signal} again, at least a second later, to exit without waiting.`
       )
       expect(errors.at(-1)).toBe(
-        'Interrupted: the run stopped after the cleanups of the running case.'
+        "Interrupted. The running case's cleanup was attempted but is not confirmed: read the WARN lines, and look for yolk-conformance items by hand if in doubt."
       )
       expect(exitCodes).toEqual([130])
       expect(forcedExits).toEqual([])
@@ -928,24 +928,63 @@ describe('connector conformance live runs are interruptible', () => {
     })
   }
 
-  it('force-exits on a second signal while the cleanup is still running', async () => {
+  it('ignores duplicates of one keypress, and force-exits on a signal a second or more later', async () => {
     const signals = fakeSignals()
     const { io, errors, forcedExits } = fakeIo()
     const running = runningProgram()
-    const done = runInterruptibly(running.program, signals.source, io)
+    let clock = 10_000
+    const done = runInterruptibly(running.program, signals.source, io, { now: () => clock })
 
     await running.started
+
+    // One Ctrl-C: the node child receives SIGINT, then relayed SIGTERM and SIGINT within ms.
     signals.emit('SIGINT')
+    clock += 2
+    signals.emit('SIGTERM')
+    clock += 30
+    signals.emit('SIGINT')
+    clock += 967
+
+    // Still inside the window (999 ms after the first): a duplicate, not a second request.
+    signals.emit('SIGINT')
+
+    expect(forcedExits).toEqual([])
+    expect(errors).toHaveLength(1)
+
+    clock += 1
     signals.emit('SIGINT')
 
     expect(forcedExits).toEqual([130])
-    expect(errors[1]).toContain(
-      'Second SIGINT: exiting now. Cleanup of case-created items may not have run'
+    expect(errors[1]).toBe(
+      'Second SIGINT: exiting now without waiting for cleanup. Case-created items may remain: look for yolk-conformance items by hand (a later live run with --allow-writes reversible warns about the ones it finds).'
     )
 
     // Let the fiber finish so the test leaves nothing running.
     running.releaseCleanup()
     await done
+  })
+
+  it('after an interrupt-only exit, prints the fresh leftover lookup before exiting 130', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes } = fakeIo()
+    const running = runningProgram()
+
+    const done = runInterruptibly(running.program, signals.source, io, {
+      afterInterrupt: Effect.succeed([
+        'WARN still present after the interruption (from this or an earlier run): /Conformance/Work/yolk-conformance-run-0000beef-copy; check it'
+      ])
+    })
+
+    await running.started
+    signals.emit('SIGINT')
+    running.releaseCleanup()
+    await done
+
+    expect(errors.slice(-2)).toEqual([
+      "Interrupted. The running case's cleanup was attempted but is not confirmed: read the WARN lines, and look for yolk-conformance items by hand if in doubt.",
+      'WARN still present after the interruption (from this or an earlier run): /Conformance/Work/yolk-conformance-run-0000beef-copy; check it'
+    ])
+    expect(exitCodes).toEqual([130])
   })
 
   it('reports a failed run with exit code 1 and no signal handlers left behind', async () => {
@@ -1009,6 +1048,51 @@ describe('connector conformance leftover warnings (read-only)', () => {
     ])
   })
 
+  it('after an interruption, lists what is still present, this run included', async () => {
+    const lines = await Effect.runPromise(
+      leftoverWarnings(
+        dropboxRunner,
+        writesOptions,
+        recordInputs,
+        ReplayHttpClient.layer([leftoverListing]),
+        'after-interrupt'
+      )
+    )
+
+    expect(lines).toEqual([
+      'WARN still present after the interruption (from this or an earlier run): /Conformance/Work/yolk-conformance-run-0000beef-copy; delete it by hand after checking that no run is still using it (nothing is deleted automatically)'
+    ])
+  })
+
+  it('names the failure code when the lookup is refused', async () => {
+    const refused: WireFixture = {
+      ...leftoverListing,
+      exchanges: [
+        {
+          request: leftoverListing.exchanges[0].request,
+          response: {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+            body: '{"error_summary":"invalid_access_token/.","error":{".tag":"invalid_access_token"}}'
+          }
+        }
+      ]
+    }
+
+    const lines = await Effect.runPromise(
+      leftoverWarnings(
+        dropboxRunner,
+        writesOptions,
+        recordInputs,
+        ReplayHttpClient.layer([refused])
+      )
+    )
+
+    expect(lines).toEqual([
+      'WARN could not look for leftovers (lookup failed: dropbox_unauthorized HTTP 401); check for yolk-conformance items by hand'
+    ])
+  })
+
   it('does not look when no write case would run', async () => {
     // An empty replay would fail closed on any request: none is sent.
     const lines = await Effect.runPromise(
@@ -1024,7 +1108,7 @@ describe('connector conformance leftover warnings (read-only)', () => {
     )
 
     expect(lines).toEqual([
-      'WARN could not look for leftovers of earlier runs (lookup failed); check for them by hand'
+      'WARN could not look for leftovers (lookup failed: transport_failed); check for yolk-conformance items by hand'
     ])
   })
 })

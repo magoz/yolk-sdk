@@ -31,6 +31,7 @@ import {
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
+import { interruptPending, reportCleanupProblem } from '../../conformance/cleanup-reporter.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import { ConnectorError } from '../../error.ts'
 import { ConnectorHttpClient, type ConnectorHttpRequest } from '../../http.ts'
@@ -1021,15 +1022,34 @@ const withOwnPage = <A, E, R>(
 
     return yield* Effect.uninterruptibleMask(unmask =>
       Effect.gen(function* () {
-        const page = yield* notionCreatePageAction
+        const created = yield* notionCreatePageAction
           .executeTyped({
             integration,
             input: NotionCreatePageInput.make({ parentPageId, title: archivePageTitle })
           })
           .pipe(
             Effect.flatMap(result => successValue(notionCreatePageAction.id, result)),
-            Effect.mapError(error => ambiguousCreateFailure(error) ?? error)
+            Effect.mapError(error => ambiguousCreateFailure(error) ?? error),
+            Effect.exit
           )
+
+        if (Exit.isFailure(created)) {
+          const error = Cause.findErrorOption(created.cause)
+
+          // An unknown-outcome create is also reported when the case was interrupted meanwhile.
+          if (
+            Option.isSome(error) &&
+            error.value instanceof NotionConformanceActionFailed &&
+            error.value.createOutcome === 'unknown' &&
+            (yield* interruptPending(unmask))
+          ) {
+            yield* reportCleanupProblem(error.value)
+          }
+
+          return yield* created
+        }
+
+        const page = created.value
 
         yield* Ref.set(pending, [page.id])
 
@@ -1044,7 +1064,7 @@ const withOwnPage = <A, E, R>(
         )
 
         if (Exit.isFailure(restored)) {
-          return yield* Exit.isSuccess(outcome)
+          const failure = Exit.isSuccess(outcome)
             ? new NotionConformanceRestoreFailed({
                 caseId: archiveCaseId,
                 reason: failureSummary(restored.cause),
@@ -1056,6 +1076,16 @@ const withOwnPage = <A, E, R>(
                 caseOutcome: 'claim failed',
                 claimFailure: failureSummary(outcome.cause)
               })
+
+          // An interruption may replace this failure (and its advice): report it first.
+          if (
+            (Exit.isFailure(outcome) && Cause.hasInterrupts(outcome.cause)) ||
+            (yield* interruptPending(unmask))
+          ) {
+            yield* reportCleanupProblem(failure)
+          }
+
+          return yield* failure
         }
 
         return yield* outcome
@@ -1068,7 +1098,7 @@ export const notionArchiveInTrashCase: NotionConformanceCase = defineConformance
   title: 'Archiving a page reports archived, and the page reads back archived',
   safety: 'write-reversible',
   docs: '`notion.update_page` sends PATCH /v1/pages/{id} with `archived` (the connector has no delete-page action; archiving is its delete) and returns the body untyped; `notion.get_page` decodes `NotionPage`, whose optional `archived` flag is how hosts see a trashed page.',
-  wire: '`notion.update_page` with `archived: true` on the case-owned page answers the page with `archived: true` (unverified: that 2025-09-03 still returns `archived` next to `in_trash`; `in_trash` is observed but not required); afterwards `notion.get_page` still answers HTTP 200 (not 404) with `archived: true` (unverified: that a trashed page stays readable). The case creates its own page under the seeded parent page with `notion.create_page` and moves it to the trash again whenever the claim did not; trashed pages stay restorable in the workspace trash.',
+  wire: '`notion.update_page` with `archived: true` on the case-owned page answers the page with `archived: true` (unverified: that 2025-09-03 still returns `archived` next to `in_trash`; `in_trash` is not checked); afterwards `notion.get_page` still answers HTTP 200 (not 404) with `archived: true` (unverified: that a trashed page stays readable). The case creates its own page under the seeded parent page with `notion.create_page` and moves it to the trash again whenever the claim did not; trashed pages stay restorable in the workspace trash.',
   fixtures: [notionArchiveInTrashFixture.id],
   run: Effect.gen(function* () {
     const parentPageId = yield* requireSeed('parentPageId')

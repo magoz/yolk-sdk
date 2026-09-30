@@ -70,11 +70,22 @@ verified under these conditions:
 
 Deleted folders stay restorable in the account's deleted files for the Dropbox retention period.
 
-In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, so the running
-case's cleanup still runs before the process exits (code 130); a second signal exits at once and may
-skip it, as does killing the process. Before any write case, the runner lists `workFolderPath`
-read-only and prints a WARN line for every `yolk-conformance-run-*` folder an earlier run left
-behind; it never deletes them. Check each one, and delete it by hand when no run is using it.
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, and the running
+case's cleanup is attempted before the process exits (code 130). The cleanup is not confirmed: a
+cleanup that fails, or a create whose outcome is unknown, while the case is being interrupted
+prints its full message, with the exact path, as a WARN line (through the case's
+`ConformanceCleanupReporter`), and the runner then lists `workFolderPath` again (read-only) and
+prints a WARN line for every `yolk-conformance-run-*` folder still present. one Ctrl-C reaches pnpm, tsx, and node, and the wrappers relay it, so further signals within a
+second count as the same keypress. A signal a second or more later exits at once and may skip the
+cleanup, as does killing the process; pnpm itself returns to the prompt at once while tsx and node
+finish.
+
+Before any write case, the runner lists `workFolderPath` read-only
+(`findDropboxConformanceLeftovers`) and prints a WARN line for every `yolk-conformance-run-*`
+folder an earlier run left behind; a work folder that does not exist yet holds none, and a failed
+lookup prints its failure code. It never deletes them. Check each one, and delete it by hand when
+no run is using it. Every valid `runId` starts with `run-` (`dropboxConformanceRunFolderPrefix` is
+`yolk-conformance-run-`), so the lookup covers every run, host-supplied run ids included.
 
 The shipped fixtures are synthetic (`evidence: 'unverified'`). In this repository,
 `pnpm conformance:dropbox` dry-runs by default; `--live --owner-approved --account <label>` (refused

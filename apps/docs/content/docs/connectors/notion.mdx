@@ -56,9 +56,16 @@ ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) fails
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry manual-recovery
 advice. Trashed pages stay restorable in the workspace trash until they are deleted from there.
 
-In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, so the cleanup
-still runs before the process exits (code 130); a second signal exits at once and may skip it, as
-does killing the process. Before the write case, the runner searches read-only for pages titled
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, and the cleanup
+is attempted before the process exits (code 130). The cleanup is not confirmed: a cleanup that
+fails, or a create whose outcome is unknown, while the case is being interrupted prints its full
+message as a WARN line (through the case's `ConformanceCleanupReporter`), and the runner then
+repeats the leftover search below. one Ctrl-C reaches pnpm, tsx, and node, and the wrappers relay it, so further signals within a
+second count as the same keypress. A signal a second or more later exits at once and may skip the
+cleanup, as does killing the process; pnpm itself returns to the prompt at once while tsx and node
+finish.
+
+Before the write case, the runner (`findNotionConformanceLeftovers`) searches read-only for pages titled
 `yolk-conformance page...` that are not in the trash and prints a WARN line for each (best effort:
 Notion's search index can lag behind recent writes); it never trashes them. Check each one, and
 trash it by hand when no run is using it.

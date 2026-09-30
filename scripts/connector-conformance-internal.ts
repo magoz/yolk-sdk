@@ -25,8 +25,11 @@
  *   concurrent local process that can already write the workspace: plain Node has no per-component
  *   `openat`/`O_NOFOLLOW`, so a check-then-write window remains.
  * - Live runs are interruptible: the first SIGINT/SIGTERM interrupts the run fiber, so the cases'
- *   uninterruptible cleanups still run; a second signal force-exits (cleanup may be skipped). Before
- *   any write case, a runner's read-only `leftovers` lookup warns about items earlier runs left
+ *   uninterruptible cleanups are attempted; a cleanup that fails meanwhile prints a WARN line (the
+ *   cases' `ConformanceCleanupReporter`), and after the interruption the read-only `leftovers`
+ *   lookup runs again and lists what is still present. A duplicate signal within a second (one
+ *   Ctrl-C reaches pnpm, tsx, and node) is ignored; a later one force-exits (cleanup may be
+ *   skipped). Before any write case, the `leftovers` lookup warns about items earlier runs left
  *   behind; nothing is deleted automatically.
  *
  * Promotion is manual: scrub the staged files of practice-account data, copy them into
@@ -61,6 +64,10 @@ import {
   type WireRecorderApi
 } from '../packages/conformance/src/record.ts'
 import { ReplayHttpClient } from '../packages/conformance/src/replay.ts'
+import {
+  ConformanceCleanupReporter,
+  type ConformanceCleanupReporterApi
+} from '../packages/connectors/src/conformance/cleanup-reporter.ts'
 import {
   conformanceReportFailed,
   conformanceSkipReason,
@@ -1081,16 +1088,43 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
     }
   })
 
+/** `code` (plus `HTTP status`) of a failure, for WARN lines; never provider bodies or URLs. */
+const failureCode = (cause: Cause.Cause<unknown>): string => {
+  const error = Cause.findErrorOption(cause)
+
+  if (Option.isNone(error)) {
+    return Cause.hasInterruptsOnly(cause) ? 'interrupted' : 'defect'
+  }
+
+  const value = error.value
+
+  const code = ['code', 'cause', '_tag']
+    .map(key => (Predicate.hasProperty(value, key) ? value[key] : undefined))
+    .find(Predicate.isString)
+
+  const status =
+    Predicate.hasProperty(value, 'status') && Predicate.isNumber(value.status)
+      ? ` HTTP ${value.status}`
+      : ''
+
+  return `${code ?? 'unknown'}${status}`
+}
+
+/** When a leftover lookup runs: before the cases, or after an interruption stopped them. */
+export type LeftoverLookupMoment = 'before-run' | 'after-interrupt'
+
 /**
  * WARN lines for items earlier runs left behind, from the runner's READ-ONLY `leftovers` lookup.
  * Runs only when a write case would run under these flags; a failed lookup becomes one WARN line
- * (it never stops the run), and nothing is ever deleted.
+ * naming the failure code (it never stops the run), and nothing is ever deleted. After an
+ * interruption the same lookup lists what is still present, this run's items included.
  */
 export const leftoverWarnings = <K extends string, S extends SeedRecord<K>, E, R>(
   runner: ConnectorConformanceRunner<K, S, E, R>,
   options: RunOptions<K>,
   inputs: LiveInputs<S>,
-  http: Layer.Layer<HttpClient.HttpClient>
+  http: Layer.Layer<HttpClient.HttpClient>,
+  moment: LeftoverLookupMoment = 'before-run'
 ): Effect.Effect<ReadonlyArray<string>> => {
   const lookup = runner.leftovers
 
@@ -1109,30 +1143,29 @@ export const leftoverWarnings = <K extends string, S extends SeedRecord<K>, E, R
     Effect.exit,
     Effect.map(exit =>
       Exit.isSuccess(exit)
-        ? exit.value.map(
-            item =>
-              `WARN leftover from an earlier run: ${item}; ${advice} (nothing is deleted automatically)`
+        ? exit.value.map(item =>
+            moment === 'before-run'
+              ? `WARN leftover from an earlier run: ${item}; ${advice} (nothing is deleted automatically)`
+              : `WARN still present after the interruption (from this or an earlier run): ${item}; ${advice} (nothing is deleted automatically)`
           )
         : [
-            'WARN could not look for leftovers of earlier runs (lookup failed); check for them by hand'
+            `WARN could not look for leftovers (lookup failed: ${failureCode(exit.cause)}); check for yolk-conformance items by hand`
           ]
     )
   )
 }
 
+/** Cleanup problems a case reports during an interruption, printed to stderr as WARN lines. */
+const stderrCleanupReporter: ConformanceCleanupReporterApi = {
+  warn: message => Effect.sync(() => console.error(`WARN ${message}`))
+}
+
 const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
   runner: ConnectorConformanceRunner<K, S, E, R>,
   options: RunOptions<K>,
-  env: ProbeEnv
+  inputs: LiveInputs<S>
 ) =>
   Effect.gen(function* () {
-    const checked = liveInputs(runner, options, env)
-
-    if ('refusal' in checked) {
-      return yield* new ConnectorRunFailed({ message: checked.refusal })
-    }
-
-    const inputs = checked.inputs
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
     const recorderOptions = {
@@ -1160,7 +1193,7 @@ const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
     const report = yield* runConformance(runner.cases, {
       target: liveTarget(options),
       layer: testCase => runner.casePorts(httpFor(testCase), inputs.accessToken, inputs.seeds)
-    })
+    }).pipe(Effect.provideService(ConformanceCleanupReporter, stderrCleanupReporter))
 
     console.log(formatConformanceReport(report))
 
@@ -1211,7 +1244,24 @@ export const runConnectorConformanceCli = <K extends string, S extends SeedRecor
   } else if (!options.live) {
     console.log(dryRunReport(runner, options))
   } else {
-    void runInterruptibly(runLive(runner, options, process.env), processSignals, processCliIo)
+    const checked = liveInputs(runner, options, process.env)
+
+    if ('refusal' in checked) {
+      console.error(checked.refusal)
+      process.exitCode = 1
+
+      return
+    }
+
+    void runInterruptibly(runLive(runner, options, checked.inputs), processSignals, processCliIo, {
+      afterInterrupt: leftoverWarnings(
+        runner,
+        options,
+        checked.inputs,
+        FetchHttpClient.layer,
+        'after-interrupt'
+      )
+    })
   }
 }
 
@@ -1249,34 +1299,58 @@ const processCliIo: CliIo = {
 
 const cliSignals: ReadonlyArray<CliSignal> = ['SIGINT', 'SIGTERM']
 
+/** A second signal sooner than this after the first is a duplicate of the same keypress. */
+export const duplicateSignalWindowMs = 1000
+
+export type RunInterruptiblyOptions = {
+  /**
+   * Run (in a fresh fiber) after an interrupt-only exit; each line is printed. Live runners pass
+   * the read-only leftover lookup, so the owner sees what the interrupted run left behind.
+   */
+  readonly afterInterrupt?: Effect.Effect<ReadonlyArray<string>>
+  /** Clock for the duplicate-signal window (milliseconds); injectable for tests. */
+  readonly now?: () => number
+}
+
 /**
  * Run `program` so that the first SIGINT/SIGTERM INTERRUPTS its fiber (the cases' uninterruptible
- * cleanups then still run, and the run waits for them) instead of killing the process, and a second
- * signal force-exits with a message that cleanup may have been skipped. Resolves when the program
- * ends: an interruption sets exit code 130, a failure prints its message and sets exit code 1.
+ * cleanups are attempted, and the run waits for them) instead of killing the process. One Ctrl-C
+ * reaches every process of the foreground group (pnpm, tsx, node) and the wrappers relay it, so a
+ * second signal within `duplicateSignalWindowMs` of the first is ignored as a duplicate; a later
+ * one force-exits with a message that cleanup may have been skipped. Resolves when the program
+ * ends: an interruption prints a not-confirmed note plus the `afterInterrupt` lines and sets exit
+ * code 130; a failure prints its message and sets exit code 1.
  */
 export const runInterruptibly = <E>(
   program: Effect.Effect<void, E>,
   signals: SignalSource,
-  io: CliIo
+  io: CliIo,
+  options: RunInterruptiblyOptions = {}
 ): Promise<void> => {
+  const now = options.now ?? Date.now
   const fiber = Effect.runFork(program)
-  let interrupting = false
+  let firstSignalAt: number | undefined
 
   const handlers = cliSignals.map(signal => {
     const handler = () => {
-      if (interrupting) {
+      const at = now()
+
+      if (firstSignalAt !== undefined) {
+        if (at - firstSignalAt < duplicateSignalWindowMs) {
+          return
+        }
+
         io.error(
-          `Second ${signal}: exiting now. Cleanup of case-created items may not have run; the next live run warns about leftovers, or check for yolk-conformance items by hand.`
+          `Second ${signal}: exiting now without waiting for cleanup. Case-created items may remain: look for yolk-conformance items by hand (a later live run with --allow-writes reversible warns about the ones it finds).`
         )
         io.forceExit(130)
 
         return
       }
 
-      interrupting = true
+      firstSignalAt = at
       io.error(
-        `${signal}: interrupting the run; cleanup of case-created items still runs. Send ${signal} again to exit without waiting.`
+        `${signal}: interrupting the run; the running case's cleanup is attempted before exit, and a cleanup that fails prints a WARN line. Send ${signal} again, at least a second later, to exit without waiting.`
       )
       Effect.runFork(Fiber.interrupt(fiber))
     }
@@ -1286,7 +1360,7 @@ export const runInterruptibly = <E>(
     return { signal, handler }
   })
 
-  return Effect.runPromise(Fiber.await(fiber)).then(exit => {
+  return Effect.runPromise(Fiber.await(fiber)).then(async exit => {
     for (const { signal, handler } of handlers) {
       signals.off(signal, handler)
     }
@@ -1296,7 +1370,17 @@ export const runInterruptibly = <E>(
     }
 
     if (Cause.hasInterruptsOnly(exit.cause)) {
-      io.error('Interrupted: the run stopped after the cleanups of the running case.')
+      io.error(
+        "Interrupted. The running case's cleanup was attempted but is not confirmed: read the WARN lines, and look for yolk-conformance items by hand if in doubt."
+      )
+
+      const lines =
+        options.afterInterrupt === undefined ? [] : await Effect.runPromise(options.afterInterrupt)
+
+      for (const line of lines) {
+        io.error(line)
+      }
+
       io.setExitCode(130)
 
       return

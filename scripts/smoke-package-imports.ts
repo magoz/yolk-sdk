@@ -266,7 +266,7 @@ const main = async () => {
           'const grokConformance = await import("@yolk-sdk/agent/providers/xai/conformance")',
           'if (grokConformance.xAiGrokConformanceFixtures.length !== 4 || grokConformance.xAiGrokConformanceCases.length !== 4 || !grokConformance.xAiGrokConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Grok conformance cases/fixtures")',
           'const connectorBridges = await import("@yolk-sdk/connectors/conformance")',
-          'for (const symbol of ["connectorHttpClientFromEffectHttpClientLayer", "connectorBinaryHttpClientFromEffectHttpClientLayer", "connectorBinaryWriteHttpClientFromEffectHttpClientLayer", "connectorHttpClientsFromEffectHttpClientLayer"]) { if (connectorBridges[symbol] === undefined) throw new Error(`Missing connector conformance export: ${symbol}`) }',
+          'for (const symbol of ["connectorHttpClientFromEffectHttpClientLayer", "connectorBinaryHttpClientFromEffectHttpClientLayer", "connectorBinaryWriteHttpClientFromEffectHttpClientLayer", "connectorHttpClientsFromEffectHttpClientLayer", "ConformanceCleanupReporter"]) { if (connectorBridges[symbol] === undefined) throw new Error(`Missing connector conformance export: ${symbol}`) }',
           'if (typeof connectorBridges.staticCredentialResolverLayer !== "function") throw new Error("Missing staticCredentialResolverLayer")',
           'const fortnoxConformance = await import("@yolk-sdk/connectors/fortnox/conformance")',
           'if (fortnoxConformance.fortnoxConformanceCases.length !== 7 || fortnoxConformance.fortnoxConformanceFixtures.length !== 7) throw new Error("Missing Fortnox conformance cases/fixtures")',

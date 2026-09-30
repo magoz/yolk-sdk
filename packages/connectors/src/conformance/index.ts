@@ -452,3 +452,8 @@ export const staticCredentialResolverLayer = (
       }
     })
   )
+
+export {
+  ConformanceCleanupReporter,
+  type ConformanceCleanupReporterApi
+} from './cleanup-reporter.ts'

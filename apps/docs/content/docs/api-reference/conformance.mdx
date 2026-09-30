@@ -311,6 +311,7 @@ connector cases run the real connector actions over replay, an emulator, or a ho
 | `connectorBinaryHttpClientFromEffectHttpClientLayer`      | GET-only `ConnectorBinaryHttpClient`; buffers, then fails oversize 200s (`response_too_large`) and truncates error bodies                                                                                                   |
 | `connectorBinaryWriteHttpClientFromEffectHttpClientLayer` | `ConnectorBinaryWriteHttpClient` with `uploadSession`: POST/PUT bytes, and PUT ranges / empty DELETE cancellation to pre-authenticated session URLs; refuses bad requests and credential headers on sessions before sending |
 | `connectorHttpClientsFromEffectHttpClientLayer`           | All three bridges                                                                                                                                                                                                           |
+| `ConformanceCleanupReporter`                              | `Context.Reference` receiving cleanup problems a write case raises while being interrupted; default `Effect.logWarning`, live runners print WARN lines                                                                      |
 | `staticCredentialResolverLayer(credentials)`              | `CredentialResolver` returning one `RuntimeCredential` for every slot, or credentials keyed by slot id (missing: `credential_missing`)                                                                                      |
 
 These bridges are **not production adapters**. They enforce no streamed byte limits, redirect,
@@ -368,8 +369,12 @@ fresh one each time, so concurrent runs are supported only through distinct run 
 create rejection deletes nothing; an ambiguous create fails with `DropboxConformanceActionFailed`
 (`createOutcome: 'unknown'`) naming the exact path; successful creates are deleted by id and
 verified, failing with `DropboxConformanceRestoreFailed` when that fails; and a path outside the
-case folder is never deleted (`DropboxConformanceCleanupRefused`). The create is not interruptible
-and the runner has no request timeout. See [Dropbox conformance cases](../connectors/dropbox#conformance-cases).
+case folder is never deleted (`DropboxConformanceCleanupRefused`). Every write inside the case
+folder (the create, copy, move, upload, and delete) is not interruptible, and the runner has no
+request timeout. `findDropboxConformanceLeftovers` lists, read-only, the folders under
+`workFolderPath` whose names start with `dropboxConformanceRunFolderPrefix`
+(`yolk-conformance-run-`; every valid `runId` starts with `run-`). See
+[Dropbox conformance cases](../connectors/dropbox#conformance-cases).
 
 `@yolk-sdk/connectors/notion/conformance` exports eight Notion cases (`notionConformanceCases`),
 their synthetic fixtures (`notionConformanceFixtures`), and the seeds they replay with
@@ -379,4 +384,15 @@ connector actions; the pinned-version case observes the outgoing `Notion-Version
 `ConnectorHttpClient` port. The write case creates its own page and moves it to the trash again,
 failing with `NotionConformanceRestoreFailed` when that fails; an ambiguous create fails with
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) and manual-recovery advice. The create
-is not interruptible and the runner has no request timeout. See [Notion conformance cases](../connectors/notion#conformance-cases).
+is not interruptible and the runner has no request timeout. `findNotionConformanceLeftovers`
+searches, read-only and best effort, for untrashed `yolk-conformance page` pages. See
+[Notion conformance cases](../connectors/notion#conformance-cases).
+
+When a case is interrupted, the fiber's exit may no longer carry a cleanup failure raised during the
+interruption. So Dropbox and Notion write cases also hand such a failure (a failed cleanup, or a
+create whose outcome is unknown) to `ConformanceCleanupReporter` from
+`@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
+`Effect.logWarning`. The live runners print it to stderr as a WARN line: their first SIGINT/SIGTERM
+interrupts the run fiber so the cleanup is attempted, duplicates within a second (one Ctrl-C
+reaches pnpm, tsx, and node) are ignored, a later signal exits at once, and after an interruption
+the read-only leftover lookup runs again and lists what is still present.

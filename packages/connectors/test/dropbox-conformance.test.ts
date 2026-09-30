@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Deferred, Effect, Exit, Fiber, Layer, Predicate, Ref } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Predicate, Ref } from 'effect'
+import * as Schema from 'effect/Schema'
 import { TestClock } from 'effect/testing'
 import {
   HttpClient,
@@ -31,12 +32,14 @@ import {
 } from '@yolk-sdk/conformance/runner'
 import { BearerTokenCredential } from '@yolk-sdk/connectors'
 import {
+  ConformanceCleanupReporter,
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
 import { DropboxConnector } from '@yolk-sdk/connectors/dropbox'
 import {
   DropboxConformanceConfig,
+  DropboxConformanceSeeds as DropboxConformanceSeedsSchema,
   dropboxConformanceCases,
   dropboxConformanceFixtureSeeds,
   dropboxConformanceFixtures,
@@ -1398,6 +1401,208 @@ describe('Dropbox conformance leftover detection (read-only)', () => {
           'https://api.dropboxapi.com/2/files/list_folder',
           'https://api.dropboxapi.com/2/files/list_folder/continue'
         ])
+      })
+  )
+
+  it.effect('treats a work folder that does not exist yet as holding no leftovers', () =>
+    Effect.gen(function* () {
+      const missing: WireFixture = {
+        ...leftoversFixture,
+        exchanges: [
+          {
+            request: leftoversFixture.exchanges[0].request,
+            response: {
+              status: 409,
+              headers: { 'content-type': 'application/json' },
+              body: notFoundBody
+            }
+          }
+        ]
+      }
+
+      const { client } = yield* makeReplayHttpClient([missing])
+
+      const found = yield* findDropboxConformanceLeftovers.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, client)))
+      )
+
+      expect(found).toEqual([])
+    })
+  )
+
+  it('requires the run- prefix in every run id, so the leftover lookup sees every run', () => {
+    const decode = Schema.decodeUnknownOption(DropboxConformanceSeedsSchema)
+
+    expect(Option.isSome(decode({ runId: 'run-0000beef' }))).toBe(true)
+    expect(Option.isNone(decode({ runId: 'mine-0000beef' }))).toBe(true)
+    expect(Option.isNone(decode({ runId: 'run-' }))).toBe(true)
+  })
+})
+
+// Interruption drills: a cleanup problem raised while the case is being interrupted still reaches
+// the owner through the ConformanceCleanupReporter, with the exact path to check.
+
+const capturingReporter = Effect.gen(function* () {
+  const warnings = yield* Ref.make<ReadonlyArray<string>>([])
+
+  return {
+    warnings,
+    reporter: { warn: (message: string) => Ref.update(warnings, list => [...list, message]) }
+  }
+})
+
+describe('Dropbox conformance interruption reporting', () => {
+  for (const moment of ['during the copy claim', 'during the restore delete'] as const) {
+    it.effect(`reports a failed delete when interrupted ${moment}`, () =>
+      Effect.gen(function* () {
+        const sent = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const deletes = yield* Ref.make(0)
+        const { warnings, reporter } = yield* capturingReporter
+
+        // Both restore deletes (by id, then by path) answer 500.
+        const failing = insertAfter(
+          replaceResponse(dropboxCopyMoveMetadataFixture, 5, withStatus(500, serverError)),
+          5,
+          deleteByPath(copyFolder, {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+            body: serverError
+          })
+        )
+
+        const { client } = yield* makeReplayHttpClient([failing])
+
+        const hold = <A, E, R>(response: Effect.Effect<A, E, R>) =>
+          response.pipe(
+            Effect.tap(() => Deferred.succeed(sent, undefined)),
+            Effect.tap(() => Deferred.await(release))
+          )
+
+        const holding = HttpClient.transform(client, (response, request) => {
+          if (moment === 'during the copy claim' && request.url.endsWith('/files/copy_v2')) {
+            return hold(response)
+          }
+
+          if (moment === 'during the restore delete' && request.url.endsWith('/files/delete_v2')) {
+            return Ref.updateAndGet(deletes, n => n + 1).pipe(
+              Effect.flatMap(n => (n === 1 ? hold(response) : response))
+            )
+          }
+
+          return response
+        })
+
+        const fiber = yield* dropboxCopyMoveMetadataCase.run.pipe(
+          Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holding))),
+          Effect.provideService(ConformanceCleanupReporter, reporter),
+          Effect.forkChild
+        )
+
+        yield* Deferred.await(sent)
+
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(interrupting)
+        yield* Fiber.await(fiber)
+
+        const reported = yield* Ref.get(warnings)
+
+        // Whatever the fiber's exit, the owner sees the restore failure and the path to check.
+        expect(reported).toHaveLength(1)
+        expect(reported[0]).toContain(
+          `dropbox.files.copy-move-metadata: restore failed; delete ${copyFolder} by hand if it still exists.`
+        )
+      })
+    )
+  }
+
+  it.effect('reports an ambiguous create answered while the case is being interrupted', () =>
+    Effect.gen(function* () {
+      const createSent = yield* Deferred.make<void>()
+      const releaseCreate = yield* Deferred.make<void>()
+      const { warnings, reporter } = yield* capturingReporter
+
+      const { client } = yield* makeReplayHttpClient([
+        {
+          ...dropboxCreateFolderConflictFixture,
+          exchanges: [
+            exchangeAt(dropboxCreateFolderConflictFixture, 0),
+            {
+              ...exchangeAt(dropboxCreateFolderConflictFixture, 1),
+              response: withStatus(
+                500,
+                serverError
+              )(exchangeAt(dropboxCreateFolderConflictFixture, 1).response)
+            },
+            deleteByPath(conflictFolder, {
+              status: 409,
+              headers: { 'content-type': 'application/json' },
+              body: notFoundBody
+            }),
+            exchangeAt(dropboxCreateFolderConflictFixture, 5)
+          ]
+        }
+      ])
+
+      const holdingCreate = HttpClient.transform(client, (response, request) =>
+        request.url.endsWith('/files/create_folder_v2')
+          ? response.pipe(
+              Effect.tap(() => Deferred.succeed(createSent, undefined)),
+              Effect.tap(() => Deferred.await(releaseCreate))
+            )
+          : response
+      )
+
+      const fiber = yield* dropboxCreateFolderConflictCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holdingCreate))),
+        Effect.provideService(ConformanceCleanupReporter, reporter),
+        Effect.forkChild
+      )
+
+      yield* Deferred.await(createSent)
+
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseCreate, undefined)
+      yield* Fiber.join(interrupting)
+      yield* Fiber.await(fiber)
+
+      expect(yield* Ref.get(warnings)).toEqual([
+        `dropbox.create_folder failed: dropbox_create_folder_failed (HTTP 500); create outcome unknown: delete ${conflictFolder} by hand if it exists`
+      ])
+    })
+  )
+
+  it.effect(
+    'reports nothing extra when an uninterrupted restore fails (the report carries it)',
+    () =>
+      Effect.gen(function* () {
+        const { warnings, reporter } = yield* capturingReporter
+
+        const undeleted = insertAfter(
+          replaceResponse(dropboxCopyMoveMetadataFixture, 5, withStatus(500, serverError)),
+          5,
+          deleteByPath(copyFolder, {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+            body: serverError
+          })
+        )
+
+        const { client } = yield* makeReplayHttpClient([undeleted])
+
+        const exit = yield* dropboxCopyMoveMetadataCase.run.pipe(
+          Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, client))),
+          Effect.provideService(ConformanceCleanupReporter, reporter),
+          Effect.exit
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(yield* Ref.get(warnings)).toEqual([])
       })
   )
 })
