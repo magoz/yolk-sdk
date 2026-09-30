@@ -1,7 +1,8 @@
 /**
  * Shared Microsoft Graph emulator wire helpers (internal): the error envelope and codes, JSON
- * responses, `$select` projection, `$top`/`$skip` paging with `@odata.nextLink`, the `Prefer`
- * header, and the route handler contract.
+ * responses, `@odata.context`, `$select` projection, `$top`/`$skip` paging with
+ * `@odata.nextLink`, the `Prefer` header, strict nested body objects, and the route handler
+ * contract.
  *
  * @experimental
  */
@@ -11,9 +12,10 @@ import type { MicrosoftEmulatorState, MicrosoftEmulatorUser } from './state.ts'
 
 /**
  * Error codes the emulator answers with. `ErrorItemNotFound`, `itemNotFound`, and
- * `ErrorIrresolvableConflict` are copied from the fixtures; the other Graph codes are documented
- * Graph codes no fixture records yet; the `Synthetic*` codes are emulator codes for requests it
- * refuses to emulate (fail closed) or cannot answer.
+ * `ErrorIrresolvableConflict` are copied from the fixtures; `InvalidAuthenticationToken` (missing
+ * bearer), `ErrorInvalidUser` (a user other than the seeded mailbox), and `TooManyRequests` (the
+ * default 429 fault body) are documented Graph codes no fixture records; the `Synthetic*` codes
+ * are emulator codes for requests it refuses to emulate (fail closed) or cannot answer.
  */
 export const microsoftEmulatorErrorCodes = {
   mailItemNotFound: 'ErrorItemNotFound',
@@ -21,8 +23,6 @@ export const microsoftEmulatorErrorCodes = {
   conflict: 'ErrorIrresolvableConflict',
   unauthenticated: 'InvalidAuthenticationToken',
   invalidUser: 'ErrorInvalidUser',
-  nameAlreadyExists: 'nameAlreadyExists',
-  preconditionFailed: 'preconditionFailed',
   rateLimited: 'TooManyRequests',
   unknownRoute: 'SyntheticRouteNotEmulated',
   unsupportedQuery: 'SyntheticQueryNotEmulated',
@@ -49,6 +49,42 @@ export const jsonResponse = (
 
   return new Response(JSON.stringify(body), { status, headers: responseHeaders })
 }
+
+/** Graph API version prefix of every Graph route. */
+export const microsoftEmulatorBasePath = '/v1.0'
+
+/** A percent-decoded path segment, or `undefined` for invalid percent-encoding. */
+export const decodeSegment = (segment: string): string | undefined => {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * An OData key segment as the fixtures write it in `@odata.context`: `('ada%40example.test')`,
+ * `('b%21synthetic-drive-0001')` (percent-encoded, including `!'()*`).
+ */
+export const odataKey = (value: string): string =>
+  `('${encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+  )}')`
+
+/** `(a,b,c)` for a `$select`, empty without one, as the fixture contexts write it. */
+export const selectSuffix = (fields: ReadonlyArray<string> | undefined): string =>
+  fields === undefined ? '' : `(${fields.join(',')})`
+
+/** The fixture `@odata.context` URL: `{graphOrigin}/v1.0/$metadata#{path}`. */
+export const metadataContext = (env: MicrosoftApiEnv, path: string): string =>
+  `${env.graphOrigin}${microsoftEmulatorBasePath}/$metadata#${path}`
+
+/** An entity body with its `@odata.context` first, as the fixtures record it. */
+export const entity = (context: string, body: Schema.JsonObject): Schema.JsonObject => ({
+  '@odata.context': context,
+  ...body
+})
 
 /** A bodiless success (204 delete, 202 cancel/copy), as the fixtures record them. */
 export const emptyResponse = (status: number, headers: HeadersInit = {}): Response =>
@@ -146,7 +182,6 @@ export type RouteRequest = {
   /** Parsed JSON body; `undefined` when absent. */
   readonly body: Schema.Json | undefined
   readonly prefer: Preferences
-  readonly ifMatch: string | undefined
   /** A Graph error envelope response for this request. */
   readonly error: (status: number, code: string, message: string) => Response
 }
@@ -169,13 +204,10 @@ export type CopyMonitor = {
   readonly sourceId: string
   readonly destinationParentId: string
   readonly name: string | undefined
-  readonly conflictBehavior: 'fail' | 'rename'
   /** In-progress answers left before the copy runs and completes. */
   pollsLeft: number
-  result:
-    | undefined
-    | { readonly status: 'completed'; readonly resourceId: string }
-    | { readonly status: 'failed'; readonly code: string; readonly message: string }
+  /** Set once the copy ran and completed. */
+  resourceId: string | undefined
 }
 
 export type MicrosoftApiEnv = {
@@ -186,7 +218,7 @@ export type MicrosoftApiEnv = {
   /** Origin of OneDrive `webUrl` values and copy monitor URLs. */
   readonly sharePointOrigin: string
   readonly drills: Required<MicrosoftEmulatorDrills>
-  /** In-progress monitor answers before a copy completes. */
+  /** In-progress monitor answers before a copy completes (default 0: the first poll completes). */
   readonly copyInProgressPolls: number
   /** How long a message write holds its message; a concurrent write in that time loses (409). */
   readonly conflictWindowMs: number
@@ -350,9 +382,15 @@ export const nextLinkOf = (
   return `${env.graphOrigin}${request.path}?${params.toString()}`
 }
 
-/** `{ value, @odata.nextLink? }`. */
-export const collection = (value: ReadonlyArray<unknown>, nextLink: string | undefined) =>
-  nextLink === undefined ? { value } : { value, '@odata.nextLink': nextLink }
+/** `{ @odata.context, value, @odata.nextLink? }`, as the fixture pages record them. */
+export const collection = (
+  context: string,
+  value: ReadonlyArray<unknown>,
+  nextLink: string | undefined
+) =>
+  nextLink === undefined
+    ? { '@odata.context': context, value }
+    : { '@odata.context': context, value, '@odata.nextLink': nextLink }
 
 /** A write body that is a JSON object with only `allowed` keys, or a 400. */
 export const bodyObject = (
@@ -385,6 +423,51 @@ export const invalidValue = (request: RouteRequest, message: string): Response =
 /** 400 for a valid Graph request the emulator does not emulate (fail closed). */
 export const notEmulated = (request: RouteRequest, message: string): Response =>
   request.error(400, codes.unsupportedValue, `Synthetic: ${message}`)
+
+/**
+ * A nested JSON object with only `allowed` keys (fail closed on anything else, before any write),
+ * or a 400. `expected` names the expected object in the error message.
+ */
+export const nestedObject = (
+  request: RouteRequest,
+  value: Schema.Json | undefined,
+  allowed: ReadonlyArray<string>,
+  expected: string
+): Schema.JsonObject | Response => {
+  if (!isJsonObject(value)) return invalidValue(request, `expected ${expected}.`)
+
+  const unknown = Object.keys(value).find(key => !allowed.includes(key))
+
+  return unknown === undefined
+    ? value
+    : notEmulated(request, `property '${unknown}' is not emulated in ${expected}.`)
+}
+
+/**
+ * An `itemBody` write value, `{ contentType, content }` with only those keys. The fixtures write
+ * text bodies only (`Text`/`text`); any other content type is not emulated.
+ */
+export const textBody = (
+  request: RouteRequest,
+  value: Schema.Json | undefined
+): string | Response => {
+  const body = nestedObject(
+    request,
+    value,
+    ['contentType', 'content'],
+    'body { contentType, content }'
+  )
+
+  if (body instanceof Response) return body
+
+  if (!Predicate.isString(body.contentType) || !Predicate.isString(body.content)) {
+    return invalidValue(request, 'body must be { contentType, content } with string values.')
+  }
+
+  return body.contentType.toLowerCase() === 'text'
+    ? body.content
+    : notEmulated(request, `body contentType ${body.contentType} is not emulated (text only).`)
+}
 
 /** A Graph timestamp (`2026-09-29T10:00:00Z`) from the emulator clock. */
 export const nowTimestamp = (env: MicrosoftApiEnv): string =>

@@ -10,6 +10,7 @@
  * @experimental
  */
 import type { Hono } from '@emulators/core'
+import { handlerFailedResponse } from '../emulator-http.ts'
 import type { EmulatorRouteEvidence } from '../route-evidence.ts'
 import {
   calendarView,
@@ -22,8 +23,10 @@ import {
 import { copyItem, copyMonitor, createFolder, deleteItem, getItem, listChildren } from './drive.ts'
 import {
   codes,
+  decodeSegment,
   errorContext,
   graphError,
+  microsoftEmulatorBasePath,
   parseJsonText,
   parsePreferences,
   type MicrosoftApiEnv,
@@ -41,8 +44,7 @@ import {
 } from './mail.ts'
 import type { MicrosoftEmulatorState } from './state.ts'
 
-/** Graph API version prefix of every Graph route. */
-export const microsoftEmulatorBasePath = '/v1.0'
+export { microsoftEmulatorBasePath } from './graph.ts'
 
 type MicrosoftApiRoute = EmulatorRouteEvidence & {
   /**
@@ -238,14 +240,6 @@ const compiledRoutes = microsoftApiRoutes.map(candidate => ({
   names: templateNames(candidate.path)
 }))
 
-const decodeSegment = (segment: string): string | undefined => {
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return undefined
-  }
-}
-
 export type MatchedRoute = {
   readonly route: MicrosoftApiRoute
   /** Decoded path parameters. */
@@ -292,11 +286,74 @@ const unsupportedQueryKey = (
 /** `{Name}` path templates become `:Name` core route parameters. */
 const corePath = (template: string): string => template.replace(/\{([A-Za-z]+)\}/g, ':$1')
 
+/** One core request: re-match, check the query allowlist and `If-Match`, then run the handler. */
+const handle = async (
+  raw: Request,
+  state: MicrosoftEmulatorState,
+  env: MicrosoftApiEnv
+): Promise<Response> => {
+  const url = new URL(raw.url)
+  const headers = raw.headers
+  const seq = Number(headers.get(requestSeqHeader) ?? '0')
+
+  // Built on demand, so the clock is read only when an error is answered.
+  const error = (status: number, code: string, message: string) =>
+    graphError(
+      errorContext(
+        env.now(),
+        Number.isSafeInteger(seq) ? seq : 0,
+        headers.get('client-request-id')
+      ),
+      status,
+      code,
+      message
+    )
+
+  const matched = matchMicrosoftRoute(raw.method, url.pathname)
+
+  if (matched === undefined) {
+    return error(404, codes.unknownRoute, 'Synthetic: no emulated Microsoft Graph route.')
+  }
+
+  const unsupported = unsupportedQueryKey(url.searchParams, matched.route.queryKeys)
+
+  if (unsupported !== undefined) {
+    return error(
+      400,
+      codes.unsupportedQuery,
+      `Synthetic: query parameter ${unsupported} is not emulated on this route.`
+    )
+  }
+
+  if (headers.has('if-match')) {
+    return error(
+      400,
+      codes.unsupportedValue,
+      'Synthetic: conditional requests (If-Match) are not emulated.'
+    )
+  }
+
+  const text = await raw.text()
+
+  const request: RouteRequest = {
+    params: matched.params,
+    path: url.pathname,
+    query: url.searchParams,
+    body: text === '' ? undefined : parseJsonText(text),
+    prefer: parsePreferences(headers.get('prefer')),
+    error
+  }
+
+  return matched.route.handler(state, request, env)
+}
+
 /**
  * Register every route of the table on the core app, over the generation's state. Each handler
  * re-matches the raw request path against the same table the wrapper ledgers (so parameters are
  * decoded once, failing closed on invalid percent-encoding), checks the route's query allowlist
- * before the handler can write, and runs the handler.
+ * and refuses `If-Match` (no fixture sends one) before the handler can write, and runs the
+ * handler. A handler that throws answers `handlerFailedResponse()`, which the wrapper turns into
+ * its Graph error envelope 500 with `responseError` in the ledger.
  */
 export const registerMicrosoftApi = (
   app: Hono,
@@ -305,48 +362,11 @@ export const registerMicrosoftApi = (
 ): void => {
   for (const apiRoute of microsoftApiRoutes) {
     app.on(apiRoute.method, corePath(apiRoute.path), async context => {
-      const url = new URL(context.req.url)
-      const headers = context.req.raw.headers
-      const seq = Number(headers.get(requestSeqHeader) ?? '0')
-
-      const errors = errorContext(
-        env.now(),
-        Number.isSafeInteger(seq) ? seq : 0,
-        headers.get('client-request-id')
-      )
-
-      const error = (status: number, code: string, message: string) =>
-        graphError(errors, status, code, message)
-
-      const matched = matchMicrosoftRoute(context.req.method, url.pathname)
-
-      if (matched === undefined) {
-        return error(404, codes.unknownRoute, 'Synthetic: no emulated Microsoft Graph route.')
+      try {
+        return await handle(context.req.raw, state, env)
+      } catch {
+        return handlerFailedResponse()
       }
-
-      const unsupported = unsupportedQueryKey(url.searchParams, matched.route.queryKeys)
-
-      if (unsupported !== undefined) {
-        return error(
-          400,
-          codes.unsupportedQuery,
-          `Synthetic: query parameter ${unsupported} is not emulated on this route.`
-        )
-      }
-
-      const text = await context.req.text()
-
-      const request: RouteRequest = {
-        params: matched.params,
-        path: url.pathname,
-        query: url.searchParams,
-        body: text === '' ? undefined : parseJsonText(text),
-        prefer: parsePreferences(headers.get('prefer')),
-        ifMatch: headers.get('if-match') ?? undefined,
-        error
-      }
-
-      return matched.route.handler(state, request, env)
     })
   }
 }

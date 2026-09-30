@@ -3,13 +3,18 @@
  * create, message update and move with immutable ids, attachment listing and retrieval, and the
  * JSON `$batch` permanent delete. Wire shapes follow the synthetic Outlook conformance fixtures.
  *
- * Ids: every message has an immutable id (answered under `Prefer: IdType="ImmutableId"`) and a
- * default id that a move regenerates; either addresses the message while it is current.
+ * Ids: every Outlook fixture request sends `Prefer: IdType="ImmutableId"`, so every Outlook route
+ * (and every `$batch` subrequest) needs it; without it the request fails closed (400). Messages
+ * have one id, the immutable id, which a move keeps.
  *
- * Concurrent writes: a message write (update or move) holds its message for `conflictWindowMs`
- * before answering. Another write to the same message that arrives in that window loses with 409
- * `ErrorIrresolvableConflict` and changes nothing; the first arrival wins. Writes that do not
- * overlap both apply (last writer wins).
+ * Writes accept only the fields the fixtures send: a draft create takes `subject`, a text `body`,
+ * `toRecipients`, and the owner as `from`; an update takes `subject` and `isRead`; a move takes
+ * `destinationId`. Anything else, including unknown nested keys, fails closed before any write.
+ *
+ * Concurrent writes: the first write (update or move) to reach the handler holds its message for
+ * `conflictWindowMs` before answering; an overlapping write to that message gets 409
+ * `ErrorIrresolvableConflict` and changes nothing. Non-overlapping writes both apply (an emulator
+ * extrapolation).
  *
  * @experimental
  */
@@ -19,19 +24,26 @@ import {
   bodyObject,
   codes,
   collection,
+  decodeSegment,
+  entity,
   invalidValue,
   isJsonObject,
   jsonResponse,
+  metadataContext,
+  nestedObject,
   nextChangeKey,
   nextLinkOf,
   notEmulated,
   nowTimestamp,
+  odataKey,
   padded,
   pageOf,
   parsePreferences,
   project,
   resolveUser,
+  selectSuffix,
   selectedFields,
+  textBody,
   type MicrosoftApiEnv,
   type RouteHandler,
   type RouteRequest
@@ -110,19 +122,26 @@ const bodyPreview = (message: MicrosoftEmulatorMessage): string =>
     .trim()
     .slice(0, 255)
 
-const hasAttachments = (state: MicrosoftEmulatorState, message: MicrosoftEmulatorMessage) =>
-  state.attachments.some(attachment => attachment.messageId === message.id && !attachment.isInline)
+/** 400 for an Outlook request without `Prefer: IdType="ImmutableId"` (every fixture sends it). */
+const immutableIdProblem = (request: RouteRequest): Response | undefined =>
+  request.prefer.immutableId
+    ? undefined
+    : notEmulated(
+        request,
+        'Outlook requests without Prefer: IdType="ImmutableId" are not emulated.'
+      )
 
-const idFor = (request: RouteRequest, message: MicrosoftEmulatorMessage): string =>
-  request.prefer.immutableId ? message.id : message.restId
+/** `users('{userId}')`, the context prefix of every Outlook route. */
+const userContext = (request: RouteRequest): string =>
+  `users${odataKey(request.params.userId ?? '')}`
+
+/** `@odata.context` of a single message (create, update, move), as the fixtures record it. */
+const messageEntityContext = (env: MicrosoftApiEnv, request: RouteRequest): string =>
+  metadataContext(env, `${userContext(request)}/messages/$entity`)
 
 /** The full message, in the draft fixture's key order. */
-const renderMessage = (
-  state: MicrosoftEmulatorState,
-  request: RouteRequest,
-  message: MicrosoftEmulatorMessage
-) => {
-  const id = idFor(request, message)
+const renderMessage = (message: MicrosoftEmulatorMessage): Schema.JsonObject => {
+  const id = message.id
 
   return {
     '@odata.etag': `W/"${message.changeKey}"`,
@@ -133,7 +152,7 @@ const renderMessage = (
     categories: message.categories,
     receivedDateTime: message.receivedDateTime,
     sentDateTime: message.sentDateTime,
-    hasAttachments: hasAttachments(state, message),
+    hasAttachments: message.hasAttachments,
     internetMessageId: message.internetMessageId,
     subject: message.subject,
     bodyPreview: bodyPreview(message),
@@ -165,12 +184,11 @@ const findFolder = (
     folder => folder.id === idOrName || folder.wellKnownName === idOrName.toLowerCase()
   )
 
-/** A message by its immutable id or its current default id. */
+/** A message by its (immutable) id. */
 const findMessage = (
   state: MicrosoftEmulatorState,
   id: string
-): MicrosoftEmulatorMessage | undefined =>
-  state.messages.find(message => message.id === id || message.restId === id)
+): MicrosoftEmulatorMessage | undefined => state.messages.find(message => message.id === id)
 
 const replaceMessage = (state: MicrosoftEmulatorState, updated: MicrosoftEmulatorMessage) => {
   state.messages = state.messages.map(message => (message.id === updated.id ? updated : message))
@@ -184,6 +202,10 @@ export const listFolderMessages: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
 
   if (user instanceof Response) return user
+
+  const immutable = immutableIdProblem(request)
+
+  if (immutable !== undefined) return immutable
 
   const folder = findFolder(state, request.params.folderId ?? '')
 
@@ -207,16 +229,49 @@ export const listFolderMessages: RouteHandler = (state, request, env) => {
 
   if (page instanceof Response) return page
 
+  const context = metadataContext(
+    env,
+    `${userContext(request)}/mailFolders${odataKey(request.params.folderId ?? '')}/messages${selectSuffix(fields)}`
+  )
+
   return jsonResponse(
     200,
     collection(
-      page.items.map(message => project(renderMessage(state, request, message), fields)),
+      context,
+      page.items.map(message => project(renderMessage(message), fields)),
       nextLinkOf(env, request, page, ['$select'])
     )
   )
 }
 
-/** `[{ emailAddress: { address, name? } }]` as stored recipients. */
+/**
+ * A `recipient` write value, `{ emailAddress: { address, name? } }` with only those keys (the
+ * shape the fixture responses show); anything else fails closed.
+ */
+const recipientOf = (
+  request: RouteRequest,
+  key: string,
+  value: Schema.Json
+): MicrosoftEmulatorRecipient | Response => {
+  const expected = `${key} { emailAddress: { address, name? } }`
+  const recipient = nestedObject(request, value, ['emailAddress'], expected)
+
+  if (recipient instanceof Response) return recipient
+
+  const email = nestedObject(request, recipient.emailAddress, ['address', 'name'], expected)
+
+  if (email instanceof Response) return email
+
+  const { address, name } = email
+
+  if (!Predicate.isString(address) || (name !== undefined && !Predicate.isString(name))) {
+    return invalidValue(request, `${expected} needs a string address (and name).`)
+  }
+
+  return { name: name ?? null, address }
+}
+
+/** `[recipient]` as stored recipients. */
 const recipientsOf = (
   request: RouteRequest,
   key: string,
@@ -227,15 +282,11 @@ const recipientsOf = (
   const recipients: Array<MicrosoftEmulatorRecipient> = []
 
   for (const entry of value) {
-    const email = isJsonObject(entry) ? entry.emailAddress : undefined
-    const address = isJsonObject(email) ? email.address : undefined
-    const name = isJsonObject(email) ? email.name : undefined
+    const recipient = recipientOf(request, key, entry)
 
-    if (!Predicate.isString(address) || (name !== undefined && !Predicate.isString(name))) {
-      return invalidValue(request, `${key} entries must be { emailAddress: { address, name? } }.`)
-    }
+    if (recipient instanceof Response) return recipient
 
-    recipients.push({ name: name ?? null, address })
+    recipients.push(recipient)
   }
 
   return recipients
@@ -243,35 +294,18 @@ const recipientsOf = (
 
 type MessageWrite = {
   subject?: string
-  bodyContentType?: MicrosoftEmulatorMessage['bodyContentType']
   bodyContent?: string
   toRecipients?: ReadonlyArray<MicrosoftEmulatorRecipient>
-  ccRecipients?: ReadonlyArray<MicrosoftEmulatorRecipient>
-  bccRecipients?: ReadonlyArray<MicrosoftEmulatorRecipient>
   isRead?: boolean
-  flagStatus?: MicrosoftEmulatorMessage['flagStatus']
-  categories?: ReadonlyArray<string>
 }
 
-/** Fields only a draft accepts; updating them on a sent or received message fails. */
-const draftOnlyKeys: ReadonlyArray<string> = [
-  'subject',
-  'body',
-  'toRecipients',
-  'ccRecipients',
-  'bccRecipients'
-]
+/** Draft create keys, as the Outlook fixtures send them. */
+const draftKeys: ReadonlyArray<string> = ['subject', 'body', 'toRecipients', 'from']
 
-const flagStatuses: ReadonlyArray<MicrosoftEmulatorMessage['flagStatus']> = [
-  'notFlagged',
-  'flagged',
-  'complete'
-]
+/** Message update keys, as the Outlook fixtures send them. */
+const updateKeys: ReadonlyArray<string> = ['subject', 'isRead']
 
-const isFlagStatus = (value: unknown): value is MicrosoftEmulatorMessage['flagStatus'] =>
-  flagStatuses.some(candidate => candidate === value)
-
-/** The emulated message fields of a create or update body; anything else fails closed. */
+/** The emulated message fields of a create or update body (keys already allowlisted). */
 const messageWrite = (
   request: RouteRequest,
   fields: Schema.JsonObject,
@@ -287,40 +321,29 @@ const messageWrite = (
         write.subject = value
         break
       case 'body': {
-        const contentType = isJsonObject(value) ? value.contentType : undefined
-        const content = isJsonObject(value) ? value.content : undefined
+        const content = textBody(request, value)
 
-        if (
-          !Predicate.isString(contentType) ||
-          !['text', 'html'].includes(contentType.toLowerCase()) ||
-          !Predicate.isString(content)
-        ) {
-          return invalidValue(request, 'body must be { contentType: Text | HTML, content }.')
-        }
+        if (content instanceof Response) return content
 
-        write.bodyContentType = contentType.toLowerCase() === 'html' ? 'html' : 'text'
         write.bodyContent = content
         break
       }
 
-      case 'toRecipients':
-      case 'ccRecipients':
-      case 'bccRecipients': {
+      case 'toRecipients': {
         const recipients = recipientsOf(request, key, value)
 
         if (recipients instanceof Response) return recipients
 
-        write[key] = recipients
+        write.toRecipients = recipients
         break
       }
 
       case 'from': {
-        const address =
-          isJsonObject(value) && isJsonObject(value.emailAddress)
-            ? value.emailAddress.address
-            : undefined
+        const from = recipientOf(request, key, value)
 
-        if (!Predicate.isString(address) || address.toLowerCase() !== user.mail.toLowerCase()) {
+        if (from instanceof Response) return from
+
+        if (from.address.toLowerCase() !== user.mail.toLowerCase()) {
           return notEmulated(request, 'from must be the mailbox owner (send-as is not emulated).')
         }
 
@@ -332,66 +355,24 @@ const messageWrite = (
 
         write.isRead = value
         break
-      case 'flag': {
-        const status = isJsonObject(value) ? value.flagStatus : undefined
-
-        if (!isJsonObject(value) || Object.keys(value).some(field => field !== 'flagStatus')) {
-          return notEmulated(request, 'flag supports flagStatus only.')
-        }
-
-        if (!isFlagStatus(status)) {
-          return invalidValue(request, 'flag.flagStatus must be notFlagged, flagged, or complete.')
-        }
-
-        write.flagStatus = status
-        break
-      }
-
-      case 'categories':
-        if (!Array.isArray(value) || !value.every(Predicate.isString)) {
-          return invalidValue(request, 'categories must be an array of strings.')
-        }
-
-        write.categories = value.filter(Predicate.isString)
-        break
     }
   }
 
   return write
 }
 
-const draftKeys: ReadonlyArray<string> = [
-  'subject',
-  'body',
-  'toRecipients',
-  'ccRecipients',
-  'bccRecipients',
-  'from',
-  'isRead',
-  'flag',
-  'categories'
-]
-
-/** A fresh default (mutable) message id. */
-const nextRestId = (state: MicrosoftEmulatorState): string => {
-  let number = state.counters.nextRestIdNumber
-  let id = `AAMkAGI2-synthetic-restid-${padded(number, 4)}=`
-
-  while (findMessage(state, id) !== undefined) {
-    number += 1
-    id = `AAMkAGI2-synthetic-restid-${padded(number, 4)}=`
-  }
-
-  state.counters = { ...state.counters, nextRestIdNumber: number + 1 }
-
-  return id
-}
-
-/** `POST /users/{userId}/messages`: a new draft in Drafts (201 with the message). Never sent. */
+/**
+ * `POST /users/{userId}/messages`: a new draft in Drafts (201 with the message). Never sent. New
+ * drafts have no attachments (`hasAttachments: false`, as the fixtures record).
+ */
 export const createDraft: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
 
   if (user instanceof Response) return user
+
+  const immutable = immutableIdProblem(request)
+
+  if (immutable !== undefined) return immutable
 
   const fields = bodyObject(request, draftKeys)
 
@@ -420,22 +401,22 @@ export const createDraft: RouteHandler = (state, request, env) => {
 
   const message: MicrosoftEmulatorMessage = {
     id,
-    restId: nextRestId(state),
     parentFolderId: drafts.id,
     subject: write.subject ?? '',
-    bodyContentType: write.bodyContentType ?? 'text',
+    bodyContentType: 'text',
     bodyContent: write.bodyContent ?? '',
     from: owner,
     sender: owner,
     toRecipients: write.toRecipients ?? [],
-    ccRecipients: write.ccRecipients ?? [],
-    bccRecipients: write.bccRecipients ?? [],
+    ccRecipients: [],
+    bccRecipients: [],
     replyTo: [],
-    isRead: write.isRead ?? true,
+    isRead: true,
     isDraft: true,
     importance: 'normal',
-    flagStatus: write.flagStatus ?? 'notFlagged',
-    categories: write.categories ?? [],
+    flagStatus: 'notFlagged',
+    categories: [],
+    hasAttachments: false,
     createdDateTime: now,
     lastModifiedDateTime: now,
     receivedDateTime: now,
@@ -447,7 +428,7 @@ export const createDraft: RouteHandler = (state, request, env) => {
 
   state.messages = [...state.messages, message]
 
-  return jsonResponse(201, renderMessage(state, request, message))
+  return jsonResponse(201, entity(messageEntityContext(env, request), renderMessage(message)))
 }
 
 const delay = (ms: number): Promise<void> =>
@@ -457,8 +438,8 @@ const delay = (ms: number): Promise<void> =>
 
 /**
  * Run a message write under its message's lock: a write that finds the lock held loses with 409
- * (nothing changes); the winner commits, then holds the lock for `conflictWindowMs` before
- * answering.
+ * (nothing changes); the first write to reach the handler commits, then holds the lock for
+ * `conflictWindowMs` before answering.
  */
 const withMessageLock = async (
   env: MicrosoftApiEnv,
@@ -481,29 +462,23 @@ const withMessageLock = async (
   }
 }
 
-/**
- * `PATCH /users/{userId}/messages/{messageId}`: update read state, flag, categories, and (drafts
- * only) subject, body, and recipients; 200 with the message.
- */
+/** `PATCH /users/{userId}/messages/{messageId}`: update `subject` or `isRead`; 200 with the message. */
 export const updateMessage: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
 
   if (user instanceof Response) return user
 
+  const immutable = immutableIdProblem(request)
+
+  if (immutable !== undefined) return immutable
+
   const message = findMessage(state, request.params.messageId ?? '')
 
   if (message === undefined) return notFound(request)
 
-  const fields = bodyObject(
-    request,
-    draftKeys.filter(key => key !== 'from')
-  )
+  const fields = bodyObject(request, updateKeys)
 
   if (fields instanceof Response) return fields
-
-  if (!message.isDraft && Object.keys(fields).some(key => draftOnlyKeys.includes(key))) {
-    return notEmulated(request, 'subject, body, and recipients are updatable on drafts only.')
-  }
 
   const write = messageWrite(request, fields, user)
 
@@ -519,18 +494,22 @@ export const updateMessage: RouteHandler = (state, request, env) => {
 
     replaceMessage(state, updated)
 
-    return jsonResponse(200, renderMessage(state, request, updated))
+    return jsonResponse(200, entity(messageEntityContext(env, request), renderMessage(updated)))
   })
 }
 
 /**
  * `POST /users/{userId}/messages/{messageId}/move` (`{ destinationId }`, a folder id or
- * well-known name): 201 with the moved message. The immutable id stays; the default id changes.
+ * well-known name): 201 with the moved message, which keeps its (immutable) id.
  */
 export const moveMessage: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
 
   if (user instanceof Response) return user
+
+  const immutable = immutableIdProblem(request)
+
+  if (immutable !== undefined) return immutable
 
   const message = findMessage(state, request.params.messageId ?? '')
 
@@ -552,14 +531,13 @@ export const moveMessage: RouteHandler = (state, request, env) => {
     const moved: MicrosoftEmulatorMessage = {
       ...message,
       parentFolderId: destination.id,
-      restId: nextRestId(state),
       lastModifiedDateTime: nowTimestamp(env),
       changeKey: nextChangeKey(state, messageTagPrefix)
     }
 
     replaceMessage(state, moved)
 
-    return jsonResponse(201, renderMessage(state, request, moved))
+    return jsonResponse(201, entity(messageEntityContext(env, request), renderMessage(moved)))
   })
 }
 
@@ -601,6 +579,10 @@ export const listAttachments: RouteHandler = (state, request, env) => {
 
   if (user instanceof Response) return user
 
+  const immutable = immutableIdProblem(request)
+
+  if (immutable !== undefined) return immutable
+
   const message = findMessage(state, request.params.messageId ?? '')
 
   if (message === undefined) return notFound(request)
@@ -614,9 +596,15 @@ export const listAttachments: RouteHandler = (state, request, env) => {
 
   if (page instanceof Response) return page
 
+  const context = metadataContext(
+    env,
+    `${userContext(request)}/messages${odataKey(request.params.messageId ?? '')}/attachments${selectSuffix(fields)}`
+  )
+
   return jsonResponse(
     200,
     collection(
+      context,
       page.items.map(attachment => project(renderListedAttachment(attachment), fields)),
       nextLinkOf(env, request, page, ['$select'])
     )
@@ -624,10 +612,14 @@ export const listAttachments: RouteHandler = (state, request, env) => {
 }
 
 /** `GET /users/{userId}/messages/{messageId}/attachments/{attachmentId}`: the file attachment. */
-export const getAttachment: RouteHandler = (state, request) => {
+export const getAttachment: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
 
   if (user instanceof Response) return user
+
+  const immutable = immutableIdProblem(request)
+
+  if (immutable !== undefined) return immutable
 
   const message = findMessage(state, request.params.messageId ?? '')
 
@@ -639,9 +631,14 @@ export const getAttachment: RouteHandler = (state, request) => {
             candidate.messageId === message.id && candidate.id === request.params.attachmentId
         )
 
+  const context = metadataContext(
+    env,
+    `${userContext(request)}/messages${odataKey(request.params.messageId ?? '')}/attachments/$entity`
+  )
+
   return attachment === undefined
     ? notFound(request)
-    : jsonResponse(200, renderAttachment(attachment))
+    : jsonResponse(200, entity(context, renderAttachment(attachment)))
 }
 
 // JSON batching: only permanent-delete subrequests are emulated.
@@ -650,21 +647,13 @@ const maxBatchRequests = 20
 
 const permanentDeletePattern = /^\/?users\/([^/?#]+)\/messages\/([^/?#]+)\/permanentDelete$/
 
-const allowedSubrequestHeaders: ReadonlyArray<string> = ['prefer', 'content-type']
+/** Subrequest headers the fixtures send (`Prefer`, which must ask for immutable ids). */
+const allowedSubrequestHeaders: ReadonlyArray<string> = ['prefer']
 
 type PermanentDelete = {
   readonly id: string
   readonly userId: string
   readonly messageId: string
-  readonly prefer: string | null
-}
-
-const decodeSegment = (segment: string): string | undefined => {
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return undefined
-  }
 }
 
 /** A validated subrequest, or why the whole batch is refused. */
@@ -696,28 +685,34 @@ const permanentDeleteOf = (entry: Schema.Json): PermanentDelete | string => {
 
   if (userId === undefined || messageId === undefined) return 'a batch url is not decodable.'
 
-  let prefer: string | null = null
-
-  if (headers !== undefined) {
-    if (!isJsonObject(headers)) return 'batch request headers must be an object.'
-
-    for (const [name, value] of Object.entries(headers)) {
-      if (!allowedSubrequestHeaders.includes(name.toLowerCase()) || !Predicate.isString(value)) {
-        return `batch request header '${name}' is not emulated.`
-      }
-
-      if (name.toLowerCase() === 'prefer') prefer = value
-    }
+  if (!isJsonObject(headers)) {
+    return 'batch requests without headers { Prefer: IdType="ImmutableId" } are not emulated.'
   }
 
-  return { id, userId, messageId, prefer }
+  let prefer: string | undefined
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (!allowedSubrequestHeaders.includes(name.toLowerCase()) || !Predicate.isString(value)) {
+      return `batch request header '${name}' is not emulated.`
+    }
+
+    prefer = value
+  }
+
+  if (!parsePreferences(prefer ?? null).immutableId) {
+    return 'batch requests without Prefer: IdType="ImmutableId" are not emulated.'
+  }
+
+  return { id, userId, messageId }
 }
 
 /**
- * `POST /$batch`: at most 20 subrequests with unique ids, each a message `permanentDelete`
- * (anything else refuses the whole batch with 400 before anything runs). Subrequests run in
- * order; each answers 204 (deleted, with its attachments), 404, or 409 (a write is in flight),
- * in `{ responses: [{ id, status, headers, body? }] }`.
+ * `POST /$batch`: at most 20 subrequests with unique ids, each a message `permanentDelete` with
+ * `Prefer: IdType="ImmutableId"`, answered `{ responses: [{ id, status: 204, headers: {} }] }` as
+ * the fixtures record. Every subrequest is checked before any runs: anything else (another
+ * route, an unknown user or message, a message named twice, or a message with a write in flight)
+ * refuses the whole batch with 400 and deletes nothing, because no fixture records a failed
+ * subrequest.
  */
 export const batch: RouteHandler = (state, request, env) => {
   const fields = bodyObject(request, ['requests'])
@@ -746,52 +741,43 @@ export const batch: RouteHandler = (state, request, env) => {
     deletes.push(parsed)
   }
 
-  const failed = (
-    id: string,
-    status: number,
-    code: string,
-    message: string
-  ): Schema.JsonObject => ({
-    id,
-    status,
-    headers: { 'content-type': 'application/json' },
-    body: { error: { code, message } }
-  })
-
-  const responses: Array<Schema.JsonObject> = []
+  const messages: Array<MicrosoftEmulatorMessage> = []
 
   for (const entry of deletes) {
     const itemRequest: RouteRequest = {
       ...request,
-      params: { userId: entry.userId, messageId: entry.messageId },
-      prefer: parsePreferences(entry.prefer)
+      params: { userId: entry.userId, messageId: entry.messageId }
     }
 
     const message = findMessage(state, entry.messageId)
 
     if (resolveUser(state, itemRequest) instanceof Response) {
-      responses.push(
-        failed(entry.id, 404, codes.invalidUser, 'Synthetic: the user is not emulated.')
-      )
-    } else if (message === undefined) {
-      responses.push(
-        failed(
-          entry.id,
-          404,
-          codes.mailItemNotFound,
-          'The specified object was not found in the store.'
-        )
-      )
-    } else if (env.messageLocks.has(message.id)) {
-      responses.push(failed(entry.id, 409, codes.conflict, 'Synthetic: a write is in flight.'))
-    } else {
-      state.messages = state.messages.filter(candidate => candidate.id !== message.id)
-      state.attachments = state.attachments.filter(
-        attachment => attachment.messageId !== message.id
-      )
-      responses.push({ id: entry.id, status: 204, headers: {} })
+      return notEmulated(request, `batch request ${entry.id} names a user that is not emulated.`)
     }
+
+    if (message === undefined || messages.includes(message)) {
+      return notEmulated(
+        request,
+        `batch request ${entry.id} names a missing or repeated message (failed subrequests are not emulated).`
+      )
+    }
+
+    if (env.messageLocks.has(message.id)) {
+      return notEmulated(
+        request,
+        `batch request ${entry.id} names a message with a write in flight (failed subrequests are not emulated).`
+      )
+    }
+
+    messages.push(message)
   }
 
-  return jsonResponse(200, { responses })
+  const removed = new Set(messages.map(message => message.id))
+
+  state.messages = state.messages.filter(message => !removed.has(message.id))
+  state.attachments = state.attachments.filter(attachment => !removed.has(attachment.messageId))
+
+  return jsonResponse(200, {
+    responses: deletes.map(entry => ({ id: entry.id, status: 204, headers: {} }))
+  })
 }

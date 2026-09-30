@@ -3,10 +3,14 @@
  * create, delete, and the asynchronous copy with its monitor URL. Wire shapes follow the
  * synthetic OneDrive conformance fixtures.
  *
- * Deleted items are removed with their subtree (no recycle bin is emulated). A copy answers 202
- * with one monitor `Location` on the SharePoint origin; the monitor needs no credentials, answers
- * `inProgress` (202) for `copyInProgressPolls` polls, then runs the copy and answers `completed`
- * (200) with the new item's `resourceId`, or `failed` when the copy can no longer run.
+ * Deleted items are removed with their subtree (no recycle bin is emulated). Folder create and
+ * copy take `@microsoft.graph.conflictBehavior` `fail` only, as the fixtures send it, and only for
+ * a name that is free: no fixture records a name conflict, so one fails closed (400). A copy
+ * answers 202 with one monitor `Location` on the SharePoint origin; the monitor needs no
+ * credentials, answers `inProgress` (202) for `copyInProgressPolls` polls (default 0), then runs
+ * the copy and answers `completed` (200) with the new item's `resourceId`, as the fixture's first
+ * poll does. No fixture records a failed copy: when the copy can no longer run (source or
+ * destination gone, or the name taken), the monitor answers 400 not emulated.
  *
  * @experimental
  */
@@ -17,16 +21,21 @@ import {
   codes,
   collection,
   emptyResponse,
+  entity,
   invalidValue,
   isJsonObject,
   jsonResponse,
+  metadataContext,
+  nestedObject,
   nextLinkOf,
   notEmulated,
   nowTimestamp,
+  odataKey,
   padded,
   pageOf,
   personalSite,
   project,
+  selectSuffix,
   selectedFields,
   type CopyMonitor,
   type MicrosoftApiEnv,
@@ -143,6 +152,14 @@ const renderItem = (
   }
 }
 
+/** `drives('{driveId}')`, the context prefix of every OneDrive route. */
+const driveContext = (request: RouteRequest): string =>
+  `drives${odataKey(request.params.driveId ?? '')}`
+
+/** `drives('{driveId}')/items('{itemId}')/children`. */
+const childrenContext = (request: RouteRequest): string =>
+  `${driveContext(request)}/items${odataKey(request.params.itemId ?? '')}/children`
+
 /** The drive of the `{driveId}` segment, or 404. */
 const driveProblem = (state: MicrosoftEmulatorState, request: RouteRequest) =>
   request.params.driveId === state.drive.id ? undefined : notFound(request)
@@ -169,9 +186,14 @@ export const getItem: RouteHandler = (state, request, env) => {
 
   const item = findItem(state, request.params.itemId ?? '')
 
+  const context = metadataContext(
+    env,
+    `${driveContext(request)}/items${selectSuffix(fields)}/$entity`
+  )
+
   return item === undefined
     ? notFound(request)
-    : jsonResponse(200, project(renderItem(state, env, item), fields))
+    : jsonResponse(200, entity(context, project(renderItem(state, env, item), fields)))
 }
 
 const byName = (left: MicrosoftEmulatorDriveItem, right: MicrosoftEmulatorDriveItem) =>
@@ -204,6 +226,7 @@ export const listChildren: RouteHandler = (state, request, env) => {
   return jsonResponse(
     200,
     collection(
+      metadataContext(env, `${childrenContext(request)}${selectSuffix(fields)}`),
       page.items.map(item => project(renderItem(state, env, item), fields)),
       nextLinkOf(env, request, page, ['$select'])
     )
@@ -226,19 +249,6 @@ const nameProblem = (request: RouteRequest, name: unknown): string | Response =>
 const nameTaken = (state: MicrosoftEmulatorState, parentId: string, name: string): boolean =>
   childrenOf(state, parentId).some(child => child.name.toLowerCase() === name.toLowerCase())
 
-/** `name 1.ext`, `name 2.ext`, ... until free (the `rename` conflict behavior). */
-const freeName = (state: MicrosoftEmulatorState, parentId: string, name: string): string => {
-  const dot = name.lastIndexOf('.')
-  const stem = dot > 0 ? name.slice(0, dot) : name
-  const extension = dot > 0 ? name.slice(dot) : ''
-
-  for (let number = 1; ; number++) {
-    const candidate = `${stem} ${number}${extension}`
-
-    if (!nameTaken(state, parentId, candidate)) return candidate
-  }
-}
-
 const nextItemId = (state: MicrosoftEmulatorState): string => {
   let number = state.counters.nextItemNumber
   let id = `01SYNTHETICITEM${padded(number, 17)}`
@@ -254,22 +264,21 @@ const nextItemId = (state: MicrosoftEmulatorState): string => {
 }
 
 const nameConflict = (request: RouteRequest): Response =>
-  request.error(409, codes.nameAlreadyExists, 'The specified item name already exists.')
+  notEmulated(request, 'name conflicts are not emulated (the name is already taken).')
 
-type ConflictBehavior = 'fail' | 'rename'
-
-const conflictBehaviorOf = (request: RouteRequest, value: unknown): ConflictBehavior | Response => {
-  if (value === undefined || value === 'fail' || value === 'rename') return value ?? 'fail'
-
-  return value === 'replace'
-    ? notEmulated(request, 'conflictBehavior replace is not emulated (fail and rename only).')
-    : invalidValue(request, 'conflictBehavior must be fail or rename.')
-}
+/** Only `fail`, as the fixtures send it; anything else (or none) is not emulated. */
+const conflictBehaviorProblem = (request: RouteRequest, value: unknown): Response | undefined =>
+  value === 'fail'
+    ? undefined
+    : notEmulated(
+        request,
+        '@microsoft.graph.conflictBehavior must be fail (other or missing values are not emulated).'
+      )
 
 /**
- * `POST /drives/{driveId}/items/{itemId}/children` with a `folder` facet: 201 with the folder;
- * `@microsoft.graph.conflictBehavior` `fail` (409 `nameAlreadyExists`) or `rename`. Creating
- * files here is not emulated.
+ * `POST /drives/{driveId}/items/{itemId}/children` with a `folder` facet and
+ * `@microsoft.graph.conflictBehavior: fail`: 201 with the folder. A taken name, and creating
+ * files here, are not emulated.
  */
 export const createFolder: RouteHandler = (state, request, env) => {
   const drive = driveProblem(state, request)
@@ -300,20 +309,18 @@ export const createFolder: RouteHandler = (state, request, env) => {
 
   if (name instanceof Response) return name
 
-  const behavior = conflictBehaviorOf(request, fields['@microsoft.graph.conflictBehavior'])
+  const behavior = conflictBehaviorProblem(request, fields['@microsoft.graph.conflictBehavior'])
 
-  if (behavior instanceof Response) return behavior
+  if (behavior !== undefined) return behavior
 
-  const taken = nameTaken(state, parent.id, name)
-
-  if (taken && behavior === 'fail') return nameConflict(request)
+  if (nameTaken(state, parent.id, name)) return nameConflict(request)
 
   const now = nowTimestamp(env)
 
   const folder: MicrosoftEmulatorDriveItem = {
     id: nextItemId(state),
     parentId: parent.id,
-    name: taken ? freeName(state, parent.id, name) : name,
+    name,
     kind: 'folder',
     size: 0,
     mimeType: null,
@@ -324,7 +331,13 @@ export const createFolder: RouteHandler = (state, request, env) => {
 
   state.driveItems = [...state.driveItems, folder]
 
-  return jsonResponse(201, renderItem(state, env, folder))
+  return jsonResponse(
+    201,
+    entity(
+      metadataContext(env, `${childrenContext(request)}/$entity`),
+      renderItem(state, env, folder)
+    )
+  )
 }
 
 /** `DELETE /drives/{driveId}/items/{itemId}`: 204; the item and its subtree are removed. */
@@ -340,14 +353,6 @@ export const deleteItem: RouteHandler = (state, request) => {
   if (item.parentId === null)
     return notEmulated(request, 'deleting the drive root is not emulated.')
 
-  if (request.ifMatch !== undefined && request.ifMatch !== `"{${itemGuid(item.id)}},1"`) {
-    return request.error(
-      412,
-      codes.preconditionFailed,
-      'Synthetic: the If-Match eTag does not match.'
-    )
-  }
-
   const removed = new Set(subtreeOf(state, item).map(entry => entry.id))
 
   state.driveItems = state.driveItems.filter(entry => !removed.has(entry.id))
@@ -360,8 +365,8 @@ const monitorPath = (state: MicrosoftEmulatorState, id: string) =>
 
 /**
  * `POST /drives/{driveId}/items/{itemId}/copy` (`{ parentReference: { driveId?, id }, name? }`,
- * query `@microsoft.graph.conflictBehavior` `fail` or `rename`): 202 with an empty body and one
- * monitor `Location`. The copy itself runs when the monitor reports completion.
+ * query `@microsoft.graph.conflictBehavior=fail`): 202 with an empty body and one monitor
+ * `Location`. The copy itself runs when the monitor reports completion.
  */
 export const copyItem: RouteHandler = (state, request, env) => {
   const drive = driveProblem(state, request)
@@ -372,24 +377,27 @@ export const copyItem: RouteHandler = (state, request, env) => {
 
   if (source === undefined) return notFound(request)
 
-  const behavior = conflictBehaviorOf(
+  const behavior = conflictBehaviorProblem(
     request,
     request.query.get('@microsoft.graph.conflictBehavior') ?? undefined
   )
 
-  if (behavior instanceof Response) return behavior
+  if (behavior !== undefined) return behavior
 
   const fields = bodyObject(request, ['parentReference', 'name'])
 
   if (fields instanceof Response) return fields
 
-  const reference = fields.parentReference
+  const reference = nestedObject(
+    request,
+    fields.parentReference,
+    ['driveId', 'id'],
+    'parentReference { driveId?, id }'
+  )
 
-  if (
-    !isJsonObject(reference) ||
-    !Predicate.isString(reference.id) ||
-    Object.keys(reference).some(key => key !== 'id' && key !== 'driveId')
-  ) {
+  if (reference instanceof Response) return reference
+
+  if (!Predicate.isString(reference.id)) {
     return invalidValue(request, 'parentReference must be { driveId?, id }.')
   }
 
@@ -422,9 +430,8 @@ export const copyItem: RouteHandler = (state, request, env) => {
     sourceId: source.id,
     destinationParentId: destination.id,
     name,
-    conflictBehavior: behavior,
     pollsLeft: env.copyInProgressPolls,
-    result: undefined
+    resourceId: undefined
   }
 
   env.monitors.set(monitor.id, monitor)
@@ -462,51 +469,38 @@ const copyTree = (
   return copy.id
 }
 
-/** Run a monitored copy: the source and destination must still exist. */
+/**
+ * Run a monitored copy: its `resourceId`, or why it cannot run (the source or destination is
+ * gone, or the name is taken; no fixture records a failed copy).
+ */
 const runCopy = (
   state: MicrosoftEmulatorState,
   env: MicrosoftApiEnv,
   monitor: CopyMonitor
-): CopyMonitor['result'] => {
+): string | { readonly problem: string } => {
   const source = findItem(state, monitor.sourceId)
   const destination = findItem(state, monitor.destinationParentId)
 
   if (source === undefined || destination === undefined || destination.kind !== 'folder') {
-    return {
-      status: 'failed',
-      code: codes.driveItemNotFound,
-      message: 'Synthetic: the copy source or destination no longer exists.'
-    }
+    return { problem: 'the copy source or destination no longer exists' }
   }
 
   const name = monitor.name ?? source.name
-  const taken = nameTaken(state, destination.id, name)
 
-  if (taken && monitor.conflictBehavior === 'fail') {
-    return {
-      status: 'failed',
-      code: codes.nameAlreadyExists,
-      message: 'The specified item name already exists.'
-    }
+  if (nameTaken(state, destination.id, name)) {
+    return { problem: 'the copy name is already taken in the destination' }
   }
 
-  const resourceId = copyTree(
-    state,
-    env,
-    source,
-    destination.id,
-    taken ? freeName(state, destination.id, name) : name
-  )
-
-  return { status: 'completed', resourceId }
+  return copyTree(state, env, source, destination.id, name)
 }
 
 const monitorContentType = 'application/json;odata.metadata=minimal;odata.streaming=true'
 
 /**
  * `GET /personal/{site}/_api/v2.0/monitor/{monitorId}` on the SharePoint origin (no credentials
- * needed, like the real capability URL): `inProgress` (202) while polls remain, then the copy
- * runs once and every later poll answers its `completed` (200, `resourceId`) or `failed` status.
+ * needed, like the real capability URL): `inProgress` (202) while polls remain, then the copy runs
+ * once and every later poll answers `completed` (200, `resourceId`). A copy that cannot run
+ * answers 400 not emulated (failed copies are not emulated) and stays pending.
  */
 export const copyMonitor: RouteHandler = (state, request, env) => {
   const monitor = env.monitors.get(request.params.monitorId ?? '')
@@ -518,7 +512,7 @@ export const copyMonitor: RouteHandler = (state, request, env) => {
   const context = `${env.sharePointOrigin}/personal/${personalSite(state.user)}/_api/v2.0/$metadata#oneDrive.asynchronousOperationStatus`
   const headers = { 'content-type': monitorContentType }
 
-  if (monitor.result === undefined && monitor.pollsLeft > 0) {
+  if (monitor.resourceId === undefined && monitor.pollsLeft > 0) {
     monitor.pollsLeft -= 1
 
     return jsonResponse(
@@ -528,29 +522,22 @@ export const copyMonitor: RouteHandler = (state, request, env) => {
     )
   }
 
-  const result = monitor.result ?? runCopy(state, env, monitor)
+  const resourceId = monitor.resourceId ?? runCopy(state, env, monitor)
 
-  monitor.result = result
+  if (!Predicate.isString(resourceId)) {
+    return notEmulated(request, `${resourceId.problem} (failed copies are not emulated).`)
+  }
 
-  return result?.status === 'completed'
-    ? jsonResponse(
-        200,
-        {
-          '@odata.context': context,
-          percentageComplete: 100,
-          resourceId: result.resourceId,
-          status: 'completed'
-        },
-        headers
-      )
-    : jsonResponse(
-        200,
-        {
-          '@odata.context': context,
-          percentageComplete: 0,
-          status: 'failed',
-          error: { code: result?.code, message: result?.message }
-        },
-        headers
-      )
+  monitor.resourceId = resourceId
+
+  return jsonResponse(
+    200,
+    {
+      '@odata.context': context,
+      percentageComplete: 100,
+      resourceId,
+      status: 'completed'
+    },
+    headers
+  )
 }

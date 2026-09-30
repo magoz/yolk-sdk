@@ -3,7 +3,10 @@
  * delete, and cancel. Wire shapes follow the synthetic calendar conformance fixtures.
  *
  * Event times are stored in UTC with seven fractional digits and always answered in UTC; a
- * `Prefer: outlook.timezone` other than UTC is refused (fail closed).
+ * `Prefer: outlook.timezone` other than UTC is refused (fail closed). Events are answered with
+ * the fixture fields only (`@odata.etag`, `id`, `subject`, `start`, `end`, `isCancelled`); a create
+ * takes the fixture's fields (`subject`, a text `body`, `start`, `end`, `isReminderOn`, `showAs`)
+ * and an update only `subject`; anything else, including unknown nested keys, fails closed.
  *
  * @experimental
  */
@@ -14,18 +17,23 @@ import {
   codes,
   collection,
   emptyResponse,
+  entity,
   invalidValue,
-  isJsonObject,
   jsonResponse,
+  metadataContext,
+  nestedObject,
   nextChangeKey,
   nextLinkOf,
   notEmulated,
   nowTimestamp,
+  odataKey,
   padded,
   pageOf,
   project,
   resolveUser,
+  selectSuffix,
   selectedFields,
+  textBody,
   type MicrosoftApiEnv,
   type RouteHandler,
   type RouteRequest
@@ -37,16 +45,8 @@ import {
   type MicrosoftEmulatorState
 } from './state.ts'
 
-const eventFields: ReadonlyArray<string> = [
-  'id',
-  'subject',
-  'body',
-  'start',
-  'end',
-  'isCancelled',
-  'isReminderOn',
-  'showAs'
-]
+/** The event fields the fixtures answer (and `$select`). */
+const eventFields: ReadonlyArray<string> = ['id', 'subject', 'start', 'end', 'isCancelled']
 
 const showAsValues: ReadonlyArray<MicrosoftEmulatorEvent['showAs']> = [
   'free',
@@ -72,18 +72,23 @@ const renderDateTime = (env: MicrosoftApiEnv, value: string) => {
   }
 }
 
-/** The full event, in the fixture key order. */
-const renderEvent = (env: MicrosoftApiEnv, event: MicrosoftEmulatorEvent) => ({
+/** The event as the fixtures answer it, in their key order. */
+const renderEvent = (env: MicrosoftApiEnv, event: MicrosoftEmulatorEvent): Schema.JsonObject => ({
   '@odata.etag': `W/"${event.changeKey}"`,
   id: event.id,
   subject: event.subject,
-  body: { contentType: event.bodyContentType, content: event.bodyContent },
   start: renderDateTime(env, event.start),
   end: renderDateTime(env, event.end),
-  isCancelled: event.isCancelled,
-  isReminderOn: event.isReminderOn,
-  showAs: event.showAs
+  isCancelled: event.isCancelled
 })
+
+/** `users('{userId}')`, the context prefix of every calendar route. */
+const userContext = (request: RouteRequest): string =>
+  `users${odataKey(request.params.userId ?? '')}`
+
+/** `users('{userId}')/calendars('{calendarId}')`. */
+const calendarContext = (request: RouteRequest): string =>
+  `${userContext(request)}/calendars${odataKey(request.params.calendarId ?? '')}`
 
 /** Every calendar route answers in UTC; any other `outlook.timezone` is not emulated. */
 const timezoneProblem = (request: RouteRequest): Response | undefined => {
@@ -172,6 +177,7 @@ export const calendarView: RouteHandler = (state, request, env) => {
   return jsonResponse(
     200,
     collection(
+      metadataContext(env, `${calendarContext(request)}/calendarView${selectSuffix(fields)}`),
       page.items.map(event => project(renderEvent(env, event), fields)),
       nextLinkOf(env, request, page, ['startDateTime', 'endDateTime', '$select'])
     ),
@@ -185,23 +191,26 @@ const writeDateTime = (
   key: string,
   value: Schema.Json
 ): string | Response => {
-  if (
-    !isJsonObject(value) ||
-    !Predicate.isString(value.dateTime) ||
-    !Predicate.isString(value.timeZone)
-  ) {
-    return invalidValue(request, `${key} must be { dateTime, timeZone }.`)
+  const dateTimeZone = nestedObject(
+    request,
+    value,
+    ['dateTime', 'timeZone'],
+    `${key} { dateTime, timeZone }`
+  )
+
+  if (dateTimeZone instanceof Response) return dateTimeZone
+
+  const { dateTime, timeZone } = dateTimeZone
+
+  if (!Predicate.isString(dateTime) || !Predicate.isString(timeZone)) {
+    return invalidValue(request, `${key} must be { dateTime, timeZone } with string values.`)
   }
 
-  if (Object.keys(value).some(field => field !== 'dateTime' && field !== 'timeZone')) {
-    return notEmulated(request, `${key} supports dateTime and timeZone only.`)
+  if (timeZone.toUpperCase() !== 'UTC') {
+    return notEmulated(request, `${key}.timeZone ${timeZone} is not emulated (UTC only).`)
   }
 
-  if (value.timeZone.toUpperCase() !== 'UTC') {
-    return notEmulated(request, `${key}.timeZone ${value.timeZone} is not emulated (UTC only).`)
-  }
-
-  const ticks = parseInstant(value.dateTime, 'forbidden')
+  const ticks = parseInstant(dateTime, 'forbidden')
 
   return ticks === undefined
     ? invalidValue(request, `${key}.dateTime must be a local date-time without offset.`)
@@ -210,7 +219,6 @@ const writeDateTime = (
 
 type EventWrite = {
   subject?: string
-  bodyContentType?: MicrosoftEmulatorEvent['bodyContentType']
   bodyContent?: string
   start?: string
   end?: string
@@ -218,7 +226,8 @@ type EventWrite = {
   showAs?: MicrosoftEmulatorEvent['showAs']
 }
 
-const writableEventKeys: ReadonlyArray<string> = [
+/** Event create keys, as the create fixture sends them. */
+const createEventKeys: ReadonlyArray<string> = [
   'subject',
   'body',
   'start',
@@ -227,9 +236,15 @@ const writableEventKeys: ReadonlyArray<string> = [
   'showAs'
 ]
 
+/** Event update keys, as the update fixture sends them. */
+const updateEventKeys: ReadonlyArray<string> = ['subject']
+
 /** The emulated event fields of a create or update body; attendees and the rest fail closed. */
-const eventWrite = (request: RouteRequest): EventWrite | Response => {
-  const fields = bodyObject(request, writableEventKeys)
+const eventWrite = (
+  request: RouteRequest,
+  allowed: ReadonlyArray<string>
+): EventWrite | Response => {
+  const fields = bodyObject(request, allowed)
 
   if (fields instanceof Response) return fields
 
@@ -243,18 +258,10 @@ const eventWrite = (request: RouteRequest): EventWrite | Response => {
         write.subject = value
         break
       case 'body': {
-        const contentType = isJsonObject(value) ? value.contentType : undefined
-        const content = isJsonObject(value) ? value.content : undefined
+        const content = textBody(request, value)
 
-        if (
-          !Predicate.isString(contentType) ||
-          !['text', 'html'].includes(contentType.toLowerCase()) ||
-          !Predicate.isString(content)
-        ) {
-          return invalidValue(request, 'body must be { contentType: text | html, content }.')
-        }
+        if (content instanceof Response) return content
 
-        write.bodyContentType = contentType.toLowerCase() === 'html' ? 'html' : 'text'
         write.bodyContent = content
         break
       }
@@ -302,7 +309,7 @@ export const createEvent: RouteHandler = (state, request, env) => {
 
   if (findCalendar(state, request) === undefined) return calendarNotFound(request)
 
-  const write = eventWrite(request)
+  const write = eventWrite(request, createEventKeys)
 
   if (write instanceof Response) return write
 
@@ -328,7 +335,7 @@ export const createEvent: RouteHandler = (state, request, env) => {
     id,
     calendarId: request.params.calendarId ?? '',
     subject: write.subject ?? '',
-    bodyContentType: write.bodyContentType ?? 'text',
+    bodyContentType: 'text',
     bodyContent: write.bodyContent ?? '',
     start: write.start,
     end: write.end,
@@ -343,8 +350,12 @@ export const createEvent: RouteHandler = (state, request, env) => {
   state.events = [...state.events, event]
 
   const { id: _id, ...withoutId } = renderEvent(env, event)
+  const context = metadataContext(env, `${calendarContext(request)}/events/$entity`)
 
-  return jsonResponse(201, env.drills.createOmitsId ? withoutId : renderEvent(env, event))
+  return jsonResponse(
+    201,
+    entity(context, env.drills.createOmitsId ? withoutId : renderEvent(env, event))
+  )
 }
 
 /** `GET /users/{userId}/events/{eventId}` (`$select`). */
@@ -363,12 +374,21 @@ export const getEvent: RouteHandler = (state, request, env) => {
 
   const event = findEvent(state, request)
 
+  const context = metadataContext(
+    env,
+    `${userContext(request)}/events${selectSuffix(fields)}/$entity`
+  )
+
   return event === undefined
     ? eventNotFound(request)
-    : jsonResponse(200, project(renderEvent(env, event), fields), readHeaders(request))
+    : jsonResponse(
+        200,
+        entity(context, project(renderEvent(env, event), fields)),
+        readHeaders(request)
+      )
 }
 
-/** `PATCH /users/{userId}/events/{eventId}`: update the emulated fields; 200 with the event. */
+/** `PATCH /users/{userId}/events/{eventId}`: update `subject`; 200 with the event. */
 export const updateEvent: RouteHandler = (state, request, env) => {
   const user = resolveUser(state, request)
 
@@ -382,7 +402,7 @@ export const updateEvent: RouteHandler = (state, request, env) => {
 
   if (event === undefined) return eventNotFound(request)
 
-  const write = eventWrite(request)
+  const write = eventWrite(request, updateEventKeys)
 
   if (write instanceof Response) return write
 
@@ -400,7 +420,10 @@ export const updateEvent: RouteHandler = (state, request, env) => {
 
   state.events = state.events.map(candidate => (candidate.id === stored.id ? stored : candidate))
 
-  return jsonResponse(200, renderEvent(env, stored))
+  return jsonResponse(
+    200,
+    entity(metadataContext(env, `${userContext(request)}/events/$entity`), renderEvent(env, stored))
+  )
 }
 
 const removeEvent = (state: MicrosoftEmulatorState, id: string): void => {

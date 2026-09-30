@@ -737,6 +737,41 @@ describe('invoices', () => {
 })
 
 describe('faults', () => {
+  it.effect('a route handler that throws answers a tagged 500 ErrorInformation, ledgered', () =>
+    Effect.promise(async () => {
+      // The unpaidoverdue filter reads the clock inside the handler; the wrapper never does.
+      const target = await emulator({
+        now: () => {
+          throw new Error('synthetic clock failure')
+        }
+      })
+
+      // The core's own error handler (which logs) is never reached.
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      let logged = 0
+
+      const failed = await call(target, 'GET', '/3/invoices?filter=unpaidoverdue').finally(() => {
+        logged = consoleError.mock.calls.length
+        consoleError.mockRestore()
+      })
+
+      expect(logged).toBe(0)
+      expect(failed.status).toBe(500)
+      expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(failed.headers.get('x-emulator-handler-failed')).toBeNull()
+      expect(await errorCode(failed)).toBe(fortnoxEmulatorErrorCodes.upstreamError)
+      expect(target.ledger.entries()).toEqual([
+        expect.objectContaining({
+          path: '/3/invoices',
+          status: 500,
+          evidence: 'unverified',
+          responseError: 'the route handler failed'
+        })
+      ])
+      expect((await call(target, 'GET', '/3/invoices')).status).toBe(200)
+    })
+  )
+
   it.effect('answer matching requests by method and path, with a count, before any write', () =>
     Effect.promise(async () => {
       const target = await emulator()

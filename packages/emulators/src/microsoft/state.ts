@@ -50,8 +50,6 @@ const BodyContentType = Schema.Literals(['text', 'html'])
 const messageFields = {
   /** The immutable id (`Prefer: IdType="ImmutableId"`): stable across moves. */
   id: Schema.String,
-  /** The default (mutable) id: regenerated on every move. */
-  restId: Schema.String,
   parentFolderId: Schema.String,
   subject: Schema.String,
   bodyContentType: BodyContentType,
@@ -67,6 +65,8 @@ const messageFields = {
   importance: Schema.Literals(['low', 'normal', 'high']),
   flagStatus: Schema.Literals(['notFlagged', 'flagged', 'complete']),
   categories: Schema.Array(Schema.String),
+  /** Answered as stored (not derived from the attachments; no fixture shows the rule). */
+  hasAttachments: Schema.Boolean,
   createdDateTime: Timestamp,
   lastModifiedDateTime: Timestamp,
   receivedDateTime: Timestamp,
@@ -76,7 +76,7 @@ const messageFields = {
   changeKey: Schema.String
 }
 
-/** A stored message. `hasAttachments` is derived (true when a non-inline attachment exists). */
+/** A stored message. Every message is addressed by its immutable id. */
 export const MicrosoftEmulatorMessage = Schema.Struct(messageFields)
 
 export type MicrosoftEmulatorMessage = typeof MicrosoftEmulatorMessage.Type
@@ -170,8 +170,6 @@ const Counters = Schema.Struct({
   nextEventNumber: Counter,
   /** Next number in created message immutable ids. */
   nextMessageNumber: Counter,
-  /** Next number in regenerated default (mutable) message ids. */
-  nextRestIdNumber: Counter,
   /** Next change key number (message and event writes). */
   nextChangeKeyNumber: Counter,
   /** Next number in created drive item ids. */
@@ -429,6 +427,8 @@ const defaultMessages: ReadonlyArray<MicrosoftEmulatorMessageSeed> = [
     toRecipients: [adaRecipient],
     isRead: false,
     isDraft: false,
+    // Synthesized (no fixture lists this message): it has a regular (non-inline) attachment.
+    hasAttachments: true,
     receivedDateTime: '2026-09-22T08:15:00Z',
     sentDateTime: '2026-09-22T08:15:00Z',
     createdDateTime: '2026-09-22T08:15:00Z',
@@ -577,15 +577,13 @@ const defaultTimestamp = '2026-09-29T10:00:00Z'
 
 const messageFromSeed = (
   seed: MicrosoftEmulatorMessageSeed,
-  user: MicrosoftEmulatorUser,
-  restId: string
+  user: MicrosoftEmulatorUser
 ): MicrosoftEmulatorMessage => {
   const owner: MicrosoftEmulatorRecipient = { name: user.displayName, address: user.mail }
   const created = seed.createdDateTime ?? defaultTimestamp
 
   return {
     id: seed.id,
-    restId: seed.restId ?? restId,
     parentFolderId: seed.parentFolderId,
     subject: seed.subject,
     bodyContentType: seed.bodyContentType ?? 'text',
@@ -601,6 +599,7 @@ const messageFromSeed = (
     importance: seed.importance ?? 'normal',
     flagStatus: seed.flagStatus ?? 'notFlagged',
     categories: seed.categories ?? [],
+    hasAttachments: seed.hasAttachments ?? false,
     createdDateTime: created,
     lastModifiedDateTime: seed.lastModifiedDateTime ?? created,
     receivedDateTime: seed.receivedDateTime ?? created,
@@ -689,10 +688,7 @@ const seedProblem = (entities: ProfileEntities): string | undefined => {
       'well-known folder',
       duplicate(entities.mailFolders.flatMap(folder => folder.wellKnownName ?? []))
     ],
-    [
-      'message id',
-      duplicate([...messageIds, ...entities.messages.flatMap(message => message.restId ?? [])])
-    ],
+    ['message id', duplicate(messageIds)],
     ['attachment id', duplicate(entities.attachments.map(attachment => attachment.id))],
     ['calendar id', duplicate(calendarIds)],
     ['event id', duplicate(entities.events.map(event => event.id))],
@@ -794,13 +790,7 @@ const stateFromSeed = (seed: MicrosoftEmulatorSeed): MicrosoftEmulatorState | st
   return {
     user: entities.user,
     mailFolders: entities.mailFolders,
-    messages: entities.messages.map((message, index) =>
-      messageFromSeed(
-        message,
-        entities.user,
-        `AAMkAGI2-synthetic-restid-seed-${pad(index + 1, 4)}=`
-      )
-    ),
+    messages: entities.messages.map(message => messageFromSeed(message, entities.user)),
     attachments: entities.attachments.map(attachmentFromSeed),
     calendars: entities.calendars,
     events,
@@ -809,7 +799,6 @@ const stateFromSeed = (seed: MicrosoftEmulatorSeed): MicrosoftEmulatorState | st
     counters: {
       nextEventNumber: 101,
       nextMessageNumber: 1,
-      nextRestIdNumber: 1,
       nextChangeKeyNumber: 1001,
       nextItemNumber: 1
     }

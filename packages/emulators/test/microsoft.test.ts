@@ -18,6 +18,7 @@ import {
 import {
   microsoftConformanceCases,
   microsoftConformanceFixtureSeeds,
+  microsoftConformanceFixtures,
   microsoftConformanceIntegration,
   microsoftOutlookPagingNextLinkFixture
 } from '@yolk-sdk/connectors/microsoft/conformance'
@@ -273,10 +274,20 @@ describe('fail closed', () => {
 
       const rejected: ReadonlyArray<readonly [string, string, unknown, Record<string, string>?]> = [
         // contentId is a fileAttachment property: not selectable on the listing.
-        ['GET', `${user}/messages/${messageId}/attachments?$select=id,contentId`, undefined],
-        ['GET', `${user}/mailFolders/inbox/messages?$select=id,internetMessageHeaders`, undefined],
-        ['GET', `${user}/mailFolders/inbox/messages?$top=0`, undefined],
-        ['GET', `${user}/mailFolders/inbox/messages?$top=abc`, undefined],
+        [
+          'GET',
+          `${user}/messages/${messageId}/attachments?$select=id,contentId`,
+          undefined,
+          immutable
+        ],
+        [
+          'GET',
+          `${user}/mailFolders/inbox/messages?$select=id,internetMessageHeaders`,
+          undefined,
+          immutable
+        ],
+        ['GET', `${user}/mailFolders/inbox/messages?$top=0`, undefined, immutable],
+        ['GET', `${user}/mailFolders/inbox/messages?$top=abc`, undefined, immutable],
         [
           'GET',
           `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/calendarView?startDateTime=2026-09-21T00:00:00Z&endDateTime=2026-09-28T00:00:00Z`,
@@ -305,13 +316,65 @@ describe('fail closed', () => {
         [
           'POST',
           `${user}/messages`,
-          { subject: 'x', from: { emailAddress: { address: 'grace@example.test' } } }
+          { subject: 'x', from: { emailAddress: { address: 'grace@example.test' } } },
+          immutable
+        ],
+        // Fields no fixture writes: cc/bcc, flags, categories, read state on create.
+        ['POST', `${user}/messages`, { subject: 'x', ccRecipients: [] }, immutable],
+        ['POST', `${user}/messages`, { subject: 'x', isRead: false }, immutable],
+        [
+          'PATCH',
+          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}`,
+          { flag: { flagStatus: 'flagged' } },
+          immutable
         ],
         [
           'PATCH',
           `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}`,
-          { subject: 'sent mail' }
+          { categories: ['x'] },
+          immutable
         ],
+        // No fixture sends an Outlook request without the immutable-id preference.
+        ['POST', `${user}/messages`, { subject: 'x' }],
+        [
+          'PATCH',
+          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}`,
+          { isRead: false },
+          { prefer: 'outlook.timezone="UTC"' }
+        ],
+        [
+          'POST',
+          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}/move`,
+          { destinationId: 'deleteditems' }
+        ],
+        ['GET', `${user}/mailFolders/inbox/messages`, undefined],
+        ['GET', `${user}/messages/${messageId}/attachments`, undefined],
+        [
+          'GET',
+          `${user}/messages/${messageId}/attachments/${encodeURIComponent('AAMkAGI2-synthetic-attachment-0001=')}`,
+          undefined
+        ],
+        // HTML bodies: the fixtures write text bodies only.
+        [
+          'POST',
+          `${user}/messages`,
+          { subject: 'x', body: { contentType: 'HTML', content: '<p>x</p>' } },
+          immutable
+        ],
+        // Conditional requests: no fixture sends If-Match.
+        [
+          'DELETE',
+          `${drive}/items/01SYNTHETICEXISTINGFILE000000001`,
+          undefined,
+          { 'if-match': '"{00000001-0000-4000-8000-000000000000},1"' }
+        ],
+        [
+          'PATCH',
+          `${user}/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}`,
+          { isRead: false },
+          { ...immutable, 'if-match': 'W/"CQAAABYAAAAsynthetic0101"' }
+        ],
+        // Conflict behaviors other than fail (or none), and name conflicts, are not emulated.
         [
           'POST',
           `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children`,
@@ -320,7 +383,26 @@ describe('fail closed', () => {
         [
           'POST',
           `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children`,
-          { name: 'file.txt', file: {} }
+          { name: 'x', folder: {}, '@microsoft.graph.conflictBehavior': 'rename' }
+        ],
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children`,
+          { name: 'x', folder: {} }
+        ],
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children`,
+          {
+            name: 'synthetic-existing.txt',
+            folder: {},
+            '@microsoft.graph.conflictBehavior': 'fail'
+          }
+        ],
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children`,
+          { name: 'file.txt', file: {}, '@microsoft.graph.conflictBehavior': 'fail' }
         ],
         [
           'POST',
@@ -329,7 +411,17 @@ describe('fail closed', () => {
         ],
         [
           'POST',
+          `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=rename`,
+          { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } }
+        ],
+        [
+          'POST',
           `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy`,
+          { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } }
+        ],
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=fail`,
           { parentReference: { driveId: 'b!other-drive', id: '01SYNTHETICPARENTFOLDER0000000001' } }
         ],
         [
@@ -359,8 +451,9 @@ describe('fail closed', () => {
         expect(response.status, `${method} ${path} ${JSON.stringify(body)}`).toBe(400)
       }
 
-      // A refused batch runs none of its subrequests.
+      // A refused batch runs none of its subrequests; nothing refused wrote anything.
       expect(target.snapshot()).toEqual(before)
+      expect(target.monitors()).toEqual([])
 
       const invalidJson = await call(target, 'PATCH', `${user}/messages/x`, {
         rawBody: '{not json'
@@ -368,6 +461,94 @@ describe('fail closed', () => {
 
       expect(invalidJson.status).toBe(400)
       expect(await errorCode(invalidJson)).toBe(microsoftEmulatorErrorCodes.invalidBody)
+    })
+  )
+
+  it.effect('rejects unknown nested body keys with 400 before any write', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const before = target.snapshot()
+      const events = `${user}/calendars/${encodeURIComponent(seeds.calendarId ?? '')}/events`
+
+      const event = {
+        subject: 'x',
+        start: { dateTime: '2026-01-05T09:00:00', timeZone: 'UTC' },
+        end: { dateTime: '2026-01-05T09:30:00', timeZone: 'UTC' }
+      }
+
+      const rejected: ReadonlyArray<readonly [string, string, unknown, Record<string, string>?]> = [
+        [
+          'POST',
+          `${user}/messages`,
+          { subject: 'x', body: { contentType: 'Text', content: 'x', unexpected: 1 } },
+          immutable
+        ],
+        [
+          'POST',
+          `${user}/messages`,
+          { toRecipients: [{ emailAddress: { address: 'grace@example.test' }, type: 'to' }] },
+          immutable
+        ],
+        [
+          'POST',
+          `${user}/messages`,
+          { toRecipients: [{ emailAddress: { address: 'grace@example.test', extra: 'x' } }] },
+          immutable
+        ],
+        [
+          'POST',
+          `${user}/messages`,
+          { from: { emailAddress: { address: 'ada@example.test' }, extra: 'x' } },
+          immutable
+        ],
+        [
+          'POST',
+          `${user}/messages`,
+          { from: { emailAddress: { address: 'ada@example.test', extra: 'x' } } },
+          immutable
+        ],
+        ['POST', events, { ...event, body: { contentType: 'text', content: 'x', unexpected: 1 } }],
+        [
+          'POST',
+          events,
+          { ...event, start: { dateTime: '2026-01-05T09:00:00', timeZone: 'UTC', extra: 1 } }
+        ],
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=fail`,
+          { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001', path: '/drive/root:' } }
+        ],
+        [
+          'POST',
+          `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children`,
+          { name: 'x', folder: { childCount: 0 }, '@microsoft.graph.conflictBehavior': 'fail' }
+        ],
+        [
+          'POST',
+          '/v1.0/$batch',
+          {
+            requests: [
+              {
+                id: '1',
+                method: 'POST',
+                url: `/users/ada%40example.test/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0101=')}/permanentDelete`,
+                headers: { Prefer: 'IdType="ImmutableId"', 'x-extra': '1' }
+              }
+            ]
+          }
+        ]
+      ]
+
+      for (const [method, path, body, headers] of rejected) {
+        const response = await call(target, method, path, { body, headers })
+
+        expect(response.status, `${method} ${path} ${JSON.stringify(body)}`).toBe(400)
+        expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      }
+
+      // Nothing was written: not even a counter advanced, and no copy monitor exists.
+      expect(target.snapshot()).toEqual(before)
+      expect(target.monitors()).toEqual([])
     })
   )
 
@@ -386,7 +567,7 @@ describe('fail closed', () => {
 describe('authorization', () => {
   it.effect('needs a non-empty bearer on Graph routes, never on the monitor, and stores none', () =>
     Effect.promise(async () => {
-      const target = await emulator({ copyInProgressPolls: 0 })
+      const target = await emulator()
 
       for (const authorization of [null, 'Bearer ', 'Basic abc']) {
         const response = await call(target, 'GET', `${user}/mailFolders/inbox/messages`, {
@@ -407,7 +588,7 @@ describe('authorization', () => {
       const copied = await call(
         target,
         'POST',
-        `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy`,
+        `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=fail`,
         {
           body: { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } },
           headers: { 'client-request-id': 'synthetic-client-1' }
@@ -603,28 +784,26 @@ describe('calendar', () => {
 })
 
 describe('outlook', () => {
-  it.effect('pages a folder with an opaque nextLink identical to the fixture', () =>
+  it.effect('pages a folder with envelopes and an opaque nextLink identical to the fixture', () =>
     Effect.promise(async () => {
       const target = await emulator()
       const [first, second] = microsoftOutlookPagingNextLinkFixture.exchanges
 
-      const firstPage = await jsonOf(
-        await call(
-          target,
-          'GET',
-          new URL(first?.request.url ?? '').pathname + new URL(first?.request.url ?? '').search,
-          {
-            headers: immutable
-          }
+      const bodyOf = (exchange: typeof first): unknown =>
+        JSON.parse(
+          exchange !== undefined && 'body' in exchange.response
+            ? (exchange.response.body ?? '')
+            : ''
         )
+
+      const firstUrl = new URL(first?.request.url ?? '')
+
+      const firstPage = await jsonOf(
+        await call(target, 'GET', firstUrl.pathname + firstUrl.search, { headers: immutable })
       )
 
-      const expectedFirst = JSON.parse(
-        first !== undefined && 'body' in first.response ? (first.response.body ?? '') : ''
-      )
-
-      expect(field(firstPage, '@odata.nextLink')).toBe(field(expectedFirst, '@odata.nextLink'))
-      expect(field(firstPage, 'value')).toEqual(field(expectedFirst, 'value'))
+      // The whole envelope: @odata.context, value, and the byte-identical @odata.nextLink.
+      expect(firstPage).toEqual(bodyOf(first))
 
       const nextLink = new URL(String(field(firstPage, '@odata.nextLink')))
 
@@ -632,11 +811,7 @@ describe('outlook', () => {
         await call(target, 'GET', nextLink.pathname + nextLink.search, { headers: immutable })
       )
 
-      const expectedSecond = JSON.parse(
-        second !== undefined && 'body' in second.response ? (second.response.body ?? '') : ''
-      )
-
-      expect(secondPage).toEqual({ value: field(expectedSecond, 'value') })
+      expect(secondPage).toEqual(bodyOf(second))
     })
   )
 
@@ -670,65 +845,56 @@ describe('outlook', () => {
     })
   )
 
-  it.effect('keeps immutable ids across moves; default ids change and stop resolving', () =>
-    Effect.promise(async () => {
-      const target = await emulator()
+  it.effect(
+    'keeps the immutable id across moves; requests without the preference fail closed',
+    () =>
+      Effect.promise(async () => {
+        const target = await emulator()
 
-      const withPrefer = await jsonOf(
-        await call(target, 'POST', `${user}/messages`, {
-          body: { subject: 'Draft', body: { contentType: 'Text', content: 'x' }, toRecipients: [] },
-          headers: immutable
-        })
-      )
+        const created = await jsonOf(
+          await call(target, 'POST', `${user}/messages`, {
+            body: {
+              subject: 'Draft',
+              body: { contentType: 'Text', content: 'x' },
+              toRecipients: []
+            },
+            headers: immutable
+          })
+        )
 
-      const immutableId = String(field(withPrefer, 'id'))
+        const immutableId = String(field(created, 'id'))
+        const path = `${user}/messages/${encodeURIComponent(immutableId)}`
 
-      expect(immutableId).toMatch(/synthetic-immutable-0001=$/)
-      expect(field(withPrefer, 'isDraft')).toBe(true)
+        expect(immutableId).toMatch(/synthetic-immutable-0001=$/)
+        expect(field(created, 'isDraft')).toBe(true)
 
-      const moved = await jsonOf(
-        await call(target, 'POST', `${user}/messages/${encodeURIComponent(immutableId)}/move`, {
-          body: { destinationId: 'deleteditems' },
-          headers: immutable
-        })
-      )
+        for (const destinationId of ['deleteditems', 'drafts']) {
+          const moved = await jsonOf(
+            await call(target, 'POST', `${path}/move`, {
+              body: { destinationId },
+              headers: immutable
+            })
+          )
 
-      expect(field(moved, 'id')).toBe(immutableId)
-      expect(field(moved, 'parentFolderId')).toBe('AAMkAGI2-synthetic-deleteditems-folder=')
+          expect(field(moved, 'id')).toBe(immutableId)
+        }
 
-      // Without the preference the answer carries the default id, which a move regenerates.
-      const plainMove = await jsonOf(
-        await call(target, 'POST', `${user}/messages/${encodeURIComponent(immutableId)}/move`, {
-          body: { destinationId: 'drafts' }
-        })
-      )
+        expect(
+          (await call(target, 'PATCH', path, { body: { isRead: false }, headers: immutable }))
+            .status
+        ).toBe(200)
 
-      const restId = String(field(plainMove, 'id'))
-
-      expect(restId).not.toBe(immutableId)
-
-      const movedAgain = await jsonOf(
-        await call(target, 'POST', `${user}/messages/${encodeURIComponent(restId)}/move`, {
+        // No fixture sends an Outlook request without IdType="ImmutableId": no default ids.
+        const plain = await call(target, 'POST', `${path}/move`, {
           body: { destinationId: 'inbox' }
         })
-      )
 
-      expect(field(movedAgain, 'id')).not.toBe(restId)
-      expect(
-        (
-          await call(target, 'PATCH', `${user}/messages/${encodeURIComponent(restId)}`, {
-            body: { isRead: false }
-          })
-        ).status
-      ).toBe(404)
-      expect(
-        (
-          await call(target, 'PATCH', `${user}/messages/${encodeURIComponent(immutableId)}`, {
-            body: { isRead: false }
-          })
-        ).status
-      ).toBe(200)
-    })
+        expect(plain.status).toBe(400)
+        expect(await errorCode(plain)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
+        expect(
+          target.snapshot().messages.find(message => message.id === immutableId)?.parentFolderId
+        ).toBe('AAMkAGI2-synthetic-drafts-folder=')
+      })
   )
 
   it.effect(
@@ -758,9 +924,14 @@ describe('outlook', () => {
           target.snapshot().messages.find(message => message.id === field(draft, 'id'))?.subject
         ).toBe('A')
 
-        // Sequential writes both apply (last writer wins).
-        expect((await call(target, 'PATCH', path, { body: { subject: 'C' } })).status).toBe(200)
-        expect((await call(target, 'PATCH', path, { body: { subject: 'D' } })).status).toBe(200)
+        // Non-overlapping writes both apply (an emulator extrapolation the immutable-id case's
+        // move-then-update sequence needs).
+        for (const subject of ['C', 'D']) {
+          expect(
+            (await call(target, 'PATCH', path, { body: { subject }, headers: immutable })).status
+          ).toBe(200)
+        }
+
         expect(
           target.snapshot().messages.find(message => message.id === field(draft, 'id'))?.subject
         ).toBe('D')
@@ -794,7 +965,8 @@ describe('outlook', () => {
         await call(
           target,
           'GET',
-          `${messagePath}/attachments/${encodeURIComponent('AAMkAGI2-synthetic-attachment-0001=')}`
+          `${messagePath}/attachments/${encodeURIComponent('AAMkAGI2-synthetic-attachment-0001=')}`,
+          { headers: immutable }
         )
       )
 
@@ -803,62 +975,142 @@ describe('outlook', () => {
         contentId: 'image001.png@01DD2E00.00000000',
         contentBytes: 'iVBORw0KGgo='
       })
-      expect((await call(target, 'GET', `${messagePath}/attachments/missing`)).status).toBe(404)
+      expect(
+        (await call(target, 'GET', `${messagePath}/attachments/missing`, { headers: immutable }))
+          .status
+      ).toBe(404)
     })
   )
 
-  it.effect('permanently deletes through $batch, answering per subrequest', () =>
+  it.effect(
+    'permanently deletes through $batch; any subrequest it cannot run refuses the batch',
+    () =>
+      Effect.promise(async () => {
+        const target = await emulator()
+        const before = target.snapshot()
+        const messageId = encodeURIComponent('AAMkAGI2-synthetic-message-0001=')
+
+        const deleteRequest = (
+          id: string,
+          headers: unknown = { Prefer: 'IdType="ImmutableId"' }
+        ) => ({
+          id,
+          method: 'POST',
+          url: `/users/ada%40example.test/messages/${messageId}/permanentDelete`,
+          headers
+        })
+
+        // The same message twice, a subrequest without the preference, or none at all: refused.
+        for (const requests of [
+          [deleteRequest('req-1'), deleteRequest('req-2')],
+          [deleteRequest('req-1', {})],
+          [
+            {
+              id: 'req-1',
+              method: 'POST',
+              url: `/users/ada%40example.test/messages/${messageId}/permanentDelete`
+            }
+          ]
+        ]) {
+          const refused = await call(target, 'POST', '/v1.0/$batch', { body: { requests } })
+
+          expect(refused.status, JSON.stringify(requests)).toBe(400)
+        }
+
+        expect(target.snapshot()).toEqual(before)
+
+        const response = await call(target, 'POST', '/v1.0/$batch', {
+          body: { requests: [deleteRequest('req-1')] }
+        })
+
+        expect(response.status).toBe(200)
+        expect(await jsonOf(response)).toEqual({
+          responses: [{ id: 'req-1', status: 204, headers: {} }]
+        })
+        expect(target.snapshot().attachments).toEqual([])
+
+        // The message is gone: deleting it again refuses the whole batch (no failed subrequests).
+        expect(
+          (
+            await call(target, 'POST', '/v1.0/$batch', {
+              body: { requests: [deleteRequest('req-1')] }
+            })
+          ).status
+        ).toBe(400)
+      })
+  )
+
+  it.effect('never ledgers a credential sent inside a rejected $batch body', () =>
     Effect.promise(async () => {
       const target = await emulator()
-      const messageId = encodeURIComponent('AAMkAGI2-synthetic-message-0001=')
+      const before = target.snapshot()
+      const secret = 'synthetic-subrequest-secret-token'
 
-      const response = await call(target, 'POST', '/v1.0/$batch', {
+      const rejected = await call(target, 'POST', '/v1.0/$batch', {
         body: {
           requests: [
             {
               id: 'req-1',
               method: 'POST',
-              url: `/users/ada%40example.test/messages/${messageId}/permanentDelete`,
-              headers: { Prefer: 'IdType="ImmutableId"' }
-            },
-            {
-              id: 'req-2',
-              method: 'POST',
-              url: `/users/ada%40example.test/messages/${messageId}/permanentDelete`
+              url: `/users/ada%40example.test/messages/${encodeURIComponent('AAMkAGI2-synthetic-message-0001=')}/permanentDelete`,
+              headers: {
+                Prefer: 'IdType="ImmutableId"',
+                Authorization: `Bearer ${secret}`,
+                Cookie: `session=${secret}`,
+                'Proxy-Authorization': `Basic ${secret}`,
+                'X-Api-Key': secret
+              }
             }
           ]
         }
       })
 
-      expect(await jsonOf(response)).toEqual({
-        responses: [
-          { id: 'req-1', status: 204, headers: {} },
+      expect(rejected.status).toBe(400)
+      expect(target.snapshot()).toEqual(before)
+
+      const [entry] = target.ledger.entries()
+
+      expect(entry?.body).toEqual({
+        requests: [
           {
-            id: 'req-2',
-            status: 404,
-            headers: { 'content-type': 'application/json' },
-            body: { error: { code: 'ErrorItemNotFound', message: expect.any(String) } }
+            id: 'req-1',
+            method: 'POST',
+            url: expect.any(String),
+            headers: {
+              Prefer: 'IdType="ImmutableId"',
+              Authorization: '<redacted>',
+              Cookie: '<redacted>',
+              'Proxy-Authorization': '<redacted>',
+              'X-Api-Key': '<redacted>'
+            }
           }
         ]
       })
-      expect(target.snapshot().attachments).toEqual([])
+
+      const recorded = JSON.stringify([
+        target.ledger.entries(),
+        await jsonOf(await target.fetch(new Request(`${origin}/_emulate/ledger`)))
+      ])
+
+      expect(recorded).not.toContain(secret)
+      expect(recorded.toLowerCase()).not.toContain('bearer')
     })
   )
 })
 
 describe('onedrive', () => {
-  it.effect('creates, lists, conflicts, renames, and deletes folders (then 404)', () =>
+  it.effect('creates, lists, and deletes folders (then 404); a name conflict fails closed', () =>
     Effect.promise(async () => {
       const target = await emulator()
       const before = target.snapshot()
       const children = `${drive}/items/01SYNTHETICPARENTFOLDER0000000001/children`
 
-      const create = (conflict: string) =>
+      const create = (name: string) =>
         call(target, 'POST', children, {
-          body: { name: 'New folder', folder: {}, '@microsoft.graph.conflictBehavior': conflict }
+          body: { name, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }
         })
 
-      const created = await jsonOf(await create('fail'))
+      const created = await jsonOf(await create('New folder'))
 
       expect(created).toMatchObject({
         id: '01SYNTHETICITEM00000000000000001',
@@ -874,11 +1126,12 @@ describe('onedrive', () => {
         folder: { childCount: 0 }
       })
 
-      const conflict = await create('fail')
+      // No fixture records a name conflict: fail closed instead of inventing its answer.
+      const conflict = await create('new FOLDER')
 
-      expect(conflict.status).toBe(409)
-      expect(await errorCode(conflict)).toBe('nameAlreadyExists')
-      expect(field(await jsonOf(await create('rename')), 'name')).toBe('New folder 1')
+      expect(conflict.status).toBe(400)
+      expect(await errorCode(conflict)).toBe(microsoftEmulatorErrorCodes.unsupportedValue)
+      expect(field(await jsonOf(await create('Other folder')), 'name')).toBe('Other folder')
 
       expect(await ids(await call(target, 'GET', `${children}?$top=1`))).toEqual([
         '01SYNTHETICITEM00000000000000001'
@@ -958,7 +1211,8 @@ describe('onedrive', () => {
       ])
       expect(copyId).toBeDefined()
 
-      // A second copy under the same name with conflictBehavior fail reports a failed copy.
+      // A second copy under the same name cannot run: no fixture records a failed copy, so the
+      // monitor fails closed (400) instead of inventing a failed status, and nothing is copied.
       yield* oneDriveCopyItemAction
         .executeTyped({
           integration: microsoftConformanceIntegration,
@@ -966,7 +1220,8 @@ describe('onedrive', () => {
             itemId: seeds.copySourceItemId ?? '',
             driveId: seeds.driveId,
             destinationDriveId: seeds.driveId ?? '',
-            destinationParentItemId: seeds.driveParentItemId ?? ''
+            destinationParentItemId: seeds.driveParentItemId ?? '',
+            conflictBehavior: 'fail'
           })
         })
         .pipe(Effect.provide(layer))
@@ -976,12 +1231,19 @@ describe('onedrive', () => {
       expect(second).toMatchObject({ status: 'inProgress', pollsLeft: 2 })
 
       const location = `${sharePoint}/personal/ada_example_test/_api/v2.0/monitor/${second?.id ?? ''}`
+      const itemsBefore = target.snapshot().driveItems
+
+      const secondStatuses = []
 
       for (let attempt = 0; attempt < 3; attempt++) {
-        yield* Effect.promise(() => target.fetch(new Request(location)))
+        const response = yield* Effect.promise(() => target.fetch(new Request(location)))
+
+        secondStatuses.push(response.status)
       }
 
-      expect(target.monitors()[1]).toMatchObject({ status: 'failed' })
+      expect(secondStatuses).toEqual([202, 202, 400])
+      expect(target.monitors()[1]).toMatchObject({ status: 'inProgress', pollsLeft: 0 })
+      expect(target.snapshot().driveItems).toEqual(itemsBefore)
       expect(
         yield* Effect.promise(() =>
           target
@@ -997,6 +1259,218 @@ describe('onedrive', () => {
   )
 })
 
+describe('handler failures', () => {
+  it.effect('a route handler that throws answers a tagged 500 Graph envelope, ledgered', () =>
+    Effect.promise(async () => {
+      // Throws once, on the first clock read after arming: the draft handler's timestamp (the
+      // wrapper and the route registration read the clock only to answer an error).
+      let armed = false
+
+      const target = await emulator({
+        now: () => {
+          if (armed) {
+            armed = false
+            throw new Error('synthetic clock failure')
+          }
+
+          return now
+        }
+      })
+
+      armed = true
+
+      // The core's own error handler (which logs and answers a non-Graph body) is never reached.
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      let logged = 0
+
+      const failed = await call(target, 'POST', `${user}/messages`, {
+        body: { subject: 'x' },
+        headers: immutable
+      }).finally(() => {
+        logged = consoleError.mock.calls.length
+        consoleError.mockRestore()
+      })
+
+      expect(armed).toBe(false)
+      expect(logged).toBe(0)
+      expect(failed.status).toBe(500)
+      expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(failed.headers.get('x-emulator-handler-failed')).toBeNull()
+      expect(await jsonOf(failed)).toEqual({
+        error: {
+          code: microsoftEmulatorErrorCodes.upstreamError,
+          message: expect.any(String),
+          innerError: {
+            date: '2026-09-29T10:00:00',
+            'request-id': '00000000-0000-4000-8000-000000000001',
+            'client-request-id': '00000000-0000-4000-8000-000000000001'
+          }
+        }
+      })
+      expect(target.ledger.entries()).toEqual([
+        expect.objectContaining({
+          route: '/v1.0/users/{userId}/messages',
+          status: 500,
+          evidence: 'unverified',
+          responseError: 'the route handler failed'
+        })
+      ])
+      expect(
+        (
+          await call(target, 'POST', `${user}/messages`, {
+            body: { subject: 'x' },
+            headers: immutable
+          })
+        ).status
+      ).toBe(201)
+    })
+  )
+})
+
+// Values the emulator generates itself, so they cannot equal a synthetic fixture's: version
+// tags (change keys, etags), the ids Graph mints for a new draft (conversation and internet
+// message ids), and the `innerError` request ids and dates (the emulator ledger and clock).
+// Everything else in a fixture body must match exactly, after the ids the emulator minted for
+// created entities replace the fixture's.
+const dynamicKeys: ReadonlySet<string> = new Set([
+  '@odata.etag',
+  'changeKey',
+  'eTag',
+  'cTag',
+  'conversationId',
+  'internetMessageId',
+  'date',
+  'request-id',
+  'client-request-id'
+])
+
+const normalized = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(normalized)
+    : Predicate.isObject(value)
+      ? Object.fromEntries(
+          Object.entries(value).map(([key, entry]) => [
+            key,
+            dynamicKeys.has(key) ? '<dynamic>' : normalized(entry)
+          ])
+        )
+      : value
+
+const substituted = (text: string, ids: ReadonlyMap<string, string>): string => {
+  let result = text
+
+  for (const [from, to] of ids) {
+    result = result
+      .split(from)
+      .join(to)
+      .split(encodeURIComponent(from))
+      .join(encodeURIComponent(to))
+  }
+
+  return result
+}
+
+describe('fixture envelopes', () => {
+  // Replays every Microsoft fixture's requests, in order, against a fresh emulator and compares
+  // each complete response (status, recorded headers, and the whole JSON body including
+  // `@odata.context`) with the fixture. The two concurrent PATCHes (the second recorded as 409)
+  // are sent together.
+  for (const fixture of microsoftConformanceFixtures) {
+    it.effect(fixture.id, () =>
+      Effect.promise(async () => {
+        const target = await emulator({ conflictWindowMs: 200 })
+        const ids = new Map<string, string>()
+        const exchanges = fixture.exchanges
+
+        const send = (exchange: (typeof exchanges)[number]) => {
+          const url = new URL(substituted(exchange.request.url, ids))
+          const headers = new Headers(exchange.request.headers)
+
+          if (url.origin === origin) headers.set('authorization', `Bearer ${token}`)
+
+          const body = exchange.request.body
+
+          return target.fetch(
+            new Request(url, {
+              method: exchange.request.method,
+              headers,
+              body: body === undefined ? undefined : substituted(JSON.stringify(body), ids)
+            })
+          )
+        }
+
+        const compare = async (exchange: (typeof exchanges)[number], response: Response) => {
+          const label = `${exchange.request.method} ${exchange.request.url}`
+          const expected = exchange.response
+
+          expect(response.status, label).toBe(expected.status)
+
+          const location = expected.headers.location
+          const actualLocation = response.headers.get('location')
+
+          if (location !== undefined && actualLocation !== null) {
+            // Monitor URLs differ only in the monitor id.
+            expect(actualLocation.slice(0, actualLocation.lastIndexOf('/')), label).toBe(
+              location.slice(0, location.lastIndexOf('/'))
+            )
+            ids.set(location, actualLocation)
+          }
+
+          for (const [name, value] of Object.entries(expected.headers)) {
+            if (name !== 'location')
+              expect(response.headers.get(name), `${label} ${name}`).toBe(value)
+          }
+
+          const text = await response.text()
+          const recorded = 'body' in expected ? (expected.body ?? '') : ''
+
+          if (recorded === '') {
+            expect(text, label).toBe('')
+
+            return
+          }
+
+          const actual: unknown = JSON.parse(text)
+          const original: unknown = JSON.parse(recorded)
+
+          for (const key of ['id', 'resourceId']) {
+            const from = field(original, key)
+            const to = field(actual, key)
+
+            if (Predicate.isString(from) && Predicate.isString(to) && from !== to) ids.set(from, to)
+          }
+
+          expect(normalized(actual), label).toEqual(
+            normalized(JSON.parse(substituted(recorded, ids)))
+          )
+        }
+
+        for (let index = 0; index < exchanges.length; index++) {
+          const exchange = exchanges[index]
+          const next = exchanges[index + 1]
+
+          if (exchange === undefined) continue
+
+          if (
+            next !== undefined &&
+            next.response.status === 409 &&
+            next.request.method === exchange.request.method &&
+            next.request.url === exchange.request.url
+          ) {
+            const [first, second] = await Promise.all([send(exchange), send(next)])
+
+            await compare(exchange, first)
+            await compare(next, second)
+            index += 1
+          } else {
+            await compare(exchange, await send(exchange))
+          }
+        }
+      })
+    )
+  }
+})
+
 describe('faults', () => {
   it.effect('answer matching requests by method and path, with a count, before any write', () =>
     Effect.promise(async () => {
@@ -1010,14 +1484,22 @@ describe('faults', () => {
         count: 1
       })
 
-      const faulted = await call(target, 'POST', `${user}/messages`, { body: { subject: 'x' } })
+      const faulted = await call(target, 'POST', `${user}/messages`, {
+        body: { subject: 'x' },
+        headers: immutable
+      })
 
       expect(faulted.status).toBe(503)
       expect(faulted.headers.get(emulatorEvidenceHeader)).toBe('unverified')
       expect(await errorCode(faulted)).toBe(microsoftEmulatorErrorCodes.upstreamError)
       expect(target.snapshot()).toEqual(before)
       expect(
-        (await call(target, 'POST', `${user}/messages`, { body: { subject: 'x' } })).status
+        (
+          await call(target, 'POST', `${user}/messages`, {
+            body: { subject: 'x' },
+            headers: immutable
+          })
+        ).status
       ).toBe(201)
       expect(target.faults.list()).toEqual([expect.objectContaining({ remaining: 0, applied: 1 })])
       expect(target.ledger.entries().map(entry => entry.fault)).toEqual(['status', undefined])
@@ -1190,10 +1672,16 @@ describe('seeds and the control plane', () => {
       const target = await emulator()
       const seeded = target.snapshot()
 
-      await call(target, 'POST', `${user}/messages`, { body: { subject: 'x' } })
-      await call(target, 'POST', `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy`, {
-        body: { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } }
+      await call(target, 'POST', `${user}/messages`, {
+        body: { subject: 'x' },
+        headers: immutable
       })
+      await call(
+        target,
+        'POST',
+        `${drive}/items/01SYNTHETICSOURCEFILE00000000001/copy?@microsoft.graph.conflictBehavior=fail`,
+        { body: { parentReference: { id: '01SYNTHETICPARENTFOLDER0000000001' } } }
+      )
       target.faults.add({ kind: 'status', status: 503 })
 
       expect(target.snapshot()).not.toEqual(seeded)

@@ -16,7 +16,12 @@
 import type { EmulatorSnapshot } from '@emulators/core'
 import { Data, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
-import { EmulatorHeaderRecord, EmulatorResponseStatus } from './emulator-http.ts'
+import {
+  EmulatorHeaderRecord,
+  EmulatorResponseStatus,
+  handlerFailedHeader,
+  redactCredentialFields
+} from './emulator-http.ts'
 import {
   matchMicrosoftRoute,
   microsoftApiRoutes,
@@ -144,7 +149,10 @@ export type MicrosoftLedgerEntry = {
   /** Path template of the matched route, for example `/v1.0/users/{userId}/messages`. */
   readonly route?: string
   readonly query: Readonly<Record<string, string>>
-  /** Parsed JSON request body, when there was one. */
+  /**
+   * Parsed JSON request body, when there was one, with every credential-named key's value
+   * (for example a `$batch` subrequest's `Authorization` header) replaced by `<redacted>`.
+   */
   readonly body?: Schema.Json
   /** The `Prefer` header, when sent (never a credential). */
   readonly prefer?: string
@@ -154,8 +162,9 @@ export type MicrosoftLedgerEntry = {
   /** Set when a fault answered the request. */
   readonly fault?: 'status'
   /**
-   * Set when the emulator could not build or produce the response; the request was answered with
-   * a 500 Graph error envelope (still evidence-tagged) and no fault was used up.
+   * Set when the emulator could not build or produce the response, or a route handler threw; the
+   * request was answered with a 500 Graph error envelope (still evidence-tagged) and no fault was
+   * used up.
    */
   readonly responseError?: string
 }
@@ -185,7 +194,7 @@ export type MicrosoftCopyMonitorState = {
   readonly sourceId: string
   readonly destinationParentId: string
   readonly pollsLeft: number
-  readonly status: 'inProgress' | 'completed' | 'failed'
+  readonly status: 'inProgress' | 'completed'
   readonly resourceId?: string
 }
 
@@ -198,12 +207,15 @@ export type MicrosoftEmulatorOptions = {
   readonly baseUrl?: string
   /** Origin of `webUrl` values and monitor URLs. Defaults to `https://synthetic-my.sharepoint.com`. */
   readonly sharePointOrigin?: string
-  /** In-progress monitor answers before a copy completes (integer 0-100, default 1). */
+  /**
+   * In-progress monitor answers before a copy completes (integer 0-100, default 0: the first poll
+   * completes, as the copy fixture records).
+   */
   readonly copyInProgressPolls?: number
   /**
-   * How long (ms, integer 0-10000, default 25) a message write holds its message; another write
-   * to that message arriving meanwhile loses with 409. `0` only rejects writes that overlap the
-   * handler itself.
+   * How long (ms, integer 0-10000, default 25) the first message write to reach the handler holds
+   * its message; an overlapping write to that message gets 409. Non-overlapping writes both apply
+   * (an emulator extrapolation). `0` only rejects writes that overlap the handler itself.
    */
   readonly conflictWindowMs?: number
   /** Drill knobs (tests only): make the emulator disagree with one conformance claim. */
@@ -369,19 +381,15 @@ const isControlPath = (path: string): boolean =>
   path === '/_emulate' || path.startsWith('/_emulate/')
 
 const monitorState = (monitor: CopyMonitor): MicrosoftCopyMonitorState => {
-  const status = monitor.result?.status ?? 'inProgress'
-
   const base: MicrosoftCopyMonitorState = {
     id: monitor.id,
     sourceId: monitor.sourceId,
     destinationParentId: monitor.destinationParentId,
     pollsLeft: monitor.pollsLeft,
-    status
+    status: monitor.resourceId === undefined ? 'inProgress' : 'completed'
   }
 
-  return monitor.result?.status === 'completed'
-    ? { ...base, resourceId: monitor.result.resourceId }
-    : base
+  return monitor.resourceId === undefined ? base : { ...base, resourceId: monitor.resourceId }
 }
 
 /**
@@ -394,8 +402,9 @@ const monitorState = (monitor: CopyMonitor): MicrosoftCopyMonitorState => {
  * credential. Precedence per request: route match (unknown routes fail closed with a 404 Graph
  * error envelope), authorization, JSON body parsing, then the first matching fault (answered
  * before the route runs, so nothing is written), then the stateful route (whose query allowlist
- * is checked before its handler). Every response from an unverified route carries
- * `x-emulator-evidence: unverified`.
+ * and `If-Match` refusal are checked before its handler). A handler that throws answers a 500
+ * Graph error envelope with `responseError` in the ledger. Every response from an unverified route
+ * carries `x-emulator-evidence: unverified`. Ledgered bodies have credential-named keys redacted.
  */
 export const makeMicrosoftEmulator = async (
   options: MicrosoftEmulatorOptions = {}
@@ -437,7 +446,7 @@ export const makeMicrosoftEmulator = async (
       ),
       omitNextLink: options.drills?.omitNextLink ?? false
     },
-    copyInProgressPolls: integerOption('copyInProgressPolls', options.copyInProgressPolls, 1, 100),
+    copyInProgressPolls: integerOption('copyInProgressPolls', options.copyInProgressPolls, 0, 100),
     conflictWindowMs: integerOption('conflictWindowMs', options.conflictWindowMs, 25, 10_000),
     messageLocks: new Set(),
     monitors: new Map(),
@@ -580,6 +589,15 @@ export const makeMicrosoftEmulator = async (
   const contextOf = (request: Request, seq: number): ErrorContext =>
     errorContext(now(), seq, request.headers.get('client-request-id'))
 
+  /** The evidence-tagged fallback when a matched route cannot build or produce its response. */
+  const responseFailed = (request: Request, seq: number): Response =>
+    graphError(
+      contextOf(request, seq),
+      500,
+      codes.upstreamError,
+      'Synthetic: the emulator could not build the response.'
+    )
+
   /** Authorization, body parsing, faults, then the core route (without the credential). */
   const routed = async (
     request: Request,
@@ -587,17 +605,18 @@ export const makeMicrosoftEmulator = async (
     entry: MutableLedgerEntry,
     auth: boolean
   ): Promise<Response> => {
-    const context = contextOf(request, entry.seq)
+    // Built on demand, so the clock is read only when the wrapper answers an error itself.
+    const context = () => contextOf(request, entry.seq)
 
     if (auth && !bearerPattern.test(request.headers.get('authorization') ?? '')) {
-      return graphError(context, 401, codes.unauthenticated, 'Access token is empty.')
+      return graphError(context(), 401, codes.unauthenticated, 'Access token is empty.')
     }
 
     const text = await readText(request)
 
     if (text === undefined) {
       return graphError(
-        context,
+        context(),
         400,
         codes.invalidBody,
         'Synthetic: the request body is unreadable.'
@@ -609,21 +628,22 @@ export const makeMicrosoftEmulator = async (
 
       if (json === undefined) {
         return graphError(
-          context,
+          context(),
           400,
           codes.invalidBody,
           'Synthetic: the request body is not valid JSON.'
         )
       }
 
-      entry.body = json
+      // Redacted before it is stored: a rejected request's body stays in the ledger too.
+      entry.body = redactCredentialFields(json)
     }
 
     const method = request.method.toUpperCase()
     const fault = takeFault(method, url.pathname)
 
     if (fault !== undefined) {
-      const response = applyFault(fault, context)
+      const response = applyFault(fault, context())
 
       entry.fault = 'status'
 
@@ -652,19 +672,18 @@ export const makeMicrosoftEmulator = async (
       init.body = text
     }
 
-    return runtime.fetch(
+    const response = await runtime.fetch(
       new Request(new URL(`${url.pathname}${url.search}`, runtime.baseUrl), init)
     )
-  }
 
-  /** The evidence-tagged fallback when a matched route cannot build or produce its response. */
-  const responseFailed = (request: Request, seq: number): Response =>
-    graphError(
-      contextOf(request, seq),
-      500,
-      codes.upstreamError,
-      'Synthetic: the emulator could not build the response.'
-    )
+    if (response.headers.has(handlerFailedHeader)) {
+      entry.responseError = 'the route handler failed'
+
+      return responseFailed(request, entry.seq)
+    }
+
+    return response
+  }
 
   const emulatedApi = async (request: Request, url: URL): Promise<Response> => {
     const matched = matchMicrosoftRoute(request.method, url.pathname)

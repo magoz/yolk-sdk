@@ -5,8 +5,8 @@
  * drill knob must make its case fail. Tests may import SDK packages; the emulator source never
  * does.
  *
- * These run on the live clock (`it.live`): with the default `copyInProgressPolls: 1` the copy
- * case sees `inProgress` once and sleeps its one-second poll interval before `completed`.
+ * With the default `copyInProgressPolls: 0` the copy case's first monitor poll completes (as the
+ * fixture records), so no case sleeps and these run on the test clock.
  */
 import { Effect, Layer } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/unstable/http'
@@ -32,6 +32,7 @@ import {
   makeMicrosoftEmulator,
   type MicrosoftEmulator,
   type MicrosoftEmulatorDrills,
+  type MicrosoftEmulatorOptions,
   type MicrosoftEmulatorState,
   type MicrosoftLedgerEntry
 } from '../src/microsoft.ts'
@@ -85,7 +86,7 @@ type Emulators = ReadonlyMap<string, MicrosoftEmulator>
 
 /** One fresh emulator per case (same seed), closed when the effect ends. */
 const withEmulators = <A, E, R>(
-  drills: MicrosoftEmulatorDrills,
+  options: MicrosoftEmulatorOptions,
   use: (emulators: Emulators) => Effect.Effect<A, E, R>
 ) =>
   Effect.acquireUseRelease(
@@ -95,7 +96,7 @@ const withEmulators = <A, E, R>(
       for (const testCase of microsoftConformanceCases) {
         emulators.set(
           testCase.id,
-          await makeMicrosoftEmulator({ now: () => now.getTime(), drills })
+          await makeMicrosoftEmulator({ now: () => now.getTime(), ...options })
         )
       }
 
@@ -158,9 +159,9 @@ const writeCaseIds = microsoftConformanceCases
 describe('cross-check A: in-process emulator through the real connector', () => {
   // What "ends at the seed" means: every read case leaves the exact seed; every write-reversible
   // case removes what it created and ends at the seed except the id counters (event, message,
-  // default-id, change-key, and drive-item numbers), which only ever advance so a later create
-  // never reuses a removed id. The test proves each write case moved at least one counter.
-  it.live(
+  // change-key, and drive-item numbers), which only ever advance so a later create never reuses
+  // a removed id. The test proves each write case moved at least one counter.
+  it.effect(
     'passes every Microsoft case; read cases leave the exact seed, write cases differ only in advanced id counters',
     () =>
       withEmulators({}, emulators =>
@@ -266,15 +267,14 @@ describe('cross-check A: in-process emulator through the real connector', () => 
             }
           ])
 
-          // Copy: accepted (202), the monitor once in progress (202, no credential), then
-          // completed (200) with the copy listed; the folder removal takes the copy with it.
+          // Copy: accepted (202), the monitor's first poll completed (200, no credential), as
+          // the fixture records, with the copy listed; the folder removal takes the copy with it.
           const copyLedger = ledgerOf('microsoft.onedrive.copy-accepted-monitor')
 
           expect(requests(copyLedger)).toEqual([
             'GET /v1.0/drives/{driveId}/items/{itemId} 200',
             'POST /v1.0/drives/{driveId}/items/{itemId}/children 201',
             'POST /v1.0/drives/{driveId}/items/{itemId}/copy 202',
-            'GET /personal/{site}/_api/v2.0/monitor/{monitorId} 202',
             'GET /personal/{site}/_api/v2.0/monitor/{monitorId} 200',
             'GET /v1.0/drives/{driveId}/items/{itemId}/children 200',
             'DELETE /v1.0/drives/{driveId}/items/{itemId} 204',
@@ -300,10 +300,12 @@ describe('cross-check A: in-process emulator through the real connector', () => 
 })
 
 describe('cross-check B: emulated over a loopback socket', () => {
-  it.live(
+  // Over a real socket the two concurrent PATCHes arrive on separate connections: a wide
+  // conflict window keeps the second one overlapping the first even on a loaded machine.
+  it.effect(
     'passes every Microsoft case through FetchHttpClient and EmulatedHttpClient',
     () =>
-      withEmulators({}, emulators =>
+      withEmulators({ conflictWindowMs: 500 }, emulators =>
         Effect.gen(function* () {
           const report = yield* runAll(emulators, { kind: 'emulated' }, emulatedLayer)
 
@@ -334,7 +336,7 @@ describe('cross-check B: emulated over a loopback socket', () => {
 })
 
 const drill = (drills: MicrosoftEmulatorDrills) =>
-  withEmulators(drills, emulators => runAll(emulators, { kind: 'in-process' }, inProcessLayer))
+  withEmulators({ drills }, emulators => runAll(emulators, { kind: 'in-process' }, inProcessLayer))
 
 type ExpectedFailure = {
   readonly id: string
@@ -362,7 +364,7 @@ const expectFailures = (report: ConformanceReport, failures: ReadonlyArray<Expec
 describe('disagreement drills (tests-only knobs)', () => {
   // The timestamp-precision case reads the seeded event from the same calendar view, so an empty
   // view also fails it, as a precondition: it cannot check a precision it never sees.
-  it.live(
+  it.effect(
     'calendarRangeEmpty fails the list-range claim (and the precision case precondition)',
     () =>
       Effect.gen(function* () {
@@ -383,7 +385,7 @@ describe('disagreement drills (tests-only knobs)', () => {
   )
 
   // The cancel case creates its event through the same route, so it cannot remove it either.
-  it.live(
+  it.effect(
     'createOmitsId fails the create-returns-id claim (and the cancel case, which creates the same way)',
     () =>
       Effect.gen(function* () {
@@ -403,7 +405,7 @@ describe('disagreement drills (tests-only knobs)', () => {
     60_000
   )
 
-  it.live(
+  it.effect(
     'timestampPrecisionDigits: 3 fails only the timestamp-precision case',
     () =>
       Effect.gen(function* () {
@@ -418,7 +420,7 @@ describe('disagreement drills (tests-only knobs)', () => {
     60_000
   )
 
-  it.live(
+  it.effect(
     'omitNextLink fails only the paging case',
     () =>
       Effect.gen(function* () {

@@ -601,7 +601,8 @@ match?: { method?, path? }, count? }` answers matching requests before the route
 written). As in the Gateway emulator, statuses without a body (1xx, 204, 205), redirects (3xx),
 invalid header names or values, `location`, and framing headers are rejected when the fault is
 added; a fault is used up only once its response is built, and a response that cannot be built
-answers an evidence-tagged 500 `ErrorInformation` with `responseError` in the ledger. For example a 429 with `retry-after: 2` reaches the connector as `fortnox_rate_limited`
+answers an evidence-tagged 500 `ErrorInformation` with `responseError` in the ledger, as does a
+route handler that throws. For example a 429 with `retry-after: 2` reaches the connector as `fortnox_rate_limited`
 with `retryAfterMs: 2000`. The ledger records method, path, route template, query, parsed body,
 status, evidence, the applied fault, and any `responseError`.
 
@@ -648,57 +649,83 @@ await microsoft.close()
 ```
 
 Graph routes (JSON; `Authorization: Bearer <non-empty>`, whose value is never checked, stored,
-forwarded, or ledgered; a missing bearer gets 401 `InvalidAuthenticationToken`):
+forwarded, or ledgered; a missing bearer gets 401 `InvalidAuthenticationToken`). Every Outlook
+route needs `Prefer: IdType="ImmutableId"`, as every Outlook fixture sends it:
 
-| Route (`/v1.0` prefix)                                        | Behavior                                                                                                                |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `GET /users/{userId}/calendars/{calendarId}/calendarView`     | Events overlapping `[startDateTime, endDateTime)`, by start; `$select`, `$top`, `$skip`, `@odata.nextLink`              |
-| `POST /users/{userId}/calendars/{calendarId}/events`          | 201 with the new event and its `id`; attendee-free, single-instance, UTC only                                           |
-| `GET`, `PATCH`, `DELETE /users/{userId}/events/{eventId}`     | Read (`$select`), update, delete (204; later reads 404)                                                                 |
-| `POST /users/{userId}/events/{eventId}/cancel`                | 202 with an empty body; the event is removed, so a later GET or DELETE is a 404                                         |
-| `GET /users/{userId}/mailFolders/{folderId}/messages`         | Newest first; `$select`, `$top`, `$skip`; opaque `@odata.nextLink`                                                      |
-| `POST /users/{userId}/messages`                               | 201 draft in Drafts (never sent)                                                                                        |
-| `PATCH /users/{userId}/messages/{messageId}`                  | `isRead`, `flag`, `categories`; subject, body, and recipients on drafts only                                            |
-| `POST /users/{userId}/messages/{messageId}/move`              | 201 with the moved message (`destinationId` is a folder id or `inbox`/`drafts`/`deleteditems`)                          |
-| `GET /users/{userId}/messages/{messageId}/attachments[/{id}]` | Listing includes inline attachments, never `contentId`; retrieval returns `contentId` and `contentBytes`                |
-| `POST /$batch`                                                | Up to 20 `POST /users/{userId}/messages/{messageId}/permanentDelete` subrequests; anything else refuses the whole batch |
-| `GET /drives/{driveId}/items/{itemId}` and `/children`        | Item read (`$select`) and children by name (`$select`, `$top`, `$skip`)                                                 |
-| `POST /drives/{driveId}/items/{itemId}/children`              | 201 folder; `@microsoft.graph.conflictBehavior` `fail` (409 `nameAlreadyExists`) or `rename`                            |
-| `DELETE /drives/{driveId}/items/{itemId}`                     | 204; the item and its subtree are removed (no recycle bin), later reads 404                                             |
-| `POST /drives/{driveId}/items/{itemId}/copy`                  | 202, empty body, exactly one monitor `Location` on `sharePointOrigin`; conflict behavior `fail` or `rename`             |
+| Route (`/v1.0` prefix)                                        | Behavior                                                                                                   |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `GET /users/{userId}/calendars/{calendarId}/calendarView`     | Events overlapping `[startDateTime, endDateTime)`, by start; `$select`, `$top`, `$skip`, `@odata.nextLink` |
+| `POST /users/{userId}/calendars/{calendarId}/events`          | 201 with the new event and its `id`; attendee-free, single-instance, UTC only                              |
+| `GET`, `PATCH`, `DELETE /users/{userId}/events/{eventId}`     | Read (`$select`), update `subject`, delete (204; later reads 404)                                          |
+| `POST /users/{userId}/events/{eventId}/cancel`                | 202 with an empty body; the event is removed, so a later GET or DELETE is a 404                            |
+| `GET /users/{userId}/mailFolders/{folderId}/messages`         | Newest first; `$select`, `$top`, `$skip`; opaque `@odata.nextLink`                                         |
+| `POST /users/{userId}/messages`                               | 201 draft in Drafts (never sent): `subject`, text `body`, `toRecipients`, the owner as `from`              |
+| `PATCH /users/{userId}/messages/{messageId}`                  | `subject` and `isRead`                                                                                     |
+| `POST /users/{userId}/messages/{messageId}/move`              | 201 with the moved message (`destinationId` is a folder id or `inbox`/`drafts`/`deleteditems`)             |
+| `GET /users/{userId}/messages/{messageId}/attachments[/{id}]` | Listing includes inline attachments, never `contentId`; retrieval returns `contentId` and `contentBytes`   |
+| `POST /$batch`                                                | Up to 20 `permanentDelete` subrequests that can all run (204 each); anything else refuses the whole batch  |
+| `GET /drives/{driveId}/items/{itemId}` and `/children`        | Item read (`$select`) and children by name (`$select`, `$top`, `$skip`)                                    |
+| `POST /drives/{driveId}/items/{itemId}/children`              | 201 folder with a free name; `@microsoft.graph.conflictBehavior` `fail` only                               |
+| `DELETE /drives/{driveId}/items/{itemId}`                     | 204; the item and its subtree are removed (no recycle bin), later reads 404                                |
+| `POST /drives/{driveId}/items/{itemId}/copy`                  | 202, empty body, exactly one monitor `Location` on `sharePointOrigin`; conflict behavior `fail` only       |
 
 The copy monitor, `GET /personal/{site}/_api/v2.0/monitor/{monitorId}` on the SharePoint origin,
-needs no credential (like the real capability URL). It answers `inProgress` (202) for
-`copyInProgressPolls` polls (default 1), then runs the copy once and answers `completed` (200) with
-the new item's `resourceId` (or `failed` when the source, destination, or name no longer allows
-it). Monitors are runtime data like the ledger: not part of `snapshot()`, listed by `monitors()`
-and `/_emulate/state`, and cleared by `reset` and `seed`.
+needs no credential (like the real capability URL). Its first poll runs the copy and answers
+`completed` (200) with the new item's `resourceId`, as the copy fixture records;
+`copyInProgressPolls` (default 0) adds `inProgress` (202) answers before that. Monitors are runtime
+data like the ledger: not part of `snapshot()`, listed by `monitors()` and `/_emulate/state`, and
+cleared by `reset` and `seed`.
 
 Wire behavior the cases claim:
 
-- **Ids.** Every message has an immutable id (answered under `Prefer: IdType="ImmutableId"`) and a
-  default id that each move regenerates; either addresses the message while current, so a moved
-  message keeps its immutable id and the old default id stops resolving.
+- **Ids.** A moved message keeps its immutable id (`Prefer: IdType="ImmutableId"`), and a later
+  update by that id applies.
 - **Times.** Event `dateTime` values are UTC with seven fractional digits
   (`2026-09-23T12:00:00.0000000`) and `timeZone: "UTC"`; calendar reads answer
   `preference-applied: outlook.timezone="UTC"` when asked, and any other time zone is refused.
 - **Paging.** `@odata.nextLink` is the configured `baseUrl`, the request's raw path (so
   `/users/ada%40example.test` keeps its `%40`), and `%24select`/`%24top`/`%24skip`, byte for byte
   as the paging fixture.
-- **Concurrent writes.** A message update or move holds its message for `conflictWindowMs`
-  (default 25) before answering; another write to that message arriving in that window loses with
-  409 `ErrorIrresolvableConflict` and changes nothing, and the first arrival wins. Writes that do
-  not overlap both apply (last writer wins).
+- **Concurrent writes.** Of two overlapping writes to one message, one gets 409
+  `ErrorIrresolvableConflict` and changes nothing.
+- **Envelopes.** Responses carry the fixtures' `@odata.context` (for example
+  `$metadata#users('ada%40example.test')/messages/$entity`), entity fields, and error envelopes;
+  `test/microsoft.test.ts` replays every fixture and compares each complete response, normalizing
+  only emulator-generated values (change keys and etags, draft conversation and internet message
+  ids, created ids, and `innerError` request ids and dates).
+
+Emulator extrapolations (no fixture), kept because the cases need them to run:
+
+- **Concurrency window.** The first write (update or move) to reach the handler holds the message
+  for `conflictWindowMs` (default 25); an overlapping write gets 409; non-overlapping writes both
+  apply (the immutable-id case moves, then updates, the same message).
+- **Id counters.** Created ids (events, drafts, drive items) and change keys come from counters
+  that only advance, so a reversible case ends at the seed except the counters.
+- **Removal.** A deleted or cancelled event, a permanently deleted message (with its attachments),
+  and a deleted folder (with its subtree) are removed from the state.
+- **Paging.** `$top`/`$skip` pages (with the paging fixture's `@odata.nextLink` format) on calendar
+  views, attachment listings, and children listings.
+- **Default time zone.** A calendar request without `Prefer: outlook.timezone` is answered in UTC
+  (every fixture asks for UTC).
+- **Seed values.** Entities no fixture shows (the inbox, the attachment message itself, the drive
+  root and `Sources` folder) are synthesized; `hasAttachments` is answered as seeded (`false` for
+  new drafts), never derived from the attachments.
 
 Anything else fails closed with the Graph error envelope `{ error: { code, message, innerError } }`
 (`innerError` holds a synthetic `date`, `request-id`, and `client-request-id`): unknown routes and
 methods (including `/me` paths) get 404 `SyntheticRouteNotEmulated` and are ledgered; query keys a
 route does not emulate get 400 before the route runs (so a rejected write writes nothing), as do
-`$select` fields, body properties, and values it does not emulate (attendees, non-UTC times,
-send-as `from`, `replace` conflicts, cross-drive copies, file creation). Responses omit
-`@odata.context`, except the monitor. `microsoftEmulatorErrorCodes` lists the codes:
-`ErrorItemNotFound`, `itemNotFound`, and `ErrorIrresolvableConflict` come from the fixtures, a few
-are documented Graph codes, and the `Synthetic*` ones are emulator codes.
+`$select` fields, body properties (including unknown keys inside `body`, recipients,
+`emailAddress`, `start`/`end`, and `parentReference`), and values it does not emulate. That covers
+Outlook requests without the immutable-id preference, `If-Match` conditional requests, conflict
+behaviors other than `fail` (or none), name conflicts, HTML bodies, attendees, non-UTC times,
+send-as `from`, cross-drive copies, file creation, a `$batch` subrequest that could not answer 204,
+and a copy that can no longer run when its monitor is polled (400 at the monitor; no fixture
+records a failed copy). A route handler that throws answers a 500 Graph error envelope, recorded
+in the ledger with `responseError`. `microsoftEmulatorErrorCodes` lists the codes:
+`ErrorItemNotFound`, `itemNotFound`, and `ErrorIrresolvableConflict` come from the fixtures;
+`InvalidAuthenticationToken`, `ErrorInvalidUser`, and `TooManyRequests` (the default 429 fault
+body) are documented Graph codes no fixture records; the `Synthetic*` ones are emulator codes.
 
 State and seeds: the mailbox user, mail folders, messages, file attachments (inline and regular),
 calendars and events, the drive and its items, and id counters. The default seed is the synthetic
@@ -707,15 +734,14 @@ fixture entities with the same ids as `microsoftConformanceFixtureSeeds` (mailbo
 parent folder, and copy source). Pass `seed: { profile?, user?, mailFolders?, messages?,
 attachments?, calendars?, events?, drive?, driveItems? }` (entity lists replace the profile's) with
 profiles `'default'` or `'empty'`. `reset()` restores the current seed and clears the ledger,
-faults, and monitors; `seed(next)` replaces the state; `snapshot()` returns a deep copy. Created
-ids come from counters that only advance, so after a reversible case removes what it created, the
-state equals the seed except the counters.
+faults, and monitors; `seed(next)` replaces the state; `snapshot()` returns a deep copy.
 
 Faults, the ledger, and the control plane mirror the Fortnox emulator: `status` faults (`match`
 by method and raw path, `count`) answer before the route runs and follow the shared status and
 header rules; the default body is a Graph error envelope (`TooManyRequests` for 429, so a 429 with
 `retry-after: 2` reaches the connector as `microsoft_rate_limited` with `retryAfterMs: 2000`). The
-ledger records method, raw path, route template, query, parsed body, the `Prefer` header, status,
+ledger records method, raw path, route template, query, parsed body (credential-named keys at any
+depth, such as a `$batch` subrequest's `Authorization`, are redacted), the `Prefer` header, status,
 evidence, the applied fault, and any `responseError`. Control plane: `/_emulate/ledger`, `faults`,
 `reset`, `state`, `seed`, and `coverage`.
 

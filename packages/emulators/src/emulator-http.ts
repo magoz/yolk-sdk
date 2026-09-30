@@ -1,13 +1,16 @@
 /**
  * HTTP rules shared by the emulators (internal): which statuses and headers a fault or scripted
- * error may answer with.
+ * error may answer with, which request header names carry credentials, and the marker a stateful
+ * core route uses to report a handler that threw.
  *
- * Every emulated response carries a body and emulators never redirect, so 1xx, 204, 205, and
- * every 3xx (including 304) are rejected when the fault or turn is added, as are invalid header
- * names or values, a `location` header, and the framing headers the server sets itself.
+ * Faults and scripted errors always carry a body and never redirect, so 1xx, 204, 205, and every
+ * 3xx (including 304) are rejected when the fault or turn is added, as are invalid header names or
+ * values, a `location` header, and the framing headers the server sets itself. Route statuses
+ * (for example a fixture's bodiless 204 or its 202 with a `Location`) follow the fixtures instead.
  *
  * Runtime-portable (no Node builtins): the emulators are plain Web fetch handlers.
  */
+import { Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 
 /** Why a status cannot answer an emulated request, or `undefined` when it can. */
@@ -68,3 +71,71 @@ const emulatorHeaderRecordProblem = (
 export const EmulatorHeaderRecord = Schema.Record(Schema.String, Schema.String).check(
   Schema.makeFilter(emulatorHeaderRecordProblem)
 )
+
+// Header names that carry credentials or session state: the same rule as the conformance wire
+// helpers (`isCredentialHeaderName` in `@yolk-sdk/conformance`), copied because emulator source
+// never imports SDK packages.
+const credentialHeaderNames: ReadonlySet<string> = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'api-key',
+  'x-goog-api-key',
+  'x-auth-token',
+  'x-access-token',
+  'x-amz-security-token',
+  'x-vercel-oidc-token',
+  'x-csrf-token'
+])
+
+const credentialHeaderPattern = /(api[-_]?key|secret|password|cookie|authorization)/i
+
+const credentialHeaderSegmentPattern = /(^|[-_])(token|key|auth)([-_]|$)/i
+
+/** True for header names that carry credentials or session state. */
+export const isCredentialHeaderName = (name: string): boolean => {
+  const lower = name.toLowerCase()
+
+  return (
+    credentialHeaderNames.has(lower) ||
+    credentialHeaderPattern.test(lower) ||
+    credentialHeaderSegmentPattern.test(lower)
+  )
+}
+
+/** What a redacted credential value becomes in a ledger. */
+export const redactedCredentialValue = '<redacted>'
+
+const isJsonRecord = (value: Schema.Json): value is Schema.JsonObject =>
+  value !== null && Predicate.isObject(value) && !Array.isArray(value)
+
+/**
+ * A JSON value safe to keep in a ledger: every object key that `isCredentialHeaderName` accepts
+ * (for example `requests[].headers.Authorization` in a Graph `$batch` body), at any depth, has
+ * its value replaced by `<redacted>`. Other values are copied unchanged.
+ */
+export const redactCredentialFields = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) return value.map(redactCredentialFields)
+
+  if (!isJsonRecord(value)) return value
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      isCredentialHeaderName(key) ? redactedCredentialValue : redactCredentialFields(entry)
+    ])
+  )
+}
+
+/**
+ * Internal response header a stateful core route sets on the bodiless 500 it answers when its
+ * handler throws. The wrapper never forwards it: it answers its own error envelope 500 instead
+ * and records `responseError` in the ledger.
+ */
+export const handlerFailedHeader = 'x-emulator-handler-failed'
+
+/** The core route's answer when its handler threw (see `handlerFailedHeader`). */
+export const handlerFailedResponse = (): Response =>
+  new Response(null, { status: 500, headers: { [handlerFailedHeader]: '1' } })

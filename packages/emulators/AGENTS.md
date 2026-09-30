@@ -142,11 +142,12 @@ There is no root export or barrel.
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
   write routes are pending (tracking #115), and so are the four Fortnox write routes and the eleven
   Microsoft write routes; expiry dates live only in that file.
-- Emulators never redirect and always send a body: fault and scripted-error statuses exclude 1xx,
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
-  turn is added. All emulators share these validators (`src/emulator-http.ts`, internal, no Node
-  builtins). Build a response before consuming its fault; a response that cannot be built
-  answers an evidence-tagged 500 recorded in the ledger (`responseError`).
+  turn is added. Route statuses follow the fixtures instead (for example a bodiless 204, or a 202
+  with a monitor `Location`). All emulators share these validators (`src/emulator-http.ts`,
+  internal, no Node builtins). Build a response before consuming its fault; a response that cannot
+  be built, or a stateful route handler that throws, answers an evidence-tagged 500 in the
+  service's error envelope, recorded in the ledger (`responseError`).
 - Every fetch-handler emulator is built on `src/emulator-kernel.ts` (the `/email` port emulator is
   not; see below): fault and scripted-turn state (strict
   decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
@@ -262,22 +263,16 @@ There is no root export or barrel.
   no silent fallback. Query keys are allowlisted per route in the route
   table (`queryKeys`, empty by default) and checked before the handler runs, so a rejected write
   never writes. `lastmodified` is not emulated (the state tracks no modification times).
-- Microsoft Graph (`src/microsoft.ts` + `src/microsoft/*`) follows the Fortnox shape: state in the
-  core runtime, ledger/faults/auth/`/_emulate/*` in the wrapper, one route table (evidence, query
-  allowlist, `auth` flag, handler), faults before the route, responses built before a fault is
-  consumed. Emulate only the routes the Microsoft conformance cases need (plus the copy monitor
-  they require); `/me` paths and everything else fail closed with the Graph error envelope
-  `{ error: { code, message, innerError } }` and are ledgered. Route params are matched on the raw
-  path and decoded once (invalid percent-encoding fails closed); `@odata.nextLink` reuses the raw
-  request path on the configured `baseUrl` so `/users/ada%40example.test` keeps its `%40`. The copy
-  monitor (`/personal/{site}/_api/v2.0/monitor/{id}`) lives on the SharePoint origin, needs no
-  credential, and its records are runtime data (not in the state; cleared by reset/seed). Deleted
-  items are removed (no recycle bin) and created ids come from counters that only advance, so the
-  state-equals-seed proof excludes only the counters. The concurrent-write rule is deterministic by
-  arrival order: a message update/move holds its message for `conflictWindowMs`; an overlapping
-  write gets 409 `ErrorIrresolvableConflict` and changes nothing. Drill knobs
-  (`drills.calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`, `omitNextLink`) are
-  tests-only; defaults follow the fixtures.
+- Microsoft Graph (`src/microsoft.ts` + `src/microsoft/*`) follows the Fortnox shape; see the
+  README for its routes and wire claims. Non-obvious rules: behaviour comes only from the
+  conformance fixtures; anything they do not show fails closed (400 `Synthetic*`) unless a case
+  needs it to run, and each such exception is listed under the README's "Emulator extrapolations
+  (no fixture)". Route params are matched on the raw path and decoded once; `@odata.nextLink`
+  reuses the raw path. Created ids and change keys come from counters that only advance, so the
+  state-equals-seed proof excludes only the counters. The first message write to reach the
+  handler holds the message for `conflictWindowMs`; an overlapping write gets 409, while
+  non-overlapping writes both apply. Copy monitors are runtime data (not in the state; cleared by
+  reset/seed). Ledgered bodies redact credential-named keys (`redactCredentialFields`).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -333,9 +328,10 @@ case failing exactly that case; a failed restore reported; fixture and manifest 
 `test/fortnox.test.ts` (routes, quirks, auth, faults through the real connector, profiles, control
 plane), `test/fortnox-conformance.test.ts` (all seven Fortnox cases in-process and over a
 loopback socket, the ledger showing the restores, the state-equals-seed proof for the reversible
-cases, and one drill per knob), `test/microsoft.test.ts` (manifest, fail closed, query allowlist,
-auth, calendar overlap, ids across moves, the concurrent-write rule, attachments, `$batch`,
-folders, the copy monitor through the real connector, faults including 429 `retry-after`, seeds,
-control plane), and `test/microsoft-conformance.test.ts` (all eleven Microsoft cases in-process and
-over a loopback socket on the live clock, the state-equals-seed-except-counters proof, and the
-drills). Loopback sockets only; never call real services.
+cases, and one drill per knob), `test/microsoft.test.ts` (manifest, fail closed including nested
+body keys, query allowlist, auth, credential redaction, calendar overlap, immutable ids, the
+concurrent-write rule, attachments, `$batch`, folders, the copy monitor through the real
+connector, handler failures, every fixture's complete envelopes, faults including 429
+`retry-after`, seeds, control plane), and `test/microsoft-conformance.test.ts` (all eleven
+Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
+proof, and the drills). Loopback sockets only; never call real services.

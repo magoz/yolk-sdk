@@ -16,7 +16,11 @@
 import type { EmulatorSnapshot } from '@emulators/core'
 import { Data, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
-import { EmulatorHeaderRecord, EmulatorResponseStatus } from './emulator-http.ts'
+import {
+  EmulatorHeaderRecord,
+  EmulatorResponseStatus,
+  handlerFailedHeader
+} from './emulator-http.ts'
 import {
   errorInformation,
   fortnoxApiRoutes,
@@ -135,8 +139,9 @@ export type FortnoxLedgerEntry = {
   /** Set when a fault answered the request. */
   readonly fault?: 'status'
   /**
-   * Set when the emulator could not build or produce the response; the request was answered with
-   * a 500 `ErrorInformation` (still evidence-tagged) and no fault was used up.
+   * Set when the emulator could not build or produce the response, or a route handler threw; the
+   * request was answered with a 500 `ErrorInformation` (still evidence-tagged) and no fault was
+   * used up.
    */
   readonly responseError?: string
 }
@@ -536,9 +541,17 @@ export const makeFortnoxEmulator = async (
       init.body = text
     }
 
-    return runtime.fetch(
+    const response = await runtime.fetch(
       new Request(new URL(`${url.pathname}${url.search}`, runtime.baseUrl), init)
     )
+
+    if (response.headers.has(handlerFailedHeader)) {
+      entry.responseError = 'the route handler failed'
+
+      return responseFailed()
+    }
+
+    return response
   }
 
   const emulatedApi = async (request: Request, url: URL): Promise<Response> => {
