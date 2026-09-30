@@ -668,6 +668,7 @@ describe('repo emulator manifests', () => {
       // At most 60 days from 2026-09-30.
       expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
       expect(entry.reason).toContain('owner-approved')
+      expect(entry.reason).toContain('live run of microsoft.')
     }
   })
 
@@ -689,8 +690,26 @@ describe('repo emulator manifests', () => {
       expect(failedRoutes(report, 'microsoft')).toEqual(microsoftWriteRoutes)
     }
 
-    // Before its own expiry, an expired Fortnox allowance does not fail the Microsoft routes.
-    expect(failedRoutes(repoCheck(new Date('2026-11-01T00:00:00.000Z')), 'microsoft')).toEqual([])
+    // The day after the last Fortnox allowance expires (dates from the pending file), the Fortnox
+    // routes fail while the Microsoft routes, still within their own allowance, do not.
+    const fortnoxExpiry = repoPending.entries
+      .filter(entry => entry.manifest === 'fortnox')
+      .map(entry => entry.expires)
+      .toSorted()
+      .at(-1)
+
+    expect(fortnoxExpiry).toBeDefined()
+
+    const dayAfterFortnoxExpiry = new Date(
+      Date.parse(`${fortnoxExpiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
+    )
+
+    expect(dayAfterFortnoxExpiry.toISOString().slice(0, 10) <= (microsoftExpiry ?? '')).toBe(true)
+
+    const betweenExpiries = repoCheck(dayAfterFortnoxExpiry)
+
+    expect(failedRoutes(betweenExpiries, 'fortnox')).toEqual(fortnoxWriteRoutes)
+    expect(failedRoutes(betweenExpiries, 'microsoft')).toEqual([])
   })
 
   it('the CLI clock is today unless the test-only --now flag sets it', () => {

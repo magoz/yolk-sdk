@@ -20,9 +20,10 @@
  * `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After the
  * run it builds `verified` fixtures (today's date, the account label) for the cases that passed,
  * re-runs each case on replay against its new fixture, and renders every fixture module plus the
- * seeds module. Only if every recorded case verified and passed the secret scan, and no rendered
- * file or review-checklist line carries the live access token (the shared `textContainsAccessToken`
- * check), does it write them, all or nothing, to a NEW run directory under the GITIGNORED root
+ * seeds module. Only if every recorded case verified and passed the secret scan, no recorded
+ * exchange carries the live access token (the shared `recordingContainsAccessToken`, before
+ * rendering), and no rendered file or review-checklist line does either (`textContainsAccessToken`),
+ * does it write them, all or nothing, to a NEW run directory under the GITIGNORED root
  * `.conformance-recordings/microsoft/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`: it writes the whole batch
  * into a sibling temp directory and publishes it with one rename, refuses an existing destination,
  * and leaves no run directory when anything fails. It never writes committed sources. Like the
@@ -104,6 +105,7 @@ import {
   processCliIo,
   processLiveRunIo,
   processSignals,
+  recordingContainsAccessToken,
   runInterruptibly,
   stderrCleanupReporter,
   textContainsAccessToken,
@@ -591,6 +593,14 @@ export class MicrosoftRunFailed extends Schema.TaggedError<MicrosoftRunFailed>()
   { message: Schema.String }
 ) {}
 
+/** Why `--record` refuses a recording in which the live access token appears. */
+export const recordedTokenRefusal =
+  'A recorded exchange contains the live access token; nothing was written'
+
+/** Why `--record` refuses staged files or checklist lines that would contain the token. */
+export const renderedTokenRefusal =
+  'The staged files or the review checklist would contain the live access token; nothing was written'
+
 /** Gitignored root of staged recordings; one new directory per `--record` run. */
 export const recordingsRoot = join(workspaceRoot, '.conformance-recordings', 'microsoft')
 
@@ -962,15 +972,17 @@ export const recordingReviewChecklist = (
 }
 
 /**
- * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan), then
- * renders every fixture module, the seeds module, and the review checklist, refuses them if any
- * carries the live access token (`textContainsAccessToken`), writes the files into a sibling temp
- * directory (`<root>/.tmp-<run>`), and publishes it to `options.stagingDir` with one rename.
- * All or nothing: any failure (verification, the token check, a write, or the rename) leaves no
- * staging directory, and the temp directory is removed (best effort). A staging directory that is
- * not a direct child of the recordings root, that already exists, or that is not physically inside
- * the containment root (a symlinked or redirected component, checked before and after creating the
- * temp directory and again before the rename) is refused. Returns `undefined` when no case passed.
+ * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan),
+ * refuses the recordings if any exchange carries the live access token
+ * (`recordingContainsAccessToken`), then renders every fixture module, the seeds module, and the
+ * review checklist, refuses them if any carries the token (`textContainsAccessToken`), writes the
+ * files into a sibling temp directory (`<root>/.tmp-<run>`), and publishes it to
+ * `options.stagingDir` with one rename. All or nothing: any failure (verification, either token
+ * check, a write, or the rename) leaves no staging directory, and the temp directory is removed
+ * (best effort). A staging directory that is not a direct child of the recordings root, that
+ * already exists, or that is not physically inside the containment root (a symlinked or redirected
+ * component, checked before and after creating the temp directory and again before the rename) is
+ * refused. Returns `undefined` when no case passed.
  */
 export const stageRecordings = (
   report: ConformanceReport,
@@ -1041,6 +1053,17 @@ export const stageRecordings = (
       return undefined
     }
 
+    // The recorded exchanges themselves, before rendering: every URL, header, text body, and JSON
+    // string value and key (parsed, so JSON escapes are undone); a body that is not UTF-8 text is
+    // searched as text rather than refused.
+    if (
+      recorded.some(({ fixture }) =>
+        recordingContainsAccessToken(fixture.exchanges, inputs.accessToken)
+      )
+    ) {
+      return yield* new MicrosoftRunFailed({ message: recordedTokenRefusal })
+    }
+
     const recordedIds = recorded.map(({ testCase }) => testCase.id)
 
     const seeds = mergedFixtureSeeds(microsoftConformanceFixtureSeeds, inputs.seeds, recordedIds)
@@ -1070,10 +1093,7 @@ export const stageRecordings = (
         textContainsAccessToken(text, inputs.accessToken)
       )
     ) {
-      return yield* new MicrosoftRunFailed({
-        message:
-          'The staged files or the review checklist would contain the live access token; nothing was written'
-      })
+      return yield* new MicrosoftRunFailed({ message: renderedTokenRefusal })
     }
 
     yield* refuseExisting
@@ -1199,11 +1219,12 @@ const parseCliArgs = (): RunOptions | undefined => {
 }
 
 /**
- * What an interrupted Microsoft run may have left behind, for the interruption and forced-exit
- * messages of `runInterruptibly` (this runner has no leftover lookup).
+ * What an interrupted Microsoft run may have left behind and where to look, for the interruption
+ * and forced-exit messages of `runInterruptibly` (this runner has no leftover lookup). The mailbox
+ * and calendar seeds are optional, and the immutable-id case moves its draft to Deleted Items.
  */
 export const microsoftRecoveryAdvice =
-  'Case-created items may remain: look for yolk-conformance events in the seeded calendar, drafts in the seeded mailbox, and folders under the seeded parent folder, and remove them by hand.'
+  "Case-created items may remain; their subjects and names start with yolk-conformance. Look for messages in the --mailbox mailbox (without it, the token user's mailbox), in Drafts and Deleted Items too; events in the --calendar calendar (without it, the default calendar); and folders under the --drive-parent folder. Remove them by hand (removed folders also sit in the OneDrive recycle bin)."
 
 /** `runInterruptibly` options of the Microsoft runner: its recovery advice; its cases clean up. */
 export const microsoftInterruptOptions: Pick<
