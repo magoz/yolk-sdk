@@ -29,21 +29,26 @@ import {
   microsoftOneDriveCreateFolderFixture,
   microsoftOutlookPagingNextLinkFixture
 } from '../../packages/connectors/src/microsoft/conformance/index.ts'
-import type { CliIo, CliSignal, SignalSource } from '../connector-conformance-internal.ts'
+import {
+  liveInCiMessage,
+  nodeRecordingWriter,
+  ownerApprovalRequiredMessage,
+  type CliIo,
+  type CliSignal,
+  type RecordingWriter,
+  type SignalSource
+} from '../connector-conformance-internal.ts'
 import {
   accessTokenRequiredMessage,
   defaultRunOptions,
   dryRunReport,
   liveAccountRequiredMessage,
   liveCredential,
-  liveInCiMessage,
   liveInputs,
   liveTarget,
   mergedFixtureSeeds,
   microsoftCaseSpecs,
   microsoftRecoveryAdvice,
-  nodeRecordingWriter,
-  ownerApprovalRequiredMessage,
   parseRunArgs,
   planMicrosoftRun,
   recordingReviewChecklist,
@@ -54,8 +59,7 @@ import {
   runMicrosoftInterruptibly,
   stageRecordings,
   staleSharedSeeds,
-  type LiveInputs,
-  type RecordingWriter
+  type LiveInputs
 } from '../run-microsoft-conformance.ts'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')

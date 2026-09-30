@@ -4,8 +4,9 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Draft create, move to Deleted Items keeping the immutable id, mark read by the original id, then the permanent-delete batch.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a replacement in a
- * gitignored directory; see the script header for the manual scrub-and-promote step.
+ * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a
+ * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
+ * step.
  */
 export const microsoftOutlookImmutableIdFixture: WireFixture = {
   id: 'microsoft.outlook.immutable-id-survives-move.synthetic',

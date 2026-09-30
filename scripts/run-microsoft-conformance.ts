@@ -9,9 +9,9 @@
  * cases through raw Graph requests over the same connector ports (the connector has no calendar
  * actions yet). Refused whenever `CI` is non-empty (`0` and `false` included) and without
  * `--owner-approved` (the repository owner's explicit approval), in both cases before any
- * credential read. Requires `MICROSOFT_ACCESS_TOKEN` (environment only, never a flag; a delegated token for
- * the practice user with Mail.ReadWrite, Calendars.ReadWrite, and Files.ReadWrite) and the seed
- * identities of every case that will run (flags or environment, see `usage`). The label is
+ * credential read. Requires `MICROSOFT_ACCESS_TOKEN` (environment only, never a flag; a delegated
+ * token for the practice user with Mail.ReadWrite, Calendars.ReadWrite, and Files.ReadWrite) and the
+ * seed identities of every case that will run (flags or environment, see `usage`). The label is
  * synthetic and non-identifying (for example `practice`): it is printed in reports and recorded in
  * fixtures. Read cases always run; `--allow-writes reversible` adds the write-reversible cases,
  * which create their own event, draft, or folder and always remove it again. There are no
@@ -111,8 +111,6 @@ import {
   type SignalSource
 } from './connector-conformance-internal.ts'
 import { isCiEnvironment, workspaceRoot } from './fixture-probe-internal.ts'
-
-export { liveInCiMessage, nodeRecordingWriter, ownerApprovalRequiredMessage, type RecordingWriter }
 
 type SeedSource = {
   readonly key: MicrosoftConformanceSeedKey
@@ -356,9 +354,9 @@ ${microsoftSeedSources
 
 MICROSOFT_ACCESS_TOKEN is read from the environment only: a delegated token for the practice
 user (Mail.ReadWrite, Calendars.ReadWrite, Files.ReadWrite). Use a practice tenant, never a real
-one, and never run live in CI. Recordings are never written over committed fixtures: scrub the staged files, copy them into
-packages/connectors/src/microsoft/conformance/, and update the Microsoft conformance tests in the
-same change (fixture ids, evidence, and account change).`
+one, and never run live in CI. Recordings are never written over committed fixtures: scrub the
+staged files, copy them into packages/connectors/src/microsoft/conformance/, and update the
+Microsoft conformance tests in the same change (fixture ids, evidence, and account change).`
 
 /**
  * Parse CLI arguments (without the node/script prefix) and seed environment variables. Throws on

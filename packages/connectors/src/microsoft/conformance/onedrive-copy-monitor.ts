@@ -4,8 +4,9 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Source read, folder create, copy accepted with a monitor `Location`, a completed status poll, the folder listing, and the folder removal.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a replacement in a
- * gitignored directory; see the script header for the manual scrub-and-promote step.
+ * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a
+ * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
+ * step.
  */
 export const microsoftOneDriveCopyMonitorFixture: WireFixture = {
   id: 'microsoft.onedrive.copy-accepted-monitor.synthetic',

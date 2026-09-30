@@ -4,8 +4,9 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * The seeded range view and the seeded event, both with seven-digit fractional UTC `dateTime` values.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a replacement in a
- * gitignored directory; see the script header for the manual scrub-and-promote step.
+ * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a
+ * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
+ * step.
  */
 export const microsoftCalendarTimestampPrecisionFixture: WireFixture = {
   id: 'microsoft.calendar.timestamp-precision.synthetic',

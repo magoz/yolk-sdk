@@ -4,8 +4,9 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Folder create (201), parent listing including it, DELETE (204), and GET of the deleted folder (404).
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a replacement in a
- * gitignored directory; see the script header for the manual scrub-and-promote step.
+ * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a
+ * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
+ * step.
  */
 export const microsoftOneDriveCreateFolderFixture: WireFixture = {
   id: 'microsoft.onedrive.create-folder-roundtrip.synthetic',
