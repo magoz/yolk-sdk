@@ -1,0 +1,89 @@
+---
+title: Notion conformance
+description: Experimental Notion conformance cases for tests and hand-run practice-workspace checks.
+---
+
+Notion actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#notion). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice Notion workspace.
+
+`@yolk-sdk/connectors/notion/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Every case runs the real connector actions over the connector ports
+and checks one wire claim the connector relies on. **Every connector action sends
+`Notion-Version: 2025-09-03`**; the pinned-version case observes that header at the
+`ConnectorHttpClient` port and sends no request of its own. The claims are as currently understood;
+none is observed live yet.
+
+| Case id                                | Safety             | Seeds                           | Claim (as currently understood)                                                                                                                                |
+| -------------------------------------- | ------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notion.search.cursor-paging`          | `read`             | `searchQuery`                   | `page_size: 1` answers `has_more` and a string `next_cursor`; following it returns new pages and ends with `next_cursor: null` present                         |
+| `notion.api.pinned-version-accepted`   | `read`             | none                            | `notion.get_bot_user` sends one request carrying `Notion-Version: 2025-09-03`, and Notion answers the bot user                                                 |
+| `notion.errors.error-envelope`         | `read`             | none                            | Errors carry `{ object: "error", status, code, message }` (404 `object_not_found`, 400 `validation_error`); the connector keeps the status and the message     |
+| `notion.pages.title-plain-text`        | `read`             | `titlePageId`, `titlePageTitle` | A page has one `title` property of rich text items with `type: "text"` and `plain_text`, joining to the seeded title                                           |
+| `notion.blocks.children-cursor-paging` | `read`             | `blocksPageId`                  | `page_size=2` block children answer `object: "list"`, `type: "block"`, `has_more`, and `next_cursor`; following it returns the rest, ending with a null cursor |
+| `notion.pages.property-item-paging`    | `read`             | `propertyPageId`, `propertyId`  | Notion accepts a `%XX`-escaped property id percent-encoded again (unverified), and a long property pages item by item (`type: "property_item"`)                |
+| `notion.data-sources.database-split`   | `read`             | `databaseId`                    | Under 2025-09-03 a database lists its `data_sources`; the data source holds the schema, and its rows have a `data_source_id` parent (parent shapes unverified) |
+| `notion.pages.archive-in-trash`        | `write-reversible` | `parentPageId`                  | `archived: true` answers `archived: true` (`in_trash` not checked); `notion.get_page` still answers (not 404) with `archived: true` (unverified)               |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- Notion accepts a property id that already contains `%XX` escapes when the connector
+  percent-encodes it again (`Syn%3Ap` sent as `Syn%253Ap`); the property's own `next_url` uses the
+  single-encoded form. The `propertyId` seed must contain such an escape and be read from the page.
+- A data source's `parent` is `{ type: "database_id", database_id }`.
+- A data source row's `parent` is `{ type: "data_source_id", data_source_id }`.
+- Under 2025-09-03 an archive response still carries `archived` next to `in_trash`.
+- A trashed page stays readable through `notion.get_page` (not 404).
+
+`NotionConformanceConfig` holds the seed ids (every seeded page and database must be shared with the
+integration). Cases never hard-code account data, and a missing seed fails the case with a
+`precondition:` mismatch before any request. Credentials bind through
+`notionConformanceIntegration` (`notion.api_token`, credential ref `notion.conformance`).
+
+The write case creates its own page (titled with the `yolk-conformance` marker) under
+`parentPageId` and registers its id for cleanup before any claim runs; the create and the
+registration are not interruptible, and neither the runner nor the bridges set a request timeout,
+so a hanging create delays an interruption until it answers. Any response showing the page trashed
+(`archived` or `in_trash` true), or a not-found read after a successful archive, counts as trashed,
+so an unverified readback claim that turns out false fails the claim, not the cleanup. Otherwise
+the cleanup trashes the page (also after a failed assertion or a fiber interruption) and checks that
+`notion.get_page` reports `archived: true`. A failed cleanup fails the case with `NotionConformanceRestoreFailed`, and an
+ambiguous create (a transport or decoding failure, no status, or HTTP 5xx) fails with
+`NotionConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry manual-recovery
+advice. Trashed pages stay restorable in the workspace trash until they are deleted from there.
+
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber, and the cleanup
+is attempted before the process exits; no further case starts. The cleanup is not confirmed:
+
+- A cleanup that fails, or a create whose outcome is unknown, while the case is being interrupted
+  prints its full message as a WARN line (through the case's `ConformanceCleanupReporter`). The run
+  then ends with that error (exit code 1).
+- Only when the run ends as a plain interruption (exit code 130) does the runner repeat the
+  leftover search below.
+
+One Ctrl-C reaches every process of the foreground group, and the wrappers relay it, so further
+signals within a second count as the same keypress. A signal a second or more later exits at once
+and may skip the cleanup, as does killing the process. Run live runs as
+`pnpm conformance:notion …` (pnpm waits for the runner and exits with its code; observed with
+pnpm 11) or `./node_modules/.bin/tsx scripts/run-notion-conformance.ts …`. Avoid
+`pnpm exec tsx …`: on Ctrl-C it returns to the prompt at once (observed), so the WARN and leftover
+lines print after the prompt, `$?` is pnpm's own code rather than the runner's, and a second Ctrl-C
+no longer reaches the runner; stop it with `kill -TERM <pid>`, using the pid the first-signal
+message prints, at least a second after the first signal.
+
+Before the write case, the runner (`findNotionConformanceLeftovers`) searches read-only for pages titled
+`yolk-conformance page...` that are not in the trash and prints a WARN line for each. The search is
+bounded and best effort: it reads at most 10 search pages of 100 results, and Notion's search index
+can lag behind recent writes. It never trashes them. Check each one, and
+trash it by hand when no run is using it.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`). In this repository,
+`pnpm conformance:notion` dry-runs by default; `--live --owner-approved --account <label>` (refused
+whenever `CI` is non-empty) needs `NOTION_API_TOKEN` and the seeds, `--allow-writes reversible` adds
+the write case, and `--record` stages verified recordings only in the gitignored
+`.conformance-recordings/notion/` for manual scrubbing and promotion. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

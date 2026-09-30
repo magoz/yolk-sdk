@@ -160,6 +160,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './afloat',
       './conformance',
       './dropbox',
+      './dropbox/conformance',
       './email',
       './email/conformance',
       './figma',
@@ -171,6 +172,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './microsoft',
       './microsoft/conformance',
       './notion',
+      './notion/conformance',
       './r2-storage',
       './telegram',
       './todoist'

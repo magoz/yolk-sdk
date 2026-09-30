@@ -311,6 +311,7 @@ connector cases run the real connector actions over replay, an emulator, or a ho
 | `connectorBinaryHttpClientFromEffectHttpClientLayer`      | GET-only `ConnectorBinaryHttpClient`; buffers, then fails oversize 200s (`response_too_large`) and truncates error bodies                                                                                                   |
 | `connectorBinaryWriteHttpClientFromEffectHttpClientLayer` | `ConnectorBinaryWriteHttpClient` with `uploadSession`: POST/PUT bytes, and PUT ranges / empty DELETE cancellation to pre-authenticated session URLs; refuses bad requests and credential headers on sessions before sending |
 | `connectorHttpClientsFromEffectHttpClientLayer`           | All three bridges                                                                                                                                                                                                           |
+| `ConformanceCleanupReporter`                              | `Context.Reference` receiving cleanup problems a write case raises while being interrupted; default `Effect.logWarning`, live runners print WARN lines                                                                      |
 | `staticCredentialResolverLayer(credentials)`              | `CredentialResolver` returning one `RuntimeCredential` for every slot, or credentials keyed by slot id (missing: `credential_missing`)                                                                                      |
 
 These bridges are **not production adapters**. They enforce no streamed byte limits, redirect,
@@ -356,3 +357,53 @@ responses are decoded with each method's output schema; `notEmulated` fails clos
 `makeEmailReplayBackend` replays the fixtures: each fixture answers at most once, and a call takes
 the first unused matching fixture. Testing only, never a production
 adapter. See [Email conformance cases](../connectors/email#conformance-cases).
+
+`@yolk-sdk/connectors/dropbox/conformance` exports eight Dropbox cases (`dropboxConformanceCases`),
+their synthetic fixtures (`dropboxConformanceFixtures`), and the seeds they replay with
+(`dropboxConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`,
+`ConnectorBinaryWriteHttpClient` (the upload case runs `createDropboxFile` / `updateDropboxFile`),
+`CredentialResolver`, and `DropboxConformanceConfig` (seed paths in a practice Dropbox account).
+Every case runs the real connector actions or host-only helpers. Write cases work only inside an
+invocation-unique `yolk-conformance-<runId>-*` folder (the `runId` seed; the live runner generates a
+fresh one each time, so concurrent runs are supported only through distinct run ids). A definitive
+create rejection deletes nothing; an ambiguous create fails with `DropboxConformanceActionFailed`
+(`createOutcome: 'unknown'`) naming the exact path; successful creates are deleted by id and
+verified, failing with `DropboxConformanceRestoreFailed` when that fails; and a path outside the
+case folder is never deleted (`DropboxConformanceCleanupRefused`). Every write inside the case
+folder (the create, copy, move, upload, and delete) is not interruptible, and the runner has no
+request timeout. `findDropboxConformanceLeftovers` lists, read-only, the folders under
+`workFolderPath` whose names start with `dropboxConformanceRunFolderPrefix`
+(`yolk-conformance-run-`; every valid `runId` starts with `run-`). See
+[Dropbox conformance cases](../connectors/dropbox#conformance-cases).
+
+`@yolk-sdk/connectors/notion/conformance` exports eight Notion cases (`notionConformanceCases`),
+their synthetic fixtures (`notionConformanceFixtures`), and the seeds they replay with
+(`notionConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `CredentialResolver`, and
+`NotionConformanceConfig` (seed ids in a practice Notion workspace). Every case runs the real
+connector actions; the pinned-version case observes the outgoing `Notion-Version` at the
+`ConnectorHttpClient` port. The write case creates its own page and moves it to the trash again,
+failing with `NotionConformanceRestoreFailed` when that fails; an ambiguous create fails with
+`NotionConformanceActionFailed` (`createOutcome: 'unknown'`) and manual-recovery advice. The create
+is not interruptible and the runner has no request timeout. `findNotionConformanceLeftovers`
+searches, read-only, bounded (at most 10 search pages), and best effort, for untrashed
+`yolk-conformance page` pages; `findDropboxConformanceLeftovers` likewise reads at most 50
+listing pages. See
+[Notion conformance cases](../connectors/notion#conformance-cases).
+
+When a case is interrupted, the run no longer produces a report, and no further case starts. So
+Dropbox and Notion write cases also hand a cleanup problem raised during the interruption (a
+failed cleanup, or a create whose outcome is unknown) to `ConformanceCleanupReporter` from
+`@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
+`Effect.logWarning`. With the Effect version this repository pins, such a run ends with that
+failure itself (no Interrupt in the cause), and a run whose cleanup succeeded ends as a plain
+interruption; drills in the connector tests pin both, so an Effect upgrade that changes this fails
+visibly. The live runners print
+reported problems to stderr as WARN lines. Their first SIGINT/SIGTERM interrupts the run fiber so
+the cleanup is attempted; duplicates within a second (one Ctrl-C reaches every process of the
+foreground group, and the wrappers relay it) are ignored, and a later signal exits at once. Only
+after an interrupt-only exit (code 130) does the read-only leftover lookup run again and list what
+is still present; a run that ends with a cleanup failure exits 1 with that failure's message. Run
+live runs as `pnpm conformance:<provider>` or with `tsx` directly: `pnpm exec tsx` returns to the
+prompt at once on Ctrl-C (observed), so later output prints after the prompt, `$?` is pnpm's own
+code, and the runner is then stopped with `kill -TERM <pid>` (the first-signal message prints the
+pid).

@@ -14,27 +14,29 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                      | Purpose                                                                                                       |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                       | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types        |
-| `@yolk-sdk/connectors/agent`                 | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                             |
-| `@yolk-sdk/connectors/afloat`                | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                   |
-| `@yolk-sdk/connectors/conformance`           | Experimental, conformance/testing only: Effect `HttpClient` bridges to the HTTP ports and a static resolver   |
-| `@yolk-sdk/connectors/dropbox`               | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update     |
-| `@yolk-sdk/connectors/email`                 | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port    |
-| `@yolk-sdk/connectors/email/conformance`     | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge |
-| `@yolk-sdk/connectors/figma`                 | Figma remote MCP auth action and OAuth constants                                                              |
-| `@yolk-sdk/connectors/fortnox`               | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update |
-| `@yolk-sdk/connectors/fortnox/conformance`   | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                            |
-| `@yolk-sdk/connectors/github`                | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                |
-| `@yolk-sdk/connectors/google`                | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                           |
-| `@yolk-sdk/connectors/linkedin-search`       | Exa people search and Enrich Layer profile/email actions                                                      |
-| `@yolk-sdk/connectors/microsoft`             | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments      |
-| `@yolk-sdk/connectors/microsoft/conformance` | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                    |
-| `@yolk-sdk/connectors/notion`                | Notion search/page/block/database/data-source/comment/user actions and API token slot                         |
-| `@yolk-sdk/connectors/r2-storage`            | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                             |
-| `@yolk-sdk/connectors/telegram`              | Telegram bot send/validate actions                                                                            |
-| `@yolk-sdk/connectors/todoist`               | Todoist project/task/label/comment actions and API token slot constants                                       |
+| Subpath                                      | Purpose                                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                       | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types         |
+| `@yolk-sdk/connectors/agent`                 | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                              |
+| `@yolk-sdk/connectors/afloat`                | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                    |
+| `@yolk-sdk/connectors/conformance`           | Experimental, conformance/testing only: Effect `HttpClient` bridges, a static resolver, and a cleanup reporter |
+| `@yolk-sdk/connectors/dropbox`               | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update      |
+| `@yolk-sdk/connectors/dropbox/conformance`   | Experimental Dropbox conformance cases, seed config, and synthetic replay fixtures                             |
+| `@yolk-sdk/connectors/email`                 | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port     |
+| `@yolk-sdk/connectors/email/conformance`     | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge  |
+| `@yolk-sdk/connectors/figma`                 | Figma remote MCP auth action and OAuth constants                                                               |
+| `@yolk-sdk/connectors/fortnox`               | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update  |
+| `@yolk-sdk/connectors/fortnox/conformance`   | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                             |
+| `@yolk-sdk/connectors/github`                | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                 |
+| `@yolk-sdk/connectors/google`                | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                            |
+| `@yolk-sdk/connectors/linkedin-search`       | Exa people search and Enrich Layer profile/email actions                                                       |
+| `@yolk-sdk/connectors/microsoft`             | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments       |
+| `@yolk-sdk/connectors/microsoft/conformance` | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                     |
+| `@yolk-sdk/connectors/notion`                | Notion search/page/block/database/data-source/comment/user actions and API token slot                          |
+| `@yolk-sdk/connectors/notion/conformance`    | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                              |
+| `@yolk-sdk/connectors/r2-storage`            | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                              |
+| `@yolk-sdk/connectors/telegram`              | Telegram bot send/validate actions                                                                             |
+| `@yolk-sdk/connectors/todoist`               | Todoist project/task/label/comment actions and API token slot constants                                        |
 
 ## Imports
 
@@ -840,6 +842,54 @@ cancellation; and actual streamed byte limits with `response_too_large` on overf
 `bodyComplete: false` only for bounded non-200 bodies. Offline fake-port tests cover protocol flow,
 byte identity, bounds, status handling, and redaction, not socket enforcement.
 
+### Dropbox conformance cases (experimental)
+
+`@yolk-sdk/connectors/dropbox/conformance` exports eight conformance cases for
+`@yolk-sdk/conformance/runner` (`dropboxConformanceCases`), synthetic replay fixtures
+(`dropboxConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
+(`dropboxConformanceFixtureSeeds`). Every case runs the real connector actions, or the host-only
+`createDropboxFile` / `updateDropboxFile` helpers, over `ConnectorHttpClient`,
+`ConnectorBinaryWriteHttpClient`, and `CredentialResolver` plus `DropboxConformanceConfig`, which
+holds host-supplied seed paths in a practice Dropbox account. They cover list and search cursor
+paging, case-insensitive path lookups, the HTTP 409 error envelope, folder conflicts, delete then
+not-found, single-item copy/move metadata, and the upload rev precondition. Credentials bind through
+`dropboxConformanceIntegration` (`dropbox.oauth`, credential ref `dropbox.conformance`). The case
+table, seeds, and claims live in the
+[Dropbox conformance guide](../../apps/docs/content/docs/connectors/dropbox.mdx#conformance-cases).
+
+Every write case works only inside its own `yolk-conformance-<runId>-<case>` folder under the
+`workFolderPath` seed. The `runId` seed makes that namespace unique per invocation (the fixtures
+replay with `run-synthetic`; the live runner generates a fresh random id every time), so concurrent
+runs are supported only through distinct run ids. A case proves its folder path absent before
+writing, and registers the created entry together with the create (uninterruptibly). A definitive
+create rejection (HTTP 4xx, such as `path/conflict`) deletes nothing. An ambiguous create (a
+transport or decoding failure, no status, or HTTP 5xx) gets one best-effort delete of the owned path
+but always fails with `DropboxConformanceActionFailed` (`createOutcome: 'unknown'`) naming the
+exact path to check by hand; so do the conflict case's duplicate creates, after the known original
+is cleaned up. Every later write inside the case folder is masked too, so no aborted request lands
+after the cleanup. After a successful create, the cleanup deletes the entry by id (a not-found answer
+proves it gone; any other failure falls back to the owned path), also after a failed assertion or a
+fiber interruption, then checks that `get_metadata` answers not-found; a failed cleanup fails with
+`DropboxConformanceRestoreFailed` naming the path, and a create answering a path outside the case
+folder is never deleted (`DropboxConformanceCleanupRefused`). Neither the runner nor the bridges set
+a request timeout, so a hanging request delays an interruption. The live runner turns the first
+SIGINT/SIGTERM into a fiber interruption, so the cleanup is attempted (not confirmed) and no
+further case starts: a cleanup problem raised meanwhile prints as a WARN line through
+`ConformanceCleanupReporter` and ends the run with that failure (exit 1); only an interrupt-only
+exit (130) runs the read-only leftover lookup again. Duplicate signals within a second (one Ctrl-C
+reaches every process of the foreground group) are ignored; a later signal or a kill skips the
+cleanup. Run live runs as `pnpm conformance:dropbox` or with `tsx` directly: `pnpm exec tsx`
+returns to the prompt at once on Ctrl-C (observed), so later lines print after the prompt, `$?` is
+pnpm's own code, and the runner must be stopped with `kill -TERM <pid>` (printed by the first-signal
+message). Before any write case, the runner warns read-only about `yolk-conformance-run-*` folders
+earlier runs left under `workFolderPath` (`findDropboxConformanceLeftovers`; bounded to 50 listing
+pages; every valid `runId` starts with `run-`, and a missing work folder holds none); it never
+deletes them. `pnpm conformance:dropbox` in this repository dry-runs by default;
+`--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; needs
+`DROPBOX_ACCESS_TOKEN` and the seeds) is for owners running a practice account by hand,
+`--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or
+nothing in `.conformance-recordings/dropbox/<run>/` (gitignored) for manual scrubbing and promotion.
+
 ## Microsoft connector
 
 ```ts
@@ -1219,6 +1269,43 @@ failure, no status, or HTTP 5xx) fails with `MicrosoftConformanceActionFailed`
 hand, `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings
 all or nothing in `.conformance-recordings/microsoft/<run>/` (gitignored) for manual scrubbing and
 promotion.
+
+### Notion conformance cases (experimental)
+
+`@yolk-sdk/connectors/notion/conformance` exports eight conformance cases for
+`@yolk-sdk/conformance/runner` (`notionConformanceCases`), synthetic replay fixtures
+(`notionConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
+(`notionConformanceFixtureSeeds`). Every case runs the real connector actions over
+`ConnectorHttpClient` and `CredentialResolver` plus `NotionConformanceConfig`, which holds
+host-supplied seed ids in a practice Notion workspace. They cover search, block children, and page
+property cursor paging (including the connector's second percent-encoding of property ids), the
+pinned `Notion-Version`, the `{ object: "error", status, code,
+message }` envelope, title rich text, the 2025-09-03 database/data source split, and archiving a
+page to the trash. **Every action sends `Notion-Version: 2025-09-03`**; the pinned-version case
+observes that header at the `ConnectorHttpClient` port and sends no request of its own. Credentials bind through
+`notionConformanceIntegration` (`notion.api_token`, credential ref `notion.conformance`). The case
+table, seeds, and claims live in the
+[Notion conformance guide](../../apps/docs/content/docs/connectors/notion.mdx#conformance-cases).
+
+The write case creates its own page under the `parentPageId` seed and registers its id before any
+claim runs (the create and registration are not interruptible, and no request timeout is set, so a
+hanging create delays an interruption). Any response showing the page trashed (`archived` or
+`in_trash`), or a not-found read after a successful archive, counts as trashed; otherwise the cleanup
+trashes the page and checks that `notion.get_page` reports `archived: true`. A failed cleanup fails
+with `NotionConformanceRestoreFailed`, and an ambiguous create fails with
+`NotionConformanceActionFailed` (`createOutcome: 'unknown'`) with manual-recovery advice. The live
+runner turns the first SIGINT/SIGTERM into a fiber interruption, so the cleanup is attempted (not
+confirmed; a cleanup problem raised meanwhile prints as a WARN line and ends the run with exit 1,
+and only an interrupt-only exit (130) runs the leftover search again; duplicate signals within a
+second are ignored, a later one or a kill skips the cleanup; use `pnpm conformance:notion` or `tsx`
+directly, not `pnpm exec tsx`, which returns to the prompt at once) and, before the write case,
+warns about untrashed `yolk-conformance page` pages found by a read-only, bounded (10 search pages),
+best-effort search (`findNotionConformanceLeftovers`); it never trashes them.
+`pnpm conformance:notion` in this repository dry-runs by default; `--live --owner-approved --account
+<label>` (refused whenever `CI` is non-empty; needs `NOTION_API_TOKEN` and the seeds) is for owners
+running a practice workspace by hand, `--allow-writes reversible` adds the write case, and
+`--record` stages verified recordings all or nothing in `.conformance-recordings/notion/<run>/`
+(gitignored) for manual scrubbing and promotion.
 
 ## Host-only file capabilities
 
