@@ -483,11 +483,22 @@ describe('record-gateway-fixtures write gate', () => {
     return { calls, writer }
   }
 
+  // Probe options matching the committed recordings (the DeepSeek one used a `--reasoning-model`
+  // override), so replay verification sends the requests that were actually recorded.
+  const recordedOptions = parseProbeArgs([
+    '--reasoning-model',
+    String(
+      vercelAiGatewayConformanceFixtures.find(
+        fixture => fixture.caseId === 'vercel-ai-gateway.stream.deepseek-reasoning'
+      )?.model ?? expect.fail('missing DeepSeek fixture')
+    )
+  ])
+
   // Fake live recordings: each planned case paired with a fixture, no network involved.
   const recordedFrom = (
     fixtures: ReadonlyArray<WireFixture>
   ): ReadonlyArray<RecordedGatewayFixture> =>
-    planGatewayProbe(defaultProbeOptions).flatMap(entry =>
+    planGatewayProbe(recordedOptions).flatMap(entry =>
       fixtures.flatMap(fixture =>
         fixture.caseId === entry.testCase.id ? [{ entry, fixture }] : []
       )
@@ -499,7 +510,7 @@ describe('record-gateway-fixtures write gate', () => {
     const result = await Effect.runPromise(
       writeVerifiedFixtures(
         recordedFrom(vercelAiGatewayConformanceFixtures),
-        defaultProbeOptions,
+        recordedOptions,
         writer
       )
     )
@@ -524,7 +535,7 @@ describe('record-gateway-fixtures write gate', () => {
     )
 
     const exit = await Effect.runPromiseExit(
-      writeVerifiedFixtures(recordedFrom(tampered), defaultProbeOptions, writer)
+      writeVerifiedFixtures(recordedFrom(tampered), recordedOptions, writer)
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
@@ -542,7 +553,7 @@ describe('record-gateway-fixtures write gate', () => {
     )
 
     const exit = await Effect.runPromiseExit(
-      writeVerifiedFixtures(recordedFrom(missing), defaultProbeOptions, writer)
+      writeVerifiedFixtures(recordedFrom(missing), recordedOptions, writer)
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
