@@ -364,8 +364,18 @@ customer `Country` is read-only.
 
 The `quirks` option (`stickyRowDiscount: false`, `emptyStringClears: true`,
 `paymentFiltersIncludeUnbooked: true`) is a test-only drill knob: it flips one quirk to prove that
-the matching conformance case fails. Faults, the ledger, and the control plane (`/_emulate/ledger`,
-`faults`, `reset`, `state`, `seed`, `coverage`) work as in the Gateway emulator.
+the matching conformance case fails.
+
+Fortnox faults are `status` faults only
+(`{ kind: 'status', status, headers?, body?, match?: { method?, path? }, count? }`), answered
+before the route runs, so nothing is written. They follow
+the Gateway emulator's rules: statuses without a body (1xx, 204, 205) and redirects (3xx) are
+rejected, as are invalid header names or values, a `location` header, and framing headers, both in
+`faults.add` and in `POST /_emulate/faults`. A fault is used up only after its response is built;
+a response that cannot be built answers an evidence-tagged 500 `ErrorInformation` recorded in the
+ledger with `responseError`. The control plane serves `/_emulate/ledger`, `faults`, `reset`,
+`state`, `seed`, and `coverage`; unlike the Gateway, it has no scripted turns and no chunk
+faults, and `reset`/`seed` also restore or replace the Fortnox state.
 
 ```ts
 import { makeFortnoxEmulator } from '@yolk-sdk/emulators/fortnox'

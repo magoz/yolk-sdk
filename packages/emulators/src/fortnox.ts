@@ -16,6 +16,7 @@
 import type { EmulatorSnapshot } from '@emulators/core'
 import { Data, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
+import { EmulatorHeaderRecord, EmulatorResponseStatus } from './emulator-http.ts'
 import {
   errorInformation,
   fortnoxApiRoutes,
@@ -74,10 +75,8 @@ export const fortnoxEmulatorDefaultOrigin = 'https://api.fortnox.se'
  * handlers by construction (both come from one route table).
  */
 export const fortnoxEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = fortnoxApiRoutes.map(
-  ({ handler: _handler, ...route }) => route
+  ({ handler: _handler, queryKeys: _queryKeys, ...route }) => route
 )
-
-const Status = Schema.Int.check(Schema.isBetween({ minimum: 200, maximum: 599 }))
 
 const FaultCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
@@ -93,11 +92,15 @@ export type FortnoxFaultMatch = typeof FortnoxFaultMatch.Type
  * A wire fault: answer matching requests with this status, headers, and body (for example 429
  * with `retry-after`) before the route runs, so nothing is written. The body defaults to a
  * Fortnox `ErrorInformation`. `count` limits how many requests it answers (omitted: all).
+ *
+ * The Gateway emulator's rules apply: statuses that cannot carry a body (1xx, 204, 205) and
+ * redirects (3xx) are rejected, as are invalid header names or values, a `location` header, and
+ * framing headers (`content-length`, `transfer-encoding`, `connection`, `keep-alive`, `upgrade`).
  */
 export const FortnoxFault = Schema.Struct({
   kind: Schema.Literal('status'),
-  status: Status,
-  headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  status: EmulatorResponseStatus,
+  headers: Schema.optionalKey(EmulatorHeaderRecord),
   body: Schema.optionalKey(Schema.Json),
   match: Schema.optionalKey(FortnoxFaultMatch),
   count: Schema.optionalKey(FaultCount)
@@ -131,6 +134,11 @@ export type FortnoxLedgerEntry = {
   readonly evidence: EmulatorEvidence | 'unknown-route'
   /** Set when a fault answered the request. */
   readonly fault?: 'status'
+  /**
+   * Set when the emulator could not build or produce the response; the request was answered with
+   * a 500 `ErrorInformation` (still evidence-tagged) and no fault was used up.
+   */
+  readonly responseError?: string
 }
 
 export type FortnoxFaultState = {
@@ -267,6 +275,7 @@ type MutableLedgerEntry = {
   status: number
   evidence: EmulatorEvidence | 'unknown-route'
   fault?: 'status'
+  responseError?: string
 }
 
 type MutableFaultState = {
@@ -295,6 +304,14 @@ const defaultQuirks: Required<FortnoxEmulatorQuirks> = {
   emptyStringClears: false,
   paymentFiltersIncludeUnbooked: false
 }
+
+/** The evidence-tagged fallback when a matched API route cannot build or produce its response. */
+const responseFailed = (): Response =>
+  errorInformation(
+    500,
+    codes.upstreamError,
+    'Synthetic: the emulator could not build the response.'
+  )
 
 const isControlPath = (path: string): boolean =>
   path === '/_emulate' || path.startsWith('/_emulate/')
@@ -401,13 +418,8 @@ export const makeFortnoxEmulator = async (
         faultMatches(state.fault, method, path)
     )
 
+  /** Build the fault's response first: a response that cannot be built must not consume it. */
   const applyFault = (state: MutableFaultState): Response => {
-    state.applied += 1
-
-    if (state.remaining !== undefined) {
-      state.remaining -= 1
-    }
-
     const headers = new Headers(state.fault.headers ?? {})
     const body = state.fault.body ?? defaultFaultBody(state.fault.status)
 
@@ -415,10 +427,18 @@ export const makeFortnoxEmulator = async (
       headers.set('content-type', Predicate.isString(body) ? 'text/plain' : 'application/json')
     }
 
-    return new Response(Predicate.isString(body) ? body : JSON.stringify(body), {
+    const response = new Response(Predicate.isString(body) ? body : JSON.stringify(body), {
       status: state.fault.status,
       headers
     })
+
+    state.applied += 1
+
+    if (state.remaining !== undefined) {
+      state.remaining -= 1
+    }
+
+    return response
   }
 
   const snapshot = (): FortnoxEmulatorState => runtime.snapshot().state
@@ -442,8 +462,8 @@ export const makeFortnoxEmulator = async (
       return next
     }
 
-    baseline = next
     await restore(next)
+    baseline = next
 
     return next
   }
@@ -496,9 +516,11 @@ export const makeFortnoxEmulator = async (
     const fault = takeFault(method, url.pathname)
 
     if (fault !== undefined) {
+      const response = applyFault(fault)
+
       entry.fault = 'status'
 
-      return applyFault(fault)
+      return response
     }
 
     const hasBody = text !== '' && method !== 'GET' && method !== 'HEAD'
@@ -541,11 +563,19 @@ export const makeFortnoxEmulator = async (
 
     entry.route = route.path
 
-    const response = withEvidence(await routed(request, url, entry), route.evidence)
+    // Error recovery still answers through the route: the fallback 500 is evidence-tagged and
+    // the ledger records the status actually sent.
+    const response = await routed(request, url, entry).catch(() => {
+      entry.responseError = 'the emulator could not build or produce the response'
 
-    entry.status = response.status
+      return responseFailed()
+    })
 
-    return response
+    const tagged = withEvidence(response, route.evidence)
+
+    entry.status = tagged.status
+
+    return tagged
   }
 
   const controlPlane = async (request: Request, path: string): Promise<Response> => {
@@ -652,11 +682,26 @@ export const makeFortnoxEmulator = async (
     }
   }
 
-  const handle = (request: Request): Promise<Response> => {
+  /**
+   * Last resort when handling itself fails (for example an unparseable request URL): API
+   * requests answer a Fortnox `ErrorInformation` 500, tagged with the matched route's evidence;
+   * control-plane requests answer an emulator error.
+   */
+  const lastResort = (request: Request): Response => {
+    const path = URL.canParse(request.url) ? new URL(request.url).pathname : undefined
+
+    if (path !== undefined && isControlPath(path)) {
+      return controlError(500, 'emulator failed to handle the request')
+    }
+
+    const route = path === undefined ? undefined : matchFortnoxRoute(request.method, path)
+
+    return route === undefined ? responseFailed() : withEvidence(responseFailed(), route.evidence)
+  }
+
+  const handle = async (request: Request): Promise<Response> => {
     if (closed) {
-      return Promise.resolve(
-        errorInformation(503, codes.upstreamError, 'Synthetic: the emulator is closed.')
-      )
+      return errorInformation(503, codes.upstreamError, 'Synthetic: the emulator is closed.')
     }
 
     const url = new URL(request.url)
@@ -667,8 +712,7 @@ export const makeFortnoxEmulator = async (
   }
 
   return {
-    fetch: request =>
-      handle(request).catch(() => controlError(500, 'emulator failed to handle the request')),
+    fetch: request => handle(request).catch(() => lastResort(request)),
     baseUrl: linkOrigin,
     ledger: {
       entries: () => entries.map(snapshotEntry),

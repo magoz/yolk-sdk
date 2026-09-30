@@ -100,6 +100,9 @@ const invalidBody = (message: string): Response =>
 const invalidField = (message: string): Response =>
   errorInformation(400, codes.invalidField, `Synthetic: ${message}`)
 
+const noReferencedEntity = (kind: string, value: string): Response =>
+  invalidField(`${kind} ${value} does not exist in the emulated company.`)
+
 const readOnlyField = (message: string): Response =>
   errorInformation(400, codes.readOnlyField, `Synthetic: ${message}`)
 
@@ -110,7 +113,9 @@ const unsupportedQuery = (key: string): Response =>
   errorInformation(
     400,
     codes.unsupportedQuery,
-    `Synthetic: query parameter ${key} is not emulated.`
+    key === 'lastmodified'
+      ? 'Synthetic: query parameter lastmodified is not emulated (the emulator does not track modification times).'
+      : `Synthetic: query parameter ${key} is not emulated.`
   )
 
 // The synthetic invoice preview PDF from the preview fixture (`bodyBase64`), copied as data.
@@ -136,7 +141,14 @@ type RouteHandler = (
   env: FortnoxApiEnv
 ) => Response
 
-type FortnoxApiRoute = EmulatorRouteEvidence & { readonly handler: RouteHandler }
+type FortnoxApiRoute = EmulatorRouteEvidence & {
+  /**
+   * Query parameters the route emulates; any other key answers 400 before the handler runs, so
+   * a rejected request never writes. Empty by default.
+   */
+  readonly queryKeys: ReadonlyArray<string>
+  readonly handler: RouteHandler
+}
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/
 
@@ -254,6 +266,7 @@ const renderInvoiceRow = (env: FortnoxApiEnv, invoice: FortnoxEmulatorInvoice) =
   Total: invoice.Total
 })
 
+/** The 400 for the first query key the route does not emulate, or `undefined`. */
 const unsupportedQueryKey = (
   query: URLSearchParams,
   allowed: ReadonlyArray<string>
@@ -323,16 +336,14 @@ const customerSearch = {
   phone: (customer, value) => contains(customer.Phone1, value) || contains(customer.Phone2, value)
 } satisfies Record<string, CustomerSearch>
 
+const customerListQueryKeys: ReadonlyArray<string> = [
+  'page',
+  'limit',
+  'filter',
+  ...Object.keys(customerSearch)
+]
+
 const listCustomers: RouteHandler = (state, { query }, env) => {
-  const unsupported = unsupportedQueryKey(query, [
-    'page',
-    'limit',
-    'filter',
-    ...Object.keys(customerSearch)
-  ])
-
-  if (unsupported !== undefined) return unsupported
-
   const filter = query.get('filter')
 
   if (filter !== null && filter !== 'active' && filter !== 'inactive') {
@@ -420,9 +431,32 @@ type CustomerUpdates = {
 }
 
 /**
+ * Why a customer field value is not emulated (fail closed), or `undefined`. The emulated company
+ * has only SEK, no cost centers, and terms of payment in whole days.
+ */
+const unsupportedCustomerValue = (
+  key: CustomerStringField,
+  value: string
+): Response | undefined => {
+  switch (key) {
+    case 'Currency':
+      return value === 'SEK' ? undefined : noReferencedEntity('Currency', value)
+    case 'CostCenter':
+      return value === '' ? undefined : noReferencedEntity('CostCenter', value)
+    case 'TermsOfPayment':
+      return /^\d+$/.test(value)
+        ? undefined
+        : invalidField(`TermsOfPayment ${value} is not emulated (whole days only).`)
+    default:
+      return undefined
+  }
+}
+
+/**
  * Quirk 2: an empty string keeps the stored value (unless the `emptyStringClears` drill knob is
- * set); omitted fields keep theirs. Quirk 5: `Country` is read-only. Unknown fields and wrong
- * types are rejected; the update is atomic.
+ * set); omitted fields keep theirs. Quirk 5: `Country` is read-only. Unknown fields, wrong types,
+ * and values the emulator does not support (non-SEK `Currency`, a `CostCenter`, non-numeric
+ * `TermsOfPayment`) are rejected; the update is atomic.
  */
 const customerUpdates = (
   fields: Schema.JsonObject,
@@ -463,6 +497,10 @@ const customerUpdates = (
     if (value === '' && !env.quirks.emptyStringClears) {
       continue
     }
+
+    const unsupported = unsupportedCustomerValue(key, value)
+
+    if (unsupported !== undefined) return unsupported
 
     if (key === 'CountryCode' && value !== '') {
       const country = fortnoxEmulatorCountries.get(value)
@@ -555,18 +593,16 @@ const invoiceSearch = {
   ocr: (invoice, value) => invoice.OCR === value
 } satisfies Record<string, InvoiceSearch>
 
+const invoiceListQueryKeys: ReadonlyArray<string> = [
+  'page',
+  'limit',
+  'filter',
+  'fromdate',
+  'todate',
+  ...Object.keys(invoiceSearch)
+]
+
 const listInvoices: RouteHandler = (state, { query }, env) => {
-  const unsupported = unsupportedQueryKey(query, [
-    'page',
-    'limit',
-    'filter',
-    'fromdate',
-    'todate',
-    ...Object.keys(invoiceSearch)
-  ])
-
-  if (unsupported !== undefined) return unsupported
-
   const filter = query.get('filter')
 
   if (filter !== null && !isInvoiceFilter(filter)) {
@@ -620,9 +656,6 @@ type RowPatch = {
 }
 
 const vatRates: ReadonlyArray<number> = [...fortnoxEmulatorVatCodes.keys()]
-
-const noReferencedEntity = (kind: string, value: string): Response =>
-  invalidField(`${kind} ${value} does not exist in the emulated company.`)
 
 /**
  * One row of an `InvoiceRows` write. `null` means omitted. Referenced articles, cost centers, and
@@ -969,6 +1002,12 @@ const createInvoice: RouteHandler = (state, { body }, env) => {
 
   if (customer === undefined) return invalidField('CustomerNumber is required.')
 
+  // The invoice inherits the customer's currency when it names none; check the effective value
+  // (a seeded customer can carry any currency) before anything is committed.
+  const currency = updates.scalars.Currency ?? customer.Currency
+
+  if (currency !== 'SEK') return noReferencedEntity('Currency', currency)
+
   const invoiceDate = updates.scalars.InvoiceDate ?? today(env)
   const terms = Number(customer.TermsOfPayment)
   const ids: RowIds = { next: state.counters.nextRowId }
@@ -1046,7 +1085,8 @@ const connectorRoute = (
   path: string,
   write: boolean,
   caseIds: ReadonlyArray<string>,
-  handler: RouteHandler
+  handler: RouteHandler,
+  queryKeys: ReadonlyArray<string> = []
 ): FortnoxApiRoute => ({
   method,
   path: `${fortnoxEmulatorBasePath}${path}`,
@@ -1054,6 +1094,7 @@ const connectorRoute = (
   write,
   caseIds,
   evidence: 'unverified',
+  queryKeys,
   handler
 })
 
@@ -1074,7 +1115,7 @@ const emailCase = 'fortnox.invoice.send-email'
 /** The route table: evidence plus handler. `fortnoxEmulatorRoutes` is its evidence part. */
 export const fortnoxApiRoutes: ReadonlyArray<FortnoxApiRoute> = [
   connectorRoute('GET', '/companyinformation', false, [], companyInformation),
-  connectorRoute('GET', '/customers', false, [], listCustomers),
+  connectorRoute('GET', '/customers', false, [], listCustomers, customerListQueryKeys),
   connectorRoute(
     'GET',
     '/customers/{CustomerNumber}',
@@ -1083,7 +1124,14 @@ export const fortnoxApiRoutes: ReadonlyArray<FortnoxApiRoute> = [
     getCustomer
   ),
   connectorRoute('PUT', '/customers/{CustomerNumber}', true, [emptyStringCase], updateCustomer),
-  connectorRoute('GET', '/invoices', false, [listCase, filtersCase], listInvoices),
+  connectorRoute(
+    'GET',
+    '/invoices',
+    false,
+    [listCase, filtersCase],
+    listInvoices,
+    invoiceListQueryKeys
+  ),
   connectorRoute('POST', '/invoices', true, [rejectionCase], createInvoice),
   connectorRoute('GET', '/invoices/{DocumentNumber}', false, [discountCase, emailCase], getInvoice),
   connectorRoute('PUT', '/invoices/{DocumentNumber}', true, [discountCase], updateInvoice),
@@ -1187,13 +1235,20 @@ export const registerFortnoxApi = (
 ): void => {
   for (const route of fortnoxApiRoutes) {
     app.on(route.method, corePath(route.path), async context => {
+      const query = new URL(context.req.url).searchParams
+
+      // Fail closed on query parameters the route does not emulate, before the handler can write.
+      const unsupported = unsupportedQueryKey(query, route.queryKeys)
+
+      if (unsupported !== undefined) return unsupported
+
       const text = await context.req.text()
 
       return route.handler(
         state,
         {
           params: context.req.param(),
-          query: new URL(context.req.url).searchParams,
+          query,
           body: text === '' ? undefined : parseJsonText(text)
         },
         env

@@ -25,7 +25,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                      | `src/subscription-usage.ts` | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go               |
 | (internal)                      | `src/*-recordings.ts`       | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                             |
 | (internal)                      | `src/emulator-compose.ts`   | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                  |
-| (internal)                      | `src/emulator-http.ts`      | Fault/scripted-error status and header validators                                                                                        |
+| (internal)                      | `src/emulator-http.ts`      | Shared fault/scripted-error status and header validators (all emulators)                                                                 |
 | (internal)                      | `src/route-evidence.ts`     | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
 | (internal)                      | `src/email-fixtures.ts`     | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                      |
 | (internal)                      | `src/fortnox/state.ts`      | Fortnox state/seed schemas, default seed (fixture entities), profiles, totals                                                            |
@@ -134,7 +134,8 @@ There is no root export or barrel.
   emulator PR stays a draft while they are); expiry dates live only in that file.
 - Emulators never redirect and always send a body: fault and scripted-error statuses exclude 1xx,
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
-  turn is added. Build a response before consuming its fault; a response that cannot be built
+  turn is added. All emulators share these validators (`src/emulator-http.ts`, internal, no Node
+  builtins). Build a response before consuming its fault; a response that cannot be built
   answers an evidence-tagged 500 recorded in the ledger (`responseError`).
 - Every fetch-handler emulator is built on `src/emulator-kernel.ts` (the `/email` port emulator is
   not; see below): fault and scripted-turn state (strict
@@ -243,7 +244,10 @@ There is no root export or barrel.
   with their case ids. The `quirks` option (`stickyRowDiscount`, `emptyStringClears`,
   `paymentFiltersIncludeUnbooked`) is a disagreement-drill knob for tests only: defaults follow the
   observed behavior. Fail closed on anything not emulated (unknown query parameters, filters,
-  fields, referenced articles/cost centers/projects, non-SEK currency) instead of ignoring it.
+  fields, referenced articles/cost centers/projects, non-SEK currency, including a customer's
+  inherited currency) instead of ignoring it. Query keys are allowlisted per route in the route
+  table (`queryKeys`, empty by default) and checked before the handler runs, so a rejected write
+  never writes. `lastmodified` is not emulated (the state tracks no modification times).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /

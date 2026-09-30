@@ -549,9 +549,17 @@ Routes (base path `/3`, JSON bodies, `Authorization: Bearer <non-empty>`; a miss
 | `GET /3/invoices/{DocumentNumber}/preview` | A small synthetic PDF (`application/pdf`); does not mark the invoice sent                                            |
 | `GET /3/invoices/{DocumentNumber}/email`   | Marks the invoice `Sent` and records an outbox entry in state; never sends anything                                  |
 
-Anything else fails closed with a 404 `ErrorInformation` (ledgered); unsupported query parameters,
-unknown filters, and unknown or read-only body fields get a 400 `ErrorInformation` instead of being
-ignored. Errors use the lowercase `{ ErrorInformation: { error, message, code } }` of the rejection
+`GET /3/companyinformation` and `GET /3/customers` have no recorded fixture: they cite no
+conformance case ids, use minimal shapes named after the connector's read fields, and are
+unverified, uncited read routes (the evidence check warns about them).
+
+Anything else fails closed with a 404 `ErrorInformation` (ledgered); unsupported query parameters
+(checked per route before it runs, so a rejected write writes nothing), unknown filters, unknown or
+read-only body fields, and values the emulated company does not have (non-SEK currency, including
+the currency a new invoice inherits from its customer; cost centers; non-numeric customer
+`TermsOfPayment`) get a 400 `ErrorInformation` instead of being ignored. The list filter
+`lastmodified` (the connector's `lastModified` input) is not emulated: the emulator tracks no
+modification times and answers it with a 400 saying so. Errors use the lowercase `{ ErrorInformation: { error, message, code } }` of the rejection
 fixture; `fortnoxEmulatorErrorCodes` lists the codes (the `2999xxx` ones are synthetic).
 
 Observed quirks (`fortnoxEmulatorQuirks`, each tied to its conformance case):
@@ -580,9 +588,12 @@ current seed and clears the ledger and faults; `seed(next)` replaces the state a
 
 Faults (`faults.add` or `POST /_emulate/faults`): `{ kind: 'status', status, headers?, body?,
 match?: { method?, path? }, count? }` answers matching requests before the route runs (nothing is
-written); for example a 429 with `retry-after: 2` reaches the connector as `fortnox_rate_limited`
+written). As in the Gateway emulator, statuses without a body (1xx, 204, 205), redirects (3xx),
+invalid header names or values, `location`, and framing headers are rejected when the fault is
+added; a fault is used up only once its response is built, and a response that cannot be built
+answers an evidence-tagged 500 `ErrorInformation` with `responseError` in the ledger. For example a 429 with `retry-after: 2` reaches the connector as `fortnox_rate_limited`
 with `retryAfterMs: 2000`. The ledger records method, path, route template, query, parsed body,
-status, evidence, and the applied fault.
+status, evidence, the applied fault, and any `responseError`.
 
 Control plane: `/_emulate/ledger` (`GET`, `DELETE`), `/_emulate/faults` (`GET`, `POST`, `DELETE`),
 `/_emulate/reset` (`POST`), `/_emulate/state` (`GET`), `/_emulate/seed` (`POST`), and
@@ -620,8 +631,9 @@ date): the check reports them as PENDING warnings until that date and fails agai
 
 All Fortnox routes are currently `unverified` (no live recording yet), including four connector
 write routes. Until an owner-approved live run verifies them, the repository lists them in a
-visible, time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry
-date): the check reports them as PENDING warnings until that date and fails again after it.
+visible, time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each
+entry's expiry date): the check reports them as PENDING warnings until that date and fails again
+after it.
 
 ## Node server
 

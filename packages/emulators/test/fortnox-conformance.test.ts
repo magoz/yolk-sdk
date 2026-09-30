@@ -154,8 +154,13 @@ const withoutRowIds = (state: FortnoxEmulatorState) => ({
 })
 
 describe('cross-check A: in-process emulator through the real connector', () => {
+  // What "ends at the seed" means per case: the read and rejection cases leave the exact seed;
+  // the reversible write cases restore what they wrote, so they end equal to the seed except the
+  // RowIds and the RowId counter, which Fortnox regenerates by design (the test proves they
+  // changed); the email case is irreversible by definition and leaves exactly `Sent` plus one
+  // outbox entry. Customers and company information end exactly at the seed in every case.
   it.effect(
-    'passes every Fortnox case, restores what the reversible cases wrote, and ends at the seed',
+    'passes every Fortnox case; reversible cases end at the seed except regenerated RowIds and counters; email leaves Sent and one outbox entry',
     () =>
       withEmulators({}, emulators =>
         Effect.gen(function* () {
@@ -202,7 +207,8 @@ describe('cross-check A: in-process emulator through the real connector', () => 
               .map(entry => firstRowDiscount(entry.body))
           ).toEqual([10, 'omitted', 0, 5])
 
-          // Reversible: equal to the seed except the regenerated RowIds (proof they changed).
+          // Reversible: equal to the seed except the regenerated RowIds and RowId counter, which
+          // Fortnox regenerates by design (proof below that they changed).
           const discountState = stateOf(discountId)
           const discountSeed = seedOf(discountId)
 
@@ -216,6 +222,9 @@ describe('cross-check A: in-process emulator through the real connector', () => 
                 .find(invoice => invoice.DocumentNumber === '103')
                 ?.InvoiceRows.map(row => row.RowId)
             ).not.toEqual([1, 2])
+            expect(discountState.counters.nextRowId).toBeGreaterThan(
+              discountSeed.counters.nextRowId
+            )
           }
 
           // Empty string: marker, "", then the restore of the original Comments; exact seed.
@@ -238,7 +247,8 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           ])
           expect(stateOf(rejectionId)).toEqual(seedOf(rejectionId))
 
-          // Email (irreversible, runs because the target is not live): Sent, one outbox entry.
+          // Email (irreversible by definition; runs because the target is not live): exactly Sent
+          // on invoice 104 and one outbox entry, nothing else.
           const emailId = 'fortnox.invoice.send-email'
           const emailState = stateOf(emailId)
 
@@ -259,6 +269,31 @@ describe('cross-check A: in-process emulator through the real connector', () => 
               sentAt: now.toISOString()
             }
           ])
+
+          const emailSeed = seedOf(emailId)
+
+          expect(emailSeed).toBeDefined()
+
+          if (emailSeed !== undefined) {
+            expect(emailState).toEqual({
+              ...emailSeed,
+              invoices: emailSeed.invoices.map(invoice =>
+                invoice.DocumentNumber === '104' ? { ...invoice, Sent: true } : invoice
+              ),
+              outbox: emailState.outbox
+            })
+          }
+
+          // Every part of each emulator's state other than invoices, counters, and the outbox
+          // (customers and company information) ends exactly at its seed.
+          for (const [id, emulator] of emulators) {
+            const { customers, company } = emulator.snapshot()
+
+            expect({ customers, company }, id).toEqual({
+              customers: seedOf(id)?.customers,
+              company: seedOf(id)?.company
+            })
+          }
 
           // No credential ever reaches the ledger.
           for (const emulator of emulators.values()) {

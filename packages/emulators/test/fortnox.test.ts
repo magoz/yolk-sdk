@@ -1,6 +1,7 @@
 import { Effect, Layer, Predicate } from 'effect'
 import { TestClock } from 'effect/testing'
 import { afterEach, describe, expect, it } from '@effect/vitest'
+import { vi } from 'vitest'
 import { runConformance } from '@yolk-sdk/conformance/runner'
 import { OAuthCredential } from '@yolk-sdk/connectors'
 import {
@@ -27,7 +28,8 @@ import {
   fortnoxEmulatorRoutes,
   makeFortnoxEmulator,
   type FortnoxEmulator,
-  type FortnoxEmulatorOptions
+  type FortnoxEmulatorOptions,
+  type FortnoxFault
 } from '../src/fortnox.ts'
 import { EmulatorRoute, InProcessHttpClient } from '../src/router.ts'
 
@@ -206,6 +208,47 @@ describe('fail closed', () => {
 
         expect(response.status, path).toBe(400)
       }
+
+      const lastModified = await call(target, 'GET', '/3/customers?lastmodified=2026-09-01')
+
+      expect(await jsonOf(lastModified)).toEqual({
+        ErrorInformation: {
+          error: 1,
+          message: expect.stringContaining('does not track modification times'),
+          code: fortnoxEmulatorErrorCodes.unsupportedQuery
+        }
+      })
+    })
+  )
+
+  it.effect('rejects unknown query keys on every other route before the handler runs', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const before = target.snapshot()
+
+      for (const [method, path, body] of [
+        ['GET', '/3/invoices/104/email?unexpected=1', undefined],
+        ['GET', '/3/companyinformation?unexpected=1', undefined],
+        ['GET', '/3/customers/1001?unexpected=1', undefined],
+        ['PUT', '/3/customers/1001?unexpected=1', { Customer: { Comments: 'changed' } }],
+        ['POST', '/3/invoices?unexpected=1', { Invoice: { CustomerNumber: '1001' } }],
+        ['GET', '/3/invoices/103?unexpected=1', undefined],
+        ['PUT', '/3/invoices/103?unexpected=1', { Invoice: { Comments: 'changed' } }],
+        ['GET', '/3/invoices/103/preview?unexpected=1', undefined]
+      ] as const) {
+        const response = await call(target, method, path, { body })
+
+        expect(response.status, `${method} ${path}`).toBe(400)
+        expect(await errorCode(response)).toBe(fortnoxEmulatorErrorCodes.unsupportedQuery)
+        expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      }
+
+      // The email route wrote nothing: no Sent flag, no outbox entry.
+      expect(target.snapshot()).toEqual(before)
+      expect(
+        target.snapshot().invoices.find(invoice => invoice.DocumentNumber === '104')?.Sent
+      ).toBe(false)
+      expect(target.snapshot().outbox).toEqual([])
     })
   )
 
@@ -314,6 +357,36 @@ describe('customers', () => {
       expect(
         (await call(target, 'PUT', '/3/customers/99999', { body: { Customer: {} } })).status
       ).toBe(404)
+    })
+  )
+
+  it.effect('rejects customer values the emulator does not support, atomically', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const before = target.snapshot()
+
+      for (const fields of [
+        { Comments: 'changed', Currency: 'USD' },
+        { CostCenter: 'CC1' },
+        { TermsOfPayment: 'K' }
+      ]) {
+        const response = await call(target, 'PUT', '/3/customers/1001', {
+          body: { Customer: fields }
+        })
+
+        expect(response.status, JSON.stringify(fields)).toBe(400)
+        expect(await errorCode(response)).toBe(fortnoxEmulatorErrorCodes.invalidField)
+      }
+
+      expect(target.snapshot()).toEqual(before)
+
+      // The supported values (and empty strings, which keep the stored value) still apply.
+      const kept = await call(target, 'PUT', '/3/customers/1001', {
+        body: { Customer: { Currency: 'SEK', CostCenter: '', TermsOfPayment: '10' } }
+      })
+
+      expect(kept.status).toBe(200)
+      expect(field(field(await jsonOf(kept), 'Customer'), 'TermsOfPayment')).toBe('10')
     })
   )
 
@@ -510,6 +583,30 @@ describe('invoices', () => {
       })
   )
 
+  it.effect('validates the inherited customer currency before creating an invoice', () =>
+    Effect.promise(async () => {
+      const target = await emulator({
+        seed: {
+          customers: [{ CustomerNumber: '1', Name: 'Euro AB', Currency: 'EUR' }],
+          invoices: []
+        }
+      })
+
+      const before = target.snapshot()
+
+      for (const invoice of [{ CustomerNumber: '1' }, { CustomerNumber: '1', Currency: 'EUR' }]) {
+        const response = await call(target, 'POST', '/3/invoices', { body: { Invoice: invoice } })
+
+        expect(response.status, JSON.stringify(invoice)).toBe(400)
+        expect(field(field(await jsonOf(response), 'ErrorInformation'), 'message')).toContain(
+          'Currency EUR'
+        )
+      }
+
+      expect(target.snapshot()).toEqual(before)
+    })
+  )
+
   it.effect('previews a synthetic PDF and emails into the outbox without delivering', () =>
     Effect.promise(async () => {
       const target = await emulator()
@@ -588,6 +685,98 @@ describe('faults', () => {
         FortnoxEmulatorInputInvalid
       )
     })
+  )
+
+  it.effect(
+    'rejects bodiless, redirecting, and framing faults through the JS API and the control plane',
+    () =>
+      Effect.promise(async () => {
+        const target = await emulator()
+        const kept = target.faults.add({ kind: 'status', status: 503, count: 2 })
+
+        const invalid: ReadonlyArray<FortnoxFault> = [
+          { kind: 'status', status: 204 },
+          { kind: 'status', status: 205 },
+          { kind: 'status', status: 101 },
+          { kind: 'status', status: 304 },
+          { kind: 'status', status: 302, headers: { location: 'https://example.test/' } },
+          { kind: 'status', status: 500, headers: { Location: 'https://example.test/' } },
+          { kind: 'status', status: 500, headers: { 'content-length': '1' } },
+          { kind: 'status', status: 500, headers: { 'Transfer-Encoding': 'chunked' } },
+          { kind: 'status', status: 500, headers: { 'bad name': 'x' } },
+          { kind: 'status', status: 500, headers: { 'x-synthetic': 'line\nbreak' } }
+        ]
+
+        const control = (body: unknown) =>
+          target.fetch(
+            new Request(`${origin}/_emulate/faults`, { method: 'POST', body: JSON.stringify(body) })
+          )
+
+        for (const fault of invalid) {
+          expect(() => target.faults.add(fault), JSON.stringify(fault)).toThrow(
+            FortnoxEmulatorInputInvalid
+          )
+          expect((await control(fault)).status, JSON.stringify(fault)).toBe(400)
+        }
+
+        // A list with one invalid fault adds none of them.
+        expect(
+          (
+            await control({
+              faults: [
+                { kind: 'status', status: 500 },
+                { kind: 'status', status: 500, headers: { connection: 'close' } }
+              ]
+            })
+          ).status
+        ).toBe(400)
+        expect(target.faults.list()).toEqual([kept])
+      })
+  )
+
+  it.effect(
+    'a fault response that cannot be built answers a tagged, ledgered 500 and is not consumed',
+    () =>
+      Effect.promise(async () => {
+        const target = await emulator()
+
+        target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+        const RealResponse = globalThis.Response
+
+        // Stands in for any fault response the emulator cannot build.
+        class UnbuildableResponse extends RealResponse {
+          constructor(bodyInit?: BodyInit | null, init?: ResponseInit) {
+            if (init?.status === 503) {
+              throw new TypeError('synthetic: cannot build a 503 response')
+            }
+
+            super(bodyInit, init)
+          }
+        }
+
+        vi.stubGlobal('Response', UnbuildableResponse)
+
+        const failed = await call(target, 'GET', '/3/invoices').finally(() => vi.unstubAllGlobals())
+
+        expect(failed.status).toBe(500)
+        expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+        expect(await errorCode(failed)).toBe(fortnoxEmulatorErrorCodes.upstreamError)
+        expect(target.ledger.entries()).toEqual([
+          expect.objectContaining({
+            path: '/3/invoices',
+            status: 500,
+            evidence: 'unverified',
+            responseError: expect.any(String)
+          })
+        ])
+        expect(target.ledger.entries()[0]?.fault).toBeUndefined()
+        expect(target.faults.list()[0]).toMatchObject({ remaining: 1, applied: 0 })
+
+        // Once its response can be built, the kept fault applies.
+        expect((await call(target, 'GET', '/3/invoices')).status).toBe(503)
+        expect(target.faults.list()[0]).toMatchObject({ remaining: 0, applied: 1 })
+      })
   )
 
   it.effect(

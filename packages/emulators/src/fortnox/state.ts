@@ -2,9 +2,10 @@
  * Fortnox emulator state: the typed entities, the seed input, the default seed, and the
  * account-variance profiles (internal; re-exported by `src/fortnox.ts`).
  *
- * Every entity shape and every default value is copied as data from the synthetic Fortnox
- * conformance fixtures (the same customer and document numbers as
- * `fortnoxConformanceFixtureSeeds`), never imported from SDK code.
+ * Entity shapes and the default entities follow the synthetic Fortnox conformance fixtures, copied
+ * as data (the same customer and document numbers as `fortnoxConformanceFixtureSeeds`), never
+ * imported from SDK code. Where no fixture records a value, the default is synthesized and says
+ * so below: customer 1002, most invoice rows, and the company information have no fixture.
  *
  * @experimental
  */
@@ -368,10 +369,13 @@ export const invoiceTotals = (rows: ReadonlyArray<FortnoxEmulatorInvoiceRow>): I
   return { Net: net, Gross: net, TotalVAT: vat, Total: total, TotalToPay: total }
 }
 
-// Default entities: copied from the synthetic Fortnox fixtures (customer 1001 from the
-// empty-string fixture; invoices 101-105 from the list, payment-filter, row-discount, and email
-// fixtures). Customer 1002 and the rows of invoices 101, 102, 104, and 105 are synthesized so their
-// computed totals equal the fixture totals.
+// Default entities. Fixture-derived: customer 1001 (empty-string fixture) and the invoice headers
+// of 101-105 (list, payment-filter, row-discount, and email fixtures). Where two fixtures disagree
+// the more specific one wins: invoice 103 (and its two rows) follows the row-discount fixture, not
+// the list fixture (its Balance, DueDate, InvoiceDate, and OCR differ there). Synthesized: customer
+// 1002, the rows of invoices 101, 102, 104, and 105 (chosen so their computed totals equal the
+// fixture totals), the company information (no fixture), and every default `customerFromSeed` and
+// `invoiceFromSeed` fill in for a field the seed omits.
 
 const exampleCustomer: FortnoxEmulatorCustomerSeed = {
   CustomerNumber: '1001',
