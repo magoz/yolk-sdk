@@ -4,10 +4,12 @@
  * Default: DRY RUN. Prints every case id, its safety, and whether it would run under the chosen
  * flags, then exits without any network call.
  *
- * `--live --account <label>`: runs the cases against the real Microsoft Graph API with a
- * `FetchHttpClient`: Outlook and OneDrive cases through the real connector actions, calendar cases
- * through raw Graph requests over the same connector ports (the connector has no calendar actions
- * yet). Requires `MICROSOFT_ACCESS_TOKEN` (environment only, never a flag; a delegated token for
+ * `--live --owner-approved --account <label>`: runs the cases against the real Microsoft Graph API
+ * with a `FetchHttpClient`: Outlook and OneDrive cases through the real connector actions, calendar
+ * cases through raw Graph requests over the same connector ports (the connector has no calendar
+ * actions yet). Refused whenever `CI` is non-empty (`0` and `false` included) and without
+ * `--owner-approved` (the repository owner's explicit approval), in both cases before any
+ * credential read. Requires `MICROSOFT_ACCESS_TOKEN` (environment only, never a flag; a delegated token for
  * the practice user with Mail.ReadWrite, Calendars.ReadWrite, and Files.ReadWrite) and the seed
  * identities of every case that will run (flags or environment, see `usage`). The label is
  * synthetic and non-identifying (for example `practice`): it is printed in reports and recorded in
@@ -22,9 +24,22 @@
  * all or nothing, to a NEW run directory under the GITIGNORED root
  * `.conformance-recordings/microsoft/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`: it writes the whole batch
  * into a sibling temp directory and publishes it with one rename, refuses an existing destination,
- * and leaves no run directory when anything fails. It never writes committed sources. It then
- * prints a review checklist (email-like strings outside `example.test`/`example.com`, names and
- * subjects, body text, tenant URLs, binary bodies, and shared seeds that changed).
+ * and leaves no run directory when anything fails. It never writes committed sources. Like the
+ * shared connector runners (`connector-conformance-internal.ts`), it refuses a recordings directory
+ * that is not physically where it appears to be (every component checked with lstat, symlinks
+ * refused, dangling ones included, re-checked before the rename); this guards against
+ * misconfiguration, not a concurrent local process. It then prints a review checklist (email-like
+ * strings outside `example.test`/`example.com`, names and subjects, body text, tenant URLs, binary
+ * bodies, and shared seeds that changed).
+ *
+ * Live runs are interruptible (the shared `runInterruptibly`): the first SIGINT/SIGTERM interrupts
+ * the run fiber, so a running write case still attempts its uninterruptible removal of the event,
+ * draft, or folder it created, and a removal that fails meanwhile prints a WARN line; a duplicate
+ * signal within `duplicateSignalWindowMs` (one Ctrl-C reaches every process of the foreground
+ * group) is ignored, and a later one force-exits. An interrupt-only exit is 130.
+ *
+ * Microsoft keeps its own runner rather than the shared `ConnectorConformanceRunner`: its review
+ * checklist flags practice-tenant SharePoint hosts, and its credential and seeds module differ.
  *
  * Promotion is manual: scrub the staged files of practice-tenant data (user names, tenant host
  * names, and ids), copy them into `packages/connectors/src/microsoft/conformance/`, run
@@ -37,7 +52,6 @@
  * Never run live in CI.
  */
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -69,6 +83,7 @@ import {
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '../packages/connectors/src/conformance/index.ts'
+import { ConformanceCleanupReporter } from '../packages/connectors/src/conformance/cleanup-reporter.ts'
 import { OAuthCredential } from '../packages/connectors/src/credential.ts'
 import {
   MicrosoftConformanceConfig,
@@ -79,6 +94,23 @@ import {
   type MicrosoftConformanceSeedKey
 } from '../packages/connectors/src/microsoft/conformance/index.ts'
 import { microsoftGraphApiBaseUrl } from '../packages/connectors/src/microsoft/index.ts'
+import {
+  liveInCiMessage,
+  nodeRecordingWriter,
+  ownerApprovalRequiredMessage,
+  physicallyContained,
+  processCliIo,
+  processSignals,
+  runInterruptibly,
+  stderrCleanupReporter,
+  type CliIo,
+  type RecordingWriter,
+  type RunInterruptiblyOptions,
+  type SignalSource
+} from './connector-conformance-internal.ts'
+import { isCiEnvironment, workspaceRoot } from './fixture-probe-internal.ts'
+
+export { liveInCiMessage, nodeRecordingWriter, ownerApprovalRequiredMessage, type RecordingWriter }
 
 type SeedSource = {
   readonly key: MicrosoftConformanceSeedKey
@@ -266,6 +298,8 @@ export type RunOptions = {
   readonly live: boolean
   readonly help: boolean
   readonly record: boolean
+  /** Explicit confirmation that the repository owner approved this live run. */
+  readonly ownerApproved: boolean
   /** Synthetic, non-identifying account label. Required with `--live`. */
   readonly account: string | undefined
   readonly allowWrites: 'none' | 'reversible'
@@ -277,6 +311,7 @@ export const defaultRunOptions: RunOptions = {
   live: false,
   help: false,
   record: false,
+  ownerApproved: false,
   account: undefined,
   allowWrites: 'none',
   seeds: {}
@@ -289,14 +324,17 @@ export const liveAccountRequiredMessage =
 
 export const accessTokenRequiredMessage = 'MICROSOFT_ACCESS_TOKEN is required for --live'
 
-const usage = `Usage: pnpm conformance:microsoft [--live --account <label>] [options]
+const usage = `Usage: pnpm conformance:microsoft [--live --owner-approved --account <label>] [options]
 
-Dry run by default: prints each case, its safety, and whether it would run. No network I/O.
+Dry run by default: prints each case, its safety, and whether it would run. No network I/O and no
+credential read.
 
 Options:
   --live                          Run against the real Microsoft Graph API (needs
-                                  MICROSOFT_ACCESS_TOKEN, --account, and the seeds of every case
-                                  that will run)
+                                  --owner-approved, MICROSOFT_ACCESS_TOKEN, --account, and the
+                                  seeds of every case that will run; refused whenever CI is
+                                  non-empty)
+  --owner-approved                confirm the repository owner approved this live run
   --account <label>               required with --live: synthetic, non-identifying label
                                   (lower-case letters, digits, hyphens; for example practice)
   --allow-writes <none|reversible>
@@ -316,14 +354,14 @@ ${microsoftSeedSources
 
 MICROSOFT_ACCESS_TOKEN is read from the environment only: a delegated token for the practice
 user (Mail.ReadWrite, Calendars.ReadWrite, Files.ReadWrite). Use a practice tenant, never a real
-one. Recordings are never written over committed fixtures: scrub the staged files, copy them into
+one, and never run live in CI. Recordings are never written over committed fixtures: scrub the staged files, copy them into
 packages/connectors/src/microsoft/conformance/, and update the Microsoft conformance tests in the
 same change (fixture ids, evidence, and account change).`
 
 /**
  * Parse CLI arguments (without the node/script prefix) and seed environment variables. Throws on
- * unknown flags, missing values, invalid labels, `--record` without `--live`, and `--live` without
- * `--account`.
+ * unknown flags, missing values, invalid labels, `--record` without `--live`, and `--live` in CI
+ * (`CI` non-empty), without `--owner-approved`, or without `--account`.
  */
 export const parseRunArgs = (
   argv: ReadonlyArray<string>,
@@ -332,6 +370,7 @@ export const parseRunArgs = (
   let live = false
   let help = false
   let record = false
+  let ownerApproved = false
   let account: string | undefined
   let allowWrites: RunOptions['allowWrites'] = 'none'
   const seeds: Partial<Record<MicrosoftConformanceSeedKey, string>> = {}
@@ -370,6 +409,9 @@ export const parseRunArgs = (
     switch (flag) {
       case '--live':
         live = true
+        break
+      case '--owner-approved':
+        ownerApproved = true
         break
       case '--help':
       case '-h':
@@ -411,11 +453,19 @@ export const parseRunArgs = (
     throw new Error('--record requires --live')
   }
 
+  if (!help && live && isCiEnvironment(env)) {
+    throw new Error(liveInCiMessage)
+  }
+
+  if (!help && live && !ownerApproved) {
+    throw new Error(ownerApprovalRequiredMessage)
+  }
+
   if (!help && live && account === undefined) {
     throw new Error(liveAccountRequiredMessage)
   }
 
-  return { live, help, record, account, allowWrites, seeds }
+  return { live, help, record, ownerApproved, account, allowWrites, seeds }
 }
 
 /** The live target the chosen flags describe (the dry run plans against the same target). */
@@ -469,10 +519,10 @@ export const dryRunReport = (options: RunOptions): string => {
   })
 
   return [
-    'DRY RUN: no network request was made. Pass --live --account <label> to run (needs MICROSOFT_ACCESS_TOKEN).',
+    'DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to run (needs MICROSOFT_ACCESS_TOKEN).',
     `Plan for a live target: allowWrites=${options.allowWrites}${options.record ? ', record' : ''}`,
     ...lines,
-    'Use a Microsoft 365 practice tenant only. Write cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations.'
+    "Use a Microsoft 365 practice tenant only, with the repository owner's approval; never in CI. Write cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations."
   ].join('\n')
 }
 
@@ -485,13 +535,22 @@ export type LiveInputs = {
 const decodeSeeds = Schema.decodeUnknownOption(MicrosoftConformanceSeeds)
 
 /**
- * Everything a live run needs, or why it must refuse (before any network): a missing account
- * label or access token, missing seeds for cases that will run, or seeds that are not valid.
+ * Everything a live run needs, or why it must refuse (before any network): CI, a missing owner
+ * approval, account label, or access token, missing seeds for cases that will run, or seeds that
+ * are not valid.
  */
 export const liveInputs = (
   options: RunOptions,
   env: Readonly<Record<string, string | undefined>>
 ): { readonly refusal: string } | { readonly inputs: LiveInputs } => {
+  if (isCiEnvironment(env)) {
+    return { refusal: liveInCiMessage }
+  }
+
+  if (!options.ownerApproved) {
+    return { refusal: ownerApprovalRequiredMessage }
+  }
+
   if (options.account === undefined) {
     return { refusal: liveAccountRequiredMessage }
   }
@@ -528,8 +587,6 @@ export class MicrosoftRunFailed extends Schema.TaggedError<MicrosoftRunFailed>()
   'MicrosoftRunFailed',
   { message: Schema.String }
 ) {}
-
-const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** Gitignored root of staged recordings; one new directory per `--record` run. */
 export const recordingsRoot = join(workspaceRoot, '.conformance-recordings', 'microsoft')
@@ -723,37 +780,6 @@ const verifiedFixture = (
   )
 
 /**
- * Directory-level file side effects of `--record`; injectable so the staging gate is tested
- * offline without touching the filesystem.
- */
-export type RecordingWriter = {
-  readonly exists: (path: string) => boolean
-  /** Create a directory and any missing parents. */
-  readonly mkdir: (path: string) => void
-  readonly writeFile: (path: string, contents: string) => void
-  /** Rename a directory in one step (same filesystem). */
-  readonly rename: (from: string, to: string) => void
-  /** Remove a directory and everything in it. */
-  readonly rm: (path: string) => void
-}
-
-export const nodeRecordingWriter: RecordingWriter = {
-  exists: path => existsSync(path),
-  mkdir: path => {
-    mkdirSync(path, { recursive: true })
-  },
-  writeFile: (path, contents) => {
-    writeFileSync(path, contents, { flag: 'wx' })
-  },
-  rename: (from, to) => {
-    renameSync(from, to)
-  },
-  rm: path => {
-    rmSync(path, { recursive: true, force: true })
-  }
-}
-
-/**
  * A unique run directory name, `<YYYY-MM-DD>T<HHMMSS>Z-<suffix>` (UTC), so two recordings on the
  * same day never share a directory.
  */
@@ -769,6 +795,12 @@ export type StageRecordingsOptions = {
   readonly writer: RecordingWriter
   /** The gitignored recordings root (defaults to `recordingsRoot`). */
   readonly recordingsRoot?: string
+  /**
+   * The directory the recordings root must physically stay inside (defaults to the workspace
+   * root): every existing component between it and the run directory must resolve to exactly that
+   * lexical location, so no symlink can redirect the writes.
+   */
+  readonly containmentRoot?: string
   /**
    * The run directory to publish; must be a new, direct child of the recordings root (for example
    * `join(recordingsRoot, recordingRunId(now, suffix))`).
@@ -932,8 +964,9 @@ export const recordingReviewChecklist = (
  * (`<root>/.tmp-<run>`), and publishes that directory to `options.stagingDir` with one rename.
  * All or nothing: any failure (verification, a write, or the rename) leaves no staging directory,
  * and the temp directory is removed (best effort). A staging directory that is not a direct child
- * of the recordings root, or that already exists, is refused. Returns `undefined` when no case
- * passed.
+ * of the recordings root, that already exists, or that is not physically inside the containment
+ * root (a symlinked or redirected component, checked before and after creating the temp directory
+ * and again before the rename) is refused. Returns `undefined` when no case passed.
  */
 export const stageRecordings = (
   report: ConformanceReport,
@@ -960,6 +993,19 @@ export const stageRecordings = (
 
     const { writer } = options
     const tempDir = join(root, `.tmp-${runName}`)
+    const base = resolve(options.containmentRoot ?? workspaceRoot)
+
+    const refuseRedirect = Effect.suspend(() =>
+      physicallyContained(writer, base, [root, tempDir, stagingDir])
+        ? Effect.void
+        : Effect.fail(
+            new MicrosoftRunFailed({
+              message: `Refusing recordings under a symlinked or redirected directory (${root}); nothing was written`
+            })
+          )
+    )
+
+    yield* refuseRedirect
 
     const refuseExisting = Effect.suspend(() =>
       writer.exists(stagingDir) || writer.exists(tempDir)
@@ -1005,13 +1051,24 @@ export const stageRecordings = (
     ]
 
     yield* refuseExisting
+    yield* refuseRedirect
 
     yield* Effect.try({
       try: () => {
         writer.mkdir(tempDir)
 
+        // Re-check after creating the temp directory, before any file is written.
+        if (!physicallyContained(writer, base, [tempDir])) {
+          throw new Error('recordings directory redirected')
+        }
+
         for (const file of files) {
           writer.writeFile(join(tempDir, file.name), file.contents)
+        }
+
+        // Re-check the temp and target directories immediately before publishing.
+        if (!physicallyContained(writer, base, [tempDir, stagingDir])) {
+          throw new Error('recordings directory redirected')
         }
 
         // Publish the complete batch in one step, only after every file is written.
@@ -1045,15 +1102,9 @@ export const stageRecordings = (
     }
   })
 
-const live = (options: RunOptions, env: Readonly<Record<string, string | undefined>>) =>
+/** One live run over checked inputs: every case, the report, and the `--record` staging. */
+const live = (options: RunOptions, inputs: LiveInputs) =>
   Effect.gen(function* () {
-    const checked = liveInputs(options, env)
-
-    if ('refusal' in checked) {
-      return yield* new MicrosoftRunFailed({ message: checked.refusal })
-    }
-
-    const inputs = checked.inputs
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
     const httpFor = (testCase: MicrosoftConformanceCase): Layer.Layer<HttpClient.HttpClient> =>
@@ -1073,7 +1124,12 @@ const live = (options: RunOptions, env: Readonly<Record<string, string | undefin
     const report = yield* runConformance(microsoftConformanceCases, {
       target: liveTarget(options),
       layer: testCase => casePorts(httpFor(testCase), inputs.accessToken, inputs.seeds)
-    })
+    }).pipe(
+      Effect.provideService(
+        ConformanceCleanupReporter,
+        stderrCleanupReporter(line => console.error(line))
+      )
+    )
 
     console.log(formatConformanceReport(report))
 
@@ -1120,16 +1176,47 @@ const parseCliArgs = (): RunOptions | undefined => {
   }
 }
 
+/**
+ * What an interrupted Microsoft run may have left behind, for the interruption and forced-exit
+ * messages of `runInterruptibly` (this runner has no leftover lookup).
+ */
+export const microsoftRecoveryAdvice =
+  'Case-created items may remain: look for yolk-conformance events in the seeded calendar, drafts in the seeded mailbox, and folders under the seeded parent folder, and remove them by hand.'
+
+/** `runInterruptibly` options of the Microsoft runner: its recovery advice; its cases clean up. */
+export const microsoftInterruptOptions: Pick<
+  RunInterruptiblyOptions,
+  'recoveryAdvice' | 'hasCleanups'
+> = { recoveryAdvice: microsoftRecoveryAdvice, hasCleanups: true }
+
+/**
+ * Run a live program so that SIGINT/SIGTERM interrupt it instead of killing the process (see
+ * `runInterruptibly`); signals and io are injectable so tests send no real signals.
+ */
+export const runMicrosoftInterruptibly = <E>(
+  program: Effect.Effect<void, E>,
+  signals: SignalSource = processSignals,
+  io: CliIo = processCliIo,
+  options: Omit<RunInterruptiblyOptions, 'recoveryAdvice' | 'hasCleanups'> = {}
+): Promise<void> =>
+  runInterruptibly(program, signals, io, { ...options, ...microsoftInterruptOptions })
+
 const runCli = (options: RunOptions): void => {
   if (options.help) {
     console.log(usage)
   } else if (!options.live) {
     console.log(dryRunReport(options))
   } else {
-    Effect.runPromise(live(options, process.env)).catch(error => {
-      console.error(error instanceof Error ? error.message : error)
+    const checked = liveInputs(options, process.env)
+
+    if ('refusal' in checked) {
+      console.error(checked.refusal)
       process.exitCode = 1
-    })
+
+      return
+    }
+
+    void runMicrosoftInterruptibly(live(options, checked.inputs))
   }
 }
 

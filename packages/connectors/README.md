@@ -1279,11 +1279,11 @@ failure, no status, HTTP 408, or HTTP 5xx) fails with `MicrosoftConformanceActio
 `yolk-conformance` item. Each of these (a failed removal, an id-less create, an ambiguous create)
 raised while the case is being interrupted is also handed, with its full message, to
 `ConformanceCleanupReporter` (default: `Effect.logWarning`), since the interruption may replace it;
-an ambiguous create's report starts with the case id. The repository runner does not turn Ctrl-C
-into an interruption, so the reporter applies to hosts that interrupt the run fiber. No case sends
-mail or invitations.
-`pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account <label>`
-(with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by hand,
+an ambiguous create's report starts with the case id. No case sends mail or invitations.
+`pnpm conformance:microsoft` in this repository dry-runs by default;
+`--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; with
+`MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by hand (a first
+Ctrl-C interrupts the run so a running write case still removes its item),
 `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or
 nothing in `.conformance-recordings/microsoft/<run>/` (gitignored) for manual scrubbing and
 promotion.
