@@ -173,8 +173,11 @@ export type EmulatorKernelConfig<
   readonly newEntry: (base: KernelLedgerEntry<Fault['kind']>) => Entry
   /** Copies an entry for the ledger API (never shares mutable state). */
   readonly snapshotEntry: (entry: Entry) => Snapshot
-  /** Response for an unknown emulated route (fails closed, still written to the ledger). */
-  readonly unknownRoute: () => Response
+  /**
+   * Response for an unknown emulated route (fails closed, still written to the ledger with the
+   * status it answers); the core may add its own ledger fields to `entry`.
+   */
+  readonly unknownRoute: (entry: Entry) => Response
   /** Fields listed first in `/_emulate/state`. */
   readonly stateFields: () => EmulatorStateFields
   /** Builds the error thrown by the JS API (`faults.add`, `script.enqueue`) for invalid input. */
@@ -762,9 +765,11 @@ export const makeEmulatorKernel = <
       entries.push(entry)
 
       if (bound === undefined) {
-        entry.status = 404
+        const response = config.unknownRoute(entry)
 
-        return config.unknownRoute()
+        entry.status = response.status
+
+        return response
       }
 
       // Error recovery still answers through the route: the fallback 500 is evidence-tagged and

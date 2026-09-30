@@ -1,26 +1,25 @@
 /**
  * OpenCode Go emulator: one plain fetch handler for the origin `https://opencode.ai`, serving the
- * three protocols the OpenCode Go provider speaks under `/zen/go/v1` plus the Go
- * subscription-usage route:
+ * routes the OpenCode Go provider and usage fetcher call under `/zen/go/v1`:
  *
- * - `POST /zen/go/v1/chat/completions`: OpenAI-compatible Chat Completions (the shared Chat
- *   Completions core; `max_tokens`, plain OpenAI framing, `reasoning_content` for scripted
- *   reasoning), Bearer auth;
- * - `POST /zen/go/v1/messages`: Anthropic Messages (the shared Messages core), `x-api-key` auth
- *   only (the Go provider never sends Claude OAuth) and `anthropic-version: 2023-06-01`;
- * - `POST /zen/go/v1/responses`: OpenAI Responses (the shared Responses core), Bearer auth,
- *   optional positive `max_output_tokens`;
- * - `GET /zen/go/v1/usage`: `{ usage: { rolling, weekly, monthly } }` windows as
- *   `{ percent, resetsAt }`, Bearer auth.
+ * - `POST /zen/go/v1/chat/completions` (Bearer, `max_tokens`, streamed with usage);
+ * - `POST /zen/go/v1/messages` (`x-api-key`, `anthropic-version: 2023-06-01`, streamed);
+ * - `POST /zen/go/v1/responses` (Bearer, `max_output_tokens`, streamed; plain text or a replayed
+ *   tool turn with commentary-tagged text);
+ * - `GET /zen/go/v1/usage` (Bearer).
+ *
+ * Fixture-only (the owner rule for new routes; `fixture-route.ts`): a request matching a recorded
+ * request shape, within the documented request-shape latitude, gets that Go conformance fixture's
+ * recorded response, copied as data (`opencode-recordings.ts`); everything else (unknown routes,
+ * missing credentials or headers, other models, non-streamed modes, tools other than the recorded
+ * replay, reasoning, extra fields) answers one ledgered 400 not-emulated.
  *
  * Each route keeps its own ledger, faults, scripted turns, and control plane (`emulator.chat`,
  * `emulator.messages`, `emulator.responses`, `emulator.usage`; over HTTP `/_emulate/<part>/*`);
  * `emulator.coverage()` and `GET /_emulate/coverage` combine them, and `emulator.reset()` and
- * `POST /_emulate/reset` reset all four. Unknown API routes fail closed through the chat part (404,
- * written to its ledger).
+ * `POST /_emulate/reset` reset all four. Requests on no route are ledgered by the chat part.
  *
- * It never imports SDK code: its wire shapes follow the synthetic OpenCode Go conformance fixtures
- * and are linked to those case ids in `openCodeGoEmulatorRoutes` (all `unverified`).
+ * It never imports SDK code. All routes are `unverified` (the fixtures are synthetic).
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
  * no Effect runtime is required to use it.
@@ -29,37 +28,26 @@
  */
 import { Data } from 'effect'
 import type * as Schema from 'effect/Schema'
-import {
-  ChatScriptedReasoningTurn,
-  makeChatCompletionsEmulator,
-  type ChatCompletionsEmulator,
-  type ChatWireError
-} from './chat-completions.ts'
 import { combinedCoverage, composeFetch, type ComposedPart } from './emulator-compose.ts'
-import { jsonResponse, type EmulatorCoverage } from './emulator-kernel.ts'
-import { makeMessagesEmulator, type MessagesEmulator } from './messages.ts'
+import { jsonResponse, stringField, type EmulatorCoverage } from './emulator-kernel.ts'
 import {
-  makeResponsesEmulator,
-  type ResponsesEmulator,
-  type ResponsesWireError
-} from './responses.ts'
+  makeFixtureRouteEmulator,
+  type FixtureRecording,
+  type FixtureRouteEmulator
+} from './fixture-route.ts'
+import { openCodeGoRecordings } from './opencode-recordings.ts'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
-import {
-  makeSubscriptionUsageEmulator,
-  type SubscriptionUsageEmulator
-} from './subscription-usage.ts'
+import { makeSubscriptionUsageEmulator, recordedUsageBody } from './subscription-usage.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
-export type { ChatScriptedReasoningTurn as OpenCodeGoChatScriptedTurn } from './chat-completions.ts'
-
-export type { MessagesScriptedTurn as OpenCodeGoMessagesScriptedTurn } from './messages.ts'
-
-export type { ResponsesScriptedTurn as OpenCodeGoResponsesScriptedTurn } from './responses.ts'
-
-export type { SubscriptionUsageScriptedTurn as OpenCodeGoUsageScriptedTurn } from './subscription-usage.ts'
+export type {
+  FixtureRouteFault as OpenCodeGoFault,
+  FixtureRouteLedgerEntry as OpenCodeGoLedgerEntry,
+  FixtureRouteScriptedTurn as OpenCodeGoScriptedTurn
+} from './fixture-route.ts'
 
 export const openCodeGoChatCompletionsPath = '/zen/go/v1/chat/completions'
 
@@ -70,19 +58,28 @@ export const openCodeGoResponsesPath = '/zen/go/v1/responses'
 /** The Go subscription-usage path (`openCodeGoSubscriptionUsageUrl` in the SDK). */
 export const openCodeGoUsagePath = '/zen/go/v1/usage'
 
+const recordingsFor = (path: string): ReadonlyArray<FixtureRecording> =>
+  openCodeGoRecordings.filter(recording => recording.request.path === path)
+
+const [usageRecording] = recordingsFor(openCodeGoUsagePath)
+
 /**
- * Synthetic-safe default model ids (the Go conformance defaults), accepted on every protocol. Go
- * model ids are opaque and unprefixed; the emulator does not tie a model to a protocol.
+ * The model ids the Go fixtures record, one per protocol (synthetic placeholders). A protocol
+ * route answers only its recorded model; any other model is not emulated.
  */
 export const openCodeGoEmulatorDefaultModels: ReadonlyArray<string> = [
-  'synthetic-go-chat',
-  'synthetic-go-messages',
-  'synthetic-go-responses'
+  ...new Set(
+    openCodeGoRecordings.flatMap(recording => {
+      const model = stringField(recording.request.body, 'model')
+
+      return model === undefined ? [] : [model]
+    })
+  )
 ]
 
 /**
  * Route evidence manifest: every emulated OpenCode Go route and the conformance cases whose
- * (synthetic, unverified) wire shapes it follows.
+ * (synthetic, unverified) fixtures it answers from.
  */
 export const openCodeGoEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
   {
@@ -127,18 +124,13 @@ export const openCodeGoEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
 ]
 
 /**
- * Default Go usage body: `usage.rolling`, `usage.weekly`, and `usage.monthly` as
- * `{ percent, resetsAt }`, with synthetic values.
+ * The recorded Go usage body (the synthetic `opencode.go.usage.snapshot` fixture, copied as
+ * data): `usage.rolling`, `usage.weekly`, and `usage.monthly` as `{ percent, resetsAt }`.
  */
-export const openCodeGoUsageDefault: Schema.Json = {
-  usage: {
-    rolling: { percent: 12.5, resetsAt: '2026-10-01T03:00:00.000Z' },
-    weekly: { percent: 40, resetsAt: '2026-10-05T00:00:00.000Z' },
-    monthly: { percent: 55, resetsAt: '2026-10-31T00:00:00.000Z' }
-  }
-}
+export const openCodeGoUsageDefault: Schema.Json =
+  usageRecording === undefined ? null : recordedUsageBody(usageRecording)
 
-/** Thrown by the JS API (`faults.add`, `script.enqueue`) for invalid input; a programmer error. */
+/** Thrown by the JS API (`faults.add`, `script.enqueue`) and at construction for invalid input. */
 export class OpenCodeGoEmulatorInputInvalid extends Data.TaggedError(
   'OpenCodeGoEmulatorInputInvalid'
 )<{
@@ -152,13 +144,15 @@ export class OpenCodeGoEmulatorInputInvalid extends Data.TaggedError(
 }
 
 export type OpenCodeGoEmulatorOptions = {
-  /** Model ids that exist (on every protocol). Defaults to `openCodeGoEmulatorDefaultModels`. */
-  readonly knownModels?: ReadonlyArray<string>
-  /** Default usage-route body. Defaults to `openCodeGoUsageDefault`. */
-  readonly usage?: Schema.Json
+  /**
+   * Replacement usage-route body; must have the recorded JSON shape (same keys and value kinds).
+   * Defaults to the recorded body (`openCodeGoUsageDefault`).
+   */
+  readonly subscriptionUsage?: Schema.Json
 }
 
-export type OpenCodeGoChatEmulator = ChatCompletionsEmulator<ChatScriptedReasoningTurn>
+/** One Go route: a fixture-only emulator API (ledger, faults, scripted turns, coverage). */
+export type OpenCodeGoRouteEmulator = FixtureRouteEmulator
 
 export type OpenCodeGoEmulator = {
   /** The fetch handler for every route and the `/_emulate/*` control plane. Never rejects. */
@@ -168,106 +162,79 @@ export type OpenCodeGoEmulator = {
   /** Every route's coverage, in manifest order. */
   readonly coverage: () => EmulatorCoverage
   /** `POST /zen/go/v1/chat/completions` (control plane `/_emulate/chat/*`). */
-  readonly chat: OpenCodeGoChatEmulator
+  readonly chat: OpenCodeGoRouteEmulator
   /** `POST /zen/go/v1/messages` (control plane `/_emulate/messages/*`). */
-  readonly messages: MessagesEmulator
+  readonly messages: OpenCodeGoRouteEmulator
   /** `POST /zen/go/v1/responses` (control plane `/_emulate/responses/*`). */
-  readonly responses: ResponsesEmulator
+  readonly responses: OpenCodeGoRouteEmulator
   /** `GET /zen/go/v1/usage` (control plane `/_emulate/usage/*`). */
-  readonly usage: SubscriptionUsageEmulator
+  readonly usage: OpenCodeGoRouteEmulator
 }
 
 const routesFor = (path: string): ReadonlyArray<EmulatorRouteEvidence> =>
   openCodeGoEmulatorRoutes.filter(route => route.path === path)
 
-const openAiErrorEnvelope = (error: ChatWireError | ResponsesWireError): Schema.Json => ({
-  error: {
-    message: error.message,
-    type: error.type,
-    param: 'param' in error && error.param !== undefined ? error.param : null,
-    code: error.code
-  }
-})
-
-const unauthorized = {
-  message: 'Synthetic: missing or invalid API key.',
-  type: 'invalid_request_error',
-  code: 'invalid_api_key'
-} as const
-
-const unknownModel = {
-  message: 'Synthetic placeholder: the requested model is not available on OpenCode Go.',
-  type: 'invalid_request_error',
-  code: 'model_not_found'
-} as const
-
 /**
- * Create an OpenCode Go emulator. Each call has independent state for every part.
+ * Create an OpenCode Go emulator. Each call has independent state for every part. Throws
+ * `OpenCodeGoEmulatorInputInvalid` when `subscriptionUsage` does not have the recorded shape.
  *
- * Without a script: chat answers a known model with plain OpenAI `chat.completion.chunk` SSE
- * (usage in a trailing chunk when `stream_options.include_usage` is set) or a JSON body; Messages
- * streams `message_start` ... `message_stop` (or a `message` body); Responses streams
- * `response.created` ... `response.completed` (or a `response` body); usage answers
- * `openCodeGoUsageDefault`. Unknown models get 404 (chat, Messages) or 400 (Responses); missing
- * credentials get 401 (a bearer for chat, Responses, and usage; `x-api-key` for Messages, where
- * a bearer alone is refused). Credential values are never checked or stored. Scripted turns,
- * faults, and ledgers are per part: `emulator.chat.script.enqueue(...)`,
- * `emulator.responses.faults.add(...)`, `emulator.usage.script.enqueue({ usage })`, and so on.
+ * Per route, a request carrying the credential and headers the Go provider or usage fetcher sends
+ * (Bearer for chat, Responses, and usage; `x-api-key` and `anthropic-version: 2023-06-01` for
+ * Messages), the recorded `accept` and `content-type`, and a body matching a recorded request
+ * shape gets the recorded response; anything else answers 400 not-emulated. Test controls per
+ * part: the shared kernel faults and scripted error turns (and, on usage, a scripted same-shaped
+ * `{ usage }` body).
  */
 export const makeOpenCodeGoEmulator = (
   options: OpenCodeGoEmulatorOptions = {}
 ): OpenCodeGoEmulator => {
-  const knownModels = options.knownModels ?? openCodeGoEmulatorDefaultModels
-
   const inputInvalid =
     (protocol: OpenCodeGoEmulatorInputInvalid['protocol']) =>
     (input: 'fault' | 'turn', reason: string) =>
       new OpenCodeGoEmulatorInputInvalid({ protocol, input, reason })
 
-  const chat = makeChatCompletionsEmulator({
+  const chat = makeFixtureRouteEmulator({
+    method: 'POST',
     path: openCodeGoChatCompletionsPath,
     routes: routesFor(openCodeGoChatCompletionsPath),
-    knownModels,
-    reasoningModels: [],
-    errorEnvelope: openAiErrorEnvelope,
-    unknownModel: { status: 404, error: unknownModel },
-    auth: { unauthorized },
-    completionTokenField: 'max_tokens',
-    responseIdPrefix: 'chatcmpl-synthetic-go',
-    defaultText: ['Hello', ' from the', ' synthetic OpenCode Go emulator.'],
-    turnSchema: ChatScriptedReasoningTurn,
+    recordings: recordingsFor(openCodeGoChatCompletionsPath),
+    credential: 'bearer',
+    headers: [],
     inputInvalid: inputInvalid('chat-completions')
   })
 
-  const messages = makeMessagesEmulator({
+  const messages = makeFixtureRouteEmulator({
+    method: 'POST',
     path: openCodeGoMessagesPath,
     routes: routesFor(openCodeGoMessagesPath),
-    knownModels,
-    credentials: 'x-api-key',
+    recordings: recordingsFor(openCodeGoMessagesPath),
+    credential: 'x-api-key',
+    headers: [
+      { name: 'anthropic-version', record: true, accepts: value => value === '2023-06-01' }
+    ],
     inputInvalid: inputInvalid('messages')
   })
 
-  const responses = makeResponsesEmulator({
+  const responses = makeFixtureRouteEmulator({
+    method: 'POST',
     path: openCodeGoResponsesPath,
     routes: routesFor(openCodeGoResponsesPath),
-    knownModels,
-    errorEnvelope: openAiErrorEnvelope,
-    unknownModel: { status: 400, error: { ...unknownModel, param: 'model' } },
-    unauthorized,
+    recordings: recordingsFor(openCodeGoResponsesPath),
+    credential: 'bearer',
     headers: [],
-    outputTokenLimit: 'optional',
-    defaultText: ['Hello', ' from the', ' synthetic OpenCode Go emulator.'],
     inputInvalid: inputInvalid('responses')
   })
+
+  if (usageRecording === undefined) {
+    throw inputInvalid('usage')('turn', 'no recorded Go usage fixture')
+  }
 
   const usage = makeSubscriptionUsageEmulator({
     path: openCodeGoUsagePath,
     routes: routesFor(openCodeGoUsagePath),
-    usage: options.usage ?? openCodeGoUsageDefault,
-    errorEnvelope: openAiErrorEnvelope,
-    unauthorized,
+    recording: usageRecording,
     headers: [],
-    query: [],
+    subscriptionUsage: options.subscriptionUsage,
     inputInvalid: inputInvalid('usage')
   })
 

@@ -162,7 +162,7 @@ describe('record-usage-fixtures plan, verification, and write gate', () => {
       ])
     })
 
-    it(`${family.family}: writes nothing for a failing, unredacted, or unscannable recording`, async () => {
+    it(`${family.family}: writes nothing for a failing, unredacted, unscannable, or undecodable recording`, async () => {
       for (const [fixture, message] of [
         [withBody(family.fixture, '{}'), 'no fixture was written'],
         [withBody(family.fixture, '{"email":["someone"]}'), 'could not redact email'],
@@ -174,6 +174,31 @@ describe('record-usage-fixtures plan, verification, and write gate', () => {
         expect(failureText(exit)).toContain(message)
         expect(calls).toEqual([])
       }
+
+      const undecodable: WireFixture = {
+        ...family.fixture,
+        exchanges: [
+          {
+            request: family.fixture.exchanges[0].request,
+            response: {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+              bodyBase64: '@@not-base64@@'
+            }
+          }
+        ]
+      }
+
+      const undecodableWrite = recordingWriter()
+
+      expect(
+        failureText(
+          await Effect.runPromiseExit(
+            writeVerifiedFixture(undecodable, options, undecodableWrite.writer)
+          )
+        )
+      ).toContain('undecodable base64')
+      expect(undecodableWrite.calls).toEqual([])
 
       const other = families.find(candidate => candidate.family !== family.family)
       const { calls, writer } = recordingWriter()

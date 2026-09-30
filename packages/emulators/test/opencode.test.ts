@@ -1,10 +1,21 @@
 /**
- * The OpenCode Go emulator: one origin serving Chat Completions, Messages, Responses, and usage
- * under `/zen/go/v1`, per-protocol auth, per-part ledgers, faults, turns, and control planes, the
- * combined coverage and reset, and the manifest.
+ * The OpenCode Go emulator: one origin serving the fixture-only chat, Messages, Responses, and
+ * usage routes under `/zen/go/v1`. Recorded requests (within the documented request-shape
+ * latitude) get the recorded responses; everything else is one ledgered 400 not-emulated that
+ * uses up no fault or turn. Per-part ledgers, faults, turns, and control planes, the combined
+ * coverage and reset, and the manifest.
  */
+import { Predicate } from 'effect'
+import type * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vitest'
-import { emulatorEvidenceHeader, EmulatorRouteUnmapped } from '../src/route-evidence.ts'
+import {
+  openCodeGoChatPlainTextFixture,
+  openCodeGoMessagesPlainTextFixture,
+  openCodeGoResponsesCommentaryReplayFixture,
+  openCodeGoResponsesPlainTextFixture,
+  openCodeGoUsageSnapshotFixture
+} from '@yolk-sdk/agent/providers/opencode/conformance'
+import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 import {
   makeOpenCodeGoEmulator,
   OpenCodeGoEmulatorInputInvalid,
@@ -15,30 +26,52 @@ import {
   openCodeGoResponsesPath,
   openCodeGoUsageDefault,
   openCodeGoUsagePath,
-  type OpenCodeGoEmulator
+  type OpenCodeGoEmulator,
+  type OpenCodeGoRouteEmulator
 } from '../src/opencode.ts'
-import { makeSubscriptionUsageEmulator } from '../src/subscription-usage.ts'
+import { isJsonObject } from '../src/emulator-kernel.ts'
+import { emulatorEvidenceHeader } from '../src/route-evidence.ts'
 
 const origin = 'https://opencode.ai'
 
 const bearer = { authorization: 'Bearer synthetic-go-key' }
 
+const apiKey = { 'x-api-key': 'synthetic-go-key', 'anthropic-version': '2023-06-01' }
+
+const recordedBody = (fixture: WireFixture): Schema.JsonObject => {
+  const body = fixture.exchanges[0].request.body
+
+  return isJsonObject(body) ? body : expect.fail(`${fixture.id} has no JSON request body`)
+}
+
+const recordedText = (fixture: WireFixture): string => {
+  const response = fixture.exchanges[0].response
+
+  if ('chunks' in response && response.chunks !== undefined) {
+    return response.chunks.map(chunk => (Predicate.isString(chunk) ? chunk : '')).join('')
+  }
+
+  return 'body' in response && Predicate.isString(response.body) ? response.body : ''
+}
+
 const post = (
   emulator: OpenCodeGoEmulator,
   path: string,
-  headers: Record<string, string>,
+  headers: Readonly<Record<string, string>>,
   body: unknown
 ) =>
   emulator.fetch(
     new Request(`${origin}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
+      headers: { accept: 'text/event-stream', 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body)
     })
   )
 
 const get = (emulator: OpenCodeGoEmulator, path: string, headers: Record<string, string>) =>
-  emulator.fetch(new Request(`${origin}${path}`, { headers }))
+  emulator.fetch(
+    new Request(`${origin}${path}`, { headers: { accept: 'application/json', ...headers } })
+  )
 
 const control = (emulator: OpenCodeGoEmulator, method: string, path: string, body?: unknown) =>
   emulator.fetch(
@@ -49,214 +82,320 @@ const control = (emulator: OpenCodeGoEmulator, method: string, path: string, bod
     })
   )
 
-const chatBody = { model: 'synthetic-go-chat', messages: [], stream: false, max_tokens: 16 }
+const chatBody = recordedBody(openCodeGoChatPlainTextFixture)
 
-const messagesBody = { model: 'synthetic-go-messages', messages: [], stream: false, max_tokens: 16 }
+const messagesBody = recordedBody(openCodeGoMessagesPlainTextFixture)
 
-const responsesBody = {
-  model: 'synthetic-go-responses',
-  input: 'Hi',
-  stream: false,
-  max_output_tokens: 16
+const responsesBody = recordedBody(openCodeGoResponsesPlainTextFixture)
+
+const replayBody = recordedBody(openCodeGoResponsesCommentaryReplayFixture)
+
+const expectNotEmulated = async (response: Response) => {
+  expect(response.status).toBe(400)
+  expect(await response.json()).toMatchObject({
+    error: { type: 'not_emulated', message: expect.stringMatching(/^Not emulated: /) }
+  })
 }
 
-const anthropicVersion = { 'anthropic-version': '2023-06-01' }
+/** A part with one armed fault and one pending turn, to prove a rejection uses up neither. */
+const armed = (part: OpenCodeGoRouteEmulator) => {
+  part.faults.add({ kind: 'status', status: 503, count: 1 })
+  part.script.enqueue({ error: { status: 502, body: { error: { message: 'synthetic' } } } })
+}
 
-describe('makeOpenCodeGoEmulator', () => {
-  it('answers each protocol on its own path with evidence-tagged bodies', async () => {
+const expectUntouched = (part: OpenCodeGoRouteEmulator) => {
+  expect(part.faults.list()).toMatchObject([{ remaining: 1, applied: 0 }])
+  expect(part.script.pending()).toBe(1)
+  expect(part.ledger.entries().at(-1)).toMatchObject({
+    status: 400,
+    notEmulated: expect.any(String)
+  })
+  expect(part.ledger.entries().at(-1)).not.toHaveProperty('recording')
+}
+
+describe('makeOpenCodeGoEmulator recorded answers', () => {
+  it('answers each recorded request with its recorded response, evidence-tagged', async () => {
     const emulator = makeOpenCodeGoEmulator()
 
-    const chat = await post(emulator, openCodeGoChatCompletionsPath, bearer, chatBody)
+    const cases = [
+      [
+        openCodeGoChatPlainTextFixture,
+        post(emulator, openCodeGoChatCompletionsPath, bearer, chatBody)
+      ],
+      [
+        openCodeGoMessagesPlainTextFixture,
+        post(emulator, openCodeGoMessagesPath, apiKey, messagesBody)
+      ],
+      [
+        openCodeGoResponsesPlainTextFixture,
+        post(emulator, openCodeGoResponsesPath, bearer, responsesBody)
+      ],
+      [
+        openCodeGoResponsesCommentaryReplayFixture,
+        post(emulator, openCodeGoResponsesPath, bearer, replayBody)
+      ],
+      [openCodeGoUsageSnapshotFixture, get(emulator, openCodeGoUsagePath, bearer)]
+    ] as const
 
-    const messages = await post(
-      emulator,
-      openCodeGoMessagesPath,
-      { 'x-api-key': 'synthetic-go-key', ...anthropicVersion },
-      messagesBody
-    )
+    for (const [fixture, pending] of cases) {
+      const response = await pending
 
-    const responses = await post(emulator, openCodeGoResponsesPath, bearer, responsesBody)
-    const usage = await get(emulator, openCodeGoUsagePath, bearer)
-
-    expect(chat.status).toBe(200)
-    expect((await chat.json()).object).toBe('chat.completion')
-    expect(messages.status).toBe(200)
-    expect((await messages.json()).type).toBe('message')
-    expect(responses.status).toBe(200)
-    expect((await responses.json()).status).toBe('completed')
-    expect(usage.status).toBe(200)
-    expect(await usage.json()).toEqual(openCodeGoUsageDefault)
-
-    for (const response of [chat, messages, responses, usage]) {
+      expect(response.status, fixture.id).toBe(200)
       expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(response.headers.get('content-type')).toBe(
+        fixture.exchanges[0].response.headers['content-type']
+      )
+      expect(await response.text(), fixture.id).toBe(recordedText(fixture))
     }
 
-    // Each part has its own ledger, with the protocol's own fields.
     expect(emulator.chat.ledger.entries()).toMatchObject([
-      { path: openCodeGoChatCompletionsPath, model: 'synthetic-go-chat', maxCompletionTokens: 16 }
+      {
+        path: openCodeGoChatCompletionsPath,
+        model: 'synthetic-go-chat',
+        credentialHeader: 'authorization',
+        recording: openCodeGoChatPlainTextFixture.id,
+        status: 200
+      }
     ])
     expect(emulator.messages.ledger.entries()).toMatchObject([
-      { path: openCodeGoMessagesPath, credentialHeader: 'x-api-key', maxTokens: 16 }
+      {
+        credentialHeader: 'x-api-key',
+        headers: { 'anthropic-version': '2023-06-01' },
+        recording: openCodeGoMessagesPlainTextFixture.id
+      }
     ])
-    expect(emulator.responses.ledger.entries()).toMatchObject([
-      { path: openCodeGoResponsesPath, maxOutputTokens: 16 }
+    expect(emulator.responses.ledger.entries().map(entry => entry.recording)).toEqual([
+      openCodeGoResponsesPlainTextFixture.id,
+      openCodeGoResponsesCommentaryReplayFixture.id
     ])
     expect(emulator.usage.ledger.entries()).toMatchObject([
-      { method: 'GET', path: openCodeGoUsagePath, credentialHeader: 'authorization', status: 200 }
+      { method: 'GET', recording: openCodeGoUsageSnapshotFixture.id }
     ])
-  })
-
-  it('enforces the credential each protocol sends: Bearer, or x-api-key for Messages', async () => {
-    const emulator = makeOpenCodeGoEmulator()
-
-    expect((await post(emulator, openCodeGoChatCompletionsPath, {}, chatBody)).status).toBe(401)
-    expect((await post(emulator, openCodeGoResponsesPath, {}, responsesBody)).status).toBe(401)
-    expect((await get(emulator, openCodeGoUsagePath, {})).status).toBe(401)
-
-    // Messages takes an API key only: a bearer alone (a Claude OAuth shape) is refused.
-    const bearerMessages = await post(
-      emulator,
-      openCodeGoMessagesPath,
-      { ...bearer, ...anthropicVersion },
-      messagesBody
-    )
-
-    expect(bearerMessages.status).toBe(401)
-    expect(await bearerMessages.json()).toEqual({
-      type: 'error',
-      error: {
-        type: 'authentication_error',
-        message: 'Synthetic: an x-api-key header is required.'
-      }
-    })
-
-    // Chat and Responses do not take x-api-key.
-    expect(
-      (
-        await post(
-          emulator,
-          openCodeGoChatCompletionsPath,
-          { 'x-api-key': 'synthetic-go-key' },
-          chatBody
-        )
-      ).status
-    ).toBe(401)
-
-    // Credential values are never recorded.
-    const recorded = JSON.stringify([
-      emulator.chat.ledger.entries(),
-      emulator.messages.ledger.entries(),
-      emulator.responses.ledger.entries(),
-      emulator.usage.ledger.entries()
-    ])
-
-    expect(recorded).not.toContain('synthetic-go-key')
-  })
-
-  it('uses the Go model list on every protocol and rejects unknown models', async () => {
-    const emulator = makeOpenCodeGoEmulator()
-
+    expect(openCodeGoUsageDefault).toEqual(JSON.parse(recordedText(openCodeGoUsageSnapshotFixture)))
     expect(openCodeGoEmulatorDefaultModels).toEqual([
       'synthetic-go-chat',
       'synthetic-go-messages',
       'synthetic-go-responses'
     ])
-
-    const unknownChat = await post(emulator, openCodeGoChatCompletionsPath, bearer, {
-      ...chatBody,
-      model: 'nope'
-    })
-
-    expect(unknownChat.status).toBe(404)
-    expect(await unknownChat.json()).toMatchObject({ error: { code: 'model_not_found' } })
-
-    const unknownResponses = await post(emulator, openCodeGoResponsesPath, bearer, {
-      ...responsesBody,
-      model: 'nope'
-    })
-
-    expect(unknownResponses.status).toBe(400)
-
-    const custom = makeOpenCodeGoEmulator({ knownModels: ['custom-go'] })
-
-    expect(
-      (
-        await post(custom, openCodeGoChatCompletionsPath, bearer, {
-          ...chatBody,
-          model: 'custom-go'
-        })
-      ).status
-    ).toBe(200)
   })
 
-  it('streams each protocol with its framing', async () => {
+  it('accepts the documented request-shape latitude', async () => {
     const emulator = makeOpenCodeGoEmulator()
 
-    const chat = await (
-      await post(emulator, openCodeGoChatCompletionsPath, bearer, {
+    // Other text values, another positive output limit, other credential values, extra headers.
+    const chat = await post(
+      emulator,
+      openCodeGoChatCompletionsPath,
+      {
+        authorization: 'Bearer other',
+        'x-extra': '1',
+        'content-type': 'application/json; charset=utf-8'
+      },
+      {
         ...chatBody,
-        stream: true,
-        stream_options: { include_usage: true }
-      })
-    ).text()
+        max_tokens: 4096,
+        messages: [
+          { role: 'system', content: 'Be brief.' },
+          { role: 'user', content: 'Hi there.' }
+        ]
+      }
+    )
 
-    expect(chat.trim().endsWith('data: [DONE]')).toBe(true)
-    expect(chat).toContain('"usage":')
+    expect(chat.status).toBe(200)
+    expect(await chat.text()).toBe(recordedText(openCodeGoChatPlainTextFixture))
 
-    const messages = await (
-      await post(
-        emulator,
-        openCodeGoMessagesPath,
-        { 'x-api-key': 'synthetic-go-key', ...anthropicVersion },
-        { ...messagesBody, stream: true }
-      )
-    ).text()
+    // Replay: other call ids, arguments, and texts keep the recorded kinds and discriminators.
+    const replay = await post(emulator, openCodeGoResponsesPath, bearer, {
+      ...replayBody,
+      input: [
+        { role: 'user', content: 'Weather in Shelbyville?' },
+        { role: 'assistant', content: 'Checking.', phase: 'commentary' },
+        {
+          type: 'function_call',
+          call_id: 'call_other',
+          name: 'lookup_weather',
+          arguments: '{"city":"Shelbyville"}'
+        },
+        { type: 'function_call_output', call_id: 'call_other', output: 'Rainy.' }
+      ]
+    })
 
-    expect(messages).toContain('event: message_start')
-    expect(messages.trim().endsWith('data: {"type":"message_stop"}')).toBe(true)
-
-    const responses = await (
-      await post(emulator, openCodeGoResponsesPath, bearer, { ...responsesBody, stream: true })
-    ).text()
-
-    expect(responses).toContain('event: response.created')
-    expect(responses).toContain('event: response.completed')
+    expect(replay.status).toBe(200)
+    expect(await replay.text()).toBe(recordedText(openCodeGoResponsesCommentaryReplayFixture))
   })
+})
 
-  it('scripts reasoning_content for chat and usage bodies per part', async () => {
+describe('makeOpenCodeGoEmulator not-emulated requests', () => {
+  const rejections: ReadonlyArray<{
+    readonly label: string
+    readonly part: 'chat' | 'messages' | 'responses' | 'usage'
+    readonly send: (emulator: OpenCodeGoEmulator) => Promise<Response>
+  }> = [
+    {
+      label: 'chat without a credential',
+      part: 'chat',
+      send: e => post(e, openCodeGoChatCompletionsPath, {}, chatBody)
+    },
+    {
+      label: 'chat with x-api-key instead of a bearer',
+      part: 'chat',
+      send: e => post(e, openCodeGoChatCompletionsPath, { 'x-api-key': 'k' }, chatBody)
+    },
+    {
+      label: 'chat with an unrecorded model',
+      part: 'chat',
+      send: e =>
+        post(e, openCodeGoChatCompletionsPath, bearer, { ...chatBody, model: 'other-model' })
+    },
+    {
+      label: 'chat without streaming (no JSON-body fixture)',
+      part: 'chat',
+      send: e => post(e, openCodeGoChatCompletionsPath, bearer, { ...chatBody, stream: false })
+    },
+    {
+      label: 'chat with tools',
+      part: 'chat',
+      send: e => post(e, openCodeGoChatCompletionsPath, bearer, { ...chatBody, tools: [] })
+    },
+    {
+      label: 'chat asking for reasoning',
+      part: 'chat',
+      send: e =>
+        post(e, openCodeGoChatCompletionsPath, bearer, { ...chatBody, reasoning_effort: 'low' })
+    },
+    {
+      label: 'chat with another message count',
+      part: 'chat',
+      send: e =>
+        post(e, openCodeGoChatCompletionsPath, bearer, {
+          ...chatBody,
+          messages: [{ role: 'user', content: 'Hi.' }]
+        })
+    },
+    {
+      label: 'chat with a JSON accept',
+      part: 'chat',
+      send: e =>
+        post(e, openCodeGoChatCompletionsPath, { ...bearer, accept: 'application/json' }, chatBody)
+    },
+    {
+      label: 'Messages with a bearer only',
+      part: 'messages',
+      send: e =>
+        post(
+          e,
+          openCodeGoMessagesPath,
+          { ...bearer, 'anthropic-version': '2023-06-01' },
+          messagesBody
+        )
+    },
+    {
+      label: 'Messages without anthropic-version',
+      part: 'messages',
+      send: e => post(e, openCodeGoMessagesPath, { 'x-api-key': 'k' }, messagesBody)
+    },
+    {
+      label: 'Messages with thinking',
+      part: 'messages',
+      send: e =>
+        post(e, openCodeGoMessagesPath, apiKey, {
+          ...messagesBody,
+          thinking: { type: 'enabled', budget_tokens: 1024 }
+        })
+    },
+    {
+      label: 'Messages with a zero output limit',
+      part: 'messages',
+      send: e => post(e, openCodeGoMessagesPath, apiKey, { ...messagesBody, max_tokens: 0 })
+    },
+    {
+      label: 'Responses with store: true',
+      part: 'responses',
+      send: e => post(e, openCodeGoResponsesPath, bearer, { ...responsesBody, store: true })
+    },
+    {
+      label: 'Responses asking for a reasoning summary',
+      part: 'responses',
+      send: e =>
+        post(e, openCodeGoResponsesPath, bearer, {
+          ...responsesBody,
+          reasoning: { effort: 'low', summary: 'auto' }
+        })
+    },
+    {
+      label: 'Responses replay without the commentary phase',
+      part: 'responses',
+      send: e => {
+        const input = replayBody.input
+
+        return post(e, openCodeGoResponsesPath, bearer, {
+          ...replayBody,
+          input: Array.isArray(input)
+            ? input.map((item, index) =>
+                index === 1 ? { role: 'assistant', content: 'Checking.' } : item
+              )
+            : input
+        })
+      }
+    },
+    {
+      label: 'usage without a credential',
+      part: 'usage',
+      send: e => get(e, openCodeGoUsagePath, {})
+    },
+    {
+      label: 'usage with a query',
+      part: 'usage',
+      send: e => get(e, `${openCodeGoUsagePath}?window=weekly`, bearer)
+    },
+    {
+      label: 'usage by POST',
+      part: 'usage',
+      send: e => post(e, openCodeGoUsagePath, bearer, {})
+    }
+  ]
+
+  for (const rejection of rejections) {
+    it(`answers 400 not-emulated for ${rejection.label}, leaving faults and turns untouched`, async () => {
+      const emulator = makeOpenCodeGoEmulator()
+      const part = emulator[rejection.part]
+
+      armed(part)
+
+      await expectNotEmulated(await rejection.send(emulator))
+      expectUntouched(part)
+    })
+  }
+
+  it('fails unknown routes as a ledgered 400 not-emulated through the chat part', async () => {
     const emulator = makeOpenCodeGoEmulator()
 
-    emulator.chat.script.enqueue({ reasoning: ['Think.'], text: ['Done.'] })
-    emulator.usage.script.enqueue({ usage: { usage: { weekly: { percent: 5 } } } })
+    await expectNotEmulated(await get(emulator, '/zen/go/v1/models', bearer))
+    expect(emulator.chat.ledger.entries()).toMatchObject([
+      { path: '/zen/go/v1/models', evidence: 'unknown-route', status: 400 }
+    ])
+    expect(emulator.coverage().unknownRouteRequests).toBe(1)
+  })
 
-    const chat = await (
-      await post(emulator, openCodeGoChatCompletionsPath, bearer, chatBody)
-    ).json()
+  it('never records credential values', async () => {
+    const emulator = makeOpenCodeGoEmulator()
 
-    expect(chat.choices[0].message).toEqual({
-      role: 'assistant',
-      content: 'Done.',
-      reasoning_content: 'Think.'
-    })
-    expect(await (await get(emulator, openCodeGoUsagePath, bearer)).json()).toEqual({
-      usage: { weekly: { percent: 5 } }
-    })
-    expect(await (await get(emulator, openCodeGoUsagePath, bearer)).json()).toEqual(
-      openCodeGoUsageDefault
-    )
-    expect(emulator.usage.ledger.entries().map(entry => entry.scripted)).toEqual([
-      'usage',
-      undefined
+    await post(emulator, openCodeGoChatCompletionsPath, bearer, chatBody)
+    await post(emulator, openCodeGoMessagesPath, apiKey, messagesBody)
+    await get(emulator, openCodeGoUsagePath, bearer)
+
+    const recorded = JSON.stringify([
+      emulator.chat.ledger.entries(),
+      emulator.messages.ledger.entries(),
+      emulator.usage.ledger.entries()
     ])
 
-    const custom = makeOpenCodeGoEmulator({ usage: { usage: { rolling: null } } })
-
-    expect(await (await get(custom, openCodeGoUsagePath, bearer)).json()).toEqual({
-      usage: { rolling: null }
-    })
+    expect(recorded).not.toContain('synthetic-go-key')
   })
+})
 
-  it('applies faults per part only', async () => {
+describe('makeOpenCodeGoEmulator test controls', () => {
+  it('applies the shared faults and scripted errors per part only', async () => {
     const emulator = makeOpenCodeGoEmulator()
 
     emulator.usage.faults.add({
@@ -270,33 +409,73 @@ describe('makeOpenCodeGoEmulator', () => {
 
     expect(limited.status).toBe(429)
     expect(limited.headers.get('retry-after')).toBe('3')
-    expect(await limited.json()).toMatchObject({ error: { code: 'rate_limit_exceeded' } })
+    expect(await limited.json()).toEqual({
+      error: { type: 'emulator_fault', message: 'Emulator fault: status 429.' }
+    })
     expect((await post(emulator, openCodeGoChatCompletionsPath, bearer, chatBody)).status).toBe(200)
 
-    emulator.usage.faults.add({ kind: 'error-after-chunks', chunks: 0, count: 1 })
+    emulator.responses.faults.add({ kind: 'truncate-after-chunks', chunks: 2, count: 1 })
 
-    const dropped = await get(emulator, openCodeGoUsagePath, bearer)
+    const truncated = await (
+      await post(emulator, openCodeGoResponsesPath, bearer, responsesBody)
+    ).text()
 
-    await expect(dropped.text()).rejects.toThrow()
-    expect(() => emulator.usage.faults.add({ kind: 'status', status: 302 })).toThrow(
+    expect(recordedText(openCodeGoResponsesPlainTextFixture).startsWith(truncated)).toBe(true)
+    expect(truncated).not.toContain('response.completed')
+
+    emulator.messages.script.enqueue({ error: { status: 500, body: { error: { message: 'x' } } } })
+
+    expect((await post(emulator, openCodeGoMessagesPath, apiKey, messagesBody)).status).toBe(500)
+    expect(emulator.messages.ledger.entries().at(-1)).toMatchObject({ scripted: 'error' })
+  })
+
+  it('refuses scripted turns and bodies no Go fixture records', async () => {
+    const emulator = makeOpenCodeGoEmulator()
+
+    // Stream routes take scripted errors only.
+    expect(() => emulator.chat.script.enqueue({ usage: {} })).toThrow(
       OpenCodeGoEmulatorInputInvalid
     )
     expect(
-      (await control(emulator, 'POST', '/_emulate/messages/script', { text: [1] })).status
+      (
+        await control(emulator, 'POST', '/_emulate/chat/script', {
+          text: ['Hi.'],
+          reasoning: ['x']
+        })
+      ).status
     ).toBe(400)
-    expect(emulator.messages.script.pending()).toBe(0)
-  })
+    expect(emulator.chat.script.pending()).toBe(0)
 
-  it('fails unknown routes closed through the chat part', async () => {
-    const emulator = makeOpenCodeGoEmulator()
+    // Usage bodies must keep the recorded shape: values may change, keys and kinds may not.
+    expect(() =>
+      emulator.usage.script.enqueue({ usage: { usage: { weekly: { percent: 5 } } } })
+    ).toThrow(/recorded shape/)
+    expect(() => makeOpenCodeGoEmulator({ subscriptionUsage: { usage: {} } })).toThrow(
+      OpenCodeGoEmulatorInputInvalid
+    )
 
-    const unknown = await get(emulator, '/zen/go/v1/models', bearer)
+    const otherValues = {
+      usage: {
+        rolling: { percent: 1, resetsAt: '2026-10-01T00:00:00.000Z' },
+        weekly: { percent: 2, resetsAt: '2026-10-02T00:00:00.000Z' },
+        monthly: { percent: 3, resetsAt: '2026-10-03T00:00:00.000Z' }
+      }
+    }
 
-    expect(unknown.status).toBe(404)
-    expect(emulator.chat.ledger.entries()).toMatchObject([
-      { path: '/zen/go/v1/models', evidence: 'unknown-route', status: 404 }
+    emulator.usage.script.enqueue({ usage: otherValues })
+
+    expect(await (await get(emulator, openCodeGoUsagePath, bearer)).json()).toEqual(otherValues)
+    expect(await (await get(emulator, openCodeGoUsagePath, bearer)).json()).toEqual(
+      openCodeGoUsageDefault
+    )
+    expect(emulator.usage.ledger.entries().map(entry => entry.scripted)).toEqual([
+      'usage',
+      undefined
     ])
-    expect(emulator.coverage().unknownRouteRequests).toBe(1)
+
+    const custom = makeOpenCodeGoEmulator({ subscriptionUsage: otherValues })
+
+    expect(await (await get(custom, openCodeGoUsagePath, bearer)).json()).toEqual(otherValues)
   })
 
   it('serves each part control plane under /_emulate/<part>, and combined coverage and reset', async () => {
@@ -311,12 +490,7 @@ describe('makeOpenCodeGoEmulator', () => {
         })
       ).status
     ).toBe(201)
-    expect(
-      (await control(emulator, 'POST', '/_emulate/usage/script', { usage: { usage: {} } })).status
-    ).toBe(201)
     expect(emulator.responses.faults.list()).toHaveLength(1)
-    expect(emulator.usage.script.pending()).toBe(1)
-
     expect((await post(emulator, openCodeGoResponsesPath, bearer, responsesBody)).status).toBe(503)
     expect(
       await (await control(emulator, 'GET', '/_emulate/responses/ledger')).json()
@@ -336,7 +510,6 @@ describe('makeOpenCodeGoEmulator', () => {
     expect((await control(emulator, 'GET', '/_emulate/ledger')).status).toBe(404)
     expect((await control(emulator, 'POST', '/_emulate/reset')).status).toBe(200)
     expect(emulator.responses.ledger.entries()).toEqual([])
-    expect(emulator.usage.script.pending()).toBe(0)
     expect(emulator.responses.faults.list()).toEqual([])
   })
 })
@@ -368,20 +541,5 @@ describe('openCodeGoEmulatorRoutes', () => {
     for (const route of openCodeGoEmulatorRoutes) {
       expect(route).toMatchObject({ kind: 'provider', write: false, observedAt: undefined })
     }
-  })
-
-  it('throws EmulatorRouteUnmapped when a usage manifest does not list its path', () => {
-    expect(() =>
-      makeSubscriptionUsageEmulator({
-        path: '/elsewhere',
-        routes: openCodeGoEmulatorRoutes.filter(route => route.path === openCodeGoUsagePath),
-        usage: {},
-        errorEnvelope: error => ({ error: { message: error.message } }),
-        unauthorized: { message: 'no', type: 'auth', code: 'no' },
-        headers: [],
-        query: [],
-        inputInvalid: (input, reason) => new Error(`${input}: ${reason}`)
-      })
-    ).toThrow(EmulatorRouteUnmapped)
   })
 })

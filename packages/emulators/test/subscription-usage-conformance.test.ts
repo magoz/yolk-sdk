@@ -100,8 +100,10 @@ type Family<Req> = {
   >
   /** Window ids of the emulator's default body. */
   readonly windowIds: ReadonlyArray<string>
-  /** A body the parser reads without any window. */
-  readonly noWindows: SubscriptionUsageScriptedTurn
+  /** A body with the recorded shape whose percentages are all out of range. */
+  readonly outOfRange: SubscriptionUsageScriptedTurn
+  /** How the usage case fails for `outOfRange`. */
+  readonly outOfRangeFailure: { readonly tag: string; readonly message?: string }
   /** Non-credential headers the usage ledger records. */
   readonly recorded: Readonly<Record<string, string>>
 }
@@ -114,7 +116,13 @@ const claude: Family<AnthropicClaudeUsageConformanceConfig> = {
   configLayer: Layer.succeed(AnthropicClaudeUsageConformanceConfig, { token: claudeToken }),
   fetch: fetchAnthropicClaudeSubscriptionUsage(claudeToken),
   windowIds: ['five-hour', 'seven-day'],
-  noWindows: { usage: { five_hour: null, seven_day: null } },
+  outOfRange: {
+    usage: {
+      five_hour: { utilization: 101, resets_at: '2026-10-01T05:00:00.000Z' },
+      seven_day: { utilization: 102, resets_at: '2026-10-06T00:00:00.000Z' }
+    }
+  },
+  outOfRangeFailure: { tag: 'ConformanceMismatch', message: 'expected at least one usage window' },
   recorded: { 'anthropic-beta': 'oauth-2025-04-20' }
 }
 
@@ -126,7 +134,25 @@ const codex: Family<OpenAiCodexUsageConformanceConfig> = {
   configLayer: Layer.succeed(OpenAiCodexUsageConformanceConfig, { token: codexToken }),
   fetch: fetchOpenAiCodexSubscriptionUsage(codexToken),
   windowIds: ['primary', 'secondary'],
-  noWindows: { usage: { rate_limit: { primary_window: { used_percent: null } } } },
+  outOfRange: {
+    usage: {
+      rate_limit: {
+        primary_window: {
+          used_percent: 101,
+          limit_window_seconds: 18000,
+          reset_after_seconds: 7200,
+          reset_at: 1790007200
+        },
+        secondary_window: {
+          used_percent: 102,
+          limit_window_seconds: 604800,
+          reset_after_seconds: 259200,
+          reset_at: 1790259200
+        }
+      }
+    }
+  },
+  outOfRangeFailure: { tag: 'ConformanceMismatch', message: 'expected at least one usage window' },
   recorded: {}
 }
 
@@ -145,7 +171,20 @@ const grok: Family<XAiGrokUsageConformanceConfig> = {
     clientVersion: '0.0.0-synthetic'
   }),
   windowIds: ['shared'],
-  noWindows: { usage: { config: null } },
+  outOfRange: {
+    usage: {
+      config: {
+        creditUsagePercent: 101,
+        currentPeriod: {
+          type: 'monthly',
+          start: '2026-09-01T00:00:00.000Z',
+          end: '2026-10-01T00:00:00.000Z'
+        }
+      }
+    }
+  },
+  // The Grok parser rejects an out-of-range credit percentage as an invalid response.
+  outOfRangeFailure: { tag: 'ProviderSubscriptionUsageResponseError' },
   recorded: { 'x-grok-client-version': '0.0.0-synthetic', 'x-grok-client-mode': 'headless' }
 }
 
@@ -161,11 +200,18 @@ const go: Family<OpenCodeGoConformanceConfig> = {
   }),
   fetch: fetchOpenCodeGoSubscriptionUsage(goKey),
   windowIds: ['five-hour', 'seven-day', 'monthly'],
-  noWindows: { usage: { usage: {} } },
+  outOfRange: {
+    usage: {
+      usage: {
+        rolling: { percent: 101, resetsAt: '2026-10-01T03:00:00.000Z' },
+        weekly: { percent: 102, resetsAt: '2026-10-05T00:00:00.000Z' },
+        monthly: { percent: 103, resetsAt: '2026-10-31T00:00:00.000Z' }
+      }
+    }
+  },
+  outOfRangeFailure: { tag: 'ConformanceMismatch', message: 'expected at least one usage window' },
   recorded: {}
 }
-
-const mismatch = (message: string) => ({ kind: 'failure', tag: 'ConformanceMismatch', message })
 
 const describeFamily = <Req>(family: Family<Req>) => {
   const inProcessLayer = (host: UsageHost) =>
@@ -257,11 +303,11 @@ const describeFamily = <Req>(family: Family<Req>) => {
   })
 
   describe(`${family.name} usage drills and faults (emulator)`, () => {
-    it.effect('fails the case for a body without windows', () =>
+    it.effect('fails the case for a same-shaped body with out-of-range percentages', () =>
       Effect.gen(function* () {
-        expect((yield* drill(usage => usage.script.enqueue(family.noWindows)))?.failure).toEqual(
-          mismatch('expected at least one usage window')
-        )
+        expect(
+          (yield* drill(usage => usage.script.enqueue(family.outOfRange)))?.failure
+        ).toMatchObject(family.outOfRangeFailure)
       })
     )
 

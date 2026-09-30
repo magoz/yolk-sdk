@@ -7,11 +7,12 @@ Emulators for outside services, for tests and local development. A route table s
 `HttpClient` to an emulator instead of the real service. Two emulators speak the OpenAI-compatible
 Chat Completions wire: the Vercel AI Gateway and OpenAI itself. A third emulates Anthropic Messages,
 and two more speak the OpenAI Responses wire of the subscription providers: the ChatGPT Codex
-endpoint and the xAI Grok CLI proxy. The OpenCode Go emulator serves all three wires under one
-origin, and the Anthropic, Codex, Grok, and Go emulators also answer their subscription-usage
-endpoints. Emulators never import other `@yolk-sdk/*` code:
-their wire shapes follow recorded conformance fixtures, and each emulated route names the
-conformance cases behind it.
+endpoint and the xAI Grok CLI proxy. The OpenCode Go emulator answers the Go chat, Messages,
+Responses, and usage routes under one origin, and the Anthropic, Codex, and Grok emulators also
+answer their subscription-usage endpoints; those newer routes are fixture-only (see below).
+Emulators never import other `@yolk-sdk/*` code: their wire shapes follow conformance fixtures
+(verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
+names the conformance cases behind it.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -354,29 +355,57 @@ const httpLayer = InProcessHttpClient.layer([
 cases in `@yolk-sdk/agent/providers/openai/conformance` (Codex) and
 `@yolk-sdk/agent/providers/xai/conformance` (Grok).
 
+## Fixture-only routes
+
+The OpenCode Go routes and the Claude, Codex, and Grok subscription-usage routes follow a stricter
+rule than the earlier model routes (whose behaviour above is unchanged): response behaviour comes
+only from the committed conformance fixtures.
+
+- A request that matches a recorded request's shape, within the request-shape latitude below,
+  gets that fixture's recorded response, copied as data: the same status, headers, chunks, and
+  bytes.
+- Everything else answers one 400 not-emulated, written to the ledger (`notEmulated`) and using up
+  no fault or turn: `{ error: { type: 'not_emulated', message: 'Not emulated: <reason>' } }`. That
+  covers unknown routes and methods, missing or invalid credentials, missing or other headers and
+  query parameters, unknown models, non-streamed modes, tools, reasoning, extra fields, and
+  anything else no fixture records. No provider status, envelope, or error code is guessed.
+- Test controls: the shared faults (`status`, `error-after-chunks`, `truncate-after-chunks`; a
+  `status` fault without a body answers `{ error: { type: 'emulator_fault', message } }`) and
+  scripted error turns `{ error: { status, body, headers? } }`. Usage routes also take a scripted
+  `{ usage }` body and a `subscriptionUsage` option, both required to keep the recorded JSON shape
+  (the same keys and value kinds; only values change).
+- Request-shape latitude (the only accepted deviations): any credential value (never checked or
+  stored); extra request headers; JSON key order; any string value except the discriminators
+  `model`, `role`, `type`, and `phase`; any positive integer where the recording has a number (the
+  output-token limit); an `anthropic-beta` list that includes `oauth-2025-04-20` (Claude usage);
+  `content-type` parameters. Object keys, array lengths, booleans (`stream`, `store`,
+  `include_usage`, `parallel_tool_calls`, `additionalProperties`), `accept`, the query string, and
+  the method must equal the recording.
+
+All fixtures behind these routes are synthetic and the routes are `unverified`.
+
 ## OpenCode Go emulator
 
 `makeOpenCodeGoEmulator(options?)` (`@yolk-sdk/emulators/opencode`) answers the origin
-`https://opencode.ai` with one fetch handler for every route the OpenCode Go provider and usage
-fetcher call under `/zen/go/v1`, each on the matching shared core:
+`https://opencode.ai` with one fetch handler for the routes the OpenCode Go provider and usage
+fetcher call under `/zen/go/v1`. Each route is fixture-only and answers its Go conformance fixture:
 
-| Route                              | Core             | Credential                                               |
-| ---------------------------------- | ---------------- | -------------------------------------------------------- |
-| `POST /zen/go/v1/chat/completions` | Chat Completions | `Authorization: Bearer` (`max_tokens` recorded)          |
-| `POST /zen/go/v1/messages`         | Messages         | `x-api-key` only (a bearer alone gets 401), `2023-06-01` |
-| `POST /zen/go/v1/responses`        | Responses        | `Authorization: Bearer` (optional `max_output_tokens`)   |
-| `GET /zen/go/v1/usage`             | usage            | `Authorization: Bearer`                                  |
+| Route                              | Headers the provider sends                   | Recorded answer                                                     |
+| ---------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| `POST /zen/go/v1/chat/completions` | `Authorization: Bearer`                      | Streamed plain text with a usage chunk and `data: [DONE]`           |
+| `POST /zen/go/v1/messages`         | `x-api-key`, `anthropic-version: 2023-06-01` | Streamed plain text ending with `message_stop`                      |
+| `POST /zen/go/v1/responses`        | `Authorization: Bearer`                      | Streamed plain text, or (replayed tool turn) a streamed text answer |
+| `GET /zen/go/v1/usage`             | `Authorization: Bearer`                      | `usage.rolling` / `weekly` / `monthly` as `{ percent, resetsAt }`   |
 
-It returns `{ fetch, reset, coverage, chat, messages, responses, usage }`: each part is a full
-emulator API (`ledger`, `faults`, `script`, `coverage`, its own `fetch`), and over HTTP its control
-plane is `/_emulate/<chat|messages|responses|usage>/*`. `coverage()` and `GET /_emulate/coverage`
-combine all four routes; `reset()` and `POST /_emulate/reset` reset every part. Unknown API routes
-fail closed through the chat part (404, written to its ledger). `knownModels` (default
-`openCodeGoEmulatorDefaultModels`: `synthetic-go-chat`, `synthetic-go-messages`,
-`synthetic-go-responses`) applies to every protocol; chat turns may script `reasoning` (sent as
-`reasoning_content`). The usage route answers `openCodeGoUsageDefault` (`usage.rolling`,
-`usage.weekly`, `usage.monthly` as `{ percent, resetsAt }`), `options.usage`, or a scripted
-`emulator.usage.script.enqueue({ usage })`. Invalid input throws `OpenCodeGoEmulatorInputInvalid`.
+Only the recorded models are emulated (`openCodeGoEmulatorDefaultModels`: `synthetic-go-chat`,
+`synthetic-go-messages`, `synthetic-go-responses`, one per protocol). It returns
+`{ fetch, reset, coverage, chat, messages, responses, usage }`: each part is a full emulator API
+(`ledger`, `faults`, `script`, `coverage`, its own `fetch`), and over HTTP its control plane is
+`/_emulate/<chat|messages|responses|usage>/*`. `coverage()` and `GET /_emulate/coverage` combine
+all four routes; `reset()` and `POST /_emulate/reset` reset every part. Requests on no route
+answer 400 not-emulated, ledgered by the chat part. `openCodeGoUsageDefault` is the recorded usage
+body; `options.subscriptionUsage` replaces it with a same-shaped body. Invalid input throws
+`OpenCodeGoEmulatorInputInvalid`.
 
 ```ts
 import { makeOpenCodeGoEmulator } from '@yolk-sdk/emulators/opencode'
@@ -399,18 +428,19 @@ const httpLayer = InProcessHttpClient.layer([
 The router takes one route per origin, so the usage endpoint of each subscription provider is
 served by the emulator already bound to its origin, with its own manifest, ledger, faults, turns,
 and coverage (`emulator.usage`, control plane `/_emulate/usage/*`). The model route's manifest,
-coverage, and top-level `ledger` / `faults` / `script` are unchanged; `reset()` and
-`POST /_emulate/reset` reset both. Bodies are synthetic and shaped exactly as each SDK parser reads
-them; `options.subscriptionUsage` replaces the default and `emulator.usage.script.enqueue({ usage })`
-sends one exact body. Usage faults take `status`, `error-after-chunks`, and `truncate-after-chunks`
-(the JSON body is one chunk). Credential and account values are never checked or recorded.
+coverage, and top-level `ledger` / `faults` / `script` are unchanged; the emulator types gain
+`usage` and a `subscriptionUsage` option, and `reset()` and `POST /_emulate/reset` reset both.
+Each usage route is fixture-only: a request with the headers the SDK fetcher sends, the recorded
+`accept: application/json`, and the recorded query gets the recorded body (`*SubscriptionUsageDefault`);
+anything else answers 400 not-emulated. Credential and account values are never checked or
+recorded.
 
-| Emulator     | Route                            | Required (in order)                                                                                                  | Default body                                             |
-| ------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `/anthropic` | `GET /api/oauth/usage`           | bearer (401), `anthropic-beta` listing `oauth-2025-04-20` (401)                                                      | `five_hour`, `seven_day` as `{ utilization, resets_at }` |
-| `/codex`     | `GET /backend-api/wham/usage`    | bearer (401), `ChatGPT-Account-Id` (401)                                                                             | `rate_limit.primary_window` / `secondary_window`         |
-| `/xai`       | `GET /v1/billing?format=credits` | bearer (401), `X-XAI-Token-Auth` (401), `x-userid` (401), `x-grok-client-version` (426), then `format=credits` (400) | `config.creditUsagePercent` and `config.currentPeriod`   |
-| `/opencode`  | `GET /zen/go/v1/usage`           | bearer (401)                                                                                                         | `usage.rolling` / `weekly` / `monthly`                   |
+| Emulator     | Route                            | Headers the fetcher sends (all required)                                              | Recorded body                                            |
+| ------------ | -------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `/anthropic` | `GET /api/oauth/usage`           | Bearer, `anthropic-beta` listing `oauth-2025-04-20`                                   | `five_hour`, `seven_day` as `{ utilization, resets_at }` |
+| `/codex`     | `GET /backend-api/wham/usage`    | Bearer, `ChatGPT-Account-Id`                                                          | `rate_limit.primary_window` / `secondary_window`         |
+| `/xai`       | `GET /v1/billing?format=credits` | Bearer, `X-XAI-Token-Auth`, `x-userid`, `x-grok-client-version`, `x-grok-client-mode` | `config.creditUsagePercent` and `config.currentPeriod`   |
+| `/opencode`  | `GET /zen/go/v1/usage`           | Bearer                                                                                | `usage.rolling` / `weekly` / `monthly`                   |
 
 The ledger records `anthropic-beta` (Claude) and `x-grok-client-version` / `x-grok-client-mode`
 (Grok), never `ChatGPT-Account-Id` or `x-userid`. The manifests

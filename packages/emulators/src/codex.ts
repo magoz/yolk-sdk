@@ -50,11 +50,13 @@ import {
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
 import {
   makeSubscriptionUsageEmulator,
+  recordedUsageBody,
   SubscriptionUsageFault,
-  SubscriptionUsageScriptedTurn,
   type SubscriptionUsageEmulator,
-  type SubscriptionUsageLedgerEntry
+  type SubscriptionUsageLedgerEntry,
+  type SubscriptionUsageScriptedTurn
 } from './subscription-usage.ts'
+import { codexUsageRecording } from './subscription-usage-recordings.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
@@ -82,26 +84,11 @@ export const codexSubscriptionUsageEmulatorRoutes: ReadonlyArray<EmulatorRouteEv
 ]
 
 /**
- * Default Codex usage body: `rate_limit.primary_window` and `secondary_window` as
- * `{ used_percent, limit_window_seconds, reset_after_seconds, reset_at }` (`reset_at` in epoch
- * seconds), with synthetic values.
+ * The recorded Codex usage body (the synthetic `openai.codex.usage.snapshot` fixture, copied as
+ * data): `rate_limit.primary_window` and `secondary_window` as
+ * `{ used_percent, limit_window_seconds, reset_after_seconds, reset_at }`.
  */
-export const codexSubscriptionUsageDefault: Schema.Json = {
-  rate_limit: {
-    primary_window: {
-      used_percent: 23,
-      limit_window_seconds: 18000,
-      reset_after_seconds: 7200,
-      reset_at: 1790007200
-    },
-    secondary_window: {
-      used_percent: 51,
-      limit_window_seconds: 604800,
-      reset_after_seconds: 259200,
-      reset_at: 1790259200
-    }
-  }
-}
+export const codexSubscriptionUsageDefault: Schema.Json = recordedUsageBody(codexUsageRecording)
 
 /** Synthetic-safe default model ids, including the Codex conformance defaults. */
 export const codexEmulatorDefaultModels: ReadonlyArray<string> = ['gpt-5.4', 'gpt-5.5']
@@ -212,9 +199,7 @@ export const CodexUsageFault = SubscriptionUsageFault
 
 export type CodexUsageFault = SubscriptionUsageFault
 
-/** A usage turn: `{ usage }` (the exact next JSON body) or `{ error }`. */
-export const CodexUsageScriptedTurn = SubscriptionUsageScriptedTurn
-
+/** A usage turn: `{ usage }` (a body with the recorded JSON shape) or `{ error }`. */
 export type CodexUsageScriptedTurn = SubscriptionUsageScriptedTurn
 
 export type CodexUsageLedgerEntry = SubscriptionUsageLedgerEntry
@@ -224,7 +209,10 @@ export type CodexUsageEmulator = SubscriptionUsageEmulator
 export type CodexEmulatorOptions = {
   /** Model ids that exist. Defaults to `codexEmulatorDefaultModels`. */
   readonly knownModels?: ReadonlyArray<string>
-  /** Default usage-route body. Defaults to `codexSubscriptionUsageDefault`. */
+  /**
+   * Replacement usage-route body; must have the recorded JSON shape (same keys and value kinds).
+   * Defaults to the recorded body (`codexSubscriptionUsageDefault`).
+   */
   readonly subscriptionUsage?: Schema.Json
 }
 
@@ -256,11 +244,11 @@ const openAiErrorEnvelope = (error: ResponsesWireError): Schema.Json => ({
  * `unsupported_parameter`; unknown routes get a 404 envelope. Not enforced: `store: false`,
  * `stream: true`, `instructions`, `originator`, and `ChatGPT-Account-Id`.
  *
- * `GET /backend-api/wham/usage` answers the Codex subscription-usage body (default
- * `codexSubscriptionUsageDefault`, or `options.subscriptionUsage`, or a scripted
- * `emulator.usage.script.enqueue({ usage })`). It requires a non-empty bearer credential (401
- * `invalid_api_key`) and a non-empty `ChatGPT-Account-Id` (401 otherwise); neither value is
- * checked or recorded. Its ledger, faults, turns, and coverage are `emulator.usage` (control plane
+ * `GET /backend-api/wham/usage` is fixture-only: a request with a non-empty bearer credential and
+ * a non-empty `ChatGPT-Account-Id` (neither checked or recorded), `accept: application/json`, and
+ * no query gets the recorded body (`codexSubscriptionUsageDefault`, or a same-shaped
+ * `options.subscriptionUsage` / scripted `{ usage }`); anything else answers 400 not-emulated.
+ * Its ledger, faults, turns, and coverage are `emulator.usage` (control plane
  * `/_emulate/usage/*`); `reset()` and `POST /_emulate/reset` reset both routes.
  */
 export const makeCodexEmulator = (options: CodexEmulatorOptions = {}): CodexEmulator =>
@@ -274,28 +262,9 @@ const makeCodexUsageEmulator = (options: CodexEmulatorOptions): CodexUsageEmulat
   makeSubscriptionUsageEmulator({
     path: codexSubscriptionUsagePath,
     routes: codexSubscriptionUsageEmulatorRoutes,
-    usage: options.subscriptionUsage ?? codexSubscriptionUsageDefault,
-    errorEnvelope: error => openAiErrorEnvelope(error),
-    unauthorized: {
-      message: 'Synthetic: missing or invalid bearer credential.',
-      type: 'invalid_request_error',
-      code: 'invalid_api_key'
-    },
-    headers: [
-      {
-        name: 'chatgpt-account-id',
-        record: false,
-        required: {
-          status: 401,
-          error: {
-            message: 'Synthetic: the ChatGPT-Account-Id header is required.',
-            type: 'invalid_request_error',
-            code: 'missing_account_id'
-          }
-        }
-      }
-    ],
-    query: [],
+    recording: codexUsageRecording,
+    headers: [{ name: 'chatgpt-account-id', record: false }],
+    subscriptionUsage: options.subscriptionUsage,
     inputInvalid: (input, reason) => new CodexEmulatorInputInvalid({ input, reason })
   })
 

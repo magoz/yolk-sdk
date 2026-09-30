@@ -1,10 +1,18 @@
 /**
- * Subscription-usage routes on the Anthropic, Codex, and Grok emulators: each is served by the
- * wire emulator's fetch handler on the same origin but keeps its own manifest, ledger, faults,
- * turns, coverage, and control plane (`/_emulate/usage/*`); the wire route's manifest, coverage,
- * and top-level APIs are unchanged.
+ * Subscription-usage routes on the Anthropic, Codex, and Grok emulators: fixture-only. A request
+ * with the credential, headers, and query the SDK fetcher sends gets the recorded snapshot body;
+ * everything else is one ledgered 400 not-emulated that uses up no fault or turn. Each route is
+ * served by the model emulator's fetch handler on the same origin but keeps its own manifest,
+ * ledger, faults, turns, coverage, and control plane (`/_emulate/usage/*`); the model route's
+ * manifest, coverage, and top-level APIs are unchanged.
  */
+import { Predicate } from 'effect'
+import type * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vitest'
+import { anthropicClaudeUsageSnapshotFixture } from '@yolk-sdk/agent/providers/anthropic/conformance'
+import { openAiCodexUsageSnapshotFixture } from '@yolk-sdk/agent/providers/openai/conformance'
+import { xAiGrokUsageSnapshotFixture } from '@yolk-sdk/agent/providers/xai/conformance'
+import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 import {
   anthropicEmulatorRoutes,
   AnthropicEmulatorInputInvalid,
@@ -15,6 +23,7 @@ import {
 } from '../src/anthropic.ts'
 import {
   codexEmulatorRoutes,
+  CodexEmulatorInputInvalid,
   codexSubscriptionUsageDefault,
   codexSubscriptionUsageEmulatorRoutes,
   codexSubscriptionUsagePath,
@@ -25,6 +34,7 @@ import type { SubscriptionUsageEmulator } from '../src/subscription-usage.ts'
 import {
   makeXAiGrokEmulator,
   xAiGrokEmulatorRoutes,
+  XAiGrokEmulatorInputInvalid,
   xAiGrokSubscriptionUsageDefault,
   xAiGrokSubscriptionUsageEmulatorRoutes,
   xAiGrokSubscriptionUsagePath
@@ -39,16 +49,19 @@ type UsageHost = {
 }
 
 const claudeHeaders = {
+  accept: 'application/json',
   authorization: 'Bearer synthetic-claude-token',
   'anthropic-beta': 'oauth-2025-04-20'
 }
 
 const codexHeaders = {
+  accept: 'application/json',
   authorization: 'Bearer synthetic-codex-token',
   'chatgpt-account-id': 'synthetic-account'
 }
 
 const grokHeaders = {
+  accept: 'application/json',
   authorization: 'Bearer synthetic-grok-token',
   'x-xai-token-auth': 'xai-grok-cli',
   'x-userid': 'synthetic-user',
@@ -56,7 +69,7 @@ const grokHeaders = {
   'x-grok-client-mode': 'headless'
 }
 
-const get = (host: UsageHost, url: string, headers: Record<string, string>) =>
+const get = (host: UsageHost, url: string, headers: Readonly<Record<string, string>>) =>
   host.fetch(new Request(url, { headers }))
 
 const control = (host: UsageHost, method: string, url: string, body?: unknown) =>
@@ -68,51 +81,145 @@ const control = (host: UsageHost, method: string, url: string, body?: unknown) =
     })
   )
 
-const families = [
+const recordedText = (fixture: WireFixture): string => {
+  const response = fixture.exchanges[0].response
+
+  return 'body' in response && Predicate.isString(response.body)
+    ? response.body
+    : expect.fail(`${fixture.id} has no body`)
+}
+
+const without = (headers: Readonly<Record<string, string>>, name: string) =>
+  Object.fromEntries(Object.entries(headers).filter(([key]) => key !== name))
+
+const expectNotEmulated = async (response: Response) => {
+  expect(response.status).toBe(400)
+  expect(await response.json()).toMatchObject({
+    error: { type: 'not_emulated', message: expect.stringMatching(/^Not emulated: /) }
+  })
+}
+
+type Family = {
+  readonly name: string
+  readonly make: (options?: { readonly subscriptionUsage?: Schema.Json }) => UsageHost
+  readonly inputInvalid: new (...args: never) => Error
+  readonly origin: string
+  readonly url: string
+  readonly headers: Readonly<Record<string, string>>
+  readonly fixture: WireFixture
+  readonly body: Schema.Json
+  /** The recorded body with other values (same keys and value kinds). */
+  readonly otherValues: Schema.Json
+  readonly routes: ReadonlyArray<{ readonly path: string }>
+  readonly wireRoutes: ReadonlyArray<{ readonly path: string }>
+  readonly recorded: Readonly<Record<string, string>>
+  /** Every header the fetcher sends besides `accept`. */
+  readonly required: ReadonlyArray<string>
+}
+
+const families: ReadonlyArray<Family> = [
   {
     name: 'Claude',
     make: makeAnthropicEmulator,
+    inputInvalid: AnthropicEmulatorInputInvalid,
     origin: 'https://api.anthropic.com',
     url: `https://api.anthropic.com${anthropicSubscriptionUsagePath}`,
     headers: claudeHeaders,
+    fixture: anthropicClaudeUsageSnapshotFixture,
     body: anthropicSubscriptionUsageDefault,
+    otherValues: {
+      five_hour: { utilization: 1, resets_at: '2026-10-02T00:00:00.000Z' },
+      seven_day: { utilization: 2, resets_at: '2026-10-09T00:00:00.000Z' }
+    },
     routes: anthropicSubscriptionUsageEmulatorRoutes,
     wireRoutes: anthropicEmulatorRoutes,
-    recorded: { 'anthropic-beta': 'oauth-2025-04-20' }
+    recorded: { 'anthropic-beta': 'oauth-2025-04-20' },
+    required: ['authorization', 'anthropic-beta']
   },
   {
     name: 'Codex',
     make: makeCodexEmulator,
+    inputInvalid: CodexEmulatorInputInvalid,
     origin: 'https://chatgpt.com',
     url: `https://chatgpt.com${codexSubscriptionUsagePath}`,
     headers: codexHeaders,
+    fixture: openAiCodexUsageSnapshotFixture,
     body: codexSubscriptionUsageDefault,
+    otherValues: {
+      rate_limit: {
+        primary_window: {
+          used_percent: 1,
+          limit_window_seconds: 1,
+          reset_after_seconds: 1,
+          reset_at: 1
+        },
+        secondary_window: {
+          used_percent: 2,
+          limit_window_seconds: 2,
+          reset_after_seconds: 2,
+          reset_at: 2
+        }
+      }
+    },
     routes: codexSubscriptionUsageEmulatorRoutes,
     wireRoutes: codexEmulatorRoutes,
-    recorded: {}
+    recorded: {},
+    required: ['authorization', 'chatgpt-account-id']
   },
   {
     name: 'Grok',
     make: makeXAiGrokEmulator,
+    inputInvalid: XAiGrokEmulatorInputInvalid,
     origin: 'https://cli-chat-proxy.grok.com',
     url: `https://cli-chat-proxy.grok.com${xAiGrokSubscriptionUsagePath}?format=credits`,
     headers: grokHeaders,
+    fixture: xAiGrokUsageSnapshotFixture,
     body: xAiGrokSubscriptionUsageDefault,
+    otherValues: {
+      config: {
+        creditUsagePercent: 1,
+        currentPeriod: { type: 'monthly', start: 'a', end: 'b' }
+      }
+    },
     routes: xAiGrokSubscriptionUsageEmulatorRoutes,
     wireRoutes: xAiGrokEmulatorRoutes,
-    recorded: { 'x-grok-client-version': '0.0.0-synthetic', 'x-grok-client-mode': 'headless' }
+    recorded: { 'x-grok-client-version': '0.0.0-synthetic', 'x-grok-client-mode': 'headless' },
+    required: [
+      'authorization',
+      'x-xai-token-auth',
+      'x-userid',
+      'x-grok-client-version',
+      'x-grok-client-mode'
+    ]
   }
-] as const
+]
+
+/** One armed fault and one pending turn, to prove a rejection uses up neither. */
+const armed = (host: UsageHost) => {
+  host.usage.faults.add({ kind: 'status', status: 503, count: 1 })
+  host.usage.script.enqueue({ error: { status: 502, body: { error: { message: 'synthetic' } } } })
+}
+
+const expectUntouched = (host: UsageHost) => {
+  expect(host.usage.faults.list()).toMatchObject([{ remaining: 1, applied: 0 }])
+  expect(host.usage.script.pending()).toBe(1)
+  expect(host.usage.ledger.entries().at(-1)).toMatchObject({
+    status: 400,
+    notEmulated: expect.any(String)
+  })
+  expect(host.ledger.entries()).toEqual([])
+}
 
 describe.each(families)('$name subscription-usage route', family => {
-  it('answers the default snapshot, evidence-tagged, in its own ledger', async () => {
-    const host: UsageHost = family.make()
+  it('answers the recorded snapshot, evidence-tagged, in its own ledger', async () => {
+    const host = family.make()
     const response = await get(host, family.url, family.headers)
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('application/json')
     expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
-    expect(await response.json()).toEqual(family.body)
+    expect(await response.text()).toBe(recordedText(family.fixture))
+    expect(family.body).toEqual(JSON.parse(recordedText(family.fixture)))
     expect(host.usage.ledger.entries()).toMatchObject([
       {
         seq: 1,
@@ -120,12 +227,13 @@ describe.each(families)('$name subscription-usage route', family => {
         path: family.routes[0]?.path,
         credentialHeader: 'authorization',
         headers: family.recorded,
+        recording: family.fixture.id,
         evidence: 'unverified',
         status: 200,
         bodyChunks: 1
       }
     ])
-    // The wire route's ledger and coverage are untouched.
+    // The model route's ledger and coverage are untouched.
     expect(host.ledger.entries()).toEqual([])
     expect(host.coverage().routes.map(route => route.path)).toEqual(
       family.wireRoutes.map(route => route.path)
@@ -137,41 +245,76 @@ describe.each(families)('$name subscription-usage route', family => {
   })
 
   it('never records credential or account values', async () => {
-    const host: UsageHost = family.make()
+    const host = family.make()
 
     await get(host, family.url, family.headers)
 
     const recorded = JSON.stringify(host.usage.ledger.entries())
 
-    expect(recorded).not.toContain('synthetic-claude-token')
-    expect(recorded).not.toContain('synthetic-codex-token')
-    expect(recorded).not.toContain('synthetic-grok-token')
-    expect(recorded).not.toContain('synthetic-account')
-    expect(recorded).not.toContain('synthetic-user')
-    expect(recorded).not.toContain('xai-grok-cli')
+    for (const value of [
+      'synthetic-claude-token',
+      'synthetic-codex-token',
+      'synthetic-grok-token',
+      'synthetic-account',
+      'synthetic-user',
+      'xai-grok-cli'
+    ]) {
+      expect(recorded).not.toContain(value)
+    }
   })
 
-  it('refuses a missing bearer with 401', async () => {
-    const host: UsageHost = family.make()
-    const { authorization: _authorization, ...rest } = family.headers
+  for (const header of ['authorization', 'accept']) {
+    it(`answers 400 not-emulated without ${header}, leaving faults and turns untouched`, async () => {
+      const host = family.make()
 
-    expect((await get(host, family.url, rest)).status).toBe(401)
-    expect(
-      (await get(host, family.url, { ...family.headers, authorization: 'Basic abc' })).status
-    ).toBe(401)
+      armed(host)
+      await expectNotEmulated(await get(host, family.url, without(family.headers, header)))
+      expectUntouched(host)
+    })
+  }
+
+  it('answers 400 not-emulated when any fetcher header is missing', async () => {
+    for (const header of family.required) {
+      const host = family.make()
+
+      armed(host)
+      await expectNotEmulated(await get(host, family.url, without(family.headers, header)))
+      expectUntouched(host)
+    }
   })
 
-  it('answers scripted snapshots and errors, then the default', async () => {
-    const host: UsageHost = family.make()
+  it('answers 400 not-emulated for a Basic credential, another query, or another method', async () => {
+    const other = new URL(family.url)
 
-    host.usage.script.enqueue({ usage: { scripted: true } })
+    other.searchParams.set('extra', '1')
+
+    for (const send of [
+      (host: UsageHost) => get(host, family.url, { ...family.headers, authorization: 'Basic abc' }),
+      (host: UsageHost) => get(host, other.toString(), family.headers),
+      (host: UsageHost) =>
+        host.fetch(new Request(family.url, { method: 'POST', headers: family.headers, body: '{}' }))
+    ]) {
+      const host = family.make()
+
+      armed(host)
+      await expectNotEmulated(await send(host))
+      expectUntouched(host)
+    }
+  })
+
+  it('answers scripted same-shaped bodies and errors, then the recording', async () => {
+    const host = family.make()
+
+    host.usage.script.enqueue({ usage: family.otherValues })
     host.usage.script.enqueue({
       error: { status: 503, body: { error: { message: 'synthetic' } } }
     })
 
-    expect(await (await get(host, family.url, family.headers)).json()).toEqual({ scripted: true })
+    expect(await (await get(host, family.url, family.headers)).json()).toEqual(family.otherValues)
     expect((await get(host, family.url, family.headers)).status).toBe(503)
-    expect(await (await get(host, family.url, family.headers)).json()).toEqual(family.body)
+    expect(await (await get(host, family.url, family.headers)).text()).toBe(
+      recordedText(family.fixture)
+    )
     expect(host.usage.ledger.entries().map(entry => entry.scripted)).toEqual([
       'usage',
       'error',
@@ -179,8 +322,26 @@ describe.each(families)('$name subscription-usage route', family => {
     ])
   })
 
+  it('refuses bodies whose shape no fixture records, in the JS API and the control plane', async () => {
+    const host = family.make()
+
+    expect(() => host.usage.script.enqueue({ usage: { scripted: true } })).toThrow(
+      family.inputInvalid
+    )
+    expect(
+      (await control(host, 'POST', `${family.origin}/_emulate/usage/script`, { usage: null }))
+        .status
+    ).toBe(400)
+    expect(host.usage.script.pending()).toBe(0)
+    expect(() => family.make({ subscriptionUsage: { custom: 1 } })).toThrow(family.inputInvalid)
+
+    const custom = family.make({ subscriptionUsage: family.otherValues })
+
+    expect(await (await get(custom, family.url, family.headers)).json()).toEqual(family.otherValues)
+  })
+
   it('applies usage faults to the usage route only, through /_emulate/usage/*', async () => {
-    const host: UsageHost = family.make()
+    const host = family.make()
 
     const added = await control(host, 'POST', `${family.origin}/_emulate/usage/faults`, {
       kind: 'status',
@@ -212,55 +373,26 @@ describe.each(families)('$name subscription-usage route', family => {
     ])
     expect(host.ledger.entries()).toEqual([])
 
-    // The wire control plane is still the top-level one; reset clears both parts.
+    // The model route's control plane is still the top-level one; reset clears both parts.
     expect((await control(host, 'GET', `${family.origin}/_emulate/state`)).status).toBe(200)
     expect((await control(host, 'POST', `${family.origin}/_emulate/reset`)).status).toBe(200)
     expect(host.usage.ledger.entries()).toEqual([])
 
-    host.usage.script.enqueue({ usage: {} })
+    host.usage.script.enqueue({ error: { status: 500, body: 'x' } })
     host.reset()
 
     expect(host.usage.script.pending()).toBe(0)
   })
-
-  it('fails other methods on the usage path closed in the usage ledger', async () => {
-    const host: UsageHost = family.make()
-
-    const response = await host.fetch(
-      new Request(family.url, { method: 'POST', headers: family.headers, body: '{}' })
-    )
-
-    expect(response.status).toBe(404)
-    expect(host.usage.ledger.entries()).toMatchObject([{ evidence: 'unknown-route' }])
-  })
-
-  it('takes a default body from the options', async () => {
-    const host: UsageHost = family.make({ subscriptionUsage: { custom: 1 } })
-
-    expect(await (await get(host, family.url, family.headers)).json()).toEqual({ custom: 1 })
-  })
 })
 
-describe('usage auth and header rules', () => {
-  it('Claude requires the OAuth anthropic-beta value', async () => {
+describe('usage header values', () => {
+  it('Claude accepts an anthropic-beta list containing the OAuth value, and nothing else', async () => {
     const host = makeAnthropicEmulator()
     const url = `https://api.anthropic.com${anthropicSubscriptionUsagePath}`
 
-    const betaHeaders: ReadonlyArray<Record<string, string>> = [
-      { authorization: claudeHeaders.authorization },
-      { authorization: claudeHeaders.authorization, 'anthropic-beta': 'prompt-caching-2024-07-31' }
-    ]
-
-    for (const headers of betaHeaders) {
-      const response = await get(host, url, headers)
-
-      expect(response.status).toBe(401)
-      expect(await response.json()).toMatchObject({
-        type: 'error',
-        error: { type: 'authentication_error' }
-      })
-    }
-
+    await expectNotEmulated(
+      await get(host, url, { ...claudeHeaders, 'anthropic-beta': 'prompt-caching-2024-07-31' })
+    )
     expect(
       (
         await get(host, url, {
@@ -269,38 +401,5 @@ describe('usage auth and header rules', () => {
         })
       ).status
     ).toBe(200)
-    expect(() => host.usage.faults.add({ kind: 'status', status: 301 })).toThrow(
-      AnthropicEmulatorInputInvalid
-    )
-  })
-
-  it('Codex requires ChatGPT-Account-Id', async () => {
-    const host = makeCodexEmulator()
-    const url = `https://chatgpt.com${codexSubscriptionUsagePath}`
-
-    const response = await get(host, url, { authorization: codexHeaders.authorization })
-
-    expect(response.status).toBe(401)
-    expect(await response.json()).toMatchObject({ error: { code: 'missing_account_id' } })
-  })
-
-  it('Grok requires token auth, user id, and client version in order, then format=credits', async () => {
-    const host = makeXAiGrokEmulator()
-    const base = `https://cli-chat-proxy.grok.com${xAiGrokSubscriptionUsagePath}`
-    const url = `${base}?format=credits`
-
-    const without = (name: keyof typeof grokHeaders) =>
-      Object.fromEntries(Object.entries(grokHeaders).filter(([key]) => key !== name))
-
-    expect((await get(host, url, without('x-xai-token-auth'))).status).toBe(401)
-    expect(await (await get(host, url, without('x-userid'))).json()).toMatchObject({
-      error: { code: 'missing_user_id' }
-    })
-    expect((await get(host, url, without('x-grok-client-version'))).status).toBe(426)
-    // The client mode is recorded, not required.
-    expect((await get(host, url, without('x-grok-client-mode'))).status).toBe(200)
-    expect((await get(host, base, grokHeaders)).status).toBe(400)
-    expect((await get(host, `${base}?format=usd`, grokHeaders)).status).toBe(400)
-    expect(host.usage.ledger.entries().at(-1)).toMatchObject({ query: '?format=usd', status: 400 })
   })
 })

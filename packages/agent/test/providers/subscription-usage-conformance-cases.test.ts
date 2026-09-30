@@ -5,7 +5,7 @@
  * structural drills over the parsed fixture bodies, plus fabrication drills that prove the
  * shared claim catches a snapshot that disagrees with the wire.
  */
-import { Chunk, Effect, Layer, Redacted, Ref } from 'effect'
+import { Chunk, Effect, Layer, Predicate, Redacted, Ref } from 'effect'
 import type * as Schema from 'effect/Schema'
 import { HttpClient } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -36,7 +36,13 @@ import {
   anthropicClaudeUsageSnapshotCase,
   anthropicClaudeUsageSnapshotFixture
 } from '../../src/providers/anthropic/conformance/index.ts'
-import { fetchAnthropicClaudeSubscriptionUsage } from '../../src/providers/anthropic/usage.ts'
+import {
+  fetchAnthropicClaudeSubscriptionUsage,
+  parseAnthropicClaudeSubscriptionUsage
+} from '../../src/providers/anthropic/usage.ts'
+import { parseOpenAiCodexSubscriptionUsage } from '../../src/providers/openai/codex-usage.ts'
+import { parseOpenCodeGoSubscriptionUsage } from '../../src/providers/opencode/usage.ts'
+import { parseXAiGrokSubscriptionUsage } from '../../src/providers/xai/usage.ts'
 import {
   OpenAiCodexUsageConformanceConfig,
   openAiCodexUsageConformanceCases,
@@ -87,6 +93,11 @@ type Family<Req> = {
   readonly headers: Readonly<Record<string, string>>
   /** Window ids of the committed fixture. */
   readonly windowIds: ReadonlyArray<string>
+  /** The public parser of the family's usage body. */
+  readonly parse: (
+    value: unknown,
+    fetchedAt: string
+  ) => Effect.Effect<ProviderSubscriptionUsageSnapshot, ProviderSubscriptionUsageError>
   /** A body in the family's shape that reports no window. */
   readonly withoutWindows: Schema.Json
   /** A body in the family's shape that reports exactly one window. */
@@ -112,6 +123,7 @@ const claude: Family<AnthropicClaudeUsageConformanceConfig> = {
   }),
   headers: { 'anthropic-beta': 'oauth-2025-04-20' },
   windowIds: ['five-hour', 'seven-day'],
+  parse: parseAnthropicClaudeSubscriptionUsage,
   withoutWindows: { five_hour: null, seven_day: { utilization: null } },
   oneWindow: claudeOneWindow
 }
@@ -131,6 +143,7 @@ const codex: Family<OpenAiCodexUsageConformanceConfig> = {
   }),
   headers: { 'chatgpt-account-id': 'synthetic-account' },
   windowIds: ['primary', 'secondary'],
+  parse: parseOpenAiCodexSubscriptionUsage,
   withoutWindows: { rate_limit: null },
   oneWindow: {
     rate_limit: {
@@ -160,6 +173,7 @@ const grok: Family<XAiGrokUsageConformanceConfig> = {
     'x-grok-client-mode': 'headless'
   },
   windowIds: ['shared'],
+  parse: parseXAiGrokSubscriptionUsage,
   withoutWindows: { config: null }
 }
 
@@ -175,6 +189,7 @@ const go: Family<OpenCodeGoConformanceConfig> = {
   }),
   headers: {},
   windowIds: ['five-hour', 'seven-day', 'monthly'],
+  parse: parseOpenCodeGoSubscriptionUsage,
   withoutWindows: { usage: { rolling: null, weekly: { percent: 101 } } },
   oneWindow: { usage: { rolling: { percent: 12.5, resetsAt: '2026-10-01T03:00:00.000Z' } } }
 }
@@ -302,9 +317,17 @@ const describeFamily = <Req>(family: Family<Req>) => {
       })
     )
 
-    it('records every window id of the family in the fixture', () => {
-      expect(family.testCase.wire).toContain(family.windowIds.map(id => `\`${id}\``).join(', '))
-    })
+    it.effect('records a fixture body that parses into every window id of the family', () =>
+      Effect.gen(function* () {
+        const response = family.fixture.exchanges[0].response
+        const text = 'body' in response && Predicate.isString(response.body) ? response.body : ''
+
+        const snapshot = yield* family.parse(JSON.parse(text), '2026-09-15T12:00:00.000Z')
+
+        expect(Array.from(snapshot.windows).map(window => window.id)).toEqual(family.windowIds)
+        expect(family.testCase.wire).toContain(family.windowIds.map(id => `\`${id}\``).join(', '))
+      })
+    )
   })
 
   describe(`${family.name} subscription-usage disagreement drills`, () => {

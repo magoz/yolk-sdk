@@ -1,8 +1,10 @@
 /**
  * Cross-checks: the OpenCode Go emulator must satisfy the same Go conformance cases the replayed
  * fixtures satisfy, through the real public Go provider on each protocol, both in-process and over
- * a loopback socket; disagreement drills must fail the right case; and wire faults must map
- * correctly through the provider (429 `retry-after`, a missing terminal event, a mid-stream error).
+ * a loopback socket; the recorded default answers (including the commentary replay's text answer)
+ * must satisfy them; the test controls the fixture-only routes allow (shared faults, scripted
+ * errors, same-shaped usage bodies) must fail the right case; and wire faults must map correctly
+ * through the provider (429 `retry-after`, a stream cut before its terminal event).
  * Tests may import SDK packages; the emulator source never does.
  */
 import { Effect, Layer, Redacted, Stream } from 'effect'
@@ -146,58 +148,60 @@ describe('OpenCode Go conformance cases against the emulator', () => {
       expect(emulator.coverage().unknownRouteRequests).toBe(0)
       expect(emulator.messages.ledger.entries()[0]).toMatchObject({
         credentialHeader: 'x-api-key',
-        anthropicVersion: '2023-06-01',
-        maxTokens: 64
+        headers: { 'anthropic-version': '2023-06-01' },
+        body: { max_tokens: 64 }
       })
-      expect(emulator.responses.ledger.entries().map(entry => entry.maxOutputTokens)).toEqual([
-        64, 64
+      // Each request was answered by its own recording, never a not-emulated 400.
+      expect(
+        [emulator.chat, emulator.messages, emulator.responses, emulator.usage].flatMap(part =>
+          part.ledger.entries().map(entry => [entry.status, entry.recording])
+        )
+      ).toEqual([
+        [200, 'opencode.go.chat.stream.plain-text.synthetic'],
+        [200, 'opencode.go.messages.stream.plain-text.synthetic'],
+        [200, 'opencode.go.responses.stream.plain-text.synthetic'],
+        [200, 'opencode.go.responses.stream.commentary-replay.synthetic'],
+        [200, 'opencode.go.usage.snapshot.synthetic']
       ])
     }).pipe(Effect.scoped)
   )
 
-  it.effect('passes the commentary case when the emulator answers with a tool call', () =>
+  it.effect('answers the commentary replay with its recorded text answer, one Done(stop)', () =>
     Effect.gen(function* () {
-      // Without a script the emulator answers a request offering tools with a function call.
-      const result = yield* drill(openCodeGoResponsesCommentaryReplayCase, () => undefined)
+      const emulator = makeOpenCodeGoEmulator()
+
+      const result = yield* runConformance([openCodeGoResponsesCommentaryReplayCase], {
+        target: { kind: 'in-process' },
+        now,
+        layer: () => Layer.mergeAll(inProcessLayer(emulator), configLayer)
+      }).pipe(Effect.map(report => report.results[0]))
 
       expect(result?.status).toBe('passed')
+      expect(emulator.responses.ledger.entries()).toMatchObject([
+        { status: 200, recording: 'opencode.go.responses.stream.commentary-replay.synthetic' }
+      ])
     })
   )
 })
 
 describe('OpenCode Go conformance disagreement drills (emulator)', () => {
-  it.effect('fails each plain-text case for an empty answer', () =>
+  it.effect('fails each protocol case for a scripted provider error', () =>
     Effect.gen(function* () {
-      expect(
-        (yield* drill(openCodeGoChatPlainTextCase, emulator =>
-          emulator.chat.script.enqueue({ text: [''] })
-        ))?.failure
-      ).toEqual(mismatch('expected non-empty answer text'))
-      expect(
-        (yield* drill(openCodeGoMessagesPlainTextCase, emulator =>
-          emulator.messages.script.enqueue({ text: [' '] })
-        ))?.failure
-      ).toEqual(mismatch('expected non-empty answer text'))
-      expect(
-        (yield* drill(openCodeGoResponsesPlainTextCase, emulator =>
-          emulator.responses.script.enqueue({ text: [''] })
-        ))?.failure
-      ).toEqual(mismatch('expected non-empty answer text'))
-    })
-  )
+      for (const [testCase, part] of [
+        [openCodeGoChatPlainTextCase, 'chat'],
+        [openCodeGoMessagesPlainTextCase, 'messages'],
+        [openCodeGoResponsesPlainTextCase, 'responses'],
+        [openCodeGoResponsesCommentaryReplayCase, 'responses']
+      ] as const) {
+        const result = yield* drill(testCase, emulator =>
+          emulator[part].script.enqueue({
+            error: { status: 500, body: { error: { message: 'synthetic' } } }
+          })
+        )
 
-  it.effect('fails the plain-text cases without usage', () =>
-    Effect.gen(function* () {
-      expect(
-        (yield* drill(openCodeGoChatPlainTextCase, emulator =>
-          emulator.chat.script.enqueue({ text: ['Hi.'], usage: null })
-        ))?.failure
-      ).toEqual(mismatch('expected a usage report'))
-      expect(
-        (yield* drill(openCodeGoResponsesPlainTextCase, emulator =>
-          emulator.responses.script.enqueue({ text: ['Hi.'], usage: null })
-        ))?.failure
-      ).toEqual(mismatch('expected a usage report'))
+        expect(result?.status, testCase.id).toBe('failed')
+        expect(result?.failure?.tag, testCase.id).toBe('LLMError')
+      }
     })
   )
 
@@ -221,11 +225,20 @@ describe('OpenCode Go conformance disagreement drills (emulator)', () => {
       })
   )
 
-  it.effect('fails the usage case for a body without windows and for a 401', () =>
+  it.effect('fails the usage case for out-of-range windows and for a 401', () =>
     Effect.gen(function* () {
+      // Same recorded shape, but no percentage the parser reports.
+      const outOfRange = {
+        usage: {
+          rolling: { percent: 101, resetsAt: '2026-10-01T03:00:00.000Z' },
+          weekly: { percent: 102, resetsAt: '2026-10-05T00:00:00.000Z' },
+          monthly: { percent: 103, resetsAt: '2026-10-31T00:00:00.000Z' }
+        }
+      }
+
       expect(
         (yield* drill(openCodeGoUsageSnapshotCase, emulator =>
-          emulator.usage.script.enqueue({ usage: { usage: { rolling: { percent: null } } } })
+          emulator.usage.script.enqueue({ usage: outOfRange })
         ))?.failure
       ).toEqual(mismatch('expected at least one usage window'))
 
@@ -302,35 +315,35 @@ describe('OpenCode Go faults through the real provider', () => {
     )
   }
 
-  it.effect('responses: a mid-stream response.failed event fails the stream', () =>
-    Effect.gen(function* () {
-      const emulator = makeOpenCodeGoEmulator()
+  it.effect(
+    'answers 400 not-emulated through the provider for a request shape no fixture records',
+    () =>
+      Effect.gen(function* () {
+        // A host output limit is latitude; a reasoning effort is not recorded, so it is not emulated.
+        const events = yield* Effect.gen(function* () {
+          const llm = yield* LLMProvider
 
-      emulator.responses.faults.add({
-        kind: 'error-event-after-chunks',
-        chunks: 3,
-        event: 'response.failed'
+          return yield* llm
+            .stream({
+              model: openCodeGoConformanceDefaultModels.responses,
+              systemPrompt: 'Reply in one short sentence.',
+              messages: [UserMessage.make({ content: 'Say hello.' })],
+              tools: [],
+              reasoningEffort: 'low'
+            })
+            .pipe(Stream.runCollect, Effect.flip)
+        }).pipe(
+          Effect.provide(
+            makeOpenCodeGoProviderLayer({
+              apiKey,
+              protocol: 'responses',
+              maxOutputTokens: 4096
+            }).pipe(Layer.provide(inProcessLayer(makeOpenCodeGoEmulator())))
+          )
+        )
+
+        expect(events).toBeInstanceOf(LLMError)
+        expect(events).toMatchObject({ provider: { status: 400 } })
       })
-
-      const error = yield* streamThroughProvider('responses', inProcessLayer(emulator)).pipe(
-        Effect.flip
-      )
-
-      expect(error).toBeInstanceOf(LLMError)
-    })
-  )
-
-  it.effect('messages: a mid-stream error event fails the stream', () =>
-    Effect.gen(function* () {
-      const emulator = makeOpenCodeGoEmulator()
-
-      emulator.messages.faults.add({ kind: 'error-event-after-chunks', chunks: 3 })
-
-      const error = yield* streamThroughProvider('messages', inProcessLayer(emulator)).pipe(
-        Effect.flip
-      )
-
-      expect(error).toBeInstanceOf(LLMError)
-    })
   )
 })

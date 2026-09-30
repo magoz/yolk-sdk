@@ -7,6 +7,7 @@ import {
   redactExchange,
   redactionRefusal,
   unredactedFields,
+  unknownSseLines,
   unscannablePayloads,
   type RedactionSpec
 } from '../fixture-probe-internal.ts'
@@ -110,9 +111,6 @@ describe('redactExchange and redactionRefusal', () => {
   it('refuses unscannable payloads, never falling back to a textual check', () => {
     expect(unscannablePayloads([body('not json')], spec)).toBe(1)
     expect(unscannablePayloads([body(`${'['.repeat(300)}${']'.repeat(300)}`)], spec)).toBe(1)
-    expect(
-      unscannablePayloads([stream([': comment\ndata: {"a":1}\n\n', 'data: [DONE]\n\n'])], spec)
-    ).toBe(1)
     expect(redactionRefusal([body('not json')], spec)).toContain('could not check 1 response')
     // Only the permitted sentinels pass, and an empty body carries nothing to scan.
     expect(unscannablePayloads([stream(['data: [DONE]\n\n'])], spec)).toBe(0)
@@ -120,5 +118,47 @@ describe('redactExchange and redactionRefusal', () => {
       unscannablePayloads([stream(['data: [DONE]\n\n'])], { ...spec, permittedNonJson: [] })
     ).toBe(1)
     expect(unscannablePayloads([body('')], spec)).toBe(0)
+  })
+
+  it('refuses every SSE line the parsers ignore, even one that parses as JSON', () => {
+    const cases = [
+      ': comment\ndata: {"a":1}\n\n',
+      'data: {"a":1}\n"synthetic-private-note"\n\n',
+      'data: {"a":1}\n{"note":"synthetic"}\n\n',
+      // A bare sentinel is exempt only as a recognised `data:` payload.
+      'data: {"a":1}\n\n[DONE]\n\n'
+    ]
+
+    for (const text of cases) {
+      const exchange = stream([text, 'data: [DONE]\n\n'])
+
+      expect(unknownSseLines([exchange], spec), text).toBe(1)
+      expect(unscannablePayloads([exchange], spec), text).toBe(0)
+      expect(redactionRefusal([exchange], spec), text).toContain(
+        'SSE line(s) the stream parsers ignore'
+      )
+    }
+
+    expect(unknownSseLines([stream(['event: x\nid: 1\nretry: 5\ndata: {"a":1}\n\n'])], spec)).toBe(
+      0
+    )
+  })
+
+  it('refuses undecodable base64 chunks and bodies as unscannable, never as empty', () => {
+    const chunk = stream(['data: {"a":1}\n\n', { base64: '@@not-base64@@' }])
+
+    const base64Body: WireExchange = {
+      request,
+      response: {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        bodyBase64: '@@not-base64@@'
+      }
+    }
+
+    for (const exchange of [chunk, base64Body]) {
+      expect(unscannablePayloads([exchange], spec)).toBe(1)
+      expect(redactionRefusal([exchange], spec)).toContain('undecodable base64')
+    }
   })
 })

@@ -10,7 +10,7 @@ import {
   openCodeGoResponsesPlainTextFixture,
   openCodeGoUsageSnapshotFixture
 } from '../../packages/agent/src/providers/opencode/conformance/index.ts'
-import type { WireFixture } from '../../packages/conformance/src/fixture.ts'
+import type { WireChunk, WireFixture } from '../../packages/conformance/src/fixture.ts'
 import { conformanceReportFailed } from '../../packages/conformance/src/runner.ts'
 import type { FixtureWriter } from '../fixture-probe-internal.ts'
 import {
@@ -273,33 +273,67 @@ describe('record-opencode-fixtures replay verification and write gate', () => {
     expect(calls).toEqual([])
   })
 
-  it('writes nothing when a stream payload cannot be scanned', async () => {
-    const { calls, writer } = recordingWriter()
+  const withChunks = (extra: ReadonlyArray<WireChunk>, position: 'before' | 'after') => {
     const response = openCodeGoResponsesPlainTextFixture.exchanges[0].response
 
-    const withComment: WireFixture = {
+    return {
       ...openCodeGoResponsesPlainTextFixture,
       exchanges: [
         {
           request: openCodeGoResponsesPlainTextFixture.exchanges[0].request,
           response:
             'chunks' in response && response.chunks !== undefined
-              ? { ...response, chunks: [': keep-alive\n\n', ...response.chunks] }
+              ? {
+                  ...response,
+                  chunks:
+                    position === 'before'
+                      ? [...extra, ...response.chunks]
+                      : [...response.chunks, ...extra]
+                }
               : expect.fail('not a stream')
         }
       ]
-    }
+    } satisfies WireFixture
+  }
+
+  const refusedWrite = async (fixture: WireFixture) => {
+    const { calls, writer } = recordingWriter()
 
     const exit = await Effect.runPromiseExit(
       writeVerifiedFixtures(
-        recordedFrom(replacing(openCodeGoResponsesPlainTextFixture.id, withComment)),
+        recordedFrom(replacing(openCodeGoResponsesPlainTextFixture.id, fixture)),
         defaultProbeOptions,
         writer
       )
     )
 
-    expect(failureText(exit)).toContain('could not check 1 response payload')
     expect(calls).toEqual([])
+
+    return failureText(exit)
+  }
+
+  it('writes nothing when a stream carries an SSE line the parsers ignore', async () => {
+    for (const line of [
+      ': keep-alive\n\n',
+      '"synthetic-private-note"\n\n',
+      '{"note":"synthetic"}\n\n'
+    ]) {
+      expect(await refusedWrite(withChunks([line], 'before')), line).toContain(
+        'SSE line(s) the stream parsers ignore'
+      )
+    }
+  })
+
+  it('writes nothing for a bare [DONE] line that is not a data: payload', async () => {
+    expect(await refusedWrite(withChunks(['[DONE]\n\n'], 'after'))).toContain(
+      'SSE line(s) the stream parsers ignore'
+    )
+  })
+
+  it('writes nothing when a base64 chunk does not decode', async () => {
+    expect(await refusedWrite(withChunks([{ base64: '@@not-base64@@' }], 'after'))).toContain(
+      'undecodable base64'
+    )
   })
 
   it('writes nothing when a case has no recording', async () => {

@@ -51,11 +51,13 @@ import {
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
 import {
   makeSubscriptionUsageEmulator,
+  recordedUsageBody,
   SubscriptionUsageFault,
-  SubscriptionUsageScriptedTurn,
   type SubscriptionUsageEmulator,
-  type SubscriptionUsageLedgerEntry
+  type SubscriptionUsageLedgerEntry,
+  type SubscriptionUsageScriptedTurn
 } from './subscription-usage.ts'
+import { xAiGrokUsageRecording } from './subscription-usage-recordings.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
@@ -65,7 +67,7 @@ export const xAiGrokResponsesPath = '/v1/responses'
 
 /**
  * The Grok subscription-usage path; the SDK fetcher (`xAiGrokSubscriptionUsageUrl`) adds
- * `?format=credits`, which the route requires.
+ * `?format=credits`, the recorded query.
  */
 export const xAiGrokSubscriptionUsagePath = '/v1/billing'
 
@@ -86,19 +88,10 @@ export const xAiGrokSubscriptionUsageEmulatorRoutes: ReadonlyArray<EmulatorRoute
 ]
 
 /**
- * Default Grok usage body (credits format): `config.creditUsagePercent` and
- * `config.currentPeriod` `{ type, start, end }`, with synthetic values.
+ * The recorded Grok usage body (the synthetic `xai.grok.usage.snapshot` fixture, copied as data):
+ * `config.creditUsagePercent` and `config.currentPeriod` `{ type, start, end }`.
  */
-export const xAiGrokSubscriptionUsageDefault: Schema.Json = {
-  config: {
-    creditUsagePercent: 37.5,
-    currentPeriod: {
-      type: 'monthly',
-      start: '2026-09-01T00:00:00.000Z',
-      end: '2026-10-01T00:00:00.000Z'
-    }
-  }
-}
+export const xAiGrokSubscriptionUsageDefault: Schema.Json = recordedUsageBody(xAiGrokUsageRecording)
 
 /** Synthetic-safe default model ids, including the Grok conformance defaults. */
 export const xAiGrokEmulatorDefaultModels: ReadonlyArray<string> = ['grok-build', 'grok-4.6']
@@ -204,9 +197,7 @@ export const XAiGrokUsageFault = SubscriptionUsageFault
 
 export type XAiGrokUsageFault = SubscriptionUsageFault
 
-/** A usage turn: `{ usage }` (the exact next JSON body) or `{ error }`. */
-export const XAiGrokUsageScriptedTurn = SubscriptionUsageScriptedTurn
-
+/** A usage turn: `{ usage }` (a body with the recorded JSON shape) or `{ error }`. */
 export type XAiGrokUsageScriptedTurn = SubscriptionUsageScriptedTurn
 
 export type XAiGrokUsageLedgerEntry = SubscriptionUsageLedgerEntry
@@ -216,7 +207,10 @@ export type XAiGrokUsageEmulator = SubscriptionUsageEmulator
 export type XAiGrokEmulatorOptions = {
   /** Model ids that exist. Defaults to `xAiGrokEmulatorDefaultModels`. */
   readonly knownModels?: ReadonlyArray<string>
-  /** Default usage-route body. Defaults to `xAiGrokSubscriptionUsageDefault`. */
+  /**
+   * Replacement usage-route body; must have the recorded JSON shape (same keys and value kinds).
+   * Defaults to the recorded body (`xAiGrokSubscriptionUsageDefault`).
+   */
   readonly subscriptionUsage?: Schema.Json
 }
 
@@ -249,12 +243,13 @@ const errorEnvelope = (error: ResponsesWireError): Schema.Json => ({
  * 404 envelope. Not enforced: that `x-grok-model-override` matches the body `model`, the client
  * version value, and the output limit itself (recorded as `maxOutputTokens`).
  *
- * `GET /v1/billing?format=credits` answers the Grok subscription-usage body (default
- * `xAiGrokSubscriptionUsageDefault`, or `options.subscriptionUsage`, or a scripted
- * `emulator.usage.script.enqueue({ usage })`). It requires, in order, a non-empty bearer
- * credential (401), `X-XAI-Token-Auth` (401), `x-userid` (401; never recorded), and
- * `x-grok-client-version` (426), then `format=credits` (400); the client version and
- * `x-grok-client-mode` are recorded. Its ledger, faults, turns, and coverage are `emulator.usage`
+ * `GET /v1/billing?format=credits` is fixture-only: a request with the headers the SDK fetcher
+ * sends (a non-empty bearer, `X-XAI-Token-Auth`, `x-userid`, `x-grok-client-version`, and
+ * `x-grok-client-mode`; values never checked, and the user id and token-auth never recorded),
+ * `accept: application/json`, and exactly the recorded `format=credits` query gets the recorded
+ * body (`xAiGrokSubscriptionUsageDefault`, or a same-shaped `options.subscriptionUsage` / scripted
+ * `{ usage }`); anything else answers 400 not-emulated. The client version and mode are recorded.
+ * Its ledger, faults, turns, and coverage are `emulator.usage`
  * (control plane `/_emulate/usage/*`); `reset()` and `POST /_emulate/reset` reset both routes.
  */
 export const makeXAiGrokEmulator = (options: XAiGrokEmulatorOptions = {}): XAiGrokEmulator =>
@@ -268,63 +263,14 @@ const makeXAiGrokUsageEmulator = (options: XAiGrokEmulatorOptions): XAiGrokUsage
   makeSubscriptionUsageEmulator({
     path: xAiGrokSubscriptionUsagePath,
     routes: xAiGrokSubscriptionUsageEmulatorRoutes,
-    usage: options.subscriptionUsage ?? xAiGrokSubscriptionUsageDefault,
-    errorEnvelope: error => errorEnvelope(error),
-    unauthorized: {
-      message: 'Synthetic: missing or invalid bearer credential.',
-      type: 'invalid_request_error',
-      code: 'invalid_api_key'
-    },
+    recording: xAiGrokUsageRecording,
     headers: [
-      {
-        name: 'x-xai-token-auth',
-        record: false,
-        required: {
-          status: 401,
-          error: {
-            message: 'Synthetic: the X-XAI-Token-Auth header is required.',
-            type: 'invalid_request_error',
-            code: 'missing_token_auth'
-          }
-        }
-      },
-      {
-        name: 'x-userid',
-        record: false,
-        required: {
-          status: 401,
-          error: {
-            message: 'Synthetic: the x-userid header is required.',
-            type: 'invalid_request_error',
-            code: 'missing_user_id'
-          }
-        }
-      },
-      {
-        name: 'x-grok-client-version',
-        record: true,
-        required: {
-          status: 426,
-          error: {
-            message: 'Synthetic: a supported x-grok-client-version header is required.',
-            type: 'invalid_request_error',
-            code: 'upgrade_required'
-          }
-        }
-      },
+      { name: 'x-xai-token-auth', record: false },
+      { name: 'x-userid', record: false },
+      { name: 'x-grok-client-version', record: true },
       { name: 'x-grok-client-mode', record: true }
     ],
-    query: [
-      {
-        name: 'format',
-        value: 'credits',
-        error: {
-          message: 'Synthetic: only format=credits is emulated.',
-          type: 'invalid_request_error',
-          code: 'unsupported_format'
-        }
-      }
-    ],
+    subscriptionUsage: options.subscriptionUsage,
     inputInvalid: (input, reason) => new XAiGrokEmulatorInputInvalid({ input, reason })
   })
 

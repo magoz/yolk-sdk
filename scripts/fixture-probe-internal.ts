@@ -9,8 +9,10 @@
  *   base64 chunks decoded together) or the whole body is scanned member by member with
  *   `json-members.ts` (repeated keys included); any redacted field with a value other than `null`,
  *   `""`, or the placeholder, any repeated redacted key, and any payload the scanner cannot fully
- *   scan (invalid JSON, nesting past its depth limit, SSE lines the parsers ignore) refuses the
- *   write; only the listed non-JSON sentinels (such as `[DONE]`) are exempt;
+ *   scan (invalid JSON, nesting past its depth limit, undecodable base64) refuses the write; any
+ *   SSE line the stream parsers ignore (not `data:`, `event:`, `id:`, or `retry:`) refuses it
+ *   unconditionally, even when it parses as JSON; only the listed non-JSON sentinels (such as
+ *   `[DONE]`) are exempt, and only as a recognised `data:` payload;
  * - the injectable fixture-module writer.
  */
 import { execFileSync } from 'node:child_process'
@@ -21,7 +23,6 @@ import { Encoding, Predicate, Result } from 'effect'
 import {
   isWireBase64BodyResponse,
   isWireStreamResponse,
-  type WireChunk,
   type WireExchange,
   type WireResponse
 } from '../packages/conformance/src/fixture.ts'
@@ -113,12 +114,10 @@ export const redactExchange = (exchange: WireExchange, spec: RedactionSpec): Wir
   return body === response.body ? exchange : { ...exchange, response: { ...response, body } }
 }
 
-// Exact bytes of base64 text; undecodable base64 yields no bytes (the recorder never writes it).
-const base64Bytes = (base64: string): Uint8Array =>
-  Result.getOrElse(Encoding.decodeBase64(base64), () => new Uint8Array())
-
-const chunkBytes = (chunk: WireChunk): Uint8Array =>
-  Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)
+// Exact bytes of base64 text, or undefined when it does not decode (the recorder never writes
+// undecodable base64, so such a recording is refused as unscannable, never read as empty).
+const base64Bytes = (base64: string): Uint8Array | undefined =>
+  Result.getOrUndefined(Encoding.decodeBase64(base64))
 
 const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
   const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
@@ -135,25 +134,61 @@ const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
 // Non-fatal UTF-8 decode: invalid bytes become U+FFFD, the rest of the text stays checkable.
 const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
-/** SSE field lines the stream parsers understand; any other non-blank line is unscannable. */
+/** SSE field lines the stream parsers understand; any other non-blank line refuses the write. */
 const sseFieldLinePattern = /^(data|event|id|retry):/
 
-// Every SSE event's `data:` of the whole stream (text and base64 chunks reassembled as bytes), or
-// the whole decoded body. Unparsed SSE lines are returned as their own payloads, so the member
-// scanner refuses them. An empty or whitespace-only body yields no payload.
-const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
-  if (!isWireStreamResponse(response)) {
-    const body = isWireBase64BodyResponse(response)
-      ? lossyText(base64Bytes(response.bodyBase64))
-      : response.body
+/** One thing the survivor check reads from a recorded response. */
+type Payload =
+  /** A recognised SSE `data:` payload (the only place a sentinel such as `[DONE]` is exempt). */
+  | { readonly kind: 'data'; readonly text: string }
+  /** A whole response body. */
+  | { readonly kind: 'body'; readonly text: string }
+  /** An SSE line the stream parsers ignore; refused whatever it contains. */
+  | { readonly kind: 'unknown-line' }
+  /** A base64 chunk or body that does not decode; refused as unscannable. */
+  | { readonly kind: 'undecodable' }
 
-    return body.trim().length > 0 ? [body] : []
+// Every SSE event's `data:` of the whole stream (text and base64 chunks reassembled as bytes) and
+// every line the parsers ignore, or the whole decoded body. An empty or whitespace-only body yields
+// no payload.
+const responsePayloads = (response: WireResponse): ReadonlyArray<Payload> => {
+  if (!isWireStreamResponse(response)) {
+    if (isWireBase64BodyResponse(response)) {
+      const bytes = base64Bytes(response.bodyBase64)
+
+      if (bytes === undefined) return [{ kind: 'undecodable' }]
+
+      const body = lossyText(bytes)
+
+      return body.trim().length > 0 ? [{ kind: 'body', text: body }] : []
+    }
+
+    return response.body.trim().length > 0 ? [{ kind: 'body', text: response.body }] : []
   }
 
-  return lossyText(concatBytes(response.chunks.map(chunkBytes)))
+  const parts: Array<Uint8Array> = []
+  let undecodable = 0
+
+  for (const chunk of response.chunks) {
+    if (Predicate.isString(chunk)) {
+      parts.push(new TextEncoder().encode(chunk))
+      continue
+    }
+
+    const bytes = base64Bytes(chunk.base64)
+
+    if (bytes === undefined) {
+      undecodable++
+      continue
+    }
+
+    parts.push(bytes)
+  }
+
+  const events = lossyText(concatBytes(parts))
     .replace(/\r\n?/g, '\n')
     .split('\n\n')
-    .flatMap(event => {
+    .flatMap((event): ReadonlyArray<Payload> => {
       const lines = event.split('\n')
 
       const data = lines
@@ -161,27 +196,42 @@ const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
         .map(line => line.slice('data:'.length).trim())
         .join('\n')
 
-      const unparsedLines = lines.filter(
-        line => line.trim().length > 0 && !sseFieldLinePattern.test(line)
-      )
+      const unknownLines = lines
+        .filter(line => line.trim().length > 0 && !sseFieldLinePattern.test(line))
+        .map((): Payload => ({ kind: 'unknown-line' }))
 
-      return data.length > 0 ? [data, ...unparsedLines] : unparsedLines
+      return data.length > 0 ? [{ kind: 'data', text: data }, ...unknownLines] : unknownLines
     })
+
+  return [
+    ...Array.from({ length: undecodable }, (): Payload => ({ kind: 'undecodable' })),
+    ...events
+  ]
 }
 
-type PayloadScan = { readonly fields: Set<string>; unscannable: number }
+type PayloadScan = { readonly fields: Set<string>; unscannable: number; unknownLines: number }
 
 const scanExchanges = (
   exchanges: ReadonlyArray<WireExchange>,
   spec: RedactionSpec
 ): PayloadScan => {
-  const scan: PayloadScan = { fields: new Set(), unscannable: 0 }
+  const scan: PayloadScan = { fields: new Set(), unscannable: 0, unknownLines: 0 }
 
   for (const { response } of exchanges) {
     for (const payload of responsePayloads(response)) {
-      if (spec.permittedNonJson.includes(payload)) continue
+      if (payload.kind === 'unknown-line') {
+        scan.unknownLines++
+        continue
+      }
 
-      const survivors = unredactedMembers(payload, spec.fields, spec.placeholder)
+      if (payload.kind === 'undecodable') {
+        scan.unscannable++
+        continue
+      }
+
+      if (payload.kind === 'data' && spec.permittedNonJson.includes(payload.text)) continue
+
+      const survivors = unredactedMembers(payload.text, spec.fields, spec.placeholder)
 
       if (survivors === undefined) {
         scan.unscannable++
@@ -205,11 +255,23 @@ export const unredactedFields = (
   return [...new Set(spec.fields)].filter(field => fields.has(field))
 }
 
-/** How many response payloads the member scanner cannot fully scan (any count refuses the write). */
+/**
+ * How many response payloads the member scanner cannot fully scan: invalid JSON, nesting past its
+ * depth limit, or undecodable base64 (any count refuses the write).
+ */
 export const unscannablePayloads = (
   exchanges: ReadonlyArray<WireExchange>,
   spec: RedactionSpec
 ): number => scanExchanges(exchanges, spec).unscannable
+
+/**
+ * How many SSE lines of the recorded streams the parsers ignore (not `data:`, `event:`, `id:`, or
+ * `retry:`); any count refuses the write, whatever the lines contain.
+ */
+export const unknownSseLines = (
+  exchanges: ReadonlyArray<WireExchange>,
+  spec: RedactionSpec
+): number => scanExchanges(exchanges, spec).unknownLines
 
 /**
  * Why the recorded exchanges must not be written, or undefined when every payload was scanned and
@@ -219,13 +281,18 @@ export const redactionRefusal = (
   exchanges: ReadonlyArray<WireExchange>,
   spec: RedactionSpec
 ): string | undefined => {
-  const { fields, unscannable } = scanExchanges(exchanges, spec)
+  const { fields, unscannable, unknownLines } = scanExchanges(exchanges, spec)
   const survivors = [...new Set(spec.fields)].filter(field => fields.has(field))
 
   const reasons = [
+    ...(unknownLines > 0
+      ? [
+          `found ${unknownLines} SSE line(s) the stream parsers ignore (not data:, event:, id:, or retry:), which would be kept in a public fixture unread; refusing to write, re-record instead`
+        ]
+      : []),
     ...(unscannable > 0
       ? [
-          `could not check ${unscannable} response payload(s) for redacted fields: not valid JSON, nested past the scanner's depth limit, or otherwise unscannable (only ${spec.permittedNonJson.join(', ') || 'no payload'} may be non-JSON); refusing to write, re-record instead`
+          `could not check ${unscannable} response payload(s) for redacted fields: not valid JSON, nested past the scanner's depth limit, undecodable base64, or otherwise unscannable (only ${spec.permittedNonJson.join(', ') || 'no payload'} may be non-JSON); refusing to write, re-record instead`
         ]
       : []),
     ...(survivors.length > 0
