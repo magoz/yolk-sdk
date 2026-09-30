@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient } from 'effect/unstable/http'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
@@ -32,6 +32,7 @@ import {
   type ConnectorHttpRequest
 } from '@yolk-sdk/connectors'
 import {
+  ConformanceCleanupReporter,
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
@@ -1138,5 +1139,230 @@ describe('Fortnox conformance disagreement drills', () => {
       )
       expect(entries).toEqual([])
     })
+  )
+})
+
+// Interruption drills: a failed restore raised while the case is being interrupted still reaches
+// the owner through the ConformanceCleanupReporter, with the full message naming the case.
+
+const capturingReporter = Effect.gen(function* () {
+  const warnings = yield* Ref.make<ReadonlyArray<string>>([])
+
+  return {
+    warnings,
+    reporter: { warn: (message: string) => Ref.update(warnings, list => [...list, message]) }
+  }
+})
+
+/** The restore read-back (exchange 8 in the full fixture) no longer shows the original rows. */
+const unrestoredRows = replaceInBody('"Discount":5,', '"Discount":0,')
+
+const restoreFailedAdvice =
+  'fortnox.invoice.row-discount-sticky: restore failed; restore the account by hand if it still differs from its original state. Restore error: expected the original invoice rows back after restoring.'
+
+const interruptionMoments = [
+  {
+    moment: 'during the claim',
+    // The claim's first write (PUT 1) is held; only the restore exchanges (7, 8) follow it.
+    fixture: replaceResponse(pickExchanges(discountFixture, [0, 1, 7, 8]), 3, unrestoredRows),
+    heldPut: 1,
+    message: `${restoreFailedAdvice} Claim failed first: interrupted`
+  },
+  {
+    moment: 'during the restore',
+    // The claim holds; the restore's write (the fourth PUT, exchange 7) is held.
+    fixture: replaceResponse(discountFixture, 8, unrestoredRows),
+    heldPut: 4,
+    message: `${restoreFailedAdvice} Claim held first.`
+  }
+] as const
+
+/** `client`, with the `heldPut`-th PUT response held until `release` (and `sent` signalled). */
+const holdingPut = (
+  client: HttpClient.HttpClient,
+  heldPut: number,
+  sent: Deferred.Deferred<void>,
+  release: Deferred.Deferred<void>
+) =>
+  Effect.gen(function* () {
+    const puts = yield* Ref.make(0)
+
+    return HttpClient.transform(client, (response, request) =>
+      request.method === 'PUT'
+        ? Ref.updateAndGet(puts, n => n + 1).pipe(
+            Effect.flatMap(n =>
+              n === heldPut
+                ? response.pipe(
+                    Effect.tap(() => Deferred.succeed(sent, undefined)),
+                    Effect.tap(() => Deferred.await(release))
+                  )
+                : response
+            )
+          )
+        : response
+    )
+  })
+
+describe('Fortnox conformance interruption reporting', () => {
+  for (const { moment, fixture, heldPut, message } of interruptionMoments) {
+    it.effect(`reports a failed restore when interrupted ${moment}`, () =>
+      Effect.gen(function* () {
+        const sent = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const { warnings, reporter } = yield* capturingReporter
+
+        const { client } = yield* makeReplayHttpClient([fixture])
+        const holding = yield* holdingPut(client, heldPut, sent, release)
+
+        const fiber = yield* fortnoxInvoiceRowDiscountCase.run.pipe(
+          Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holding))),
+          Effect.provideService(ConformanceCleanupReporter, reporter),
+          Effect.forkChild
+        )
+
+        yield* Deferred.await(sent)
+
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(interrupting)
+        yield* Fiber.await(fiber)
+
+        // Whatever the fiber's exit, the owner sees the failed restore and what to do by hand.
+        expect(yield* Ref.get(warnings)).toEqual([message])
+      })
+    )
+  }
+
+  it.effect(
+    'reports nothing extra when an uninterrupted restore fails (the report carries it)',
+    () =>
+      Effect.gen(function* () {
+        const { warnings, reporter } = yield* capturingReporter
+
+        const { client } = yield* makeReplayHttpClient([
+          replaceResponse(discountFixture, 8, unrestoredRows)
+        ])
+
+        const exit = yield* fortnoxInvoiceRowDiscountCase.run.pipe(
+          Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, client))),
+          Effect.provideService(ConformanceCleanupReporter, reporter),
+          Effect.exit
+        )
+
+        if (Exit.isSuccess(exit)) {
+          return expect.fail('expected the failed restore to fail the case')
+        }
+
+        expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'FortnoxConformanceRestoreFailed' })
+        expect(yield* Ref.get(warnings)).toEqual([])
+      })
+  )
+})
+
+// Run-level interruption drill: runConformance over [a write case whose restore fails, a sentinel].
+// Interrupting the case must stop the run: the sentinel never starts.
+
+const sentinelCase = (ran: Ref.Ref<boolean>) =>
+  defineConformanceCase({
+    id: 'test.sentinel.after-interrupted-case',
+    safety: 'read',
+    docs: 'Synthetic sentinel: records whether it ran.',
+    wire: 'Runs only if the run was not stopped.',
+    fixtures: [],
+    run: Ref.set(ran, true)
+  })
+
+describe('Fortnox conformance run interruption', () => {
+  for (const { moment, fixture, heldPut, message } of interruptionMoments) {
+    it.effect(`stops the whole run when interrupted ${moment} with a failing restore`, () =>
+      Effect.gen(function* () {
+        const sent = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const sentinelRan = yield* Ref.make(false)
+        const { warnings, reporter } = yield* capturingReporter
+
+        const { client } = yield* makeReplayHttpClient([fixture])
+        const holding = yield* holdingPut(client, heldPut, sent, release)
+
+        const fiber = yield* runConformance(
+          [fortnoxInvoiceRowDiscountCase, sentinelCase(sentinelRan)],
+          {
+            target: { kind: 'replay' },
+            now,
+            layer: () => portsOver(Layer.succeed(HttpClient.HttpClient, holding))
+          }
+        ).pipe(Effect.provideService(ConformanceCleanupReporter, reporter), Effect.forkChild)
+
+        yield* Deferred.await(sent)
+
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(interrupting)
+
+        const exit = yield* Fiber.await(fiber)
+
+        expect(yield* Ref.get(sentinelRan)).toBe(false)
+
+        // As for Dropbox: the run ends with the case's own RestoreFailed, and no Interrupt in the
+        // cause, so it produces no report and resumes no case.
+        if (Exit.isSuccess(exit)) {
+          return expect.fail('expected the interrupted run to fail')
+        }
+
+        expect(Cause.hasInterrupts(exit.cause)).toBe(false)
+        expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'FortnoxConformanceRestoreFailed' })
+        expect(yield* Ref.get(warnings)).toEqual([message])
+      })
+    )
+  }
+
+  it.effect(
+    'ends interrupt-only, without a report or a later case, when the restore succeeds',
+    () =>
+      Effect.gen(function* () {
+        const sent = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const sentinelRan = yield* Ref.make(false)
+        const { warnings, reporter } = yield* capturingReporter
+
+        const { client, ledger } = yield* makeReplayHttpClient([
+          pickExchanges(discountFixture, [0, 1, 7, 8])
+        ])
+
+        const holding = yield* holdingPut(client, 1, sent, release)
+
+        const fiber = yield* runConformance(
+          [fortnoxInvoiceRowDiscountCase, sentinelCase(sentinelRan)],
+          {
+            target: { kind: 'replay' },
+            now,
+            layer: () => portsOver(Layer.succeed(HttpClient.HttpClient, holding))
+          }
+        ).pipe(Effect.provideService(ConformanceCleanupReporter, reporter), Effect.forkChild)
+
+        yield* Deferred.await(sent)
+
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(interrupting)
+
+        const exit = yield* Fiber.await(fiber)
+
+        expect(yield* Ref.get(sentinelRan)).toBe(false)
+
+        if (Exit.isSuccess(exit)) {
+          return expect.fail('expected the interrupted run to be interrupted')
+        }
+
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        expect(yield* Ref.get(warnings)).toEqual([])
+        expect(yield* ledger.remaining).toEqual([])
+      })
   )
 })
