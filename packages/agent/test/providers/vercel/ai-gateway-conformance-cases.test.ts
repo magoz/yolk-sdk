@@ -1,6 +1,7 @@
-import { Effect, Layer, Predicate, Redacted, Ref } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref, Schema } from 'effect'
 import { HttpClient } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
+import { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import { isWireStreamResponse, type WireFixture } from '@yolk-sdk/conformance/fixture'
 import {
@@ -17,7 +18,6 @@ import { vercelAiGatewayChatCompletionsUrl } from '../../../src/providers/vercel
 import {
   VercelAiGatewayConformanceConfig,
   vercelAiGatewayConformanceCases,
-  vercelAiGatewayConformanceDefaultModels,
   vercelAiGatewayConformanceFixtures,
   vercelAiGatewayDeepSeekReasoningCase,
   vercelAiGatewayDeepSeekReasoningFixture,
@@ -33,12 +33,70 @@ import {
 
 const now = new Date('2026-09-30T12:00:00.000Z')
 
+// The request fields a replayed case must send exactly as the fixture recorded them. Replay
+// matches requests by method and URL only, so the ledger check below pins the rest.
+const recordedRequestFields = [
+  'model',
+  'reasoning_effort',
+  'thinking',
+  'max_tokens',
+  'stream',
+  'tools'
+] as const
+
+const recordedRequestBody = (fixture: WireFixture): unknown => fixture.exchanges[0].request.body
+
+const recordedField = (fixture: WireFixture, field: string): unknown => {
+  const body = recordedRequestBody(fixture)
+
+  return Predicate.hasProperty(body, field)
+    ? body[field]
+    : expect.fail(`${fixture.id} recorded no request \`${field}\``)
+}
+
+const recordedString = (fixture: WireFixture, field: string): string => {
+  const value = recordedField(fixture, field)
+
+  return Predicate.isString(value) ? value : expect.fail(`${fixture.id} \`${field}\` is no string`)
+}
+
+const recordedNumber = (fixture: WireFixture, field: string): number => {
+  const value = recordedField(fixture, field)
+
+  return Predicate.isNumber(value) ? value : expect.fail(`${fixture.id} \`${field}\` is no number`)
+}
+
+// Only the fields present, so a field sent but never recorded (or the reverse) is a mismatch.
+const pickRecordedRequestFields = (body: unknown) =>
+  recordedRequestFields.flatMap(field =>
+    Predicate.hasProperty(body, field) ? [{ field, value: body[field] }] : []
+  )
+
+const recordedReasoningEffort = (fixture: WireFixture): AgentReasoningEffort => {
+  const value = recordedField(fixture, 'reasoning_effort')
+
+  return Schema.is(AgentReasoningEffort)(value)
+    ? value
+    : expect.fail(`${fixture.id} \`reasoning_effort\` is no reasoning effort`)
+}
+
+// Replay-only settings: every model, limit, and effort comes from the recorded request bodies,
+// so each case sends the request its fixture recorded (the DeepSeek fixture, for example, was
+// recorded with a reasoning-model override rather than the public default models).
 const settings: VercelAiGatewayConformanceSettings = {
   apiKey: Redacted.make('synthetic-gateway-key'),
-  maxCompletionTokens: 64,
-  reasoningMaxCompletionTokens: 512,
-  reasoningEffort: 'high',
-  models: vercelAiGatewayConformanceDefaultModels
+  maxCompletionTokens: recordedNumber(vercelAiGatewayPlainTextFixture, 'max_tokens'),
+  reasoningMaxCompletionTokens: recordedNumber(
+    vercelAiGatewayDeepSeekReasoningFixture,
+    'max_tokens'
+  ),
+  reasoningEffort: recordedReasoningEffort(vercelAiGatewayDeepSeekReasoningFixture),
+  models: {
+    plainText: recordedString(vercelAiGatewayPlainTextFixture, 'model'),
+    reasoning: recordedString(vercelAiGatewayDeepSeekReasoningFixture, 'model'),
+    toolCall: recordedString(vercelAiGatewayToolCallDeltasFixture, 'model'),
+    invalid: recordedString(vercelAiGatewayErrorEnvelopeFixture, 'model')
+  }
 }
 
 const configLayer = Layer.succeed(VercelAiGatewayConformanceConfig, settings)
@@ -185,7 +243,7 @@ describe('Vercel AI Gateway conformance cases', () => {
     })
   )
 
-  it.effect('send the claimed requests (asserted through the replay ledger)', () =>
+  it.effect('send the recorded requests (asserted through the replay ledger)', () =>
     Effect.gen(function* () {
       const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
 
@@ -233,18 +291,28 @@ describe('Vercel AI Gateway conformance cases', () => {
           return entries[0]?.bodyJson
         })
 
+      // Every case sends its fixture's recorded model, effort, thinking toggle, token limit,
+      // streaming flag, and tools.
+      for (const testCase of vercelAiGatewayConformanceCases) {
+        const [fixture] = fixturesFor(testCase)
+
+        if (fixture === undefined) {
+          return expect.fail(`no fixture for ${testCase.id}`)
+        }
+
+        expect(pickRecordedRequestFields(yield* entriesOf(testCase))).toEqual(
+          pickRecordedRequestFields(recordedRequestBody(fixture))
+        )
+      }
+
       expect(yield* entriesOf(vercelAiGatewayPlainTextCase)).toMatchObject({
-        model: settings.models.plainText,
         stream: true,
-        stream_options: { include_usage: true },
-        max_tokens: settings.maxCompletionTokens
+        stream_options: { include_usage: true }
       })
 
       const reasoningBody = yield* entriesOf(vercelAiGatewayDeepSeekReasoningCase)
 
       expect(reasoningBody).toMatchObject({
-        model: settings.models.reasoning,
-        stream: true,
         reasoning_effort: settings.reasoningEffort,
         thinking: { type: 'enabled' },
         max_tokens: settings.reasoningMaxCompletionTokens
@@ -252,14 +320,7 @@ describe('Vercel AI Gateway conformance cases', () => {
       expect(reasoningBody).not.toHaveProperty('reasoning')
 
       expect(yield* entriesOf(vercelAiGatewayToolCallDeltasCase)).toMatchObject({
-        model: settings.models.toolCall,
-        stream: true,
         tools: [{ type: 'function', function: { name: 'lookup_weather' } }]
-      })
-
-      expect(yield* entriesOf(vercelAiGatewayErrorEnvelopeCase)).toMatchObject({
-        model: settings.models.invalid,
-        stream: true
       })
     })
   )

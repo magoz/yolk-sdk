@@ -619,7 +619,6 @@ const eventChoices = (event: RecordedSseEvent): ReadonlyArray<unknown> =>
     ? event.json.choices
     : []
 
-// The answer text an event's content deltas carry.
 const contentOf = (event: RecordedSseEvent): string =>
   eventChoices(event)
     .map(choice =>
@@ -706,6 +705,33 @@ const recordedReasoningEffort = (fixture: WireFixture) =>
       : undefined
   )
 
+const recordedRequestBody = (fixture: WireFixture): unknown => fixture.exchanges[0].request.body
+
+const recordedMaxTokens = (fixture: WireFixture): number => {
+  const body = recordedRequestBody(fixture)
+
+  return Predicate.hasProperty(body, 'max_tokens') && Predicate.isNumber(body.max_tokens)
+    ? body.max_tokens
+    : expect.fail(`${fixture.id} recorded no numeric \`max_tokens\``)
+}
+
+// Replay matches requests by method and URL only; these request fields must also equal the
+// recording, so a fixture-backed test sends the request its fixture recorded.
+const recordedRequestFields = [
+  'model',
+  'reasoning_effort',
+  'thinking',
+  'max_tokens',
+  'stream',
+  'tools'
+] as const
+
+// Only the fields present, so a field sent but never recorded (or the reverse) is a mismatch.
+const pickRecordedRequestFields = (body: unknown) =>
+  recordedRequestFields.flatMap(field =>
+    Predicate.hasProperty(body, field) ? [{ field, value: body[field] }] : []
+  )
+
 const streamingGatewayConfig: Parameters<typeof makeVercelAiGatewayProviderLayer>[0] = {
   ...defaultGatewayConfig,
   streaming: true
@@ -717,6 +743,15 @@ const deepSeekGatewayConfig: Parameters<typeof makeVercelAiGatewayProviderLayer>
   reasoningEffortFormat: 'reasoning-effort',
   thinking: { type: 'enabled' }
 }
+
+// A Gateway config sending the output limit the fixture recorded.
+const recordedGatewayConfig = (
+  config: Parameters<typeof makeVercelAiGatewayProviderLayer>[0],
+  fixture: WireFixture
+): Parameters<typeof makeVercelAiGatewayProviderLayer>[0] => ({
+  ...config,
+  maxCompletionTokens: recordedMaxTokens(fixture)
+})
 
 const replayGatewayLayer = (
   config: Parameters<typeof makeVercelAiGatewayProviderLayer>[0],
@@ -904,12 +939,20 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
           model,
           stream: true,
           stream_options: { include_usage: true },
-          max_tokens: 2_000
+          max_tokens: recordedMaxTokens(fixture)
         }
       })
+      expect(pickRecordedRequestFields(entry?.bodyJson)).toEqual(
+        pickRecordedRequestFields(recordedRequestBody(fixture))
+      )
       expect(entry?.bodyJson).not.toHaveProperty('reasoning_effort')
     }).pipe(
-      Effect.provide(replayGatewayLayer(streamingGatewayConfig, [vercelAiGatewayPlainTextFixture]))
+      Effect.provide(
+        replayGatewayLayer(
+          recordedGatewayConfig(streamingGatewayConfig, vercelAiGatewayPlainTextFixture),
+          [vercelAiGatewayPlainTextFixture]
+        )
+      )
     )
   )
 
@@ -1003,10 +1046,16 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
           reasoning_effort: reasoningEffort,
           thinking: { type: 'enabled' }
         })
+        expect(pickRecordedRequestFields(entry?.bodyJson)).toEqual(
+          pickRecordedRequestFields(recordedRequestBody(fixture))
+        )
         expect(entry?.bodyJson).not.toHaveProperty('reasoning')
       }).pipe(
         Effect.provide(
-          replayGatewayLayer(deepSeekGatewayConfig, [vercelAiGatewayDeepSeekReasoningFixture])
+          replayGatewayLayer(
+            recordedGatewayConfig(deepSeekGatewayConfig, vercelAiGatewayDeepSeekReasoningFixture),
+            [vercelAiGatewayDeepSeekReasoningFixture]
+          )
         )
       )
   )
@@ -1073,9 +1122,15 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
         tools: [{ type: 'function', function: { name: 'lookup_weather' } }],
         parallel_tool_calls: true
       })
+      expect(pickRecordedRequestFields(entry?.bodyJson)).toEqual(
+        pickRecordedRequestFields(recordedRequestBody(fixture))
+      )
     }).pipe(
       Effect.provide(
-        replayGatewayLayer(streamingGatewayConfig, [vercelAiGatewayToolCallDeltasFixture])
+        replayGatewayLayer(
+          recordedGatewayConfig(streamingGatewayConfig, vercelAiGatewayToolCallDeltasFixture),
+          [vercelAiGatewayToolCallDeltasFixture]
+        )
       )
     )
   )
@@ -1129,9 +1184,15 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
       const [entry] = yield* (yield* ReplayLedger).entries
 
       expect(entry?.bodyJson).toMatchObject({ model: fixtureModel(fixture), stream: true })
+      expect(pickRecordedRequestFields(entry?.bodyJson)).toEqual(
+        pickRecordedRequestFields(recordedRequestBody(fixture))
+      )
     }).pipe(
       Effect.provide(
-        replayGatewayLayer(streamingGatewayConfig, [vercelAiGatewayErrorEnvelopeFixture])
+        replayGatewayLayer(
+          recordedGatewayConfig(streamingGatewayConfig, vercelAiGatewayErrorEnvelopeFixture),
+          [vercelAiGatewayErrorEnvelopeFixture]
+        )
       )
     )
   )

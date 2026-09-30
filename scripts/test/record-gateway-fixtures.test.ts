@@ -8,6 +8,7 @@ import {
   vercelAiGatewayConformanceDefaultModels,
   vercelAiGatewayConformanceFixtures,
   vercelAiGatewayDeepSeekReasoningFixture,
+  vercelAiGatewayErrorEnvelopeFixture,
   vercelAiGatewayPlainTextFixture
 } from '../../packages/agent/src/providers/vercel/conformance/index.ts'
 import {
@@ -22,10 +23,15 @@ import {
   dryRunReport,
   gatewayFixtureModuleFor,
   gatewayFixtureModules,
+  gatewayFixtureNote,
+  gatewayJsonRedactions,
   liveAccountRequiredMessage,
   parseProbeArgs,
   planGatewayProbe,
+  redactJsonFields,
+  redactRecording,
   renderFixtureModule,
+  unredactedJsonFields,
   verifyGatewayFixtures,
   writeVerifiedFixtures,
   type FixtureWriter,
@@ -307,6 +313,155 @@ describe('record-gateway-fixtures replay verification', () => {
       status: 'failed'
     })
     expect(casesWithoutSingleFixture(missing)).toEqual(['vercel-ai-gateway.stream.plain-text'])
+  })
+})
+
+const placeholder =
+  gatewayJsonRedactions.clientSessionId ?? expect.fail('no clientSessionId redaction')
+
+// A fingerprint-shaped stand-in for a live session id: never a real recorded value.
+const fakeSessionId = '0123456789abcdef0123456789abcdef'
+
+// Put a live-looking session id back into a committed (redacted) recording.
+const unredacted = (exchange: WireExchange): WireExchange => {
+  const response = exchange.response
+
+  return isWireStreamResponse(response)
+    ? {
+        ...exchange,
+        response: {
+          ...response,
+          chunks: response.chunks.map(chunk =>
+            Predicate.isString(chunk)
+              ? chunk.replaceAll(
+                  `"clientSessionId":"${placeholder}"`,
+                  `"clientSessionId":"${fakeSessionId}"`
+                )
+              : chunk
+          )
+        }
+      }
+    : exchange
+}
+
+describe('record-gateway-fixtures redaction', () => {
+  it('keeps the committed recordings fully redacted, with the redaction in their notes', () => {
+    for (const fixture of vercelAiGatewayConformanceFixtures) {
+      expect(unredactedJsonFields(fixture.exchanges, gatewayJsonRedactions)).toEqual([])
+      expect(redactRecording(fixture.exchanges)).toEqual({
+        exchanges: fixture.exchanges,
+        redactedFields: [],
+        unredactedFields: []
+      })
+    }
+
+    const withSession = vercelAiGatewayConformanceFixtures.filter(fixture =>
+      JSON.stringify(fixture.exchanges).includes('clientSessionId')
+    )
+
+    expect(withSession.map(fixture => fixture.id)).not.toContain(
+      vercelAiGatewayErrorEnvelopeFixture.id
+    )
+    expect(withSession.length).toBeGreaterThan(0)
+
+    for (const fixture of vercelAiGatewayConformanceFixtures) {
+      expect(fixture.note).toBe(
+        gatewayFixtureNote(withSession.includes(fixture) ? ['clientSessionId'] : [])
+      )
+    }
+
+    expect(gatewayFixtureNote(['clientSessionId'])).toContain(
+      'clientSessionId redacted after recording.'
+    )
+  })
+
+  it('redacts a live session id from stream chunks, changing no other recorded byte', () => {
+    for (const fixture of vercelAiGatewayConformanceFixtures) {
+      const live = fixture.exchanges.map(unredacted)
+      const redacted = redactRecording(live)
+      const hadSession = JSON.stringify(live).includes(fakeSessionId)
+
+      expect(redacted.redactedFields).toEqual(hadSession ? ['clientSessionId'] : [])
+      expect(redacted.unredactedFields).toEqual([])
+      // Chunk boundaries and every other byte match the committed recording.
+      expect(redacted.exchanges).toEqual(fixture.exchanges)
+    }
+  })
+
+  it('redacts request bodies and text bodies, keeping whitespace and neighbouring fields', () => {
+    const exchanges: ReadonlyArray<WireExchange> = [
+      {
+        request: {
+          method: 'POST',
+          url: 'https://example.test/v1',
+          body: {
+            clientSessionId: fakeSessionId,
+            nested: [{ clientSessionId: fakeSessionId, keep: 'value' }],
+            count: 1
+          }
+        },
+        response: {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+          body: `{"clientSessionId" : "${fakeSessionId}","clientSessionIdSource":"fingerprint"}`
+        }
+      },
+      {
+        request: { method: 'GET', url: 'https://example.test/v1' },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [`data: {"a":1,"clientSessionId":"${fakeSessionId}"}\n\n`, { base64: 'AAEC' }]
+        }
+      }
+    ]
+
+    expect(redactJsonFields(exchanges, gatewayJsonRedactions)).toEqual([
+      {
+        request: {
+          method: 'POST',
+          url: 'https://example.test/v1',
+          body: {
+            clientSessionId: placeholder,
+            nested: [{ clientSessionId: placeholder, keep: 'value' }],
+            count: 1
+          }
+        },
+        response: {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+          body: `{"clientSessionId" : "${placeholder}","clientSessionIdSource":"fingerprint"}`
+        }
+      },
+      {
+        request: { method: 'GET', url: 'https://example.test/v1' },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [`data: {"a":1,"clientSessionId":"${placeholder}"}\n\n`, { base64: 'AAEC' }]
+        }
+      }
+    ])
+    expect(redactRecording(exchanges).redactedFields).toEqual(['clientSessionId'])
+    expect(redactRecording(exchanges).unredactedFields).toEqual([])
+  })
+
+  it('reports a value split across network chunks as unredacted, so the probe refuses to write', () => {
+    const split: ReadonlyArray<WireExchange> = [
+      {
+        request: { method: 'POST', url: 'https://example.test/v1' },
+        response: {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+          chunks: [
+            `data: {"clientSessionId":"${fakeSessionId.slice(0, 8)}`,
+            `${fakeSessionId.slice(8)}"}\n\n`
+          ]
+        }
+      }
+    ]
+
+    expect(redactRecording(split).unredactedFields).toEqual(['clientSessionId'])
   })
 })
 
