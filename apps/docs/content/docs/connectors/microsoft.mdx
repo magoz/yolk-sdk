@@ -50,7 +50,11 @@ remove the item by hand if it still exists. Some creates need manual recovery be
 recoverable: a create that succeeds without an id fails with `MicrosoftConformanceRestoreFailed`,
 and an ambiguous create (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
 `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`, keeping its code and status). Both
-messages carry the advice; look for `yolk-conformance` items and remove them by hand. Removed
+messages carry the advice; look for `yolk-conformance` items and remove them by hand. A failed
+removal, an id-less create, or an ambiguous create raised while the case is being interrupted is
+also handed, with its full message, to `ConformanceCleanupReporter` from
+`@yolk-sdk/connectors/conformance` (default: `Effect.logWarning`), since the interruption may
+replace it; a definitive create rejection created nothing and is not reported. Removed
 folders stay in the OneDrive recycle bin, and permanently deleted drafts may be kept by retention
 policies. No case sends mail or invitations.
 

@@ -9,7 +9,8 @@
  * account"). None is observed live yet (`observed` absent = unverified).
  *
  * The row and customer mutation cases restore what they change, verify the restore by reading
- * back, and report (never swallow) a failed restore. The rejection case writes nothing when Fortnox
+ * back, and report (never swallow) a failed restore, also through `ConformanceCleanupReporter` when
+ * the case is being interrupted. The rejection case writes nothing when Fortnox
  * behaves as claimed: it first confirms the customer is absent and names any invoice Fortnox
  * unexpectedly creates for manual cancellation.
  */
@@ -24,6 +25,7 @@ import {
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
 import type { ConnectorBinaryHttpClient } from '../../binary-http.ts'
+import { failReporting } from '../../conformance/cleanup-reporter.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import type { ConnectorError } from '../../error.ts'
 import type { ConnectorFileTransferError } from '../../file-transfer.ts'
@@ -313,7 +315,9 @@ const failureSummary = (cause: Cause.Cause<unknown>): string => {
  * Run `use`, then ALWAYS run `restore` (also after a failure or interruption, uninterruptibly).
  * A failed restore fails the case with `FortnoxConformanceRestoreFailed`, which says whether the
  * claim itself held and, if not, summarizes why; otherwise the outcome of `use` (including an
- * interruption) is returned unchanged.
+ * interruption) is returned unchanged. A failed restore raised while the case is being interrupted
+ * is also handed to `ConformanceCleanupReporter` (via `failReporting`) before leaving the mask, since
+ * an interruption may replace it.
  */
 const withRestore = <A, E, R, E2, R2>(
   caseId: string,
@@ -326,18 +330,22 @@ const withRestore = <A, E, R, E2, R2>(
       const restored = yield* Effect.exit(restore)
 
       if (Exit.isFailure(restored)) {
-        return yield* Exit.isSuccess(outcome)
-          ? new FortnoxConformanceRestoreFailed({
-              caseId,
-              reason: failureSummary(restored.cause),
-              caseOutcome: 'claim held'
-            })
-          : new FortnoxConformanceRestoreFailed({
-              caseId,
-              reason: failureSummary(restored.cause),
-              caseOutcome: 'claim failed',
-              claimFailure: failureSummary(outcome.cause)
-            })
+        return yield* failReporting(
+          unmask,
+          Exit.isSuccess(outcome)
+            ? new FortnoxConformanceRestoreFailed({
+                caseId,
+                reason: failureSummary(restored.cause),
+                caseOutcome: 'claim held'
+              })
+            : new FortnoxConformanceRestoreFailed({
+                caseId,
+                reason: failureSummary(restored.cause),
+                caseOutcome: 'claim failed',
+                claimFailure: failureSummary(outcome.cause)
+              }),
+          Exit.isFailure(outcome) && Cause.hasInterrupts(outcome.cause)
+        )
       }
 
       return yield* outcome

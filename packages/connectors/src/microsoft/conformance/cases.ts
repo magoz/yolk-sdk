@@ -19,7 +19,8 @@
  * fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create failure (the shared
  * `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
  * `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`): both messages say to remove the
- * item by hand if it exists. No case sends mail or invitations.
+ * item by hand if it exists. Raised while the case is being interrupted, these and a failed restore
+ * also go to `ConformanceCleanupReporter`. No case sends mail or invitations.
  */
 import { Cause, Chunk, Context, Data, Duration, Effect, Exit, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -31,7 +32,7 @@ import {
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
-import { classifyWriteExit } from '../../conformance/cleanup-reporter.ts'
+import { classifyWriteExit, failReporting } from '../../conformance/cleanup-reporter.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import type { ConnectorError } from '../../error.ts'
 import type { ConnectorHttpClient } from '../../http.ts'
@@ -401,7 +402,10 @@ const createdItem = <T, R>(
  * fails the case with `MicrosoftConformanceRestoreFailed`, which says whether the claim itself
  * held and, if not, summarizes why; otherwise the outcome of `use` (including an interruption) is returned unchanged. A create that succeeds without an id leaves
  * nothing to remove automatically: it fails with `MicrosoftConformanceRestoreFailed` too, so the
- * item is removed by hand.
+ * item is removed by hand. Each of these cleanup problems (an ambiguous create, an id-less create, a
+ * failed restore) raised while the case is being interrupted is also handed to
+ * `ConformanceCleanupReporter` (via `failReporting`) before leaving the mask, since an interruption
+ * may replace it.
  */
 const withOwnItem = <T, A, R1, E, R, E2, R2>(
   caseId: string,
@@ -418,16 +422,35 @@ const withOwnItem = <T, A, R1, E, R, E2, R2>(
 
     return yield* Effect.uninterruptibleMask(unmask =>
       Effect.gen(function* () {
-        const created = yield* createdItem(item)
+        const creation = yield* Effect.exit(createdItem(item))
 
+        if (Exit.isFailure(creation)) {
+          const error = Cause.findErrorOption(creation.cause)
+
+          // Only an unknown-outcome create is a cleanup problem: a definitive rejection wrote nothing.
+          if (
+            Option.isSome(error) &&
+            error.value instanceof MicrosoftConformanceActionFailed &&
+            error.value.createOutcome === 'unknown'
+          ) {
+            return yield* failReporting(unmask, error.value)
+          }
+
+          return yield* Effect.failCause(creation.cause)
+        }
+
+        const created = creation.value
         const id = item.idOf(created)
 
         if (id === undefined) {
-          return yield* new MicrosoftConformanceRestoreFailed({
-            caseId,
-            reason: 'the create response carried no id, so nothing was removed',
-            caseOutcome: 'claim failed'
-          })
+          return yield* failReporting(
+            unmask,
+            new MicrosoftConformanceRestoreFailed({
+              caseId,
+              reason: 'the create response carried no id, so nothing was removed',
+              caseOutcome: 'claim failed'
+            })
+          )
         }
 
         yield* Ref.set(pending, [id])
@@ -441,18 +464,22 @@ const withOwnItem = <T, A, R1, E, R, E2, R2>(
         )
 
         if (Exit.isFailure(restored)) {
-          return yield* Exit.isSuccess(outcome)
-            ? new MicrosoftConformanceRestoreFailed({
-                caseId,
-                reason: failureSummary(restored.cause),
-                caseOutcome: 'claim held'
-              })
-            : new MicrosoftConformanceRestoreFailed({
-                caseId,
-                reason: failureSummary(restored.cause),
-                caseOutcome: 'claim failed',
-                claimFailure: failureSummary(outcome.cause)
-              })
+          return yield* failReporting(
+            unmask,
+            Exit.isSuccess(outcome)
+              ? new MicrosoftConformanceRestoreFailed({
+                  caseId,
+                  reason: failureSummary(restored.cause),
+                  caseOutcome: 'claim held'
+                })
+              : new MicrosoftConformanceRestoreFailed({
+                  caseId,
+                  reason: failureSummary(restored.cause),
+                  caseOutcome: 'claim failed',
+                  claimFailure: failureSummary(outcome.cause)
+                }),
+            Exit.isFailure(outcome) && Cause.hasInterrupts(outcome.cause)
+          )
         }
 
         return yield* outcome

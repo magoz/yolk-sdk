@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientError } from 'effect/unstable/http'
-import type { ConformanceCase } from '@yolk-sdk/conformance/case'
+import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,
   isWireBase64BodyResponse,
@@ -26,6 +26,7 @@ import {
 } from '@yolk-sdk/conformance/runner'
 import { OAuthCredential } from '@yolk-sdk/connectors'
 import {
+  ConformanceCleanupReporter,
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
@@ -1113,6 +1114,346 @@ describe('Microsoft conformance ambiguous creates', () => {
           /^precondition: a folder named "[^"]+" already exists under driveParentItemId \(left by an earlier run\?\); delete it by hand/
         )
         expect(exchangeIndices(entries)).toEqual(['POST 0'])
+      })
+  )
+})
+
+// Interruption reporting: a cleanup problem (a failed removal, an ambiguous create, an id-less
+// create) raised while the case is being interrupted still reaches the owner through the
+// ConformanceCleanupReporter, with the full message naming the case or create.
+
+const capturingReporter = Effect.gen(function* () {
+  const warnings = yield* Ref.make<ReadonlyArray<string>>([])
+
+  return {
+    warnings,
+    reporter: { warn: (message: string) => Ref.update(warnings, list => [...list, message]) }
+  }
+})
+
+const restoreFailedAdvice =
+  'microsoft.calendar.create-returns-event-id: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance).'
+
+const failedEventDelete = withStatus(500, graphServerError)
+
+const removalMoments = [
+  {
+    moment: 'during the claim',
+    // The claim's GET (1) is held; the restore's DELETE (3) then answers 500.
+    fixture: replaceResponse(
+      pickExchanges(microsoftCalendarCreateEventFixture, [0, 1, 3]),
+      2,
+      failedEventDelete
+    ),
+    held: (request: { readonly method: string }) => request.method === 'GET',
+    message: `${restoreFailedAdvice} Restore error: microsoft.conformance.delete_event microsoft_delete_e... 500. Claim failed first: interrupted`
+  },
+  {
+    moment: 'during the restore',
+    // The claim's PATCH (2) answers the old subject, so the claim fails before its own DELETE;
+    // the restore's DELETE (3) is held and then answers 500.
+    fixture: replaceResponse(
+      replaceResponse(
+        pickExchanges(microsoftCalendarCreateEventFixture, [0, 1, 2, 3]),
+        2,
+        replaceInBody(
+          '"yolk-conformance event (updated): safe to delete"',
+          '"yolk-conformance event: safe to delete"'
+        )
+      ),
+      3,
+      failedEventDelete
+    ),
+    held: (request: { readonly method: string }) => request.method === 'DELETE',
+    message: `${restoreFailedAdvice} Restore error: microsoft.conformance.delete_event microsoft_delete_e... 500. Claim failed first: expected PATCH with the created id to return the updated...`
+  }
+] as const
+
+/** `client`, with the first response `held` selects held until `release` (and `sent` signalled). */
+const holdingFirst = (
+  client: HttpClient.HttpClient,
+  held: (request: { readonly method: string }) => boolean,
+  sent: Deferred.Deferred<void>,
+  release: Deferred.Deferred<void>
+) =>
+  Effect.gen(function* () {
+    const seen = yield* Ref.make(0)
+
+    return HttpClient.transform(client, (response, request) =>
+      held(request)
+        ? Ref.updateAndGet(seen, n => n + 1).pipe(
+            Effect.flatMap(n =>
+              n === 1
+                ? response.pipe(
+                    Effect.tap(() => Deferred.succeed(sent, undefined)),
+                    Effect.tap(() => Deferred.await(release))
+                  )
+                : response
+            )
+          )
+        : response
+    )
+  })
+
+/** Run the create-event case over `fixture`, interrupting it while the `held` response is held. */
+const interruptCreateEventCase = (
+  fixture: WireFixture,
+  held: (request: { readonly method: string }) => boolean
+) =>
+  Effect.gen(function* () {
+    const sent = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const { warnings, reporter } = yield* capturingReporter
+
+    const { client } = yield* makeReplayHttpClient([fixture])
+    const holding = yield* holdingFirst(client, held, sent, release)
+
+    const fiber = yield* microsoftCalendarCreateEventCase.run.pipe(
+      Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holding))),
+      Effect.provideService(ConformanceCleanupReporter, reporter),
+      Effect.forkChild
+    )
+
+    yield* Deferred.await(sent)
+
+    const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+    yield* Effect.yieldNow
+    yield* Deferred.succeed(release, undefined)
+    yield* Fiber.join(interrupting)
+    yield* Fiber.await(fiber)
+
+    return yield* Ref.get(warnings)
+  })
+
+const isCreate = (request: { readonly method: string }) => request.method === 'POST'
+
+describe('Microsoft conformance interruption reporting', () => {
+  for (const { moment, fixture, held, message } of removalMoments) {
+    it.effect(`reports a failed removal when interrupted ${moment}`, () =>
+      Effect.gen(function* () {
+        // Whatever the fiber's exit, the owner sees the failed removal and what to do by hand.
+        expect(yield* interruptCreateEventCase(fixture, held)).toEqual([message])
+      })
+    )
+  }
+
+  it.effect('reports an ambiguous create answered while the case is being interrupted', () =>
+    Effect.gen(function* () {
+      // Graph receives the create; its answer (a 502) is held until the case is being stopped.
+      const badGateway = pickExchanges(
+        replaceResponse(microsoftCalendarCreateEventFixture, 0, withStatus(502, graphServerError)),
+        [0]
+      )
+
+      expect(yield* interruptCreateEventCase(badGateway, isCreate)).toEqual([
+        `microsoft.conformance.create_event failed: microsoft_create_event_failed (HTTP 502); ${ambiguousCreateAdvice}`
+      ])
+    })
+  )
+
+  it.effect('reports a create without an id answered while the case is being interrupted', () =>
+    Effect.gen(function* () {
+      const noId = pickExchanges(
+        replaceResponse(
+          microsoftCalendarCreateEventFixture,
+          0,
+          replaceInBody('"id":"AAMkAGI2-synthetic-event-0101=",', '')
+        ),
+        [0]
+      )
+
+      expect(yield* interruptCreateEventCase(noId, isCreate)).toEqual([
+        `${restoreFailedAdvice} Restore error: the create response carried no id, so nothing was removed. Claim failed first.`
+      ])
+    })
+  )
+
+  it.effect('reports nothing for a definitive create rejection while interrupted', () =>
+    Effect.gen(function* () {
+      const rejected = pickExchanges(
+        replaceResponse(microsoftCalendarCreateEventFixture, 0, withStatus(403, graphServerError)),
+        [0]
+      )
+
+      expect(yield* interruptCreateEventCase(rejected, isCreate)).toEqual([])
+    })
+  )
+
+  it.effect(
+    'reports nothing extra when an uninterrupted removal fails (the report carries it)',
+    () =>
+      Effect.gen(function* () {
+        const { warnings, reporter } = yield* capturingReporter
+
+        const undeleted = replaceResponse(
+          microsoftOutlookImmutableIdFixture,
+          3,
+          replaceInBody('"status":204', '"status":500')
+        )
+
+        const { client } = yield* makeReplayHttpClient([undeleted])
+
+        const exit = yield* microsoftOutlookImmutableIdCase.run.pipe(
+          Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, client))),
+          Effect.provideService(ConformanceCleanupReporter, reporter),
+          Effect.exit
+        )
+
+        if (Exit.isSuccess(exit)) {
+          return expect.fail('expected the failed removal to fail the case')
+        }
+
+        expect(Cause.squash(exit.cause)).toMatchObject({
+          _tag: 'MicrosoftConformanceRestoreFailed'
+        })
+        expect(yield* Ref.get(warnings)).toEqual([])
+      })
+  )
+
+  it.effect('reports nothing extra for an uninterrupted ambiguous create', () =>
+    Effect.gen(function* () {
+      const { warnings, reporter } = yield* capturingReporter
+
+      const exit = yield* microsoftCalendarCreateEventCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, droppingHttpClient))),
+        Effect.provideService(ConformanceCleanupReporter, reporter),
+        Effect.exit
+      )
+
+      if (Exit.isSuccess(exit)) {
+        return expect.fail('expected the ambiguous create to fail the case')
+      }
+
+      expect(Cause.squash(exit.cause)).toMatchObject({
+        _tag: 'MicrosoftConformanceActionFailed',
+        createOutcome: 'unknown'
+      })
+      expect(yield* Ref.get(warnings)).toEqual([])
+    })
+  )
+})
+
+// Run-level interruption drill: runConformance over [a write case whose removal fails, a
+// sentinel]. Interrupting the case must stop the run: the sentinel never starts.
+
+const sentinelCase = (ran: Ref.Ref<boolean>) =>
+  defineConformanceCase({
+    id: 'test.sentinel.after-interrupted-case',
+    safety: 'read',
+    docs: 'Synthetic sentinel: records whether it ran.',
+    wire: 'Runs only if the run was not stopped.',
+    fixtures: [],
+    run: Ref.set(ran, true)
+  })
+
+/** runConformance over [the create-event case, a sentinel], interrupted while `held` is held. */
+const interruptCreateEventRun = (
+  fixture: WireFixture,
+  held: (request: { readonly method: string }) => boolean
+) =>
+  Effect.gen(function* () {
+    const sent = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const sentinelRan = yield* Ref.make(false)
+    const { warnings, reporter } = yield* capturingReporter
+
+    const { client, ledger } = yield* makeReplayHttpClient([fixture])
+    const holding = yield* holdingFirst(client, held, sent, release)
+
+    const fiber = yield* runConformance(
+      [microsoftCalendarCreateEventCase, sentinelCase(sentinelRan)],
+      {
+        target: { kind: 'replay' },
+        now,
+        layer: () => portsOver(Layer.succeed(HttpClient.HttpClient, holding))
+      }
+    ).pipe(Effect.provideService(ConformanceCleanupReporter, reporter), Effect.forkChild)
+
+    yield* Deferred.await(sent)
+
+    const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+    yield* Effect.yieldNow
+    yield* Deferred.succeed(release, undefined)
+    yield* Fiber.join(interrupting)
+
+    return {
+      exit: yield* Fiber.await(fiber),
+      sentinelRan: yield* Ref.get(sentinelRan),
+      warnings: yield* Ref.get(warnings),
+      remaining: yield* ledger.remaining
+    }
+  })
+
+describe('Microsoft conformance run interruption', () => {
+  for (const { moment, fixture, held, message } of removalMoments) {
+    it.effect(`stops the whole run when interrupted ${moment} with a failing removal`, () =>
+      Effect.gen(function* () {
+        const { exit, sentinelRan, warnings } = yield* interruptCreateEventRun(fixture, held)
+
+        expect(sentinelRan).toBe(false)
+
+        // As for Dropbox: the run ends with the case's own RestoreFailed, and no Interrupt in the
+        // cause, so it produces no report and resumes no case.
+        if (Exit.isSuccess(exit)) {
+          return expect.fail('expected the interrupted run to fail')
+        }
+
+        expect(Cause.hasInterrupts(exit.cause)).toBe(false)
+        expect(Cause.squash(exit.cause)).toMatchObject({
+          _tag: 'MicrosoftConformanceRestoreFailed'
+        })
+        expect(warnings).toEqual([message])
+      })
+    )
+  }
+
+  it.effect('stops the whole run when an ambiguous create answers while interrupted', () =>
+    Effect.gen(function* () {
+      const badGateway = pickExchanges(
+        replaceResponse(microsoftCalendarCreateEventFixture, 0, withStatus(502, graphServerError)),
+        [0]
+      )
+
+      const { exit, sentinelRan, warnings } = yield* interruptCreateEventRun(badGateway, isCreate)
+
+      expect(sentinelRan).toBe(false)
+
+      if (Exit.isSuccess(exit)) {
+        return expect.fail('expected the interrupted run to fail')
+      }
+
+      expect(Cause.hasInterrupts(exit.cause)).toBe(false)
+      expect(Cause.squash(exit.cause)).toMatchObject({
+        _tag: 'MicrosoftConformanceActionFailed',
+        createOutcome: 'unknown'
+      })
+      expect(warnings).toEqual([
+        `microsoft.conformance.create_event failed: microsoft_create_event_failed (HTTP 502); ${ambiguousCreateAdvice}`
+      ])
+    })
+  )
+
+  it.effect(
+    'ends interrupt-only, without a report or a later case, when the removal succeeds',
+    () =>
+      Effect.gen(function* () {
+        // The claim's GET (1) is held; the restore's DELETE (3) and GET (4) then succeed.
+        const { exit, sentinelRan, warnings, remaining } = yield* interruptCreateEventRun(
+          pickExchanges(microsoftCalendarCreateEventFixture, [0, 1, 3, 4]),
+          request => request.method === 'GET'
+        )
+
+        expect(sentinelRan).toBe(false)
+
+        if (Exit.isSuccess(exit)) {
+          return expect.fail('expected the interrupted run to be interrupted')
+        }
+
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        expect(warnings).toEqual([])
+        expect(remaining).toEqual([])
       })
   )
 })

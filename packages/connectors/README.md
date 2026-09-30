@@ -696,7 +696,9 @@ table, seeds, and claims live in the
 The row and customer mutation cases read the original state first, always restore it afterwards
 (also after a failed assertion or interruption), verify the restore by reading back, and fail with
 `FortnoxConformanceRestoreFailed` when the restore fails (check the account and restore it by hand
-if it still differs). The rejection case restores nothing: it only confirms the customer is absent
+if it still differs). A failed restore raised while the case is being interrupted is also handed,
+with its full message, to `ConformanceCleanupReporter` from `@yolk-sdk/connectors/conformance`
+(default: `Effect.logWarning`), since the interruption may replace it. The rejection case restores nothing: it only confirms the customer is absent
 before its write and names any invoice Fortnox unexpectedly creates for manual cancellation. The
 email case aborts unless the invoice's `EmailInformation.EmailAddressTo` equals the `emailRecipient`
 seed exactly; the runner never runs it live unless its exact id is allowed.
@@ -1266,7 +1268,10 @@ interruption), verifies the removal where Graph allows it, and fails with
 fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create (a transport or decoding
 failure, no status, HTTP 408, or HTTP 5xx) fails with `MicrosoftConformanceActionFailed`
 (`createOutcome: 'unknown'`, code and status kept): both messages advise manual recovery of the
-`yolk-conformance` item. No case sends mail or invitations. `pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account
+`yolk-conformance` item. Each of these (a failed removal, an id-less create, an ambiguous create)
+raised while the case is being interrupted is also handed, with its full message, to
+`ConformanceCleanupReporter` (default: `Effect.logWarning`), since the interruption may replace it.
+No case sends mail or invitations. `pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account
 <label>` (with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by
 hand, `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings
 all or nothing in `.conformance-recordings/microsoft/<run>/` (gitignored) for manual scrubbing and
