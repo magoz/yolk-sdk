@@ -701,26 +701,24 @@ The row and customer mutation cases read the original state first, always restor
 `FortnoxConformanceRestoreFailed` when the restore fails (check the account and restore it by hand
 if it still differs). A failed restore raised while the case is being interrupted is also handed,
 with its full message, to `ConformanceCleanupReporter` from `@yolk-sdk/connectors/conformance`
-(default: `Effect.logWarning`), since the interruption may replace it. The repository runner on main
-does not turn Ctrl-C into an interruption, so the reporter applies to hosts that interrupt the run
-fiber (draft pull requests #114 and #122 add this to the runners). The rejection case restores
-nothing: it only confirms the customer is absent before its write and names any invoice Fortnox
-unexpectedly creates for manual cancellation. The email case aborts unless the invoice's
-`EmailInformation.EmailAddressTo` equals the `emailRecipient` seed exactly; the runner never runs it
-live unless its exact id is allowed. Neither the rejection case nor the email send reports through
-`ConformanceCleanupReporter`.
+(default: `Effect.logWarning`), since the interruption may replace it. The repository runner
+(`pnpm conformance:fortnox`) turns a first Ctrl-C into an interruption and prints these reports on
+stderr as `WARN` lines. The rejection case restores nothing: it only confirms the customer is absent
+before its write and names any invoice Fortnox unexpectedly creates for manual cancellation. The
+email case aborts unless the invoice's `EmailInformation.EmailAddressTo` equals the `emailRecipient`
+seed exactly; the runner never runs it live unless its exact id is allowed. Neither the rejection
+case nor the email send reports through `ConformanceCleanupReporter`.
 
 `fortnoxConformanceFixtures` are synthetic placeholders (`evidence: 'unverified'`) that replay with
 `fortnoxConformanceFixtureSeeds`. `pnpm conformance:fortnox` in this repository dry-runs by default;
 its `--live --owner-approved --account <label>` mode (refused whenever `CI` is non-empty) is for
 owners running a practice account by hand, and a first Ctrl-C interrupts the run so a running write
-case still restores. `--record`
-stages verified recordings all or nothing in a new gitignored run directory,
-`.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`, and never writes committed
-sources. Promotion is manual: scrub, copy into `src/fortnox/conformance/`, and update the tests in
-the same change, because promoted fixtures change fixture ids, `evidence`, and `account`. A promoted
-payment-filter recording also needs the tests' fixed clock (`atTestNow`) moved past the recorded
-`DueDate`.
+case still restores. `--record` stages verified recordings all or nothing in a new gitignored run
+directory, `.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`, and never writes
+committed sources. Promotion is manual: scrub, copy into `src/fortnox/conformance/`, and update the
+tests in the same change, because promoted fixtures change fixture ids, `evidence`, and `account`. A
+promoted payment-filter recording also needs the tests' fixed clock (`atTestNow`) moved past the
+recorded `DueDate`.
 
 `@yolk-sdk/connectors/conformance` supplies the ports for such runs:
 `connectorHttpClientFromEffectHttpClientLayer`, `connectorBinaryHttpClientFromEffectHttpClientLayer`,

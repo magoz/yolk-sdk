@@ -12,7 +12,8 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Deferred, Effect, Result } from 'effect'
+import { Deferred, Effect, Layer, Result } from 'effect'
+import { HttpClient } from 'effect/unstable/http'
 import { describe, expect, it } from 'vitest'
 import {
   isWireBase64BodyResponse,
@@ -21,6 +22,7 @@ import {
   type WireFixture
 } from '../../packages/conformance/src/fixture.ts'
 import type { WireRecorderApi } from '../../packages/conformance/src/record.ts'
+import { makeReplayHttpClient } from '../../packages/conformance/src/replay.ts'
 import type { ConformanceReport } from '../../packages/conformance/src/runner.ts'
 import {
   fortnoxConformanceCases,
@@ -58,6 +60,7 @@ import {
   renderFixtureModule,
   renderSeedsModule,
   runFortnoxInterruptibly,
+  runFortnoxLive,
   stageRecordings,
   type LiveInputs
 } from '../run-fortnox-conformance.ts'
@@ -959,6 +962,22 @@ const fakeIo = () => {
   return { io, errors, exitCodes, forcedExits }
 }
 
+const exchangeAt = (fixture: WireFixture, index: number): WireExchange =>
+  fixture.exchanges[index] ?? expect.fail(`no exchange ${index} in ${fixture.id}`)
+
+/** `exchange` with `from` replaced by `to` in its text response body. */
+const withTextBody = (exchange: WireExchange, from: string, to: string): WireExchange => {
+  const { response } = exchange
+
+  if (isWireStreamResponse(response) || isWireBase64BodyResponse(response)) {
+    return expect.fail('expected a text response body')
+  }
+
+  expect(response.body).toContain(from)
+
+  return { ...exchange, response: { ...response, body: response.body.replace(from, to) } }
+}
+
 /** A program that starts, then waits; its uninterruptible cleanup waits for `releaseCleanup`. */
 const runningProgram = () => {
   const started = Effect.runSync(Deferred.make<void>())
@@ -1039,6 +1058,88 @@ describe('run-fortnox-conformance live runs are interruptible', () => {
 
     running.releaseCleanup()
     await done
+  })
+
+  it('prints the case-specific WARN when a real row case is interrupted and its restore fails', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes, forcedExits } = fakeIo()
+    const out: Array<string> = []
+    const sent = Effect.runSync(Deferred.make<void>())
+    const release = Effect.runSync(Deferred.make<void>())
+
+    // The row case's first PUT is held; after it only the restore's PUT (7) and read-back (8)
+    // follow, and the read-back no longer shows the original rows, so the restore fails.
+    const discount = fortnoxInvoiceRowDiscountFixture
+
+    const unrestored: WireFixture = {
+      ...discount,
+      exchanges: [
+        exchangeAt(discount, 0),
+        exchangeAt(discount, 1),
+        exchangeAt(discount, 7),
+        withTextBody(exchangeAt(discount, 8), '"Discount":5,', '"Discount":0,')
+      ]
+    }
+
+    const { client } = await Effect.runPromise(
+      makeReplayHttpClient(
+        fortnoxConformanceFixtures.map(fixture =>
+          fixture.id === fortnoxInvoiceRowDiscountFixture.id ? unrestored : fixture
+        )
+      )
+    )
+
+    let puts = 0
+
+    const holding = HttpClient.transform(client, (response, request) =>
+      request.method === 'PUT' && ++puts === 1
+        ? response.pipe(
+            Effect.tap(() => Deferred.succeed(sent, undefined)),
+            Effect.tap(() => Deferred.await(release))
+          )
+        : response
+    )
+
+    const done = runFortnoxInterruptibly(
+      runFortnoxLive(
+        {
+          ...defaultRunOptions,
+          live: true,
+          ownerApproved: true,
+          account: 'practice',
+          allowWrites: 'reversible'
+        },
+        recordInputs,
+        {
+          http: Layer.succeed(HttpClient.HttpClient, holding),
+          out: line => out.push(line),
+          // stderr: the WARN lines share the stream with the runner's own messages.
+          err: line => io.error(line)
+        }
+      ),
+      signals.source,
+      io,
+      { pid: 4242 }
+    )
+
+    await Effect.runPromise(Deferred.await(sent))
+    signals.emit('SIGINT')
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+    Effect.runSync(Deferred.succeed(release, undefined))
+    await done
+
+    const restoreFailed =
+      'fortnox.invoice.row-discount-sticky: restore failed; restore the account by hand if it still differs from its original state. Restore error: expected the original invoice rows back after restoring. Claim failed first: interrupted'
+
+    expect(errors[0]).toContain('SIGINT: interrupting the run (pid 4242)')
+    expect(errors).toContain(`WARN ${restoreFailed}`)
+    expect(errors.filter(line => line.startsWith('WARN '))).toEqual([`WARN ${restoreFailed}`])
+    // The run ends with the case's own RestoreFailed (not interrupt-only): exit 1, no report.
+    expect(errors.at(-1)).toBe(restoreFailed)
+    expect(exitCodes).toEqual([1])
+    expect(forcedExits).toEqual([])
+    expect(out).toEqual([])
+    expect(signals.registered()).toBe(0)
   })
 
   it('reports a failed run with exit code 1 and no signal handlers left behind', async () => {

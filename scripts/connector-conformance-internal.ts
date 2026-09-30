@@ -6,7 +6,8 @@
  * `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential, and ports)
  * and gets the same behaviour as the Microsoft runner, plus the owner-approval and CI gates. The
  * Fortnox runner (`run-fortnox-conformance.ts`) keeps its own module and reuses the gate messages,
- * `physicallyContained`, `nodeRecordingWriter`, and `runInterruptibly` from here:
+ * `physicallyContained`, `nodeRecordingWriter`, `textContainsAccessToken`, `LiveRunIo`,
+ * `stderrCleanupReporter`, and `runInterruptibly` from here:
  *
  * - DRY RUN by default: prints every case id, its safety, whether it would run under the chosen
  *   flags, and the seeds it still needs; no network call and no credential read.
@@ -1773,7 +1774,8 @@ export type LiveRunIo = {
   readonly err: (line: string) => void
 }
 
-const processLiveRunIo: LiveRunIo = {
+/** The running process's network (`fetch`), stdout, and stderr. */
+export const processLiveRunIo: LiveRunIo = {
   http: FetchHttpClient.layer,
   out: line => console.log(line),
   err: line => console.error(line)
