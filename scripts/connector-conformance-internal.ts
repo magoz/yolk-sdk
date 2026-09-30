@@ -1012,14 +1012,19 @@ const percentDecoded = (text: string): string => {
   return current
 }
 
-/** Replace `\uXXXX`, `\xXX`, and numeric HTML character references with their characters. */
-const escapesDecoded = (text: string): string =>
+// One backslash escape: an escaped backslash, `\uXXXX`, or `\xXX`.
+const backslashEscape = /\\(?:(\\)|u([0-9A-Fa-f]{4})|x([0-9A-Fa-f]{2}))/g
+
+const escapesDecodedOnce = (text: string): string =>
   text
-    .replace(/\\u([0-9A-Fa-f]{4})/g, (_match, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16))
-    )
-    .replace(/\\x([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16))
+    .replace(
+      backslashEscape,
+      (
+        _match,
+        backslash: string | undefined,
+        unicode: string | undefined,
+        hex: string | undefined
+      ) => backslash ?? String.fromCharCode(Number.parseInt(unicode ?? hex ?? '', 16))
     )
     .replace(/&#x([0-9A-Fa-f]+);?/g, (_match, hex: string) =>
       String.fromCodePoint(Math.min(Number.parseInt(hex, 16), 0x10ffff))
@@ -1027,6 +1032,25 @@ const escapesDecoded = (text: string): string =>
     .replace(/&#([0-9]+);?/g, (_match, decimal: string) =>
       String.fromCodePoint(Math.min(Number.parseInt(decimal, 10), 0x10ffff))
     )
+
+/**
+ * Replace `\uXXXX`, `\xXX`, and numeric HTML character references with their characters, and `\\`
+ * with `\`, repeatedly (up to 3 rounds): a rendered fixture module escapes a recorded escape again
+ * (`\\u0037`), which the next round decodes.
+ */
+const escapesDecoded = (text: string): string => {
+  let current = text
+
+  for (let round = 0; round < 3; round++) {
+    const next = escapesDecodedOnce(current)
+
+    if (next === current) break
+
+    current = next
+  }
+
+  return current
+}
 
 // Whitespace and JSON whitespace escapes (`\r`, `\n`, `\t`): MIME-style base64 is folded at 76
 // columns, so a fold can fall inside the encoded token.
