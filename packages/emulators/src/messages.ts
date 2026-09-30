@@ -16,7 +16,11 @@
  * is cut when it would exceed the request's `max_tokens`; scripted turns name any reason).
  *
  * Requests authenticate with a non-empty `x-api-key` (native API) or `Authorization: Bearer`
- * (OAuth) credential; neither value is ever checked or stored.
+ * (OAuth) credential; neither value is ever checked or stored. They must send a supported
+ * `anthropic-version` (`2023-06-01`, the value the SDK providers send); a missing or other value
+ * answers 400 `invalid_request_error`. `thinking` together with a forced `tool_choice` (`tool` or
+ * `any`) answers 400 as well. Other API constraints (the OAuth `anthropic-beta` header for bearer
+ * credentials, `budget_tokens` limits) are not enforced.
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
  * no Node builtins and no SDK imports.
@@ -200,6 +204,9 @@ const decodeMessagesRequest = Schema.decodeUnknownResult(MessagesRequest)
 // A non-empty bearer credential. The value is never checked or stored.
 const bearerPattern = /^bearer\s+\S+/i
 
+/** `anthropic-version` values the emulator accepts; the SDK providers send `2023-06-01`. */
+const supportedAnthropicVersions: ReadonlyArray<string> = ['2023-06-01']
+
 const defaultText = ['Hello', ' from the', ' synthetic Anthropic emulator.']
 
 const defaultThinking = ['The user wants a short greeting.', ' Reply briefly.']
@@ -228,6 +235,13 @@ const thinkingRequested = (request: MessagesRequest): boolean => {
   const type = stringField(request.thinking, 'type')
 
   return type === 'enabled' || type === 'adaptive'
+}
+
+// The real API rejects extended thinking when `tool_choice` forces tool use.
+const forcedToolUse = (request: MessagesRequest): boolean => {
+  const choice = stringField(request.tool_choice, 'type')
+
+  return choice === 'tool' || choice === 'any'
 }
 
 const chosenTool = (request: MessagesRequest) => {
@@ -384,7 +398,7 @@ type WireMessage = {
 
 type WireMessageDelta = {
   readonly delta: { readonly stop_reason: string; readonly stop_sequence: null }
-  usage?: { readonly output_tokens: number }
+  usage?: WireUsage
 }
 
 const wireUsage = (inputTokens: number, outputTokens: number): WireUsage => ({
@@ -473,8 +487,10 @@ const streamEvents = (
     delta: { stop_reason: plan.stopReason, stop_sequence: null }
   }
 
+  // Same usage shape as the committed fixtures: input and cache counts alongside the cumulative
+  // `output_tokens`. Unverified until a live recording confirms it.
   if (usage !== undefined) {
-    messageDelta.usage = { output_tokens: usage.outputTokens }
+    messageDelta.usage = wireUsage(usage.inputTokens, usage.outputTokens)
   }
 
   events.push(sseEvent('message_delta', messageDelta))
@@ -617,8 +633,9 @@ const isPositiveInteger = (value: Schema.Json | undefined): value is number =>
  * Create a Messages emulator from its config. Each call has independent ledger, fault, and
  * script state.
  *
- * Precedence per request: authentication, JSON and request validation (including a positive
- * integer `max_tokens`), then the first matching fault if it is a `status` fault, then the next
+ * Precedence per request: authentication, a supported `anthropic-version`, JSON and request
+ * validation (including a positive integer `max_tokens`, and no `thinking` with a forced
+ * `tool_choice`), then the first matching fault if it is a `status` fault, then the next
  * scripted turn, then model validation and defaults; a first matching body fault then shapes the
  * body. Only the first matching fault (in insertion order) applies. Credential headers are never
  * recorded, and credential values are never checked or stored.
@@ -669,6 +686,16 @@ export const makeMessagesEmulator = (config: MessagesEmulatorConfig): MessagesEm
 
     if (beta !== null) entry.anthropicBeta = beta
 
+    if (version === null || !supportedAnthropicVersions.includes(version)) {
+      entry.status = 400
+
+      return invalidRequest(
+        version === null
+          ? 'Synthetic: the anthropic-version header is required.'
+          : 'Synthetic: the anthropic-version header value is not supported.'
+      )
+    }
+
     const text = await readText(request)
     const json = text === undefined ? undefined : parseJson(text)
 
@@ -708,6 +735,14 @@ export const makeMessagesEmulator = (config: MessagesEmulatorConfig): MessagesEm
       entry.status = 400
 
       return invalidRequest('Synthetic: max_tokens must be a positive integer.')
+    }
+
+    if (thinkingRequested(body) && forcedToolUse(body)) {
+      entry.status = 400
+
+      return invalidRequest(
+        'Synthetic: thinking may not be enabled when tool_choice forces tool use.'
+      )
     }
 
     const fault = kernel.takeFault(path, body.model)

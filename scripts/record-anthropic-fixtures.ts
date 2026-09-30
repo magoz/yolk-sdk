@@ -14,9 +14,10 @@
  * conformance case with `runConformance` on a live target against the real Anthropic API, through
  * the conformance recorder wrapped around a real fetch `HttpClient` (response headers limited to
  * `content-type`; failures are reported with the runner's sanitizer), redacts thinking-block
- * signatures, turns each single recorded exchange into a `verified` fixture dated today, then
- * replays the new fixtures through the same cases. Nothing is written unless every case passes
- * live, records cleanly, passes the secret scan, and passes again on replay; only then are the
+ * signatures and `redacted_thinking` data (text chunks only, never re-chunked), turns each single
+ * recorded exchange into a `verified` fixture dated today, then replays the new fixtures through
+ * the same cases. Nothing is written unless every case passes live, records cleanly, is fully
+ * redacted, passes the secret scan, and passes again on replay; only then are the
  * fixture modules under `packages/agent/src/providers/anthropic/conformance/` rewritten. Live
  * runs spend Anthropic credits: never run in CI.
  *
@@ -28,7 +29,7 @@ import { writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { Data, Effect, Layer, Predicate, Redacted } from 'effect'
+import { Data, Effect, Encoding, Layer, Predicate, Redacted, Result } from 'effect'
 import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
 import {
   AnthropicConformanceConfig,
@@ -41,9 +42,12 @@ import {
   type AnthropicConformanceSettings
 } from '@yolk-sdk/agent/providers/anthropic/conformance'
 import {
+  isWireBase64BodyResponse,
   isWireStreamResponse,
+  type WireChunk,
   type WireExchange,
-  type WireFixture
+  type WireFixture,
+  type WireResponse
 } from '../packages/conformance/src/fixture.ts'
 import { makeWireFixture, WireRecorder } from '../packages/conformance/src/record.ts'
 import { ReplayHttpClient } from '../packages/conformance/src/replay.ts'
@@ -220,7 +224,7 @@ export const anthropicFixtureModules: ReadonlyArray<AnthropicFixtureModule> = [
     caseId: 'anthropic.messages.stream.tool-use-input-deltas',
     fileName: 'tool-use-input-deltas.ts',
     exportName: 'anthropicMessagesToolUseInputDeltasFixture',
-    doc: "Streamed Anthropic `tool_use` block, forced with `tool_choice: { type: 'tool', name }`, whose JSON input arrives as `input_json_delta` fragments that assemble into one call.",
+    doc: "Streamed Anthropic `tool_use` block, forced with `tool_choice: { type: 'tool', name, disable_parallel_tool_use: true }`, whose JSON input arrives as `input_json_delta` fragments that assemble into one call.",
     model: 'toolUse',
     limit: 'default'
   },
@@ -228,7 +232,7 @@ export const anthropicFixtureModules: ReadonlyArray<AnthropicFixtureModule> = [
     caseId: 'anthropic.messages.stream.thinking-before-text',
     fileName: 'thinking-before-text.ts',
     exportName: 'anthropicMessagesThinkingBeforeTextFixture',
-    doc: 'Streamed Anthropic answer with extended thinking enabled: a `thinking` block before the text block (thinking signatures redacted).',
+    doc: 'Streamed Anthropic answer with extended thinking enabled: a `thinking` block before the text block (thinking signatures and `redacted_thinking` data redacted).',
     model: 'thinking',
     limit: 'thinking'
   },
@@ -360,109 +364,202 @@ export const casesWithoutSingleFixture = (
     .map(testCase => testCase.id)
     .filter(caseId => fixtures.filter(fixture => fixture.caseId === caseId).length !== 1)
 
-/** Placeholder written over every recorded thinking-block signature. */
-export const redactedSignature = 'redacted-thinking-signature'
+// Parsed JSON, read-only.
+type Json = null | boolean | number | string | ReadonlyArray<Json> | JsonRecord
 
-// Mutable JSON, for editing parsed payloads in place.
-type Json = null | boolean | number | string | Array<Json> | JsonRecord
-
-type JsonRecord = { [key: string]: Json }
+type JsonRecord = { readonly [key: string]: Json }
 
 const isRecord = (value: unknown): value is JsonRecord =>
   Predicate.isObject(value) && !Array.isArray(value)
 
-/** Replace a non-empty `signature` string on this object; true when it changed. */
-const redactSignatureField = (value: unknown): boolean => {
-  if (isRecord(value) && Predicate.isString(value.signature) && value.signature.length > 0) {
-    value.signature = redactedSignature
+/** Placeholder written over every recorded thinking-block signature. */
+export const redactedSignature = 'redacted-thinking-signature'
 
-    return true
-  }
+/** Placeholder written over the encrypted `data` of every recorded `redacted_thinking` block. */
+export const redactedThinkingData = 'redacted-thinking-data'
 
-  return false
-}
+/** The opaque encrypted reasoning values the probe redacts, as named in failure messages. */
+export type ThinkingRedactionField = 'signature' | 'redacted_thinking.data'
 
-/** One SSE event after redaction, and whether a signature in it changed. */
-type RedactedEvent = { readonly event: string; readonly changed: boolean }
+const thinkingRedactionFields: ReadonlyArray<ThinkingRedactionField> = [
+  'signature',
+  'redacted_thinking.data'
+]
 
-const redactEventSignatures = (event: string): RedactedEvent => {
-  const lines = event.split('\n')
-  const isData = (line: string) => line.startsWith('data:')
-  const data = lines.filter(isData).map(line => line.slice('data:'.length).trim())
+// A non-empty JSON string literal, escapes included.
+const nonEmptyJsonString = String.raw`"(?:[^"\\]|\\.)+"`
 
-  if (data.length === 0) return { event, changed: false }
+// `"signature": "<value>"` inside JSON text. Only the value changes, so every other recorded byte
+// is kept. An escaped `\"signature\"` inside another string never matches.
+const signaturePattern = new RegExp(String.raw`("signature"\s*:\s*)${nonEmptyJsonString}`, 'g')
 
-  let json: unknown
+// The `data` of a `redacted_thinking` block, with its `type` just before or just after it.
+const redactedDataAfterType = new RegExp(
+  String.raw`("type"\s*:\s*"redacted_thinking"\s*,\s*"data"\s*:\s*)${nonEmptyJsonString}`,
+  'g'
+)
 
-  try {
-    json = JSON.parse(data.join('\n'))
-  } catch {
-    return { event, changed: false }
-  }
+const redactedDataBeforeType = new RegExp(
+  String.raw`("data"\s*:\s*)${nonEmptyJsonString}(\s*,\s*"type"\s*:\s*"redacted_thinking")`,
+  'g'
+)
 
-  const changed = [
-    isRecord(json) ? json.delta : undefined,
-    isRecord(json) ? json.content_block : undefined
-  ]
-    .map(redactSignatureField)
-    .some(Boolean)
+const signaturePlaceholder = JSON.stringify(redactedSignature)
 
-  if (!changed) return { event, changed: false }
+const dataPlaceholder = JSON.stringify(redactedThinkingData)
 
-  return {
-    event: [...lines.filter(line => !isData(line)), `data: ${JSON.stringify(json)}`].join('\n'),
-    changed: true
-  }
-}
+const redactThinkingText = (text: string): string =>
+  text
+    .replace(signaturePattern, (_match, prefix: string) => `${prefix}${signaturePlaceholder}`)
+    .replace(redactedDataAfterType, (_match, prefix: string) => `${prefix}${dataPlaceholder}`)
+    .replace(
+      redactedDataBeforeType,
+      (_match, prefix: string, suffix: string) => `${prefix}${dataPlaceholder}${suffix}`
+    )
 
 /**
- * JSON redaction hook: replace the opaque thinking-block `signature` values (encrypted model
- * reasoning, never needed for replay) in a recorded exchange. Streamed bodies are split into SSE
- * events (reassembled across network chunks first); when any signature changed, the stream is
- * rewritten as one chunk per event, otherwise it is returned untouched. JSON bodies are rewritten
- * only when a `content[].signature` changed.
+ * JSON redaction hook: replace the opaque thinking-block `signature` values and the encrypted
+ * `data` of `redacted_thinking` blocks (encrypted model reasoning, never needed for replay) in a
+ * recorded exchange, in `content_block_start` / `signature_delta` events and in JSON
+ * `content[]`. Only text is rewritten, value by value: each text stream chunk on its own and a
+ * text body; chunk boundaries and every other byte are kept. `{ base64 }` chunks and base64 bodies
+ * are never rewritten, and chunks are never merged or re-split, so a value inside one, or split
+ * across network chunks, stays in place; `unredactedThinkingFields` reports it and the probe
+ * refuses to write the recording. Returns the exchange itself when nothing changed.
  */
 export const redactThinkingSignatures = (exchange: WireExchange): WireExchange => {
   const response = exchange.response
 
   if (isWireStreamResponse(response)) {
-    if (!response.chunks.every(Predicate.isString)) return exchange
+    const chunks = response.chunks.map(chunk =>
+      Predicate.isString(chunk) ? redactThinkingText(chunk) : chunk
+    )
 
-    const events = response.chunks
-      .join('')
-      .replace(/\r\n?/g, '\n')
-      .split('\n\n')
-      .filter(event => event.trim().length > 0)
-      .map(redactEventSignatures)
-
-    return events.some(event => event.changed)
-      ? {
-          ...exchange,
-          response: { ...response, chunks: events.map(event => `${event.event}\n\n`) }
-        }
-      : exchange
+    return chunks.every((chunk, index) => chunk === response.chunks[index])
+      ? exchange
+      : { ...exchange, response: { ...response, chunks } }
   }
 
-  if (!('body' in response) || !Predicate.isString(response.body)) return exchange
+  if (isWireBase64BodyResponse(response)) return exchange
 
+  const body = redactThinkingText(response.body)
+
+  return body === response.body ? exchange : { ...exchange, response: { ...response, body } }
+}
+
+// Exact bytes of base64 text; undecodable base64 yields no bytes (the recorder never writes it).
+const base64Bytes = (base64: string): Uint8Array =>
+  Result.getOrElse(Encoding.decodeBase64(base64), () => new Uint8Array())
+
+const chunkBytes = (chunk: WireChunk): Uint8Array =>
+  Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)
+
+const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
+  const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
+  let offset = 0
+
+  for (const part of parts) {
+    joined.set(part, offset)
+    offset += part.length
+  }
+
+  return joined
+}
+
+// Non-fatal UTF-8 decode: invalid bytes become U+FFFD, the rest of the text stays checkable.
+const lossyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
+
+// The JSON payloads a survivor check reads: every SSE event's `data:` of the whole stream (all
+// chunks, text and `{ base64 }`, reassembled as bytes and decoded, so a value inside a base64
+// chunk or split across chunks, even mid-character, is seen), or the whole decoded body.
+const responsePayloads = (response: WireResponse): ReadonlyArray<string> => {
+  if (!isWireStreamResponse(response)) {
+    return [
+      isWireBase64BodyResponse(response)
+        ? lossyText(base64Bytes(response.bodyBase64))
+        : response.body
+    ]
+  }
+
+  return lossyText(concatBytes(response.chunks.map(chunkBytes)))
+    .replace(/\r\n?/g, '\n')
+    .split('\n\n')
+    .map(event =>
+      event
+        .split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice('data:'.length).trim())
+        .join('\n')
+    )
+    .filter(data => data.length > 0)
+}
+
+const collectSurvivors = (value: unknown, found: Set<ThinkingRedactionField>): void => {
+  if (Array.isArray(value)) {
+    for (const item of value) collectSurvivors(item, found)
+
+    return
+  }
+
+  if (!isRecord(value)) return
+
+  const { signature, data } = value
+
+  if (Predicate.isString(signature) && signature.length > 0 && signature !== redactedSignature) {
+    found.add('signature')
+  }
+
+  if (
+    value.type === 'redacted_thinking' &&
+    Predicate.isString(data) &&
+    data.length > 0 &&
+    data !== redactedThinkingData
+  ) {
+    found.add('redacted_thinking.data')
+  }
+
+  for (const item of Object.values(value)) collectSurvivors(item, found)
+}
+
+const payloadSurvivors = (payload: string, found: Set<ThinkingRedactionField>): void => {
   let json: unknown
 
   try {
-    json = JSON.parse(response.body)
+    json = JSON.parse(payload)
   } catch {
-    return exchange
+    // Not checkable as JSON: fail closed on any mention of a redacted field.
+    if (payload.includes('signature')) found.add('signature')
+
+    if (payload.includes('redacted_thinking')) found.add('redacted_thinking.data')
+
+    return
   }
 
-  const content = isRecord(json) && Array.isArray(json.content) ? json.content : []
-  const changed = content.map(redactSignatureField).some(Boolean)
-
-  return changed
-    ? {
-        ...exchange,
-        response: { status: response.status, headers: response.headers, body: JSON.stringify(json) }
-      }
-    : exchange
+  collectSurvivors(json, found)
 }
+
+/**
+ * Redacted fields still carrying a real value in recorded responses, checked structurally on
+ * each response's whole decoded text: every stream chunk (text and base64) reassembled as bytes
+ * and decoded non-fatally, or the text or decoded base64 body. A value in a base64 chunk or body,
+ * or split across network chunks, is therefore caught; a JSON payload that does not parse fails
+ * closed when it mentions a redacted field. Empty when fully redacted.
+ */
+export const unredactedThinkingFields = (
+  exchanges: ReadonlyArray<WireExchange>
+): ReadonlyArray<ThinkingRedactionField> => {
+  const found = new Set<ThinkingRedactionField>()
+
+  for (const { response } of exchanges) {
+    for (const payload of responsePayloads(response)) payloadSurvivors(payload, found)
+  }
+
+  return thinkingRedactionFields.filter(field => found.has(field))
+}
+
+/** Why the probe refuses to write a recording that still carries a redacted value. */
+export const unredactedThinkingMessage = (fields: ReadonlyArray<ThinkingRedactionField>): string =>
+  `could not redact ${fields.join(', ')} from the recording: the value is inside a base64 body or chunk, or split across network chunks, which value-only redaction cannot rewrite without changing recorded chunk boundaries; refusing to write (chunks are never re-split), re-record instead`
 
 export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
   readonly caseId: string
@@ -514,6 +611,13 @@ const recordCase = (
       })
     }
 
+    const redacted = exchanges.map(redactThinkingSignatures)
+    const unredacted = unredactedThinkingFields(redacted)
+
+    if (unredacted.length > 0) {
+      return yield* new ProbeFailed({ caseId, message: unredactedThinkingMessage(unredacted) })
+    }
+
     return yield* makeWireFixture({
       id: `${caseId}.recorded`,
       caseId,
@@ -522,8 +626,8 @@ const recordCase = (
       account,
       endpoint: anthropicConformanceMessagesUrl,
       model: entry.model,
-      note: 'Recorded from the live Anthropic Messages API by running its conformance case through pnpm conformance:anthropic --live. Prompts and outputs are synthetic; thinking signatures are redacted.',
-      exchanges: exchanges.map(redactThinkingSignatures)
+      note: 'Recorded from the live Anthropic Messages API by running its conformance case through pnpm conformance:anthropic --live. Prompts and outputs are synthetic; thinking signatures and redacted_thinking data are redacted.',
+      exchanges: redacted
     }).pipe(Effect.mapError(error => new ProbeFailed({ caseId, message: error.message })))
   }).pipe(
     Effect.provide(
@@ -574,9 +678,11 @@ export const defaultFixtureWriter: FixtureWriter = {
 }
 
 /**
- * The write gate: replay `recorded` through every case and write the fixture modules only when
- * the report passes and every case has exactly one recording. On failure nothing is written and
- * the formatted report is logged. Returns the report and the written paths.
+ * The write gate: refuse any recording that still carries a thinking signature or
+ * `redacted_thinking` data (checked across base64 and split chunks), then replay `recorded`
+ * through every case and write the fixture modules only when the report passes and every case
+ * has exactly one recording. On failure nothing is written (the replay report is logged when
+ * replay failed). Returns the report and the written paths.
  */
 export const writeVerifiedFixtures = (
   recorded: ReadonlyArray<RecordedAnthropicFixture>,
@@ -585,6 +691,18 @@ export const writeVerifiedFixtures = (
 ) =>
   Effect.gen(function* () {
     const fixtures = recorded.map(({ fixture }) => fixture)
+
+    for (const fixture of fixtures) {
+      const unredacted = unredactedThinkingFields(fixture.exchanges)
+
+      if (unredacted.length > 0) {
+        return yield* new ProbeFailed({
+          caseId: fixture.caseId,
+          message: `${unredactedThinkingMessage(unredacted)}; no fixture was written`
+        })
+      }
+    }
+
     const report = yield* verifyAnthropicFixtures(fixtures, options)
     const unmatched = casesWithoutSingleFixture(fixtures)
 

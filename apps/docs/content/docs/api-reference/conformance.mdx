@@ -226,9 +226,10 @@ exports five synthetic fixtures (`anthropicMessagesPlainTextFixture`,
 `anthropicConformanceCases`). They require an `HttpClient` and the `AnthropicConformanceConfig`
 service (API key, `maxTokens`, `thinkingBudgetTokens`, and model ids;
 `anthropicConformanceDefaultModels` holds the fixture model ids). The tool-use case forces its tool
-with `tool_choice: { type: 'tool', name }`; the thinking case enables `thinking` and sends
-`max_tokens` = `maxTokens + thinkingBudgetTokens`; the error-envelope case requires a 404 that is
-not an `auth` failure; the max-tokens case requires `stop_reason: max_tokens` to fail as a
+with `tool_choice: { type: 'tool', name, disable_parallel_tool_use: true }`; the thinking case
+enables `thinking` and sends `max_tokens` = `maxTokens + thinkingBudgetTokens`; the error-envelope
+case requires a 404 that is not an `auth` failure and whose body, read at the case's `HttpClient`
+boundary, is `{ type: 'error', error: { type: 'not_found_error', message } }`; the max-tokens case requires `stop_reason: max_tokens` to fail as a
 non-retryable `invalid_response` without `Done`.
 
 ## Connector conformance

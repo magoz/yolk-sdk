@@ -196,14 +196,16 @@ binding are shared with the Chat Completions emulators; the Messages wire is its
 
 - `stream: true` streams the events in the order the API sends them: `message_start` (with input
   usage), then per content block `content_block_start`, its deltas, and `content_block_stop` (a
-  `ping` follows the first block start), then `message_delta` (`stop_reason`, output usage) and
-  `message_stop`. `stream: false` returns one `message` JSON body.
+  `ping` follows the first block start), then `message_delta` (`stop_reason`, and usage: input
+  and cache counts next to the cumulative `output_tokens`, as the unverified fixtures record it)
+  and `message_stop`. `stream: false` returns one `message` JSON body.
 - `thinking: { type: 'enabled' | 'adaptive' }` adds a `thinking` block (`thinking_delta` events,
   then one `signature_delta`) before the answer.
 - A request with `tools` gets one `tool_use` block whose input is synthesized from the tool's
   `input_schema` and streamed as `input_json_delta` fragments (the first one empty), stopping with
   `tool_use`. `tool_choice: { type: 'tool', name }` picks that tool (otherwise the first);
-  `tool_choice: { type: 'none' }` answers with text.
+  `tool_choice: { type: 'none' }` answers with text. `thinking` together with a forced
+  `tool_choice` (`tool` or `any`) gets 400 `invalid_request_error`.
 - An answer that would not fit `max_tokens` (about four characters per token) is cut and stops
   with `max_tokens`. A missing or non-positive `max_tokens` gets 400 `invalid_request_error`.
 - Errors use `{ type: 'error', error: { type, message } }`; an unknown model gets 404
@@ -212,6 +214,10 @@ binding are shared with the Chat Completions emulators; the Messages wire is its
   (Claude OAuth); anything else gets 401 `authentication_error`. Neither value is checked or
   stored. The ledger records which header carried it (`credentialHeader`), `anthropic-version`,
   `anthropic-beta`, `max_tokens` (`maxTokens`), `thinking`, `tool_choice`, and tool names.
+- `anthropic-version` must be `2023-06-01` (the value the SDK providers send); a missing or
+  other value gets 400 `invalid_request_error`.
+- Not enforced: the OAuth `anthropic-beta` header for bearer credentials, and `budget_tokens`
+  limits.
 - `knownModels` defaults to `anthropicEmulatorDefaultModels` (`claude-haiku-4-5`,
   `claude-sonnet-4-5`). Invalid faults or turns throw `AnthropicEmulatorInputInvalid`.
 

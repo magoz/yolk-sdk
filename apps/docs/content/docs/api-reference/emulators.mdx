@@ -147,7 +147,8 @@ emulated for `/openai` yet: scripted turns reject reasoning fields.
 It stands in for Anthropic Messages at `https://api.anthropic.com`. `stream: true` streams the
 events in the order the API sends them: `message_start` (input usage), then per content block
 `content_block_start`, its deltas, and `content_block_stop` (a `ping` follows the first block
-start), then `message_delta` (`stop_reason` and output usage) and `message_stop`; `stream: false`
+start), then `message_delta` (`stop_reason`, and usage with input and cache counts next to
+`output_tokens`, as the unverified fixtures record it) and `message_stop`; `stream: false`
 returns one `message` JSON body. A request with `thinking` enabled (`enabled` or `adaptive`) gets a
 `thinking` block (`thinking_delta` events, then a `signature_delta`) before the text. A request
 with `tools` gets one `tool_use` block whose input is synthesized from the tool's `input_schema`
@@ -156,12 +157,14 @@ and streamed as `input_json_delta` fragments, stopping with `tool_use`; `tool_ch
 that would not fit `max_tokens` is cut and stops with `max_tokens`.
 
 Errors use the Anthropic envelope `{ type: 'error', error: { type, message } }`: an unknown model
-gets 404 `not_found_error`, a missing or non-positive `max_tokens` gets 400
-`invalid_request_error`, and a request with neither a non-empty `x-api-key` (native API keys) nor
+gets 404 `not_found_error`; a missing or unsupported `anthropic-version` (only `2023-06-01`, the
+value the SDK providers send), a missing or non-positive `max_tokens`, or `thinking` with a forced
+`tool_choice` (`tool` or `any`) gets 400 `invalid_request_error`; and a request with neither a non-empty `x-api-key` (native API keys) nor
 an `Authorization: Bearer` credential (Claude OAuth) gets 401 `authentication_error`. Neither
 credential is checked or stored; the ledger records which header carried it
 (`credentialHeader`), `anthropic-version`, `anthropic-beta`, `max_tokens` (`maxTokens`),
-`thinking`, `tool_choice`, and tool names.
+`thinking`, `tool_choice`, and tool names. The OAuth `anthropic-beta` header and `budget_tokens`
+limits are not enforced.
 
 Scripted turns are messages (`thinking`, `text`, `toolUses` with `inputFragments`, `order`,
 `usage`, `stopReason`; `usage: null` drops usage, `order: 'text-first'` sends thinking after the

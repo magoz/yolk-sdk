@@ -87,7 +87,15 @@ There is no root export or barrel.
   stops (default answers are cut to fit `max_tokens`), the `message` JSON body, and the
   `{ type: 'error', error: { type, message } }` envelope. Auth accepts a non-empty `x-api-key` or
   `Authorization: Bearer`; the ledger records only which header carried it, plus
-  `anthropic-version` / `anthropic-beta`. Its extra fault `error-event-after-chunks` (a mid-stream
+  `anthropic-version` / `anthropic-beta`. A missing or unsupported `anthropic-version` (only
+  `2023-06-01`, the value the SDK providers send) answers 400 `invalid_request_error`, as does
+  `thinking` with a forced `tool_choice` (`tool` / `any`); both keep evidence tagging and the
+  ledger status. `message_delta.usage` carries input and cache counts next to `output_tokens`,
+  matching the committed (unverified) fixtures. Known leniency: the emulator does not require the
+  OAuth `anthropic-beta` header for bearer credentials and does not enforce other thinking,
+  `tool_choice`, or `budget_tokens` constraints (`budget_tokens >= 1024`,
+  `budget_tokens < max_tokens`), so a provider that stopped sending or honouring them would still
+  pass here. Its extra fault `error-event-after-chunks` (a mid-stream
   `event: error`) applies only to streamed responses and before `message_stop`; otherwise it
   answers 500 and is kept (never a silent no-op).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly

@@ -1,8 +1,8 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * Streamed Anthropic `tool_use` block, forced with `tool_choice: { type: 'tool', name }`, whose
- * JSON input arrives as `input_json_delta` fragments (the first one empty) that assemble into one
+ * Streamed Anthropic `tool_use` block, forced with
+ * `tool_choice: { type: 'tool', name, disable_parallel_tool_use: true }`, whose JSON input arrives as `input_json_delta` fragments (the first one empty) that assemble into one
  * call, followed by `message_delta` with `stop_reason: tool_use` and `message_stop`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording
@@ -29,7 +29,8 @@ export const anthropicMessagesToolUseInputDeltasFixture: WireFixture = {
         body: {
           tool_choice: {
             type: 'tool',
-            name: 'lookup_weather'
+            name: 'lookup_weather',
+            disable_parallel_tool_use: true
           },
           model: 'claude-haiku-4-5',
           system: [

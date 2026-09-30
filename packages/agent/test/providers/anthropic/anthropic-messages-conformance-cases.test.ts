@@ -220,9 +220,9 @@ describe('Anthropic Messages conformance cases', () => {
         stream: true
       })
 
-      // Native tool names (no `mcp_` rewriting) and a forced tool choice.
+      // Native tool names (no `mcp_` rewriting) and a forced tool choice limited to one call.
       expect(yield* bodyOf(anthropicMessagesToolUseInputDeltasCase)).toMatchObject({
-        tool_choice: { type: 'tool', name: 'lookup_weather' },
+        tool_choice: { type: 'tool', name: 'lookup_weather', disable_parallel_tool_use: true },
         model: settings.models.toolUse,
         system,
         max_tokens: settings.maxTokens,
@@ -729,6 +729,60 @@ describe('Anthropic Messages conformance disagreement drills', () => {
           )
         ).toEqual(mismatch('expected a 404 model-rejection status'))
       }
+    })
+  )
+
+  it.effect('fails the error-envelope case for a 404 whose body is not the envelope', () =>
+    Effect.gen(function* () {
+      const html: WireFixture = {
+        ...anthropicMessagesErrorEnvelopeFixture,
+        id: `${anthropicMessagesErrorEnvelopeFixture.id}.html`,
+        exchanges: [
+          {
+            request: anthropicMessagesErrorEnvelopeFixture.exchanges[0].request,
+            response: {
+              status: 404,
+              headers: { 'content-type': 'text/html' },
+              body: '<html><body>Not Found</body></html>'
+            }
+          }
+        ]
+      }
+
+      const malformed = [
+        withResponse(anthropicMessagesErrorEnvelopeFixture, 'empty-object', 404, '{}'),
+        html,
+        withResponse(anthropicMessagesErrorEnvelopeFixture, 'empty', 404, ''),
+        withResponse(
+          anthropicMessagesErrorEnvelopeFixture,
+          'other-type',
+          404,
+          JSON.stringify({
+            type: 'error',
+            error: { type: 'invalid_request_error', message: 'synthetic' }
+          })
+        ),
+        withResponse(
+          anthropicMessagesErrorEnvelopeFixture,
+          'no-message',
+          404,
+          JSON.stringify({ type: 'error', error: { type: 'not_found_error' } })
+        )
+      ]
+
+      for (const fixture of malformed) {
+        expect(yield* failedDrill(anthropicMessagesErrorEnvelopeCase, fixture), fixture.id).toEqual(
+          mismatch('expected the 404 body to be a `not_found_error` Anthropic error envelope')
+        )
+      }
+
+      // The same 404 with the committed envelope passes: only the body differs.
+      const passing = yield* drill(
+        anthropicMessagesErrorEnvelopeCase,
+        withResponse(anthropicMessagesErrorEnvelopeFixture, 'envelope', 404, errorBody())
+      )
+
+      expect(passing?.status).toBe('passed')
     })
   )
 

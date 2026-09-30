@@ -144,7 +144,11 @@ describe('cross-check B: Anthropic emulator over a loopback socket', () => {
         })
         expect(entryOf('anthropic.messages.stream.tool-use-input-deltas')).toMatchObject({
           maxTokens: settings.maxTokens,
-          toolChoice: { type: 'tool', name: 'lookup_weather' },
+          toolChoice: {
+            type: 'tool',
+            name: 'lookup_weather',
+            disable_parallel_tool_use: true
+          },
           toolNames: ['lookup_weather'],
           status: 200
         })

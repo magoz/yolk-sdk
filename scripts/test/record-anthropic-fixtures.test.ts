@@ -13,10 +13,12 @@ import {
 } from '../../packages/agent/src/providers/anthropic/conformance/index.ts'
 import {
   isWireStreamResponse,
+  type WireChunk,
   type WireExchange,
   type WireFixture
 } from '../../packages/conformance/src/fixture.ts'
 import { conformanceReportFailed } from '../../packages/conformance/src/runner.ts'
+import { recordBytes } from '../../packages/conformance/src/wire-internal.ts'
 import {
   anthropicApiKeyEnv,
   anthropicFixtureModuleFor,
@@ -28,8 +30,10 @@ import {
   parseProbeArgs,
   planAnthropicProbe,
   redactedSignature,
+  redactedThinkingData,
   redactThinkingSignatures,
   renderFixtureModule,
+  unredactedThinkingFields,
   verifyAnthropicFixtures,
   writeVerifiedFixtures,
   type FixtureWriter,
@@ -206,40 +210,135 @@ describe('record-anthropic-fixtures plan', () => {
   })
 })
 
-describe('record-anthropic-fixtures signature redaction', () => {
-  const streamText = (exchange: WireExchange): string => {
-    const response = exchange.response
+const streamChunks = (exchange: WireExchange): ReadonlyArray<WireChunk> => {
+  const response = exchange.response
 
-    return isWireStreamResponse(response)
-      ? response.chunks
-          .map(chunk => (Predicate.isString(chunk) ? chunk : expect.fail('text chunks only')))
-          .join('')
-      : expect.fail('not a stream')
+  return isWireStreamResponse(response) ? response.chunks : expect.fail('not a stream')
+}
+
+const withChunks = (exchange: WireExchange, chunks: ReadonlyArray<WireChunk>): WireExchange => ({
+  request: exchange.request,
+  response: {
+    status: exchange.response.status,
+    headers: exchange.response.headers,
+    chunks: [...chunks]
+  }
+})
+
+const jsonExchange = (content: ReadonlyArray<unknown>): WireExchange => ({
+  request: anthropicMessagesPlainTextFixture.exchanges[0].request,
+  response: {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'message', content })
+  }
+})
+
+const responseBody = (exchange: WireExchange): string => {
+  const response = exchange.response
+
+  return 'body' in response && Predicate.isString(response.body)
+    ? response.body
+    : expect.fail('not a text body')
+}
+
+const signatureChunkIndex = (chunks: ReadonlyArray<WireChunk>): number =>
+  chunks.findIndex(chunk => Predicate.isString(chunk) && chunk.includes('"signature_delta"'))
+
+// The committed thinking recording with its `signature_delta` event recorded as one `{ base64 }`
+// chunk between text chunks, as `WireRecorder` stores bytes it cannot keep as text.
+const mixedBase64Recording = (): WireExchange => {
+  const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
+  const chunks = streamChunks(exchange)
+  const index = signatureChunkIndex(chunks)
+  const chunk = chunks[index]
+
+  if (!Predicate.isString(chunk)) {
+    return expect.fail('no signature_delta chunk')
   }
 
-  it('replaces thinking signatures in streamed events, split across chunks or not', () => {
+  return withChunks(exchange, [
+    ...chunks.slice(0, index),
+    { base64: Buffer.from(chunk, 'utf8').toString('base64') },
+    ...chunks.slice(index + 1)
+  ])
+}
+
+// The committed thinking recording with the thinking text ending in the multibyte `\u2192` and the
+// signature event in the same network read, split inside that character: neither half is valid
+// UTF-8 on its own, so (as `WireRecorder` does) both are recorded as base64.
+const splitUtf8Recording = (): WireExchange => {
+  const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
+  const chunks = streamChunks(exchange)
+  const index = signatureChunkIndex(chunks)
+  const signatureChunk = chunks[index]
+  const thinkingChunk = chunks[index - 1]
+
+  if (!Predicate.isString(signatureChunk) || !Predicate.isString(thinkingChunk)) {
+    return expect.fail('unexpected thinking recording shape')
+  }
+
+  const withArrow = thinkingChunk.replace('enough."', 'enough \u2192"')
+
+  expect(withArrow).not.toBe(thinkingChunk)
+
+  const joined = `${withArrow}${signatureChunk}`
+  const bytes = new TextEncoder().encode(joined)
+  const cut = new TextEncoder().encode(joined.slice(0, joined.indexOf('\u2192'))).length + 1
+
+  const parts = [bytes.subarray(0, cut), bytes.subarray(cut)].map((part): WireChunk => {
+    const recorded = recordBytes(part)
+
+    return 'text' in recorded ? recorded.text : { base64: recorded.base64 }
+  })
+
+  expect(parts.every(part => !Predicate.isString(part))).toBe(true)
+
+  return withChunks(exchange, [...chunks.slice(0, index - 1), ...parts, ...chunks.slice(index + 1)])
+}
+
+// The committed thinking recording with the signature value itself split across two text chunks.
+const splitValueRecording = (): WireExchange => {
+  const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
+  const chunks = streamChunks(exchange)
+  const index = signatureChunkIndex(chunks)
+  const chunk = chunks[index]
+
+  if (!Predicate.isString(chunk)) {
+    return expect.fail('no signature_delta chunk')
+  }
+
+  const cut = chunk.indexOf('synthetic-thinking-signature') + 'synthetic-thinking'.length
+
+  return withChunks(exchange, [
+    ...chunks.slice(0, index),
+    chunk.slice(0, cut),
+    chunk.slice(cut),
+    ...chunks.slice(index + 1)
+  ])
+}
+
+describe('record-anthropic-fixtures signature redaction', () => {
+  it('redacts thinking signatures chunk by chunk, keeping every boundary and other byte', () => {
     const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
-    const text = streamText(exchange)
+    const chunks = streamChunks(exchange)
+    const redacted = redactThinkingSignatures(exchange)
+    const redactedChunks = streamChunks(redacted)
 
-    // One recorded chunk, split mid-event, to show reassembly before parsing.
-    const middle = Math.floor(text.length / 2)
-
-    const split: WireExchange = {
-      ...exchange,
-      response: {
-        status: exchange.response.status,
-        headers: exchange.response.headers,
-        chunks: [text.slice(0, middle), text.slice(middle)]
-      }
-    }
-
-    const redacted = streamText(redactThinkingSignatures(split))
-
-    expect(text).toContain('"signature":"synthetic-thinking-signature"')
-    expect(redacted).not.toContain('synthetic-thinking-signature')
-    expect(redacted).toContain(`"signature":"${redactedSignature}"`)
+    expect(unredactedThinkingFields([exchange])).toEqual(['signature'])
+    expect(unredactedThinkingFields([redacted])).toEqual([])
+    expect(redactedChunks).toHaveLength(chunks.length)
+    expect(redactedChunks).toEqual(
+      chunks.map(chunk =>
+        Predicate.isString(chunk)
+          ? chunk.replace('"synthetic-thinking-signature"', `"${redactedSignature}"`)
+          : chunk
+      )
+    )
     // The empty signature on `content_block_start` stays as recorded.
-    expect(redacted).toContain('"signature":""')
+    expect(redactedChunks.join('')).toContain('"signature":""')
+    // Idempotent: a redacted recording is returned as is.
+    expect(redactThinkingSignatures(redacted)).toBe(redacted)
   })
 
   it('leaves exchanges without signatures untouched', () => {
@@ -248,28 +347,91 @@ describe('record-anthropic-fixtures signature redaction', () => {
 
     expect(redactThinkingSignatures(plain)).toBe(plain)
     expect(redactThinkingSignatures(tool)).toBe(tool)
+    expect(unredactedThinkingFields([plain, tool])).toEqual([])
   })
 
   it('replaces signatures in a JSON message body', () => {
-    const exchange: WireExchange = {
-      request: anthropicMessagesPlainTextFixture.exchanges[0].request,
-      response: {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          type: 'message',
-          content: [
-            { type: 'thinking', thinking: 'Plan.', signature: 'synthetic-json-signature' },
-            { type: 'text', text: 'Hello.' }
-          ]
-        })
-      }
-    }
+    const exchange = jsonExchange([
+      { type: 'thinking', thinking: 'Plan.', signature: 'synthetic-json-signature' },
+      { type: 'text', text: 'Hello.' }
+    ])
 
-    const redacted = redactThinkingSignatures(exchange).response
+    const redacted = redactThinkingSignatures(exchange)
 
-    expect('body' in redacted ? redacted.body : undefined).toContain(redactedSignature)
+    expect(responseBody(redacted)).toContain(`"signature":"${redactedSignature}"`)
     expect(JSON.stringify(redacted)).not.toContain('synthetic-json-signature')
+    expect(unredactedThinkingFields([exchange])).toEqual(['signature'])
+    expect(unredactedThinkingFields([redacted])).toEqual([])
+  })
+
+  it('redacts redacted_thinking data in content_block_start and in JSON content[]', () => {
+    const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
+    const chunks = streamChunks(exchange)
+
+    const start = (block: Record<string, string>) =>
+      `event: content_block_start\ndata: ${JSON.stringify({
+        type: 'content_block_start',
+        index: 0,
+        content_block: block
+      })}\n\n`
+
+    // Both key orders, and an empty `data` that stays as recorded.
+    const stream = withChunks(exchange, [
+      chunks[0] ?? expect.fail('empty recording'),
+      start({ type: 'redacted_thinking', data: 'synthetic-encrypted-data-a' }),
+      start({ data: 'synthetic-encrypted-data-b', type: 'redacted_thinking' }),
+      start({ type: 'redacted_thinking', data: '' }),
+      ...chunks.slice(1)
+    ])
+
+    const body = jsonExchange([
+      { type: 'redacted_thinking', data: 'synthetic-encrypted-data-c' },
+      { type: 'text', text: 'Hello.' }
+    ])
+
+    expect(unredactedThinkingFields([stream])).toEqual(['signature', 'redacted_thinking.data'])
+    expect(unredactedThinkingFields([body])).toEqual(['redacted_thinking.data'])
+
+    const redacted = [stream, body].map(redactThinkingSignatures)
+    const serialized = JSON.stringify(redacted)
+
+    expect(unredactedThinkingFields(redacted)).toEqual([])
+    expect(serialized).not.toContain('synthetic-encrypted-data')
+    expect(serialized).toContain(redactedThinkingData)
+    expect(streamChunks(redacted[0] ?? expect.fail('no stream'))).toHaveLength(chunks.length + 3)
+    expect(streamChunks(redacted[0] ?? expect.fail('no stream')).join('')).toContain(
+      '"type":"redacted_thinking","data":""'
+    )
+  })
+
+  it('never rewrites a base64 chunk: a signature there is reported, text chunks are redacted', () => {
+    const mixed = mixedBase64Recording()
+    const redacted = redactThinkingSignatures(mixed)
+    const chunks = streamChunks(mixed)
+
+    expect(chunks.some(chunk => !Predicate.isString(chunk))).toBe(true)
+    expect(streamChunks(redacted)).toEqual(chunks)
+    expect(unredactedThinkingFields([redacted])).toEqual(['signature'])
+  })
+
+  it('reports a signature split across text chunks or inside split UTF-8 base64 chunks', () => {
+    for (const recording of [splitValueRecording(), splitUtf8Recording()]) {
+      const redacted = redactThinkingSignatures(recording)
+
+      expect(streamChunks(redacted)).toEqual(streamChunks(recording))
+      expect(unredactedThinkingFields([redacted])).toEqual(['signature'])
+    }
+  })
+
+  it('fails closed on a payload that is not JSON but mentions a redacted field', () => {
+    const [exchange] = anthropicMessagesPlainTextFixture.exchanges
+
+    expect(
+      unredactedThinkingFields([
+        withChunks(exchange, ['data: {"signature":"synthetic-cut\n\n']),
+        withChunks(exchange, ['data: {"type":"redacted_thinking",\n\n'])
+      ])
+    ).toEqual(['signature', 'redacted_thinking.data'])
   })
 })
 
@@ -363,14 +525,35 @@ describe('record-anthropic-fixtures write gate', () => {
     return { calls, writer }
   }
 
-  // Fake live recordings: each planned case paired with a fixture, no network involved.
+  // Fake live recordings: each planned case paired with a fixture, no network involved, redacted
+  // as the probe redacts every live recording before the write gate.
   const recordedFrom = (
     fixtures: ReadonlyArray<WireFixture>
   ): ReadonlyArray<RecordedAnthropicFixture> =>
     planAnthropicProbe(defaultProbeOptions).flatMap(entry =>
       fixtures.flatMap(fixture =>
-        fixture.caseId === entry.testCase.id ? [{ entry, fixture }] : []
+        fixture.caseId === entry.testCase.id
+          ? [
+              {
+                entry,
+                fixture: {
+                  ...fixture,
+                  exchanges: [
+                    redactThinkingSignatures(fixture.exchanges[0]),
+                    ...fixture.exchanges.slice(1).map(redactThinkingSignatures)
+                  ]
+                }
+              }
+            ]
+          : []
       )
+    )
+
+  const withThinkingExchange = (exchange: WireExchange): ReadonlyArray<WireFixture> =>
+    anthropicConformanceFixtures.map(fixture =>
+      fixture.id === anthropicMessagesThinkingBeforeTextFixture.id
+        ? { ...fixture, exchanges: [exchange] }
+        : fixture
     )
 
   it('writes every fixture module, then formats them, only after replay verification passes', async () => {
@@ -401,6 +584,57 @@ describe('record-anthropic-fixtures write gate', () => {
     expect(Exit.isFailure(exit)).toBe(true)
     expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
       'no fixture was written'
+    )
+    expect(calls).toEqual([])
+  })
+
+  it('writes nothing when a signature survives in a base64 chunk, split UTF-8, or split chunks', async () => {
+    for (const recording of [mixedBase64Recording(), splitUtf8Recording(), splitValueRecording()]) {
+      const { calls, writer } = recordingWriter()
+
+      const exit = await Effect.runPromiseExit(
+        writeVerifiedFixtures(
+          recordedFrom(withThinkingExchange(recording)),
+          defaultProbeOptions,
+          writer
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+        'could not redact signature from the recording'
+      )
+      expect(calls).toEqual([])
+    }
+  })
+
+  it('writes nothing when redacted_thinking data survives in a base64 chunk', async () => {
+    const { calls, writer } = recordingWriter()
+    const [exchange] = anthropicMessagesThinkingBeforeTextFixture.exchanges
+    const chunks = streamChunks(exchange)
+
+    const block = `event: content_block_start\ndata: ${JSON.stringify({
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'redacted_thinking', data: 'synthetic-encrypted-data' }
+    })}\n\n`
+
+    const recording = withChunks(exchange, [
+      ...chunks.slice(0, 1),
+      { base64: Buffer.from(block, 'utf8').toString('base64') },
+      ...chunks.slice(1)
+    ])
+
+    const exit = await Effect.runPromiseExit(
+      writeVerifiedFixtures(
+        recordedFrom(withThinkingExchange(recording)),
+        defaultProbeOptions,
+        writer
+      )
+    )
+
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : '')).toContain(
+      'could not redact redacted_thinking.data from the recording'
     )
     expect(calls).toEqual([])
   })

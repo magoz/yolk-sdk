@@ -14,9 +14,9 @@
  * replayed fixtures (`ReplayHttpClient`), an emulator, or a host's live `HttpClient`. All five are
  * `read` cases; none is observed live yet (`observed` absent = unverified).
  */
-import { Context, Effect, Predicate, Redacted, Ref, Result, Stream } from 'effect'
-import type * as Schema from 'effect/Schema'
-import type { HttpClient } from 'effect/unstable/http'
+import { Context, Effect, Option, Predicate, Redacted, Ref, Result, Stream } from 'effect'
+import * as Schema from 'effect/Schema'
+import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
 import {
   defineConformanceCase,
   expectConformance,
@@ -219,18 +219,23 @@ export const anthropicMessagesPlainTextCase: AnthropicConformanceCase = defineCo
 })
 
 /**
- * Forces the offered tool so the one-call claim rests on the request, not on the model choosing
- * to call it.
+ * Forces the offered tool and disables parallel tool use, so the exactly-one-call claim rests on
+ * the request (`tool_choice: { type: 'tool', name }` alone still allows several calls of that
+ * tool), not on the model choosing to call it once.
  */
-const forcedToolChoice = { type: 'tool', name: lookupWeatherTool.name } as const
+const forcedToolChoice = {
+  type: 'tool',
+  name: lookupWeatherTool.name,
+  disable_parallel_tool_use: true
+} as const
 
 export const anthropicMessagesToolUseInputDeltasCase: AnthropicConformanceCase =
   defineConformanceCase({
     id: 'anthropic.messages.stream.tool-use-input-deltas',
     title: 'Streamed tool_use input fragments assemble into one call',
     safety: 'read',
-    docs: 'A streamed Anthropic `tool_use` block starts with `content_block_start` carrying the block `id`, `name`, and an empty `input`; the input JSON arrives as `input_json_delta` `partial_json` fragments and is complete at `content_block_stop`; `message_delta` then carries `stop_reason: tool_use`. `tool_choice: { type: "tool", name }` forces that tool.',
-    wire: 'For a single offered tool forced with `tool_choice: { type: "tool", name }`, the streamed input fragments assemble into exactly one ToolCall named after the tool (native name, no rewriting) whose params are a JSON object with a non-empty string `city`, followed by Done(tool_use). Where the fragments split is not asserted.',
+    docs: 'A streamed Anthropic `tool_use` block starts with `content_block_start` carrying the block `id`, `name`, and an empty `input`; the input JSON arrives as `input_json_delta` `partial_json` fragments and is complete at `content_block_stop`; `message_delta` then carries `stop_reason: tool_use`. `tool_choice: { type: "tool", name }` forces that tool, and `disable_parallel_tool_use: true` limits the answer to at most one tool use.',
+    wire: 'For a single offered tool forced with `tool_choice: { type: "tool", name, disable_parallel_tool_use: true }`, the streamed input fragments assemble into exactly one ToolCall named after the tool (native name, no rewriting) whose params are a JSON object with a non-empty string `city`, followed by Done(tool_use). Where the fragments split is not asserted.',
     fixtures: [anthropicMessagesToolUseInputDeltasFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* AnthropicConformanceConfig
@@ -309,21 +314,68 @@ export const anthropicMessagesThinkingBeforeTextCase: AnthropicConformanceCase =
     })
   })
 
+/** The Anthropic error envelope the error case requires in the 404 body (extra keys allowed). */
+const NotFoundErrorEnvelope = Schema.fromJsonString(
+  Schema.Struct({
+    type: Schema.Literal('error'),
+    error: Schema.Struct({
+      type: Schema.Literal('not_found_error'),
+      message: Schema.String
+    })
+  })
+)
+
+const isNotFoundErrorEnvelope = (body: string): boolean =>
+  Option.isSome(Schema.decodeUnknownOption(NotFoundErrorEnvelope)(body))
+
+/**
+ * The error case's own HttpClient boundary: wraps the host client so the body of every error
+ * response (status 400 or above) is read, kept in `bodies`, and handed on to the provider as the
+ * same status, headers, and bytes. Success responses pass through untouched, and the provider's
+ * behaviour does not change; the case only gains the envelope the provider does not surface.
+ */
+const capturingErrorBodies = (
+  client: HttpClient.HttpClient,
+  bodies: Ref.Ref<ReadonlyArray<string>>
+): HttpClient.HttpClient =>
+  HttpClient.transform(client, (effect, request) =>
+    Effect.flatMap(effect, response =>
+      response.status < 400
+        ? Effect.succeed(response)
+        : response.arrayBuffer.pipe(
+            Effect.tap(bytes =>
+              Ref.update(bodies, current => [...current, new TextDecoder().decode(bytes)])
+            ),
+            Effect.map(bytes =>
+              HttpClientResponse.fromWeb(
+                request,
+                new Response(bytes, { status: response.status, headers: response.headers })
+              )
+            )
+          )
+    )
+  )
+
 export const anthropicMessagesErrorEnvelopeCase: AnthropicConformanceCase = defineConformanceCase({
   id: 'anthropic.messages.stream.error-envelope',
   title: 'Unknown model ids fail with a sanitized non-retryable 404',
   safety: 'read',
   docs: 'Anthropic errors use the envelope `{ type: "error", error: { type, message } }` with a non-2xx status; an unknown model id is rejected with status 404 and error type `not_found_error`, while a missing or invalid credential is a 401 `authentication_error`.',
-  wire: 'An unknown model id is rejected with a JSON envelope before any stream starts, as a 404 and never a 401/403 authentication or permission failure: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps the 404 status, and whose message is sanitized to the provider name and error cause (no upstream body text). The native Messages layer does not surface the envelope `error.type`, so `not_found_error` is recorded in the fixture but not asserted here.',
+  wire: 'An unknown model id is rejected with a JSON envelope before any stream starts, as a 404 and never a 401/403 authentication or permission failure: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps the 404 status, and whose message is sanitized to the provider name and error cause (no upstream body text). The native Messages layer does not surface the envelope, so the case also reads the 404 body at its own HttpClient boundary (handing the same bytes on to the provider) and requires `{ type: "error", error: { type: "not_found_error", message } }`; an empty, non-JSON, or differently shaped body fails the case.',
   fixtures: [anthropicMessagesErrorEnvelopeFixture.id],
   run: Effect.gen(function* () {
     const settings = yield* AnthropicConformanceConfig
+    const client = yield* HttpClient.HttpClient
+    const errorBodies = yield* Ref.make<ReadonlyArray<string>>([])
 
     const outcome = yield* collectEvents(
       settings,
       { maxTokens: settings.maxTokens },
       userRequest(settings.models.invalid, 'Say hello.')
-    ).pipe(Effect.result)
+    ).pipe(
+      Effect.provideService(HttpClient.HttpClient, capturingErrorBodies(client, errorBodies)),
+      Effect.result
+    )
 
     if (Result.isSuccess(outcome)) {
       return yield* expectConformance(false, 'expected an error envelope, the request succeeded', {
@@ -352,6 +404,15 @@ export const anthropicMessagesErrorEnvelopeCase: AnthropicConformanceCase = defi
       error.message,
       `Anthropic Messages ${error.cause}`,
       'expected a sanitized message without upstream body text'
+    )
+
+    const bodies = yield* Ref.get(errorBodies)
+
+    // Only the shape is reported, never the upstream body text.
+    yield* expectConformance(
+      bodies.length === 1 && bodies.every(isNotFoundErrorEnvelope),
+      'expected the 404 body to be a `not_found_error` Anthropic error envelope',
+      { actual: bodies.map(isNotFoundErrorEnvelope) }
     )
   })
 })

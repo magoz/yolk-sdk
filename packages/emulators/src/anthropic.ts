@@ -180,8 +180,10 @@ export type AnthropicEmulator = MessagesEmulator
  * `tool_choice: { type: 'none' }` answers with text. An answer that would exceed `max_tokens`
  * is cut and stops with `max_tokens`. Unknown models get 404 `not_found_error`; a request with
  * neither a non-empty `x-api-key` nor a bearer credential gets 401 `authentication_error`; a
- * missing or non-positive `max_tokens` gets 400 `invalid_request_error`; unknown routes get a
- * 404 envelope. The ledger records which header carried the credential, `anthropic-version`,
+ * missing or unsupported `anthropic-version` (only `2023-06-01` is accepted), a missing or
+ * non-positive `max_tokens`, or `thinking` with a forced `tool_choice` (`tool` or `any`) gets 400
+ * `invalid_request_error`; unknown routes get a 404 envelope. The OAuth `anthropic-beta` header
+ * and `budget_tokens` limits are not enforced. The ledger records which header carried the credential, `anthropic-version`,
  * and `anthropic-beta`, never a credential value.
  */
 export const makeAnthropicEmulator = (options: AnthropicEmulatorOptions = {}): AnthropicEmulator =>

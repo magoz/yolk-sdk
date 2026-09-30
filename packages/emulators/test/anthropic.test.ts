@@ -93,7 +93,7 @@ type Payload = {
     readonly signature?: string
     readonly stop_reason?: string
   }
-  readonly usage?: { readonly output_tokens: number }
+  readonly usage?: { readonly input_tokens?: number; readonly output_tokens: number }
   readonly error?: { readonly type: string; readonly message: string }
 }
 
@@ -153,9 +153,17 @@ describe('anthropic emulator defaults', () => {
     expect(deltaText(events, 'text_delta', 'text')).toBe(
       'Hello from the synthetic Anthropic emulator.'
     )
-    expect(events.at(-2)?.data).toMatchObject({
+    // The committed fixtures' (unverified) usage shape: input and cache counts next to the
+    // cumulative output count.
+    expect(events.at(-2)?.data).toEqual({
+      type: 'message_delta',
       delta: { stop_reason: 'end_turn', stop_sequence: null },
-      usage: { output_tokens: expect.any(Number) }
+      usage: {
+        input_tokens: events[0]?.data.message?.usage?.input_tokens,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: expect.any(Number)
+      }
     })
   })
 
@@ -241,24 +249,30 @@ describe('anthropic emulator defaults', () => {
     )
   })
 
-  it('honours tool_choice: a named tool, and none', async () => {
+  it('honours tool_choice: a named tool (with or without parallel use disabled), and none', async () => {
     const otherTool = { name: 'lookup_time', input_schema: { type: 'object' } }
 
-    const forced = sseEvents(
-      await (
-        await send(
-          makeAnthropicEmulator(),
-          plainRequest({
-            tools: [otherTool, weatherTool],
-            tool_choice: { type: 'tool', name: 'lookup_weather' }
-          })
-        )
-      ).text()
-    )
+    const toolChoices: ReadonlyArray<Schema.Json> = [
+      { type: 'tool', name: 'lookup_weather' },
+      { type: 'tool', name: 'lookup_weather', disable_parallel_tool_use: true }
+    ]
 
-    expect(
-      forced.find(event => event.event === 'content_block_start')?.data.content_block?.name
-    ).toBe('lookup_weather')
+    for (const toolChoice of toolChoices) {
+      const forced = sseEvents(
+        await (
+          await send(
+            makeAnthropicEmulator(),
+            plainRequest({ tools: [otherTool, weatherTool], tool_choice: toolChoice })
+          )
+        ).text()
+      )
+
+      expect(
+        forced.flatMap(event =>
+          event.event === 'content_block_start' ? [event.data.content_block?.name] : []
+        )
+      ).toEqual(['lookup_weather'])
+    }
 
     const none = sseEvents(
       await (
@@ -331,6 +345,81 @@ describe('anthropic emulator defaults', () => {
       1.5,
       undefined
     ])
+  })
+
+  it('rejects a missing or unsupported anthropic-version with invalid_request_error', async () => {
+    const emulator = makeAnthropicEmulator()
+    const { 'anthropic-version': _version, ...withoutVersion } = apiKeyHeaders
+
+    const missing = await send(emulator, plainRequest(), withoutVersion)
+
+    const unsupported = await send(emulator, plainRequest(), {
+      ...apiKeyHeaders,
+      'anthropic-version': '2099-01-01'
+    })
+
+    for (const [response, message] of [
+      [missing, 'Synthetic: the anthropic-version header is required.'],
+      [unsupported, 'Synthetic: the anthropic-version header value is not supported.']
+    ] as const) {
+      expect(response.status).toBe(400)
+      expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(await response.json()).toEqual({
+        type: 'error',
+        error: { type: 'invalid_request_error', message }
+      })
+    }
+
+    expect(emulator.ledger.entries()).toMatchObject([
+      { credentialHeader: 'x-api-key', evidence: 'unverified', status: 400 },
+      {
+        credentialHeader: 'x-api-key',
+        anthropicVersion: '2099-01-01',
+        evidence: 'unverified',
+        status: 400
+      }
+    ])
+    expect(emulator.ledger.entries()[0]?.anthropicVersion).toBeUndefined()
+  })
+
+  it('rejects thinking together with a forced tool_choice', async () => {
+    const emulator = makeAnthropicEmulator()
+    const thinking = { type: 'enabled', budget_tokens: 1024 }
+
+    const forced: ReadonlyArray<Schema.Json> = [
+      { type: 'tool', name: 'lookup_weather' },
+      { type: 'any' }
+    ]
+
+    for (const toolChoice of forced) {
+      const response = await send(
+        emulator,
+        plainRequest({ max_tokens: 2048, thinking, tools: [weatherTool], tool_choice: toolChoice })
+      )
+
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'Synthetic: thinking may not be enabled when tool_choice forces tool use.'
+        }
+      })
+    }
+
+    const auto = await send(
+      emulator,
+      plainRequest({
+        max_tokens: 2048,
+        thinking,
+        tools: [weatherTool],
+        tool_choice: { type: 'auto' }
+      })
+    )
+
+    expect(auto.status).toBe(200)
+    await auto.text()
+    expect(emulator.ledger.entries().map(entry => entry.status)).toEqual([400, 400, 200])
   })
 
   it('rejects bodies that are not JSON Messages requests', async () => {
