@@ -4,7 +4,8 @@
  * The Microsoft connector has no calendar actions yet. These helpers send raw Graph v1.0 calendar
  * requests through the real connector ports (`ConnectorHttpClient`, `CredentialResolver` via
  * `resolveMicrosoftAccessToken`) and map non-2xx responses through the shared Graph failure
- * mapping, so the calendar cases pin observed Graph behaviour for hosts and the upcoming emulator.
+ * mapping, so the calendar cases pin expected Graph behaviour (unverified until a live run) for hosts
+ * and the upcoming emulator.
  * The calendar slot hints and the instant helpers stay internal to the conformance module.
  */
 import { Effect, Predicate } from 'effect'

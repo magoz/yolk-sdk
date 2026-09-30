@@ -8,7 +8,8 @@
  * redirect policy, DNS/IP policy, timeouts, or TLS policy beyond what the wrapped `HttpClient`
  * does. No bridge propagates trace context; upload-session requests and requests without an
  * `Authorization` header (whose URL may be the credential) get no client span, since the span would
- * record the URL and its query string. Production hosts implement `ConnectorHttpClient` / `ConnectorBinaryHttpClient` /
+ * record the URL and its query string. A host `HttpClient.TracerDisabledWhen` still applies on top.
+ * Production hosts implement `ConnectorHttpClient` / `ConnectorBinaryHttpClient` /
  * `ConnectorBinaryWriteHttpClient` themselves (see the connectors README host integration
  * contract) and own real credential storage.
  *
@@ -102,7 +103,8 @@ const untracedWithoutAuthorization: TracerDisabledWhen = request =>
  * (merged over any host defaults), which `FetchHttpClient` honors; other `HttpClient`
  * implementations must honor them on their own. Trace-context propagation headers are disabled so
  * the upstream sees exactly the connector's headers, and requests matched by `tracerDisabledWhen`
- * get no client span (whose attributes would carry the URL).
+ * get no client span (whose attributes would carry the URL). A host `HttpClient.TracerDisabledWhen`
+ * is kept: a request is untraced when either the host's predicate or the bridge's matches.
  */
 const executeWithPortSemantics = <A>(
   client: HttpClient.HttpClient,
@@ -115,20 +117,22 @@ const executeWithPortSemantics = <A>(
 ): Effect.Effect<A, HttpClientError.HttpClientError> =>
   Effect.gen(function* () {
     const hostDefaults = yield* Effect.serviceOption(FetchHttpClient.RequestInit)
+    const hostTracerDisabledWhen = yield* HttpClient.TracerDisabledWhen
 
     const requestInit: globalThis.RequestInit = {
       ...Option.getOrElse(hostDefaults, () => ({})),
       ...options
     }
 
-    return yield* client
-      .execute(request)
-      .pipe(
-        Effect.flatMap(read),
-        Effect.provideService(FetchHttpClient.RequestInit, requestInit),
-        Effect.provideService(HttpClient.TracerPropagationEnabled, false),
-        Effect.provideService(HttpClient.TracerDisabledWhen, tracerDisabledWhen)
+    return yield* client.execute(request).pipe(
+      Effect.flatMap(read),
+      Effect.provideService(FetchHttpClient.RequestInit, requestInit),
+      Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+      Effect.provideService(
+        HttpClient.TracerDisabledWhen,
+        next => hostTracerDisabledWhen(next) || tracerDisabledWhen(next)
       )
+    )
   })
 
 const fetchOptions = (request: {

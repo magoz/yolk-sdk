@@ -654,6 +654,43 @@ describe('connectorBinaryWriteHttpClientFromEffectHttpClientLayer', () => {
     })
   )
 
+  it.effect('keeps a host TracerDisabledWhen that disables every span', () =>
+    Effect.gen(function* () {
+      const spans: Array<Tracer.NativeSpan> = []
+
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+
+          spans.push(span)
+
+          return span
+        }
+      })
+
+      const layer = connectorHttpClientsFromEffectHttpClientLayer.pipe(
+        Layer.provide(fakeHttpClient([], () => new Response('{}', { status: 200 })))
+      )
+
+      const authorized = sendText(
+        ConnectorHttpRequest.make({
+          method: 'GET',
+          url: 'https://api.example.test/v1/items',
+          headers: { authorization: 'Bearer synthetic-token' }
+        })
+      ).pipe(Effect.provide(layer), Effect.provideService(Tracer.Tracer, tracer))
+
+      // Control: without a host predicate the authorized request is traced.
+      yield* authorized
+
+      expect(spans).toHaveLength(1)
+
+      yield* authorized.pipe(Effect.provideService(HttpClient.TracerDisabledWhen, () => true))
+
+      expect(spans).toHaveLength(1)
+    })
+  )
+
   it.effect('is part of the all-ports bridge layer', () =>
     Effect.gen(function* () {
       const response = yield* sendSession(sessionRequest()).pipe(

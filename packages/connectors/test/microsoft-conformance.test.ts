@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient, HttpClientError } from 'effect/unstable/http'
 import type { ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,
@@ -424,6 +424,55 @@ const graphNotFoundError =
 const graphServerError =
   '{"error":{"code":"ErrorInternalServerError","message":"Synthetic placeholder: server error.","innerError":{"date":"2026-09-29T10:00:09","request-id":"00000000-0000-4000-8000-000000000009","client-request-id":"00000000-0000-4000-8000-000000000009"}}}'
 
+const immutableOriginalId = 'AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A-synthetic-immutable-0001='
+
+const immutableMovedId = 'AAMkAGI2-synthetic-moved-0001='
+
+/**
+ * The immutable-id create (0), a move (1) that answers a NEW id, and the cleanup batch (3) in which
+ * the original id no longer exists (404) and the new id deletes (204).
+ */
+const movedIdFixture = pickExchanges(
+  replaceResponse(
+    replaceResponse(
+      microsoftOutlookImmutableIdFixture,
+      1,
+      replaceInBody(`"id":"${immutableOriginalId}"`, `"id":"${immutableMovedId}"`)
+    ),
+    3,
+    response => ({
+      status: 200,
+      headers: response.headers,
+      body: JSON.stringify({
+        responses: [
+          { id: 'req-1', status: 404, headers: {}, body: JSON.parse(graphNotFoundError) },
+          { id: 'req-2', status: 204, headers: {} }
+        ]
+      })
+    })
+  ),
+  [0, 1, 3]
+)
+
+/** The cleanup batch permanently deletes the NEW id (and tries the original one). */
+const expectBatchDeletesBothIds = (entries: ReadonlyArray<ReplayLedgerEntry>) => {
+  const batch = entries.at(-1)
+
+  expect(batch?.url).toBe('https://graph.microsoft.com/v1.0/$batch')
+  expect(batch?.bodyJson).toMatchObject({
+    requests: [
+      {
+        method: 'POST',
+        url: `/users/ada%40example.test/messages/${encodeURIComponent(immutableOriginalId)}/permanentDelete`
+      },
+      {
+        method: 'POST',
+        url: `/users/ada%40example.test/messages/${encodeURIComponent(immutableMovedId)}/permanentDelete`
+      }
+    ]
+  })
+}
+
 describe('Microsoft conformance disagreement drills', () => {
   it.effect('fails the range case when a populated range returns an empty success', () =>
     Effect.gen(function* () {
@@ -646,55 +695,16 @@ describe('Microsoft conformance disagreement drills', () => {
 
   it.effect('fails the immutable-id case when the move returns a new id, and deletes that id', () =>
     Effect.gen(function* () {
-      const originalId = 'AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A-synthetic-immutable-0001='
-      const movedId = 'AAMkAGI2-synthetic-moved-0001='
-
-      const changed = replaceResponse(
-        replaceResponse(
-          microsoftOutlookImmutableIdFixture,
-          1,
-          replaceInBody(`"id":"${originalId}"`, `"id":"${movedId}"`)
-        ),
-        3,
-        // The original id no longer exists after the move (404); the new id deletes (204).
-        response => ({
-          status: 200,
-          headers: response.headers,
-          body: JSON.stringify({
-            responses: [
-              { id: 'req-1', status: 404, headers: {}, body: JSON.parse(graphNotFoundError) },
-              { id: 'req-2', status: 204, headers: {} }
-            ]
-          })
-        })
-      )
-
       const { failure, entries, remaining } = yield* drill(
         microsoftOutlookImmutableIdCase,
-        pickExchanges(changed, [0, 1, 3])
+        movedIdFixture
       )
 
       // The restore succeeded: the case reports the claim, not a restore failure.
       expect(failure).toEqual(mismatch('expected the moved message to keep its immutable id'))
       expect(exchangeIndices(entries)).toEqual(['POST 0', 'POST 1', 'POST 2'])
       expect(remaining).toEqual([])
-
-      // The cleanup batch permanently deletes the NEW id (and tries the original one).
-      const batch = entries.at(-1)
-
-      expect(batch?.url).toBe('https://graph.microsoft.com/v1.0/$batch')
-      expect(batch?.bodyJson).toMatchObject({
-        requests: [
-          {
-            method: 'POST',
-            url: `/users/ada%40example.test/messages/${encodeURIComponent(originalId)}/permanentDelete`
-          },
-          {
-            method: 'POST',
-            url: `/users/ada%40example.test/messages/${encodeURIComponent(movedId)}/permanentDelete`
-          }
-        ]
-      })
+      expectBatchDeletesBothIds(entries)
     })
   )
 
@@ -910,6 +920,156 @@ describe('Microsoft conformance interruption', () => {
       expect(Exit.hasInterrupts(exit)).toBe(true)
       expect(exchangeIndices(yield* ledger.entries)).toEqual(['POST 0', 'DELETE 1', 'GET 2'])
       expect(yield* ledger.remaining).toEqual([])
+    })
+  )
+
+  it.effect(
+    'deletes the new id of a draft whose move was in flight when the case was interrupted',
+    () =>
+      Effect.gen(function* () {
+        const moveSent = yield* Deferred.make<void>()
+        const releaseMove = yield* Deferred.make<void>()
+
+        // The create (0), a move answering a NEW id (1), then only the cleanup batch (2).
+        const { client, ledger } = yield* makeReplayHttpClient([movedIdFixture])
+
+        // Graph has moved the draft, but the move response is held back until the test releases it.
+        const holdingMove = HttpClient.transform(client, (response, request) =>
+          request.url.endsWith('/move')
+            ? response.pipe(
+                Effect.tap(() => Deferred.succeed(moveSent, undefined)),
+                Effect.tap(() => Deferred.await(releaseMove))
+              )
+            : response
+        )
+
+        const fiber = yield* microsoftOutlookImmutableIdCase.run.pipe(
+          Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holdingMove))),
+          Effect.forkChild
+        )
+
+        yield* Deferred.await(moveSent)
+
+        // Interrupt between the remote move and the new id's registration, then let the response in.
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(releaseMove, undefined)
+        yield* Fiber.join(interrupting)
+
+        const exit = yield* Fiber.await(fiber)
+        const entries = yield* ledger.entries
+
+        // Interrupted before the claims: no set_read PATCH, straight to the cleanup batch.
+        expect(Exit.hasInterrupts(exit)).toBe(true)
+        expect(exchangeIndices(entries)).toEqual(['POST 0', 'POST 1', 'POST 2'])
+        expect(yield* ledger.remaining).toEqual([])
+        expectBatchDeletesBothIds(entries)
+      })
+  )
+})
+
+const ambiguousCreateAdvice =
+  'the item may exist anyway: remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance).'
+
+/** A client whose every request fails in transport, as if the connection dropped mid-response. */
+const droppingHttpClient = HttpClient.make(request =>
+  Effect.fail(
+    new HttpClientError.HttpClientError({
+      reason: new HttpClientError.TransportError({ request, description: 'connection reset' })
+    })
+  )
+)
+
+describe('Microsoft conformance ambiguous creates', () => {
+  const runOver = (testCase: MicrosoftConformanceCase, client: HttpClient.HttpClient) =>
+    Effect.gen(function* () {
+      yield* atTestNow
+
+      const report = yield* runConformance([testCase], {
+        target: { kind: 'replay' },
+        now,
+        layer: () => portsOver(Layer.succeed(HttpClient.HttpClient, client))
+      })
+
+      return report.results[0]?.failure
+    })
+
+  it.effect('reports a transport failure of the create with manual-recovery advice', () =>
+    Effect.gen(function* () {
+      expect(yield* runOver(microsoftCalendarCreateEventCase, droppingHttpClient)).toEqual({
+        kind: 'failure',
+        tag: 'MicrosoftConformanceActionFailed',
+        message: `microsoft.conformance.create_event failed: transport_failed; ${ambiguousCreateAdvice}`
+      })
+    })
+  )
+
+  it.effect(
+    'reports a create that answers an undecodable success with manual-recovery advice',
+    () =>
+      Effect.gen(function* () {
+        const garbled = replaceResponse(microsoftCalendarCreateEventFixture, 0, response => ({
+          status: 201,
+          headers: response.headers,
+          body: 'not json'
+        }))
+
+        const { failure, entries } = yield* drill(
+          microsoftCalendarCreateEventCase,
+          pickExchanges(garbled, [0])
+        )
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'MicrosoftConformanceActionFailed',
+          message: `microsoft.conformance.create_event failed: validation_failed; ${ambiguousCreateAdvice}`
+        })
+        expect(exchangeIndices(entries)).toEqual(['POST 0'])
+      })
+  )
+
+  it.effect('reports a 5xx create with its code, status, and manual-recovery advice', () =>
+    Effect.gen(function* () {
+      const serverError = replaceResponse(
+        microsoftOutlookImmutableIdFixture,
+        0,
+        withStatus(500, graphServerError)
+      )
+
+      const { failure, entries } = yield* drill(
+        microsoftOutlookImmutableIdCase,
+        pickExchanges(serverError, [0])
+      )
+
+      expect(failure).toEqual({
+        kind: 'failure',
+        tag: 'MicrosoftConformanceActionFailed',
+        message: `outlook.create_draft failed: outlook_create_draft_failed (HTTP 500); ${ambiguousCreateAdvice}`
+      })
+      expect(failure?.message.length).toBeLessThanOrEqual(300)
+      expect(exchangeIndices(entries)).toEqual(['POST 0'])
+    })
+  )
+
+  it.effect('reports a 4xx create without the advice: nothing was created', () =>
+    Effect.gen(function* () {
+      const rejected = replaceResponse(
+        microsoftOneDriveCreateFolderFixture,
+        0,
+        withStatus(403, graphServerError)
+      )
+
+      const { failure } = yield* drill(
+        microsoftOneDriveCreateFolderCase,
+        pickExchanges(rejected, [0])
+      )
+
+      expect(failure).toEqual({
+        kind: 'failure',
+        tag: 'MicrosoftConformanceActionFailed',
+        message: 'onedrive.create_folder failed: microsoft_unauthorized (HTTP 403)'
+      })
     })
   )
 })

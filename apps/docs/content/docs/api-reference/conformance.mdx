@@ -254,7 +254,9 @@ seeds they replay with (`microsoftConformanceFixtureSeeds`). Cases need `Connect
 `CredentialResolver`, and `MicrosoftConformanceConfig` (seed identities in a Microsoft 365 practice
 tenant). Outlook and OneDrive cases run the real connector actions. The connector has no calendar
 actions yet, so the four calendar cases send raw Graph requests through the same ports and pin
-observed Graph behaviour for hosts and the upcoming emulator. Write cases create their own event,
-draft, or folder and remove it again automatically when its id is recoverable, failing with
-`MicrosoftConformanceRestoreFailed` when the removal fails or a create returns no id (an ambiguous
-create also needs manual recovery). See [Microsoft conformance cases](../connectors/microsoft#conformance-cases).
+expected Graph behaviour (unverified until a live run) for hosts and the upcoming emulator. Write
+cases create their own event, draft, or folder and remove it again automatically when its id is
+recoverable, failing with `MicrosoftConformanceRestoreFailed` when the removal fails or a create
+returns no id. An ambiguous create (transport or decoding failure, no status, or HTTP 5xx) fails
+with `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry
+manual-recovery advice. The create is not interruptible and the runner has no request timeout. See [Microsoft conformance cases](../connectors/microsoft#conformance-cases).

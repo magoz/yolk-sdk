@@ -1169,18 +1169,20 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 `ConnectorHttpClient` and `CredentialResolver` plus `MicrosoftConformanceConfig`, which holds
 host-supplied seed identities in a Microsoft 365 practice tenant. **The connector has no calendar
 actions yet:** the four calendar cases send raw Graph v1.0 requests through the same ports, token
-resolution, and Graph failure mapping, and pin observed Graph behaviour for hosts and the upcoming
-emulator. Credentials bind through `microsoftConformanceIntegration` (`microsoft.oauth`, credential
+resolution, and Graph failure mapping, and pin expected Graph behaviour (unverified until a live
+run) for hosts and the upcoming emulator. Credentials bind through `microsoftConformanceIntegration` (`microsoft.oauth`, credential
 ref `microsoft.conformance`). The case table, seeds, and claims live in the
 [Microsoft conformance guide](../../apps/docs/content/docs/connectors/microsoft.mdx#conformance-cases).
 
 Every write case creates its own event, recipient-free draft, or folder and registers its id for
-cleanup before any claim runs (the create and the registration are not interruptible). When the id
+cleanup before any claim runs (the create and the registration are not interruptible, and the
+runner sets no request timeout, so a hanging create delays an interruption). When the id
 is recoverable, the case removes the item again automatically (also after a failed assertion or
 interruption), verifies the removal where Graph allows it, and fails with
 `MicrosoftConformanceRestoreFailed` when the removal fails. A create that succeeds without an id also
-fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create (for example a transport
-failure after sending) fails with its own error: both need manual recovery of the
+fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create (a transport or decoding
+failure, no status, or HTTP 5xx) fails with `MicrosoftConformanceActionFailed`
+(`createOutcome: 'unknown'`, code and status kept): both messages advise manual recovery of the
 `yolk-conformance` item. No case sends mail or invitations. `pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account
 <label>` (with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by
 hand, `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings

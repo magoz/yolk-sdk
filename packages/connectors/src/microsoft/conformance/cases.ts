@@ -6,16 +6,20 @@
  * actions over the connector ports (`ConnectorHttpClient`, `CredentialResolver`) plus the
  * host-supplied `MicrosoftConformanceConfig` seed identities. The connector has no calendar
  * actions yet: the calendar cases send raw Graph v1.0 requests through the same ports, the shared
- * token resolution, and the shared Graph failure mapping, and pin observed Graph behaviour for
- * hosts and the upcoming emulator. The same cases run on replay fixtures, an emulator, or by hand
- * against a practice tenant. None is observed live yet (`observed` absent = unverified).
+ * token resolution, and the shared Graph failure mapping, and pin expected Graph behaviour
+ * (unverified until a live run) for hosts and the upcoming emulator. The same cases run on replay
+ * fixtures, an emulator, or by hand against a practice tenant. None is observed live yet
+ * (`observed` absent = unverified).
  *
  * Every write case creates its own calendar event, draft, or folder and registers its id for the
- * restore before any claim runs (the create and the registration run uninterruptibly). The restore
- * then removes it again (also after a failed claim or an interruption), verifies the removal where
- * Graph allows it, and reports (never swallows) a failed restore. A create that succeeds without a
- * recoverable id fails with `MicrosoftConformanceRestoreFailed`: the item needs removal by hand.
- * No case sends mail or invitations.
+ * restore before any claim runs (the create and the registration run uninterruptibly, so a hanging
+ * create cannot be interrupted; nothing here adds a request timeout). The restore then removes it
+ * again (also after a failed claim or an interruption), verifies the removal where Graph allows it,
+ * and reports (never swallows) a failed restore. A create that succeeds without a recoverable id
+ * fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create failure (transport or
+ * decoding failure, no status, or HTTP 5xx) fails with `MicrosoftConformanceActionFailed`
+ * (`createOutcome: 'unknown'`): both messages say to remove the item by hand if it exists. No case
+ * sends mail or invitations.
  */
 import { Cause, Chunk, Context, Data, Duration, Effect, Exit, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -28,7 +32,7 @@ import {
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
-import type { ConnectorError } from '../../error.ts'
+import { ConnectorError } from '../../error.ts'
 import type { ConnectorHttpClient } from '../../http.ts'
 import { makeIntegration } from '../../integration.ts'
 import type { ActionResult } from '../../result.ts'
@@ -162,23 +166,34 @@ export const microsoftConformanceIntegration = makeIntegration({
   ]
 })
 
-/** A connector action (or raw calendar request) returned a failure where the case needed success. */
+const restoreByHandAdvice =
+  'remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance).'
+
+/**
+ * A connector action (or raw calendar request) returned a failure where the case needed success.
+ *
+ * `createOutcome: 'unknown'` marks an ambiguous create of a write case's own item (a transport or
+ * decoding failure, no status, or HTTP 5xx): Graph may have created the item without the case
+ * learning its id, so the message adds the manual-recovery advice. `code` and `status` keep the
+ * underlying classification (`transport_failed` or `validation_failed` for a `ConnectorError`).
+ */
 export class MicrosoftConformanceActionFailed extends Data.TaggedError(
   'MicrosoftConformanceActionFailed'
 )<{
   readonly actionId: string
   readonly code: string
   readonly status?: number
+  readonly createOutcome?: 'unknown'
 }> {
   override get message(): string {
     const status = this.status === undefined ? '' : ` (HTTP ${this.status})`
 
-    return `${this.actionId} failed: ${this.code}${status}`
+    const advice =
+      this.createOutcome === 'unknown' ? `; the item may exist anyway: ${restoreByHandAdvice}` : ''
+
+    return `${this.actionId} failed: ${this.code}${status}${advice}`
   }
 }
-
-const restoreByHandAdvice =
-  'remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance).'
 
 /** `text` ending in a period (a truncated `...` summary already does). */
 const sentence = (text: string): string => (text.endsWith('.') ? text : `${text}.`)
@@ -327,6 +342,8 @@ type PendingIds = Ref.Ref<ReadonlyArray<string>>
 
 /** How a write case creates its own item. */
 interface OwnItem<T, E, R> {
+  /** The action (or raw calendar request) id the create reports failures under. */
+  readonly actionId: string
   /** Creates the item remotely and decodes the response. */
   readonly create: Effect.Effect<T, E, R>
   /** The id of the created item, or `undefined` when the create response carries none. */
@@ -334,11 +351,57 @@ interface OwnItem<T, E, R> {
 }
 
 /**
+ * An ambiguous create failure (transport or decoding failure, no status, or HTTP 5xx) as a
+ * `MicrosoftConformanceActionFailed` with `createOutcome: 'unknown'`, keeping its code and status;
+ * `undefined` for a failure that proves nothing was created.
+ */
+const ambiguousCreateFailure = (
+  actionId: string,
+  error: unknown
+): MicrosoftConformanceActionFailed | undefined => {
+  if (error instanceof MicrosoftConformanceActionFailed) {
+    if (error.status === undefined) {
+      return new MicrosoftConformanceActionFailed({
+        actionId: error.actionId,
+        code: error.code,
+        createOutcome: 'unknown'
+      })
+    }
+
+    return error.status >= 500
+      ? new MicrosoftConformanceActionFailed({
+          actionId: error.actionId,
+          code: error.code,
+          status: error.status,
+          createOutcome: 'unknown'
+        })
+      : undefined
+  }
+
+  if (
+    error instanceof ConnectorError &&
+    (error.cause === 'transport_failed' || error.cause === 'validation_failed')
+  ) {
+    return new MicrosoftConformanceActionFailed({
+      actionId,
+      code: error.cause,
+      createOutcome: 'unknown'
+    })
+  }
+
+  return undefined
+}
+
+/**
  * Create a case-owned item, run `use`, then ALWAYS remove whatever is still pending.
  *
  * The create request, its decoding, and the registration of the id in `pending` run
  * uninterruptibly, so an interruption cannot land between the remote create and the registration
- * the restore relies on; `use` (the claims) runs interruptibly again. The restore runs
+ * the restore relies on (the create itself cannot be interrupted, and there is no request
+ * timeout); `use` (the claims) runs interruptibly again. An ambiguous create failure (transport or
+ * decoding failure, no status, or HTTP 5xx) may still have created the item: it fails as a
+ * `MicrosoftConformanceActionFailed` with `createOutcome: 'unknown'` whose message carries the
+ * manual-recovery advice. The restore runs
  * uninterruptibly after `use` succeeds, fails, or is interrupted, and does nothing once `pending`
  * is empty. A failed restore fails the case with `MicrosoftConformanceRestoreFailed`, which says
  * whether the claim itself held and, if not, summarizes why; otherwise the outcome of `use`
@@ -351,13 +414,20 @@ const withOwnItem = <T, A, E1, R1, E, R, E2, R2>(
   item: OwnItem<T, E1, R1>,
   use: (created: T, id: string, pending: PendingIds) => Effect.Effect<A, E, R>,
   remove: (ids: ReadonlyArray<string>) => Effect.Effect<void, E2, R2>
-): Effect.Effect<A, E1 | E | MicrosoftConformanceRestoreFailed, R1 | R | R2> =>
+): Effect.Effect<
+  A,
+  E1 | E | MicrosoftConformanceActionFailed | MicrosoftConformanceRestoreFailed,
+  R1 | R | R2
+> =>
   Effect.gen(function* () {
     const pending: PendingIds = yield* Ref.make<ReadonlyArray<string>>([])
 
     return yield* Effect.uninterruptibleMask(unmask =>
       Effect.gen(function* () {
-        const created = yield* item.create
+        const created = yield* item.create.pipe(
+          Effect.mapError(error => ambiguousCreateFailure(item.actionId, error) ?? error)
+        )
+
         const id = item.idOf(created)
 
         if (id === undefined) {
@@ -590,6 +660,7 @@ export const microsoftCalendarCreateEventCase: MicrosoftConformanceCase = define
     yield* withOwnItem(
       createEventCaseId,
       {
+        actionId: calendarActionIds.create,
         create: createCalendarEvent(target, {
           subject: createEventSubject,
           body: 'Synthetic conformance event; safe to delete.',
@@ -662,6 +733,7 @@ export const microsoftCalendarCancelCase: MicrosoftConformanceCase = defineConfo
     yield* withOwnItem(
       cancelCaseId,
       {
+        actionId: calendarActionIds.create,
         create: createCalendarEvent(target, {
           subject: cancelEventSubject,
           body: 'Synthetic conformance event; cancelled by the case.',
@@ -864,6 +936,7 @@ const draftSubject = `${microsoftConformanceMarker} draft: safe to delete`
 const ownDraft = (
   mailbox: string | undefined
 ): OwnItem<OutlookMessage, MicrosoftConformanceError, MicrosoftConformanceRequirements> => ({
+  actionId: outlookCreateDraftAction.id,
   create: outlookCreateDraftAction
     .executeTyped({
       integration,
@@ -923,20 +996,24 @@ export const microsoftOutlookImmutableIdCase: MicrosoftConformanceCase = defineC
       ownDraft(mailbox),
       (draft, id, pending) =>
         Effect.gen(function* () {
-          const moved = yield* outlookTrashAction
-            .executeTyped({
-              integration,
-              input: OutlookTrashInput.make({ messageId: id, mailbox })
-            })
-            .pipe(Effect.flatMap(result => successValue(outlookTrashAction.id, result)))
-
-          // Register the id the move answered with BEFORE asserting it is unchanged: if the move
-          // changed the id, the restore must also remove the draft under its new id.
-          if (isNonEmptyString(moved.id) && moved.id !== id) {
-            const movedId = moved.id
-
-            yield* Ref.update(pending, ids => [...ids, movedId])
-          }
+          // The move request, its decoding, and the registration of the id it answered with run
+          // uninterruptibly, BEFORE asserting the id is unchanged: if the move changed the id, the
+          // restore must also remove the draft under its new id, even after an interruption.
+          const moved = yield* Effect.uninterruptible(
+            outlookTrashAction
+              .executeTyped({
+                integration,
+                input: OutlookTrashInput.make({ messageId: id, mailbox })
+              })
+              .pipe(
+                Effect.flatMap(result => successValue(outlookTrashAction.id, result)),
+                Effect.tap(({ id: movedId }) =>
+                  isNonEmptyString(movedId) && movedId !== id
+                    ? Ref.update(pending, ids => [...ids, movedId])
+                    : Effect.void
+                )
+              )
+          )
 
           yield* expectEqual(moved.id, id, 'expected the moved message to keep its immutable id')
           yield* expectConformance(
@@ -1113,6 +1190,7 @@ const ownFolder = (
   parentItemId: string,
   name: string
 ): OwnItem<OneDriveItem, MicrosoftConformanceError, MicrosoftConformanceRequirements> => ({
+  actionId: oneDriveCreateFolderAction.id,
   create: createOwnFolder(driveId, parentItemId, name),
   idOf: folder => (isNonEmptyString(folder.id) ? folder.id : undefined)
 })
