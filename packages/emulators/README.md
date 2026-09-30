@@ -5,7 +5,8 @@
 
 Emulators for outside services, for tests and local development. A route table sends an Effect
 `HttpClient` to an emulator instead of the real service. Two emulators speak the OpenAI-compatible
-Chat Completions wire: the Vercel AI Gateway and OpenAI itself. Emulators never import other `@yolk-sdk/*` code:
+Chat Completions wire: the Vercel AI Gateway and OpenAI itself. A third emulates Anthropic Messages.
+Emulators never import other `@yolk-sdk/*` code:
 their wire shapes follow recorded conformance fixtures, and each emulated route names the
 conformance cases behind it.
 
@@ -21,12 +22,13 @@ pnpm add -D @yolk-sdk/emulators@canary effect@4.0.0-rc.115
 
 There is no root export. Import an explicit subpath:
 
-| Subpath                       | Purpose                                                                                                     |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/emulators/router`  | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` (Effect; no Node builtins)         |
-| `@yolk-sdk/emulators/gateway` | `makeGatewayEmulator`, `gatewayEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)       |
-| `@yolk-sdk/emulators/openai`  | `makeOpenAiEmulator`, `openAiEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)         |
-| `@yolk-sdk/emulators/node`    | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
+| Subpath                         | Purpose                                                                                                     |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`    | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` (Effect; no Node builtins)         |
+| `@yolk-sdk/emulators/gateway`   | `makeGatewayEmulator`, `gatewayEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)       |
+| `@yolk-sdk/emulators/openai`    | `makeOpenAiEmulator`, `openAiEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)         |
+| `@yolk-sdk/emulators/anthropic` | `makeAnthropicEmulator`, `anthropicEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)   |
+| `@yolk-sdk/emulators/node`      | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
 
 ## Routing
 
@@ -185,9 +187,73 @@ const httpLayer = InProcessHttpClient.layer([
 `openAiEmulatorRoutes` links the route to the OpenAI chat conformance cases in
 `@yolk-sdk/agent/providers/openai/conformance`.
 
+## Anthropic emulator
+
+`makeAnthropicEmulator(options?)` returns the same `{ fetch, ledger, reset, faults, script,
+coverage }` shape for Anthropic Messages: `POST /v1/messages`, routed from
+`https://api.anthropic.com`. Faults, the ledger, the control plane, evidence tagging, and route
+binding are shared with the Chat Completions emulators; the Messages wire is its own:
+
+- `stream: true` streams the Messages events in API order (block order and `ping` placement are
+  emulator choices until a live recording): `message_start` (with input
+  usage), then per content block `content_block_start`, its deltas, and `content_block_stop` (a
+  `ping` follows the first block start), then `message_delta` (`stop_reason`, and usage: input
+  and cache counts next to the cumulative `output_tokens`, as the unverified fixtures record it)
+  and `message_stop`. `stream: false` returns one `message` JSON body.
+- `thinking: { type: 'enabled' | 'adaptive' }` adds a `thinking` block (`thinking_delta` events,
+  then one `signature_delta`) before the answer.
+- A request with `tools` gets one `tool_use` block whose input is synthesized from the tool's
+  `input_schema` and streamed as `input_json_delta` fragments (the first one empty), stopping with
+  `tool_use`. `tool_choice: { type: 'tool', name }` picks that tool (otherwise the first);
+  `tool_choice: { type: 'none' }` answers with text. `thinking` together with a forced
+  `tool_choice` (`tool` or `any`) gets 400 `invalid_request_error`.
+- An answer that would not fit `max_tokens` (about four characters per token) is cut and stops
+  with `max_tokens`. A missing or non-positive `max_tokens` gets 400 `invalid_request_error`.
+- Errors use `{ type: 'error', error: { type, message } }`; an unknown model gets 404
+  `not_found_error`.
+- Authentication accepts a non-empty `x-api-key` (native API keys) or `Authorization: Bearer`
+  (Claude OAuth); anything else gets 401 `authentication_error`. Neither value is checked or
+  stored. The ledger records which header carried it (`credentialHeader`), `anthropic-version`,
+  `anthropic-beta`, `max_tokens` (`maxTokens`), `thinking`, `tool_choice`, and tool names.
+- `anthropic-version` must be `2023-06-01` (the value the SDK providers send by default); a missing or
+  other value gets 400 `invalid_request_error`.
+- Not enforced: the OAuth `anthropic-beta` header for bearer credentials, and `budget_tokens`
+  limits.
+- `knownModels` defaults to `anthropicEmulatorDefaultModels` (`claude-haiku-4-5`,
+  `claude-sonnet-4-5`). Invalid faults or turns throw `AnthropicEmulatorInputInvalid`.
+
+`script.enqueue(turn)` queues a message `{ thinking?, text?, toolUses?, order?, usage?,
+stopReason? }` (each tool use is `{ name, inputFragments, id? }`; a block is sent only when its
+field is present; `usage: null` drops usage; `order: 'text-first'` sends thinking after the text;
+`stopReason` defaults to `tool_use` with tool uses, else `end_turn`) or an error
+`{ error: { status, body, headers? } }`.
+
+`faults.add(fault)` takes the shared `status`, `error-after-chunks`, and `truncate-after-chunks`
+kinds (a `status` fault's default body is the Anthropic envelope for the status, for example
+`rate_limit_error` for 429 and `overloaded_error` for 529), plus `error-event-after-chunks`: send N
+events, then one `event: error` (default `overloaded_error`, or `error: { type, message }`) and
+close without `message_stop`. It applies to streamed responses only and must come before
+`message_stop`; otherwise the request answers 500 and the fault is kept.
+
+```ts
+import { makeAnthropicEmulator } from '@yolk-sdk/emulators/anthropic'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const anthropic = makeAnthropicEmulator()
+
+anthropic.faults.add({ kind: 'status', status: 529, count: 1 })
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://api.anthropic.com', anthropic.fetch)
+])
+```
+
+`anthropicEmulatorRoutes` links the route to the Anthropic Messages conformance cases in
+`@yolk-sdk/agent/providers/anthropic/conformance`.
+
 ## Evidence
 
-`gatewayEmulatorRoutes` and `openAiEmulatorRoutes` list every emulated route with `method`, `path`,
+`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, and `anthropicEmulatorRoutes` list every emulated route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route carries `x-emulator-evidence: unverified`.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a

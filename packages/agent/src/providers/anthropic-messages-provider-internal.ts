@@ -16,6 +16,11 @@ type AnthropicMessagesProviderConfig = {
   readonly messagesUrl: string
   readonly maxTokens: number
   readonly headers: Readonly<Record<string, string>>
+  /**
+   * Extra JSON request fields (for example `tool_choice` or `thinking`). Lowered request fields
+   * win on a name clash. Internal: the Anthropic conformance cases use it; OpenCode Go does not.
+   */
+  readonly extraBody?: Readonly<Record<string, Schema.Json>> | undefined
 }
 
 type AnthropicMessagesErrorFields = {
@@ -65,7 +70,9 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
               })
 
               const serialized = yield* Schema.decodeUnknownEffect(Schema.Json)(
-                replaceLoneSurrogatesDeep(body)
+                replaceLoneSurrogatesDeep(
+                  config.extraBody === undefined ? body : { ...config.extraBody, ...body }
+                )
               ).pipe(
                 Effect.flatMap(Schema.encodeEffect(Schema.fromJsonString(Schema.Json))),
                 Effect.mapError(
