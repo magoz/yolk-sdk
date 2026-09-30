@@ -33,7 +33,7 @@ There is no root export. Import an explicit subpath.
 | `PortValueFixture`, `PortFailureFixture`, `isPortFixture`, `isPortFailureFixture`, `isPortCredentialKey` | The two port fixture branches, their narrowing helpers, and the credential-key predicate `redactPortPayload` uses                                                                                                                                                                         |
 | `ConformanceFixture`, `conformanceFixtureEvidence`                                                       | `WireFixture \| PortFixture`; evidence and date (a port fixture is `verified` only with `observed`)                                                                                                                                                                                       |
 | `scanFixtureForSecrets`, `FixtureSecretIssue`                                                            | Pure scan for credential headers, bearer tokens, API-key prefixes, JWTs, credential query/form params and JSON fields                                                                                                                                                                     |
-| `syntheticCredentialMarker`                                                                              | `yolk-synthetic`: a credential query/form parameter whose value starts with it is a documented synthetic placeholder, not flagged by either scan                                                                                                                                          |
+| `syntheticPortCredentialParams`                                                                          | Frozen exact synthetic placeholders, keyed by parameter name (SigV4 `x-amz-signature`, `x-amz-credential`): the only credential parameter values `scanPortFixtureForSecrets` accepts, whole and exact; `scanFixtureForSecrets` accepts none                                               |
 
 Fixtures must contain synthetic or scrubbed data only. The scan covers metadata strings, URLs,
 headers, request and response bodies (including decodable `bodyBase64` text), each chunk, and the
@@ -49,8 +49,10 @@ A `PortFixture` records one call through a host port that is not HTTP, such as t
 `observed: { account, date }` it is `verified` as of that date. Record requests through
 `redactPortPayload` and scan them with `scanPortFixtureForSecrets`, which also flags credential query
 parameters inside any JSON string, the note, or the failure message (a signed URL a port answered,
-such as an S3 presigned URL's `X-Amz-Signature`), except values that start with
-`syntheticCredentialMarker`; it does not see parameters escaped inside a string (`&amp;`,
+such as an S3 presigned URL's `X-Amz-Signature`), each `name=` judged on its own (a value ends at
+whitespace, a quote, `<`, `>`, `?`, `#`, or `&`), except an exact, whole value from
+`syntheticPortCredentialParams` under its own parameter name; it does not see parameters escaped
+inside a string (`&amp;`,
 percent-encoded names), which port owners check themselves (the R2 port cases ship
 `findR2PortFixtureSecrets`). Replaying port fixtures belongs to
 the port owner (for example `makeEmailReplayBackend`); the runner accepts both fixture kinds for its

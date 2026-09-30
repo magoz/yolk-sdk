@@ -16,12 +16,13 @@ import {
   apiKeyPatterns,
   bearerPattern,
   credentialFieldPattern,
+  credentialParamPattern,
   decodeBase64Bytes,
-  hasCredentialParam,
+  hasLiveCredentialParam,
   isCredentialHeaderName
 } from './wire-internal.ts'
 
-export { syntheticCredentialMarker } from './wire-internal.ts'
+export { syntheticPortCredentialParams } from './wire-internal.ts'
 
 /** `verified` = recorded from a live service; `unverified` = synthetic placeholder. */
 export const WireFixtureEvidence = Schema.Literals(['verified', 'unverified'])
@@ -223,7 +224,7 @@ const scanHeaders = (
 }
 
 const scanUrl = (url: string, location: string, issues: IssueSink): void => {
-  if (hasCredentialParam(url)) {
+  if (credentialParamPattern.test(url)) {
     issues.push({ kind: 'credential_query_param', location })
   }
 
@@ -282,7 +283,7 @@ const sseDataPayloads = (text: string): ReadonlyArray<string> =>
 const scanPayload = (text: string, location: string, issues: IssueSink): void => {
   scanText(text, location, issues)
 
-  if (hasCredentialParam(text)) {
+  if (credentialParamPattern.test(text)) {
     issues.push({ kind: 'credential_query_param', location })
   }
 
@@ -354,8 +355,7 @@ const uniqueIssues = (issues: IssueSink): ReadonlyArray<FixtureSecretIssue> => {
 
 /**
  * Pure secret scan. Flags credential headers, bearer tokens, common API-key
- * prefixes, JWTs, private keys, credential query/form parameters (except
- * documented synthetic placeholders, see `syntheticCredentialMarker`), and
+ * prefixes, JWTs, private keys, credential query/form parameters, and
  * credential JSON fields anywhere in the fixture: metadata, URLs, headers,
  * request bodies, response bodies (text or decodable base64), each stream
  * chunk, and the reassembled stream (so a secret split across chunks is still
@@ -544,7 +544,7 @@ export const redactPortPayload = (value: Schema.Json): Schema.Json => {
 const scanPortText = (text: string, location: string, issues: IssueSink): void => {
   scanText(text, location, issues)
 
-  if (hasCredentialParam(text)) {
+  if (hasLiveCredentialParam(text)) {
     issues.push({ kind: 'credential_query_param', location })
   }
 }
@@ -554,7 +554,7 @@ const scanPortJson = (value: Schema.Json, location: string, issues: IssueSink): 
 
   const visit = (item: Schema.Json, itemLocation: string): void => {
     if (Predicate.isString(item)) {
-      if (hasCredentialParam(item)) {
+      if (hasLiveCredentialParam(item)) {
         issues.push({ kind: 'credential_query_param', location: itemLocation })
       }
 
@@ -588,9 +588,10 @@ const scanPortJson = (value: Schema.Json, location: string, issues: IssueSink): 
  * `scanFixtureForSecrets`, plus any non-null `credential` / `credentials` field (port requests must
  * be recorded through `redactPortPayload`), plus credential query or form parameters inside every
  * JSON string value, `note`, and `failure.message` (a signed URL a port answered, such as an S3
- * presigned URL's `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token`), except
- * documented synthetic placeholders (`syntheticCredentialMarker`). Parameters escaped inside the
- * string (`&amp;`, percent-encoded names) are not found. Covers metadata, the request, the
+ * presigned URL's `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token`), each
+ * `name=` judged on its own (a value ends at whitespace, a quote, `<`, `>`, `?`, `#`, or `&`). The
+ * only exemption is an exact value from `syntheticPortCredentialParams` under its own parameter
+ * name. Parameters escaped inside the string (`&amp;`, percent-encoded names) are not found. Covers metadata, the request, the
  * response, and the failure. Issues name locations only. Returns an empty array when clean.
  */
 export const scanPortFixtureForSecrets = (

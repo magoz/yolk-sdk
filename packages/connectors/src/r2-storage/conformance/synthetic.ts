@@ -6,7 +6,7 @@
 import type * as Schema from 'effect/Schema'
 import {
   r2BytesToBase64,
-  r2ConformanceSyntheticAccessKeyId,
+  r2ConformanceSyntheticCredential,
   r2ConformanceSyntheticSignature
 } from './backend.ts'
 
@@ -46,10 +46,7 @@ export const r2SyntheticPresignedUrl = (key: string) => {
 
   url.searchParams.set('X-Amz-Algorithm', 'AWS4-HMAC-SHA256')
   url.searchParams.set('X-Amz-Content-Sha256', 'UNSIGNED-PAYLOAD')
-  url.searchParams.set(
-    'X-Amz-Credential',
-    `${r2ConformanceSyntheticAccessKeyId}/20260930/auto/s3/aws4_request`
-  )
+  url.searchParams.set('X-Amz-Credential', r2ConformanceSyntheticCredential)
   url.searchParams.set('X-Amz-Date', '20260930T120000Z')
   url.searchParams.set('X-Amz-Expires', '900')
   url.searchParams.set('X-Amz-Signature', r2ConformanceSyntheticSignature)

@@ -79,15 +79,27 @@ const credentialParamNames =
  */
 export const credentialParamPattern = new RegExp(`(?:^|[?&])(${credentialParamNames})=[^&#]+`, 'i')
 
-const credentialParamValues = new RegExp(`(?:^|[?&])(?:${credentialParamNames})=([^&#]+)`, 'gi')
+// Every credential parameter occurrence, one per `name=`, the value stopping at whitespace, a quote,
+// `<`, `>`, `?`, `#`, or `&`, so one value never swallows a later parameter in the same text.
+const credentialParamOccurrences = new RegExp(
+  `(?:^|[?&])(${credentialParamNames})=([^&#?\\s"'<>]*)`,
+  'gi'
+)
 
 /**
- * Reserved marker of a documented synthetic credential placeholder. A credential query or form
- * parameter whose (percent-decoded) value starts with it, for example a synthetic presigned-URL
- * `X-Amz-Signature=yolk-synthetic-signature`, is not a secret, so the fixture scan does not flag
- * it. Real provider-issued credentials never start with it.
+ * The exact synthetic credential values a `PortFixture` may carry, keyed by lower-case parameter
+ * name: SigV4 presigned-URL placeholders for S3-compatible ports (the R2 conformance fixtures sign
+ * with them). `scanPortFixtureForSecrets` exempts a credential parameter only when its name is a
+ * key here and its whole percent-decoded value equals that key's value exactly; anything else
+ * (a suffix, another parameter name, another scope) is flagged. `scanFixtureForSecrets` exempts
+ * nothing. Never build a placeholder by prefixing or suffixing a real value.
  */
-export const syntheticCredentialMarker = 'yolk-synthetic'
+export const syntheticPortCredentialParams = Object.freeze({
+  'x-amz-signature': 'yolk-synthetic-signature',
+  'x-amz-credential': 'yolk-synthetic-access-key-id/20260930/auto/s3/aws4_request'
+})
+
+const exactPlaceholders = new Map<string, string>(Object.entries(syntheticPortCredentialParams))
 
 const percentDecodedValue = (value: string): string => {
   try {
@@ -98,13 +110,20 @@ const percentDecodedValue = (value: string): string => {
 }
 
 /**
- * True when `text` carries a credential query or form parameter (see `credentialParamPattern`)
- * whose value is not a synthetic placeholder (see `syntheticCredentialMarker`).
+ * True when `text` carries a credential query or form parameter that is not an exact synthetic
+ * placeholder (`syntheticPortCredentialParams`). Every `name=` occurrence is judged on its own.
+ * It flags at least whatever `credentialParamPattern` flags (a `name=` followed by any character
+ * but `&` or `#`), except the exact placeholders.
  */
-export const hasCredentialParam = (text: string): boolean =>
-  [...text.matchAll(credentialParamValues)].some(
-    match => !percentDecodedValue(match[1] ?? '').startsWith(syntheticCredentialMarker)
-  )
+export const hasLiveCredentialParam = (text: string): boolean =>
+  [...text.matchAll(credentialParamOccurrences)].some(match => {
+    const name = (match[1] ?? '').toLowerCase()
+    const value = match[2] ?? ''
+    const next = text.charAt(match.index + match[0].length)
+    const present = value.length > 0 || (next !== '' && next !== '&' && next !== '#')
+
+    return present && exactPlaceholders.get(name) !== percentDecodedValue(value)
+  })
 
 // Singular credential field names (snake, kebab, or camel case), including the AWS-style
 // `accessKeyId` / `secretAccessKey` / `sessionToken` of S3-compatible signing inputs. Plural usage

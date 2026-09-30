@@ -29,6 +29,7 @@ import {
   r2ConformanceFixtures,
   r2ConformanceIntegration,
   r2ConformanceSyntheticAccessKeyId,
+  r2ConformanceSyntheticCredential,
   r2ConformanceSyntheticSignature,
   r2CreateIfAbsentCase,
   r2ObjectClientPortName,
@@ -765,6 +766,51 @@ describe('R2 presigned URL guard', () => {
     expect(findR2PortFixtureSecrets(encoded)).toEqual(['failure.message: a live X-Amz-Signature'])
   })
 
+  it('refuses placeholders with anything appended, in both scans', () => {
+    const encodedCredential = encodeURIComponent(r2ConformanceSyntheticCredential)
+
+    for (const uploadUrl of [
+      withParam('X-Amz-Signature', `${r2ConformanceSyntheticSignature}0123abcdef0123abcdef`),
+      presignedUrl.replace(encodedCredential, `${encodedCredential}%2Fextra`),
+      presignedUrl.replace(
+        `X-Amz-Signature=${r2ConformanceSyntheticSignature}`,
+        `X-Amz-Signature=${encodeURIComponent(r2ConformanceSyntheticSignature)}%2D0123abcd`
+      )
+    ]) {
+      const fixture = answering({ uploadUrl })(fixtureById(presignId))
+
+      expect(scanPortFixtureForSecrets(fixture), uploadUrl).toEqual([
+        { kind: 'credential_query_param', location: 'response.uploadUrl' }
+      ])
+      expect(findR2PortFixtureSecrets(fixture), uploadUrl).toHaveLength(1)
+    }
+  })
+
+  it('refuses a live URL that follows the synthetic one in the same string', () => {
+    const twoUrls = failingWith(
+      `PUT ${presignedUrl} failed; retried /yolk-synthetic-bucket/k?X-Amz-Signature=${liveSignature}`
+    )
+
+    expect(scanPortFixtureForSecrets(twoUrls)).toEqual([
+      { kind: 'credential_query_param', location: 'failure.message' }
+    ])
+    expect(findR2PortFixtureSecrets(twoUrls)).toEqual(['failure.message: a live X-Amz-Signature'])
+  })
+
+  it('refuses the placeholders under another parameter, and a look-alike password', () => {
+    for (const query of [
+      `token=${r2ConformanceSyntheticSignature}`,
+      `X-Amz-Security-Token=${r2ConformanceSyntheticSignature}`,
+      'password=yolk-synthetic-Hunter2!'
+    ]) {
+      const fixture = answering({ uploadUrl: `${presignedUrl}&${query}` })(fixtureById(presignId))
+
+      expect(scanPortFixtureForSecrets(fixture), query).toEqual([
+        { kind: 'credential_query_param', location: 'response.uploadUrl' }
+      ])
+    }
+  })
+
   it('leaves credential fields to the shared scan and redaction', () => {
     const withKeys: PortFixture = {
       ...fixtureById(presignId),
@@ -791,9 +837,7 @@ describe('R2 presigned URL guard', () => {
       const url = new URL(scrubR2PresignedUrl(liveUrl))
 
       expect(url.searchParams.get('X-Amz-Signature')).toBe(r2ConformanceSyntheticSignature)
-      expect(url.searchParams.get('X-Amz-Credential')).toBe(
-        `${r2ConformanceSyntheticAccessKeyId}/20260930/auto/s3/aws4_request`
-      )
+      expect(url.searchParams.get('X-Amz-Credential')).toBe(r2ConformanceSyntheticCredential)
       expect(url.searchParams.has('X-Amz-Security-Token')).toBe(false)
 
       expect(yield* suiteFailures(withFixture(presignId, () => scrubbed))).toEqual([])

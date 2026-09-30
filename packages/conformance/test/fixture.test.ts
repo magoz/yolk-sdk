@@ -5,6 +5,7 @@ import {
   fixtureAgeDays,
   isFixtureStale,
   scanFixtureForSecrets,
+  syntheticPortCredentialParams,
   type FixtureSecretIssue,
   type WireExchange,
   type WireFixture
@@ -367,31 +368,35 @@ describe('scanFixtureForSecrets', () => {
     noSecretValues(issues)
   })
 
-  it('accepts only documented synthetic placeholders in credential parameters', () => {
+  it('exempts nothing in credential parameters, not even the port placeholders', () => {
     const url = (query: string) => ({
       request: { method: 'PUT', url: `https://storage.example.test/bucket/key.txt?${query}` },
       response: { status: 200, headers: {}, body: '' }
     })
 
-    expect(
-      scanFixtureForSecrets(
-        withExchange(
-          url(
-            'X-Amz-Credential=yolk-synthetic-key-id%2F20260930%2Fauto%2Fs3%2Faws4_request&X-Amz-Signature=yolk-synthetic-signature'
-          )
-        )
-      )
-    ).toEqual([])
-
     for (const query of [
-      'X-Amz-Signature=synthetic-signature',
-      'X-Amz-Signature=yolk-synthetic-signature&X-Amz-Credential=LIVEKEYID%2F20260930',
-      'token=Yolk-Synthetic-but-capitalized'
+      `X-Amz-Signature=${syntheticPortCredentialParams['x-amz-signature']}`,
+      `X-Amz-Credential=${encodeURIComponent(syntheticPortCredentialParams['x-amz-credential'])}`,
+      'X-Amz-Signature=yolk-synthetic-signature0123abcdef',
+      'password=yolk-synthetic-Hunter2!'
     ]) {
-      expect(scanFixtureForSecrets(withExchange(url(query)))).toEqual([
+      expect(scanFixtureForSecrets(withExchange(url(query))), query).toEqual([
         { kind: 'credential_query_param', location: 'exchanges[0].request.url' }
       ])
     }
+  })
+
+  it('flags a live parameter that follows a placeholder in the same JSON body', () => {
+    const body = JSON.stringify({
+      a: `https://h.example.test/b?X-Amz-Signature=${syntheticPortCredentialParams['x-amz-signature']}`,
+      b: 'https://h.example.test/c?token=GHSAT0AAAALIVE0000000000'
+    })
+
+    expect(
+      scanFixtureForSecrets(
+        withExchange({ request: getRequest, response: { status: 200, headers: {}, body } })
+      )
+    ).toEqual([{ kind: 'credential_query_param', location: 'exchanges[0].response.body' }])
   })
 
   it('scans fixture metadata strings with the token patterns', () => {
