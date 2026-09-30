@@ -10,9 +10,12 @@
  * hosts and the upcoming emulator. The same cases run on replay fixtures, an emulator, or by hand
  * against a practice tenant. None is observed live yet (`observed` absent = unverified).
  *
- * Every write case creates its own calendar event, draft, or folder, ALWAYS removes it again
- * (also after a failed claim or an interruption), verifies the removal where Graph allows it, and
- * reports (never swallows) a failed restore. No case sends mail or invitations.
+ * Every write case creates its own calendar event, draft, or folder and registers its id for the
+ * restore before any claim runs (the create and the registration run uninterruptibly). The restore
+ * then removes it again (also after a failed claim or an interruption), verifies the removal where
+ * Graph allows it, and reports (never swallows) a failed restore. A create that succeeds without a
+ * recoverable id fails with `MicrosoftConformanceRestoreFailed`: the item needs removal by hand.
+ * No case sends mail or invitations.
  */
 import { Cause, Chunk, Context, Data, Duration, Effect, Exit, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -181,9 +184,10 @@ const restoreByHandAdvice =
 const sentence = (text: string): string => (text.endsWith('.') ? text : `${text}.`)
 
 /**
- * Removing what a write case created failed. `caseOutcome` says whether the claim itself held
- * before the restore; `claimFailure` is a sanitized summary of why it failed. The item may or may
- * not still exist: check it, and remove it by hand only if it does.
+ * Removing what a write case created failed, or a create succeeded without an id so nothing could
+ * be removed automatically. `caseOutcome` says whether the claim itself held before the restore;
+ * `claimFailure` is a sanitized summary of why it failed. The item may or may not still exist:
+ * check it, and remove it by hand only if it does.
  */
 export class MicrosoftConformanceRestoreFailed extends Data.TaggedError(
   'MicrosoftConformanceRestoreFailed'
@@ -274,6 +278,20 @@ const outcomeStatus = <A>(result: ActionResult<A>): number | 'success' | 'no-sta
 /** Longest failure summary embedded in a `MicrosoftConformanceRestoreFailed` message. */
 const failureSummaryLength = 60
 
+/** `text` cut to `length` characters, ending in `...` when cut. */
+const truncated = (text: string, length: number): string =>
+  text.length > length ? `${text.slice(0, length - 3).trimEnd()}...` : text
+
+/**
+ * `actionId code status` of a failed action, cut in front of the status so the status always
+ * survives the cap.
+ */
+const actionFailureSummary = (error: MicrosoftConformanceActionFailed): string => {
+  const status = error.status === undefined ? '' : ` ${error.status}`
+
+  return `${truncated(sanitizeConformanceMessage(`${error.actionId} ${error.code}`), failureSummaryLength - status.length)}${status}`
+}
+
 /** Short, sanitized `Tag: message` summary of a failure (credential patterns redacted). */
 const failureSummary = (cause: Cause.Cause<unknown>): string => {
   if (Cause.hasInterruptsOnly(cause)) {
@@ -282,6 +300,11 @@ const failureSummary = (cause: Cause.Cause<unknown>): string => {
 
   const error = Cause.findErrorOption(cause)
   const value = Option.isSome(error) ? error.value : Cause.squash(cause)
+
+  if (value instanceof MicrosoftConformanceActionFailed) {
+    return actionFailureSummary(value)
+  }
+
   const tag = Predicate.hasProperty(value, '_tag') ? String(value._tag) : 'defect'
   const message = Predicate.hasProperty(value, 'message') ? String(value.message) : ''
 
@@ -293,67 +316,85 @@ const failureSummary = (cause: Cause.Cause<unknown>): string => {
         ? message
         : `${tag}: ${message}`
 
-  const summary = sanitizeConformanceMessage(raw)
-
-  return summary.length > failureSummaryLength
-    ? `${summary.slice(0, failureSummaryLength - 3).trimEnd()}...`
-    : summary
+  return truncated(sanitizeConformanceMessage(raw), failureSummaryLength)
 }
 
 /**
- * Run `use`, then ALWAYS run `restore` (also after a failure or interruption, uninterruptibly).
- * A failed restore fails the case with `MicrosoftConformanceRestoreFailed`, which says whether the
- * claim itself held and, if not, summarizes why; otherwise the outcome of `use` (including an
- * interruption) is returned unchanged.
+ * The ids a write case must remove. The restore removes every id still pending; a case drops an id
+ * only once it has itself verified that the item is gone.
  */
-const withRestore = <A, E, R, E2, R2>(
-  caseId: string,
-  use: Effect.Effect<A, E, R>,
-  restore: Effect.Effect<void, E2, R2>
-): Effect.Effect<A, E | MicrosoftConformanceRestoreFailed, R | R2> =>
-  Effect.uninterruptibleMask(unmask =>
-    Effect.gen(function* () {
-      const outcome = yield* Effect.exit(unmask(use))
-      const restored = yield* Effect.exit(restore)
+type PendingIds = Ref.Ref<ReadonlyArray<string>>
 
-      if (Exit.isFailure(restored)) {
-        return yield* Exit.isSuccess(outcome)
-          ? new MicrosoftConformanceRestoreFailed({
-              caseId,
-              reason: failureSummary(restored.cause),
-              caseOutcome: 'claim held'
-            })
-          : new MicrosoftConformanceRestoreFailed({
-              caseId,
-              reason: failureSummary(restored.cause),
-              caseOutcome: 'claim failed',
-              claimFailure: failureSummary(outcome.cause)
-            })
-      }
-
-      return yield* outcome
-    })
-  )
+/** How a write case creates its own item. */
+interface OwnItem<T, E, R> {
+  /** Creates the item remotely and decodes the response. */
+  readonly create: Effect.Effect<T, E, R>
+  /** The id of the created item, or `undefined` when the create response carries none. */
+  readonly idOf: (created: T) => string | undefined
+}
 
 /**
- * `withRestore` for a case that creates its own item: `use` records the created id in `pending`
- * (and clears it once the claim itself removed the item); the restore removes whatever is still
- * pending and does nothing when nothing was created.
+ * Create a case-owned item, run `use`, then ALWAYS remove whatever is still pending.
+ *
+ * The create request, its decoding, and the registration of the id in `pending` run
+ * uninterruptibly, so an interruption cannot land between the remote create and the registration
+ * the restore relies on; `use` (the claims) runs interruptibly again. The restore runs
+ * uninterruptibly after `use` succeeds, fails, or is interrupted, and does nothing once `pending`
+ * is empty. A failed restore fails the case with `MicrosoftConformanceRestoreFailed`, which says
+ * whether the claim itself held and, if not, summarizes why; otherwise the outcome of `use`
+ * (including an interruption) is returned unchanged. A create that succeeds without an id leaves
+ * nothing to remove automatically: it fails with `MicrosoftConformanceRestoreFailed` too, so the
+ * item is removed by hand.
  */
-const withOwnItem = <A, E, R, E2, R2>(
+const withOwnItem = <T, A, E1, R1, E, R, E2, R2>(
   caseId: string,
-  use: (pending: Ref.Ref<Option.Option<string>>) => Effect.Effect<A, E, R>,
-  remove: (id: string) => Effect.Effect<void, E2, R2>
-) =>
+  item: OwnItem<T, E1, R1>,
+  use: (created: T, id: string, pending: PendingIds) => Effect.Effect<A, E, R>,
+  remove: (ids: ReadonlyArray<string>) => Effect.Effect<void, E2, R2>
+): Effect.Effect<A, E1 | E | MicrosoftConformanceRestoreFailed, R1 | R | R2> =>
   Effect.gen(function* () {
-    const pending = yield* Ref.make(Option.none<string>())
+    const pending: PendingIds = yield* Ref.make<ReadonlyArray<string>>([])
 
-    return yield* withRestore(
-      caseId,
-      use(pending),
-      Ref.get(pending).pipe(
-        Effect.flatMap(id => (Option.isSome(id) ? remove(id.value) : Effect.void))
-      )
+    return yield* Effect.uninterruptibleMask(unmask =>
+      Effect.gen(function* () {
+        const created = yield* item.create
+        const id = item.idOf(created)
+
+        if (id === undefined) {
+          return yield* new MicrosoftConformanceRestoreFailed({
+            caseId,
+            reason: 'the create response carried no id, so nothing was removed',
+            caseOutcome: 'claim failed'
+          })
+        }
+
+        yield* Ref.set(pending, [id])
+
+        const outcome = yield* Effect.exit(unmask(use(created, id, pending)))
+
+        const restored = yield* Effect.exit(
+          Ref.get(pending).pipe(
+            Effect.flatMap(ids => (ids.length === 0 ? Effect.void : remove(ids)))
+          )
+        )
+
+        if (Exit.isFailure(restored)) {
+          return yield* Exit.isSuccess(outcome)
+            ? new MicrosoftConformanceRestoreFailed({
+                caseId,
+                reason: failureSummary(restored.cause),
+                caseOutcome: 'claim held'
+              })
+            : new MicrosoftConformanceRestoreFailed({
+                caseId,
+                reason: failureSummary(restored.cause),
+                caseOutcome: 'claim failed',
+                claimFailure: failureSummary(outcome.cause)
+              })
+        }
+
+        return yield* outcome
+      })
     )
   })
 
@@ -524,14 +565,11 @@ const ensureEventAbsent = (target: CalendarTarget, eventId: string) =>
     )
   })
 
-const createdEventId = (event: GraphEvent, subject: string) =>
-  isNonEmptyString(event.id)
-    ? Effect.succeed(event.id)
-    : Effect.fail(
-        new ConformanceMismatch({
-          message: `expected the create response to carry an event id; an event titled "${subject}" may exist: delete it by hand`
-        })
-      )
+/** Remove every pending case-created event. */
+const ensureEventsAbsent = (target: CalendarTarget) => (eventIds: ReadonlyArray<string>) =>
+  Effect.forEach(eventIds, eventId => ensureEventAbsent(target, eventId), { discard: true })
+
+const eventIdOf = (event: GraphEvent) => (isNonEmptyString(event.id) ? event.id : undefined)
 
 const createEventCaseId = 'microsoft.calendar.create-returns-event-id'
 
@@ -551,19 +589,17 @@ export const microsoftCalendarCreateEventCase: MicrosoftConformanceCase = define
 
     yield* withOwnItem(
       createEventCaseId,
-      pending =>
+      {
+        create: createCalendarEvent(target, {
+          subject: createEventSubject,
+          body: 'Synthetic conformance event; safe to delete.',
+          startUtc: '2026-01-05T09:00:00',
+          endUtc: '2026-01-05T09:30:00'
+        }).pipe(Effect.flatMap(result => successValue(calendarActionIds.create, result))),
+        idOf: eventIdOf
+      },
+      (_created, eventId, pending) =>
         Effect.gen(function* () {
-          const created = yield* createCalendarEvent(target, {
-            subject: createEventSubject,
-            body: 'Synthetic conformance event; safe to delete.',
-            startUtc: '2026-01-05T09:00:00',
-            endUtc: '2026-01-05T09:30:00'
-          }).pipe(Effect.flatMap(result => successValue(calendarActionIds.create, result)))
-
-          const eventId = yield* createdEventId(created, createEventSubject)
-
-          yield* Ref.set(pending, Option.some(eventId))
-
           const fetched = yield* getCalendarEvent(target, eventId).pipe(
             Effect.flatMap(result => successValue(calendarActionIds.get, result))
           )
@@ -594,15 +630,17 @@ export const microsoftCalendarCreateEventCase: MicrosoftConformanceCase = define
           yield* deleteCalendarEvent(target, eventId).pipe(
             Effect.flatMap(result => successValue(calendarActionIds.delete, result))
           )
-          yield* Ref.set(pending, Option.none())
 
+          // Still pending until GET proves the removal: a DELETE success that leaves the event
+          // readable must still reach the restore.
           yield* expectEqual(
             outcomeStatus(yield* getCalendarEvent(target, eventId)),
             404,
             'expected GET with the created id to answer 404 after DELETE'
           )
+          yield* Ref.set(pending, [])
         }),
-      eventId => ensureEventAbsent(target, eventId)
+      ensureEventsAbsent(target)
     )
   })
 })
@@ -623,19 +661,17 @@ export const microsoftCalendarCancelCase: MicrosoftConformanceCase = defineConfo
 
     yield* withOwnItem(
       cancelCaseId,
-      pending =>
+      {
+        create: createCalendarEvent(target, {
+          subject: cancelEventSubject,
+          body: 'Synthetic conformance event; cancelled by the case.',
+          startUtc: '2026-01-05T10:00:00',
+          endUtc: '2026-01-05T10:30:00'
+        }).pipe(Effect.flatMap(result => successValue(calendarActionIds.create, result))),
+        idOf: eventIdOf
+      },
+      (_created, eventId, pending) =>
         Effect.gen(function* () {
-          const created = yield* createCalendarEvent(target, {
-            subject: cancelEventSubject,
-            body: 'Synthetic conformance event; cancelled by the case.',
-            startUtc: '2026-01-05T10:00:00',
-            endUtc: '2026-01-05T10:30:00'
-          }).pipe(Effect.flatMap(result => successValue(calendarActionIds.create, result)))
-
-          const eventId = yield* createdEventId(created, cancelEventSubject)
-
-          yield* Ref.set(pending, Option.some(eventId))
-
           yield* cancelCalendarEvent(target, eventId, 'Synthetic conformance cancellation.').pipe(
             Effect.flatMap(result => successValue(calendarActionIds.cancel, result))
           )
@@ -653,9 +689,9 @@ export const microsoftCalendarCancelCase: MicrosoftConformanceCase = defineConfo
             'expected DELETE after cancel to be a no-op success or 404',
             { actual: deleteStatus }
           )
-          yield* Ref.set(pending, Option.none())
+          yield* Ref.set(pending, [])
         }),
-      eventId => ensureEventAbsent(target, eventId)
+      ensureEventsAbsent(target)
     )
   })
 })
@@ -825,8 +861,10 @@ export const microsoftOutlookPagingNextLinkCase: MicrosoftConformanceCase = defi
 const draftSubject = `${microsoftConformanceMarker} draft: safe to delete`
 
 /** A case-owned, recipient-free draft (never sent). */
-const createDraft = (mailbox: string | undefined) =>
-  outlookCreateDraftAction
+const ownDraft = (
+  mailbox: string | undefined
+): OwnItem<OutlookMessage, MicrosoftConformanceError, MicrosoftConformanceRequirements> => ({
+  create: outlookCreateDraftAction
     .executeTyped({
       integration,
       input: OutlookComposeInput.make({
@@ -837,30 +875,34 @@ const createDraft = (mailbox: string | undefined) =>
         contentType: 'text'
       })
     })
-    .pipe(Effect.flatMap(result => successValue(outlookCreateDraftAction.id, result)))
+    .pipe(Effect.flatMap(result => successValue(outlookCreateDraftAction.id, result))),
+  idOf: draft => (isNonEmptyString(draft.id) ? draft.id : undefined)
+})
 
-const draftId = (draft: OutlookMessage) =>
-  isNonEmptyString(draft.id)
-    ? Effect.succeed(draft.id)
-    : Effect.fail(
-        new ConformanceMismatch({
-          message: `expected the created draft to carry an id; a draft titled "${draftSubject}" may exist: delete it by hand`
-        })
-      )
-
-/** Permanently delete a case-owned draft and require its per-message outcome to succeed. */
-const deleteDraft = (mailbox: string | undefined, messageId: string) =>
+/**
+ * Permanently delete the pending ids of a case-owned draft (its original id and, if a move
+ * changed it, the id it answered with). At least one must be deleted and every other one must no
+ * longer exist.
+ */
+const deleteDraft = (mailbox: string | undefined) => (messageIds: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const output = yield* outlookDeletePermanentlyAction
-      .executeTyped({ integration, input: { messageIds: [messageId], mailbox } })
+      .executeTyped({ integration, input: { messageIds, mailbox } })
       .pipe(Effect.flatMap(result => successValue(outlookDeletePermanentlyAction.id, result)))
 
-    const outcome = output.results.find(item => item.messageId === messageId)
+    const outcomes = messageIds.map(
+      messageId => output.results.find(item => item.messageId === messageId) ?? null
+    )
 
-    yield* expectEqual(
-      outcome?.status ?? null,
-      'succeeded',
-      'expected the case-created draft to be permanently deleted'
+    yield* expectConformance(
+      outcomes.some(outcome => outcome?.status === 'succeeded') &&
+        outcomes.every(
+          outcome =>
+            outcome?.status === 'succeeded' ||
+            (outcome?.status === 'failed' && outcome.code === 'not_found')
+        ),
+      'expected the case-created draft to be permanently deleted',
+      { actual: outcomes.map(outcome => outcome?.code ?? outcome?.status ?? null) }
     )
   })
 
@@ -878,19 +920,23 @@ export const microsoftOutlookImmutableIdCase: MicrosoftConformanceCase = defineC
 
     yield* withOwnItem(
       immutableIdCaseId,
-      pending =>
+      ownDraft(mailbox),
+      (draft, id, pending) =>
         Effect.gen(function* () {
-          const draft = yield* createDraft(mailbox)
-          const id = yield* draftId(draft)
-
-          yield* Ref.set(pending, Option.some(id))
-
           const moved = yield* outlookTrashAction
             .executeTyped({
               integration,
               input: OutlookTrashInput.make({ messageId: id, mailbox })
             })
             .pipe(Effect.flatMap(result => successValue(outlookTrashAction.id, result)))
+
+          // Register the id the move answered with BEFORE asserting it is unchanged: if the move
+          // changed the id, the restore must also remove the draft under its new id.
+          if (isNonEmptyString(moved.id) && moved.id !== id) {
+            const movedId = moved.id
+
+            yield* Ref.update(pending, ids => [...ids, movedId])
+          }
 
           yield* expectEqual(moved.id, id, 'expected the moved message to keep its immutable id')
           yield* expectConformance(
@@ -911,7 +957,7 @@ export const microsoftOutlookImmutableIdCase: MicrosoftConformanceCase = defineC
             'expected the original id to still address the moved message'
           )
         }),
-      id => deleteDraft(mailbox, id)
+      deleteDraft(mailbox)
     )
   })
 })
@@ -939,12 +985,9 @@ export const microsoftOutlookConcurrentWritesCase: MicrosoftConformanceCase = de
 
       yield* withOwnItem(
         concurrentCaseId,
-        pending =>
+        ownDraft(mailbox),
+        (_draft, id) =>
           Effect.gen(function* () {
-            const id = yield* draftId(yield* createDraft(mailbox))
-
-            yield* Ref.set(pending, Option.some(id))
-
             const outcomes = yield* Effect.all(
               concurrentSubjects.map(subject =>
                 outlookUpdateDraftAction.executeTyped({
@@ -981,7 +1024,7 @@ export const microsoftOutlookConcurrentWritesCase: MicrosoftConformanceCase = de
               'expected every winning write to return one of the two sent subjects'
             )
           }),
-        id => deleteDraft(mailbox, id)
+        deleteDraft(mailbox)
       )
     })
   }
@@ -1060,6 +1103,20 @@ const deleteDriveItem = (driveId: string | undefined, itemId: string) =>
     input: OneDriveDeleteItemInput.make({ itemId, driveId })
   })
 
+/** Remove every pending case-created folder. */
+const ensureDriveItemsAbsent = (driveId: string | undefined) => (itemIds: ReadonlyArray<string>) =>
+  Effect.forEach(itemIds, itemId => ensureDriveItemAbsent(driveId, itemId), { discard: true })
+
+/** A case-owned folder under the seeded parent. */
+const ownFolder = (
+  driveId: string | undefined,
+  parentItemId: string,
+  name: string
+): OwnItem<OneDriveItem, MicrosoftConformanceError, MicrosoftConformanceRequirements> => ({
+  create: createOwnFolder(driveId, parentItemId, name),
+  idOf: folder => (isNonEmptyString(folder.id) ? folder.id : undefined)
+})
+
 /** Remove a case-created folder that may still exist, then verify GET answers 404. */
 const ensureDriveItemAbsent = (driveId: string | undefined, itemId: string) =>
   Effect.gen(function* () {
@@ -1094,12 +1151,9 @@ export const microsoftOneDriveCreateFolderCase: MicrosoftConformanceCase = defin
 
     yield* withOwnItem(
       createFolderCaseId,
-      pending =>
+      ownFolder(driveId, parentItemId, roundtripFolderName),
+      (folder, _folderId, pending) =>
         Effect.gen(function* () {
-          const folder = yield* createOwnFolder(driveId, parentItemId, roundtripFolderName)
-
-          yield* Ref.set(pending, Option.some(folder.id))
-
           yield* expectConformance(
             folder.folder !== undefined && folder.name === roundtripFolderName,
             'expected the created item to be a folder with the requested name'
@@ -1115,15 +1169,17 @@ export const microsoftOneDriveCreateFolderCase: MicrosoftConformanceCase = defin
           yield* deleteDriveItem(driveId, folder.id).pipe(
             Effect.flatMap(result => successValue(oneDriveDeleteItemAction.id, result))
           )
-          yield* Ref.set(pending, Option.none())
 
+          // Still pending until GET proves the removal: a DELETE success that leaves the folder
+          // readable must still reach the restore.
           yield* expectEqual(
             outcomeStatus(yield* getDriveItem(driveId, folder.id)),
             404,
             'expected GET of the deleted folder to answer 404'
           )
+          yield* Ref.set(pending, [])
         }),
-      folderId => ensureDriveItemAbsent(driveId, folderId)
+      ensureDriveItemsAbsent(driveId)
     )
   })
 })
@@ -1162,12 +1218,9 @@ export const microsoftOneDriveCopyMonitorCase: MicrosoftConformanceCase = define
 
     yield* withOwnItem(
       copyCaseId,
-      pending =>
+      ownFolder(driveId, parentItemId, copyFolderName),
+      (folder, _folderId) =>
         Effect.gen(function* () {
-          const folder = yield* createOwnFolder(driveId, parentItemId, copyFolderName)
-
-          yield* Ref.set(pending, Option.some(folder.id))
-
           const accepted = yield* oneDriveCopyItemAction
             .executeTyped({
               integration,
@@ -1211,7 +1264,7 @@ export const microsoftOneDriveCopyMonitorCase: MicrosoftConformanceCase = define
             'expected the completed copy in the destination folder under the source name'
           )
         }),
-      folderId => ensureDriveItemAbsent(driveId, folderId)
+      ensureDriveItemsAbsent(driveId)
     )
   })
 })

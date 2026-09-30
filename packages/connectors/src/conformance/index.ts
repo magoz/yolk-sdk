@@ -6,7 +6,9 @@
  * cases run the real connector actions over a replay `HttpClient` (`@yolk-sdk/conformance/replay`),
  * an emulator, or a host's live client driven by hand. They enforce NO streamed byte limits,
  * redirect policy, DNS/IP policy, timeouts, or TLS policy beyond what the wrapped `HttpClient`
- * does. Production hosts implement `ConnectorHttpClient` / `ConnectorBinaryHttpClient` /
+ * does. No bridge propagates trace context; upload-session requests and requests without an
+ * `Authorization` header (whose URL may be the credential) get no client span, since the span would
+ * record the URL and its query string. Production hosts implement `ConnectorHttpClient` / `ConnectorBinaryHttpClient` /
  * `ConnectorBinaryWriteHttpClient` themselves (see the connectors README host integration
  * contract) and own real credential storage.
  *
@@ -77,11 +79,30 @@ const toEffectRequest = (input: {
 }
 
 /**
+ * Whether the client span for a request is skipped. `HttpClient` records `url.full` and
+ * `url.query` on its span even when trace propagation is off, so a request whose URL may itself be
+ * the credential must not be traced.
+ */
+type TracerDisabledWhen = (request: HttpClientRequest.HttpClientRequest) => boolean
+
+/** Upload-session URLs are secret capabilities: never traced. */
+const neverTraced: TracerDisabledWhen = () => true
+
+/**
+ * A request without an `Authorization` header may carry its credential in the URL (for example a
+ * pre-authenticated download, copy-monitor, or upload URL), so it is not traced either.
+ * `HttpClientRequest` header names are lowercase.
+ */
+const untracedWithoutAuthorization: TracerDisabledWhen = request =>
+  request.headers['authorization'] === undefined
+
+/**
  * Execute one request with the port's fetch semantics. `redirect: 'manual'` and
  * `credentials: 'omit'` are forwarded as `FetchHttpClient.RequestInit` for this request only
  * (merged over any host defaults), which `FetchHttpClient` honors; other `HttpClient`
  * implementations must honor them on their own. Trace-context propagation headers are disabled so
- * the upstream sees exactly the connector's headers.
+ * the upstream sees exactly the connector's headers, and requests matched by `tracerDisabledWhen`
+ * get no client span (whose attributes would carry the URL).
  */
 const executeWithPortSemantics = <A>(
   client: HttpClient.HttpClient,
@@ -89,7 +110,8 @@ const executeWithPortSemantics = <A>(
   options: FetchOptions,
   read: (
     response: HttpClientResponse.HttpClientResponse
-  ) => Effect.Effect<A, HttpClientError.HttpClientError>
+  ) => Effect.Effect<A, HttpClientError.HttpClientError>,
+  tracerDisabledWhen: TracerDisabledWhen = untracedWithoutAuthorization
 ): Effect.Effect<A, HttpClientError.HttpClientError> =>
   Effect.gen(function* () {
     const hostDefaults = yield* Effect.serviceOption(FetchHttpClient.RequestInit)
@@ -104,7 +126,8 @@ const executeWithPortSemantics = <A>(
       .pipe(
         Effect.flatMap(read),
         Effect.provideService(FetchHttpClient.RequestInit, requestInit),
-        Effect.provideService(HttpClient.TracerPropagationEnabled, false)
+        Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+        Effect.provideService(HttpClient.TracerDisabledWhen, tracerDisabledWhen)
       )
   })
 
@@ -271,7 +294,8 @@ const isSuccessStatusList = (
 const sendBinaryWrite = (
   client: HttpClient.HttpClient,
   request: ConnectorBinaryWriteHttpRequest | ConnectorBinaryUploadSessionRequest,
-  valid: boolean
+  valid: boolean,
+  tracerDisabledWhen: TracerDisabledWhen = untracedWithoutAuthorization
 ): Effect.Effect<ConnectorBinaryHttpResponse, ConnectorBinaryHttpError> =>
   Effect.gen(function* () {
     if (
@@ -301,7 +325,8 @@ const sendBinaryWrite = (
             headers: plainHeaders(response),
             bytes: new Uint8Array(buffer)
           }))
-        )
+        ),
+      tracerDisabledWhen
     ).pipe(Effect.mapError(binaryTransportFailure))
 
     return yield* binaryResponse(request, status, headers, bytes, request.successStatuses)
@@ -318,8 +343,9 @@ const sendBinaryWrite = (
  * a success status (`successStatuses`) larger than `maxBytes` fails with `response_too_large`, and
  * any other status keeps at most `maxErrorBodyBytes` bytes (`bodyComplete: false` when truncated).
  * `redirect: 'manual'` and `credentials: 'omit'` are forwarded as `FetchHttpClient.RequestInit`
- * options. Errors are code-only `ConnectorBinaryHttpError`s: never the URL (a session URL is a
- * secret capability), headers, or bodies. Enforces NO streamed byte limit, redirect, DNS/IP,
+ * options. Session requests are never traced (`HttpClient.TracerDisabledWhen`), so no span
+ * records the session URL. Errors are code-only `ConnectorBinaryHttpError`s: never the URL (a
+ * session URL is a secret capability), headers, or bodies. Enforces NO streamed byte limit, redirect, DNS/IP,
  * timeout, or TLS policy beyond the wrapped client, never retries, and is not for production.
  */
 export const connectorBinaryWriteHttpClientFromEffectHttpClientLayer: Layer.Layer<
@@ -351,7 +377,8 @@ export const connectorBinaryWriteHttpClientFromEffectHttpClientLayer: Layer.Laye
               (request.method === 'DELETE' &&
                 isBytes(request.bytes) &&
                 request.bytes.byteLength === 0 &&
-                isSuccessStatusList(request.successStatuses, [[204]])))
+                isSuccessStatusList(request.successStatuses, [[204]]))),
+          neverTraced
         )
     })
   })

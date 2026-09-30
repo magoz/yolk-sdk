@@ -208,7 +208,7 @@ export type NewCalendarEvent = {
   readonly endUtc: string
 }
 
-/** `POST .../events` in the target calendar: a private, reminder-free, attendee-free event. */
+/** `POST .../events` in the target calendar: a reminder-free, attendee-free event. */
 export const createCalendarEvent = (target: CalendarTarget, event: NewCalendarEvent) =>
   calendarJson(
     {

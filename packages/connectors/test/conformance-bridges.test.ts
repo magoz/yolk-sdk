@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Context, Effect, Layer, Option, Predicate } from 'effect'
+import { Context, Effect, Layer, Option, Predicate, Tracer } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -431,7 +431,9 @@ describe('connectorBinaryWriteHttpClientFromEffectHttpClientLayer', () => {
       expect(new TextDecoder().decode(response.bytes)).toBe('{"id":"synthetic"}')
       expect(response.headers).toMatchObject({ location: 'https://files.example.test/v1/items/1' })
       expect(seen[0]?.request.method).toBe('POST')
-      expect(requestBytes(seen[0]!.request)).toEqual(Array.from(tenBytes))
+      expect(requestBytes((seen[0] ?? expect.fail('expected one request')).request)).toEqual(
+        Array.from(tenBytes)
+      )
       expect(seen[0]?.request.headers).toMatchObject({
         authorization: 'Bearer synthetic-token',
         'content-type': 'application/octet-stream'
@@ -508,7 +510,9 @@ describe('connectorBinaryWriteHttpClientFromEffectHttpClientLayer', () => {
         expect(response.headers.location).toContain("Attachments('z')")
         expect(seen[0]?.request.method).toBe('PUT')
         expect(seen[0]?.url).toBe(sessionUrl)
-        expect(requestBytes(seen[0]!.request)).toEqual(Array.from(tenBytes))
+        expect(requestBytes((seen[0] ?? expect.fail('expected one request')).request)).toEqual(
+          Array.from(tenBytes)
+        )
         expect(Object.keys(seen[0]?.request.headers ?? {})).not.toContain('authorization')
         expect(seen[0]?.requestInit).toEqual({ redirect: 'manual', credentials: 'omit' })
       })
@@ -543,6 +547,7 @@ describe('connectorBinaryWriteHttpClientFromEffectHttpClientLayer', () => {
       for (const request of [
         sessionRequest({ headers: { Authorization: 'Bearer synthetic-token' } }),
         sessionRequest({ headers: { cookie: 'session=synthetic' } }),
+        sessionRequest({ headers: { 'Proxy-Authorization': 'Basic synthetic-proxy-secret' } }),
         sessionRequest({ method: 'DELETE', successStatuses: [204] }),
         sessionRequest({ method: 'DELETE', bytes: new Uint8Array(0), maxUploadBytes: 0 }),
         sessionRequest({ successStatuses: [204] })
@@ -573,6 +578,79 @@ describe('connectorBinaryWriteHttpClientFromEffectHttpClientLayer', () => {
 
       expect(serialized).not.toContain('outlook.office.com')
       expect(serialized).not.toContain('synthetic-session-secret')
+    })
+  )
+
+  it.effect('records no span that carries the session URL or its token', () =>
+    Effect.gen(function* () {
+      const spans: Array<Tracer.NativeSpan> = []
+
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+
+          spans.push(span)
+
+          return span
+        }
+      })
+
+      const layer = connectorHttpClientsFromEffectHttpClientLayer.pipe(
+        Layer.provide(fakeHttpClient([], () => new Response('{}', { status: 200 })))
+      )
+
+      const traced = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        effect.pipe(Effect.provide(layer), Effect.provideService(Tracer.Tracer, tracer))
+
+      // Control: an authorized Graph-style request is still traced, so the tracer is live.
+      yield* traced(
+        sendText(
+          ConnectorHttpRequest.make({
+            method: 'GET',
+            url: 'https://api.example.test/v1/items',
+            headers: { authorization: 'Bearer synthetic-token' }
+          })
+        )
+      )
+
+      expect(spans.map(span => span.attributes.get('url.full'))).toEqual([
+        'https://api.example.test/v1/items'
+      ])
+
+      yield* traced(sendSession(sessionRequest()))
+      yield* traced(
+        sendSession(
+          sessionRequest({
+            method: 'DELETE',
+            headers: {},
+            bytes: new Uint8Array(0),
+            maxUploadBytes: 0,
+            successStatuses: [204],
+            maxBytes: 0
+          })
+        )
+      )
+      // A request without Authorization (a pre-authenticated URL) is not traced either.
+      yield* traced(
+        sendText(ConnectorHttpRequest.make({ method: 'GET', url: sessionUrl, credentials: 'omit' }))
+      )
+      yield* traced(
+        sendBytes({
+          ...binaryRequest({ maxBytes: 64, maxErrorBodyBytes: 4 }),
+          url: sessionUrl,
+          headers: {}
+        })
+      )
+
+      expect(spans).toHaveLength(1)
+
+      for (const span of spans) {
+        const attributes = JSON.stringify([span.name, ...span.attributes.entries()])
+
+        expect(attributes).not.toContain('outlook.office.com')
+        expect(attributes).not.toContain('authtoken')
+        expect(attributes).not.toContain('synthetic-session-secret')
+      }
     })
   )
 

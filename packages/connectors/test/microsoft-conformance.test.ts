@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer, Ref } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient } from 'effect/unstable/http'
 import type { ConformanceCase } from '@yolk-sdk/conformance/case'
@@ -418,6 +418,9 @@ const drill = (
 
 const mismatch = (message: string) => ({ kind: 'failure', tag: 'ConformanceMismatch', message })
 
+const graphNotFoundError =
+  '{"error":{"code":"ErrorItemNotFound","message":"Synthetic placeholder: not found.","innerError":{"date":"2026-09-29T10:00:08","request-id":"00000000-0000-4000-8000-000000000008","client-request-id":"00000000-0000-4000-8000-000000000008"}}}'
+
 const graphServerError =
   '{"error":{"code":"ErrorInternalServerError","message":"Synthetic placeholder: server error.","innerError":{"date":"2026-09-29T10:00:09","request-id":"00000000-0000-4000-8000-000000000009","client-request-id":"00000000-0000-4000-8000-000000000009"}}}'
 
@@ -446,7 +449,7 @@ describe('Microsoft conformance disagreement drills', () => {
   )
 
   it.effect(
-    'fails the create case when the create response carries no id, writing nothing more',
+    'reports a create without an id as a restore failure needing removal by hand, writing nothing more',
     () =>
       Effect.gen(function* () {
         const noId = replaceResponse(
@@ -457,10 +460,9 @@ describe('Microsoft conformance disagreement drills', () => {
 
         const { failure, entries } = yield* drill(microsoftCalendarCreateEventCase, noId)
 
-        expect(failure).toEqual(
-          mismatch(
-            'expected the create response to carry an event id; an event titled "yolk-conformance event: safe to delete" may exist: delete it by hand'
-          )
+        expect(failure?.tag).toBe('MicrosoftConformanceRestoreFailed')
+        expect(failure?.message).toBe(
+          'microsoft.calendar.create-returns-event-id: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance). Restore error: the create response carried no id, so nothing was removed. Claim failed first.'
         )
         // Without an id there is nothing to address: only the create was sent.
         expect(exchangeIndices(entries)).toEqual(['POST 0'])
@@ -642,7 +644,61 @@ describe('Microsoft conformance disagreement drills', () => {
     })
   )
 
-  it.effect('fails the immutable-id case when the move returns a new id, and still deletes', () =>
+  it.effect('fails the immutable-id case when the move returns a new id, and deletes that id', () =>
+    Effect.gen(function* () {
+      const originalId = 'AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A-synthetic-immutable-0001='
+      const movedId = 'AAMkAGI2-synthetic-moved-0001='
+
+      const changed = replaceResponse(
+        replaceResponse(
+          microsoftOutlookImmutableIdFixture,
+          1,
+          replaceInBody(`"id":"${originalId}"`, `"id":"${movedId}"`)
+        ),
+        3,
+        // The original id no longer exists after the move (404); the new id deletes (204).
+        response => ({
+          status: 200,
+          headers: response.headers,
+          body: JSON.stringify({
+            responses: [
+              { id: 'req-1', status: 404, headers: {}, body: JSON.parse(graphNotFoundError) },
+              { id: 'req-2', status: 204, headers: {} }
+            ]
+          })
+        })
+      )
+
+      const { failure, entries, remaining } = yield* drill(
+        microsoftOutlookImmutableIdCase,
+        pickExchanges(changed, [0, 1, 3])
+      )
+
+      // The restore succeeded: the case reports the claim, not a restore failure.
+      expect(failure).toEqual(mismatch('expected the moved message to keep its immutable id'))
+      expect(exchangeIndices(entries)).toEqual(['POST 0', 'POST 1', 'POST 2'])
+      expect(remaining).toEqual([])
+
+      // The cleanup batch permanently deletes the NEW id (and tries the original one).
+      const batch = entries.at(-1)
+
+      expect(batch?.url).toBe('https://graph.microsoft.com/v1.0/$batch')
+      expect(batch?.bodyJson).toMatchObject({
+        requests: [
+          {
+            method: 'POST',
+            url: `/users/ada%40example.test/messages/${encodeURIComponent(originalId)}/permanentDelete`
+          },
+          {
+            method: 'POST',
+            url: `/users/ada%40example.test/messages/${encodeURIComponent(movedId)}/permanentDelete`
+          }
+        ]
+      })
+    })
+  )
+
+  it.effect('reports a failed restore when the draft under its new id is not deleted', () =>
     Effect.gen(function* () {
       const changed = replaceResponse(
         microsoftOutlookImmutableIdFixture,
@@ -653,14 +709,16 @@ describe('Microsoft conformance disagreement drills', () => {
         )
       )
 
-      const { failure, entries, remaining } = yield* drill(
+      // Only the original id answers in the batch: the new id's outcome is unknown.
+      const { failure } = yield* drill(
         microsoftOutlookImmutableIdCase,
         pickExchanges(changed, [0, 1, 3])
       )
 
-      expect(failure).toEqual(mismatch('expected the moved message to keep its immutable id'))
-      expect(exchangeIndices(entries)).toEqual(['POST 0', 'POST 1', 'POST 2'])
-      expect(remaining).toEqual([])
+      expect(failure?.tag).toBe('MicrosoftConformanceRestoreFailed')
+      expect(failure?.message).toContain(
+        'Restore error: expected the case-created draft to be permanently deleted. Claim failed first: expected the moved message to keep ...'
+      )
     })
   )
 
@@ -706,10 +764,91 @@ describe('Microsoft conformance disagreement drills', () => {
       expect(failure?.tag).toBe('MicrosoftConformanceRestoreFailed')
       // Both summaries are capped so the whole message fits the 300-character report cap.
       expect(failure?.message).toBe(
-        'microsoft.onedrive.create-folder-roundtrip: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance). Restore error: MicrosoftConformanceActionFailed: onedrive.delete_item fa... Claim failed first: expected the parent listing to incl...'
+        'microsoft.onedrive.create-folder-roundtrip: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance). Restore error: onedrive.delete_item onedrive_delete_item_failed 500. Claim failed first: expected the parent listing to include the...'
       )
       expect(failure?.message.length).toBeLessThanOrEqual(300)
       expect(exchangeIndices(entries)).toEqual(['POST 0', 'GET 1', 'DELETE 2'])
+    })
+  )
+
+  it.effect('keeps the event for the restore when DELETE succeeds but GET still finds it', () =>
+    Effect.gen(function* () {
+      const [, fetched] = microsoftCalendarCreateEventFixture.exchanges
+      const deleted = microsoftCalendarCreateEventFixture.exchanges[3]
+      const gone = microsoftCalendarCreateEventFixture.exchanges[4]
+
+      if (fetched === undefined || deleted === undefined || gone === undefined) {
+        return expect.fail('expected five create-event exchanges')
+      }
+
+      // DELETE (3) answers 204 but GET (4) still returns the event; the restore then deletes it
+      // again (5) and GET (6) still finds it, so the restore fails and is reported.
+      const stillThere: WireExchange = { request: gone.request, response: fetched.response }
+
+      const fixture = withExtra(pickExchanges(microsoftCalendarCreateEventFixture, [0, 1, 2, 3]), [
+        stillThere,
+        deleted,
+        stillThere
+      ])
+
+      const { failure, entries, remaining } = yield* drill(
+        microsoftCalendarCreateEventCase,
+        fixture
+      )
+
+      expect(exchangeIndices(entries)).toEqual([
+        'POST 0',
+        'GET 1',
+        'PATCH 2',
+        'DELETE 3',
+        'GET 4',
+        'DELETE 5',
+        'GET 6'
+      ])
+      expect(remaining).toEqual([])
+      expect(failure?.tag).toBe('MicrosoftConformanceRestoreFailed')
+      expect(failure?.message).toBe(
+        'microsoft.calendar.create-returns-event-id: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance). Restore error: expected GET of the case-created event to answer 404 afte... Claim failed first: expected GET with the created id to...'
+      )
+    })
+  )
+
+  it.effect('keeps the folder for the restore when DELETE succeeds but GET still finds it', () =>
+    Effect.gen(function* () {
+      const [created, , deleted, gone] =
+        microsoftOneDriveCreateFolderFixture.exchanges.length === 4
+          ? microsoftOneDriveCreateFolderFixture.exchanges
+          : expect.fail('expected four create-folder exchanges')
+
+      const stillThere: WireExchange = {
+        request: gone.request,
+        response: { ...created.response, status: 200 }
+      }
+
+      const fixture = withExtra(pickExchanges(microsoftOneDriveCreateFolderFixture, [0, 1, 2]), [
+        stillThere,
+        deleted,
+        stillThere
+      ])
+
+      const { failure, entries, remaining } = yield* drill(
+        microsoftOneDriveCreateFolderCase,
+        fixture
+      )
+
+      expect(exchangeIndices(entries)).toEqual([
+        'POST 0',
+        'GET 1',
+        'DELETE 2',
+        'GET 3',
+        'DELETE 4',
+        'GET 5'
+      ])
+      expect(remaining).toEqual([])
+      expect(failure?.tag).toBe('MicrosoftConformanceRestoreFailed')
+      expect(failure?.message).toBe(
+        'microsoft.onedrive.create-folder-roundtrip: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance). Restore error: expected GET of the case-created folder to answer 404 aft... Claim failed first: expected GET of the deleted folder ...'
+      )
     })
   )
 
@@ -727,6 +866,50 @@ describe('Microsoft conformance disagreement drills', () => {
         mismatch('precondition: MicrosoftConformanceConfig.calendarEventId is not configured')
       )
       expect(entries).toEqual([])
+    })
+  )
+})
+
+describe('Microsoft conformance interruption', () => {
+  it.effect('removes an event whose create was in flight when the case was interrupted', () =>
+    Effect.gen(function* () {
+      const createSent = yield* Deferred.make<void>()
+      const releaseCreate = yield* Deferred.make<void>()
+
+      // The create (0), then only the restore's DELETE (3) and GET (4).
+      const { client, ledger } = yield* makeReplayHttpClient([
+        pickExchanges(microsoftCalendarCreateEventFixture, [0, 3, 4])
+      ])
+
+      // Graph has created the event, but its response is held back until the test releases it.
+      const holdingCreate = HttpClient.transform(client, (response, request) =>
+        request.method === 'POST'
+          ? response.pipe(
+              Effect.tap(() => Deferred.succeed(createSent, undefined)),
+              Effect.tap(() => Deferred.await(releaseCreate))
+            )
+          : response
+      )
+
+      const fiber = yield* microsoftCalendarCreateEventCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holdingCreate))),
+        Effect.forkChild
+      )
+
+      yield* Deferred.await(createSent)
+
+      // Interrupt between the remote create and the id registration, then let the response in.
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseCreate, undefined)
+      yield* Fiber.join(interrupting)
+
+      const exit = yield* Fiber.await(fiber)
+
+      expect(Exit.hasInterrupts(exit)).toBe(true)
+      expect(exchangeIndices(yield* ledger.entries)).toEqual(['POST 0', 'DELETE 1', 'GET 2'])
+      expect(yield* ledger.remaining).toEqual([])
     })
   )
 })

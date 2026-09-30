@@ -1174,10 +1174,14 @@ emulator. Credentials bind through `microsoftConformanceIntegration` (`microsoft
 ref `microsoft.conformance`). The case table, seeds, and claims live in the
 [Microsoft conformance guide](../../apps/docs/content/docs/connectors/microsoft.mdx#conformance-cases).
 
-Every write case creates its own event, recipient-free draft, or folder, always removes it again
-(also after a failed assertion or interruption), verifies the removal where Graph allows it, and
-fails with `MicrosoftConformanceRestoreFailed` when the removal fails. No case sends mail or
-invitations. `pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account
+Every write case creates its own event, recipient-free draft, or folder and registers its id for
+cleanup before any claim runs (the create and the registration are not interruptible). When the id
+is recoverable, the case removes the item again automatically (also after a failed assertion or
+interruption), verifies the removal where Graph allows it, and fails with
+`MicrosoftConformanceRestoreFailed` when the removal fails. A create that succeeds without an id also
+fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create (for example a transport
+failure after sending) fails with its own error: both need manual recovery of the
+`yolk-conformance` item. No case sends mail or invitations. `pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account
 <label>` (with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by
 hand, `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings
 all or nothing in `.conformance-recordings/microsoft/<run>/` (gitignored) for manual scrubbing and
