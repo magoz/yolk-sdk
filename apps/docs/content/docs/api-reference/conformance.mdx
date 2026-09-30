@@ -311,7 +311,7 @@ connector cases run the real connector actions over replay, an emulator, or a ho
 | `connectorBinaryHttpClientFromEffectHttpClientLayer`      | GET-only `ConnectorBinaryHttpClient`; buffers, then fails oversize 200s (`response_too_large`) and truncates error bodies                                                                                                   |
 | `connectorBinaryWriteHttpClientFromEffectHttpClientLayer` | `ConnectorBinaryWriteHttpClient` with `uploadSession`: POST/PUT bytes, and PUT ranges / empty DELETE cancellation to pre-authenticated session URLs; refuses bad requests and credential headers on sessions before sending |
 | `connectorHttpClientsFromEffectHttpClientLayer`           | All three bridges                                                                                                                                                                                                           |
-| `ConformanceCleanupReporter`                              | `Context.Reference` receiving cleanup problems a write case raises while being interrupted; default `Effect.logWarning`, live runners print WARN lines                                                                      |
+| `ConformanceCleanupReporter`                              | `Context.Reference` receiving cleanup problems a write case raises while being interrupted; default `Effect.logWarning`; the Dropbox, Notion, Todoist, and Telegram live runners print WARN lines                           |
 | `staticCredentialResolverLayer(credentials)`              | `CredentialResolver` returning one `RuntimeCredential` for every slot, or credentials keyed by slot id (missing: `credential_missing`)                                                                                      |
 
 These bridges are **not production adapters**. They enforce no streamed byte limits, redirect,
@@ -422,21 +422,20 @@ chat. There is no leftover lookup.
 See [Telegram conformance cases](../connectors/telegram#conformance-cases).
 
 When a case is interrupted, the run no longer produces a report, and no further case starts. So
-Dropbox, Notion, Todoist, Fortnox, and Microsoft write cases (and the Telegram send) also hand a
-cleanup problem raised
-during the interruption (a failed cleanup, or a create or send whose outcome is unknown) to
-`ConformanceCleanupReporter` from
+Dropbox, Notion, Todoist, and Microsoft write cases, the Fortnox row and customer mutation cases,
+and the Telegram send also hand a cleanup problem raised during the interruption (a failed cleanup,
+or a create or send whose outcome is unknown) to `ConformanceCleanupReporter` from
 `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
-`Effect.logWarning`. With the Effect version this repository pins, such a run ends with that
-failure itself (no Interrupt in the cause), and a run whose cleanup succeeded ends as a plain
-interruption; drills in the connector tests pin both, so an Effect upgrade that changes this fails
-visibly. The Dropbox, Notion, Todoist, and Telegram live runners print
-reported problems to stderr as WARN lines. Their first SIGINT/SIGTERM interrupts the run fiber so
-the cleanup is attempted; duplicates within a second (one Ctrl-C reaches every process of the
-foreground group, and the wrappers relay it) are ignored, and a later signal exits at once. Only
-after an interrupt-only exit (code 130) does the read-only leftover lookup run again and list what
-is still present; a run that ends with a cleanup failure exits 1 with that failure's message. Run
-live runs as `pnpm conformance:<provider>` or with `tsx` directly: `pnpm exec tsx` returns to the
-prompt at once on Ctrl-C (observed), so later output prints after the prompt, `$?` is pnpm's own
-code, and the runner is then stopped with `kill -TERM <pid>` (the first-signal message prints the
-pid).
+`Effect.logWarning`. The Fortnox rejection case and the Fortnox email send do not report. With the
+Effect version this repository pins, such a run ends with that failure itself (no Interrupt in the
+cause), and a run whose cleanup succeeded ends as a plain interruption; drills in the connector
+tests pin both, so an Effect upgrade that changes this fails visibly. The Dropbox, Notion, Todoist,
+and Telegram live runners print reported problems to stderr as WARN lines. Their first
+SIGINT/SIGTERM interrupts the run fiber so the cleanup is attempted; duplicates within a second (one
+Ctrl-C reaches every process of the foreground group, and the wrappers relay it) are ignored, and a
+later signal exits at once. Only after an interrupt-only exit (code 130) does the read-only leftover
+lookup run again and list what is still present; a run that ends with a cleanup failure exits 1 with
+that failure's message. Run live runs as `pnpm conformance:<provider>` or with `tsx` directly:
+`pnpm exec tsx` returns to the prompt at once on Ctrl-C (observed), so later output prints after the
+prompt, `$?` is pnpm's own code, and the runner is then stopped with `kill -TERM <pid>` (the
+first-signal message prints the pid).

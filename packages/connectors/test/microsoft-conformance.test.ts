@@ -419,6 +419,26 @@ const drill = (
 
 const mismatch = (message: string) => ({ kind: 'failure', tag: 'ConformanceMismatch', message })
 
+/** The event create (0) answering without an id: nothing can be removed automatically. */
+const idLessCreateFixture = pickExchanges(
+  replaceResponse(
+    microsoftCalendarCreateEventFixture,
+    0,
+    replaceInBody('"id":"AAMkAGI2-synthetic-event-0101=",', '')
+  ),
+  [0]
+)
+
+/** A `ConformanceCleanupReporter` that captures every reported message. */
+const capturingReporter = Effect.gen(function* () {
+  const warnings = yield* Ref.make<ReadonlyArray<string>>([])
+
+  return {
+    warnings,
+    reporter: { warn: (message: string) => Ref.update(warnings, list => [...list, message]) }
+  }
+})
+
 const graphNotFoundError =
   '{"error":{"code":"ErrorItemNotFound","message":"Synthetic placeholder: not found.","innerError":{"date":"2026-09-29T10:00:08","request-id":"00000000-0000-4000-8000-000000000008","client-request-id":"00000000-0000-4000-8000-000000000008"}}}'
 
@@ -502,13 +522,12 @@ describe('Microsoft conformance disagreement drills', () => {
     'reports a create without an id as a restore failure needing removal by hand, writing nothing more',
     () =>
       Effect.gen(function* () {
-        const noId = replaceResponse(
-          microsoftCalendarCreateEventFixture,
-          0,
-          replaceInBody('"id":"AAMkAGI2-synthetic-event-0101=",', '')
-        )
+        const { warnings, reporter } = yield* capturingReporter
 
-        const { failure, entries } = yield* drill(microsoftCalendarCreateEventCase, noId)
+        const { failure, entries } = yield* drill(
+          microsoftCalendarCreateEventCase,
+          idLessCreateFixture
+        ).pipe(Effect.provideService(ConformanceCleanupReporter, reporter))
 
         expect(failure?.tag).toBe('MicrosoftConformanceRestoreFailed')
         expect(failure?.message).toBe(
@@ -516,6 +535,8 @@ describe('Microsoft conformance disagreement drills', () => {
         )
         // Without an id there is nothing to address: only the create was sent.
         expect(exchangeIndices(entries)).toEqual(['POST 0'])
+        // Uninterrupted, the report carries it: nothing goes to the reporter.
+        expect(yield* Ref.get(warnings)).toEqual([])
       })
   )
 
@@ -973,6 +994,9 @@ describe('Microsoft conformance interruption', () => {
 const ambiguousCreateAdvice =
   'the item may exist anyway: remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance).'
 
+/** The raised message of a 502 event create; the report puts the case id in front of it. */
+const badGatewayCreateMessage = `microsoft.conformance.create_event failed: microsoft_create_event_failed (HTTP 502); ${ambiguousCreateAdvice}`
+
 /** A client whose every request fails in transport, as if the connection dropped mid-response. */
 const droppingHttpClient = HttpClient.make(request =>
   Effect.fail(
@@ -1122,17 +1146,10 @@ describe('Microsoft conformance ambiguous creates', () => {
 // create) raised while the case is being interrupted still reaches the owner through the
 // ConformanceCleanupReporter, with the full message naming the case or create.
 
-const capturingReporter = Effect.gen(function* () {
-  const warnings = yield* Ref.make<ReadonlyArray<string>>([])
-
-  return {
-    warnings,
-    reporter: { warn: (message: string) => Ref.update(warnings, list => [...list, message]) }
-  }
-})
-
 const restoreFailedAdvice =
   'microsoft.calendar.create-returns-event-id: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance).'
+
+const idLessCreateMessage = `${restoreFailedAdvice} Restore error: the create response carried no id, so nothing was removed. Claim failed first.`
 
 const failedEventDelete = withStatus(500, graphServerError)
 
@@ -1247,24 +1264,15 @@ describe('Microsoft conformance interruption reporting', () => {
       )
 
       expect(yield* interruptCreateEventCase(badGateway, isCreate)).toEqual([
-        `microsoft.conformance.create_event failed: microsoft_create_event_failed (HTTP 502); ${ambiguousCreateAdvice}`
+        `microsoft.calendar.create-returns-event-id: ${badGatewayCreateMessage}`
       ])
     })
   )
 
   it.effect('reports a create without an id answered while the case is being interrupted', () =>
     Effect.gen(function* () {
-      const noId = pickExchanges(
-        replaceResponse(
-          microsoftCalendarCreateEventFixture,
-          0,
-          replaceInBody('"id":"AAMkAGI2-synthetic-event-0101=",', '')
-        ),
-        [0]
-      )
-
-      expect(yield* interruptCreateEventCase(noId, isCreate)).toEqual([
-        `${restoreFailedAdvice} Restore error: the create response carried no id, so nothing was removed. Claim failed first.`
+      expect(yield* interruptCreateEventCase(idLessCreateFixture, isCreate)).toEqual([
+        idLessCreateMessage
       ])
     })
   )
@@ -1425,13 +1433,39 @@ describe('Microsoft conformance run interruption', () => {
       }
 
       expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-      expect(Cause.squash(exit.cause)).toMatchObject({
+
+      const raised = Cause.squash(exit.cause)
+
+      expect(raised).toMatchObject({
         _tag: 'MicrosoftConformanceActionFailed',
         createOutcome: 'unknown'
       })
+      // The raised error is unchanged; only the report names the case.
+      expect(raised instanceof Error ? raised.message : undefined).toBe(badGatewayCreateMessage)
       expect(warnings).toEqual([
-        `microsoft.conformance.create_event failed: microsoft_create_event_failed (HTTP 502); ${ambiguousCreateAdvice}`
+        `microsoft.calendar.create-returns-event-id: ${badGatewayCreateMessage}`
       ])
+    })
+  )
+
+  it.effect('stops the whole run when a create without an id answers while interrupted', () =>
+    Effect.gen(function* () {
+      const { exit, sentinelRan, warnings } = yield* interruptCreateEventRun(
+        idLessCreateFixture,
+        isCreate
+      )
+
+      expect(sentinelRan).toBe(false)
+
+      if (Exit.isSuccess(exit)) {
+        return expect.fail('expected the interrupted run to fail')
+      }
+
+      expect(Cause.hasInterrupts(exit.cause)).toBe(false)
+      expect(Cause.squash(exit.cause)).toMatchObject({
+        _tag: 'MicrosoftConformanceRestoreFailed'
+      })
+      expect(warnings).toEqual([idLessCreateMessage])
     })
   )
 

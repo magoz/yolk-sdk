@@ -280,7 +280,10 @@ What the write cases guarantee differs:
   summarizes the original failure when the claim failed; check the account and restore it by hand
   if it still differs. A failed restore raised while the case is being interrupted is also handed,
   with its full message, to `ConformanceCleanupReporter` from `@yolk-sdk/connectors/conformance`
-  (default: `Effect.logWarning`), since the interruption may replace it.
+  (default: `Effect.logWarning`), since the interruption may replace it. The repository runner
+  (`pnpm conformance:fortnox`) on main does not turn Ctrl-C into an interruption, so the reporter
+  applies to hosts that interrupt the run fiber (draft pull requests #114 and #122 add this to the
+  runners). The rejection case and the email send do not report.
 - **The rejection case** does not restore anything. It first confirms that the customer is absent: a
   404, or another 4xx with a customer-not-found `ErrorInformation` code (`2000204`, `2000433`).
   401, 403, and every other failure abort before the write. If Fortnox unexpectedly accepted the

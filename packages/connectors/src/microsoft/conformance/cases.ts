@@ -32,7 +32,12 @@ import {
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
-import { classifyWriteExit, failReporting } from '../../conformance/cleanup-reporter.ts'
+import {
+  classifyWriteExit,
+  failReporting,
+  interruptPending,
+  reportCleanupProblem
+} from '../../conformance/cleanup-reporter.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import type { ConnectorError } from '../../error.ts'
 import type { ConnectorHttpClient } from '../../http.ts'
@@ -405,7 +410,8 @@ const createdItem = <T, R>(
  * item is removed by hand. Each of these cleanup problems (an ambiguous create, an id-less create, a
  * failed restore) raised while the case is being interrupted is also handed to
  * `ConformanceCleanupReporter` (via `failReporting`) before leaving the mask, since an interruption
- * may replace it.
+ * may replace it; an ambiguous create is reported with the case id in front, since several cases
+ * share one create action.
  */
 const withOwnItem = <T, A, R1, E, R, E2, R2>(
   caseId: string,
@@ -433,7 +439,13 @@ const withOwnItem = <T, A, R1, E, R, E2, R2>(
             error.value instanceof MicrosoftConformanceActionFailed &&
             error.value.createOutcome === 'unknown'
           ) {
-            return yield* failReporting(unmask, error.value)
+            // The action id alone does not say which case left the item: the report names the
+            // case too (the raised error stays unchanged).
+            if (yield* interruptPending(unmask)) {
+              yield* reportCleanupProblem({ message: `${caseId}: ${error.value.message}` })
+            }
+
+            return yield* Effect.fail(error.value)
           }
 
           return yield* Effect.failCause(creation.cause)

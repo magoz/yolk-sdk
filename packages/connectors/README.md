@@ -698,10 +698,14 @@ The row and customer mutation cases read the original state first, always restor
 `FortnoxConformanceRestoreFailed` when the restore fails (check the account and restore it by hand
 if it still differs). A failed restore raised while the case is being interrupted is also handed,
 with its full message, to `ConformanceCleanupReporter` from `@yolk-sdk/connectors/conformance`
-(default: `Effect.logWarning`), since the interruption may replace it. The rejection case restores nothing: it only confirms the customer is absent
-before its write and names any invoice Fortnox unexpectedly creates for manual cancellation. The
-email case aborts unless the invoice's `EmailInformation.EmailAddressTo` equals the `emailRecipient`
-seed exactly; the runner never runs it live unless its exact id is allowed.
+(default: `Effect.logWarning`), since the interruption may replace it. The repository runner on main
+does not turn Ctrl-C into an interruption, so the reporter applies to hosts that interrupt the run
+fiber (draft pull requests #114 and #122 add this to the runners). The rejection case restores
+nothing: it only confirms the customer is absent before its write and names any invoice Fortnox
+unexpectedly creates for manual cancellation. The email case aborts unless the invoice's
+`EmailInformation.EmailAddressTo` equals the `emailRecipient` seed exactly; the runner never runs it
+live unless its exact id is allowed. Neither the rejection case nor the email send reports through
+`ConformanceCleanupReporter`.
 
 `fortnoxConformanceFixtures` are synthetic placeholders (`evidence: 'unverified'`) that replay with
 `fortnoxConformanceFixtureSeeds`. `pnpm conformance:fortnox` in this repository dry-runs by default;
@@ -1270,11 +1274,14 @@ failure, no status, HTTP 408, or HTTP 5xx) fails with `MicrosoftConformanceActio
 (`createOutcome: 'unknown'`, code and status kept): both messages advise manual recovery of the
 `yolk-conformance` item. Each of these (a failed removal, an id-less create, an ambiguous create)
 raised while the case is being interrupted is also handed, with its full message, to
-`ConformanceCleanupReporter` (default: `Effect.logWarning`), since the interruption may replace it.
-No case sends mail or invitations. `pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account
-<label>` (with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by
-hand, `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings
-all or nothing in `.conformance-recordings/microsoft/<run>/` (gitignored) for manual scrubbing and
+`ConformanceCleanupReporter` (default: `Effect.logWarning`), since the interruption may replace it;
+an ambiguous create's report starts with the case id. The repository runner on main does not turn
+Ctrl-C into an interruption, so the reporter applies to hosts that interrupt the run fiber (draft
+pull requests #114 and #122 add this to the runners). No case sends mail or invitations.
+`pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account <label>`
+(with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by hand,
+`--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or
+nothing in `.conformance-recordings/microsoft/<run>/` (gitignored) for manual scrubbing and
 promotion.
 
 ### Notion conformance cases (experimental)
