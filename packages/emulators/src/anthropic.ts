@@ -14,12 +14,19 @@
  * Requests authenticate with a non-empty `x-api-key` (native API keys) or `Authorization:
  * Bearer` (Claude OAuth) credential. Neither value is ever checked or stored.
  *
+ * The same fetch handler also answers the Claude subscription-usage route
+ * (`GET /api/oauth/usage`, `emulator.usage`) with its own manifest
+ * (`anthropicSubscriptionUsageEmulatorRoutes`), ledger, faults, and turns; see
+ * `makeAnthropicEmulator`.
+ *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
  * no Effect runtime is required to use it.
  *
  * @experimental
  */
 import { Data } from 'effect'
+import type * as Schema from 'effect/Schema'
+import { withSubscriptionUsage } from './emulator-compose.ts'
 import type {
   EmulatorCoverage,
   EmulatorFaultState,
@@ -40,12 +47,50 @@ import {
   type MessagesLedgerEntry
 } from './messages.ts'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
+import {
+  makeSubscriptionUsageEmulator,
+  SubscriptionUsageFault,
+  SubscriptionUsageScriptedTurn,
+  type SubscriptionUsageEmulator,
+  type SubscriptionUsageLedgerEntry
+} from './subscription-usage.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export const anthropicMessagesPath = '/v1/messages'
+
+/** The Claude subscription-usage path (`anthropicClaudeSubscriptionUsageUrl` in the SDK). */
+export const anthropicSubscriptionUsagePath = '/api/oauth/usage'
+
+/** The `anthropic-beta` value the Claude usage fetcher sends for OAuth credentials. */
+export const anthropicOAuthBeta = 'oauth-2025-04-20'
+
+/**
+ * Route evidence manifest of the Claude subscription-usage route (served by the same fetch
+ * handler as the Messages route, with its own ledger and coverage). Synthetic, unverified.
+ */
+export const anthropicSubscriptionUsageEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
+  {
+    method: 'GET',
+    path: anthropicSubscriptionUsagePath,
+    kind: 'provider',
+    write: false,
+    caseIds: ['anthropic.claude.usage.snapshot'],
+    evidence: 'unverified',
+    observedAt: undefined
+  }
+]
+
+/**
+ * Default Claude usage body: both windows the parser reads (`five_hour`, `seven_day`) as
+ * `{ utilization, resets_at }`, with synthetic values.
+ */
+export const anthropicSubscriptionUsageDefault: Schema.Json = {
+  five_hour: { utilization: 18, resets_at: '2026-10-01T05:00:00.000Z' },
+  seven_day: { utilization: 42, resets_at: '2026-10-06T00:00:00.000Z' }
+}
 
 /** Synthetic-safe default model ids, including the Anthropic Messages conformance defaults. */
 export const anthropicEmulatorDefaultModels: ReadonlyArray<string> = [
@@ -158,12 +203,34 @@ export type AnthropicRouteCoverage = EmulatorRouteCoverage
 
 export type AnthropicCoverage = EmulatorCoverage
 
+/** A usage-route fault (`status`, `error-after-chunks`, `truncate-after-chunks`). */
+export const AnthropicUsageFault = SubscriptionUsageFault
+
+export type AnthropicUsageFault = SubscriptionUsageFault
+
+/** A usage turn: `{ usage }` (the exact next JSON body) or `{ error }`. */
+export const AnthropicUsageScriptedTurn = SubscriptionUsageScriptedTurn
+
+export type AnthropicUsageScriptedTurn = SubscriptionUsageScriptedTurn
+
+export type AnthropicUsageLedgerEntry = SubscriptionUsageLedgerEntry
+
+export type AnthropicUsageEmulator = SubscriptionUsageEmulator
+
 export type AnthropicEmulatorOptions = {
   /** Model ids that exist. Defaults to `anthropicEmulatorDefaultModels`. */
   readonly knownModels?: ReadonlyArray<string>
+  /** Default usage-route body. Defaults to `anthropicSubscriptionUsageDefault`. */
+  readonly subscriptionUsage?: Schema.Json
 }
 
-export type AnthropicEmulator = MessagesEmulator
+/** The Messages emulator, plus `usage`: the subscription-usage route's own emulator API. */
+export type AnthropicEmulator = MessagesEmulator & { readonly usage: AnthropicUsageEmulator }
+
+const anthropicErrorEnvelope = (error: { readonly type: string; readonly message: string }) => ({
+  type: 'error',
+  error: { type: error.type, message: error.message }
+})
 
 /**
  * Create an Anthropic Messages emulator. Each call has independent ledger, fault, and script
@@ -185,11 +252,54 @@ export type AnthropicEmulator = MessagesEmulator
  * 404 envelope. The OAuth `anthropic-beta` header and `budget_tokens` limits are not enforced. The
  * ledger records which header carried the credential, `anthropic-version`, and `anthropic-beta`,
  * never a credential value.
+ *
+ * `GET /api/oauth/usage` answers the Claude subscription-usage body (default
+ * `anthropicSubscriptionUsageDefault`, or `options.subscriptionUsage`, or a scripted
+ * `emulator.usage.script.enqueue({ usage })`). It requires a non-empty bearer credential (401
+ * `authentication_error` otherwise; never checked or stored) and an `anthropic-beta` header that
+ * lists `oauth-2025-04-20` (401 otherwise). Its ledger, faults, turns, and coverage are
+ * `emulator.usage` (control plane `/_emulate/usage/*`); `emulator.faults` and the other top-level
+ * APIs stay the Messages route's. `reset()` and `POST /_emulate/reset` reset both.
  */
 export const makeAnthropicEmulator = (options: AnthropicEmulatorOptions = {}): AnthropicEmulator =>
-  makeMessagesEmulator({
-    path: anthropicMessagesPath,
-    routes: anthropicEmulatorRoutes,
-    knownModels: options.knownModels ?? anthropicEmulatorDefaultModels,
-    inputInvalid: (input, reason) => new AnthropicEmulatorInputInvalid({ input, reason })
-  })
+  withSubscriptionUsage(
+    makeMessagesEmulator({
+      path: anthropicMessagesPath,
+      routes: anthropicEmulatorRoutes,
+      knownModels: options.knownModels ?? anthropicEmulatorDefaultModels,
+      inputInvalid: (input, reason) => new AnthropicEmulatorInputInvalid({ input, reason })
+    }),
+    makeSubscriptionUsageEmulator({
+      path: anthropicSubscriptionUsagePath,
+      routes: anthropicSubscriptionUsageEmulatorRoutes,
+      usage: options.subscriptionUsage ?? anthropicSubscriptionUsageDefault,
+      errorEnvelope: anthropicErrorEnvelope,
+      unauthorized: {
+        message: 'Synthetic: a bearer OAuth credential is required.',
+        type: 'authentication_error',
+        code: 'authentication_error'
+      },
+      headers: [
+        {
+          name: 'anthropic-beta',
+          record: true,
+          required: {
+            status: 401,
+            error: {
+              message: `Synthetic: OAuth usage requests need anthropic-beta: ${anthropicOAuthBeta}.`,
+              type: 'authentication_error',
+              code: 'authentication_error'
+            },
+            accepts: value =>
+              value
+                .split(',')
+                .map(beta => beta.trim())
+                .includes(anthropicOAuthBeta)
+          }
+        }
+      ],
+      query: [],
+      inputInvalid: (input, reason) => new AnthropicEmulatorInputInvalid({ input, reason })
+    }),
+    anthropicSubscriptionUsagePath
+  )

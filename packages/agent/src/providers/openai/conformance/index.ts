@@ -8,6 +8,10 @@
  * OpenAI Chat Completions and Responses wires; live probes replace them with verified recordings
  * (`pnpm conformance:openai`; `pnpm conformance:codex`, subscription OAuth, owner approval
  * required).
+ *
+ * Also exports the Codex subscription-usage case and fixture (`openAiCodexUsageSnapshotCase`,
+ * `OpenAiCodexUsageConformanceConfig`; `pnpm conformance:usage --family codex`), kept apart from
+ * the Responses cases.
  */
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 import {
@@ -42,6 +46,16 @@ import { openAiCodexErrorEnvelopeFixture } from './codex-error-envelope.ts'
 import { openAiCodexFunctionCallArgumentsFixture } from './codex-function-call-arguments.ts'
 import { openAiCodexPlainTextFixture } from './codex-plain-text.ts'
 import { openAiCodexTerminalEventFixture } from './codex-terminal-event.ts'
+import {
+  OpenAiCodexUsageConformanceConfig,
+  openAiCodexUsageConformanceCases,
+  openAiCodexUsageConformanceUrl,
+  openAiCodexUsageSnapshotCase,
+  type OpenAiCodexUsageConformanceCase,
+  type OpenAiCodexUsageConformanceRequirements,
+  type OpenAiCodexUsageConformanceSettings
+} from './codex-usage-cases.ts'
+import { openAiCodexUsageSnapshotFixture } from './codex-usage-snapshot.ts'
 import { openAiChatErrorEnvelopeFixture } from './error-envelope.ts'
 import { openAiChatJsonPlainTextFixture } from './json-plain-text.ts'
 import { openAiChatPlainTextFixture } from './plain-text.ts'
@@ -79,7 +93,15 @@ export {
   openAiCodexErrorEnvelopeFixture,
   openAiCodexFunctionCallArgumentsFixture,
   openAiCodexPlainTextFixture,
-  openAiCodexTerminalEventFixture
+  openAiCodexTerminalEventFixture,
+  OpenAiCodexUsageConformanceConfig,
+  openAiCodexUsageConformanceCases,
+  openAiCodexUsageConformanceUrl,
+  openAiCodexUsageSnapshotCase,
+  type OpenAiCodexUsageConformanceCase,
+  type OpenAiCodexUsageConformanceRequirements,
+  type OpenAiCodexUsageConformanceSettings,
+  openAiCodexUsageSnapshotFixture
 }
 
 /** Every OpenAI chat wire fixture, for replaying a whole conformance suite at once. */
@@ -96,4 +118,9 @@ export const openAiCodexConformanceFixtures: ReadonlyArray<WireFixture> = [
   openAiCodexFunctionCallArgumentsFixture,
   openAiCodexErrorEnvelopeFixture,
   openAiCodexTerminalEventFixture
+]
+
+/** Every Codex subscription-usage wire fixture. */
+export const openAiCodexUsageConformanceFixtures: ReadonlyArray<WireFixture> = [
+  openAiCodexUsageSnapshotFixture
 ]

@@ -5,21 +5,24 @@ Effect `HttpClient` routing that points code at them.
 
 ## Subpaths
 
-| Subpath                         | Source                    | Role                                                                                                                                     |
-| ------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/emulators/router`    | `src/router.ts`           | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                 |
-| `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`          | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                 |
-| `@yolk-sdk/emulators/openai`    | `src/openai.ts`           | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                          |
-| `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`        | Anthropic Messages fetch-handler emulator and its manifest                                                                               |
-| `@yolk-sdk/emulators/codex`     | `src/codex.ts`            | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
-| `@yolk-sdk/emulators/xai`       | `src/xai.ts`              | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
-| `@yolk-sdk/emulators/node`      | `src/node.ts`             | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
-| (internal)                      | `src/emulator-kernel.ts`  | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
-| (internal)                      | `src/chat-completions.ts` | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
-| (internal)                      | `src/messages.ts`         | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
-| (internal)                      | `src/responses.ts`        | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai`                                                            |
-| (internal)                      | `src/emulator-http.ts`    | Fault/scripted-error status and header validators                                                                                        |
-| (internal)                      | `src/route-evidence.ts`   | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
+| Subpath                         | Source                      | Role                                                                                                                                     |
+| ------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`    | `src/router.ts`             | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                 |
+| `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`            | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                 |
+| `@yolk-sdk/emulators/openai`    | `src/openai.ts`             | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                          |
+| `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`          | Anthropic Messages fetch-handler emulator and its manifest                                                                               |
+| `@yolk-sdk/emulators/codex`     | `src/codex.ts`              | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
+| `@yolk-sdk/emulators/xai`       | `src/xai.ts`                | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
+| `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`           | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                              |
+| `@yolk-sdk/emulators/node`      | `src/node.ts`               | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
+| (internal)                      | `src/emulator-kernel.ts`    | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
+| (internal)                      | `src/chat-completions.ts`   | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
+| (internal)                      | `src/messages.ts`           | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
+| (internal)                      | `src/responses.ts`          | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai`                                                            |
+| (internal)                      | `src/subscription-usage.ts` | Subscription-usage `GET` core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go usage routes                             |
+| (internal)                      | `src/emulator-compose.ts`   | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                  |
+| (internal)                      | `src/emulator-http.ts`      | Fault/scripted-error status and header validators                                                                                        |
+| (internal)                      | `src/route-evidence.ts`     | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
 
 There is no root export or barrel.
 
@@ -29,7 +32,7 @@ There is no root export or barrel.
   (`scripts/check-package-boundaries.ts` enforces this). Tests may import `@yolk-sdk/agent` and
   `@yolk-sdk/conformance` (workspace devDependencies).
 - `node:` builtins are allowed only in `src/node.ts` (also enforced).
-- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, and `xai` are plain Web fetch
+- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain Web fetch
   handlers (no Effect runtime needed, no Node builtins); `node` is the only Node boundary.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
@@ -126,12 +129,30 @@ There is no root export or barrel.
   `/codex` records `originator` and never records `ChatGPT-Account-Id`. Known leniency (unverified):
   `store`, `stream`, `instructions`, the model override matching `model`, the client version value,
   and output limits are not enforced. The Codex and Grok error envelopes and unknown-model status
-  (400 `model_not_found`) are synthetic until a live recording. OpenCode Go Responses are not
-  emulated yet.
+  (400 `model_not_found`) are synthetic until a live recording.
+- One origin, one fetch handler: the router takes one route per origin, so routes of different cores
+  on one origin are composed by `src/emulator-compose.ts`, each part keeping its own manifest,
+  ledger, faults, turns, coverage, and control plane (`/_emulate/<part>/*`); `POST /_emulate/reset`
+  resets every part. Do not merge parts into one kernel, and never add a usage route to a model
+  route's manifest (its manifest and coverage stay unchanged).
+- `/opencode` composes the chat, Messages, Responses, and usage cores under `/zen/go/v1`
+  (`emulator.chat` / `.messages` / `.responses` / `.usage`; combined `coverage()` and
+  `GET /_emulate/coverage`; unknown API routes fail closed through the chat part). Auth follows the
+  Go provider per protocol: Bearer for chat, Responses, and usage; `x-api-key` only for Messages
+  (`MessagesEmulatorConfig.credentials: 'x-api-key'`, the one Messages-core parameter this added;
+  default unchanged). Chat uses `max_tokens`, the plain OpenAI framing, and the reasoning turn
+  schema (`reasoning_content`); Responses allows an optional positive `max_output_tokens`.
+- Subscription-usage routes use `src/subscription-usage.ts` (bearer, then header rules in order,
+  then query rules, then status fault, scripted `{ usage }` / `{ error }` turn, default body; chunk
+  faults shape the one-chunk JSON body). `/anthropic`, `/codex`, and `/xai` serve their usage route
+  through `withSubscriptionUsage` (`emulator.usage`, own manifest `*SubscriptionUsageEmulatorRoutes`);
+  `/opencode` includes it as a part. Default bodies are synthetic and match exactly the fields each
+  SDK parser reads; credential and account headers (`ChatGPT-Account-Id`, `x-userid`,
+  `X-XAI-Token-Auth`) are required but never recorded.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
-  `XAiGrokEmulatorInputInvalid` for invalid input.
+  `XAiGrokEmulatorInputInvalid` / `OpenCodeGoEmulatorInputInvalid` for invalid input.
 - Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over
   (network chunks; a Gateway chunk may pack several SSE events); chunk faults that cannot take
   effect answer 500 and are not consumed, never a silent no-op.
@@ -163,4 +184,11 @@ faults, control plane, and manifests for `/codex` and `/xai`), and
 loopback socket, disagreement drills, and 429 `retry-after` / mid-stream `error` and
 `response.failed` events / dropped connection / truncation faults through the real Codex and Grok
 providers, pinning Grok's required terminal event, Codex's EOF-completion compatibility, and the
-426 for a missing client version). Loopback sockets only; never call real services.
+426 for a missing client version), `test/opencode.test.ts` (Go routing, per-protocol auth,
+per-part ledgers, faults, control planes, combined coverage and reset, manifest),
+`test/opencode-conformance.test.ts` (the Go cases in-process and over a loopback socket, drills, and
+429 / truncation / mid-stream error faults through the real Go provider), `test/subscription-usage.test.ts`
+(the Claude, Codex, and Grok usage routes: bodies, header and query rules, scripted turns, faults,
+control plane, and untouched model-route manifests), and `test/subscription-usage-conformance.test.ts`
+(the four usage cases in-process and over a loopback socket, drills, and 401 / 429 / dropped /
+truncated faults through the real fetchers). Loopback sockets only; never call real services.

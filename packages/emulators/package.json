@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, and OpenAI Responses (Codex, xAI Grok) fetch-handler emulators, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -50,6 +50,10 @@
       "types": "./src/xai.ts",
       "default": "./src/xai.ts"
     },
+    "./opencode": {
+      "types": "./src/opencode.ts",
+      "default": "./src/opencode.ts"
+    },
     "./node": {
       "types": "./src/node.ts",
       "default": "./src/node.ts"
@@ -96,6 +100,11 @@
         "types": "./dist/xai.d.mts",
         "import": "./dist/xai.mjs",
         "default": "./dist/xai.mjs"
+      },
+      "./opencode": {
+        "types": "./dist/opencode.d.mts",
+        "import": "./dist/opencode.mjs",
+        "default": "./dist/opencode.mjs"
       },
       "./node": {
         "types": "./dist/node.d.mts",

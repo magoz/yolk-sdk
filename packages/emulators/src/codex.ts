@@ -15,6 +15,10 @@
  * `originator` header is recorded in the ledger; `ChatGPT-Account-Id` is neither required nor
  * recorded.
  *
+ * The same fetch handler also answers the Codex subscription-usage route
+ * (`GET /backend-api/wham/usage`, `emulator.usage`) with its own manifest
+ * (`codexSubscriptionUsageEmulatorRoutes`), ledger, faults, and turns; see `makeCodexEmulator`.
+ *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
  * no Effect runtime is required to use it.
  *
@@ -22,6 +26,7 @@
  */
 import { Data } from 'effect'
 import type * as Schema from 'effect/Schema'
+import { withSubscriptionUsage } from './emulator-compose.ts'
 import type {
   EmulatorCoverage,
   EmulatorFaultState,
@@ -43,12 +48,60 @@ import {
   type ResponsesWireError
 } from './responses.ts'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
+import {
+  makeSubscriptionUsageEmulator,
+  SubscriptionUsageFault,
+  SubscriptionUsageScriptedTurn,
+  type SubscriptionUsageEmulator,
+  type SubscriptionUsageLedgerEntry
+} from './subscription-usage.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export const codexResponsesPath = '/backend-api/codex/responses'
+
+/** The Codex subscription-usage path (`openAiCodexSubscriptionUsageUrl` in the SDK). */
+export const codexSubscriptionUsagePath = '/backend-api/wham/usage'
+
+/**
+ * Route evidence manifest of the Codex subscription-usage route (served by the same fetch handler
+ * as the Responses route, with its own ledger and coverage). Synthetic, unverified.
+ */
+export const codexSubscriptionUsageEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
+  {
+    method: 'GET',
+    path: codexSubscriptionUsagePath,
+    kind: 'provider',
+    write: false,
+    caseIds: ['openai.codex.usage.snapshot'],
+    evidence: 'unverified',
+    observedAt: undefined
+  }
+]
+
+/**
+ * Default Codex usage body: `rate_limit.primary_window` and `secondary_window` as
+ * `{ used_percent, limit_window_seconds, reset_after_seconds, reset_at }` (`reset_at` in epoch
+ * seconds), with synthetic values.
+ */
+export const codexSubscriptionUsageDefault: Schema.Json = {
+  rate_limit: {
+    primary_window: {
+      used_percent: 23,
+      limit_window_seconds: 18000,
+      reset_after_seconds: 7200,
+      reset_at: 1790007200
+    },
+    secondary_window: {
+      used_percent: 51,
+      limit_window_seconds: 604800,
+      reset_after_seconds: 259200,
+      reset_at: 1790259200
+    }
+  }
+}
 
 /** Synthetic-safe default model ids, including the Codex conformance defaults. */
 export const codexEmulatorDefaultModels: ReadonlyArray<string> = ['gpt-5.4', 'gpt-5.5']
@@ -154,12 +207,29 @@ export type CodexRouteCoverage = EmulatorRouteCoverage
 
 export type CodexCoverage = EmulatorCoverage
 
+/** A usage-route fault (`status`, `error-after-chunks`, `truncate-after-chunks`). */
+export const CodexUsageFault = SubscriptionUsageFault
+
+export type CodexUsageFault = SubscriptionUsageFault
+
+/** A usage turn: `{ usage }` (the exact next JSON body) or `{ error }`. */
+export const CodexUsageScriptedTurn = SubscriptionUsageScriptedTurn
+
+export type CodexUsageScriptedTurn = SubscriptionUsageScriptedTurn
+
+export type CodexUsageLedgerEntry = SubscriptionUsageLedgerEntry
+
+export type CodexUsageEmulator = SubscriptionUsageEmulator
+
 export type CodexEmulatorOptions = {
   /** Model ids that exist. Defaults to `codexEmulatorDefaultModels`. */
   readonly knownModels?: ReadonlyArray<string>
+  /** Default usage-route body. Defaults to `codexSubscriptionUsageDefault`. */
+  readonly subscriptionUsage?: Schema.Json
 }
 
-export type CodexEmulator = ResponsesEmulator
+/** The Responses emulator, plus `usage`: the subscription-usage route's own emulator API. */
+export type CodexEmulator = ResponsesEmulator & { readonly usage: CodexUsageEmulator }
 
 const openAiErrorEnvelope = (error: ResponsesWireError): Schema.Json => ({
   error: {
@@ -185,8 +255,51 @@ const openAiErrorEnvelope = (error: ResponsesWireError): Schema.Json => ({
  * without a bearer credential gets 401 `invalid_api_key`; `max_output_tokens` gets 400
  * `unsupported_parameter`; unknown routes get a 404 envelope. Not enforced: `store: false`,
  * `stream: true`, `instructions`, `originator`, and `ChatGPT-Account-Id`.
+ *
+ * `GET /backend-api/wham/usage` answers the Codex subscription-usage body (default
+ * `codexSubscriptionUsageDefault`, or `options.subscriptionUsage`, or a scripted
+ * `emulator.usage.script.enqueue({ usage })`). It requires a non-empty bearer credential (401
+ * `invalid_api_key`) and a non-empty `ChatGPT-Account-Id` (401 otherwise); neither value is
+ * checked or recorded. Its ledger, faults, turns, and coverage are `emulator.usage` (control plane
+ * `/_emulate/usage/*`); `reset()` and `POST /_emulate/reset` reset both routes.
  */
 export const makeCodexEmulator = (options: CodexEmulatorOptions = {}): CodexEmulator =>
+  withSubscriptionUsage(
+    makeCodexResponsesEmulator(options),
+    makeCodexUsageEmulator(options),
+    codexSubscriptionUsagePath
+  )
+
+const makeCodexUsageEmulator = (options: CodexEmulatorOptions): CodexUsageEmulator =>
+  makeSubscriptionUsageEmulator({
+    path: codexSubscriptionUsagePath,
+    routes: codexSubscriptionUsageEmulatorRoutes,
+    usage: options.subscriptionUsage ?? codexSubscriptionUsageDefault,
+    errorEnvelope: error => openAiErrorEnvelope(error),
+    unauthorized: {
+      message: 'Synthetic: missing or invalid bearer credential.',
+      type: 'invalid_request_error',
+      code: 'invalid_api_key'
+    },
+    headers: [
+      {
+        name: 'chatgpt-account-id',
+        record: false,
+        required: {
+          status: 401,
+          error: {
+            message: 'Synthetic: the ChatGPT-Account-Id header is required.',
+            type: 'invalid_request_error',
+            code: 'missing_account_id'
+          }
+        }
+      }
+    ],
+    query: [],
+    inputInvalid: (input, reason) => new CodexEmulatorInputInvalid({ input, reason })
+  })
+
+const makeCodexResponsesEmulator = (options: CodexEmulatorOptions): ResponsesEmulator =>
   makeResponsesEmulator({
     path: codexResponsesPath,
     routes: codexEmulatorRoutes,

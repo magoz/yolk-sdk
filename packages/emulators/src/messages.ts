@@ -175,6 +175,12 @@ export type MessagesEmulatorConfig = {
   /** Route evidence manifest; must list exactly the Messages route. */
   readonly routes: ReadonlyArray<EmulatorRouteEvidence>
   readonly knownModels: ReadonlyArray<string>
+  /**
+   * Accepted credential headers: `x-api-key-or-bearer` (default: a native API key or Claude OAuth)
+   * or `x-api-key` (API keys only, for example OpenCode Go Messages); anything else answers 401
+   * `authentication_error`.
+   */
+  readonly credentials?: 'x-api-key-or-bearer' | 'x-api-key'
   /** Builds the error thrown by the JS API (`faults.add`, `script.enqueue`) for invalid input. */
   readonly inputInvalid: (input: 'fault' | 'turn', reason: string) => Error
 }
@@ -667,13 +673,16 @@ export const makeMessagesEmulator = (config: MessagesEmulatorConfig): MessagesEm
     path: string
   ): Promise<Response> => {
     const credentialHeader = credentialHeaderOf(request)
+    const apiKeyOnly = config.credentials === 'x-api-key'
 
-    if (credentialHeader === undefined) {
+    if (credentialHeader === undefined || (apiKeyOnly && credentialHeader !== 'x-api-key')) {
       entry.status = 401
 
       return errorResponse(401, {
         type: 'authentication_error',
-        message: 'Synthetic: an x-api-key header or a bearer credential is required.'
+        message: apiKeyOnly
+          ? 'Synthetic: an x-api-key header is required.'
+          : 'Synthetic: an x-api-key header or a bearer credential is required.'
       })
     }
 

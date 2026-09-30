@@ -97,6 +97,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './providers/vercel/conformance',
       './providers/opencode/go-provider',
       './providers/opencode/usage',
+      './providers/opencode/conformance',
       './providers/subscription-usage',
       './providers/xai',
       './providers/xai/grok',
@@ -220,6 +221,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './anthropic',
       './codex',
       './xai',
+      './opencode',
       './node'
     ],
     root: 'none'

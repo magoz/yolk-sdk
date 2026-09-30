@@ -301,12 +301,21 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('anthropic.messages.stream.max-tokens')).toBe(true)
     expect(knownConformanceCaseIds.has('openai.codex.stream.terminal-event')).toBe(true)
     expect(knownConformanceCaseIds.has('xai.grok.stream.terminal-event')).toBe(true)
+    expect(knownConformanceCaseIds.has('anthropic.claude.usage.snapshot')).toBe(true)
+    expect(knownConformanceCaseIds.has('openai.codex.usage.snapshot')).toBe(true)
+    expect(knownConformanceCaseIds.has('xai.grok.usage.snapshot')).toBe(true)
+    expect(knownConformanceCaseIds.has('opencode.go.responses.stream.commentary-replay')).toBe(true)
+    expect(knownConformanceCaseIds.has('opencode.go.usage.snapshot')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
       'openai',
       'anthropic',
       'codex',
-      'xai'
+      'xai',
+      'anthropic-usage',
+      'codex-usage',
+      'xai-usage',
+      'opencode'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -324,6 +333,21 @@ describe('repo emulator manifests', () => {
     ])
     expect(conformanceFixtureEvidence.get('openai.codex.stream.plain-text')).toEqual(['unverified'])
     expect(conformanceFixtureEvidence.get('xai.grok.stream.plain-text')).toEqual(['unverified'])
+
+    // Every new route (usage and OpenCode Go) is unverified and backed by unverified fixtures.
+    for (const name of ['anthropic-usage', 'codex-usage', 'xai-usage', 'opencode']) {
+      const routes = emulatorManifests.find(manifest => manifest.name === name)?.routes ?? []
+
+      expect(routes.length, name).toBeGreaterThan(0)
+
+      for (const route of routes) {
+        expect(route.evidence, `${name} ${route.path}`).toBe('unverified')
+        expect(
+          route.caseIds.map(caseId => conformanceFixtureEvidence.get(caseId)),
+          `${name} ${route.path}`
+        ).toEqual(route.caseIds.map(() => ['unverified']))
+      }
+    }
   })
 
   it('runs as a CLI that prints the report and exits 0', async () => {
@@ -345,5 +369,16 @@ describe('repo emulator manifests', () => {
       'WARN  codex  POST /backend-api/codex/responses  unverified evidence'
     )
     expect(result.stdout).toContain('WARN  xai  POST /v1/responses  unverified evidence')
+    expect(result.stdout).toContain(
+      'WARN  anthropic-usage  GET /api/oauth/usage  unverified evidence'
+    )
+    expect(result.stdout).toContain(
+      'WARN  codex-usage  GET /backend-api/wham/usage  unverified evidence'
+    )
+    expect(result.stdout).toContain('WARN  xai-usage  GET /v1/billing  unverified evidence')
+    expect(result.stdout).toContain('WARN  opencode  GET /zen/go/v1/usage  unverified evidence')
+    expect(result.stdout).toContain(
+      'WARN  opencode  POST /zen/go/v1/responses  unverified evidence (2 case(s))'
+    )
   }, 120000)
 })

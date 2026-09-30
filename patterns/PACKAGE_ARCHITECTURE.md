@@ -30,6 +30,7 @@ metadata.
   - `@yolk-sdk/agent/providers/vercel/conformance`
   - `@yolk-sdk/agent/providers/opencode/go-provider`
   - `@yolk-sdk/agent/providers/opencode/usage`
+  - `@yolk-sdk/agent/providers/opencode/conformance`
   - `@yolk-sdk/agent/providers/anthropic`
   - `@yolk-sdk/agent/providers/anthropic/claude`
   - `@yolk-sdk/agent/providers/anthropic/usage`

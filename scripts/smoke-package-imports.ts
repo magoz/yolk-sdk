@@ -38,6 +38,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './providers/vercel/conformance',
       './providers/opencode/go-provider',
       './providers/opencode/usage',
+      './providers/opencode/conformance',
       './providers/subscription-usage',
       './providers/xai',
       './providers/xai/grok',
@@ -119,7 +120,16 @@ const packages: ReadonlyArray<PackageManifest> = [
   },
   {
     name: '@yolk-sdk/emulators',
-    exports: ['./router', './gateway', './openai', './anthropic', './codex', './xai', './node']
+    exports: [
+      './router',
+      './gateway',
+      './openai',
+      './anthropic',
+      './codex',
+      './xai',
+      './opencode',
+      './node'
+    ]
   }
 ]
 
@@ -283,6 +293,16 @@ const main = async () => {
           'const unversionedGrok = await grokEmulator.fetch(new Request(grokUrl, { method: "POST", headers: { authorization: "Bearer synthetic", "x-xai-token-auth": "synthetic", "x-grok-model-override": "grok-build", "content-type": "application/json" }, body: grokBody }))',
           'const emulatedGrok = await grokEmulator.fetch(new Request(grokUrl, { method: "POST", headers: { authorization: "Bearer synthetic", "x-xai-token-auth": "synthetic", "x-grok-model-override": "grok-build", "x-grok-client-version": "0.0.0-synthetic", "content-type": "application/json" }, body: grokBody }))',
           'if (unversionedGrok.status !== 426 || emulatedGrok.status !== 200 || (await emulatedGrok.json()).status !== "completed" || grokEmulator.ledger.entries()[1]?.maxOutputTokens !== 16) throw new Error("Grok emulator smoke failed")',
+          'const claudeUsage = await anthropicEmulator.fetch(new Request("https://api.anthropic.com/api/oauth/usage", { headers: { authorization: "Bearer synthetic", "anthropic-beta": "oauth-2025-04-20" } }))',
+          'if (claudeUsage.status !== 200 || (await claudeUsage.json()).five_hour?.utilization === undefined || anthropicEmulator.usage.ledger.entries().length !== 1 || anthropicEmulator.ledger.entries().length !== 1) throw new Error("Claude usage emulator smoke failed")',
+          'const goEmulator = (await import("@yolk-sdk/emulators/opencode")).makeOpenCodeGoEmulator()',
+          'const goChat = await goEmulator.fetch(new Request("https://opencode.ai/zen/go/v1/chat/completions", { method: "POST", headers: { authorization: "Bearer synthetic", "content-type": "application/json" }, body: JSON.stringify({ model: "synthetic-go-chat", messages: [], stream: false, max_tokens: 16 }) }))',
+          'const goMessages = await goEmulator.fetch(new Request("https://opencode.ai/zen/go/v1/messages", { method: "POST", headers: { authorization: "Bearer synthetic", "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: "synthetic-go-messages", messages: [], stream: false, max_tokens: 16 }) }))',
+          'const goUsage = await goEmulator.fetch(new Request("https://opencode.ai/zen/go/v1/usage", { headers: { authorization: "Bearer synthetic" } }))',
+          'if (goChat.status !== 200 || goMessages.status !== 401 || goUsage.status !== 200 || (await goUsage.json()).usage?.rolling?.percent === undefined || goEmulator.coverage().routes.length !== 4) throw new Error("OpenCode Go emulator smoke failed")',
+          'const goConformance = await import("@yolk-sdk/agent/providers/opencode/conformance")',
+          'if (goConformance.openCodeGoConformanceCases.length !== 5 || goConformance.openCodeGoConformanceFixtures.length !== 5 || !goConformance.openCodeGoConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing OpenCode Go conformance cases/fixtures")',
+          'if (anthropicConformance.anthropicClaudeUsageConformanceCases.length !== 1 || openAiConformance.openAiCodexUsageConformanceCases.length !== 1 || grokConformance.xAiGrokUsageConformanceCases.length !== 1 || grokConformance.xAiGrokUsageConformanceFixtures.length !== 1) throw new Error("Missing subscription-usage conformance cases/fixtures")',
           'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")'
         ].join('\n')
     )

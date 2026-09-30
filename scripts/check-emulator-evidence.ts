@@ -9,7 +9,8 @@
  * - FAIL: a verified connector write route has a missing, unreadable, or future `observedAt`.
  * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
  *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat,
- *   Codex Responses, Anthropic Messages, Grok Responses, and Fortnox fixtures).
+ *   Codex Responses, Anthropic Messages, Grok Responses, OpenCode Go, subscription-usage (Claude,
+ *   Codex, Grok), and Fortnox fixtures).
  * - WARN: a route's evidence is `unverified` (the emulator tags its responses
  *   `x-emulator-evidence: unverified`).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
@@ -23,24 +24,46 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import type { WireFixture } from '../packages/conformance/src/fixture.ts'
 import { anthropicConformanceCases } from '../packages/agent/src/providers/anthropic/conformance/cases.ts'
-import { anthropicConformanceFixtures } from '../packages/agent/src/providers/anthropic/conformance/index.ts'
+import { anthropicClaudeUsageConformanceCases } from '../packages/agent/src/providers/anthropic/conformance/claude-usage-cases.ts'
+import {
+  anthropicClaudeUsageConformanceFixtures,
+  anthropicConformanceFixtures
+} from '../packages/agent/src/providers/anthropic/conformance/index.ts'
 import { openAiConformanceCases } from '../packages/agent/src/providers/openai/conformance/cases.ts'
 import { openAiCodexConformanceCases } from '../packages/agent/src/providers/openai/conformance/codex-cases.ts'
+import { openAiCodexUsageConformanceCases } from '../packages/agent/src/providers/openai/conformance/codex-usage-cases.ts'
 import {
   openAiCodexConformanceFixtures,
+  openAiCodexUsageConformanceFixtures,
   openAiConformanceFixtures
 } from '../packages/agent/src/providers/openai/conformance/index.ts'
+import { openCodeGoConformanceCases } from '../packages/agent/src/providers/opencode/conformance/cases.ts'
+import { openCodeGoConformanceFixtures } from '../packages/agent/src/providers/opencode/conformance/index.ts'
 import { vercelAiGatewayConformanceCases } from '../packages/agent/src/providers/vercel/conformance/cases.ts'
 import { vercelAiGatewayConformanceFixtures } from '../packages/agent/src/providers/vercel/conformance/index.ts'
 import { xAiGrokConformanceCases } from '../packages/agent/src/providers/xai/conformance/cases.ts'
-import { xAiGrokConformanceFixtures } from '../packages/agent/src/providers/xai/conformance/index.ts'
+import {
+  xAiGrokConformanceFixtures,
+  xAiGrokUsageConformanceFixtures
+} from '../packages/agent/src/providers/xai/conformance/index.ts'
+import { xAiGrokUsageConformanceCases } from '../packages/agent/src/providers/xai/conformance/usage-cases.ts'
 import { fortnoxConformanceCases } from '../packages/connectors/src/fortnox/conformance/cases.ts'
 import { fortnoxConformanceFixtures } from '../packages/connectors/src/fortnox/conformance/index.ts'
-import { anthropicEmulatorRoutes } from '../packages/emulators/src/anthropic.ts'
-import { codexEmulatorRoutes } from '../packages/emulators/src/codex.ts'
+import {
+  anthropicEmulatorRoutes,
+  anthropicSubscriptionUsageEmulatorRoutes
+} from '../packages/emulators/src/anthropic.ts'
+import {
+  codexEmulatorRoutes,
+  codexSubscriptionUsageEmulatorRoutes
+} from '../packages/emulators/src/codex.ts'
 import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
 import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
-import { xAiGrokEmulatorRoutes } from '../packages/emulators/src/xai.ts'
+import { openCodeGoEmulatorRoutes } from '../packages/emulators/src/opencode.ts'
+import {
+  xAiGrokEmulatorRoutes,
+  xAiGrokSubscriptionUsageEmulatorRoutes
+} from '../packages/emulators/src/xai.ts'
 import type {
   EmulatorEvidence,
   EmulatorRouteEvidence
@@ -98,7 +121,11 @@ export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'openai', routes: openAiEmulatorRoutes },
   { name: 'anthropic', routes: anthropicEmulatorRoutes },
   { name: 'codex', routes: codexEmulatorRoutes },
-  { name: 'xai', routes: xAiGrokEmulatorRoutes }
+  { name: 'xai', routes: xAiGrokEmulatorRoutes },
+  { name: 'anthropic-usage', routes: anthropicSubscriptionUsageEmulatorRoutes },
+  { name: 'codex-usage', routes: codexSubscriptionUsageEmulatorRoutes },
+  { name: 'xai-usage', routes: xAiGrokSubscriptionUsageEmulatorRoutes },
+  { name: 'opencode', routes: openCodeGoEmulatorRoutes }
 ]
 
 /** Every conformance case id the manifests may cite. */
@@ -108,6 +135,10 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...anthropicConformanceCases.map(testCase => testCase.id),
   ...openAiCodexConformanceCases.map(testCase => testCase.id),
   ...xAiGrokConformanceCases.map(testCase => testCase.id),
+  ...anthropicClaudeUsageConformanceCases.map(testCase => testCase.id),
+  ...openAiCodexUsageConformanceCases.map(testCase => testCase.id),
+  ...xAiGrokUsageConformanceCases.map(testCase => testCase.id),
+  ...openCodeGoConformanceCases.map(testCase => testCase.id),
   ...fortnoxConformanceCases.map(testCase => testCase.id)
 ])
 
@@ -140,6 +171,10 @@ export const conformanceFixtureEvidence: ReadonlyMap<
   ...anthropicConformanceFixtures,
   ...openAiCodexConformanceFixtures,
   ...xAiGrokConformanceFixtures,
+  ...anthropicClaudeUsageConformanceFixtures,
+  ...openAiCodexUsageConformanceFixtures,
+  ...xAiGrokUsageConformanceFixtures,
+  ...openCodeGoConformanceFixtures,
   ...fortnoxConformanceFixtures
 ])
 

@@ -260,6 +260,33 @@ subscription OAuth tokens (`OPENAI_CODEX_ACCESS_TOKEN`, `XAI_GROK_ACCESS_TOKEN`)
 repository owner's approval (`--owner-approved`); `--live` is refused whenever `CI` is set to any
 non-empty value, `0` and `false` included.
 
+`@yolk-sdk/agent/providers/opencode/conformance` covers OpenCode Go through the public Go provider
+and usage fetcher (`https://opencode.ai/zen/go/v1`): five synthetic fixtures
+(`openCodeGoConformanceFixtures`) and five `read` cases (`openCodeGoConformanceCases`), requiring an
+`HttpClient` and `OpenCodeGoConformanceConfig` (redacted API key, `maxOutputTokens`, and one model
+id per protocol). `openCodeGoChatPlainTextCase`, `openCodeGoMessagesPlainTextCase`, and
+`openCodeGoResponsesPlainTextCase` claim non-empty text, one `Done(stop)`, and usage on each
+protocol; `openCodeGoResponsesCommentaryReplayCase` reads its own request at the case's
+`HttpClient` boundary and requires a replayed tool turn in order with the assistant text tagged
+`phase: "commentary"`, then an accepted stream with one `Done`; `openCodeGoUsageSnapshotCase` is the
+Go usage case. `pnpm conformance:opencode` is a dry-run probe; live runs need `OPENCODE_API_KEY`,
+owner approval, and real Go model ids for every protocol.
+
+Subscription-usage cases share one shape across vendors: `anthropicClaudeUsageSnapshotCase`
+(`@yolk-sdk/agent/providers/anthropic/conformance`, `AnthropicClaudeUsageConformanceConfig`),
+`openAiCodexUsageSnapshotCase` (`@yolk-sdk/agent/providers/openai/conformance`,
+`OpenAiCodexUsageConformanceConfig`), `xAiGrokUsageSnapshotCase`
+(`@yolk-sdk/agent/providers/xai/conformance`, `XAiGrokUsageConformanceConfig`), and
+`openCodeGoUsageSnapshotCase`. Each calls the public fetcher at its default URL and asserts the
+normalized `ProviderSubscriptionUsageSnapshot`: the vendor provider id, at least one window with
+distinct known ids in vendor order, and, against the raw body read at the case's `HttpClient`
+boundary, exactly one window per reported wire window with the same id, used percentage, and reset
+instant, so no window is fabricated or dropped. The usage cases and fixtures are exported apart
+from the model-route suites (`anthropicClaudeUsageConformanceCases`,
+`openAiCodexUsageConformanceCases`, `xAiGrokUsageConformanceCases`, and the matching
+`*UsageConformanceFixtures`). `pnpm conformance:usage --family claude|codex|grok` is a dry-run
+probe with the same owner-approval and CI rules.
+
 ## Connector conformance
 
 > **Experimental.** Conformance/testing only.
