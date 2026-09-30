@@ -16,14 +16,14 @@
  *   replaceable JSON body (the usage routes) also takes a scripted `{ usage }` body (or a default
  *   override) whose JSON shape (object keys and value kinds) equals the recording's. Fault and
  *   scripted-error statuses must be 400 or above, so no control can produce a success status or
- *   shape no fixture records.
+ *   a body other than the recorded one (or a prefix of it cut by the truncation faults).
  *
  * Request-shape latitude (accepted, harmless): any credential value (never checked or stored);
  * extra request headers; key order; every string value except the discriminators `model`, `role`,
  * `type`, and `phase` (which must equal the recording); any positive integer where the recording
  * has a number (the output-token limit). Array lengths, object keys, booleans (`stream`, `store`,
  * `include_usage`, `parallel_tool_calls`, `additionalProperties`), the recorded `accept` value,
- * the `content-type` media type, and the query string (exactly, byte for byte) must equal the
+ * the `content-type` media type, and the query string (exactly, byte for byte; a bare `?` counts as no query) must equal the
  * recording. Route-specific header values (for example Grok's `x-grok-client-version`) are
  * documented by the route that declares them.
  *

@@ -90,7 +90,7 @@ There is no root export or barrel.
   that includes `oauth-2025-04-20`; any non-empty `x-userid` and `x-grok-client-version` (Grok
   usage); for `content-type`, media-type parameters. Everything else must
   equal the recording: object keys, array lengths, booleans (`stream`, `store`, `include_usage`,
-  `parallel_tool_calls`, `additionalProperties`), the `accept` value, the query string (byte for
+  `parallel_tool_calls`, `additionalProperties`), the `accept` value, the query string (a bare `?` counts as no query; otherwise byte for
   byte), the method,
   and the headers the SDK sends (Go chat, Responses, usage: Bearer; Go Messages: `x-api-key` and
   `anthropic-version: 2023-06-01`; Claude usage: Bearer and `anthropic-beta`; Codex usage: Bearer

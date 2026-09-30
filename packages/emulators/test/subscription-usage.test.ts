@@ -29,8 +29,7 @@ import {
   codexSubscriptionUsagePath,
   makeCodexEmulator
 } from '../src/codex.ts'
-import { emulatorEvidenceHeader } from '../src/route-evidence.ts'
-import { EmulatorRouteUnmapped } from '../src/route-evidence.ts'
+import { emulatorEvidenceHeader, EmulatorRouteUnmapped } from '../src/route-evidence.ts'
 import {
   makeSubscriptionUsageEmulator,
   type SubscriptionUsageEmulator

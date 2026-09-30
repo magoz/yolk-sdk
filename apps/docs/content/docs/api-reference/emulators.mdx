@@ -242,7 +242,7 @@ Accepted request-shape latitude: any credential value; extra headers; key order;
 except `model`, `role`, `type`, and `phase`; any positive integer where the recording has a number
 (the output-token limit); an `anthropic-beta` list that includes `oauth-2025-04-20`; any
 non-empty Grok `x-userid` and `x-grok-client-version`; and `content-type` parameters. The query
-string must match byte for byte, and Grok's `X-XAI-Token-Auth` (`xai-grok-cli`) and
+string must match byte for byte (a bare `?` counts as no query), and Grok's `X-XAI-Token-Auth` (`xai-grok-cli`) and
 `x-grok-client-mode` (`headless`) must be the SDK's fixed values. Test controls are the shared faults, scripted error turns, and, on usage
 routes, a scripted `{ usage }` body or `subscriptionUsage` option with the recorded JSON shape;
 fault and scripted-error statuses are 400-599 only. All
@@ -285,7 +285,8 @@ emulator types gain `usage` and a `subscriptionUsage` option.
 
 Each answers its recorded synthetic snapshot body (`*SubscriptionUsageDefault`) for a request with
 those headers, `accept: application/json`, and exactly the recorded query; anything else is 400
-not-emulated. Credential and account values are never checked or recorded.
+not-emulated. Credential and account values are never recorded, and are not checked except Grok's
+fixed `X-XAI-Token-Auth: xai-grok-cli`.
 
 ## Node server
 

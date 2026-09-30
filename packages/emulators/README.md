@@ -380,7 +380,7 @@ only from the committed conformance fixtures.
   output-token limit); an `anthropic-beta` list that includes `oauth-2025-04-20` (Claude usage);
   any non-empty `x-userid` and `x-grok-client-version` (Grok usage); `content-type` parameters. Object keys, array lengths, booleans (`stream`, `store`,
   `include_usage`, `parallel_tool_calls`, `additionalProperties`), `accept`, the query string (byte
-  for byte), the method, `X-XAI-Token-Auth: xai-grok-cli`, and `x-grok-client-mode: headless` must
+  for byte; a bare `?` counts as no query), the method, `X-XAI-Token-Auth: xai-grok-cli`, and `x-grok-client-mode: headless` must
   equal the recording or the SDK's fixed value. Faults and scripted errors on these routes take
   statuses of 400-599 only.
 
@@ -434,8 +434,8 @@ coverage, and top-level `ledger` / `faults` / `script` are unchanged; the emulat
 `usage` and a `subscriptionUsage` option, and `reset()` and `POST /_emulate/reset` reset both.
 Each usage route is fixture-only: a request with the headers the SDK fetcher sends, the recorded
 `accept: application/json`, and the recorded query gets the recorded body (`*SubscriptionUsageDefault`);
-anything else answers 400 not-emulated. Credential and account values are never checked or
-recorded.
+anything else answers 400 not-emulated. Credential and account values are never recorded, and
+are not checked except Grok's fixed `X-XAI-Token-Auth: xai-grok-cli`.
 
 | Emulator     | Route                            | Headers the fetcher sends (all required)                                              | Recorded body                                            |
 | ------------ | -------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- |
