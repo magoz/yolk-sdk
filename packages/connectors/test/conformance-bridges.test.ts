@@ -10,6 +10,7 @@ import {
 import {
   ApiKeyCredential,
   ConnectorBinaryHttpClient,
+  ConnectorBinaryWriteHttpClient,
   ConnectorHttpClient,
   ConnectorHttpRequest,
   CredentialResolver,
@@ -18,11 +19,15 @@ import {
   makeCredentialBinding,
   makeIntegration,
   type ConnectorBinaryHttpRequest,
+  type ConnectorBinaryUploadSessionRequest,
+  type ConnectorBinaryWriteHttpRequest,
   type CredentialResolveRequest
 } from '@yolk-sdk/connectors'
 import {
   connectorBinaryHttpClientFromEffectHttpClientLayer,
+  connectorBinaryWriteHttpClientFromEffectHttpClientLayer,
   connectorHttpClientFromEffectHttpClientLayer,
+  connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
 
@@ -322,6 +327,266 @@ describe('connectorBinaryHttpClientFromEffectHttpClientLayer', () => {
 
       expect(invalid.code).toBe('transport_failed')
       expect(seen).toHaveLength(0)
+    })
+  )
+})
+
+const writeRequest = (
+  overrides: Partial<ConnectorBinaryWriteHttpRequest> = {}
+): ConnectorBinaryWriteHttpRequest => ({
+  method: 'PUT',
+  url: 'https://files.example.test/v1/upload/file.bin',
+  headers: { authorization: 'Bearer synthetic-token', 'content-type': 'application/octet-stream' },
+  bytes: tenBytes,
+  redirect: 'manual',
+  credentials: 'omit',
+  maxUploadBytes: 10,
+  successStatuses: [200, 201],
+  maxBytes: 64,
+  maxErrorBodyBytes: 4,
+  ...overrides
+})
+
+/** A pre-authenticated session URL is a secret capability: errors must never carry it. */
+const sessionUrl =
+  "https://outlook.office.com/api/v2.0/Users('00000000-0000-4000-8000-000000000001')/Messages('synthetic')/AttachmentSessions('synthetic')?authtoken=synthetic-session-secret"
+
+const sessionRequest = (
+  overrides: Partial<ConnectorBinaryUploadSessionRequest> = {}
+): ConnectorBinaryUploadSessionRequest => ({
+  method: 'PUT',
+  url: sessionUrl,
+  headers: { 'content-range': 'bytes 0-9/20', 'content-type': 'application/octet-stream' },
+  bytes: tenBytes,
+  redirect: 'manual',
+  credentials: 'omit',
+  maxUploadBytes: 10,
+  successStatuses: [200, 201],
+  maxBytes: 64,
+  maxErrorBodyBytes: 4,
+  ...overrides
+})
+
+/** A write request whose `key` holds a value its static type forbids (hosts may pass anything). */
+const withRuntimeValue = (key: string, value: unknown): ConnectorBinaryWriteHttpRequest => {
+  const request = writeRequest()
+
+  Reflect.set(request, key, value)
+
+  return request
+}
+
+const writeLayer = (respond: () => Response, seen: Array<Seen> = []) =>
+  connectorBinaryWriteHttpClientFromEffectHttpClientLayer.pipe(
+    Layer.provide(fakeHttpClient(seen, respond))
+  )
+
+const sendWrite = (request: ConnectorBinaryWriteHttpRequest) =>
+  Effect.gen(function* () {
+    const http = yield* ConnectorBinaryWriteHttpClient
+
+    return yield* http.request(request)
+  })
+
+const sendSession = (request: ConnectorBinaryUploadSessionRequest) =>
+  Effect.gen(function* () {
+    const http = yield* ConnectorBinaryWriteHttpClient
+
+    if (http.uploadSession === undefined) {
+      return expect.fail('expected the bridge to provide uploadSession')
+    }
+
+    return yield* http.uploadSession(request)
+  })
+
+const requestBytes = (request: HttpClientRequest.HttpClientRequest): Array<number> | undefined => {
+  const body = request.body
+
+  return Predicate.isTagged(body, 'Uint8Array') ? Array.from(body.body) : undefined
+}
+
+describe('connectorBinaryWriteHttpClientFromEffectHttpClientLayer', () => {
+  it.effect('sends the exact bytes and headers and returns a complete 201 body', () =>
+    Effect.gen(function* () {
+      const seen: Array<Seen> = []
+
+      const response = yield* sendWrite(writeRequest({ method: 'POST' })).pipe(
+        Effect.provide(
+          writeLayer(
+            () =>
+              new Response('{"id":"synthetic"}', {
+                status: 201,
+                headers: {
+                  'content-type': 'application/json',
+                  location: 'https://files.example.test/v1/items/1'
+                }
+              }),
+            seen
+          )
+        )
+      )
+
+      expect(response.status).toBe(201)
+      expect(response.bodyComplete).toBe(true)
+      expect(new TextDecoder().decode(response.bytes)).toBe('{"id":"synthetic"}')
+      expect(response.headers).toMatchObject({ location: 'https://files.example.test/v1/items/1' })
+      expect(seen[0]?.request.method).toBe('POST')
+      expect(requestBytes(seen[0]!.request)).toEqual(Array.from(tenBytes))
+      expect(seen[0]?.request.headers).toMatchObject({
+        authorization: 'Bearer synthetic-token',
+        'content-type': 'application/octet-stream'
+      })
+      expect(seen[0]?.requestInit).toEqual({ redirect: 'manual', credentials: 'omit' })
+    })
+  )
+
+  it.effect('fails an oversize success and truncates error bodies', () =>
+    Effect.gen(function* () {
+      const tooLarge = yield* sendWrite(writeRequest({ maxBytes: 9 })).pipe(
+        Effect.provide(writeLayer(() => new Response(tenBytes, { status: 200 }))),
+        Effect.flip
+      )
+
+      expect(tooLarge).toMatchObject({
+        _tag: 'ConnectorBinaryHttpError',
+        code: 'response_too_large'
+      })
+
+      const truncated = yield* sendWrite(writeRequest()).pipe(
+        Effect.provide(writeLayer(() => new Response(tenBytes, { status: 409 })))
+      )
+
+      expect(truncated).toMatchObject({ status: 409, bodyComplete: false })
+      expect(truncated.bytes.byteLength).toBe(4)
+    })
+  )
+
+  it.effect('refuses invalid requests before any network contact', () =>
+    Effect.gen(function* () {
+      const seen: Array<Seen> = []
+      const layer = writeLayer(() => new Response('', { status: 200 }), seen)
+
+      for (const request of [
+        writeRequest({ maxUploadBytes: 9 }),
+        writeRequest({ maxBytes: -1 }),
+        withRuntimeValue('method', 'DELETE'),
+        withRuntimeValue('successStatuses', [204]),
+        withRuntimeValue('bytes', 'not bytes')
+      ]) {
+        const error = yield* sendWrite(request).pipe(Effect.provide(layer), Effect.flip)
+
+        expect(error).toMatchObject({ _tag: 'ConnectorBinaryHttpError', code: 'transport_failed' })
+      }
+
+      expect(seen).toHaveLength(0)
+    })
+  )
+
+  it.effect(
+    'uploads session byte ranges without Authorization and returns the final Location',
+    () =>
+      Effect.gen(function* () {
+        const seen: Array<Seen> = []
+
+        const response = yield* sendSession(sessionRequest()).pipe(
+          Effect.provide(
+            writeLayer(
+              () =>
+                new Response('', {
+                  status: 201,
+                  headers: {
+                    location:
+                      "https://outlook.office.com/api/v2.0/Users('x')/Messages('y')/Attachments('z')"
+                  }
+                }),
+              seen
+            )
+          )
+        )
+
+        expect(response.status).toBe(201)
+        expect(response.headers.location).toContain("Attachments('z')")
+        expect(seen[0]?.request.method).toBe('PUT')
+        expect(seen[0]?.url).toBe(sessionUrl)
+        expect(requestBytes(seen[0]!.request)).toEqual(Array.from(tenBytes))
+        expect(Object.keys(seen[0]?.request.headers ?? {})).not.toContain('authorization')
+        expect(seen[0]?.requestInit).toEqual({ redirect: 'manual', credentials: 'omit' })
+      })
+  )
+
+  it.effect('cancels a session with an empty DELETE answered 204', () =>
+    Effect.gen(function* () {
+      const seen: Array<Seen> = []
+
+      const response = yield* sendSession(
+        sessionRequest({
+          method: 'DELETE',
+          headers: {},
+          bytes: new Uint8Array(0),
+          maxUploadBytes: 0,
+          successStatuses: [204],
+          maxBytes: 0
+        })
+      ).pipe(Effect.provide(writeLayer(() => new Response(null, { status: 204 }), seen)))
+
+      expect(response).toMatchObject({ status: 204, bodyComplete: true })
+      expect(seen[0]?.request.method).toBe('DELETE')
+      expect(seen[0]?.request.body._tag).toBe('Empty')
+    })
+  )
+
+  it.effect('refuses credentials, bodies on DELETE, and bad status lists before sending', () =>
+    Effect.gen(function* () {
+      const seen: Array<Seen> = []
+      const layer = writeLayer(() => new Response('', { status: 200 }), seen)
+
+      for (const request of [
+        sessionRequest({ headers: { Authorization: 'Bearer synthetic-token' } }),
+        sessionRequest({ headers: { cookie: 'session=synthetic' } }),
+        sessionRequest({ method: 'DELETE', successStatuses: [204] }),
+        sessionRequest({ method: 'DELETE', bytes: new Uint8Array(0), maxUploadBytes: 0 }),
+        sessionRequest({ successStatuses: [204] })
+      ]) {
+        const error = yield* sendSession(request).pipe(Effect.provide(layer), Effect.flip)
+
+        expect(error).toMatchObject({ _tag: 'ConnectorBinaryHttpError', code: 'transport_failed' })
+      }
+
+      expect(seen).toHaveLength(0)
+    })
+  )
+
+  it.effect('maps session transport failures to code-only errors without the session URL', () =>
+    Effect.gen(function* () {
+      const error = yield* sendSession(sessionRequest()).pipe(
+        Effect.provide(
+          connectorBinaryWriteHttpClientFromEffectHttpClientLayer.pipe(
+            Layer.provide(failingHttpClient)
+          )
+        ),
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({ _tag: 'ConnectorBinaryHttpError', code: 'transport_failed' })
+
+      const serialized = `${error.message} ${JSON.stringify(error)}`
+
+      expect(serialized).not.toContain('outlook.office.com')
+      expect(serialized).not.toContain('synthetic-session-secret')
+    })
+  )
+
+  it.effect('is part of the all-ports bridge layer', () =>
+    Effect.gen(function* () {
+      const response = yield* sendSession(sessionRequest()).pipe(
+        Effect.provide(
+          connectorHttpClientsFromEffectHttpClientLayer.pipe(
+            Layer.provide(fakeHttpClient([], () => new Response('{}', { status: 200 })))
+          )
+        )
+      )
+
+      expect(response.status).toBe(200)
     })
   )
 })

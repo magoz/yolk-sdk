@@ -1,0 +1,49 @@
+---
+title: Microsoft conformance
+description: Experimental Microsoft Graph conformance cases for tests and hand-run practice-tenant checks.
+---
+
+Microsoft Outlook and OneDrive actions are documented in the [connectors package guide](./index)
+and the [integrations reference](../integrations/connectors#microsoft). This page lists the
+experimental conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a Microsoft 365 practice tenant.
+
+`@yolk-sdk/connectors/microsoft/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Outlook and OneDrive cases run the real connector actions. **The
+connector has no calendar actions yet:** the calendar cases send raw Graph v1.0 requests through the
+same connector ports and pin observed Graph behaviour for hosts and the upcoming emulator. The claims
+are as currently understood; none is observed live yet.
+
+| Case id                                            | Safety             | Seeds                                                       | Claim (as currently understood)                                                                                                                             |
+| -------------------------------------------------- | ------------------ | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `microsoft.calendar.list-range-returns-events`     | `read`             | `calendarRangeStart`, `calendarRangeEnd`, `calendarEventId` | A calendar view over a populated range returns its events (an empty success is the failure mode); every event overlaps the range as UTC instants            |
+| `microsoft.calendar.timestamp-precision`           | `read`             | range seeds, `calendarEventId`, `calendarEventStart`        | Event times come back as seven-digit fractional `dateTime` values (`2026-09-23T12:00:00.0000000`) naming the same instant as the ISO seed; compare instants |
+| `microsoft.calendar.create-returns-event-id`       | `write-reversible` | none                                                        | Creating an event returns an id that works for GET, PATCH, and DELETE; GET after DELETE is a 404                                                            |
+| `microsoft.calendar.cancel-semantics`              | `write-reversible` | none                                                        | After cancel, GET of the event is a 404 and DELETE is a no-op or 404; the event has no attendees, so nothing is sent                                        |
+| `microsoft.outlook.attachments-listing`            | `read`             | `attachmentMessageId`                                       | Listing returns attachment ids (inline included) that retrieve the same file attachments                                                                    |
+| `microsoft.outlook.attachment-content-id`          | `read`             | `attachmentMessageId`                                       | The listing carries no `contentId`; retrieving the inline file attachment returns it                                                                        |
+| `microsoft.outlook.paging-next-link`               | `read`             | `pagingFolderId`                                            | A folder larger than the page size (2) returns a `nextLink` the connector accepts and that leads to new messages                                            |
+| `microsoft.outlook.immutable-id-survives-move`     | `write-reversible` | none                                                        | With the immutable-id preference the connector sends, a draft moved to Deleted Items keeps its id                                                           |
+| `microsoft.outlook.concurrent-writes-same-message` | `write-reversible` | none                                                        | Two concurrent draft updates: at least one wins; a loser fails with 409 or 404, never a 5xx                                                                 |
+| `microsoft.onedrive.create-folder-roundtrip`       | `write-reversible` | `driveParentItemId`                                         | A created folder is listed under its parent, deletes cleanly, and GET is then a 404                                                                         |
+| `microsoft.onedrive.copy-accepted-monitor`         | `write-reversible` | `driveId`, `driveParentItemId`, `copySourceItemId`          | A copy answers 202 with one monitor `Location` the connector accepts, completes, and the copy appears in the destination                                    |
+
+`MicrosoftConformanceConfig` holds the seeds; `mailbox`, `calendarId`, and `driveId` are optional
+(`/me`, the default calendar, and `/me/drive` otherwise). Cases never hard-code account data, and a
+missing seed fails the case with a `precondition:` mismatch before any request. Credentials bind
+through `microsoftConformanceIntegration` (`microsoft.oauth`, credential ref
+`microsoft.conformance`); for a delegated token, set the credential's `accountId` to the `mailbox`
+seed so Outlook actions keep ordinary scopes.
+
+Every write case creates its own event, recipient-free draft, or folder (named with the
+`yolk-conformance` marker), always removes it again (also after a failed assertion or an
+interruption), and verifies the removal with a 404 where Graph allows it. A failed removal fails the
+case with `MicrosoftConformanceRestoreFailed`; remove the item by hand if it still exists. Removed
+folders stay in the OneDrive recycle bin, and permanently deleted drafts may be kept by retention
+policies. No case sends mail or invitations.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`). See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

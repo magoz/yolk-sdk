@@ -78,6 +78,10 @@
       "types": "./src/microsoft/index.ts",
       "default": "./src/microsoft/index.ts"
     },
+    "./microsoft/conformance": {
+      "types": "./src/microsoft/conformance/index.ts",
+      "default": "./src/microsoft/conformance/index.ts"
+    },
     "./notion": {
       "types": "./src/notion/index.ts",
       "default": "./src/notion/index.ts"
@@ -171,6 +175,11 @@
         "types": "./dist/microsoft/index.d.mts",
         "import": "./dist/microsoft/index.mjs",
         "default": "./dist/microsoft/index.mjs"
+      },
+      "./microsoft/conformance": {
+        "types": "./dist/microsoft/conformance/index.d.mts",
+        "import": "./dist/microsoft/conformance/index.mjs",
+        "default": "./dist/microsoft/conformance/index.mjs"
       },
       "./notion": {
         "types": "./dist/notion/index.d.mts",

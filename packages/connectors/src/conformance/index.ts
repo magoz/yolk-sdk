@@ -6,8 +6,9 @@
  * cases run the real connector actions over a replay `HttpClient` (`@yolk-sdk/conformance/replay`),
  * an emulator, or a host's live client driven by hand. They enforce NO streamed byte limits,
  * redirect policy, DNS/IP policy, timeouts, or TLS policy beyond what the wrapped `HttpClient`
- * does. Production hosts implement `ConnectorHttpClient` / `ConnectorBinaryHttpClient` themselves
- * (see the connectors README host integration contract) and own real credential storage.
+ * does. Production hosts implement `ConnectorHttpClient` / `ConnectorBinaryHttpClient` /
+ * `ConnectorBinaryWriteHttpClient` themselves (see the connectors README host integration
+ * contract) and own real credential storage.
  *
  * @experimental
  */
@@ -27,12 +28,18 @@ import {
   type ConnectorBinaryHttpResponse
 } from '../binary-http.ts'
 import {
+  ConnectorBinaryWriteHttpClient,
+  type ConnectorBinaryUploadSessionRequest,
+  type ConnectorBinaryWriteHttpRequest
+} from '../binary-write-http.ts'
+import {
   CredentialResolver,
   RuntimeCredential,
   type CredentialResolveRequest
 } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
 import { ConnectorHttpClient, ConnectorHttpResponse, type ConnectorHttpRequest } from '../http.ts'
+import { isBytes } from '../transfer-internal.ts'
 
 type FetchOptions = {
   redirect?: 'manual'
@@ -52,16 +59,19 @@ const toEffectRequest = (input: {
   readonly method: ConnectorHttpRequest['method']
   readonly url: string
   readonly headers?: Readonly<Record<string, string>> | undefined
-  readonly body?: string | undefined
+  readonly body?: string | Uint8Array | undefined
 }): HttpClientRequest.HttpClientRequest => {
   const base = HttpClientRequest.make(input.method)(input.url)
+  const contentType = headerValue(input.headers, 'content-type')
 
   // The body sets a default content type; the connector's own headers are applied afterwards so
   // a caller-supplied `content-type` (for example `application/json`) always wins.
   const withBody =
     input.body === undefined
       ? base
-      : HttpClientRequest.bodyText(base, input.body, headerValue(input.headers, 'content-type'))
+      : Predicate.isString(input.body)
+        ? HttpClientRequest.bodyText(base, input.body, contentType)
+        : HttpClientRequest.bodyUint8Array(base, input.body, contentType)
 
   return HttpClientRequest.setHeaders(withBody, input.headers ?? {})
 }
@@ -164,12 +174,13 @@ export const connectorHttpClientFromEffectHttpClientLayer: Layer.Layer<
 const isByteLimit = (value: number) => Number.isSafeInteger(value) && value >= 0
 
 const binaryResponse = (
-  request: ConnectorBinaryHttpRequest,
+  request: Pick<ConnectorBinaryHttpRequest, 'maxBytes' | 'maxErrorBodyBytes'>,
   status: number,
   headers: Record<string, string>,
-  bytes: Uint8Array
+  bytes: Uint8Array,
+  successStatuses: ReadonlyArray<number> = [200]
 ): Effect.Effect<ConnectorBinaryHttpResponse, ConnectorBinaryHttpError> => {
-  if (status === 200) {
+  if (successStatuses.includes(status)) {
     // An oversize success must fail, never succeed truncated.
     return bytes.byteLength > request.maxBytes
       ? Effect.fail(new ConnectorBinaryHttpError({ code: 'response_too_large' }))
@@ -237,14 +248,128 @@ export const connectorBinaryHttpClientFromEffectHttpClientLayer: Layer.Layer<
   })
 )
 
-/** Both conformance bridges over the `HttpClient` in context. Conformance/testing only. */
+const binaryTransportFailure = () => new ConnectorBinaryHttpError({ code: 'transport_failed' })
+
+const hasHeader = (headers: Readonly<Record<string, string>>, name: string): boolean =>
+  Object.keys(headers).some(key => key.toLowerCase() === name)
+
+const isSuccessStatusList = (
+  statuses: ReadonlyArray<number>,
+  allowed: ReadonlyArray<ReadonlyArray<number>>
+): boolean =>
+  allowed.some(
+    candidate =>
+      candidate.length === statuses.length &&
+      candidate.every((status, index) => statuses[index] === status)
+  )
+
+/**
+ * One buffered binary write: validate the request shape and limits BEFORE any network contact
+ * (a failure sends nothing), send the bytes with the port's fetch semantics, then apply the
+ * success/error body limits after buffering.
+ */
+const sendBinaryWrite = (
+  client: HttpClient.HttpClient,
+  request: ConnectorBinaryWriteHttpRequest | ConnectorBinaryUploadSessionRequest,
+  valid: boolean
+): Effect.Effect<ConnectorBinaryHttpResponse, ConnectorBinaryHttpError> =>
+  Effect.gen(function* () {
+    if (
+      !valid ||
+      !isByteLimit(request.maxUploadBytes) ||
+      !isByteLimit(request.maxBytes) ||
+      !isByteLimit(request.maxErrorBodyBytes) ||
+      !isBytes(request.bytes) ||
+      request.bytes.byteLength > request.maxUploadBytes
+    ) {
+      return yield* binaryTransportFailure()
+    }
+
+    const { status, headers, bytes } = yield* executeWithPortSemantics(
+      client,
+      toEffectRequest({
+        method: request.method,
+        url: request.url,
+        headers: request.headers,
+        body: request.method === 'DELETE' ? undefined : request.bytes
+      }),
+      fetchOptions(request),
+      response =>
+        response.arrayBuffer.pipe(
+          Effect.map(buffer => ({
+            status: response.status,
+            headers: plainHeaders(response),
+            bytes: new Uint8Array(buffer)
+          }))
+        )
+    ).pipe(Effect.mapError(binaryTransportFailure))
+
+    return yield* binaryResponse(request, status, headers, bytes, request.successStatuses)
+  })
+
+/**
+ * `ConnectorBinaryWriteHttpClient` over the `HttpClient` in context. Conformance/testing only.
+ *
+ * `request` sends POST/PUT bytes; `uploadSession` sends PUT byte ranges and DELETE cancellation to
+ * a pre-authenticated upload-session URL. Before any network contact, both fail with
+ * `transport_failed` (sending nothing) on an unexpected method or success-status list, invalid
+ * limits, or more bytes than `maxUploadBytes`; `uploadSession` also refuses any `authorization`,
+ * `cookie`, or `proxy-authorization` header and a DELETE with bytes. Responses are buffered, then
+ * a success status (`successStatuses`) larger than `maxBytes` fails with `response_too_large`, and
+ * any other status keeps at most `maxErrorBodyBytes` bytes (`bodyComplete: false` when truncated).
+ * `redirect: 'manual'` and `credentials: 'omit'` are forwarded as `FetchHttpClient.RequestInit`
+ * options. Errors are code-only `ConnectorBinaryHttpError`s: never the URL (a session URL is a
+ * secret capability), headers, or bodies. Enforces NO streamed byte limit, redirect, DNS/IP,
+ * timeout, or TLS policy beyond the wrapped client, never retries, and is not for production.
+ */
+export const connectorBinaryWriteHttpClientFromEffectHttpClientLayer: Layer.Layer<
+  ConnectorBinaryWriteHttpClient,
+  never,
+  HttpClient.HttpClient
+> = Layer.effect(
+  ConnectorBinaryWriteHttpClient,
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+
+    return ConnectorBinaryWriteHttpClient.of({
+      request: request =>
+        sendBinaryWrite(
+          client,
+          request,
+          (request.method === 'POST' || request.method === 'PUT') &&
+            isSuccessStatusList(request.successStatuses, [[200, 201]])
+        ),
+      uploadSession: request =>
+        sendBinaryWrite(
+          client,
+          request,
+          !['authorization', 'cookie', 'proxy-authorization'].some(name =>
+            hasHeader(request.headers, name)
+          ) &&
+            ((request.method === 'PUT' &&
+              isSuccessStatusList(request.successStatuses, [[200, 201]])) ||
+              (request.method === 'DELETE' &&
+                isBytes(request.bytes) &&
+                request.bytes.byteLength === 0 &&
+                isSuccessStatusList(request.successStatuses, [[204]])))
+        )
+    })
+  })
+)
+
+/**
+ * Every conformance bridge over the `HttpClient` in context: `ConnectorHttpClient`,
+ * `ConnectorBinaryHttpClient`, and `ConnectorBinaryWriteHttpClient` (with `uploadSession`).
+ * Conformance/testing only.
+ */
 export const connectorHttpClientsFromEffectHttpClientLayer: Layer.Layer<
-  ConnectorHttpClient | ConnectorBinaryHttpClient,
+  ConnectorHttpClient | ConnectorBinaryHttpClient | ConnectorBinaryWriteHttpClient,
   never,
   HttpClient.HttpClient
 > = Layer.mergeAll(
   connectorHttpClientFromEffectHttpClientLayer,
-  connectorBinaryHttpClientFromEffectHttpClientLayer
+  connectorBinaryHttpClientFromEffectHttpClientLayer,
+  connectorBinaryWriteHttpClientFromEffectHttpClientLayer
 )
 
 /** One credential for every slot, or credentials keyed by credential slot id. */
