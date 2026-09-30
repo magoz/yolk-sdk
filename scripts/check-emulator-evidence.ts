@@ -325,7 +325,8 @@ export const portFixtureEvidence = (
 
 /**
  * Evidence of every committed Gateway, OpenAI chat, Codex Responses, Anthropic Messages, Grok
- * Responses, Fortnox, and email fixture, by case id.
+ * Responses, OpenCode Go, subscription-usage (Claude, Codex, Grok), Fortnox, and email port
+ * fixture, by case id.
  */
 export const repoFixtureEvidenceByCase: ReadonlyMap<
   string,

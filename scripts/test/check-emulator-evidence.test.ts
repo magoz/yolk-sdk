@@ -509,6 +509,11 @@ describe('repo emulator manifests', () => {
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
       ['verified', '2026-09-30']
     ])
+    expect(
+      emulatorManifests[0]?.routes.flatMap(route =>
+        route.caseIds.map(caseId => repoFixtureEvidenceByCase.get(caseId))
+      )
+    ).toEqual([['verified'], ['verified'], ['verified'], ['verified']])
     expect(report.findings.filter(finding => finding.manifest === 'gateway')).toEqual([])
     expect(repoFixtureEvidenceByCase.get('openai.chat.stream.plain-text')).toEqual(['unverified'])
     expect(repoFixtureEvidenceByCase.get('anthropic.messages.stream.plain-text')).toEqual([
@@ -582,12 +587,13 @@ describe('repo emulator manifests', () => {
     }
   })
 
-  // The CLI runs at explicit dates, never the wall clock, so this test does not start failing on
-  // its own when the entries expire: the passing run is pinned to 2026-09-30 (when the email
-  // entries were written) and the failing run to the day after the latest expiry.
-  const cliToday = '2026-09-30'
+  // The CLI runs at explicit dates taken from the pending file, never the wall clock, so this
+  // test does not start failing on its own when the entries expire. With no pending entries the
+  // result does not depend on the date, so today is used (a fixed date could precede the
+  // `observedAt` of freshly verified routes and fail as `future-observed-at`).
   const expiries = repoPending.entries.map(entry => entry.expires).toSorted()
-  const latestExpiry = expiries.at(-1) ?? cliToday
+  const earliestExpiry = expiries[0] ?? new Date().toISOString().slice(0, 10)
+  const latestExpiry = expiries.at(-1) ?? earliestExpiry
 
   const dayAfter = (date: string) =>
     new Date(Date.parse(`${date}T00:00:00.000Z`) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
@@ -605,11 +611,11 @@ describe('repo emulator manifests', () => {
     })
 
   it('runs as a CLI that prints the report and exits 0 before the pending entries expire', async () => {
-    const pendingRoutes = repoCheck(new Date(`${cliToday}T12:00:00.000Z`)).findings.filter(
+    const pendingRoutes = repoCheck(new Date(`${earliestExpiry}T12:00:00.000Z`)).findings.filter(
       finding => finding.kind === 'pending-write'
     ).length
 
-    const result = await runCli(cliToday)
+    const result = await runCli(earliestExpiry)
 
     expect(pendingRoutes).toBe(repoPending.entries.length)
     expect(result.failed).toBe(false)

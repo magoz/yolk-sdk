@@ -18,7 +18,8 @@
  *
  * Request-shape latitude (the only one): credential fields are never compared or recorded, and
  * `connection.host` is not compared (the practice host comes from seeds). Every other connection
- * field (`protocol`, `port`, `security`) is compared. Everything else must equal a fixture request exactly. Anything that does not
+ * field (`protocol`, `port`, `security`) is compared. Everything else must equal a fixture request
+ * exactly. Anything that does not
  * match (an unknown method, no matching fixture, or no fixture consistent with the mailbox state)
  * fails closed with a ledgered `notEmulated` answer, the port analogue of HTTP 400.
  *

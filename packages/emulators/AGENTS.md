@@ -85,18 +85,18 @@ There is no root export or barrel.
   (`test/fixture-recordings.test.ts`) compares status, event kinds and order, field names, and
   content. Scope: the four `/opencode` routes and the three subscription-usage routes (Claude,
   Codex, Grok) today, on `src/fixture-route.ts`, and the `/email` port emulator (its own
-  latitude and not-emulated answer, below). The earlier model routes (`/gateway`, `/openai`,
+  latitude, not-emulated answer, faults, and parity test, below; it does not use the kernel). The earlier model routes (`/gateway`, `/openai`,
   `/anthropic`, `/codex`, `/xai` Messages and Responses) predate the rule and keep their synthetic
   behaviour and 404 fallback unchanged; do not copy that behaviour into new routes.
-- Request-shape latitude (fixture-only HTTP routes, the only accepted deviations): any credential value
-  (never checked or stored); extra request headers; JSON key order; any string value except the
+- Request-shape latitude (fixture-only HTTP routes, the only accepted deviations): any credential
+  value (never checked or stored); extra request headers; JSON key order; any string value except the
   discriminators `model`, `role`, `type`, and `phase`; any positive integer where the recording has
   a number (the output-token limit); for `anthropic-beta` (Claude usage), a comma-separated list
   that includes `oauth-2025-04-20`; any non-empty `x-userid` and `x-grok-client-version` (Grok
   usage); for `content-type`, media-type parameters. Everything else must
   equal the recording: object keys, array lengths, booleans (`stream`, `store`, `include_usage`,
-  `parallel_tool_calls`, `additionalProperties`), the `accept` value, the query string (a bare `?` counts as no query; otherwise byte for
-  byte), the method,
+  `parallel_tool_calls`, `additionalProperties`), the `accept` value, the query string (a bare `?` counts as no query;
+  otherwise byte for byte), the method,
   and the headers the SDK sends (Go chat, Responses, usage: Bearer; Go Messages: `x-api-key` and
   `anthropic-version: 2023-06-01`; Claude usage: Bearer and `anthropic-beta`; Codex usage: Bearer
   and `ChatGPT-Account-Id`; Grok usage: Bearer, `X-XAI-Token-Auth: xai-grok-cli`, `x-userid`,
@@ -197,8 +197,8 @@ There is no root export or barrel.
   manifest `*SubscriptionUsageEmulatorRoutes`); `/opencode` includes it as a part. All four take a
   `subscriptionUsage` option (a replacement body with the recorded shape). Credential and account
   headers (`ChatGPT-Account-Id`, `x-userid`, `X-XAI-Token-Auth`) are required but never recorded.
-- `/email` is a port emulator, not a fetch handler, and does not use the kernel: `call(method,
-request)` answers one `EmailClient` call as plain JSON (`{ response }`, `{ failure }`, or
+- `/email` is a port emulator, not a fetch handler, and does not use the kernel:
+  `call(method, request)` answers one `EmailClient` call as plain JSON (`{ response }`, `{ failure }`, or
   `{ notEmulated }`), and `emailClientLayerFromBackend` in `@yolk-sdk/connectors/email/conformance`
   bridges it to the port. Response behaviour comes ONLY from the fixtures in
   `src/email-fixtures.ts`, a verbatim copy of the connector `emailConformanceFixtures`
