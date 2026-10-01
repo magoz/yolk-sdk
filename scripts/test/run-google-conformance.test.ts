@@ -793,6 +793,17 @@ describe('run-google-conformance printed output redacts the live token', () => {
 
     const rawFolded = liveToken.match(/.{1,6}/g)?.join('\n') ?? ''
 
+    // A wide fold (16+ characters per line): every full line is a fragment on its own, but the
+    // short first and last pieces sit next to ordinary text; the whole message is still withheld.
+    const wide = liveToken.match(/.{1,17}/g) ?? []
+
+    expect(
+      redactAccessToken(
+        `start ${wide[0]}\n${wide.slice(1, -1).join('\n')}\n${wide.at(-1)} end`,
+        liveToken
+      )
+    ).toBe(withheldTokenLine)
+
     expect(redactAccessToken(`name\n${rawFolded}\nend`, liveToken)).toBe(withheldTokenLine)
     // Ordinary multi-line text without the token is unchanged.
     expect(redactAccessToken('first line\nsecond line', liveToken)).toBe('first line\nsecond line')

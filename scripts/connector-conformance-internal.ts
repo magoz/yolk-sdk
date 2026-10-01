@@ -1141,45 +1141,50 @@ export const withheldTokenLine =
  * `text` with every form of the live access token that `textContainsAccessToken` looks for (see
  * `accessTokenForms`: raw, percent-encoded, base64) replaced by `redactedLiveTokenMarker`; a line
  * that still holds the token afterwards (escaped, folded, or double-encoded) is replaced whole by
- * `withheldTokenLine`, and the whole message is withheld when the token (or 16 or more consecutive
- * characters of it) only appears once the lines are joined with whitespace removed. Live runs print every line through it: a provider can echo the token into a
- * field a case reports (a refused item's name, a leftover's title, a failure message).
+ * `withheldTokenLine`, and the whole message is withheld when the token (or a fragment of it, see
+ * `tokenFragmentForms`) only appears once the lines are joined with whitespace removed. Live runs
+ * print every line through it: a provider can echo the token into a field a case reports (a
+ * refused item's name, a leftover's title, a failure message).
  */
 export const redactAccessToken = (text: string, accessToken: string): string => {
   const forms = accessTokenForms(accessToken)
   const longestFirst = [...forms].sort((left, right) => right.length - left.length)
 
-  const redacted = text
+  const replacedLines = text
     .split('\n')
-    .map(line => {
-      const replaced = longestFirst.reduce(
+    .map(line =>
+      longestFirst.reduce(
         (current, form) => current.replaceAll(form, redactedLiveTokenMarker),
         line
       )
+    )
 
-      return textHasToken(replaced, forms) || hasTokenFragment(replaced, accessToken)
-        ? withheldTokenLine
-        : replaced
-    })
+  // A token folded across lines passes every single-line check, so the whole message is checked
+  // with all whitespace removed, before any line is withheld (a withheld line would split the
+  // token and hide its short first and last pieces). When the joined text holds the full token (or
+  // a fragment) but no single line does, the match spans lines and the whole message is withheld.
+  const joined = unfolded(replacedLines.join('\n'))
+  const lineHasToken = (line: string) => textHasToken(line, forms)
+  const lineHasFragment = (line: string) => hasTokenFragment(line, accessToken)
+
+  const spansLines =
+    (textHasToken(joined, forms) && !replacedLines.some(lineHasToken)) ||
+    (hasTokenFragment(joined, accessToken) && !replacedLines.some(lineHasFragment))
+
+  if (spansLines) return withheldTokenLine
+
+  return replacedLines
+    .map(line => (lineHasToken(line) || lineHasFragment(line) ? withheldTokenLine : line))
     .join('\n')
-
-  // A token folded across lines (newlines every few characters) passes every single-line check,
-  // so the whole message is checked once more with all whitespace removed; a match that cannot be
-  // localized to one line withholds the whole message.
-  const joined = unfolded(redacted)
-
-  return textHasToken(joined, forms) || hasTokenFragment(joined, accessToken)
-    ? withheldTokenLine
-    : redacted
 }
 
 /** Shortest run of consecutive token characters treated as a leaked fragment. */
 const tokenFragmentMinLength = 16
 
 /**
- * True when `line` holds `tokenFragmentMinLength` or more consecutive characters of the token: a
- * report or warning that a length cap cut in the middle of an echoed token still leaks a usable
- * part of it, so such a line is withheld whole.
+ * True when `line` holds any of `tokenFragmentForms`: a report or warning that a length cap cut
+ * in the middle of an echoed token still leaks a usable part of it, so such a line is withheld
+ * whole.
  */
 const hasTokenFragment = (line: string, accessToken: string): boolean =>
   tokenFragmentForms(accessToken).some(form => line.includes(form))
@@ -1187,7 +1192,9 @@ const hasTokenFragment = (line: string, accessToken: string): boolean =>
 /**
  * Every `tokenFragmentMinLength` window of the token, verbatim and base64-encoded (standard and
  * URL-safe, every byte alignment), so a capped report that cut a raw or base64 echo short is
- * still recognised.
+ * still recognised. A base64 core drops the groups it shares with the surrounding bytes, so an
+ * encoded fragment can match text that encodes as few as 12 consecutive token characters: this
+ * errs toward withholding.
  */
 const tokenFragmentForms = (accessToken: string): ReadonlyArray<string> => {
   if (accessToken.length < tokenFragmentMinLength) return []

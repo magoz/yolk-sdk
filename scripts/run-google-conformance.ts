@@ -295,8 +295,8 @@ export const googleRunner = {
     '--practice-address must be a plain email address (no display name), the Gmail ids letters, digits, _ and -, --calendar a calendar id, the range bounds RFC 3339 instants with a Z or offset, and the Drive ids letters, digits, _ and - (10 or more)',
   casePorts,
   recordedRequestHeaders: [],
-  // Checked before any request, never printed: Google OAuth access tokens are `ya29.` followed by
-  // URL-safe characters.
+  // Checked before any request, never printed. The runner's supported profile: an OAuth access
+  // token of the `ya29.` form Google issues to installed and web clients; other shapes are refused.
   tokenFormat: {
     pattern: /^ya29\.[A-Za-z0-9._-]{20,4096}$/,
     description:
