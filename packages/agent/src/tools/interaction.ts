@@ -1,7 +1,7 @@
 import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
-import { decodeToolArguments } from './arguments.ts'
+import { decodeToolArguments, hasPlainPrototype, omitUndefinedKeys } from './arguments.ts'
 import {
   EmptyToolParams,
   toolJsonSchemaFromSchema,
@@ -67,25 +67,6 @@ const decodeExact = <S extends SyncSchema>(
     )
   )
 
-const hasPlainPrototype = (value: object) => {
-  const prototype = Object.getPrototypeOf(value)
-
-  return prototype === Object.prototype || prototype === null
-}
-
-// The JSON codec decodes `null` on `Schema.optional(X)` as an `undefined` value; drop those keys.
-const omitUndefinedKeys = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(omitUndefinedKeys)
-
-  if (!Predicate.isObject(value) || !hasPlainPrototype(value)) return value
-
-  return Object.fromEntries(
-    Object.entries(value).flatMap(([key, item]) =>
-      item === undefined ? [] : [[key, omitUndefinedKeys(item)]]
-    )
-  )
-}
-
 // Treat an input `null` as absent only where the decoded value has no such key.
 const omitNullsAbsentFrom = (input: unknown, decoded: unknown): unknown => {
   if (Array.isArray(input) && Array.isArray(decoded)) {
@@ -122,7 +103,7 @@ const decodeCallExact = <S extends SyncSchema>(
     Effect.flatMap(decoded => {
       const params = omitUndefinedKeys(decoded)
 
-      return interactionJsonEquals(params, omitNullsAbsentFrom(input, params))
+      return interactionJsonEquals(params, omitNullsAbsentFrom(omitUndefinedKeys(input), params))
         ? decodeExact(schema, params)
         : Effect.fail(exactJsonError())
     })

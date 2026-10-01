@@ -329,15 +329,20 @@ to typeless `anyOf`/`oneOf` unions whose members are all object schemas, as requ
 OpenAI-compatible upstreams; primitives, unknown, and already-typed roots are unchanged, and call
 validation still uses the original Effect Schema.
 
-### Tool arguments and `null`
+### Tool arguments: `null` and unknown keys
 
-`ToolDef.parameters` describes the schema's canonical JSON codec, so `Schema.optional(X)` is
+Tool arguments are accepted exactly as advertised: unambiguous `null`s are normalized, and keys
+that would be silently lost are rejected. `ToolDef.parameters` describes the schema's canonical JSON codec, so `Schema.optional(X)` is
 advertised as `X | null`. `makeTool` (validate and execute), `makeInputTool`/`makeInteractionTool`
 call params, and the loop `question` decode model arguments with `Schema.toCodecJson(parameters)`:
 `null` on `Schema.optional(X)` decodes as absent and `withDecodingDefault` still applies,
 `Schema.optional(Schema.NullOr(X))` keeps `null`, and required non-nullable fields still reject it.
-Non-finite numbers (the codec's `"NaN"`/`"Infinity"` strings) are validation errors.
-`resolveTools` also drops `null` where the advertised schema marks a property optional without
+`undefined`-valued keys from in-process callers count as absent.
+Non-finite numbers (the codec's `"NaN"`/`"Infinity"` strings) are validation errors. Objects are
+advertised closed (`additionalProperties: false`), so unknown keys at any depth are model-visible
+validation errors instead of being stripped (also through closed-input declarations whose JSON codec
+bypasses their own parser). `resolveTools` also drops `null` on keys a closed object does not
+declare (provider-flattened unions show every branch's fields), and where the advertised schema marks a property optional without
 admitting `null` (for example `Schema.optionalKey(X)`, the subagent `model`, or raw MCP schemas)
 before any registration sees the call; `omitNullOptionalToolArguments` exposes that step for hosts
 that dispatch registrations themselves. User-submitted input/interaction responses are unchanged.

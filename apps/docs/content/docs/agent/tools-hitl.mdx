@@ -39,7 +39,7 @@ the decode error is passed through unwrapped. Default:
 this tool-message contract. Existing
 `(error: unknown) => string` callbacks remain assignable.
 
-### Optional arguments and `null`
+### Optional arguments, `null`, and unknown keys
 
 The advertised `ToolDef.parameters` describe the schema's JSON codec, so `Schema.optional(X)`
 reaches the model as `X | null`, and models often send `null` for fields they do not use. Tool
@@ -51,9 +51,13 @@ arguments decode through `Schema.toCodecJson(parameters)`:
   different from omission, such as clearing a value.
 - Required non-nullable fields still reject `null` with a model-visible validation error.
 - Non-finite numbers (`"NaN"`, `"Infinity"`, `"-Infinity"`) are rejected.
+- Unknown keys are rejected at any depth with a model-visible validation error. Parameters are
+  advertised as closed objects, and silently dropping a key would let the model believe it set
+  something (a filter, a start time) that was ignored.
 
 `resolveTools` also drops `null` on properties advertised as optional without `null`, such as
-`Schema.optionalKey(X)` fields or raw MCP schemas, before any tool sees the call. If you dispatch
+`Schema.optionalKey(X)` fields or raw MCP schemas, and on keys a closed object does not declare
+(provider-flattened unions show every branch's fields), before any tool sees the call. If you dispatch
 registrations without `resolveTools`, apply `omitNullOptionalToolArguments(def.parameters, params)`
 from `@yolk-sdk/agent/tools` yourself.
 

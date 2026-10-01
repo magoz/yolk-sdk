@@ -7,15 +7,22 @@ import { ToolCall, type ToolJsonSchema } from '@yolk-sdk/agent/protocol'
 // Model tool-call arguments are JSON that the model produced from the advertised `ToolDef.parameters`.
 // That advertisement is `Schema.toJsonSchemaDocument(schema)`, which describes the canonical JSON
 // codec of the schema, not its type side: the JSON codec encodes `undefined` as `null`, so every
-// `Schema.optional(X)` is advertised as `X | null`. Two steps make execution accept exactly what the
-// model was shown, without changing the advertisement:
+// `Schema.optional(X)` is advertised as `X | null`, and objects as closed
+// (`additionalProperties: false`). Execution accepts exactly what the model was shown, without
+// changing the advertisement. Policy: normalize what is unambiguous (`null` means "not sent"), and
+// reject what would otherwise be silently lost (an unknown key the model believes it set), so the
+// model gets a precise, recoverable validation error instead of a call that quietly did less.
 //
-// 1. `decodeToolArguments` decodes with `Schema.toCodecJson(schema)`. `null` on `Schema.optional(X)`
-//    becomes `undefined` (and `withDecodingDefault` applies), while `Schema.optional(Schema.NullOr(X))`
-//    keeps `null` as a meaningful value. Required non-nullable fields still reject `null`.
+// 1. `decodeToolArguments` decodes with `Schema.toCodecJson(schema)` and `onExcessProperty: 'error'`.
+//    `null` on `Schema.optional(X)` becomes `undefined` (and `withDecodingDefault` applies), while
+//    `Schema.optional(Schema.NullOr(X))` keeps `null` as a meaningful value. Required non-nullable
+//    fields still reject `null`; unknown keys are rejected at any depth, also through declarations
+//    whose JSON codec bypasses their own parser.
 // 2. `omitNullOptionalToolArguments` covers properties advertised as optional WITHOUT `null`
-//    (`Schema.optionalKey(X)`, raw/MCP JSON Schemas). Strict-mode models still fill those with `null`;
-//    the registry drops such a `null` before any registration decodes or forwards the arguments.
+//    (`Schema.optionalKey(X)`, raw/MCP JSON Schemas) and `null` on keys a closed object does not
+//    declare (provider-flattened unions show every branch's fields). Strict-mode models still fill
+//    those with `null`; the registry drops such a `null` before any registration decodes or forwards
+//    the arguments.
 
 type ToolArgumentsSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
 
@@ -55,10 +62,49 @@ const nonFiniteNumberError = (path: PropertyPath) =>
     )
   )
 
+export const hasPlainPrototype = (value: object) => {
+  const prototype = Object.getPrototypeOf(value)
+
+  return prototype === Object.prototype || prototype === null
+}
+
+/** Drops `undefined`-valued keys from plain objects at any depth, as JSON serialization would.
+ * Model arguments are JSON and never carry `undefined`; in-process callers building params from
+ * optional values do. Returns the same reference when nothing changes.
+ */
+export const omitUndefinedKeys = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    const items = value.map(omitUndefinedKeys)
+
+    return items.some((item, index) => item !== value[index]) ? items : value
+  }
+
+  if (!Predicate.isObject(value) || !hasPlainPrototype(value)) return value
+
+  let changed = false
+
+  const entries = Object.entries(value).flatMap(([key, item]) => {
+    if (item === undefined) {
+      changed = true
+
+      return []
+    }
+
+    const normalized = omitUndefinedKeys(item)
+
+    changed ||= normalized !== item
+
+    return [[key, normalized]]
+  })
+
+  return changed ? Object.fromEntries(entries) : value
+}
+
 /** Decoder for model-produced tool/interaction call arguments.
  *
  * Decodes through `Schema.toCodecJson(schema)`, the codec that `ToolDef.parameters` advertises, so
- * `null` on `Schema.optional(X)` decodes as absent. The JSON codec also accepts the strings
+ * `null` on `Schema.optional(X)` decodes as absent, and unknown keys are rejected (callers may
+ * override `onExcessProperty`). `undefined`-valued keys from in-process callers count as absent. The JSON codec also accepts the strings
  * `"NaN"`/`"Infinity"`/`"-Infinity"` for bare `Schema.Number`; JSON arguments never carried
  * non-finite numbers before, so any non-finite number in the decoded value is a validation error.
  */
@@ -66,10 +112,13 @@ export const decodeToolArguments = <S extends ToolArgumentsSchema>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => {
-  const decode = Schema.decodeUnknownEffect(Schema.toCodecJson(schema), options)
+  const decode = Schema.decodeUnknownEffect(Schema.toCodecJson(schema), {
+    onExcessProperty: 'error',
+    ...options
+  })
 
   return (input: unknown): Effect.Effect<S['Type'], Schema.SchemaError> =>
-    decode(input).pipe(
+    decode(omitUndefinedKeys(input)).pipe(
       Effect.flatMap(decoded => {
         const path = nonFiniteNumberPath(decoded, [], new Set())
 
@@ -274,7 +323,11 @@ const normalizeObject = (
   const properties = schemaRecord(schema, 'properties')
   const additionalProperties = ownValue(schema, 'additionalProperties')
 
-  if (properties === undefined && jsonObject(additionalProperties) === undefined) return value
+  const closed = additionalProperties === false
+
+  if (properties === undefined && !closed && jsonObject(additionalProperties) === undefined) {
+    return value
+  }
 
   const required = requiredKeys(schema)
   const normalized: { [key: string]: Schema.Json } = {}
@@ -284,11 +337,12 @@ const normalizeObject = (
     const declaredSchema = properties === undefined ? undefined : ownValue(properties, key)
     const propertySchema = declaredSchema ?? additionalProperties
 
+    // `null` means "not sent": drop it on optional non-nullable properties, and on keys a closed
+    // object does not declare (e.g. another branch's field from a provider-flattened union).
     if (
-      declaredSchema !== undefined &&
       propertyValue === null &&
       !required.has(key) &&
-      !admitsNull(declaredSchema, definitions, 0)
+      (declaredSchema === undefined ? closed : !admitsNull(declaredSchema, definitions, 0))
     ) {
       changed = true
 
@@ -378,7 +432,7 @@ const normalizeValue = (
 
 /** Drops `null` from model-produced tool arguments only where the advertised JSON Schema marks
  * the property optional and does not admit `null` (for example `Schema.optionalKey(X)` or a raw
- * MCP schema). Follows local `$ref`/`$defs`, `allOf`, discriminated `anyOf`/`oneOf`, and arrays;
+ * MCP schema), or where a closed object (`additionalProperties: false`) does not declare the key. Follows local `$ref`/`$defs`, `allOf`, discriminated `anyOf`/`oneOf`, and arrays;
  * ambiguous unions are left untouched. A declared nullable value is never rewritten. Non-JSON
  * arguments and unchanged arguments are returned as the same reference.
  */

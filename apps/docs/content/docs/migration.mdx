@@ -61,9 +61,9 @@ version. Tooling such as `@effect/language-service` is versioned independently.
   your regex accepts (surrogate ranges and bounded quantifiers over astral characters can).
 - String `Schema.isMinLength(n)` and the minimum of `Schema.isBetweenLength` (`n >= 2`) are
   advertised as `minLength: ceil(n / 2)` code points. Tool execution still validates against the
-  original Effect Schema.
+  original Effect Schema (through its JSON codec).
 
-### Next canary: tool arguments accept `null` for optional fields
+### Next canary: tool arguments accept `null` for optional fields and reject unknown keys
 
 `makeTool`, `makeInputTool`/`makeInteractionTool` call params, and the `question` tool now decode
 model arguments with `Schema.toCodecJson(parameters)`, the codec that `ToolDef.parameters` already
@@ -72,6 +72,10 @@ advertised. `null` on `Schema.optional(X)` now decodes as omitted instead of fai
 `resolveTools` also drops `null` on properties advertised as optional without `null`
 (`Schema.optionalKey(X)`, the subagent `model`/`reasoning_effort`, raw MCP schemas) before any
 registration sees the call. Advertised schemas are unchanged. Non-finite numbers stay rejected.
+Unknown keys are now rejected (`onExcessProperty: 'error'`) instead of silently stripped, matching
+the `additionalProperties: false` that tool schemas already advertised; a `null` on an undeclared
+key is still ignored. Callers or fixtures that sent extra keys to a tool now get a model-visible
+validation error, and app wrappers that only existed to reject unknown keys can be removed.
 If you worked around this with `Schema.optional(Schema.NullOr(X))` plus `null`-to-`undefined`
 mapping, `Schema.optional(X)` is now enough; app wrappers that re-decoded with the JSON codec can
 use `makeTool` directly. `omitNullOptionalToolArguments` is new on `@yolk-sdk/agent/tools` for

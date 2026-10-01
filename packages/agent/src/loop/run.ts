@@ -718,10 +718,15 @@ const invalidQuestionToolResult = (call: ToolCall) =>
     structuredContent: { type: 'question_invalid' }
   })
 
-// Model-produced question args decode through the JSON codec that the question ToolDef
-// advertises, so `null` on optional prompt fields means absent. No numeric fields, so the
-// non-finite guard of `decodeToolArguments` (tools) is not needed here.
-const decodeQuestionToolParams = Schema.decodeUnknownEffect(Schema.toCodecJson(QuestionToolParams))
+// Model-produced question args decode like `decodeToolArguments` (tools; loop cannot import it):
+// the advertised JSON codec, so `null` on optional prompt fields means absent, and unknown keys are
+// rejected as the closed advertised schema says. No numeric fields, so no non-finite guard.
+const decodeQuestionToolParams = Schema.decodeUnknownEffect(
+  Schema.toCodecJson(QuestionToolParams),
+  {
+    onExcessProperty: 'error'
+  }
+)
 
 const prepareQuestionCall = (
   call: ToolCall,

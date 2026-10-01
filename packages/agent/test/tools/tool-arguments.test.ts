@@ -1,4 +1,4 @@
-import { Effect, Predicate, Result, Stream } from 'effect'
+import { Effect, Predicate, Result, SchemaGetter, SchemaParser, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { LoopConfig, runToolBatch, ToolExecutor, type ToolError } from '@yolk-sdk/agent/loop'
@@ -121,6 +121,28 @@ describe('tool argument decoding', () => {
       expect(received[0]?.nested).toBeUndefined()
       expect(received[0]?.pageSize).toBe(received[1]?.pageSize)
       expect(received[0]?.operation).toBe(received[1]?.operation)
+    })
+  )
+
+  it.effect('treats undefined-valued keys from in-process callers as absent', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(OptionalArgs)
+
+      const result = yield* tool.execute({
+        context: undefined,
+        call: call({ operation: 'get', query: undefined, nested: { tag: undefined } })
+      })
+
+      expect(result.isError).toBeUndefined()
+      expect(received[0]?.query).toBeUndefined()
+      expect(received[0]?.pageSize).toBe(20)
+
+      const required = yield* tool.execute({
+        context: undefined,
+        call: call({ operation: undefined })
+      })
+
+      expect(required).toMatchObject({ isError: true, structuredContent: { reason: 'validation' } })
     })
   )
 
@@ -563,6 +585,194 @@ describe('interaction and input call arguments', () => {
       const response = yield* view.validateResponse({ title: 'x', note: null }).pipe(Effect.result)
 
       expect(Result.isFailure(response)).toBe(true)
+    })
+  )
+})
+
+// Mirrors an app-owned closed-input declaration whose JSON codec link bypasses its own parser.
+const closedDeclaration = <S extends Schema.Top>(schema: S) =>
+  Schema.declareConstructor<S['Type'], S['Encoded']>()(
+    [schema],
+    ([codec]) =>
+      (input, _ast, options) =>
+        SchemaParser.decodeUnknownEffect(codec)(input, { ...options, onExcessProperty: 'error' }),
+    {
+      toCodecJson: ([inner]) =>
+        Schema.link<S['Type']>()(inner, {
+          decode: SchemaGetter.passthrough(),
+          encode: SchemaGetter.passthrough()
+        })
+    }
+  )
+
+const expectValidationError = (result: ToolResult, key: string) =>
+  expect(result).toMatchObject({
+    isError: true,
+    content: expect.stringContaining('Expected no excess property'),
+    structuredContent: {
+      type: 'model_visible_tool_error',
+      reason: 'validation',
+      message: expect.stringContaining(key)
+    }
+  })
+
+describe('unknown tool argument keys', () => {
+  const Nested = Schema.Struct({
+    id: Schema.String,
+    note: Schema.optional(Schema.String),
+    child: Schema.optional(Schema.Struct({ tag: Schema.String }))
+  })
+
+  const Operations = Schema.Union([
+    Schema.Struct({ kind: Schema.Literal('create'), title: Schema.optional(Schema.String) }),
+    Schema.Struct({ kind: Schema.Literal('delete'), reason: Schema.optional(Schema.String) })
+  ])
+
+  it.effect(
+    'rejects unknown keys at the root, nested, and in union branches before execution',
+    () =>
+      Effect.gen(function* () {
+        const nested = capturingTool(Nested)
+        const nestedSet = yield* resolveOne(nested.tool)
+
+        expectValidationError(yield* nestedSet.execute(call({ id: 'a', start: 'x' })), 'start')
+        expectValidationError(
+          yield* nestedSet.execute(call({ id: 'a', child: { tag: 't', extra: true } })),
+          'extra'
+        )
+
+        const union = capturingTool(Operations)
+        const unionSet = yield* resolveOne(union.tool)
+
+        expectValidationError(
+          yield* unionSet.execute(call({ kind: 'delete', reason: 'r', force: true })),
+          'force'
+        )
+
+        const validated = yield* (
+          nested.tool.validate?.(call({ id: 'a', start: 'x' })) ?? Effect.void
+        ).pipe(Effect.result)
+
+        expect(Result.isFailure(validated)).toBe(true)
+        expect(nested.received).toHaveLength(0)
+        expect(union.received).toHaveLength(0)
+      })
+  )
+
+  it.effect('keeps closed-input declarations closed through the JSON codec', () =>
+    Effect.gen(function* () {
+      const Closed = closedDeclaration(Nested)
+      const { tool, received } = capturingTool(Closed)
+      const toolSet = yield* resolveOne(tool)
+
+      expect(JSON.stringify(tool.def.parameters)).toBe(
+        JSON.stringify(toolJsonSchemaFromSchema(Closed))
+      )
+
+      expectValidationError(yield* toolSet.execute(call({ id: 'a', start: 'x' })), 'start')
+      expectValidationError(
+        yield* toolSet.execute(call({ id: 'a', child: { tag: 't', extra: 1 } })),
+        'extra'
+      )
+      expect(received).toHaveLength(0)
+
+      const result = yield* toolSet.execute(call({ id: 'a', note: null, child: null }))
+
+      expect(result.isError).toBeUndefined()
+      expect(received[0]?.note).toBeUndefined()
+      expect(received[0]?.child).toBeUndefined()
+    })
+  )
+
+  it.effect('drops null on another union branch field but rejects a real value there', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(Operations)
+      const toolSet = yield* resolveOne(tool)
+
+      // Provider-flattened schemas (Anthropic) show every branch's fields to the model.
+      const accepted = yield* toolSet.execute(call({ kind: 'delete', title: null, reason: 'r' }))
+
+      expect(accepted.isError).toBeUndefined()
+      expect(received).toEqual([{ kind: 'delete', reason: 'r' }])
+
+      expectValidationError(
+        yield* toolSet.execute(call({ kind: 'delete', title: 'kept?' })),
+        'title'
+      )
+    })
+  )
+
+  it.effect('selects the union member that declares every sent key', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(
+        Schema.Union([
+          Schema.Struct({ a: Schema.String }),
+          Schema.Struct({ a: Schema.String, b: Schema.String })
+        ])
+      )
+
+      const toolSet = yield* resolveOne(tool)
+
+      yield* toolSet.execute(call({ a: 'x', b: 'y' }))
+
+      expect(received).toEqual([{ a: 'x', b: 'y' }])
+    })
+  )
+
+  it.effect('rejects unknown keys in background business calls before admission', () =>
+    Effect.gen(function* () {
+      const { tool } = capturingTool(Nested, { background: true })
+      let accepted = 0
+
+      const toolSet = yield* resolveTools([{ id: 'test', tools: [tool] }], undefined, {
+        backgroundHost: {
+          accept: () =>
+            Effect.sync(() => {
+              accepted++
+
+              return BackgroundToolAccepted.make({ version: 1, executionId: 'owner:call_1' })
+            })
+        }
+      })
+
+      expectValidationError(
+        yield* toolSet.execute(
+          call({ execution: 'background', arguments: { id: 'a', start: 'x' } })
+        ),
+        'start'
+      )
+      expect(accepted).toBe(0)
+    })
+  )
+
+  it.effect('loop rejects unknown keys in question prompts', () =>
+    Effect.gen(function* () {
+      const executor = {
+        execute: (toolCall: ToolCall): Effect.Effect<ToolResult, ToolError> => ok(toolCall)
+      }
+
+      const events = yield* runToolBatch({
+        calls: [
+          call(
+            { questions: [{ id: 'choice', prompt: 'Pick one', placeholder: 'x' }] },
+            questionToolName
+          )
+        ],
+        tools: [ToolDef.make({ name: questionToolName, description: 'Ask', parameters: {} })]
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(LoopConfig.defaultLayer),
+        Effect.provideService(ToolExecutor, executor)
+      )
+
+      expect(Array.from(events).some(event => Predicate.isTagged(event, 'QuestionRequested'))).toBe(
+        false
+      )
+      expect(
+        Array.from(events).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject({
+        result: { isError: true, structuredContent: { type: 'question_invalid' } }
+      })
     })
   )
 })

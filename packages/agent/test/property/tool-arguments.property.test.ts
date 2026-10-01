@@ -238,6 +238,35 @@ describe('tool argument property tests', () => {
   )
 
   it.effect.prop(
+    'an unknown key is rejected when it carries a value and ignored when it is null',
+    [propertyCaseArbitrary],
+    ([input]) =>
+      Effect.gen(function* () {
+        const { def } = yield* decodeThroughRegistry(input.family, {})
+        const { defs, branches } = rootBranches(def.parameters)
+
+        for (const branch of branches) {
+          const valid = sample(branch, defs, makeSampler('omit', input.present))
+
+          if (!isRecord(valid)) continue
+
+          const baseline = yield* decodeThroughRegistry(input.family, valid)
+          const withValue = yield* decodeThroughRegistry(input.family, { ...valid, unknown: 'x' })
+          const withNull = yield* decodeThroughRegistry(input.family, { ...valid, unknown: null })
+
+          expect(withValue.received).toHaveLength(0)
+          expect(withValue.result).toMatchObject({
+            isError: true,
+            structuredContent: { type: 'model_visible_tool_error', reason: 'validation' }
+          })
+          expect(withNull.result.isError).toBeUndefined()
+          expect(asJson(withNull.received)).toEqual(asJson(baseline.received))
+        }
+      }),
+    propertyOptions
+  )
+
+  it.effect.prop(
     'null on any required field is a model-visible validation error before execution',
     [propertyCaseArbitrary],
     ([input]) =>

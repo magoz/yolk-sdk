@@ -68,6 +68,16 @@ type OutlookReadExecuteParams = {
   readonly orderBy?: string | null
 }
 
+// `query` is a search-only field: tool calls reject unknown keys, so shared fixtures send it to
+// `outlook.search_messages` only.
+const toolParams = (name: OutlookReadToolName, params: OutlookReadExecuteParams) => {
+  if (name === 'outlook.search_messages') return params
+
+  const { query: _query, ...listParams } = params
+
+  return listParams
+}
+
 const execute = (name: OutlookReadToolName, params: OutlookReadExecuteParams, host = makeHost()) =>
   Effect.gen(function* () {
     const tools = yield* resolveTools(
@@ -75,7 +85,7 @@ const execute = (name: OutlookReadToolName, params: OutlookReadExecuteParams, ho
       {}
     )
 
-    const result = yield* tools.execute({ id: 'call-1', name, params })
+    const result = yield* tools.execute({ id: 'call-1', name, params: toolParams(name, params) })
 
     return { result, requests: host.requests }
   })
@@ -291,6 +301,30 @@ describe('Outlook read input compatibility', () => {
       })
     )
   }
+
+  it.effect('list rejects a search query instead of silently listing unfiltered mail', () =>
+    Effect.gen(function* () {
+      const host = makeHost()
+
+      const tools = yield* resolveTools(
+        [makeConnectorToolModule(MicrosoftConnector, { integration, layer: host.layer })],
+        {}
+      )
+
+      const result = yield* tools.execute({
+        id: 'call-1',
+        name: 'outlook.list_messages',
+        params: { query: 'car offer' }
+      })
+
+      expect(result.isError).toBe(true)
+      expect(result.structuredContent).toMatchObject({
+        reason: 'validation',
+        message: expect.stringContaining('query')
+      })
+      expect(host.requests).toEqual([])
+    })
+  )
 
   it.effect('list preserves real filters and ordering without trimming', () =>
     Effect.gen(function* () {
