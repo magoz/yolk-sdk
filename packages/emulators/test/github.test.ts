@@ -1514,6 +1514,25 @@ describe('the total, lexical transforms: malformed neighbours never hide the bea
       unrecognised('an unrecognisable Authorization header is not emulated')
     ],
     [
+      // A bearer starting with hex digits: a stray `%` beside its encoded form would consume them.
+      'a bearer starting with hex digits, a stray % beside its encoded form',
+      'POST',
+      repo('/issues/1/comments'),
+      { authorization: 'Bearer 41abcdfg', rawBody: JSON.stringify({ body: '%41abcd%66g' }) },
+      unrecognised('an unrecognisable Authorization header is not emulated')
+    ],
+    [
+      // A bearer starting with a JSON escape letter: a stray `\` beside it would make `\n`.
+      'a bearer starting with n, a stray backslash beside its escaped form',
+      'POST',
+      repo('/issues/1/comments'),
+      {
+        authorization: 'Bearer nabcdefg',
+        rawBody: JSON.stringify({ body: String.raw`\nabcde\u0066g` })
+      },
+      unrecognised('an unrecognisable Authorization header is not emulated')
+    ],
+    [
       'a non-ASCII bearer (unrecognisable)',
       'GET',
       repo('/labels?per_page=2'),
@@ -1550,9 +1569,85 @@ describe('the total, lexical transforms: malformed neighbours never hide the bea
     // The real response text, the ledger, and every `/_emulate/*` read (state included).
     const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
 
-    for (const form of [token, tail, 'ynth\u00e9tique', 'abcdefg', 'u0061bcdefg']) {
+    for (const form of [token, tail, 'ynth\u00e9tique', 'abcdefg', 'u0061bcdefg', 'abcd', '41a']) {
       expect(seen.join('\n')).not.toContain(form)
     }
+  })
+})
+
+describe('a bearer with a safe first character is found beside any stray escape introducer', () => {
+  // A stray introducer immediately left of the bearer (`%`, `%4`, `%7`, `\`, `\u`, `\u00`, `\u006`,
+  // or `%25` / `%5C`, which decode to one later) can only meet its first character, which completes
+  // no escape. The first character `g` is left as it is, or percent-encoded or JSON-escaped one,
+  // two, or three times; the rest of the bearer follows unencoded.
+  const bearer = 'ghp_SyntheticStrayToken01'
+  const rest = bearer.slice(1)
+  const strays = ['%', '%4', '%7', '\\', '\\u', '\\u00', '\\u006', '%25', '%5C']
+
+  const firsts = [
+    ['unencoded', 'g'],
+    ['percent-encoded once', '%67'],
+    ['percent-encoded twice', '%2567'],
+    ['percent-encoded three times', '%252567'],
+    ['JSON-escaped once', '\\u0067'],
+    ['JSON-escaped twice', '\\\\u0067'],
+    ['JSON-escaped three times', '\\\\\\\\u0067']
+  ] as const
+
+  const parts = [
+    [
+      'a recorded header',
+      'GET',
+      (_text: string) => repo('/labels?per_page=2'),
+      (text: string): CallOptions => ({ apiVersion: text }),
+      'a recorded request header repeats'
+    ],
+    [
+      'a query value',
+      'GET',
+      (text: string) => repo(`/labels?per_page=2&q=${encodeURIComponent(text)}`),
+      (_text: string): CallOptions => ({}),
+      'the query repeats'
+    ],
+    [
+      'a body string',
+      'POST',
+      (_text: string) => repo('/issues/1/comments'),
+      (text: string): CallOptions => ({ body: { body: text } }),
+      'the request body repeats'
+    ]
+  ] as const
+
+  const rows = parts.flatMap(([part, method, path, options, reason]) =>
+    strays.flatMap(stray =>
+      firsts.map(
+        ([encoding, first]) =>
+          [
+            `${part}, stray ${JSON.stringify(stray)}, first character ${encoding}`,
+            method,
+            path(`${stray}${first}${rest}`),
+            options(`${stray}${first}${rest}`),
+            reason
+          ] as const
+      )
+    )
+  )
+
+  it.each(rows)('%s', async (_label, method, path, options, reason) => {
+    const target = await emulator()
+
+    const text = await expectRefusedWithoutFault(
+      target,
+      () => call(target, method, path, { ...options, authorization: `Bearer ${bearer}` }),
+      reason
+    )
+
+    expectConstantEntry(target, method)
+
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    expect(seen.join('\n')).not.toContain(bearer)
+    expect(seen.join('\n')).not.toContain(rest)
   })
 })
 

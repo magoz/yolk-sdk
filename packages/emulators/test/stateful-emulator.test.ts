@@ -462,28 +462,38 @@ describe('fail-closed credential guard', () => {
     expect(performance.now() - closureStarted).toBeLessThan(1000)
   })
 
-  it('recognises only an RFC 6750 b64token bearer outside the number alphabet', async () => {
+  it('recognises only a b64token bearer with a safe first character, not a number', async () => {
     const api = await build([echo], true)
 
-    // Characters the transforms consume (`\`, `%`, `"`), separators, and `=` before the end.
     const refused = [
+      // Characters the transforms consume (`\`, `%`, `"`), separators, and `=` before the end.
       String.raw`\nabcdefg`,
-      'abcd\\efgh',
-      'abcd%41efgh',
-      'abcd"efgh',
-      'abcd efgh',
-      'abcd,efgh',
-      'abcd=efgh',
-      'abcd:efgh',
-      'abcd!efgh'
+      'Gbcd\\efgh',
+      'Gbcd%41efgh',
+      'Gbcd"efgh',
+      'Gbcd efgh',
+      'Gbcd,efgh',
+      'Gbcd=efgh',
+      'Gbcd:efgh',
+      'Gbcd!efgh',
+      // First characters that complete an escape: hex digits and the JSON escape letters.
+      ...['0', '4', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F'].map(
+        first => `${first}1abcdfgh`
+      ),
+      ...['n', 'r', 't', 'u'].map(first => `${first}abcdefgh`),
+      // The number alphabet, and non-ASCII.
+      '12345678',
+      '1.2345678e7',
+      '-1.5E+10000',
+      '12345678901234567890',
+      'synth\u00e9tique-token'
     ]
 
     for (const value of refused) {
       const response = await api.fetch(get('/files/a', { authorization: `Bearer ${value}` }))
-      const text = await response.text()
 
       expect(response.status, value).toBe(400)
-      expect(text, value).not.toContain(value)
+      expect(await response.text(), value).not.toContain(value)
       expect(isRecognisableBearerValue(value), value).toBe(false)
     }
 
@@ -499,14 +509,23 @@ describe('fail-closed credential guard', () => {
 
     for (const value of refused) expect(control.join('\n'), value).not.toContain(value)
 
-    // GitHub and Google token forms, and trailing `=` padding, are recognised.
+    // GitHub and Google token forms, the allowed first characters (upper-case `N`, `R`, `T`, `U`
+    // included: the JSON escape letters are lower-case only), and trailing `=` padding.
     for (const value of [
       'ghp_SyntheticToken0123456789',
       'github_pat_11SYNTHETIC0_abcdefghijklmnopqrstuvwxyz',
       'gho_SyntheticToken0123456789',
       'ya29.a0Synthetic-Token_value',
-      'c3ludGhldGljLXRva2Vu==',
-      'abc+def/ghi~jkl'
+      'S3ludGhldGljLXRva2Vu==',
+      'Zbc+def/ghi~jkl',
+      'Nabcdefg',
+      'Rabcdefg',
+      'Tabcdefg',
+      'Uabcdefg',
+      '/abcdefg',
+      '_abcdefg',
+      '~abcdefg',
+      'x1234567'
     ]) {
       expect(isRecognisableBearerValue(value), value).toBe(true)
       expect((await api.fetch(get('/files/a', { authorization: `Bearer ${value}` }))).status).toBe(
@@ -515,37 +534,31 @@ describe('fail-closed credential guard', () => {
     }
   })
 
-  it('recognises only a printable-ASCII bearer outside the number alphabet', async () => {
-    const api = await build([echo], true)
+  it('a bearer with a safe first character is found beside any stray escape introducer', () => {
+    const strays = ['%', '%4', '%7', '\\', '\\u', '\\u00', '\\u006', '%25', '%5C', '%255C']
 
-    for (const value of [
-      '12345678',
-      '1.2345678e7',
-      '-1.5E+10000',
-      '12345678901234567890',
-      'synth\u00e9tique-token'
-    ]) {
-      const response = await api.fetch(get('/files/a', { authorization: `Bearer ${value}` }))
+    for (const bearer of ['Nabcdefg', 'Uabcdefg', '/abcdefg', 'gabcdefg', 'zabcdefg']) {
+      const hex = bearer.charCodeAt(0).toString(16).padStart(2, '0')
+      const rest = bearer.slice(1)
 
-      expect(response.status, value).toBe(400)
-      expect(await response.text()).not.toContain(value)
+      // The first character unencoded, percent-encoded once and twice, and JSON-escaped once and
+      // twice, each with the rest of the bearer as it is.
+      const encodings = [
+        bearer,
+        `%${hex}${rest}`,
+        `%25${hex}${rest}`,
+        `\\u00${hex}${rest}`,
+        `\\\\u00${hex}${rest}`
+      ]
+
+      for (const stray of strays) {
+        for (const encoded of encodings) {
+          const text = `${stray}${encoded}`
+
+          expect(textRepeatsSecret(text, [bearer]), text).toBe(true)
+        }
+      }
     }
-
-    expect(api.ledger.entries().map(entry => [entry.path, entry.notEmulated])).toEqual(
-      Array.from({ length: 5 }, () => [
-        '/<unrecognised>',
-        'synthetic: unrecognisable authorization'
-      ])
-    )
-    expect(isRecognisableBearerValue('ghp_1234567890')).toBe(true)
-    expect(isRecognisableBearerValue('github_pat_11AAAA')).toBe(true)
-    expect(isRecognisableBearerValue('gho_0000000000')).toBe(true)
-    expect(isRecognisableBearerValue('ya29.a0AfH6SMsynthetic')).toBe(true)
-    expect(isRecognisableBearerValue('synth\u00e9tique-token')).toBe(false)
-
-    const answered = await api.fetch(get('/files/a', { authorization: 'Bearer 1234567x' }))
-
-    expect(answered.status).toBe(200)
   })
 })
 

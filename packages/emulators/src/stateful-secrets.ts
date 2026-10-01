@@ -100,20 +100,45 @@ const jsonNumberAlphabet = /^[0-9.eE+-]+$/
 /**
  * The RFC 6750 `b64token` syntax (`1*( ALPHA / DIGIT / "-" / "." / "_" / "~" / "+" / "/" ) *"="`),
  * at least 8 characters: what every GitHub (`ghp_…`, `github_pat_…`, `gho_…`) and Google (`ya29.…`)
- * token is made of. Why exactly this: it holds none of the characters the closure's transforms
- * consume (`\`, `%`, `"`, and every other escape-introducing character), so a neighbouring
- * backslash or percent sign in the request can never pair with one of the bearer's own characters
- * and shift an escape across it; every encoded form of the bearer decodes back to the bearer.
+ * token is made of. Why exactly this: it holds no escape introducer the closure's transforms
+ * recognise (`%`, `\`, nor `"`), so no escape can start inside a bearer; with `firstCharacter`,
+ * no escape starting to its left can complete with its first character either (see there).
  */
 const b64token = /^[A-Za-z0-9\-._~+/]+=*$/
 
 /**
- * True when a bearer value matches the RFC 6750 `b64token` syntax exactly (at least 8 characters)
- * and holds a character outside the JSON-number alphabet `[0-9.eE+-]`, so it is never the text of a
- * number and no escape can be shifted across its characters.
+ * The first character a fail-closed bearer may start with: `[G-Zg-z\-._~+/]` without the
+ * lower-case JSON escape letters `n`, `r`, `t`, `u`. Proof that no neighbour can then hide the
+ * bearer:
+ *
+ * 1. The bearer holds no escape introducer (a `b64token` has no `%`, `\`, or `"`), so no escape
+ *    the transforms recognise can start inside it.
+ * 2. An escape that starts to its left (a stray `%`, `%X`, `\`, `\u`, `\u0`, `\u00`, `\u006`, or
+ *    such an introducer produced by an earlier round, `%25` or `%5C` decoded) can only reach the
+ *    bearer by consuming its first character. That character completes no escape form: it is no
+ *    hex digit (so no `%X`, `%XX`, or `\uXXXX` prefix completes with it) and no short JSON escape
+ *    letter (`b` and `f` are hex; `n`, `r`, `t`, `u` are excluded). `/` is kept: `\/` decodes to
+ *    `/`, which leaves the character in place.
+ * 3. So the bearer's characters always decode in place, and the closure finds the bearer once its
+ *    own encodings are undone.
+ *
+ * Upper-case `N`, `R`, `T`, `U` are allowed: the JSON escape letters are case-sensitive, and
+ * `tolerantJsonUnescape` recognises only the lower-case ones (`\N` stays as it is), so they
+ * complete no escape either.
+ */
+const firstCharacter = /^[G-Zg-mo-qsv-z\-._~+/]/
+
+/**
+ * True when a bearer value matches the RFC 6750 `b64token` syntax exactly (at least 8
+ * characters), starts with a character that completes no escape (`firstCharacter`), and holds a
+ * character outside the JSON-number alphabet `[0-9.eE+-]`, so it is never the text of a number
+ * and no escape can be shifted across its characters.
  */
 export const isRecognisableBearerValue = (value: string): boolean =>
-  value.length >= 8 && b64token.test(value) && !jsonNumberAlphabet.test(value)
+  value.length >= 8 &&
+  b64token.test(value) &&
+  firstCharacter.test(value) &&
+  !jsonNumberAlphabet.test(value)
 
 /** How many rounds `textRepeatsSecret` applies (after checking the raw text). */
 export const secretClosureRounds = 4

@@ -19,15 +19,17 @@
  * request is ledgered and answered with constant text only (`/<unrecognised>`, a standard method or
  * `<other>`, an empty query, no body, a constant reason). The bearer value is never compared
  * against anything, stored, forwarded, or ledgered. A recognised bearer must match the RFC 6750
- * `b64token` syntax exactly (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8 characters) and hold at least
- * one character outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google token form
- * does: `ghp_…`, `github_pat_…`, `gho_…`, `ya29.…`). So no number's text can contain it, and it
- * holds none of the characters the transforms consume (`\`, `%`, `"`), so no neighbouring escape
- * can shift across its own characters; an `Authorization` header with any other value is
- * unrecognisable. A recognised request that repeats the bearer value in its raw path, any path
- * segment, the raw query or any query key or value, any recorded header, or its body is refused and
- * ledgered with constant text only: a standard method, the path `/<unrecognised>`, its route
- * template, an empty query, no headers or body, and a constant reason
+ * `b64token` syntax exactly (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8 characters), start with a
+ * character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, and hold at least one character
+ * outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google token form does: `ghp_…`,
+ * `github_pat_…`, `gho_…`, `ya29.…`). So no number's text can contain it; it holds no escape
+ * introducer (`%`, `\`, `"`), so no escape starts inside it; and its first character is no hex
+ * digit and no JSON escape letter, so no stray `%`, `\`, or partial escape to its left can complete
+ * with it, and its characters always decode in place. An `Authorization` header with any other
+ * value is unrecognisable. A recognised request that repeats the bearer value in its raw path, any
+ * path segment, the raw query or any query key or value, any recorded header, or its body is
+ * refused and ledgered with constant text only: a standard method, the path `/<unrecognised>`, its
+ * route template, an empty query, no headers or body, and a constant reason
  * (`the query repeats the credential`, for example). Each part is checked through a bounded closure
  * of two total, lexical transforms that cannot fail: a tolerant percent-decode (every `%XX` below
  * `%80` becomes its ASCII character; any other `%` sequence is left as it is) and a tolerant
@@ -47,7 +49,8 @@
  * own query or body keys.
  *
  * Request-shape latitude (`/github`, the only accepted deviations): any bearer value in the RFC
- * 6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, at least one outside
+ * 6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
+ * character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside
  * `[0-9.eE+-]`, that occurs nowhere else in the request (never compared against anything, stored,
  * or ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the
  * order of query parameters; any non-empty issue title and comment body, and any issue body text;
