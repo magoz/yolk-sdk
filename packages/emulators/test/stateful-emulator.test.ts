@@ -24,7 +24,8 @@ import {
 } from '../src/stateful-emulator.ts'
 import {
   isRecognisableBearerValue,
-  secretClosureRounds,
+  secretClosureCaps,
+  secretClosureOutcome,
   textRepeatsSecret,
   tolerantJsonUnescape,
   tolerantPercentDecode
@@ -368,26 +369,22 @@ describe('fail-closed mode: plan-time reasons and recorded headers', () => {
 describe('fail-closed credential guard', () => {
   const secret = 'synthetic-wrapper-secret'
 
-  // Needs `rounds` percent-decodings to show the secret: its `s` as `%73`, then `%2573`, ...
-  const encoded = (rounds: number): string => {
-    if (rounds === 0) return secret
+  // Needs `depth` percent-decodings to show the secret: its `s` as `%73`, then `%2573`, ...
+  const encoded = (depth: number): string =>
+    depth === 0 ? secret : secret.replace('s', `%${'25'.repeat(depth - 1)}73`)
 
-    let escape = '%73'
+  it('textRepeatsSecret is caught at any depth until the cap; the cap refuses', () => {
+    expect(secretClosureCaps).toEqual({ rounds: 64, texts: 1024, characters: 8 * 1024 * 1024 })
 
-    for (let round = 1; round < rounds; round += 1) escape = escape.replace('%', '%25')
-
-    return secret.replace('s', escape)
-  }
-
-  it('textRepeatsSecret walks a bounded closure: 4 rounds of decoding, every text checked', () => {
-    expect(secretClosureRounds).toBe(4)
-
-    for (const rounds of [0, 1, 2, 3, 4]) {
-      expect(textRepeatsSecret(encoded(rounds), [secret]), String(rounds)).toBe(true)
+    // A fixpoint, not a round budget: every depth below the round cap is caught.
+    for (const depth of [0, 1, 2, 3, 4, 5, 6, 8, 16, 32, 63, 64]) {
+      expect(secretClosureOutcome(encoded(depth), [secret]), String(depth)).toBe('repeats')
     }
 
-    // A fifth round lies beyond the bound.
-    expect(textRepeatsSecret(encoded(5), [secret])).toBe(false)
+    // Past the round cap the closure stops: uncertainty refuses, it never admits.
+    expect(secretClosureOutcome(encoded(65), [secret])).toBe('capped')
+    expect(textRepeatsSecret(encoded(65), [secret])).toBe(true)
+    expect(textRepeatsSecret('%' + '25'.repeat(100) + '41', [secret])).toBe(true)
 
     // Percent-decoding and JSON compose: an encoded JSON string, a JSON string in a JSON string,
     // object keys, and `\u` escapes.
@@ -403,7 +400,10 @@ describe('fail-closed credential guard', () => {
       expect(textRepeatsSecret(text, [secret]), text).toBe(true)
     }
 
-    expect(textRepeatsSecret('{"k":"synthetic-wrapper"}', [secret])).toBe(false)
+    // A text whose closure converges without the secret is clear.
+    expect(secretClosureOutcome('{"k":"synthetic-wrapper"} %2541 \\\\u0041', [secret])).toBe(
+      'clear'
+    )
     expect(textRepeatsSecret('anything', [])).toBe(false)
   })
 
@@ -428,12 +428,22 @@ describe('fail-closed credential guard', () => {
     }
   })
 
-  it('a 64 KiB body of nested escapes is checked well under a second', async () => {
+  /** 64 KiB of `unit`, repeated. */
+  const fill = (unit: string): string =>
+    unit.repeat(Math.ceil((64 * 1024) / unit.length)).slice(0, 64 * 1024)
+
+  const timed = <A>(run: () => A): readonly [A, number] => {
+    const started = performance.now()
+    const result = run()
+
+    return [result, performance.now() - started]
+  }
+
+  it('a converging 64 KiB body of nested escapes is checked well under a second', async () => {
     const api = await build([echoPlan], true)
 
-    // Nested escapes of every kind, 64 KiB, none of them the bearer.
-    const unit = String.raw`\\\\u0025%2525\"\\u005c%5C\/`
-    const nested = unit.repeat(Math.ceil((64 * 1024) / unit.length)).slice(0, 64 * 1024)
+    // Nested escapes of every kind, none of them the bearer: the closure reaches its fixpoint.
+    const nested = fill(String.raw`\\\\u0025%2525\"\\u005c%5C\/`)
     const body = JSON.stringify({ a: nested, b: '' })
 
     expect(body.length).toBeGreaterThan(64 * 1024)
@@ -451,15 +461,48 @@ describe('fail-closed credential guard', () => {
 
     const started = performance.now()
     const response = await send()
-    const elapsed = performance.now() - started
+
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(response.status).toBe(400)
+    // Admitted past the credential check: the route's own plan refused it.
+    expect(api.ledger.entries().at(-1)?.notEmulated).toContain('the plan saw')
+
+    const [outcome, elapsed] = timed(() => secretClosureOutcome(nested, [secret]))
+
+    expect(outcome).toBe('clear')
+    expect(elapsed).toBeLessThan(1000)
+  })
+
+  it('a capped 64 KiB body is refused as a credential repeat well under a second', async () => {
+    const api = await build([echoPlan], true)
+
+    // One escape that needs ~32000 percent-decodings (round cap), and two independent kinds of
+    // deep escapes whose interleavings multiply the distinct texts (text and character caps).
+    const deep = `%${'25'.repeat(32_000)}41`
+    const interleaved = fill(`%${'25'.repeat(100)}41 ${'\\'.repeat(4096)}q `)
+
+    for (const text of [deep, interleaved]) {
+      const [outcome, elapsed] = timed(() => secretClosureOutcome(text, [secret]))
+
+      expect(outcome).toBe('capped')
+      expect(elapsed).toBeLessThan(1000)
+    }
+
+    const response = await api.fetch(
+      new Request('https://api.example.test/echo/1', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ a: interleaved, b: '' })
+      })
+    )
 
     expect(response.status).toBe(400)
-    expect(elapsed).toBeLessThan(1000)
-
-    const closureStarted = performance.now()
-
-    expect(textRepeatsSecret(nested, [secret])).toBe(false)
-    expect(performance.now() - closureStarted).toBeLessThan(1000)
+    expect(api.ledger.entries().at(-1)).toMatchObject({
+      path: '/<unrecognised>',
+      query: {},
+      headers: {},
+      notEmulated: 'the request body repeats the credential'
+    })
   })
 
   it('recognises only a b64token bearer with a safe first character, not a number', async () => {

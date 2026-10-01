@@ -49,26 +49,29 @@
  * path segment, the raw query or any query key or value, any recorded header, or its body is
  * refused and ledgered with constant text only: a standard method, the path `/<unrecognised>`, its
  * route template, an empty query, no headers or body, and a constant reason
- * (`the query repeats the credential`, for example). Each part is checked through a bounded closure
- * of two total, lexical transforms that cannot fail: a tolerant percent-decode (every `%XX` below
+ * (`the query repeats the credential`, for example). Each part is checked through the closure of
+ * two total, lexical transforms that cannot fail: a tolerant percent-decode (every `%XX` below
  * `%80` becomes its ASCII character; any other `%` sequence is left as it is) and a tolerant
  * JSON-unescape (in any text, whether or not it parses as JSON, `\uXXXX` below `\u0080` and `\"`,
  * `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t` become their characters). Starting from each part's raw
- * text, up to 4 rounds apply either transform to every text of the previous round, deduplicated,
- * and every intermediate text is checked for the bearer as a substring. So each part's raw text
- * gets 4 layers of percent-encoding or JSON escaping, in any order: the raw path and each raw path
- * segment, the raw query and each query key and value (already decoded once by `URLSearchParams`,
- * so one layer more), each recorded header, and the raw body (whose own JSON escaping costs a round
- * only where it escapes the bearer's text). Any other recognised request has the bearer value
- * scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons included); its
- * recorded query is keyed by recorded key; a key recorded more than once lists its values in order
- * (as a JSON array); and recorded headers and query keys and values that start like JSON (`{`, `[`,
- * `"`) are recorded parsed with credential-named keys redacted at any depth, or as `<redacted>`
- * when they do not parse, whatever the header's declared format. Empty query components (a bare
- * `?`, a stray `&`) are refused. Routes check their own query and body keys with `exactQuery` and
- * `exactBodyKeys`, whose reasons never echo a request's own key. A template parameter written
- * `{name+}` spans one or more path segments (each decoded once, none may decode to a `/`). The
- * credential helpers live in `src/stateful-secrets.ts`.
+ * text, either transform is applied to every text of the previous step, deduplicated, until no new
+ * text appears (a fixpoint), and every text is checked for the bearer as a substring; both
+ * transforms never lengthen a text and shorten it whenever they change it. So any depth of
+ * percent-encoding or JSON escaping, in any order, is seen through in every part: the raw path and
+ * each raw path segment, the raw query and each query key and value (already decoded once by
+ * `URLSearchParams`), each recorded header, and the raw body. The work is capped at 64 rounds, 1024
+ * distinct texts, or 8 Mi characters read by the transforms, whichever comes first; a part whose
+ * closure hits a cap before its fixpoint counts as repeating the credential and is refused with the
+ * same constant entry (uncertainty refuses, it never admits). Any other recognised request has the
+ * bearer value scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons
+ * included); its recorded query is keyed by recorded key; a key recorded more than once lists its
+ * values in order (as a JSON array); and recorded headers and query keys and values that start like
+ * JSON (`{`, `[`, `"`) are recorded parsed with credential-named keys redacted at any depth, or as
+ * `<redacted>` when they do not parse, whatever the header's declared format. Empty query
+ * components (a bare `?`, a stray `&`) are refused. Routes check their own query and body keys with
+ * `exactQuery` and `exactBodyKeys`, whose reasons never echo a request's own key. A template
+ * parameter written `{name+}` spans one or more path segments (each decoded once, none may decode
+ * to a `/`). The credential helpers live in `src/stateful-secrets.ts`.
  *
  * @experimental
  */
@@ -640,7 +643,8 @@ const bearerPattern = /^bearer\s+\S+/i
 /**
  * Fail-closed mode: exactly `Bearer `, one space, and one token of at least 8 non-space characters
  * (no other scheme spelling, no extra words, so combined duplicate headers never match). The token
- * must also match the RFC 6750 `b64token` syntax with a character outside the JSON-number alphabet
+ * must also match the RFC 6750 `b64token` syntax, start with a character that completes no escape
+ * (not a hex digit, not `n`, `r`, `t`, `u`), and hold a character outside the JSON-number alphabet
  * (`isRecognisableBearerValue`, which says why). The value is guarded, never compared against
  * anything, stored, or ledgered.
  */
@@ -1012,9 +1016,9 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
   /**
    * Fail-closed mode: the constant reason when any part of a recognised request repeats a guarded
-   * secret, or `undefined`. Checked, each through the bounded decoding closure of
-   * `textRepeatsSecret`: the raw path and every path segment, the raw query and every decoded query
-   * key and value, every recorded header, and the body.
+   * secret, or `undefined`. Checked, each through the fixpoint closure of `textRepeatsSecret` (a
+   * capped closure counts as a repeat): the raw path and every path segment, the raw query and
+   * every decoded query key and value, every recorded header, and the body.
    */
   const credentialRepeat = (
     request: Request,

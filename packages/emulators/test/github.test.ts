@@ -1316,7 +1316,7 @@ describe('the bearer value is never ledgered or echoed', () => {
   })
 })
 
-describe('the bearer is found through a bounded decoding closure (4 rounds)', () => {
+describe('the bearer is found through the decoding closure, encodings composed', () => {
   // `token` is `synthetic-github-unit-token`: `%73` is its `s`, `%25` a percent sign, `\u0073` its
   // `s` as a JSON escape.
   const escaped = token.replace('s', '\\u0073')
@@ -1648,6 +1648,85 @@ describe('a bearer with a safe first character is found beside any stray escape 
 
     expect(seen.join('\n')).not.toContain(bearer)
     expect(seen.join('\n')).not.toContain(rest)
+  })
+})
+
+describe('the closure runs to a fixpoint: any depth of encoding is caught', () => {
+  // A stray `\` beside the `\` of an escaped first character delays its decoding by a step; with a
+  // fixpoint instead of a round budget, every depth is caught (and the work cap refuses).
+  const bearer = 'ghp_SyntheticStrayToken01'
+  const escapedFirst = String.raw`\u0067hp_SyntheticStrayToken01`
+
+  const percentEncoded = (text: string, layers: number): string => {
+    let result = text
+
+    for (let layer = 0; layer < layers; layer += 1) result = encodeURIComponent(result)
+
+    return result
+  }
+
+  const rows = [
+    ...[3, 4, 5, 6, 8].map(
+      layers =>
+        [
+          `a stray \\ and ${layers} percent layers`,
+          `\\${percentEncoded(escapedFirst, layers)}`
+        ] as const
+    ),
+    ...['\\', '\\\\', '\\\\\\', '\\\\\\\\'].flatMap(strays =>
+      [1, 3].map(
+        layers =>
+          [
+            `${strays.length} strays \\ and ${layers} percent layers`,
+            `${strays}${percentEncoded(escapedFirst, layers)}`
+          ] as const
+      )
+    ),
+    [
+      'many strays before a twice-escaped first character',
+      `${'\\'.repeat(7)}\\\\u0067hp_SyntheticStrayToken01`
+    ]
+  ] as const
+
+  it.each(rows)('in a recorded header: %s', async (_label, header) => {
+    const target = await emulator()
+
+    const text = await expectRefusedWithoutFault(
+      target,
+      () =>
+        call(target, 'GET', repo('/labels?per_page=2'), {
+          apiVersion: header,
+          authorization: `Bearer ${bearer}`
+        }),
+      'a recorded request header repeats'
+    )
+
+    expectConstantEntry(target, 'GET')
+
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    expect(seen.join('\n')).not.toContain(bearer)
+    expect(seen.join('\n')).not.toContain('hp_SyntheticStrayToken01')
+  })
+
+  it.each(rows)('in a body string: %s', async (_label, comment) => {
+    const target = await emulator()
+
+    const text = await expectRefusedWithoutFault(
+      target,
+      () =>
+        call(target, 'POST', repo('/issues/1/comments'), {
+          body: { body: comment },
+          authorization: `Bearer ${bearer}`
+        }),
+      'the request body repeats'
+    )
+
+    expectConstantEntry(target, 'POST')
+
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    expect(seen.join('\n')).not.toContain('hp_SyntheticStrayToken01')
   })
 })
 

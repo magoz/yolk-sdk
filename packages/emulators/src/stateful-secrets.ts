@@ -9,9 +9,10 @@
  * so a request repeating it can be refused. `repeatsSecret` and `jsonRepeatsSecret` (raw, once
  * percent-decoded, parsed JSON keys, strings, and numbers as JavaScript prints them) serve
  * `src/stateful-fixture.ts`, unchanged; the fail-closed mode of `src/stateful-emulator.ts` uses
- * `textRepeatsSecret`, a bounded closure of two total, lexical transforms that cannot fail
- * (`tolerantPercentDecode`, `tolerantJsonUnescape`), and recognises only RFC 6750 `b64token`
- * bearers outside the JSON-number alphabet (`isRecognisableBearerValue`).
+ * `textRepeatsSecret`, the fixpoint closure of two total, lexical transforms that cannot fail
+ * (`tolerantPercentDecode`, `tolerantJsonUnescape`), failing closed when its work cap is hit, and
+ * recognises only RFC 6750 `b64token` bearers whose first character completes no escape and that
+ * lie outside the JSON-number alphabet (`isRecognisableBearerValue`).
  *
  * @experimental
  */
@@ -118,7 +119,10 @@ const b64token = /^[A-Za-z0-9\-._~+/]+=*$/
  *    bearer by consuming its first character. That character completes no escape form: it is no
  *    hex digit (so no `%X`, `%XX`, or `\uXXXX` prefix completes with it) and no short JSON escape
  *    letter (`b` and `f` are hex; `n`, `r`, `t`, `u` are excluded). `/` is kept: `\/` decodes to
- *    `/`, which leaves the character in place.
+ *    `/`, which leaves the character in place. When the first character is itself escaped, a stray
+ *    `\` can pair with the escape's leading `\`: the pair `\\` decodes to `\`, followed by the rest
+ *    of the escape, which decodes in a later step. That delays the decoding but never destroys it,
+ *    and the closure runs to a fixpoint, so delays do not matter.
  * 3. So the bearer's characters always decode in place, and the closure finds the bearer once its
  *    own encodings are undone.
  *
@@ -140,8 +144,22 @@ export const isRecognisableBearerValue = (value: string): boolean =>
   firstCharacter.test(value) &&
   !jsonNumberAlphabet.test(value)
 
-/** How many rounds `textRepeatsSecret` applies (after checking the raw text). */
-export const secretClosureRounds = 4
+/**
+ * The work caps of `textRepeatsSecret`. The closure runs to a fixpoint; these only bound the work
+ * of a pathological text, and hitting one counts as a credential repeat (uncertainty refuses, it
+ * never admits). Every fixture and every realistic request converges within a handful of rounds,
+ * texts, and kilobytes read, far below them. A 64 KiB body of densely nested escapes converges in
+ * about 25 rounds, under 100 texts, and about 2.4 Mi characters read; a pathological 64 KiB body
+ * hits a cap in about 100 ms.
+ */
+export const secretClosureCaps = {
+  /** Rounds of the breadth-first walk. */
+  rounds: 64,
+  /** Distinct texts seen. */
+  texts: 1024,
+  /** Characters the transforms read, over all texts (keeps the worst large body near 100 ms). */
+  characters: 8 * 1024 * 1024
+} as const
 
 /**
  * Tolerant percent-decode, total: every `%XX` whose value is below `0x80` becomes its ASCII
@@ -149,9 +167,11 @@ export const secretClosureRounds = 4
  * throws, so an encoded fragment next to `100%` or `%E9` is still decoded.
  */
 export const tolerantPercentDecode = (text: string): string =>
-  text.replace(/%([0-7][0-9A-Fa-f])/g, (_escape, hex: string) =>
-    String.fromCharCode(Number.parseInt(hex, 16))
-  )
+  !text.includes('%')
+    ? text
+    : text.replace(/%([0-7][0-9A-Fa-f])/g, (_escape, hex: string) =>
+        String.fromCharCode(Number.parseInt(hex, 16))
+      )
 
 /** The short JSON escapes and the characters they stand for. */
 const jsonEscapes = new Map([
@@ -172,59 +192,85 @@ const jsonEscapes = new Map([
  * sees every string of a JSON text, duplicate keys and overwritten values included.
  */
 export const tolerantJsonUnescape = (text: string): string =>
-  text.replace(/\\(?:u([0-9A-Fa-f]{4})|(["\\/bfnrt]))/g, (escape, hex?: string, short?: string) => {
-    if (hex !== undefined) {
-      const code = Number.parseInt(hex, 16)
+  !text.includes('\\')
+    ? text
+    : text.replace(
+        /\\(?:u([0-9A-Fa-f]{4})|(["\\/bfnrt]))/g,
+        (escape, hex?: string, short?: string) => {
+          if (hex !== undefined) {
+            const code = Number.parseInt(hex, 16)
 
-      return code < 0x80 ? String.fromCharCode(code) : escape
-    }
+            return code < 0x80 ? String.fromCharCode(code) : escape
+          }
 
-    return jsonEscapes.get(short ?? '') ?? escape
-  })
+          return jsonEscapes.get(short ?? '') ?? escape
+        }
+      )
+
+/** What the closure of a text found: the secret, its fixpoint without the secret, or a cap. */
+export type SecretClosureOutcome = 'repeats' | 'clear' | 'capped'
 
 /**
- * True when `text` repeats a secret anywhere in its bounded closure: starting from the raw text, up
- * to `secretClosureRounds` rounds, each applying either total transform (`tolerantPercentDecode`,
- * `tolerantJsonUnescape`) to every text of the previous round, deduplicated; every intermediate
- * text is checked for a secret as a substring. So up to four layers of percent-encoding or JSON
- * escaping, in any order, are seen through. No JSON is parsed and nothing can fail, and each round
- * holds at most twice the texts of the one before, none longer than the raw text. Numbers need no
- * handling: a recognisable bearer never fits the JSON-number alphabet.
+ * The closure of `text` against `secrets`: starting from the raw text, a breadth-first walk
+ * applying either total transform (`tolerantPercentDecode`, `tolerantJsonUnescape`) to every text
+ * of the previous round, deduplicated, until no new text appears (a fixpoint); every text is
+ * checked for a secret as a substring. Both transforms never lengthen a text and strictly shorten
+ * it when they change it, so every branch ends. `capped` when a cap of `secretClosureCaps` is hit
+ * first. No JSON is parsed and nothing can fail. Numbers need no handling: a recognisable bearer
+ * never fits the JSON-number alphabet.
  */
-export const textRepeatsSecret = (text: string, secrets: ReadonlyArray<string>): boolean => {
+export const secretClosureOutcome = (
+  text: string,
+  secrets: ReadonlyArray<string>
+): SecretClosureOutcome => {
   const guarded = meaningful(secrets)
 
-  if (guarded.length === 0) return false
+  if (guarded.length === 0) return 'clear'
 
   const seen = new Set([text])
+  let characters = 0
   let frontier: ReadonlyArray<string> = [text]
 
   for (let round = 0; frontier.length > 0; round += 1) {
     if (frontier.some(candidate => guarded.some(secret => candidate.includes(secret)))) {
-      return true
+      return 'repeats'
     }
 
-    if (round === secretClosureRounds) return false
+    if (round === secretClosureCaps.rounds) return 'capped'
 
     const next: Array<string> = []
 
     for (const candidate of frontier) {
+      // The work: every character each transform reads.
+      characters += 2 * candidate.length
+
+      if (characters > secretClosureCaps.characters) return 'capped'
+
       for (const transformed of [
         tolerantPercentDecode(candidate),
         tolerantJsonUnescape(candidate)
       ]) {
-        if (!seen.has(transformed)) {
-          seen.add(transformed)
-          next.push(transformed)
-        }
+        if (seen.has(transformed)) continue
+
+        if (seen.size >= secretClosureCaps.texts) return 'capped'
+
+        seen.add(transformed)
+        next.push(transformed)
       }
     }
 
     frontier = next
   }
 
-  return false
+  return 'clear'
 }
+
+/**
+ * True when `text` repeats a secret anywhere in its closure (`secretClosureOutcome`), or when the
+ * closure hits a work cap before its fixpoint: fail closed, uncertainty counts as a repeat.
+ */
+export const textRepeatsSecret = (text: string, secrets: ReadonlyArray<string>): boolean =>
+  secretClosureOutcome(text, secrets) !== 'clear'
 
 /**
  * `text` with every secret (raw and percent-encoded) replaced by `<redacted>`; when a secret still
