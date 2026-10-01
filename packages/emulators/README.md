@@ -1006,20 +1006,23 @@ parent folder must be seeded too) with profiles `'default'` or `'empty'`. `reset
 current seed and clears the ledger, faults, and cursors; `seed(next)` replaces the state;
 `snapshot()` returns a deep copy.
 
-Faults (`faults.add` or `POST /_emulate/faults`): `{ kind: 'status', status, headers?, body?,
-match?: { method?, path? }, count? }` with a status of 400-599 answers a matching request the
-emulator would otherwise answer, instead of its write (nothing is written): the route's pure,
-state-reading eligibility check runs first, so a request that is not emulated never uses one up.
-The default body is `{ error: { type: 'emulator_fault', message } }` (never a guessed Dropbox body),
-so a 429 with `retry-after: 2` reaches the connector as `dropbox_rate_limited` with
-`retryAfterMs: 2000`. The ledger records method, raw path, route template, query (credential-named
-keys such as `authorization` and `access_token` redacted; a value starting with `{` or `[`, such as
-a browser-style `arg`, parsed with credential-named keys redacted at any depth, or `<redacted>` when
-unparseable), the parsed JSON body (credential-named keys redacted), an upload's body length (never
-its bytes), the `Dropbox-API-Arg` header (parsed, credential-named keys redacted at any depth; an
-unparseable value is recorded as `<redacted>`), status, evidence, the applied fault, `notEmulated`,
-and any `responseError`. Control plane: `/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and
-`coverage`.
+Faults (`faults.add` or `POST /_emulate/faults`):
+`{ kind: 'status', status, headers?, body?, match?: { method?, path?, route? }, count? }` with a
+status of 400-599 answers a matching request the emulator would otherwise answer, instead of its
+write (nothing is written). In `match`, `method` is the HTTP method, `path` the raw request path (a
+trailing `*` makes it a prefix), and `route` a route template of the manifest
+(`dropboxEmulatorRoutes`; a value that names no manifest row is rejected when the fault is added).
+The route's pure, state-reading eligibility check runs first, so a request that is not emulated
+never uses one up. The default body is `{ error: { type: 'emulator_fault', message } }` (never a
+guessed Dropbox body), so a 429 with `retry-after: 2` reaches the connector as
+`dropbox_rate_limited` with `retryAfterMs: 2000`. The ledger records method, raw path, route
+template, query (credential-named keys such as `authorization` and `access_token` redacted; a value
+starting with `{` or `[`, such as a browser-style `arg`, parsed with credential-named keys redacted
+at any depth, or `<redacted>` when unparseable), the parsed JSON body (credential-named keys
+redacted), an upload's body length (never its bytes), the `Dropbox-API-Arg` header (parsed,
+credential-named keys redacted at any depth; an unparseable value is recorded as `<redacted>`),
+status, evidence, the applied fault, `notEmulated`, and any `responseError`. Control plane:
+`/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and `coverage`.
 
 **Drill knobs (tests only).** `drills: { listFolderSinglePage, getMetadataCaseSensitive,
 searchRepeatsMatches, notFoundAsPathLookup, folderConflictAsFile, deleteLeavesNoTombstone,
@@ -1946,60 +1949,81 @@ exactly three request-derived or minted substitutions:
   a reset or seed (each starts a generation); the second page answers only the cursor issued in the
   current generation.
 
-**Fail closed: the shared rule, and the reserved credential seen only as a digest.** MCP follows the
-shared fail-closed rule of the stateful wrapper, exactly as the GitHub emulator states it above, with
-its opt-in constant refusals: every refusal, by shape or by state, is ledgered with constant text
-only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no headers or body, a
-constant reason, and the route template or row), so request text reaches the ledger only once a
-request equals a recorded one. A recognised request that repeats its bearer in the path, the query,
-the recorded headers (`accept`, `content-type`, `mcp-method`, `mcp-name`, `mcp-protocol-version`,
-`mcp-session-id`), or the body, through any depth of percent-encoding or JSON escaping, is refused
-the same way. The bearer is never stored, ledgered, or echoed: routes see only its digest (the
-wrapper's opt-in `bearerDigest`: SHA-256 of the origin, a space, and the bearer), which they compare
-only with the digest of the public reserved invalid credential
-`yolk-conformance-invalid-credential-0000` (`mcpEmulatorReservedInvalidCredential`, itself a
-recognisable bearer) to answer the recorded 401 on the era probe.
+**Fail closed: the shared rule, every header, the output, and the reserved credential seen only as a
+digest.** MCP follows the shared fail-closed rule of the stateful wrapper, exactly as the GitHub
+emulator states it above, with its opt-in constant refusals: every refusal, by shape or by state, is
+ledgered with constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty query,
+no headers or body, a constant reason, and the route template or row), so request text reaches the
+ledger only once a request equals a recorded one. A recognised request that repeats its bearer in
+the path, the query, any request header name or value other than `Authorization` (the wrapper's
+opt-in `guardAllHeaders`, whatever the ledger records), or the body, through any depth of
+percent-encoding or JSON escaping, is refused the same way. The output is guarded too (the opt-in
+`guardOutput`): before any fault is decided or anything is committed, the prepared answer (every
+header and chunk) and the minted session id or cursor the request would store are checked for the
+bearer, and a hit is refused with the constant credential-repeat entry
+(`the answer would repeat the credential`), no fault used and nothing written. So a bearer such as
+`yolk-emu-session-1` on a fresh emulator, or `synthetic-mcp` (inside the recorded
+`yolk-synthetic-mcp`), never reaches a response, the state, or `/_emulate/*`. The bearer is never
+stored, ledgered, or echoed: routes see only its digest (the wrapper's opt-in `bearerDigest`:
+SHA-256 of the origin, a space, and the bearer), which they compare only with the digest of the
+public reserved invalid credential `yolk-conformance-invalid-credential-0000`
+(`mcpEmulatorReservedInvalidCredential`, itself a recognisable bearer) to answer the recorded 401 on
+the era probe.
 
 - **Request-shape latitude (`/mcp`, the only accepted deviations).** Any bearer value in the RFC
   6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
   character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside
-  `[0-9.eE+-]`, that occurs nowhere else in the request (never stored or ledgered; only its digest
-  is compared, with the digest of the public reserved invalid credential
+  `[0-9.eE+-]`, that occurs nowhere else in the request (any header name or value included) and in
+  no answer or value the request would store (never stored or ledgered; only its digest is compared,
+  with the digest of the public reserved invalid credential
   `yolk-conformance-invalid-credential-0000`, which answers the recorded 401 on the era probe);
-  extra request headers other than the MCP headers the fixtures record; JSON key order; any JSON-RPC
-  request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters where the
-  recording has an id; any non-empty `name` and `version` (and no other key) in the `_meta` client
-  info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted
+  extra request headers, except `mcp-*` headers other than `mcp-method`, `mcp-name`,
+  `mcp-protocol-version`, and `mcp-session-id`; a recorded header value sent as several headers that
+  the HTTP layer joins into the recorded value; JSON key order; any JSON-RPC request id that is an
+  integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters where the recording has an id;
+  any non-empty `name` and `version` (and no other key) in the `_meta` client info
+  (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted
   since the last reset or seed where the recording sends `mcp-session-id` (initializing for
   `notifications/initialized`, ready otherwise); and, with the seed's `two-pages` listing, the
   cursor this emulator issued in the current generation on the second page. `Authorization` must be
   exactly `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any
   query, other HTTP methods such as `DELETE` or a `GET` on the modern profile, JSON-RPC methods no
   fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches and
-  client-sent responses, other members, a `null`, negative, or fractional id, other params (other
-  tools, arguments, protocol versions, or capabilities, extra client-info keys, and a legacy
-  `initialize` client info other than the recorded one), the MCP headers `accept`, `content-type`,
-  `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id` other than the recorded
-  values or present where none is recorded, `mcp-session-id` missing where recorded or present where
-  not, an unknown session or one in the wrong phase, a cursor not issued in the current generation,
-  the reserved invalid credential on anything but the era probe, and a bearer repeated anywhere in
-  the request) is not emulated.
+  client-sent responses, other members, a JSON body repeating a key (compared after unescaping), a
+  `null`, negative, or fractional id, other params (other tools, arguments, protocol versions, or
+  capabilities, extra client-info keys, and a legacy `initialize` client info other than the
+  recorded one), the MCP headers `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`,
+  `mcp-name`, and `last-event-id` other than the recorded values or present where none is recorded,
+  any other `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing where recorded or
+  present where not, an unknown session or one in the wrong phase, a cursor not issued in the
+  current generation, the reserved invalid credential on anything but the era probe, a bearer
+  repeated anywhere in the request, and a bearer an answer or a minted session id or cursor would
+  repeat) is not emulated.
 
 Not emulated (a constant-text 400 that writes nothing and uses up no fault): `DELETE` (the client
 never sends it), `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`, `tasks/*`,
-JSON-RPC batches and client-sent responses, cursors this emulator did not issue, any other tool or
-arguments, any other origin, path, or query, and a missing `Authorization` (no fixture records the
-answer to one). A closed emulator answers 503; a route that throws answers an evidence-tagged 500
-with `responseError` in the ledger.
+JSON-RPC batches and client-sent responses, a JSON body repeating a key (compared after unescaping;
+the wrapper's opt-in `uniqueJsonKeys`), `mcp-*` headers no recording carries (such as
+`mcp-param-*`), cursors this emulator did not issue, any other tool or arguments, any other origin,
+path, or query, and a missing `Authorization` (no fixture records the answer to one). A closed
+emulator answers 503; a route that throws answers an evidence-tagged 500 with `responseError` in the
+ledger. `makeMcpEmulator` throws when a copied recording is not canonical JSON (every JSON body and
+SSE `data:` payload equal to `JSON.stringify(JSON.parse(text))`), which id substitution relies on.
 
 Faults are status faults (400-599) and `truncate-after-chunks` faults (`McpFault`), decided only
-after a request is admitted and planned; `match.route` selects one manifest row (for example
-`https://mcp.example.test/legacy/mcp#tools/list`). An SSE answer has two chunks (the notification,
-then the response) and a JSON answer one, so truncating an SSE answer after one chunk ends the
-stream before its response: the client fails the operation as an `McpError` at its timeout, never
-hangs. A truncation that cannot apply (a 202 or 405 has no chunk) answers 500 and is not used up.
-The ledger, coverage (per row), recovery, and the control plane behave as in the Dropbox emulator;
-`/_emulate/state` also reports `nextSession`, `cursorGeneration`, and `issuedCursor`.
+after a request is admitted and planned, against the answer the plan prepared; a faulted request
+writes nothing. In `match`, `method` is the HTTP method (`POST` or `GET`, never a row's `RPC`),
+`path` the raw request path, and `route` one manifest row (for example
+`https://mcp.example.test/legacy/mcp#tools/list`); a `route` naming no row is rejected when the
+fault is added. An SSE answer has two chunks (the notification, then the response) and a JSON answer
+one, so truncating an SSE answer after one chunk ends the stream before its response: the client
+fails the operation as an `McpError` at its timeout, never hangs. A truncation sends the prepared
+answer cut short and never runs its commit: a truncated `initialize` holds no session and leaves the
+counter and the session cap where they were, and a truncated first page of the two-page listing
+issues no cursor, so its continuation is refused. A truncation that cannot apply (a 202 or 405 has
+no chunk) answers 500 and is not used up. The ledger, coverage (per row), recovery, and the control
+plane behave as in the Dropbox emulator; `/_emulate/state` also reports `nextSession`,
+`cursorGeneration`, and `issuedCursor`.
 
 **Drill knobs (tests only).** `drills: { discoverCarriesErrorResponse, discoverWithoutResultType,
 sessionIdNotVisibleAscii, discoverAnsweredTwice, writeToolMarkedReadOnly, readCallAnswersToolError,

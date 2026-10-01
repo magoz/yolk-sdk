@@ -92,17 +92,27 @@
  * repeats the bearer answers the 500 emulator error (`responseError`). Without it, routes see no
  * digest, as before.
  *
- * Three more opt-ins serve `/mcp`, whose JSON-RPC methods share one HTTP endpoint; a route or
- * emulator that does not take them behaves exactly as before. A route may answer several manifest
- * rows (`variants`, for example `RPC <origin><path>#<method>`): its admission names the row,
- * which becomes the request's ledger route, its coverage row, and what a fault's `match.route`
- * compares (a request refused before admission keeps the route template). A plan may return a
- * `StreamedCommit` (its answer's chunk count known before the commit), and an emulator built with
- * `makeChunkedStatefulEmulator` also takes `truncate-after-chunks` faults, decided where a status
- * fault is (after the plan, before the commit); one that cannot take effect answers 500 and is not
- * used up. In fail-closed mode, `constantRefusals` ledgers every refusal with constant text only
+ * More opt-ins serve `/mcp`, whose JSON-RPC methods share one HTTP endpoint; a route or emulator
+ * that does not take them behaves exactly as before. A route may answer several manifest rows
+ * (`variants`, for example `RPC <origin><path>#<method>`): its admission names the row, which
+ * becomes the request's ledger route, its coverage row, and what a fault's `match.route` compares
+ * (a request refused before admission keeps the route template). A fault's `match.route` must name
+ * a manifest row (a variant, or the template of a route without variants); any other value is
+ * rejected when the fault is added, and `match.method` is always the HTTP method. A plan may return
+ * a `StreamedCommit`: the answer it prepares, and the `commit` that writes. Faults are decided
+ * against the prepared answer, and a faulted request never runs `commit`; an emulator built with
+ * `makeChunkedStatefulEmulator` also takes `truncate-after-chunks` faults, which send the prepared
+ * answer cut short and write nothing (one that cannot take effect answers 500 and is not used up).
+ * In fail-closed mode: `constantRefusals` ledgers every refusal with constant text only
  * (`/<unrecognised>`, no query, headers, or body), so request text reaches the ledger only once a
- * route admitted the request.
+ * route admitted the request; `guardAllHeaders` checks every request header name and value but
+ * `Authorization` for a credential repeat, not only the recorded ones; and `guardOutput` checks a
+ * streamed commit's prepared answer (every header and chunk) and its `persisted` texts (minted ids,
+ * for example) for the bearer before any fault is decided or anything is committed, refusing a hit
+ * with the constant credential-repeat entry, so no answer or stored value repeats the bearer, while
+ * routes still see only its digest. `uniqueJsonKeys` refuses a JSON body in which an object repeats
+ * a key (after unescaping). Routes also see every request header name
+ * (`EmulatedRequest.headerNames`), never a credential value.
  *
  * @experimental
  */
@@ -184,9 +194,12 @@ const FaultCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const ChunkCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 /**
- * Optional fault filter; an omitted field matches every request. `path` ending in `*` is a prefix.
- * `route` is compared with the request's ledger route: the template of its matched route, or the
- * manifest variant its route admitted it as (see `StatefulRouteBinding.variants`).
+ * Optional fault filter; an omitted field matches every request. `method` is the HTTP method
+ * (never a manifest row's `RPC`). `path` is the raw request path; ending in `*`, a prefix. `route`
+ * is a manifest row path, compared with the request's ledger route: the template of its matched
+ * route, or the manifest variant its route admitted it as (see `StatefulRouteBinding.variants`).
+ * A `route` that names no manifest row of the emulator could never match, so adding the fault
+ * rejects it (a route with variants is matched by its variant rows, never its template).
  */
 export const StatefulFaultMatch = Schema.Struct({
   method: Schema.optionalKey(Schema.String),
@@ -213,11 +226,12 @@ export const StatefulFault = Schema.Struct({
 export type StatefulFault = typeof StatefulFault.Type
 
 /**
- * Opt-in (`makeChunkedStatefulEmulator`): send the first `chunks` body chunks of a streamed answer
- * (`StreamedCommit`), then close the body cleanly (a truncated answer). It is decided where a
- * status fault is, after the plan and before the commit; one that cannot take effect (the answer
- * is not streamed, or has no more than `chunks` chunks) answers the 500 emulator error and is not
- * used up, never a silent no-op.
+ * Opt-in (`makeChunkedStatefulEmulator`): send the first `chunks` body chunks of the answer a
+ * streamed commit prepared (`StreamedCommit`), then close the body cleanly (a truncated answer).
+ * It is decided where a status fault is, after the plan, and a truncated request writes nothing:
+ * its `commit` never runs (no state, counter, or runtime change). One that cannot take effect (the
+ * answer is not streamed, or has no more than `chunks` chunks) answers the 500 emulator error and
+ * is not used up, never a silent no-op.
  */
 export const StatefulTruncateFault = Schema.Struct({
   kind: Schema.Literal('truncate-after-chunks'),
@@ -302,6 +316,11 @@ export type EmulatedRequest = {
   readonly rawQuery?: string | undefined
   /** A non-credential request header (credential headers always read as `undefined`). */
   readonly header: (name: string) => string | undefined
+  /**
+   * The lower-case names of every request header, credential headers included (names only, never
+   * a credential value). Absent on a request built elsewhere.
+   */
+  readonly headerNames?: ReadonlyArray<string> | undefined
   /** Parsed JSON body (`json` routes). */
   readonly json: Schema.Json | undefined
   /** Raw body (`bytes` routes). */
@@ -331,19 +350,25 @@ export type StreamedAnswer = {
 }
 
 /**
- * A commit whose answer is streamed in exactly `chunks` chunks. The count is known when the plan
- * returns it, so a `truncate-after-chunks` fault (`makeChunkedStatefulEmulator`) is decided before
- * anything is written; a commit whose answer has another count answers the 500 emulator error.
+ * A commit whose answer the plan prepares: `answer` is sent (one chunk per pull) only after
+ * `commit` has written the request's change. Because the answer exists before anything is
+ * written, the wrapper decides faults against it: a status fault or a `truncate-after-chunks`
+ * fault (`makeChunkedStatefulEmulator`) answers without running `commit`, so a faulted request
+ * writes nothing. `persisted` lists the texts `commit` will store (minted ids, for example), which
+ * the opt-in output guard (`guardOutput`) checks together with the answer.
  */
 export type StreamedCommit = {
-  readonly chunks: number
-  readonly commit: () => StreamedAnswer
+  readonly answer: StreamedAnswer
+  readonly commit: () => void
+  readonly persisted: ReadonlyArray<string>
 }
 
-export const streamedCommit = (chunks: number, commit: () => StreamedAnswer): StreamedCommit => ({
-  chunks,
-  commit
-})
+/** A streamed commit: the prepared `answer`, and the write (none by default) it commits. */
+export const streamedCommit = (
+  answer: StreamedAnswer,
+  commit: () => void = () => undefined,
+  persisted: ReadonlyArray<string> = []
+): StreamedCommit => ({ answer, commit, persisted })
 
 /** What a plan returns: a commit, a streamed commit, or not emulated. */
 export type Planned = Commit | StreamedCommit | NotEmulated
@@ -592,6 +617,53 @@ export const parseJsonText = (text: string): Schema.Json | undefined => {
 export const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
   value !== undefined && value !== null && Predicate.isObject(value) && !Array.isArray(value)
 
+/**
+ * True when any object of a valid JSON text repeats a key, compared after JSON unescaping (so
+ * `"id"` and `"\u0069d"` are one key). `JSON.parse` would keep the last value silently.
+ */
+export const repeatsJsonKey = (text: string): boolean => {
+  // One entry per open object or array: an object's keys so far, and whether a key comes next.
+  const open: Array<{ readonly keys: Set<string> | undefined; expectKey: boolean }> = []
+  let index = 0
+
+  while (index < text.length) {
+    const character = text[index]
+
+    if (character === '"') {
+      let end = index + 1
+
+      while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1
+
+      const top = open.at(-1)
+
+      if (top?.keys !== undefined && top.expectKey) {
+        const key = parseJsonText(text.slice(index, end + 1))
+
+        if (!Predicate.isString(key) || top.keys.has(key)) return true
+
+        top.keys.add(key)
+        top.expectKey = false
+      }
+
+      index = end + 1
+      continue
+    }
+
+    if (character === '{') open.push({ keys: new Set(), expectKey: true })
+    else if (character === '[') open.push({ keys: undefined, expectKey: false })
+    else if (character === '}' || character === ']') open.pop()
+    else if (character === ',') {
+      const top = open.at(-1)
+
+      if (top?.keys !== undefined) top.expectKey = true
+    }
+
+    index += 1
+  }
+
+  return false
+}
+
 /** The media type of a `content-type` value (lower-case, without parameters). */
 export const mediaType = (value: string | undefined): string =>
   (value ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
@@ -779,6 +851,30 @@ export type StatefulEmulatorConfig<State, Env> = {
    * before.
    */
   readonly constantRefusals?: boolean
+  /**
+   * Opt-in, fail-closed mode only (checked at build): every request header other than
+   * `Authorization`, its name and its value, is checked for a credential repeat through the
+   * closure (not only the recorded headers), independently of what the ledger records; a repeat is
+   * refused with the constant credential-repeat entry (`a request header repeats the credential`).
+   * Omitted: only the recorded headers are checked, as before.
+   */
+  readonly guardAllHeaders?: boolean
+  /**
+   * Opt-in, fail-closed mode only (checked at build): a recognised request's prepared output must
+   * not repeat its bearer. Every plan answers a `StreamedCommit` (a plain `Commit` answers the 500
+   * emulator error), and before any fault is decided or anything is committed, every answer header
+   * name and value, every answer chunk, and every `persisted` text are checked for the bearer
+   * through the closure; a hit is refused with the constant credential-repeat entry
+   * (`the answer would repeat the credential`), no fault used and nothing written. Routes still see
+   * only the bearer's digest. Omitted: answers are not checked, as before.
+   */
+  readonly guardOutput?: boolean
+  /**
+   * Opt-in: a JSON body in which any object repeats a key (after JSON unescaping, so `"id"` and
+   * `"\u0069d"` are one key) is not emulated (`a JSON body with a repeated key is not emulated`),
+   * instead of `JSON.parse` keeping the last value. Omitted: the last value wins, as before.
+   */
+  readonly uniqueJsonKeys?: boolean
   /** Clear runtime data (cursors) on reset and seed. */
   readonly clearRuntime: () => void
   /** Extra `/_emulate/state` fields (runtime data). */
@@ -1014,6 +1110,8 @@ type Job<State, Env> = {
   /** Guarded credential values, scrubbed from a plan's not-emulated reason. */
   readonly secrets: ReadonlyArray<string>
   notEmulated?: string
+  /** Set when `guardOutput` refused the prepared output (a constant credential-repeat entry). */
+  credentialRepeat?: boolean
 }
 
 const withEvidence = (response: Response, evidence: EmulatorEvidence): Response => {
@@ -1096,6 +1194,24 @@ const snapshotFault = (state: MutableFaultState): StatefulFaultState<StatefulStr
 const isStreamedCommit = (planned: Commit | StreamedCommit): planned is StreamedCommit =>
   !Predicate.isFunction(planned)
 
+/** The constant reason of a prepared output that would repeat the bearer (`guardOutput`). */
+const outputRepeatReason = 'the answer would repeat the credential'
+
+/**
+ * `guardOutput`: whether a streamed commit's answer (every header name and value, every chunk, and
+ * the whole body) or any text it would persist repeats a guarded secret, through the closure.
+ */
+const outputRepeatsSecret = (planned: StreamedCommit, secrets: ReadonlyArray<string>): boolean => {
+  const { answer } = planned
+
+  return [
+    ...Object.entries(answer.headers).flat(),
+    ...answer.chunks,
+    answer.chunks.join(''),
+    ...planned.persisted
+  ].some(text => textRepeatsSecret(text, secrets))
+}
+
 /**
  * A streamed answer's body, strictly pull-driven (one chunk per pull), closed cleanly after
  * `after` chunks when a truncation fault applies; no body at all for an answer without chunks.
@@ -1150,8 +1266,10 @@ const buildStatefulEmulator = async <State, Env, Seed>(
     throw new Error('bearerDigest needs fail-closed mode (failClosed)')
   }
 
-  if (config.constantRefusals === true && config.failClosed === undefined) {
-    throw new Error('constantRefusals needs fail-closed mode (failClosed)')
+  for (const option of ['constantRefusals', 'guardAllHeaders', 'guardOutput'] as const) {
+    if (config[option] === true && config.failClosed === undefined) {
+      throw new Error(`${option} needs fail-closed mode (failClosed)`)
+    }
   }
 
   const constantRefusals = config.constantRefusals === true
@@ -1194,6 +1312,7 @@ const buildStatefulEmulator = async <State, Env, Seed>(
 
   const match = routeMatcher(config.routes)
   const manifest = config.routes.flatMap(routeManifest)
+  const manifestPaths = new Set(manifest.map(row => row.path))
   const jobs = new Map<number, Job<State, Env>>()
   let nextJobId = 1
 
@@ -1215,18 +1334,32 @@ const buildStatefulEmulator = async <State, Env, Seed>(
       }
 
       const streamed = isStreamedCommit(planned)
-      const decision = job.decideFault(streamed ? planned.chunks : undefined)
+
+      // `guardOutput`: the prepared answer and the texts the commit would store must not repeat
+      // the bearer; checked before any fault is decided or anything is written.
+      if (config.guardOutput === true) {
+        if (!streamed) return handlerFailedResponse()
+
+        if (outputRepeatsSecret(planned, job.secrets)) {
+          job.notEmulated = outputRepeatReason
+          job.credentialRepeat = true
+
+          return notEmulatedResponse(outputRepeatReason)
+        }
+      }
+
+      const decision = job.decideFault(streamed ? planned.answer.chunks.length : undefined)
 
       if (decision.kind === 'answer') return decision.response
 
       if (!streamed) return planned()
 
-      const answer = planned.commit()
+      // A truncated answer is the prepared one cut short; its commit never runs.
+      if (decision.kind === 'truncate') return streamedResponse(planned.answer, decision.after)
 
-      // The plan declared the chunk count a truncation fault was decided against.
-      if (answer.chunks.length !== planned.chunks) return handlerFailedResponse()
+      planned.commit()
 
-      return streamedResponse(answer, decision.kind === 'truncate' ? decision.after : undefined)
+      return streamedResponse(planned.answer, undefined)
     } catch {
       return handlerFailedResponse()
     }
@@ -1246,12 +1379,25 @@ const buildStatefulEmulator = async <State, Env, Seed>(
     nextSeq = 1
   }
 
+  /** Why a fault's `match.route` could never match (it names no manifest row), or `undefined`. */
+  const matchRouteProblem = (fault: StatefulStreamFault): string | undefined => {
+    const route = fault.match?.route
+
+    return route === undefined || manifestPaths.has(route)
+      ? undefined
+      : 'match.route must name a manifest row of this emulator'
+  }
+
   const addFault = (input: unknown): StatefulFaultState<StatefulStreamFault> | string => {
     const decoded = chunkFaults ? decodeStreamFault(input) : decodeFault(input)
 
     if (Result.isFailure(decoded)) {
       return issueMessage(decoded.failure.issue)
     }
+
+    const problem = matchRouteProblem(decoded.success)
+
+    if (problem !== undefined) return problem
 
     const state: MutableFaultState = {
       id: nextFaultId++,
@@ -1387,6 +1533,18 @@ const buildStatefulEmulator = async <State, Env, Seed>(
       return 'a recorded request header repeats the credential'
     }
 
+    if (config.guardAllHeaders === true) {
+      const headers: Array<string> = []
+
+      request.headers.forEach((value, name) => {
+        if (name !== 'authorization') headers.push(name, value)
+      })
+
+      if (headers.some(text => textRepeatsSecret(text, secrets))) {
+        return 'a request header repeats the credential'
+      }
+    }
+
     if (body === undefined) return undefined
 
     const repeat = 'the request body repeats the credential'
@@ -1473,6 +1631,10 @@ const buildStatefulEmulator = async <State, Env, Seed>(
 
         if (parsed === undefined) return refused('the request body is not valid JSON')
 
+        if (config.uniqueJsonKeys === true && text !== undefined && repeatsJsonKey(text)) {
+          return refused('a JSON body with a repeated key is not emulated')
+        }
+
         // Redacted before it is stored: a refused request's body stays in the ledger too (with
         // `constantRefusals`, only once the route admits the request).
         recorded.body = redactCredentialFields(parsed)
@@ -1526,6 +1688,7 @@ const buildStatefulEmulator = async <State, Env, Seed>(
         query: url.searchParams,
         rawQuery: rawQuery(request.url) ?? '',
         header,
+        headerNames: [...request.headers.keys()],
         json,
         bytes,
         bearerDigest
@@ -1535,7 +1698,8 @@ const buildStatefulEmulator = async <State, Env, Seed>(
 
     if (isNotEmulated(admitted)) return refused(admitted.reason)
 
-    // A route with variants admits a request as exactly one of them; a route without none.
+    // A route with variants admits a request as exactly one of them; a route without variants
+    // admits it as none of them.
     const variants = matched.route.variants
     const variant = admitted.variant
 
@@ -1618,7 +1782,10 @@ const buildStatefulEmulator = async <State, Env, Seed>(
       if (job.notEmulated !== undefined) {
         entry.notEmulated = job.notEmulated
 
-        if (constantRefusals) blankEntry(entry)
+        if (constantRefusals || job.credentialRepeat === true) blankEntry(entry)
+
+        // The constant credential-repeat entry keeps the route template, as a request repeat does.
+        if (job.credentialRepeat === true) entry.route = matched.route.path
       }
 
       return response
@@ -1832,6 +1999,10 @@ const buildStatefulEmulator = async <State, Env, Seed>(
         }
 
         const faults = 'faults' in decoded.success ? decoded.success.faults : [decoded.success]
+        const problem = faults.map(matchRouteProblem).find(Predicate.isString)
+
+        // Checked before any fault is added: a list is added whole or not at all.
+        if (problem !== undefined) return emulatorError(400, `invalid fault: ${problem}`)
 
         return jsonResponse(201, { faults: faults.map(fault => addFault(fault)) })
       }

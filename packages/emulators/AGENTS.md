@@ -752,11 +752,18 @@ There is no root export or barrel.
   search emulator).
 - MCP (`src/mcp.ts` + `src/mcp/{state,api,recordings}.ts`) is stateful AND fixture-only, without
   exceptions, on `src/stateful-emulator.ts` in its opt-in fail-closed mode, built with
-  `makeChunkedStatefulEmulator` and the opt-in `constantRefusals`, and follows the shared
-  fail-closed rule stated for GitHub above, unchanged (its recorded headers `accept`,
-  `content-type`, `mcp-method`, `mcp-name`, `mcp-protocol-version`, and `mcp-session-id`, the raw
-  query, and the raw body are checked like every other part). It emulates only the two synthetic
-  servers of the sixteen `@yolk-sdk/mcp/conformance` fixtures (copied as data in
+  `makeChunkedStatefulEmulator` and the opt-ins `constantRefusals`, `guardAllHeaders`,
+  `guardOutput`, and `uniqueJsonKeys`, and follows the shared fail-closed rule stated for GitHub
+  above, unchanged (every request header name and value but `Authorization`, whatever the ledger
+  records, the raw query, and the raw body are checked like every other part; the ledger records
+  `accept`, `content-type`, `mcp-method`, `mcp-name`, `mcp-protocol-version`, and `mcp-session-id`).
+  The output is guarded too: before any fault is decided or anything is committed, the prepared
+  answer (every header and chunk) and the minted session id or cursor the request would store are
+  checked for the bearer through the closure, and a hit is the constant credential-repeat entry
+  (`the answer would repeat the credential`), no fault used and nothing written, so a bearer that
+  happens to equal a minted id (`yolk-emu-session-1`) or to sit in fixture text (`synthetic-mcp` in
+  `yolk-synthetic-mcp`) never reaches a response, the state, or `/_emulate/*`. It emulates only the
+  two synthetic servers of the sixteen `@yolk-sdk/mcp/conformance` fixtures (copied as data in
   `src/mcp/recordings.ts`; `test/mcp.test.ts` fails on drift): profile `synthetic-modern` on
   `https://mcp.example.test/modern/mcp` and profile `synthetic-legacy` on
   `https://mcp.example.test/legacy/mcp`. Three wire routes (`POST /modern/mcp`, `POST /legacy/mcp`,
@@ -785,41 +792,55 @@ There is no root export or barrel.
   answers the recorded 401 byte for byte on the era probe and is refused anywhere else. Every
   refusal, by shape or by state, is ledgered with constant text only (`/<unrecognised>`, a standard
   method or `<other>`, an empty query, no headers or body, a constant reason, and the route template
-  or row), writes nothing, and uses up no fault. Status and `truncate-after-chunks` faults apply
-  only after admission and plan, and `match.route` selects one row; a truncation of a bodiless
-  answer cannot apply (500, unused). Not emulated: `DELETE`, `ping`, `resources/*`, `prompts/*`,
-  `logging/*`, `completion/*`, `tasks/*`, batches, client-sent responses, cursors the emulator did
-  not issue, other tools or arguments, and a missing `Authorization`. `test/mcp.test.ts` replays
-  every fixture byte for byte, alone (with the recorded ids, and again with other ids substituted
-  only at the recorded place) and all one-page fixtures in suite order on one emulator, substituting
-  only the minted session id in the `mcp-session-id` header. Drill knobs (`drills`, booleans) each
-  fail exactly one case.
+  or row), writes nothing, and uses up no fault. Every plan prepares its answer (`StreamedCommit`);
+  its commit (minting or readying a session, issuing a cursor) runs only when no fault answers.
+  Status and `truncate-after-chunks` faults apply only after admission and plan, and a faulted
+  request writes nothing: a truncation sends the prepared answer cut short and never commits (a
+  truncated `initialize` holds no session and moves neither the counter nor the cap; a truncated
+  first page issues no cursor, so its continuation is refused). `match.route` selects one row (a
+  value naming no row is rejected when the fault is added) and `match.method` is the HTTP method; a
+  truncation of a bodiless answer cannot apply (500, unused). `makeMcpEmulator` throws when a copied
+  recording is not canonical JSON (every JSON body and SSE `data:` payload equal to
+  `JSON.stringify(JSON.parse(text))`), which id substitution relies on, so provider recordings in
+  another form fail loudly. Not emulated: `DELETE`, `ping`, `resources/*`, `prompts/*`, `logging/*`,
+  `completion/*`, `tasks/*`, batches, client-sent responses, a JSON body repeating a key, `mcp-*`
+  headers no recording carries (such as `mcp-param-*`; routes see header names through
+  `EmulatedRequest.headerNames`), cursors the emulator did not issue, other tools or arguments, and
+  a missing `Authorization`. `test/mcp.test.ts` replays every fixture byte for byte, alone (with the
+  recorded ids, and again with other ids substituted only at the recorded place) and all one-page
+  fixtures in suite order on one emulator, substituting only the minted session id in the
+  `mcp-session-id` header. Drill knobs (`drills`, booleans) each fail exactly one case, on every era
+  whose answers they change.
 - Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
   `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]`, that
-  occurs nowhere else in the request (never stored or ledgered; only its digest is compared, with
-  the digest of the public reserved invalid credential `yolk-conformance-invalid-credential-0000`,
-  which answers the recorded 401 on the era probe); extra request headers other than the MCP headers
-  the fixtures record; JSON key order; any JSON-RPC request id that is an integer from 0 to 2^53 - 1
-  or 1 to 64 printable ASCII characters where the recording has an id; any non-empty `name` and
-  `version` (and no other key) in the `_meta` client info (`io.modelcontextprotocol/clientInfo`) of
-  a modern request; a session id this emulator minted since the last reset or seed where the
-  recording sends `mcp-session-id` (initializing for `notifications/initialized`, ready otherwise);
-  and, with the seed's `two-pages` listing, the cursor this emulator issued in the current
-  generation on the second page. `Authorization` must be exactly `Bearer <token>` (that spelling,
-  one space). Everything else (another origin or path, any query, other HTTP methods such as
-  `DELETE` or a `GET` on the modern profile, JSON-RPC methods no fixture of the profile records such
-  as `ping`, `resources/*`, or `prompts/*`, batches and client-sent responses, other members, a
-  `null`, negative, or fractional id, other params (other tools, arguments, protocol versions, or
-  capabilities, extra client-info keys, and a legacy `initialize` client info other than the
-  recorded one), the MCP headers `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`,
-  `mcp-name`, and `last-event-id` other than the recorded values or present where none is recorded,
-  `mcp-session-id` missing where recorded or present where not, an unknown session or one in the
-  wrong phase, a cursor not issued in the current generation, the reserved invalid credential on
-  anything but the era probe, and a bearer repeated anywhere in the request) is not emulated. The
-  bullet has four copies that change together with `test/mcp.test.ts`: this one, the `src/mcp.ts`
-  header, `README.md` (MCP emulator), and `apps/docs/content/docs/api-reference/emulators.mdx` (MCP
-  emulator).
+  occurs nowhere else in the request (any header name or value included) and in no answer or value
+  the request would store (never stored or ledgered; only its digest is compared, with the digest of
+  the public reserved invalid credential `yolk-conformance-invalid-credential-0000`, which answers
+  the recorded 401 on the era probe); extra request headers, except `mcp-*` headers other than
+  `mcp-method`, `mcp-name`, `mcp-protocol-version`, and `mcp-session-id`; a recorded header value
+  sent as several headers that the HTTP layer joins into the recorded value; JSON key order; any
+  JSON-RPC request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters
+  where the recording has an id; any non-empty `name` and `version` (and no other key) in the
+  `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this
+  emulator minted since the last reset or seed where the recording sends `mcp-session-id`
+  (initializing for `notifications/initialized`, ready otherwise); and, with the seed's `two-pages`
+  listing, the cursor this emulator issued in the current generation on the second page.
+  `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
+  (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET` on the modern
+  profile, JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
+  `prompts/*`, batches and client-sent responses, other members, a JSON body repeating a key
+  (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
+  arguments, protocol versions, or capabilities, extra client-info keys, and a legacy `initialize`
+  client info other than the recorded one), the MCP headers `accept`, `content-type`, `mcp-method`,
+  `mcp-protocol-version`, `mcp-name`, and `last-event-id` other than the recorded values or present
+  where none is recorded, any other `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing
+  where recorded or present where not, an unknown session or one in the wrong phase, a cursor not
+  issued in the current generation, the reserved invalid credential on anything but the era probe, a
+  bearer repeated anywhere in the request, and a bearer an answer or a minted session id or cursor
+  would repeat) is not emulated. The bullet has four copies that change together with
+  `test/mcp.test.ts`: this one, the `src/mcp.ts` header, `README.md` (MCP emulator), and
+  `apps/docs/content/docs/api-reference/emulators.mdx` (MCP emulator).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -979,28 +1000,41 @@ the sockets; one drill per case failing exactly that case), `test/mcp.test.ts` (
 copy and constants, the drift test above, the latitude, every refusal as a constant-text 400 with an
 unchanged state and an unused match-all fault that still answers the next valid request, the
 reserved invalid credential's 401 byte for byte, credential repeats (the request id, a JSON-escaped
-client info, a JSON key, a percent-encoded query key, the `mcp-session-id` and `mcp-name` headers)
-checked against the real response, the ledger, the state, and every `/_emulate/*` read, the session
-lifecycle and cap, cursor issuance across resets and seeds, row-matched status and truncation
-faults, seeds, control plane), `test/mcp-conformance.test.ts` (every applicable case per profile
-through the real `@yolk-sdk/mcp/client`, its observer, and its call gate, in-process and over a
-loopback socket, each case on a fresh emulator ending at its seed except the minted sessions, and
-all cases twice in sequence on one emulator; the paged listing across a reset; one drill per case
-failing exactly that case; an SSE answer truncated before its response failing as `McpError` at the
-timeout, not a hang), and `test/stateful-emulator.test.ts`
-(the shared wrapper's `{name+}` parameters, raw parameter patterns matched in full (alternation and
-lazy quantifiers included), the opt-in fail-closed mode over a fake core (credential-repeating
-requests ledgered with constant text only, scrubbed plan-time reasons, a route's decoded body views
-checked like its raw body, a throwing view refused with a declared `DecodedViewRefusal` reason, else
-as uncheckable with its own constant reason, never echoing request text; `textClosureOutcome`, the
-predicate form of the secret closure, agreeing with it; the opt-in per-origin `bearerDigest`,
-refused at build without fail-closed mode, routes seeing only a real SHA-256 digest for the arrival
-origin (the expected per-origin hashes, the bearer absent from every response, the ledger, the
-snapshot, and every `/_emulate/*` read), and a digest that throws, repeats the bearer, or is no
-string answering the 500 with no fault used), the constant-reason `exactBodyKeys` and `exactQuery`
-(with `rawNames` comparing raw parameter names, and the raw query the wrapper hands routes), route
-variants (manifest rows, ledger routes, coverage, `match.route`, build checks), truncation faults on
-streamed commits (`makeChunkedStatefulEmulator`; one that cannot apply answers 500 unused),
-`constantRefusals` (no request text before admission, a match-all fault unused), and the unchanged
-behaviour without these options and without fail-closed mode). Loopback sockets only; never call
-real services.
+client info, a JSON key, a percent-encoded query key, the `mcp-session-id` and `mcp-name` headers,
+an unrecorded header raw, percent-encoded, and JSON-escaped, a header name) checked against the real
+response, the ledger, the state, and every `/_emulate/*` read, each leaving an unused fault that
+answers the next valid request, the output guard (`Bearer yolk-emu-session-1` on a fresh emulator,
+`Bearer synthetic-mcp` against the discover answer, a bearer naming the minted cursor: refused with
+no session, cursor, or counter change, checked against the real response text and headers,
+`snapshot()`, and `/_emulate/*`), the canonical-recordings check (a respaced copy fails), the
+session lifecycle and cap, cursor issuance across resets and seeds, a stale cursor refused before
+any fault, row-matched status and truncation faults (a truncated `initialize` mints no session and
+moves no counter; a truncated first page issues no cursor), seeds, control plane),
+`test/mcp-conformance.test.ts` (every applicable case per profile through the real
+`@yolk-sdk/mcp/client`, its observer, and its call gate, in-process and over a loopback socket, each
+case on a fresh emulator ending at its seed except the minted sessions, and all cases twice in
+sequence on one emulator; the paged listing across a reset; one drill per case failing exactly that
+case on every era it changes; an SSE answer truncated before its response failing as `McpError` at
+the timeout, not a hang), and `test/stateful-emulator.test.ts` (the shared wrapper's `{name+}`
+parameters, raw parameter patterns matched in full (alternation and lazy quantifiers included), the
+opt-in fail-closed mode over a fake core (credential-repeating requests ledgered with constant text
+only, scrubbed plan-time reasons, a route's decoded body views checked like its raw body, a throwing
+view refused with a declared `DecodedViewRefusal` reason, else as uncheckable with its own constant
+reason, never echoing request text; `textClosureOutcome`, the predicate form of the secret closure,
+agreeing with it; the opt-in per-origin `bearerDigest`, refused at build without fail-closed mode,
+routes seeing only a real SHA-256 digest for the arrival origin (the expected per-origin hashes, the
+bearer absent from every response, the ledger, the snapshot, and every `/_emulate/*` read), and a
+digest that throws, repeats the bearer, or is no string answering the 500 with no fault used), the
+constant-reason `exactBodyKeys` and `exactQuery` (with `rawNames` comparing raw parameter names, and
+the raw query the wrapper hands routes), route variants (manifest rows, ledger routes, coverage,
+`match.route`, build checks), truncation faults on streamed commits (`makeChunkedStatefulEmulator`;
+a truncated writing row writes nothing; one that cannot apply answers 500 unused), `match.route`
+naming a manifest row (a template on an emulator without variants; an unknown route or a variant
+route's template rejected at `faults.add` and over `/_emulate/faults`), `constantRefusals` (no
+request text before admission, a match-all fault unused), `guardOutput` (a prepared answer header, a
+chunk, a straddled body, or a persisted text holding the bearer refused as the constant entry with
+no write and an unused fault; a plain commit answers 500), `guardAllHeaders` (raw, percent-encoded,
+and JSON-escaped repeats in any header value, and a header name), `uniqueJsonKeys` and
+`repeatsJsonKey` (repeated keys raw, escaped, and nested refused; sibling objects and strings not),
+and the unchanged behaviour without these options and without fail-closed mode). Loopback sockets
+only; never call real services.

@@ -88,7 +88,9 @@
   `_meta` envelope of the pinned SDK, and they never record `authorization`. The auth case sends
   the public reserved invalid credential (`Bearer yolk-conformance-invalid-credential-0000`). A
   pinned SDK upgrade that changes ids, headers or order shows up in the replay request-equality
-  test.
+  test. The sixteen fixtures are copied as data into `packages/emulators/src/mcp/recordings.ts`
+  (the `@yolk-sdk/emulators/mcp` emulator); `packages/emulators/test/mcp.test.ts` fails when the
+  copy drifts, so a fixture change updates that copy in the same change.
 - Real-code facts the cases pin (pinned `@modelcontextprotocol/client` 2.0.0; trust the SDK source
   over the design and keep the `cases.ts` header in sync):
   - `listTools(undefined)` follows `nextCursor` (stopping silently on a repeated cursor), lists

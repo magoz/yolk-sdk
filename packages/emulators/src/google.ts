@@ -165,8 +165,9 @@ export const googleEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> =
   googleApiRoutes.map(routeEvidence)
 
 /**
- * Optional fault filter; an omitted field matches every request. `path` ending in `*` is a
- * prefix.
+ * Optional fault filter; an omitted field matches every request. `method` is the HTTP method;
+ * `path` is the raw request path (ending in `*`, a prefix); `route` is a route template of the
+ * manifest (another value is rejected when the fault is added).
  */
 export const GoogleFaultMatch = StatefulFaultMatch
 

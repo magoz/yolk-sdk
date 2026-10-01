@@ -36,6 +36,7 @@ import {
   type McpRecordedExchange,
   type McpRecordedFixture
 } from '../src/mcp.ts'
+import { mcpRecordingProblems } from '../src/mcp/api.ts'
 import { isJsonObject } from '../src/stateful-emulator.ts'
 import { isRecognisableBearerValue } from '../src/stateful-secrets.ts'
 
@@ -291,6 +292,55 @@ describe('the data copy', () => {
     expect(modernUrl).toBe(mcpConformanceSyntheticModernUrl)
     expect(legacyUrl).toBe(mcpConformanceSyntheticLegacyUrl)
     expect(mcpEmulatorReservedInvalidCredential).toBe(mcpConformanceInvalidCredential)
+  })
+
+  it('every recorded answer is canonical JSON; a non-canonical copy fails loudly', () => {
+    expect(mcpRecordingProblems(mcpEmulatorFixtures)).toEqual([])
+
+    const [first] = mcpEmulatorFixtures
+
+    if (first === undefined) throw new Error('no fixtures')
+
+    const [exchange] = first.exchanges
+
+    if (exchange === undefined || 'chunks' in exchange.response) throw new Error('no JSON answer')
+
+    const respaced = {
+      ...first,
+      exchanges: [
+        {
+          ...exchange,
+          response: { ...exchange.response, body: exchange.response.body.replace(':', ': ') }
+        },
+        ...mcpEmulatorFixtures.flatMap(fixture =>
+          fixture.id === legacyEra
+            ? fixture.exchanges.flatMap(candidate =>
+                'chunks' in candidate.response
+                  ? [
+                      {
+                        ...candidate,
+                        response: {
+                          ...candidate.response,
+                          chunks: candidate.response.chunks.map(chunk =>
+                            chunk.replace('data: ', 'data:')
+                          )
+                        }
+                      }
+                    ]
+                  : []
+              )
+            : []
+        )
+      ]
+    }
+
+    expect(mcpRecordingProblems([respaced])).toEqual([
+      `${first.id} exchange 0: the JSON body is not canonical`,
+      `${first.id} exchange 1 chunk 0: an SSE data line is not canonical`,
+      `${first.id} exchange 1 chunk 1: an SSE data line is not canonical`,
+      `${first.id} exchange 2 chunk 0: an SSE data line is not canonical`,
+      `${first.id} exchange 2 chunk 1: an SSE data line is not canonical`
+    ])
   })
 
   it('the reserved invalid credential is a recognisable bearer (handled explicitly)', () => {
@@ -618,6 +668,28 @@ const refusals: ReadonlyArray<Refusal> = [
     reason: 'the mcp-method header must be the recorded value, or absent where none is'
   },
   {
+    name: 'an mcp-param-* header no recording carries',
+    request: () =>
+      requestFor(recorded.modernCallRead, { headers: { 'mcp-param-note-id': 'note-0001' } }),
+    reason: 'an mcp-* header no recording carries is not emulated'
+  },
+  {
+    name: 'another mcp-* header on the standing GET',
+    request: async emulator =>
+      onSession(recorded.legacyGet, await handshake(emulator), {
+        headers: { 'mcp-extra': '1' }
+      }),
+    reason: 'an mcp-* header no recording carries is not emulated'
+  },
+  ...[
+    `{"jsonrpc":"2.0","id":1,"id":2,"method":"tools/list","params":${JSON.stringify(bodyWith(recorded.modernList, {})['params'])}}`,
+    `{"jsonrpc":"2.0","\\u0069d":1,"id":2,"method":"tools/list","params":${JSON.stringify(bodyWith(recorded.modernList, {})['params'])}}`
+  ].map((body, index): Refusal => ({
+    name: `a JSON body repeating a key (${index === 0 ? 'raw' : 'escaped'})`,
+    request: () => requestFor(recorded.modernList, { body }),
+    reason: 'a JSON body with a repeated key is not emulated'
+  })),
+  {
     name: 'mcp-session-id on a modern request',
     request: () =>
       requestFor(recorded.modernDiscover, { headers: { 'mcp-session-id': 'yolk-emu-session-1' } }),
@@ -915,6 +987,29 @@ describe('the credential guard', () => {
       'in the mcp-name header',
       () => requestFor(recorded.modernCallRead, { headers: { 'mcp-name': token } }),
       'a recorded request header repeats the credential'
+    ],
+    [
+      'in a header the ledger does not record',
+      () => requestFor(recorded.modernDiscover, { headers: { 'x-trace': token } }),
+      'a request header repeats the credential'
+    ],
+    [
+      'percent-encoded in a header the ledger does not record',
+      () =>
+        requestFor(recorded.modernDiscover, {
+          headers: { 'x-trace': `trace ${token.replace('s', '%73')}` }
+        }),
+      'a request header repeats the credential'
+    ],
+    [
+      'JSON-escaped in a header the ledger does not record',
+      () => requestFor(recorded.modernDiscover, { headers: { 'x-trace': escaped } }),
+      'a request header repeats the credential'
+    ],
+    [
+      'in a header name',
+      () => requestFor(recorded.modernDiscover, { headers: { [`x-${token}`]: '1' } }),
+      'a request header repeats the credential'
     ]
   ]
 
@@ -940,6 +1035,10 @@ describe('the credential guard', () => {
         expect(emulator.snapshot()).toEqual(before)
         expect(emulator.faults.list().map(fault => fault.applied)).toEqual([0])
         expect(await controlPlaneText(emulator)).not.toContain(token)
+
+        // The unused match-all fault still answers the next valid request.
+        expect((await emulator.fetch(valid())).status).toBe(503)
+        expect(emulator.faults.list().map(fault => fault.applied)).toEqual([1])
       })
     })
   }
@@ -959,6 +1058,91 @@ describe('the credential guard', () => {
         body: recorded.legacyCallRead.request.body
       })
       expect(await controlPlaneText(emulator)).not.toContain(token)
+    })
+  })
+})
+
+describe('the output guard: no answer or stored value holds the bearer', () => {
+  /** The refusal, its constant entry, no write, and an unused fault for the next valid request. */
+  const expectGuarded = async (emulator: McpEmulator, answer: Response, bearer: string) => {
+    const text = await answer.text()
+    const headers = [...answer.headers.entries()].flat().join('\n')
+
+    expect(answer.status).toBe(400)
+    expect(JSON.parse(text)).toEqual({
+      error: {
+        type: 'not_emulated',
+        message: 'Not emulated: the answer would repeat the credential'
+      }
+    })
+    expect(`${text}\n${headers}`).not.toContain(bearer)
+    expect(emulator.ledger.entries().at(-1)).toMatchObject({
+      path: '/<unrecognised>',
+      query: {},
+      headers: {},
+      status: 400,
+      notEmulated: 'the answer would repeat the credential'
+    })
+    expect(emulator.ledger.entries().at(-1)?.body).toBeUndefined()
+    expect(JSON.stringify(emulator.snapshot())).not.toContain(bearer)
+    expect(await controlPlaneText(emulator)).not.toContain(bearer)
+    expect(emulator.faults.list().map(fault => fault.applied)).toEqual([0])
+
+    // The unused match-all fault still answers the next valid request.
+    expect((await emulator.fetch(valid())).status).toBe(503)
+  }
+
+  it('Bearer yolk-emu-session-1 on a fresh emulator: initialize refused, nothing minted', async () => {
+    await withEmulator({}, async emulator => {
+      const bearer = 'yolk-emu-session-1'
+
+      emulator.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      await expectGuarded(
+        emulator,
+        await emulator.fetch(requestFor(recorded.legacyInitialize, { bearer })),
+        bearer
+      )
+      expect(emulator.snapshot().sessions).toEqual([])
+
+      // The counter did not move: the next initialize (another bearer) mints the first session.
+      expect(await handshake(emulator)).toBe('yolk-emu-session-1')
+    })
+  })
+
+  it('Bearer synthetic-mcp against the discover answer naming yolk-synthetic-mcp', async () => {
+    await withEmulator({}, async emulator => {
+      const bearer = 'synthetic-mcp'
+
+      expect(recordedText(recorded.modernDiscover)).toContain(`yolk-${bearer}`)
+
+      emulator.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      await expectGuarded(
+        emulator,
+        await emulator.fetch(requestFor(recorded.modernDiscover, { bearer })),
+        bearer
+      )
+    })
+  })
+
+  it('a bearer naming the minted cursor: the first page refused, no cursor issued', async () => {
+    await withEmulator({ seed: { modernListing: 'two-pages' } }, async emulator => {
+      const bearer = 'synthetic-cursor-0001'
+
+      emulator.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      await expectGuarded(
+        emulator,
+        await emulator.fetch(requestFor(recorded.modernList, { bearer })),
+        bearer
+      )
+
+      const state = await emulator
+        .fetch(new Request(`${mcpEmulatorOrigin}/_emulate/state`))
+        .then(response => response.json())
+
+      expect(state.issuedCursor).toBeNull()
     })
   })
 })
@@ -1025,6 +1209,10 @@ describe('legacy sessions', () => {
       expect(emulator.snapshot()).toEqual(before)
       expect(emulator.faults.list().map(fault => fault.applied)).toEqual([0])
 
+      // The unused match-all fault still answers the next valid request.
+      expect((await emulator.fetch(valid())).status).toBe(503)
+      expect(emulator.faults.list().map(fault => fault.applied)).toEqual([1])
+
       await emulator.reset()
       expect(await handshake(emulator)).toBe(`yolk-emu-session-${mcpEmulatorSessionCap + 1}`)
     })
@@ -1078,6 +1266,34 @@ describe('the paged modern listing: cursors by issuance', () => {
   })
 })
 
+describe('a stale cursor', () => {
+  it('is refused before any fault, writes nothing, and leaves the fault unused', async () => {
+    await withEmulator({ seed: { modernListing: 'two-pages' } }, async emulator => {
+      await (await emulator.fetch(requestFor(recorded.modernList))).text()
+      await emulator.reset()
+
+      const before = emulator.snapshot()
+
+      emulator.faults.add({ kind: 'status', status: 503 })
+
+      const refused = await emulator.fetch(requestFor(recorded.modernSecondPage))
+
+      expect(refused.status).toBe(400)
+      expect(emulator.ledger.entries().at(-1)).toMatchObject({
+        path: '/<unrecognised>',
+        notEmulated:
+          'a cursor this emulator did not issue since the last reset or seed is not emulated'
+      })
+      expect(emulator.snapshot()).toEqual(before)
+      expect(emulator.faults.list().map(fault => fault.applied)).toEqual([0])
+
+      // The unused match-all fault still answers the next valid request.
+      expect((await emulator.fetch(valid())).status).toBe(503)
+      expect(emulator.faults.list().map(fault => fault.applied)).toEqual([1])
+    })
+  })
+})
+
 describe('faults', () => {
   it('a status fault matched by row answers only that row', async () => {
     await withEmulator({}, async emulator => {
@@ -1126,6 +1342,60 @@ describe('faults', () => {
       expect(refused.status).toBe(500)
       expect(emulator.faults.list().map(fault => fault.applied)).toEqual([1, 0])
       expect(emulator.snapshot().sessions).toEqual([{ id: session, phase: 'initializing' }])
+    })
+  })
+
+  it('a truncated initialize answers the cut answer and mints nothing', async () => {
+    await withEmulator({}, async emulator => {
+      emulator.faults.add({
+        kind: 'truncate-after-chunks',
+        chunks: 1,
+        match: { route: row(legacyUrl, 'initialize') },
+        count: 1
+      })
+
+      const truncated = await emulator.fetch(requestFor(recorded.legacyInitialize))
+
+      const chunks =
+        'chunks' in recorded.legacyInitialize.response
+          ? recorded.legacyInitialize.response.chunks
+          : []
+
+      expect(truncated.status).toBe(200)
+      expect(await truncated.text()).toBe(chunks[0])
+      expect(emulator.ledger.entries().at(-1)?.fault).toBe('truncate-after-chunks')
+
+      // No session held (the cap untouched), and the counter did not move.
+      expect(emulator.snapshot().sessions).toEqual([])
+      expect(await handshake(emulator)).toBe('yolk-emu-session-1')
+      expect(emulator.snapshot().sessions).toHaveLength(1)
+    })
+  })
+
+  it('a truncated first page issues no cursor: its continuation is refused', async () => {
+    await withEmulator({ seed: { modernListing: 'two-pages' } }, async emulator => {
+      emulator.faults.add({
+        kind: 'truncate-after-chunks',
+        chunks: 0,
+        match: { route: row(modernUrl, 'tools/list') },
+        count: 1
+      })
+
+      const truncated = await emulator.fetch(requestFor(recorded.modernList))
+
+      expect(truncated.status).toBe(200)
+      expect(await truncated.text()).toBe('')
+
+      const state = await emulator
+        .fetch(new Request(`${mcpEmulatorOrigin}/_emulate/state`))
+        .then(response => response.json())
+
+      expect(state.issuedCursor).toBeNull()
+      expect((await emulator.fetch(requestFor(recorded.modernSecondPage))).status).toBe(400)
+
+      // A first page answered whole issues it.
+      await (await emulator.fetch(requestFor(recorded.modernList))).text()
+      expect((await emulator.fetch(requestFor(recorded.modernSecondPage))).status).toBe(200)
     })
   })
 

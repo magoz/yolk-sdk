@@ -340,7 +340,8 @@ describe('the paged modern listing (seed two-pages)', () => {
 
 type Drill = {
   readonly knobs: McpEmulatorDrills
-  readonly era: McpConformanceEra
+  /** Every era whose answers the knob changes. */
+  readonly eras: ReadonlyArray<McpConformanceEra>
   readonly id: string
   readonly message: string
 }
@@ -348,56 +349,56 @@ type Drill = {
 const drills: ReadonlyArray<Drill> = [
   {
     knobs: { discoverCarriesErrorResponse: true },
-    era: 'modern',
+    eras: ['modern'],
     id: 'mcp.negotiation.era',
     message: 'expected the era probe answer to select the modern era'
   },
   {
     knobs: { discoverWithoutResultType: true },
-    era: 'modern',
+    eras: ['modern'],
     id: 'mcp.modern.stateless',
     message: 'expected resultType: "complete" on the result of POST server/discover'
   },
   {
     knobs: { sessionIdNotVisibleAscii: true },
-    era: 'legacy',
+    eras: ['legacy'],
     id: 'mcp.legacy.session',
     message: 'expected the issued mcp-session-id to be visible ASCII'
   },
   {
     knobs: { discoverAnsweredTwice: true },
-    era: 'modern',
+    eras: ['modern'],
     id: 'mcp.transport.response-encoding',
     message: 'expected the event stream answering POST server/discover to hold its response once'
   },
   {
     knobs: { writeToolMarkedReadOnly: true },
-    era: 'legacy',
+    eras: ['modern', 'legacy'],
     id: 'mcp.tools.list',
     message: 'expected no notReadOnly tool to be marked readOnlyHint: true'
   },
   {
     knobs: { readCallAnswersToolError: true },
-    era: 'legacy',
+    eras: ['modern', 'legacy'],
     id: 'mcp.tools.call-read',
     message: 'expected the read call result to have isError absent or false'
   },
   {
     knobs: { invalidCallAnswersRpcError: true },
-    era: 'modern',
+    eras: ['modern', 'legacy'],
     id: 'mcp.tools.call-tool-error',
     message:
       'expected invalid arguments to answer a tool result with isError: true, not a JSON-RPC error'
   },
   {
     knobs: { absentCallAnswersResult: true },
-    era: 'modern',
+    eras: ['modern', 'legacy'],
     id: 'mcp.errors.unknown-tool',
     message: 'expected tools/call of an absent tool not to answer a result'
   },
   {
     knobs: { unauthorizedWithoutChallenge: true },
-    era: 'legacy',
+    eras: ['modern', 'legacy'],
     id: 'mcp.auth.rejected',
     // The runner's message sanitizer redacts the word after `Bearer`.
     message: 'expected the 401 to carry a WWW-Authenticate: Bearer <redacted>'
@@ -410,34 +411,36 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
   })
 
   for (const drill of drills) {
-    it.effect(
-      `${Object.keys(drill.knobs).join(', ')} fails only ${drill.id} (${drill.era})`,
-      () =>
-        Effect.gen(function* () {
-          const cases = applicable(drill.era)
+    for (const era of drill.eras) {
+      it.effect(
+        `${Object.keys(drill.knobs).join(', ')} fails only ${drill.id} (${era})`,
+        () =>
+          Effect.gen(function* () {
+            const cases = applicable(era)
 
-          const report = yield* runEach(
-            drill.era,
-            cases,
-            { drills: drill.knobs },
-            { kind: 'in-process' },
-            inProcessLayer
-          )
+            const report = yield* runEach(
+              era,
+              cases,
+              { drills: drill.knobs },
+              { kind: 'in-process' },
+              inProcessLayer
+            )
 
-          expect(report.summary, formatConformanceReport(report)).toEqual({
-            passed: cases.length - 1,
-            failed: 1,
-            skipped: 0
-          })
+            expect(report.summary, formatConformanceReport(report)).toEqual({
+              passed: cases.length - 1,
+              failed: 1,
+              skipped: 0
+            })
 
-          const failed = report.results.filter(result => result.status === 'failed')
+            const failed = report.results.filter(result => result.status === 'failed')
 
-          expect(failed.map(result => result.id)).toEqual([drill.id])
-          expect(failed[0]?.failure?.tag).toBe('ConformanceMismatch')
-          expect(failed[0]?.failure?.message).toContain(drill.message)
-        }),
-      60_000
-    )
+            expect(failed.map(result => result.id)).toEqual([drill.id])
+            expect(failed[0]?.failure?.tag).toBe('ConformanceMismatch')
+            expect(failed[0]?.failure?.message).toContain(drill.message)
+          }),
+        60_000
+      )
+    }
   }
 })
 

@@ -36,6 +36,7 @@ import {
 import {
   mcpEmulatorFixtures,
   type McpRecordedExchange,
+  type McpRecordedFixture,
   type McpRecordedRequest,
   type McpRecordedResponse
 } from './recordings.ts'
@@ -292,6 +293,45 @@ const mapResult =
     return isJsonObject(result) ? { ...message, result: change(result) } : message
   }
 
+/**
+ * Where a copied recording is not in the canonical form id substitution relies on: every JSON
+ * answer body, and every SSE `data:` payload, must equal `JSON.stringify(JSON.parse(text))`, and
+ * every SSE data line must start with `data: `. `makeMcpEmulator` throws on any problem, so a
+ * recording copied in another form (escapes such as `\u00e9` or `\/`, numbers such as `1.0`,
+ * spacing) fails loudly instead of answering bytes the substitution would rewrite.
+ */
+export const mcpRecordingProblems = (
+  fixtures: ReadonlyArray<McpRecordedFixture>
+): ReadonlyArray<string> =>
+  fixtures.flatMap(fixture =>
+    fixture.exchanges.flatMap(({ response }, index) => {
+      const where = `${fixture.id} exchange ${index}`
+
+      const canonical = (text: string) => {
+        const parsed = parseJsonText(text)
+
+        return parsed !== undefined && JSON.stringify(parsed) === text
+      }
+
+      if (!('chunks' in response)) {
+        return response.body === '' || canonical(response.body)
+          ? []
+          : [`${where}: the JSON body is not canonical`]
+      }
+
+      return response.chunks.flatMap((chunk, at) =>
+        chunk
+          .split('\n')
+          .flatMap(line =>
+            !line.startsWith('data') ||
+            (line.startsWith(dataPrefix) && canonical(line.slice(dataPrefix.length)))
+              ? []
+              : [`${where} chunk ${at}: an SSE data line is not canonical`]
+          )
+      )
+    })
+  )
+
 // Request checks: constant reasons only (the wrapper ledgers refusals as constant entries).
 
 /** The MCP headers compared with the recording (absent where the recording has none). */
@@ -305,6 +345,21 @@ const comparedHeaders = [
 ] as const
 
 const sessionHeader = 'mcp-session-id'
+
+/** The `mcp-*` headers a recording carries; any other (such as `mcp-param-*`) is refused. */
+const recordedMcpHeaders: ReadonlySet<string> = new Set([
+  'mcp-method',
+  'mcp-name',
+  'mcp-protocol-version',
+  sessionHeader
+])
+
+/** Refuse an `mcp-*` header no recording carries (fail closed when the names are unknown). */
+const unrecordedMcpHeader = (request: EmulatedRequest): NotEmulated | undefined =>
+  request.headerNames === undefined ||
+  request.headerNames.some(name => name.startsWith('mcp-') && !recordedMcpHeaders.has(name))
+    ? notEmulated('an mcp-* header no recording carries is not emulated')
+    : undefined
 
 const headerProblem = (
   request: EmulatedRequest,
@@ -336,7 +391,7 @@ export const isMcpEmulatedRequestId = (id: Schema.Json | undefined): id is RpcId
   (Predicate.isString(id) && /^[\x20-\x7E]{1,64}$/.test(id))
 
 /** Structural JSON equality, ignoring object key order. */
-export const jsonEqual = (left: Schema.Json, right: Schema.Json): boolean => {
+const jsonEqual = (left: Schema.Json, right: Schema.Json): boolean => {
   if (Array.isArray(left)) {
     return (
       Array.isArray(right) &&
@@ -444,11 +499,13 @@ const matchRpc = (
 
   if (!isJsonObject(recordedBody)) return notEmulated('this JSON-RPC method is not emulated here')
 
-  const common = headerProblem(
-    request,
-    firstRequest,
-    comparedHeaders.filter(name => name !== 'mcp-name')
-  )
+  const common =
+    unrecordedMcpHeader(request) ??
+    headerProblem(
+      request,
+      firstRequest,
+      comparedHeaders.filter(name => name !== 'mcp-name')
+    )
 
   if (common !== undefined) return common
 
@@ -535,8 +592,7 @@ const admission = (
 })
 
 /** A commit that answers `answer` and writes nothing. */
-const answerOnly = (answer: StreamedAnswer): Planned =>
-  streamedCommit(answer.chunks.length, () => answer)
+const answerOnly = (answer: StreamedAnswer): Planned => streamedCommit(answer)
 
 const sessionOf = (state: McpEmulatorState, admitted: Admitted, phase: 'initializing' | 'ready') =>
   state.sessions.find(session => session.id === admitted.session && session.phase === phase)
@@ -704,12 +760,11 @@ const planModernList: Plan = (state, admitted, env) => {
           mapResult(result => ({ ...result, nextCursor: cursor }))
         )
 
-  return streamedCommit(sent.chunks.length, () => {
+  // The cursor is issued only by the commit, so a faulted or truncated first page issues none.
+  return streamedCommit(sent, () => {
     env.runtime.cursorFirstGeneration ??= env.runtime.generation
     env.runtime.issuedCursor = cursor
-
-    return sent
-  })
+  }, [cursor])
 }
 
 const planModernSecondPage: Plan = (state, admitted, env) =>
@@ -734,12 +789,12 @@ const planInitialize: Plan = (state, admitted, env) => {
 
   const answer = withSession(recordedAnswer('legacyInitialize', admitted.id, env), session)
 
-  return streamedCommit(answer.chunks.length, () => {
+  // The session is minted only by the commit, so a faulted or truncated `initialize` holds none
+  // and leaves the counter where it was.
+  return streamedCommit(answer, () => {
     env.runtime.nextSession = number + 1
     state.sessions = [...state.sessions, { id: session, phase: 'initializing' }]
-
-    return answer
-  })
+  }, [session])
 }
 
 const planInitialized: Plan = (state, admitted, env) => {
@@ -749,12 +804,10 @@ const planInitialized: Plan = (state, admitted, env) => {
 
   const answer = recordedAnswer('legacyInitialized', undefined, env)
 
-  return streamedCommit(answer.chunks.length, () => {
+  return streamedCommit(answer, () => {
     state.sessions = state.sessions.map(held =>
       held.id === session.id ? { id: held.id, phase: 'ready' } : held
     )
-
-    return answer
   })
 }
 
@@ -919,7 +972,9 @@ const legacyGetRoute: McpRoute = {
 
     if (isReserved(request, env)) return notEmulated(reservedOnlyOnProbe)
 
-    const problem = headerProblem(request, recorded.legacyGet.request, comparedHeaders)
+    const problem =
+      unrecordedMcpHeader(request) ??
+      headerProblem(request, recorded.legacyGet.request, comparedHeaders)
 
     if (problem !== undefined) return problem
 

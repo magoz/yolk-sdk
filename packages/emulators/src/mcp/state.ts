@@ -21,17 +21,6 @@ export const mcpEmulatorModernPath = '/modern/mcp'
 /** The synthetic legacy server: an `initialize` handshake, a session, and SSE answers. */
 export const mcpEmulatorLegacyPath = '/legacy/mcp'
 
-/** The emulated profiles: the two synthetic servers of the MCP conformance fixtures. */
-export const McpEmulatorProfile = Schema.Literals(['synthetic-modern', 'synthetic-legacy'])
-
-export type McpEmulatorProfile = typeof McpEmulatorProfile.Type
-
-/** The endpoint path of each profile. */
-export const mcpEmulatorProfilePaths: Readonly<Record<McpEmulatorProfile, string>> = {
-  'synthetic-modern': mcpEmulatorModernPath,
-  'synthetic-legacy': mcpEmulatorLegacyPath
-}
-
 /**
  * The public reserved invalid credential of the MCP auth case: the only credential value the
  * emulator compares a bearer with (through its digest), answered the recorded 401.
