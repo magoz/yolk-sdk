@@ -787,8 +787,8 @@ none), `GET .../issues/{number}` (the recorded 404 for a number the repository h
 (`per_page=100`), and delete (204, then the recorded 404), issue label add and remove (the recorded
 404 for a repository label not on the issue; removing an issue's last label is not emulated), and
 issue create, rename, and close as completed. Every route needs exactly
-`Authorization: Bearer <token>` (at least 8 non-space characters; never stored or ledgered),
-`Accept: application/vnd.github+json` (`githubEmulatorAccept`), and
+`Authorization: Bearer <token>` (at least 8 non-space characters, at least one outside `[0-9.eE+-]`;
+never stored or ledgered), `Accept: application/vnd.github+json` (`githubEmulatorAccept`), and
 `X-GitHub-Api-Version: 2026-03-10` (`githubEmulatorApiVersion`), and answers only on the recorded
 origin `https://api.github.com` (`githubEmulatorOrigin`): `fetch` reads the origin from the request
 URL; behind a loopback rewrite, serve `fetchOn(githubEmulatorOrigin)`.
@@ -806,17 +806,21 @@ keeps both), so a write case ends at the seed except those and the counters.
 It fails closed: only a request whose raw path is exactly an emulated route shape under that route's
 method, with no `Authorization` header or exactly `Bearer <token>`, is recognised. Every other
 request is ledgered and answered with constant text only (the path `/<unrecognised>`, a standard
-method or `<other>`, no query or body, a constant reason). A recognised request that repeats the
-bearer value in its raw path, any decoded path segment, any query key or value, any recorded header,
-or its body (raw, percent-decoded, or parsed as JSON with `\u` escapes undone and numbers such as
-`1.2345678e7` normalised: path segments, query parts, and headers when they look like JSON, the body
-always) is refused and ledgered with constant text only: a standard method, the path
-`/<unrecognised>`, its route template, an empty query, no headers or body, and a constant reason
-(`the query repeats the credential`, for example). Any other recognised request has the bearer value
-scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons included); its
-recorded query keeps every pair (a repeated key as a JSON array of its values, in order), and
-recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are recorded parsed
-with credential-named keys redacted at any depth, or as `<redacted>` when they do not parse,
+method or `<other>`, no query or body, a constant reason). A recognised bearer must hold at least
+one character outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub token form does: `ghp_…`,
+`github_pat_…`, `gho_…`), so no number's text can contain it; an `Authorization` header with any
+other value is unrecognisable. A recognised request that repeats the bearer value in its raw path,
+any path segment, the raw query or any query key or value, any recorded header, or its body is
+refused and ledgered with constant text only: a standard method, the path `/<unrecognised>`, its
+route template, an empty query, no headers or body, and a constant reason
+(`the query repeats the credential`, for example). Each part is checked through a bounded decoding
+closure: starting from the raw text, up to 4 rounds, each applying percent-decoding and, when a text
+parses as JSON, taking its string values and object keys (so `\u` escapes are undone), with every
+intermediate text checked. Any other recognised request has the bearer value scrubbed from its
+ledgered fields and every not-emulated reason (plan-time reasons included); its recorded query is
+keyed by recorded key; a key recorded more than once lists its values in order (as a JSON array);
+and recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are recorded
+parsed with credential-named keys redacted at any depth, or as `<redacted>` when they do not parse,
 whatever the header's declared format. Also, refusals never echo a request's own query or body keys;
 empty query components are refused. It is **fixture-only**: anything else answers the ledgered 400
 not-emulated before anything is written and before any fault is chosen, for example other routes,
@@ -829,19 +833,19 @@ issues. That includes the open-issue listing of the read-only leftover lookup
 HTTP 400), and the repository runner prints its lookup-failed WARN instead of leftover warnings.
 
 - Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
-  non-space characters that occurs nowhere else in the request (never checked, stored, or ledgered);
-  extra request headers; JSON key order; `content-type` media-type parameters; the order of query
-  parameters; any non-empty issue title and comment body, and any issue body text; any comment
-  listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to 100,
-  with no `page` or a `page` from 2 to one past the last page; any issue search `q` that starts with
-  the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256 characters
-  (answered the recorded 422); any issue number the repository has not reached (answered the
-  recorded 404); and any issue, comment, repository label, or file the state holds where a fixture
-  has one, under the per-route state rules. `Authorization` must be exactly `Bearer <token>` (that
-  spelling, one space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version`
-  `2026-03-10`. Everything else (other keys and values, query parameters, empty query components
-  such as a bare `?` or a stray `&`, another origin or repository, a repeated query key, an explicit
-  `page=1`, and a comment listing `per_page` other than 100) is not emulated.
+  non-space characters, at least one outside `[0-9.eE+-]`, that occurs nowhere else in the request
+  (never checked, stored, or ledgered); extra request headers; JSON key order; `content-type`
+  media-type parameters; the order of query parameters; any non-empty issue title and comment body,
+  and any issue body text; any comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label
+  listing `per_page` from 1 to 100, with no `page` or a `page` from 2 to one past the last page; any
+  issue search `q` that starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after
+  it is longer than 256 characters (answered the recorded 422); any issue number the repository has
+  not reached (answered the recorded 404); and any issue, comment, repository label, or file the
+  state holds where a fixture has one, under the per-route state rules. `Authorization` must be
+  exactly `Bearer <token>` (that spelling, one space), `Accept` `application/vnd.github+json`, and
+  `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query parameters,
+  empty query components such as a bare `?` or a stray `&`, another origin or repository, a repeated
+  query key, an explicit `page=1`, and a comment listing `per_page` other than 100) is not emulated.
 
 Faults, the ledger (which records the `Accept` and `X-GitHub-Api-Version` headers), clock-free
 recovery, and the control plane behave as in the Dropbox emulator; a 429 fault reaches the

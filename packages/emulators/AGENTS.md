@@ -460,18 +460,22 @@ There is no root export or barrel.
   comment ids, plain label names, a multi-segment `{path+}` of plain file path segments), so a
   request is recognised only when its raw path is exactly an emulated route shape under that route's
   method (each raw pattern matched in full; a `g` or `y` flag is refused at build) and any
-  `Authorization` header is exactly `Bearer <at least 8 non-space characters>`; everything else is
-  ledgered with constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty
-  query, no body, a constant reason). A recognised request that repeats the bearer value in its raw
-  path, any decoded path segment, any query key or value, any recorded header, or its body (raw,
-  percent-decoded, or parsed as JSON with `\u` escapes undone and numbers such as `1.2345678e7`
-  normalised: path segments, query parts, and headers when they look like JSON, the body always) is
-  refused and ledgered with constant text only: a standard method, the path `/<unrecognised>`, its
-  route template, an empty query, no headers or body, and a constant reason
-  (`the query repeats the credential`, for example). Any other recognised request has the bearer
-  value scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons
-  included); its recorded query keeps every pair (a repeated key as a JSON array of its values, in
-  order), and recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are
+  `Authorization` header is exactly `Bearer <at least 8 non-space characters>`, at least one outside
+  `[0-9.eE+-]`; everything else is ledgered with constant text only (`/<unrecognised>`, a standard
+  method or `<other>`, an empty query, no body, a constant reason). A recognised bearer must hold at
+  least one character outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub token form does:
+  `ghp_…`, `github_pat_…`, `gho_…`), so no number's text can contain it; an `Authorization` header
+  with any other value is unrecognisable. A recognised request that repeats the bearer value in its
+  raw path, any path segment, the raw query or any query key or value, any recorded header, or its
+  body is refused and ledgered with constant text only: a standard method, the path
+  `/<unrecognised>`, its route template, an empty query, no headers or body, and a constant reason
+  (`the query repeats the credential`, for example). Each part is checked through a bounded decoding
+  closure: starting from the raw text, up to 4 rounds, each applying percent-decoding and, when a
+  text parses as JSON, taking its string values and object keys (so `\u` escapes are undone), with
+  every intermediate text checked. Any other recognised request has the bearer value scrubbed from
+  its ledgered fields and every not-emulated reason (plan-time reasons included); its recorded query
+  is keyed by recorded key; a key recorded more than once lists its values in order (as a JSON
+  array); and recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are
   recorded parsed with credential-named keys redacted at any depth, or as `<redacted>` when they do
   not parse, whatever the header's declared format. Empty query components are refused, and GitHub
   refusals never echo a request's own query or body keys (they use the wrapper's constant-reason
@@ -481,7 +485,7 @@ There is no root export or barrel.
   values, issue 42 and comment 9000000001, and end at the last addressable number and id, after
   which creates are refused before any fault; a seed's counters lie above its seeded numbers, and no
   seeded node id, of an issue or a label, may use a minted `node_id` form at or above its counter),
-  the issue `id`/ `node_id` and comment `node_id` derived from them in the fixtures' form, and
+  the issue `id`/`node_id` and comment `node_id` derived from them in the fixtures' form, and
   timestamps from the injectable clock (whole seconds). Issue numbers below the counter that the
   state does not hold are implied (never rendered); numbers at or above it answer the not-found
   fixture's 404 byte for byte. Error bodies are the fixtures' byte for byte
@@ -501,21 +505,22 @@ There is no root export or barrel.
   issue (GitHub cannot delete issues); the cross-checks prove exactly that. Drill knobs (`drills`,
   booleans) each fail exactly one case.
 - Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
-  non-space characters that occurs nowhere else in the request (never checked, stored, or ledgered);
-  extra request headers; JSON key order; `content-type` media-type parameters; the order of query
-  parameters; any non-empty issue title and comment body, and any issue body text; any comment
-  listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to 100,
-  with no `page` or a `page` from 2 to one past the last page; any issue search `q` that starts with
-  the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256 characters
-  (answered the recorded 422); any issue number the repository has not reached (answered the
-  recorded 404); and any issue, comment, repository label, or file the state holds where a fixture
-  has one, under the per-route state rules. `Authorization` must be exactly `Bearer <token>` (that
-  spelling, one space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version`
-  `2026-03-10`. Everything else (other keys and values, query parameters, empty query components
-  such as a bare `?` or a stray `&`, another origin or repository, a repeated query key, an explicit
-  `page=1`, and a comment listing `per_page` other than 100) is not emulated. Copies change together
-  with `test/github.test.ts`: this bullet, the `src/github.ts` header, `README.md` (GitHub
-  emulator), and `apps/docs/content/docs/api-reference/emulators.mdx` (GitHub emulator).
+  non-space characters, at least one outside `[0-9.eE+-]`, that occurs nowhere else in the request
+  (never checked, stored, or ledgered); extra request headers; JSON key order; `content-type`
+  media-type parameters; the order of query parameters; any non-empty issue title and comment body,
+  and any issue body text; any comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label
+  listing `per_page` from 1 to 100, with no `page` or a `page` from 2 to one past the last page; any
+  issue search `q` that starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after
+  it is longer than 256 characters (answered the recorded 422); any issue number the repository has
+  not reached (answered the recorded 404); and any issue, comment, repository label, or file the
+  state holds where a fixture has one, under the per-route state rules. `Authorization` must be
+  exactly `Bearer <token>` (that spelling, one space), `Accept` `application/vnd.github+json`, and
+  `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query parameters,
+  empty query components such as a bare `?` or a stray `&`, another origin or repository, a repeated
+  query key, an explicit `page=1`, and a comment listing `per_page` other than 100) is not emulated.
+  Copies change together with `test/github.test.ts`: this bullet, the `src/github.ts` header,
+  `README.md` (GitHub emulator), and `apps/docs/content/docs/api-reference/emulators.mdx` (GitHub
+  emulator).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /

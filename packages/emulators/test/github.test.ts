@@ -1171,72 +1171,104 @@ describe('the bearer value is never ledgered or echoed', () => {
     expect(seen.join('\n')).not.toContain('ecretValue')
   })
 
-  // JSON numbers normalise (`1.2345678e7` parses to `12345678`): an all-digit bearer must still
-  // never reach the ledger.
-  it('an exponent-notation number repeating an all-digit bearer', async () => {
-    const target = await emulator()
-
-    const text = await expectRefusedWithoutFault(
-      target,
-      () =>
-        call(target, 'POST', repo('/issues'), {
-          rawBody: '{"title":"x","body":"y","n":[1.2345678e7]}',
-          authorization: 'Bearer 12345678'
-        }),
-      'the request body repeats the credential'
-    )
-
-    expectConstantEntry(target, 'POST')
-    expect([text, ...(await controlReads(target))].join('\n')).not.toContain('12345678')
-  })
-
+  // A bearer made only of JSON-number characters (`[0-9.eE+-]`) is unrecognisable, so no number's
+  // text (`1.2345678e7`, any precision) can ever repeat a recognised one: the request is ledgered
+  // as the constant unrecognised-Authorization entry, and nothing it carries is kept.
   it.each([
-    ['a query value', repo('/labels?per_page=2&q=1.2345678e7'), {}, 'the query repeats'],
-    ['a query key', repo('/labels?per_page=2&1.2345678e7=1'), {}, 'the query repeats'],
     [
-      'a recorded header',
+      'an exponent in a JSON body',
+      'Bearer 12345678',
+      'POST',
+      repo('/issues'),
+      { rawBody: '{"title":"x","body":"y","n":[1.2345678e7]}' }
+    ],
+    ['an exponent query value', 'Bearer 12345678', 'GET', repo('/labels?q=1.2345678e7'), {}],
+    ['an exponent query key', 'Bearer 12345678', 'GET', repo('/labels?1.2345678e7=1'), {}],
+    // Astra's round-3 case: a percent-encoded exponent in a recorded header.
+    [
+      'a percent-encoded exponent header',
+      'Bearer 12345678',
+      'GET',
       repo('/labels?per_page=2'),
-      { apiVersion: '1.2345678e7' },
-      'a recorded request header repeats the credential'
+      { apiVersion: '1%2E2345678e7' }
     ],
     [
-      'a number inside a JSON recorded header',
-      repo('/labels?per_page=2'),
-      { accept: '{"n":[1.2345678e7]}' },
-      'a recorded request header repeats the credential'
+      'a repeated key, exponent last',
+      'Bearer 12345678',
+      'GET',
+      repo('/labels?q=safe&q=1.2345678e7'),
+      {}
     ],
-    // A repeated key: every pair is checked (never one value per key), in both orders.
-    ['a repeated key, exponent last', repo('/labels?per_page=2&q=safe&q=1.2345678e7'), {}, 'query'],
+    ['an exponent path segment', 'Bearer 12345678', 'GET', repo('/contents/1.2345678e7'), {}],
+    // Opus's round-3 case: a long bearer whose exponent form would lose float precision.
     [
-      'a repeated key, exponent first',
-      repo('/labels?per_page=2&q=1.2345678e7&q=safe'),
-      {},
-      'query'
+      'a 20-digit bearer as a long exponent',
+      'Bearer 12345678901234567890',
+      'GET',
+      repo('/labels?q=1.2345678901234567890e19'),
+      {}
     ],
-    ['a repeated key, literal last', repo('/labels?per_page=2&q=safe&q=12345678'), {}, 'query'],
-    ['a repeated key, literal first', repo('/labels?per_page=2&q=12345678&q=safe'), {}, 'query'],
-    // A path segment is checked in its parsed form too (a file path may look like a number).
-    ['a path segment', repo('/contents/1.2345678e7'), {}, 'the request path repeats'],
-    ['a path segment, literal', repo('/contents/docs/12345678'), {}, 'the request path repeats']
+    ['a signed exponent-only bearer', 'Bearer -1.5e+10000', 'GET', repo('/labels?q=x'), {}]
   ] as const)(
-    'an exponent-notation number repeating an all-digit bearer in %s',
-    async (_label, path, options, reason) => {
+    'an all-number-alphabet bearer is unrecognisable (%s)',
+    async (_label, authorization, method, path, options) => {
       const target = await emulator()
 
       const text = await expectRefusedWithoutFault(
         target,
-        () => call(target, 'GET', path, { ...options, authorization: 'Bearer 12345678' }),
-        reason
+        () => call(target, method, path, { ...options, authorization }),
+        'an unrecognisable Authorization header is not emulated'
       )
 
-      expectConstantEntry(target, 'GET')
+      expect(target.ledger.entries().at(-2)).toEqual({
+        seq: 1,
+        method,
+        path: '/<unrecognised>',
+        query: {},
+        headers: {},
+        status: 400,
+        evidence: 'unknown-route',
+        notEmulated: 'an unrecognisable Authorization header is not emulated'
+      })
 
       const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+      const digits = authorization.slice('Bearer '.length)
 
-      expect(seen.join('\n')).not.toContain('12345678')
-      expect(seen.join('\n')).not.toContain('1.2345678e7')
+      for (const form of [digits, '1.2345678e7', '1%2E2345678e7', '1.2345678901234567890e19']) {
+        expect(seen.join('\n')).not.toContain(form)
+      }
     }
   )
+
+  // A repeated key: every pair is checked (never one value per key), in both orders; and a file
+  // path segment carrying the bearer.
+  it.each([
+    ['a repeated key, secret last', repo(`/labels?per_page=2&q=safe&q=${secret}`), 'query'],
+    ['a repeated key, secret first', repo(`/labels?per_page=2&q=${secret}&q=safe`), 'query'],
+    [
+      'a repeated key, encoded secret last',
+      repo(`/labels?per_page=2&q=safe&q=${encodeURIComponent(encodeURIComponent(secret))}`),
+      'query'
+    ],
+    [
+      // A file path takes no `%`: an encoded segment is no route shape (constant entry anyway).
+      'a contents path segment',
+      repo(`/contents/docs/${secret}`),
+      'the request path repeats'
+    ]
+  ] as const)('%s', async (_label, path, reason) => {
+    const target = await emulator()
+
+    const text = await expectRefusedWithoutFault(
+      target,
+      () => call(target, 'GET', path, bearer),
+      reason
+    )
+
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    expect(seen.join('\n')).not.toContain('ecretValue')
+  })
 
   it('records every pair of a repeated key, in order (never one value per key)', async () => {
     const target = await emulator()
@@ -1254,6 +1286,21 @@ describe('the bearer value is never ledgered or echoed', () => {
     })
   })
 
+  it('groups the recorded query by recorded key, so no pair is lost', async () => {
+    const target = await emulator()
+
+    // Both unparseable JSON-looking keys record as `<redacted>`; both pairs are kept, in order.
+    await expectNotEmulated(
+      await call(target, 'GET', repo(`/labels?per_page=2&${'{a'}=1&${'{b'}=2`)),
+      'a query parameter this route does not take'
+    )
+
+    expect(target.ledger.entries()[0]?.query).toEqual({
+      per_page: '2',
+      '<redacted>': '["1","2"]'
+    })
+  })
+
   it('answers recognised requests without the bearer anywhere', async () => {
     const target = await emulator()
 
@@ -1266,6 +1313,97 @@ describe('the bearer value is never ledgered or echoed', () => {
     const texts = await Promise.all(responses.map(response => response.text()))
 
     expect([...texts, ...(await controlReads(target))].join('\n')).not.toContain(token)
+  })
+})
+
+describe('the bearer is found through a bounded decoding closure (4 rounds)', () => {
+  // `token` is `synthetic-github-unit-token`: `%73` is its `s`, `%25` a percent sign, `\u0073` its
+  // `s` as a JSON escape.
+  const escaped = token.replace('s', '\\u0073')
+  const doubleEncoded = token.replace('s', '%2573')
+  const encodedJsonString = encodeURIComponent(`"${escaped}"`)
+  const jsonInEncodedJson = encodeURIComponent(JSON.stringify(`"${escaped}"`))
+
+  // Every form must be absent from what the emulator keeps or answers.
+  const forms = [token, 'ynthetic-github-unit-token', doubleEncoded, encodedJsonString]
+
+  it.each([
+    [
+      'double encoding in a recorded header',
+      'GET',
+      repo('/labels?per_page=2'),
+      {
+        apiVersion: doubleEncoded
+      },
+      'a recorded request header repeats'
+    ],
+    [
+      'an encoded JSON string with a \\u escape in a header',
+      'GET',
+      repo('/labels?per_page=2'),
+      {
+        apiVersion: encodedJsonString
+      },
+      'a recorded request header repeats'
+    ],
+    [
+      'a JSON string inside an encoded JSON string in a header',
+      'GET',
+      repo('/labels?per_page=2'),
+      {
+        apiVersion: jsonInEncodedJson
+      },
+      'a recorded request header repeats'
+    ],
+    [
+      'double encoding in a query value',
+      'GET',
+      repo(`/labels?per_page=2&q=${encodeURIComponent(doubleEncoded)}`),
+      {},
+      'the query repeats'
+    ],
+    [
+      'an encoded JSON string with a \\u escape in a query key',
+      'GET',
+      repo(`/labels?per_page=2&${encodeURIComponent(encodedJsonString)}=1`),
+      {},
+      'the query repeats'
+    ],
+    [
+      'a JSON string inside an encoded JSON string in a query value',
+      'GET',
+      repo(`/labels?per_page=2&q=${encodeURIComponent(jsonInEncodedJson)}`),
+      {},
+      'the query repeats'
+    ],
+    [
+      'double encoding in a body string',
+      'POST',
+      repo('/issues/1/comments'),
+      { body: { body: doubleEncoded } },
+      'the request body repeats'
+    ],
+    [
+      'a JSON string inside an encoded JSON string in a body string',
+      'POST',
+      repo('/issues/1/comments'),
+      { body: { body: jsonInEncodedJson } },
+      'the request body repeats'
+    ]
+  ] as const)('%s', async (_label, method, path, options, reason) => {
+    const target = await emulator()
+
+    const text = await expectRefusedWithoutFault(
+      target,
+      () => call(target, method, path, options),
+      reason
+    )
+
+    expectConstantEntry(target, method)
+
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    for (const form of forms) expect(seen.join('\n')).not.toContain(form)
   })
 })
 

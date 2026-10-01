@@ -35,21 +35,25 @@
  * Fail-closed mode (opt-in, `failClosed`; used by `/github`): every route parameter has a raw
  * pattern (matched in full), and a request is recognised only when its raw path is exactly an
  * emulated route shape under that route's method and any `Authorization` header is exactly
- * `Bearer <at least 8 non-space characters>`. Every other request is ledgered and answered with
- * constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no body, a
- * constant reason). A recognised request that repeats the bearer value in its raw path, any decoded
- * path segment, any query key or value, any recorded header, or its body (raw, percent-decoded, or
- * parsed as JSON with `\u` escapes undone and numbers such as `1.2345678e7` normalised: path
- * segments, query parts, and headers when they look like JSON, the body always) is refused and
- * ledgered with constant text only: a standard method, the path `/<unrecognised>`, its route
- * template, an empty query, no headers or body, and a constant reason
- * (`the query repeats the credential`, for example). Any other recognised request has the bearer
- * value scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons
- * included); its recorded query keeps every pair (a repeated key as a JSON array of its values, in
- * order), and recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are
- * recorded parsed with credential-named keys redacted at any depth, or as `<redacted>` when they do
- * not parse, whatever the header's declared format. Empty query components (a bare `?`, a stray
- * `&`) are refused. Routes check their own query and body keys with `exactQuery` and
+ * `Bearer <at least 8 non-space characters>`, at least one outside `[0-9.eE+-]`. Every other
+ * request is ledgered and answered with constant text only (`/<unrecognised>`, a standard method or
+ * `<other>`, an empty query, no body, a constant reason). A recognised bearer must hold at least
+ * one character outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub token form does:
+ * `ghp_…`, `github_pat_…`, `gho_…`), so no number's text can contain it; an `Authorization` header
+ * with any other value is unrecognisable. A recognised request that repeats the bearer value in its
+ * raw path, any path segment, the raw query or any query key or value, any recorded header, or its
+ * body is refused and ledgered with constant text only: a standard method, the path
+ * `/<unrecognised>`, its route template, an empty query, no headers or body, and a constant reason
+ * (`the query repeats the credential`, for example). Each part is checked through a bounded
+ * decoding closure: starting from the raw text, up to 4 rounds, each applying percent-decoding and,
+ * when a text parses as JSON, taking its string values and object keys (so `\u` escapes are
+ * undone), with every intermediate text checked. Any other recognised request has the bearer value
+ * scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons included); its
+ * recorded query is keyed by recorded key; a key recorded more than once lists its values in order
+ * (as a JSON array); and recorded headers and query keys and values that start like JSON (`{`, `[`,
+ * `"`) are recorded parsed with credential-named keys redacted at any depth, or as `<redacted>`
+ * when they do not parse, whatever the header's declared format. Empty query components (a bare
+ * `?`, a stray `&`) are refused. Routes check their own query and body keys with `exactQuery` and
  * `exactBodyKeys`, whose reasons never echo a request's own key. A template parameter written
  * `{name+}` spans one or more path segments (each decoded once, none may decode to a `/`). The
  * credential helpers live in `src/stateful-secrets.ts`.
@@ -76,8 +80,7 @@ import {
   type EmulatorRouteEvidence
 } from './route-evidence.ts'
 import {
-  decodedOrRaw,
-  repeatsSecret,
+  isRecognisableBearerValue,
   scrubSecrets,
   textRepeatsSecret,
   unrecognisedLedgerPath,
@@ -359,7 +362,7 @@ export const routeMatcher = <State, Env>(routes: ReadonlyArray<StatefulRoute<Sta
     route,
     pattern: templatePattern(route.path),
     names: templateNames(route.path),
-    // Built once per parameter.
+    // Compiled when the matcher is built, so no request compiles a RegExp.
     whole: new Map(
       Object.entries(route.params ?? {}).map(([name, raw]) => [name, wholePattern(raw)] as const)
     ),
@@ -624,10 +627,18 @@ const bearerPattern = /^bearer\s+\S+/i
 
 /**
  * Fail-closed mode: exactly `Bearer `, one space, and one token of at least 8 non-space characters
- * (no other scheme spelling, no extra words, so combined duplicate headers never match). The value
- * is guarded, never checked or stored.
+ * (no other scheme spelling, no extra words, so combined duplicate headers never match), at least
+ * one of them outside the JSON-number alphabet (`isRecognisableBearerValue`). The value is
+ * guarded, never checked or stored.
  */
 const recognisableBearerPattern = /^Bearer ([^\s]{8,})$/
+
+/** The fail-closed bearer of an `Authorization` header, or `undefined` when unrecognisable. */
+const recognisableBearer = (authorization: string | null): string | undefined => {
+  const bearer = recognisableBearerPattern.exec(authorization ?? '')?.[1]
+
+  return bearer !== undefined && isRecognisableBearerValue(bearer) ? bearer : undefined
+}
 
 /** The raw query of a request URL (after `?`, before `#`), or `undefined` when it has none. */
 const rawQuery = (requestUrl: string): string | undefined => {
@@ -666,10 +677,11 @@ const recordedJsonLooking = (text: string): string => {
 }
 
 /**
- * Fail-closed mode: the recorded query, built from every original pair (never one value per key):
- * credential-named keys have their values redacted, JSON-looking keys and values are recorded as
- * `recordedJsonLooking` does, and a key that occurs more than once maps to a JSON array of its
- * recorded values, in order.
+ * Fail-closed mode: the recorded query, built from every original pair (never one value per key)
+ * and keyed by recorded key: credential-named keys have their values redacted, keys and values are
+ * recorded as `recordedJsonLooking` does, and a key recorded more than once (two original keys may
+ * record alike, for example two unparseable JSON-looking keys as `<redacted>`) lists its values in
+ * order, as a JSON array.
  */
 const recordedQueryPairs = (
   query: URLSearchParams,
@@ -678,16 +690,18 @@ const recordedQueryPairs = (
   const values = new Map<string, Array<string>>()
 
   for (const [key, value] of query) {
-    const recorded = isCredentialQueryKey(key)
-      ? redactedCredentialValue
-      : recordedJsonLooking(value)
+    const recordedKey = scrub(recordedJsonLooking(key))
 
-    values.set(key, [...(values.get(key) ?? []), scrub(recorded)])
+    const recordedValue = scrub(
+      isCredentialQueryKey(key) ? redactedCredentialValue : recordedJsonLooking(value)
+    )
+
+    values.set(recordedKey, [...(values.get(recordedKey) ?? []), recordedValue])
   }
 
   return Object.fromEntries(
     [...values].map(([key, list]) => [
-      scrub(recordedJsonLooking(key)),
+      key,
       list.length === 1 ? (list[0] ?? '') : JSON.stringify(list)
     ])
   )
@@ -985,9 +999,9 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
   /**
    * Fail-closed mode: the constant reason when any part of a recognised request repeats a guarded
-   * secret, or `undefined`. Checked: the raw path and every decoded path segment, every query key
-   * and value, every recorded header, and the body; each raw, percent-decoded, and (path segments,
-   * query parts, and headers when they look like JSON; the body always) in its parsed JSON form.
+   * secret, or `undefined`. Checked, each through the bounded decoding closure of
+   * `textRepeatsSecret`: the raw path and every path segment, the raw query and every decoded query
+   * key and value, every recorded header, and the body.
    */
   const credentialRepeat = (
     request: Request,
@@ -996,14 +1010,14 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     secrets: ReadonlyArray<string>
   ): string | undefined => {
     if (
-      repeatsSecret(url.pathname, secrets) ||
-      url.pathname.split('/').some(segment => textRepeatsSecret(decodedOrRaw(segment), secrets))
+      textRepeatsSecret(url.pathname, secrets) ||
+      url.pathname.split('/').some(segment => textRepeatsSecret(segment, secrets))
     ) {
       return 'the request path repeats the credential'
     }
 
     if (
-      repeatsSecret(url.search, secrets) ||
+      textRepeatsSecret(url.search, secrets) ||
       [...url.searchParams].some(
         ([key, value]) => textRepeatsSecret(key, secrets) || textRepeatsSecret(value, secrets)
       )
@@ -1019,7 +1033,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       return 'a recorded request header repeats the credential'
     }
 
-    return body !== undefined && textRepeatsSecret(body, secrets, 'any')
+    return body !== undefined && textRepeatsSecret(body, secrets)
       ? 'the request body repeats the credential'
       : undefined
   }
@@ -1180,7 +1194,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
     if (failClosed !== undefined) {
       const authorization = request.headers.get('authorization')
-      const bearer = recognisableBearerPattern.exec(authorization ?? '')?.[1]
+      const bearer = recognisableBearer(authorization)
 
       // Its credential cannot be extracted and scrubbed: nothing of the request is kept.
       if (authorization !== null && bearer === undefined) {

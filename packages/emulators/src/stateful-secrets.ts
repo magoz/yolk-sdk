@@ -6,8 +6,11 @@
  * A guarded secret (a request-carried credential value the wrapper extracted from a recognised
  * request shape) must never reach the ledger, a response, or `/_emulate/*`: `scrubSecrets` removes
  * it from everything recorded or answered, and the `*RepeatsSecret` checks find it in request text
- * raw, percent-decoded, or in any parsed JSON form (keys, string values with `\u` escapes undone,
- * and numbers as JavaScript prints them), so a request repeating it can be refused.
+ * so a request repeating it can be refused. `repeatsSecret` and `jsonRepeatsSecret` (raw, once
+ * percent-decoded, parsed JSON keys, strings, and numbers as JavaScript prints them) serve
+ * `src/stateful-fixture.ts`; the fail-closed mode of `src/stateful-emulator.ts` uses
+ * `textRepeatsSecret`, a bounded decoding closure, and recognises only bearers outside the
+ * JSON-number alphabet (`isRecognisableBearerValue`).
  *
  * @experimental
  */
@@ -58,7 +61,8 @@ const isJsonRecord = (value: Schema.Json): value is Schema.JsonObject =>
 
 /**
  * True when any object key, string value, or number of `value` (raw or percent-decoded) holds a
- * secret. Numbers are checked as JavaScript prints them (`1.2345678e7` parses to `12345678`).
+ * secret. Numbers are checked as JavaScript prints them (`1.2345678e7` parses to `12345678`). Used
+ * by `src/stateful-fixture.ts` (Todoist, Telegram), unchanged.
  */
 export const jsonRepeatsSecret = (value: Schema.Json, secrets: ReadonlyArray<string>): boolean => {
   if (Predicate.isString(value)) return repeatsSecret(value, secrets)
@@ -85,47 +89,80 @@ export const parseJsonText = (text: string): Schema.Json | undefined => {
   return Result.isSuccess(result) ? result.success : undefined
 }
 
-const jsonNumberPattern = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/
-
 /**
- * True when `text` looks like JSON that parses to something other than itself: an object, an
- * array, a string (`"..."`), or a number (`1.2345678e7`). Such text is checked in its parsed form
- * too.
+ * The JSON-number alphabet. A fail-closed bearer must hold at least one character outside it
+ * (`isRecognisableBearerValue`), so no number's text can ever contain or equal it: numeric forms
+ * (`1.2345678e7`, any precision) need no normalisation.
  */
-const looksLikeJson = (text: string): boolean => {
-  const trimmed = text.trim()
+const jsonNumberAlphabet = /^[0-9.eE+-]+$/
 
-  return (
-    trimmed.startsWith('{') ||
-    trimmed.startsWith('[') ||
-    trimmed.startsWith('"') ||
-    jsonNumberPattern.test(trimmed)
-  )
+/** True when a bearer value holds a character outside the JSON-number alphabet `[0-9.eE+-]`. */
+export const isRecognisableBearerValue = (value: string): boolean => !jsonNumberAlphabet.test(value)
+
+/** How many rounds of decoding `textRepeatsSecret` applies (after checking the raw text). */
+export const secretClosureRounds = 4
+
+/** The string values and object keys of a parsed JSON value, at any depth. */
+const jsonStrings = (value: Schema.Json): ReadonlyArray<string> => {
+  if (Predicate.isString(value)) return [value]
+
+  if (Array.isArray(value)) return value.flatMap(jsonStrings)
+
+  if (isJsonRecord(value)) {
+    return Object.entries(value).flatMap(([key, item]) => [key, ...jsonStrings(item)])
+  }
+
+  return []
+}
+
+/** One decoding round of a text: its percent-decodings, and its JSON strings when it parses. */
+const decodings = (text: string): ReadonlyArray<string> => {
+  const parsed = text.trim() === '' ? undefined : parseJsonText(text)
+
+  return [
+    decodedOrRaw(text),
+    decodedOrRaw(text.replaceAll('+', ' ')),
+    ...(parsed === undefined ? [] : jsonStrings(parsed))
+  ]
 }
 
 /**
- * True when `text` repeats a secret raw, percent-decoded, or, when it parses as JSON, in any key,
- * string value, or number of the parsed value or in the value as it would be recorded (so `\u`
- * escapes and normalised numbers such as `1.2345678e7` are caught). `parse` is `'json-looking'`
- * (only text that looks like JSON, for query parts, headers, and path segments) or `'any'` (any
- * text, for a body). The one place this escape and number logic lives.
+ * True when `text` repeats a secret anywhere in its bounded decoding closure: starting from the raw
+ * text, up to `secretClosureRounds` rounds, each applying percent-decoding and, when a text parses
+ * as JSON, taking its string values and object keys (so `\u` escapes are undone); every
+ * intermediate text is checked. A breadth-first walk with deduplication. Numbers need no handling:
+ * a recognisable bearer never fits the JSON-number alphabet.
  */
-export const textRepeatsSecret = (
-  text: string,
-  secrets: ReadonlyArray<string>,
-  parse: 'json-looking' | 'any' = 'json-looking'
-): boolean => {
-  if (meaningful(secrets).length === 0) return false
+export const textRepeatsSecret = (text: string, secrets: ReadonlyArray<string>): boolean => {
+  const guarded = meaningful(secrets)
 
-  if (repeatsSecret(text, secrets)) return true
+  if (guarded.length === 0) return false
 
-  const parsed =
-    text !== '' && (parse === 'any' || looksLikeJson(text)) ? parseJsonText(text) : undefined
+  const seen = new Set([text])
+  let frontier: ReadonlyArray<string> = [text]
 
-  return (
-    parsed !== undefined &&
-    (jsonRepeatsSecret(parsed, secrets) || repeatsSecret(JSON.stringify(parsed), secrets))
-  )
+  for (let round = 0; frontier.length > 0; round += 1) {
+    if (frontier.some(candidate => guarded.some(secret => candidate.includes(secret)))) {
+      return true
+    }
+
+    if (round === secretClosureRounds) return false
+
+    const next: Array<string> = []
+
+    for (const candidate of frontier) {
+      for (const decoded of decodings(candidate)) {
+        if (!seen.has(decoded)) {
+          seen.add(decoded)
+          next.push(decoded)
+        }
+      }
+    }
+
+    frontier = next
+  }
+
+  return false
 }
 
 /**

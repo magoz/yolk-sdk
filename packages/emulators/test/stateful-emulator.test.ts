@@ -22,6 +22,11 @@ import {
   type StatefulEmulatorConfig,
   type StatefulRoute
 } from '../src/stateful-emulator.ts'
+import {
+  isRecognisableBearerValue,
+  secretClosureRounds,
+  textRepeatsSecret
+} from '../src/stateful-secrets.ts'
 
 type State = { writes: number }
 
@@ -355,6 +360,74 @@ describe('fail-closed mode: plan-time reasons and recorded headers', () => {
     // Without fail-closed mode a header declared plain is recorded as sent (the earlier
     // behaviour, which Dropbox and Notion keep).
     expect(legacy.ledger.entries()[0]?.headers).toEqual({ 'x-note': value })
+  })
+})
+
+describe('fail-closed credential guard', () => {
+  const secret = 'synthetic-wrapper-secret'
+
+  // Needs `rounds` percent-decodings to show the secret: its `s` as `%73`, then `%2573`, ...
+  const encoded = (rounds: number): string => {
+    if (rounds === 0) return secret
+
+    let escape = '%73'
+
+    for (let round = 1; round < rounds; round += 1) escape = escape.replace('%', '%25')
+
+    return secret.replace('s', escape)
+  }
+
+  it('textRepeatsSecret walks a bounded closure: 4 rounds of decoding, every text checked', () => {
+    expect(secretClosureRounds).toBe(4)
+
+    for (const rounds of [0, 1, 2, 3, 4]) {
+      expect(textRepeatsSecret(encoded(rounds), [secret]), String(rounds)).toBe(true)
+    }
+
+    // A fifth round lies beyond the bound.
+    expect(textRepeatsSecret(encoded(5), [secret])).toBe(false)
+
+    // Percent-decoding and JSON compose: an encoded JSON string, a JSON string in a JSON string,
+    // object keys, and `\u` escapes.
+    const escaped = `"${secret.replace('s', '\\u0073')}"`
+
+    for (const text of [
+      encodeURIComponent(escaped),
+      JSON.stringify(escaped),
+      encodeURIComponent(JSON.stringify(escaped)),
+      `{"k":{${escaped}:1}}`,
+      `[1,${JSON.stringify(encodeURIComponent(secret))}]`
+    ]) {
+      expect(textRepeatsSecret(text, [secret]), text).toBe(true)
+    }
+
+    expect(textRepeatsSecret('{"k":"synthetic-wrapper"}', [secret])).toBe(false)
+    expect(textRepeatsSecret('anything', [])).toBe(false)
+  })
+
+  it('recognises only a bearer with a character outside the JSON-number alphabet', async () => {
+    const api = await build([echo], true)
+
+    for (const value of ['12345678', '1.2345678e7', '-1.5E+10000', '12345678901234567890']) {
+      const response = await api.fetch(get('/files/a', { authorization: `Bearer ${value}` }))
+
+      expect(response.status, value).toBe(400)
+      expect(await response.text()).not.toContain(value)
+    }
+
+    expect(api.ledger.entries().map(entry => [entry.path, entry.notEmulated])).toEqual(
+      Array.from({ length: 4 }, () => [
+        '/<unrecognised>',
+        'synthetic: unrecognisable authorization'
+      ])
+    )
+    expect(isRecognisableBearerValue('ghp_1234567890')).toBe(true)
+    expect(isRecognisableBearerValue('github_pat_11AAAA')).toBe(true)
+    expect(isRecognisableBearerValue('gho_0000000000')).toBe(true)
+
+    const answered = await api.fetch(get('/files/a', { authorization: 'Bearer 1234567x' }))
+
+    expect(answered.status).toBe(200)
   })
 })
 
