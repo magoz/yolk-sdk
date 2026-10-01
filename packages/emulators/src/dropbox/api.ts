@@ -3,12 +3,13 @@
  * the fixture error envelopes, metadata rendering, and list and search cursors (internal;
  * re-exported by `src/dropbox.ts`).
  *
- * Only the RPC and upload routes the eight Dropbox conformance cases (and their cleanup and
- * leftover lookup) send are emulated, with the wire shapes of their synthetic fixtures. Every
- * route is a `POST` under `/2`: the RPC routes on `api.dropboxapi.com` with a JSON body, the
+ * Only the RPC and upload routes the eight Dropbox conformance cases (and their cleanup) send are
+ * emulated, with the wire shapes of their synthetic fixtures. Every route is a `POST` under `/2`: the RPC routes on `api.dropboxapi.com` with a JSON body, the
  * upload on `content.dropboxapi.com` with an `application/octet-stream` body and a
- * `Dropbox-API-Arg` header. Route errors are the fixtures' HTTP 409 `error_summary` envelopes,
- * copied byte for byte. Anything no fixture shows is not emulated (400, nothing written).
+ * `Dropbox-API-Arg` header, each only on the origin its fixtures record. Route errors are the
+ * fixtures' HTTP 409 `error_summary` envelopes, copied byte for byte. Every route plans first
+ * (reading the state, writing nothing) and commits only an eligible request: anything no fixture
+ * shows is not emulated (400, nothing written, no fault used up).
  *
  * @experimental
  */
@@ -18,10 +19,12 @@ import {
   exactObject,
   integerIn,
   isNotEmulated,
+  jsonResponse,
   mediaType,
   notEmulated,
   parseJsonText,
   statefulRoute,
+  type Commit,
   type EmulatedRequest,
   type NotEmulated,
   type StatefulRoute
@@ -70,7 +73,7 @@ export type DropboxEmulatorDrills = {
   readonly notFoundAsPathLookup?: boolean
   /** A folder create conflict answers `path/conflict/file` instead of `path/conflict/folder`. */
   readonly folderConflictAsFile?: boolean
-  /** `delete_v2` keeps no deleted-entry record, so `include_deleted` finds nothing. */
+  /** `delete_v2` keeps no deleted-entry record, so `include_deleted` is not emulated. */
   readonly deleteLeavesNoTombstone?: boolean
   /** `move_v2` gives the moved file a new id. */
   readonly moveMintsNewId?: boolean
@@ -92,9 +95,9 @@ export const dropboxEmulatorDrillKnobs: ReadonlyArray<keyof DropboxEmulatorDrill
 /** A `list_folder` cursor (runtime data, not state). */
 export type DropboxListCursor = {
   readonly kind: 'list'
-  readonly folderId: string | null
-  /** The folder's child ids when the listing started; a changed folder is not emulated. */
-  readonly childIds: ReadonlyArray<string>
+  readonly folderId: string
+  /** The whole listing as rendered when the cursor was issued; any change is not emulated. */
+  readonly fingerprint: string
   readonly offset: number
   readonly limit: number
 }
@@ -102,8 +105,9 @@ export type DropboxListCursor = {
 /** A `search_v2` cursor (runtime data, not state). */
 export type DropboxSearchCursor = {
   readonly kind: 'search'
-  /** The matching entry ids when the search ran. */
-  readonly matchIds: ReadonlyArray<string>
+  readonly query: string
+  /** Every match as rendered when the cursor was issued; any change is not emulated. */
+  readonly fingerprint: string
   readonly offset: number
   readonly maxResults: number
 }
@@ -114,12 +118,19 @@ export type DropboxApiEnv = {
   /** Clock in epoch milliseconds (upload timestamps only). */
   readonly now: () => number
   readonly drills: Readonly<Record<keyof DropboxEmulatorDrills, boolean>>
-  /** Cursors by value (runtime-only; cleared by reset and seed). */
+  /** Issued cursors by value (runtime-only; cleared by reset and seed). */
   readonly cursors: Map<string, DropboxCursor>
+  /** Cursor numbers; never reset, so a cursor issued before a reset is never issued again. */
   readonly cursorCounters: { list: number; search: number }
 }
 
 type Route = StatefulRoute<DropboxEmulatorState, DropboxApiEnv>
+
+/** Origin of the RPC routes. */
+export const dropboxEmulatorApiOrigin = 'https://api.dropboxapi.com'
+
+/** Origin of the upload route. */
+export const dropboxEmulatorContentOrigin = 'https://content.dropboxapi.com'
 
 const pagingCase = 'dropbox.files.list-folder-cursor-paging'
 
@@ -137,13 +148,19 @@ const copyCase = 'dropbox.files.copy-move-metadata'
 
 const uploadCase = 'dropbox.files.upload-rev-precondition'
 
-const evidence = (path: string, write: boolean, caseIds: ReadonlyArray<string>) => ({
+const evidence = (
+  path: string,
+  write: boolean,
+  caseIds: ReadonlyArray<string>,
+  origin: string = dropboxEmulatorApiOrigin
+) => ({
   method: 'POST',
   path: `${dropboxEmulatorBasePath}${path}`,
   kind: 'connector' as const,
   write,
   caseIds,
-  evidence: 'unverified' as const
+  evidence: 'unverified' as const,
+  origin
 })
 
 // Responses.
@@ -151,7 +168,7 @@ const evidence = (path: string, write: boolean, caseIds: ReadonlyArray<string>) 
 const json = (status: number, text: string): Response =>
   new Response(text, { status, headers: { 'content-type': 'application/json' } })
 
-const ok = (body: Schema.Json): Response => json(200, JSON.stringify(body))
+const ok = (body: Schema.Json): Response => jsonResponse(200, body)
 
 const notFound = (env: DropboxApiEnv): Response =>
   json(
@@ -212,7 +229,10 @@ const lookup = (
   return current
 }
 
-/** The folder a new entry at `components` goes in: `null` for the root, or not emulated. */
+/**
+ * The folder holding `components`: `null` for the root, the folder, or not emulated when it is
+ * missing or a file (every fixture names a path whose parent folder exists).
+ */
 const parentFolder = (
   state: DropboxEmulatorState,
   components: ReadonlyArray<string>,
@@ -224,7 +244,7 @@ const parentFolder = (
 
   return parent !== undefined && parent.file === null
     ? parent
-    : notEmulated(`${label} into a missing parent folder is not emulated`)
+    : notEmulated(`${label} under a missing parent folder (or a file) is not emulated`)
 }
 
 /** Stored names from the root down to the entry. */
@@ -285,16 +305,41 @@ const folderMetadata = (
   return tagged ? { '.tag': 'folder', ...body } : body
 }
 
-/** Metadata at the stored display path. */
+const impliedRefusal = (): NotEmulated =>
+  notEmulated(
+    'an answer showing a folder no fixture shows (an implied seed folder) is not emulated'
+  )
+
+/** Metadata at the stored display path, or not emulated for an implied entry. */
 const metadataOf = (
   state: DropboxEmulatorState,
   entry: DropboxEmulatorEntry
-): Schema.JsonObject => {
+): Schema.JsonObject | NotEmulated => {
+  if (entry.implied) return impliedRefusal()
+
   const display = pathOf(storedNames(state, entry))
 
   return entry.file === null
     ? folderMetadata(entry, display, true)
     : fileMetadata(entry, entry.file, display)
+}
+
+/** Metadata of every entry, or not emulated when any is implied. */
+const metadataOfAll = (
+  state: DropboxEmulatorState,
+  entries: ReadonlyArray<DropboxEmulatorEntry>
+): ReadonlyArray<Schema.JsonObject> | NotEmulated => {
+  const rendered: Array<Schema.JsonObject> = []
+
+  for (const entry of entries) {
+    const metadata = metadataOf(state, entry)
+
+    if (isNotEmulated(metadata)) return metadata
+
+    rendered.push(metadata)
+  }
+
+  return rendered
 }
 
 const deletedMetadata = (deleted: DropboxEmulatorDeleted): Schema.JsonObject => ({
@@ -304,7 +349,7 @@ const deletedMetadata = (deleted: DropboxEmulatorDeleted): Schema.JsonObject => 
   path_display: deleted.pathDisplay
 })
 
-// Counters and timestamps.
+// Counters and timestamps (minted values).
 
 const pad = (value: number, width: number): string => String(value).padStart(width, '0')
 
@@ -328,7 +373,8 @@ const nextRev = (state: DropboxEmulatorState): string => {
 const nowTimestamp = (env: DropboxApiEnv): string =>
   new Date(Math.floor(env.now() / 1000) * 1000).toISOString().replace('.000Z', 'Z')
 
-const nextCursor = (env: DropboxApiEnv, cursor: DropboxCursor): string => {
+/** Issue a cursor (in a commit): a value never issued before, registered until reset or seed. */
+const issueCursor = (env: DropboxApiEnv, cursor: DropboxCursor): string => {
   const number = env.cursorCounters[cursor.kind]
 
   env.cursorCounters[cursor.kind] = number + 1
@@ -368,6 +414,12 @@ const cursorValue = (request: EmulatedRequest, route: string): string | NotEmula
     : notEmulated('cursor must be a non-empty string')
 }
 
+/** A read-only commit. */
+const answer =
+  (response: () => Response): Commit =>
+  () =>
+    response()
+
 // Routes.
 
 type GetMetadataInput = { readonly path: DropboxPath; readonly includeDeleted: boolean }
@@ -399,12 +451,18 @@ const getMetadata: Route = statefulRoute(
     const entry = lookup(state, input.path.components, env.drills.getMetadataCaseSensitive)
 
     if (entry === undefined) {
+      const parent = parentFolder(state, input.path.components, 'get_metadata of a path')
+
+      if (isNotEmulated(parent)) return parent
+
+      if (!input.includeDeleted) return answer(() => notFound(env))
+
       const lower = pathOf(input.path.components).toLowerCase()
       const deleted = state.deleted.find(candidate => candidate.pathLower === lower)
 
-      return input.includeDeleted && deleted !== undefined
-        ? ok(deletedMetadata(deleted))
-        : notFound(env)
+      return deleted === undefined
+        ? notEmulated('include_deleted for a path without a recorded delete is not emulated')
+        : answer(() => ok(deletedMetadata(deleted)))
     }
 
     if (input.includeDeleted) {
@@ -415,40 +473,48 @@ const getMetadata: Route = statefulRoute(
       return notEmulated('get_metadata of a folder is not emulated (no fixture records it)')
     }
 
+    if (entry.implied) return impliedRefusal()
+
     // Only the last component keeps the stored casing; the rest echo the request.
     const display = pathOf([...input.path.components.slice(0, -1), entry.name])
+    const file = entry.file
 
-    return ok(fileMetadata(entry, entry.file, display))
+    return answer(() => ok(fileMetadata(entry, file, display)))
   }
 )
 
 type ListInput = { readonly path: DropboxPath; readonly limit: number }
 
-const listPage = (
+/** The whole listing of a folder, rendered, or not emulated (an implied child). */
+const listingOf = (
   state: DropboxEmulatorState,
-  env: DropboxApiEnv,
-  folderId: string | null,
-  children: ReadonlyArray<DropboxEmulatorEntry>,
-  offset: number,
-  limit: number
-): Response => {
-  const page = children.slice(offset, offset + limit)
-  const end = offset + page.length
+  folderId: string
+): ReadonlyArray<Schema.JsonObject> | NotEmulated =>
+  metadataOfAll(state, childrenOf(state, folderId))
 
-  const cursor = nextCursor(env, {
-    kind: 'list',
-    folderId,
-    childIds: children.map(child => child.id),
-    offset: end,
-    limit
-  })
+/** A commit answering one listing page and issuing its cursor. */
+const listPage =
+  (
+    env: DropboxApiEnv,
+    folderId: string,
+    listing: ReadonlyArray<Schema.JsonObject>,
+    offset: number,
+    limit: number
+  ): Commit =>
+  () => {
+    const page = listing.slice(offset, offset + limit)
+    const end = offset + page.length
 
-  return ok({
-    entries: page.map(entry => metadataOf(state, entry)),
-    cursor,
-    has_more: end < children.length
-  })
-}
+    const cursor = issueCursor(env, {
+      kind: 'list',
+      folderId,
+      fingerprint: JSON.stringify(listing),
+      offset: end,
+      limit
+    })
+
+    return ok({ entries: [...page], cursor, has_more: end < listing.length })
+  }
 
 const listFolder: Route = statefulRoute(
   evidence('/files/list_folder', false, [pagingCase]),
@@ -473,15 +539,21 @@ const listFolder: Route = statefulRoute(
       return notEmulated('list_folder of a missing path or a file is not emulated')
     }
 
-    const children = childrenOf(state, folder.id)
-    const limit = env.drills.listFolderSinglePage ? Math.max(children.length, 1) : input.limit
+    const listing = listingOf(state, folder.id)
 
-    return listPage(state, env, folder.id, children, 0, limit)
+    if (isNotEmulated(listing)) return listing
+
+    // Every recorded listing has entries; an empty one (for example the leftover lookup's empty
+    // work folder) is no fixture's answer.
+    if (listing.length === 0) {
+      return notEmulated('a listing of an empty folder is not emulated (no fixture records one)')
+    }
+
+    const limit = env.drills.listFolderSinglePage ? Math.max(listing.length, 1) : input.limit
+
+    return listPage(env, folder.id, listing, 0, limit)
   }
 )
-
-const sameIds = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
-  left.length === right.length && left.every((id, index) => right[index] === id)
 
 const listFolderContinue: Route = statefulRoute(
   evidence('/files/list_folder/continue', false, [pagingCase]),
@@ -491,76 +563,86 @@ const listFolderContinue: Route = statefulRoute(
     const cursor = env.cursors.get(value)
 
     if (cursor === undefined || cursor.kind !== 'list') {
-      return notEmulated('an unknown list_folder cursor is not emulated')
+      return notEmulated(
+        'a list cursor this emulator did not issue since the last reset is not emulated'
+      )
     }
 
-    const folder =
-      cursor.folderId === null
-        ? undefined
-        : state.entries.find(entry => entry.id === cursor.folderId)
-
-    const children = folder === undefined ? [] : childrenOf(state, folder.id)
+    const folder = state.entries.find(entry => entry.id === cursor.folderId)
+    const listing = folder === undefined ? undefined : listingOf(state, folder.id)
 
     if (
       folder === undefined ||
-      !sameIds(
-        children.map(child => child.id),
-        cursor.childIds
-      )
+      listing === undefined ||
+      isNotEmulated(listing) ||
+      JSON.stringify(listing) !== cursor.fingerprint
     ) {
-      return notEmulated('changes since the listing (list_folder/continue deltas) are not emulated')
+      return notEmulated(
+        'continuing a listing whose folder changed since its cursor is not emulated'
+      )
     }
 
-    if (cursor.offset >= children.length) {
+    if (cursor.offset >= listing.length) {
       return notEmulated('continuing a finished listing (changes since it) is not emulated')
     }
 
-    return listPage(state, env, folder.id, children, cursor.offset, cursor.limit)
+    return listPage(env, folder.id, listing, cursor.offset, cursor.limit)
   }
 )
 
 type SearchInput = { readonly query: string; readonly maxResults: number }
 
-const searchMatch = (
+/** Every match of `query`, rendered as the fixture's match objects, or not emulated. */
+const searchMatches = (
   state: DropboxEmulatorState,
-  entry: DropboxEmulatorEntry
-): Schema.JsonObject => ({
-  match_type: { '.tag': 'filename' },
-  metadata: { '.tag': 'metadata', metadata: metadataOf(state, entry) }
-})
+  query: string
+): ReadonlyArray<Schema.JsonObject> | NotEmulated => {
+  const lower = query.toLowerCase()
+  const matches = state.entries.filter(entry => entry.name.toLowerCase().includes(lower))
 
-const searchPage = (
-  state: DropboxEmulatorState,
-  env: DropboxApiEnv,
-  matches: ReadonlyArray<DropboxEmulatorEntry>,
-  start: number,
-  offset: number,
-  maxResults: number
-): Response => {
-  const end = Math.min(offset + maxResults, matches.length)
-  const page = matches.slice(start, end)
-  const hasMore = end < matches.length
+  if (matches.length === 0) return notEmulated('a search without matches is not emulated')
 
-  const body: Schema.JsonObject = {
-    matches: page.map(entry => searchMatch(state, entry)),
-    has_more: hasMore
+  if (matches.some(entry => entry.file === null)) {
+    return notEmulated('a search matching a folder is not emulated (the fixture matches files)')
   }
 
-  // The fixtures' last page carries no cursor.
-  return ok(
-    hasMore
-      ? {
-          ...body,
-          cursor: nextCursor(env, {
-            kind: 'search',
-            matchIds: matches.map(entry => entry.id),
-            offset: end,
-            maxResults
-          })
-        }
-      : body
-  )
+  const rendered = metadataOfAll(state, matches)
+
+  return isNotEmulated(rendered)
+    ? rendered
+    : rendered.map(metadata => ({
+        match_type: { '.tag': 'filename' },
+        metadata: { '.tag': 'metadata', metadata }
+      }))
 }
+
+/** A commit answering one search page (the fixtures' last page carries no cursor). */
+const searchPage =
+  (
+    env: DropboxApiEnv,
+    query: string,
+    matches: ReadonlyArray<Schema.JsonObject>,
+    start: number,
+    offset: number,
+    maxResults: number
+  ): Commit =>
+  () => {
+    const end = Math.min(offset + maxResults, matches.length)
+    const hasMore = end < matches.length
+    const body = { matches: matches.slice(start, end), has_more: hasMore }
+
+    if (!hasMore) return ok(body)
+
+    const cursor = issueCursor(env, {
+      kind: 'search',
+      query,
+      fingerprint: JSON.stringify(matches),
+      offset: end,
+      maxResults
+    })
+
+    return ok({ ...body, cursor })
+  }
 
 const search: Route = statefulRoute(
   evidence('/files/search_v2', false, [searchCase]),
@@ -587,10 +669,11 @@ const search: Route = statefulRoute(
     return isNotEmulated(maxResults) ? maxResults : { query: body.query, maxResults }
   },
   (state, input, { env }) => {
-    const query = input.query.toLowerCase()
-    const matches = state.entries.filter(entry => entry.name.toLowerCase().includes(query))
+    const matches = searchMatches(state, input.query)
 
-    return searchPage(state, env, matches, 0, 0, input.maxResults)
+    return isNotEmulated(matches)
+      ? matches
+      : searchPage(env, input.query, matches, 0, 0, input.maxResults)
   }
 )
 
@@ -602,18 +685,22 @@ const searchContinue: Route = statefulRoute(
     const cursor = env.cursors.get(value)
 
     if (cursor === undefined || cursor.kind !== 'search') {
-      return notEmulated('an unknown search cursor is not emulated')
+      return notEmulated(
+        'a search cursor this emulator did not issue since the last reset is not emulated'
+      )
     }
 
-    const matches = cursor.matchIds.flatMap(id => state.entries.filter(entry => entry.id === id))
+    const matches = searchMatches(state, cursor.query)
 
-    if (matches.length !== cursor.matchIds.length) {
-      return notEmulated('changes since the search are not emulated')
+    if (isNotEmulated(matches) || JSON.stringify(matches) !== cursor.fingerprint) {
+      return notEmulated(
+        'continuing a search whose matches changed since its cursor is not emulated'
+      )
     }
 
     const start = env.drills.searchRepeatsMatches ? 0 : cursor.offset
 
-    return searchPage(state, env, matches, start, cursor.offset, cursor.maxResults)
+    return searchPage(env, cursor.query, matches, start, cursor.offset, cursor.maxResults)
   }
 )
 
@@ -635,26 +722,33 @@ const createFolder: Route = statefulRoute(
     const existing = lookup(state, path.components)
 
     if (existing !== undefined) {
-      return existing.file === null
-        ? json(
-            409,
-            env.drills.folderConflictAsFile
-              ? drillErrorBodies.folderConflictAsFile
-              : dropboxEmulatorErrorBodies.folderConflict
-          )
-        : notEmulated('create_folder_v2 over a file is not emulated')
+      if (existing.file !== null) {
+        return notEmulated('create_folder_v2 over a file is not emulated')
+      }
+
+      return answer(() =>
+        json(
+          409,
+          env.drills.folderConflictAsFile
+            ? drillErrorBodies.folderConflictAsFile
+            : dropboxEmulatorErrorBodies.folderConflict
+        )
+      )
     }
 
-    const created: DropboxEmulatorEntry = {
-      id: nextId(state),
-      parentId: parent?.id ?? null,
-      name: path.components.at(-1) ?? '',
-      file: null
+    return () => {
+      const created: DropboxEmulatorEntry = {
+        id: nextId(state),
+        parentId: parent?.id ?? null,
+        name: path.components.at(-1) ?? '',
+        file: null,
+        implied: false
+      }
+
+      state.entries = [...state.entries, created]
+
+      return ok({ metadata: folderMetadata(created, pathOf(storedNames(state, created)), false) })
     }
-
-    state.entries = [...state.entries, created]
-
-    return ok({ metadata: folderMetadata(created, pathOf(storedNames(state, created)), false) })
   }
 )
 
@@ -697,25 +791,32 @@ const deleteEntry: Route = statefulRoute(
       return notEmulated('delete_v2 of a file is not emulated (the fixtures delete folders)')
     }
 
-    const metadata = metadataOf(state, entry)
     const removed = subtreeOf(state, entry)
-    const removedIds = new Set(removed.map(candidate => candidate.id))
 
-    if (!env.drills.deleteLeavesNoTombstone) {
-      const records = removed.map(candidate => {
-        const display = pathOf(storedNames(state, candidate))
+    if (removed.some(candidate => candidate.implied)) return impliedRefusal()
 
-        return { name: candidate.name, pathLower: display.toLowerCase(), pathDisplay: display }
-      })
+    const metadata = metadataOf(state, entry)
 
-      const lowers = new Set(records.map(record => record.pathLower))
+    if (isNotEmulated(metadata)) return metadata
 
-      state.deleted = [...state.deleted.filter(record => !lowers.has(record.pathLower)), ...records]
+    return () => {
+      const removedIds = new Set(removed.map(candidate => candidate.id))
+
+      // Only an empty folder's delete has a recorded `include_deleted` answer.
+      if (removed.length === 1 && !env.drills.deleteLeavesNoTombstone) {
+        const display = pathOf(storedNames(state, entry))
+        const lower = display.toLowerCase()
+
+        state.deleted = [
+          ...state.deleted.filter(record => record.pathLower !== lower),
+          { name: entry.name, pathLower: lower, pathDisplay: display }
+        ]
+      }
+
+      state.entries = state.entries.filter(candidate => !removedIds.has(candidate.id))
+
+      return ok({ metadata })
     }
-
-    state.entries = state.entries.filter(candidate => !removedIds.has(candidate.id))
-
-    return ok({ metadata })
   }
 )
 
@@ -742,17 +843,21 @@ const relocationInput = (
   return isNotEmulated(to) ? to : { from, to }
 }
 
+type Relocation = {
+  readonly source: DropboxEmulatorEntry
+  readonly file: DropboxEmulatorFile
+  readonly parent: DropboxEmulatorEntry | null
+}
+
 /** The source file and destination folder of a copy or move, or not emulated. */
 const relocation = (
   state: DropboxEmulatorState,
   input: RelocationInput,
   route: string
-):
-  | { readonly source: DropboxEmulatorEntry; readonly parent: DropboxEmulatorEntry | null }
-  | NotEmulated => {
+): Relocation | NotEmulated => {
   const source = lookup(state, input.from.components)
 
-  if (source === undefined || source.file === null) {
+  if (source === undefined || source.file === null || source.implied) {
     return notEmulated(`${route} of a missing entry or a folder is not emulated (files only)`)
   }
 
@@ -761,7 +866,7 @@ const relocation = (
   if (isNotEmulated(parent)) return parent
 
   return lookup(state, input.to.components) === undefined
-    ? { source, parent }
+    ? { source, file: source.file, parent }
     : notEmulated(`${route} onto an existing entry is not emulated`)
 }
 
@@ -774,21 +879,22 @@ const copy: Route = statefulRoute(
 
     if (isNotEmulated(found)) return found
 
-    const { source, parent } = found
-
-    if (source.file === null) return notEmulated('copy_v2 of a folder is not emulated')
-
     // The copy keeps the source's size, content hash, and timestamps, as the fixture records.
-    const created: DropboxEmulatorEntry = {
-      id: nextId(state),
-      parentId: parent?.id ?? null,
-      name: input.to.components.at(-1) ?? '',
-      file: { ...source.file, rev: nextRev(state) }
+    return () => {
+      const file = { ...found.file, rev: nextRev(state) }
+
+      const created: DropboxEmulatorEntry = {
+        id: nextId(state),
+        parentId: found.parent?.id ?? null,
+        name: input.to.components.at(-1) ?? '',
+        file,
+        implied: false
+      }
+
+      state.entries = [...state.entries, created]
+
+      return ok({ metadata: fileMetadata(created, file, pathOf(storedNames(state, created))) })
     }
-
-    state.entries = [...state.entries, created]
-
-    return ok({ metadata: metadataOf(state, created) })
   }
 )
 
@@ -801,21 +907,22 @@ const move: Route = statefulRoute(
 
     if (isNotEmulated(found)) return found
 
-    const { source, parent } = found
-
-    if (source.file === null) return notEmulated('move_v2 of a folder is not emulated')
-
     // The moved file keeps its id and timestamps and gets a new rev, as the fixture records.
-    const moved: DropboxEmulatorEntry = {
-      id: env.drills.moveMintsNewId ? nextId(state) : source.id,
-      parentId: parent?.id ?? null,
-      name: input.to.components.at(-1) ?? '',
-      file: { ...source.file, rev: nextRev(state) }
+    return () => {
+      const file = { ...found.file, rev: nextRev(state) }
+
+      const moved: DropboxEmulatorEntry = {
+        id: env.drills.moveMintsNewId ? nextId(state) : found.source.id,
+        parentId: found.parent?.id ?? null,
+        name: input.to.components.at(-1) ?? '',
+        file,
+        implied: false
+      }
+
+      state.entries = state.entries.map(entry => (entry.id === found.source.id ? moved : entry))
+
+      return ok({ metadata: fileMetadata(moved, file, pathOf(storedNames(state, moved))) })
     }
-
-    state.entries = state.entries.map(entry => (entry.id === source.id ? moved : entry))
-
-    return ok({ metadata: metadataOf(state, moved) })
   }
 )
 
@@ -830,8 +937,25 @@ type UploadInput =
 
 const revPattern = /^[0-9a-f]{9,}$/
 
+/** A file written by an upload (in a commit): a new rev, its size, hash, and clock timestamps. */
+const uploadedFile = (
+  state: DropboxEmulatorState,
+  at: string,
+  bytes: Uint8Array
+): DropboxEmulatorFile => {
+  const rev = nextRev(state)
+
+  return {
+    rev,
+    size: bytes.byteLength,
+    contentHash: syntheticContentHash(rev.slice(-2)),
+    clientModified: at,
+    serverModified: at
+  }
+}
+
 const upload: Route = statefulRoute(
-  evidence('/files/upload', true, [uploadCase]),
+  evidence('/files/upload', true, [uploadCase], dropboxEmulatorContentOrigin),
   'bytes',
   (request): UploadInput | NotEmulated => {
     const noQuery = withoutQuery(request)
@@ -891,9 +1015,6 @@ const upload: Route = statefulRoute(
       : notEmulated('an update upload addresses the file by its id: form only')
   },
   (state, input, { env }) => {
-    // Read the clock before any write: a failing clock writes nothing.
-    const at = nowTimestamp(env)
-
     if (input.mode === 'add') {
       const parent = parentFolder(state, input.path.components, 'the upload')
 
@@ -904,55 +1025,47 @@ const upload: Route = statefulRoute(
       if (existing !== undefined) {
         return existing.file === null
           ? notEmulated('an add upload onto a folder is not emulated')
-          : json(409, dropboxEmulatorErrorBodies.uploadConflict)
+          : answer(() => json(409, dropboxEmulatorErrorBodies.uploadConflict))
       }
 
-      const rev = nextRev(state)
+      return () => {
+        // Read the clock before any write: a failing clock writes nothing.
+        const at = nowTimestamp(env)
+        const file = uploadedFile(state, at, input.bytes)
 
-      const created: DropboxEmulatorEntry = {
-        id: nextId(state),
-        parentId: parent?.id ?? null,
-        name: input.path.components.at(-1) ?? '',
-        file: {
-          rev,
-          size: input.bytes.byteLength,
-          contentHash: syntheticContentHash(rev.slice(-2)),
-          clientModified: at,
-          serverModified: at
+        const created: DropboxEmulatorEntry = {
+          id: nextId(state),
+          parentId: parent?.id ?? null,
+          name: input.path.components.at(-1) ?? '',
+          file,
+          implied: false
         }
+
+        state.entries = [...state.entries, created]
+
+        return ok(fileMetadata(created, file, pathOf(storedNames(state, created))))
       }
-
-      state.entries = [...state.entries, created]
-
-      return ok(metadataOf(state, created))
     }
 
     const existing = state.entries.find(entry => entry.id === input.id)
 
-    if (existing === undefined || existing.file === null) {
+    if (existing === undefined || existing.file === null || existing.implied) {
       return notEmulated('an update upload of a missing file or a folder is not emulated')
     }
 
     if (existing.file.rev !== input.rev && !env.drills.uploadIgnoresRev) {
-      return json(409, dropboxEmulatorErrorBodies.uploadConflict)
+      return answer(() => json(409, dropboxEmulatorErrorBodies.uploadConflict))
     }
 
-    const rev = nextRev(state)
+    return () => {
+      const at = nowTimestamp(env)
+      const file = uploadedFile(state, at, input.bytes)
+      const updated: DropboxEmulatorEntry = { ...existing, file }
 
-    const updated: DropboxEmulatorEntry = {
-      ...existing,
-      file: {
-        rev,
-        size: input.bytes.byteLength,
-        contentHash: syntheticContentHash(rev.slice(-2)),
-        clientModified: at,
-        serverModified: at
-      }
+      state.entries = state.entries.map(entry => (entry.id === existing.id ? updated : entry))
+
+      return ok(fileMetadata(updated, file, pathOf(storedNames(state, updated))))
     }
-
-    state.entries = state.entries.map(entry => (entry.id === existing.id ? updated : entry))
-
-    return ok(metadataOf(state, updated))
   }
 )
 

@@ -180,16 +180,29 @@ describe('fixture data copies', () => {
   it.effect('the default seed holds every seeded id of the fixture seeds', () =>
     Effect.promise(async () => {
       const state = (await emulator()).snapshot()
-      const pageIds = state.pages.map(page => page.id)
 
-      expect(pageIds).toEqual(
-        expect.arrayContaining([
-          seeds.titlePageId,
-          seeds.blocksPageId,
-          seeds.propertyPageId,
-          seeds.parentPageId
-        ])
-      )
+      // Shown pages: the search, title, and property pages and the query's first row.
+      expect(state.pages.map(page => page.id)).toEqual([
+        '1f0000a0-0000-4000-8000-000000000001',
+        '1f0000a0-0000-4000-8000-000000000002',
+        seeds.titlePageId,
+        seeds.propertyPageId,
+        '1f0000d0-0000-4000-8000-000000000101'
+      ])
+      // Pages a fixture only names by id carry no content at all.
+      expect(state.impliedPages).toEqual([
+        { id: seeds.blocksPageId, parent: null },
+        { id: seeds.parentPageId, parent: null },
+        { id: '1f0000d0-0000-4000-8000-0000000000aa', parent: null },
+        {
+          id: '1f0000d0-0000-4000-8000-000000000102',
+          parent: {
+            type: 'data_source_id',
+            data_source_id: '1f0000d0-0000-4000-8000-000000000001',
+            database_id: seeds.databaseId
+          }
+        }
+      ])
       expect(state.databases.map(database => database.id)).toEqual([seeds.databaseId])
       expect(state.propertyItems.map(items => [items.pageId, items.propertyId])).toEqual([
         [seeds.propertyPageId, seeds.propertyId]
@@ -199,41 +212,15 @@ describe('fixture data copies', () => {
   )
 })
 
-/** Values the emulator generates itself: request ids come from its ledger. */
-const dynamicKeys: ReadonlySet<string> = new Set(['request_id'])
-
-const normalized = (value: unknown): unknown =>
-  Array.isArray(value)
-    ? value.map(normalized)
-    : Predicate.isObject(value)
-      ? Object.fromEntries(
-          Object.entries(value).map(([key, entry]) => [
-            key,
-            dynamicKeys.has(key) ? '<dynamic>' : normalized(entry)
-          ])
-        )
-      : value
-
-const substituted = (text: string, cursors: ReadonlyMap<string, string>): string => {
-  let result = text
-
-  for (const [from, to] of cursors) {
-    result = result.split(from).join(to)
-  }
-
-  return result
-}
-
 describe('fixture envelopes', () => {
-  // Replays every Notion fixture's requests, in order, against a fresh emulator and compares each
-  // complete response (status, content type, and the whole body) with the fixture. Only the
-  // request ids (from the emulator ledger) are normalized, and the opaque property item cursor
-  // the emulator issues replaces the fixture's (learned from the property route's answers only).
+  // Replays every Notion fixture's requests, in order, against a fresh emulator (the clock at the
+  // archive fixture's time) and compares each complete response with the fixture byte for byte:
+  // status, content type, and the whole body. Only the top-level `request_id` (the emulator mints
+  // it from its ledger) is replaced by the fixture's before the comparison.
   for (const fixture of notionConformanceFixtures) {
     it.effect(fixture.id, () =>
       Effect.promise(async () => {
         const target = await emulator()
-        const cursors = new Map<string, string>()
 
         for (const exchange of fixture.exchanges) {
           const label = `${exchange.request.method} ${exchange.request.url}`
@@ -244,7 +231,7 @@ describe('fixture envelopes', () => {
           const body = exchange.request.body
 
           const response = await target.fetch(
-            new Request(substituted(exchange.request.url, cursors), {
+            new Request(exchange.request.url, {
               method: exchange.request.method,
               headers,
               body: body === undefined ? undefined : JSON.stringify(body)
@@ -257,19 +244,17 @@ describe('fixture envelopes', () => {
           expect(response.headers.get('content-type'), label).toBe(expected.headers['content-type'])
           expect(response.headers.get(emulatorEvidenceHeader), label).toBe('unverified')
 
-          const actual: unknown = await response.json()
-          const recorded: unknown = JSON.parse('body' in expected ? (expected.body ?? '') : '')
+          const text = await response.text()
+          const recorded = 'body' in expected ? (expected.body ?? '') : ''
+          const fixtureRequestId = field(JSON.parse(recorded), 'request_id')
+          const actual: unknown = JSON.parse(text)
 
-          if (exchange.request.url.includes('/properties/')) {
-            const from = field(recorded, 'next_cursor')
-            const to = field(actual, 'next_cursor')
+          const comparable =
+            Predicate.isString(fixtureRequestId) && Predicate.isObject(actual)
+              ? JSON.stringify({ ...actual, request_id: fixtureRequestId })
+              : text
 
-            if (Predicate.isString(from) && Predicate.isString(to)) cursors.set(from, to)
-          }
-
-          expect(normalized(actual), label).toEqual(
-            normalized(JSON.parse(substituted(JSON.stringify(recorded), cursors)))
-          )
+          expect(comparable, label).toBe(recorded)
         }
 
         expect(target.ledger.entries().every(entry => entry.notEmulated === undefined)).toBe(true)
@@ -317,6 +302,9 @@ describe('fail closed', () => {
         const property = `/v1/pages/${seeds.propertyPageId}/properties/${encodeURIComponent(seeds.propertyId ?? '')}`
         const query = `/v1/data_sources/1f0000d0-0000-4000-8000-000000000001/query`
 
+        // An unlimited fault on every route: no refused request may reach it.
+        target.faults.add({ kind: 'status', status: 503 })
+
         const refused: ReadonlyArray<readonly [string, Promise<Response>]> = [
           ['no bearer', call(target, 'GET', page, { authorization: null })],
           ['basic auth', call(target, 'GET', page, { authorization: 'Basic eDp5' })],
@@ -346,6 +334,12 @@ describe('fail closed', () => {
           [
             'search page_size 101',
             call(target, 'POST', '/v1/search', { body: searchBody({ page_size: 101 }) })
+          ],
+          [
+            'search without matches',
+            call(target, 'POST', '/v1/search', {
+              body: searchBody({ query: 'yolk-conformance', page_size: 100 })
+            })
           ],
           [
             'search unknown cursor',
@@ -450,6 +444,56 @@ describe('fail closed', () => {
             call(target, 'PATCH', '/v1/pages/ffffffff-ffff-4fff-bfff-ffffffffffff', {
               body: { archived: true }
             })
+          ],
+          [
+            'create with another title',
+            call(target, 'POST', '/v1/pages', { body: createBody('Another') })
+          ],
+          [
+            'read the blocks page (implied)',
+            call(target, 'GET', `/v1/pages/${seeds.blocksPageId}`)
+          ],
+          [
+            'read the parent page (implied)',
+            call(target, 'GET', `/v1/pages/${seeds.parentPageId}`)
+          ],
+          [
+            'read the second row (implied)',
+            call(target, 'GET', '/v1/pages/1f0000d0-0000-4000-8000-000000000102')
+          ],
+          [
+            'read the first row (shown only as a query row)',
+            call(target, 'GET', '/v1/pages/1f0000d0-0000-4000-8000-000000000101')
+          ],
+          [
+            'archive an implied page',
+            call(target, 'PATCH', `/v1/pages/${seeds.parentPageId}`, { body: { archived: true } })
+          ],
+          [
+            'query page_size 2 (needs the implied row)',
+            call(target, 'POST', query, { body: { page_size: 2 } })
+          ],
+          [
+            'search cursor never issued (a real result id)',
+            call(target, 'POST', '/v1/search', {
+              body: searchBody({ start_cursor: '1f0000a0-0000-4000-8000-000000000002' })
+            })
+          ],
+          [
+            'blocks cursor never issued (a real block id)',
+            call(
+              target,
+              'GET',
+              `${blocks}?page_size=2&start_cursor=1f0000c0-0000-4000-8000-000000000003`
+            )
+          ],
+          [
+            'property cursor never issued (the minted form)',
+            call(
+              target,
+              'GET',
+              `${property}?page_size=2&start_cursor=c3ludGhldGljLXByb3BlcnR5LWN1cnNvcg`
+            )
           ]
         ]
 
@@ -458,7 +502,107 @@ describe('fail closed', () => {
         }
 
         expect(target.snapshot()).toEqual(before)
+        expect(target.ledger.entries().every(entry => entry.fault === undefined)).toBe(true)
+        expect(target.faults.list()[0]).toMatchObject({ applied: 0 })
+        // An eligible request does reach the fault.
+        expect((await call(target, 'GET', page)).status).toBe(503)
       })
+  )
+
+  it.effect('accepts a cursor only for the list it was issued for, until a reset', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const blocks = `/v1/blocks/${seeds.blocksPageId}/children`
+      const property = `/v1/pages/${seeds.propertyPageId}/properties/${encodeURIComponent(seeds.propertyId ?? '')}`
+
+      const searched = await jsonOf(
+        await call(target, 'POST', '/v1/search', { body: searchBody() })
+      )
+
+      const searchCursor = String(field(searched, 'next_cursor'))
+
+      expect(searchCursor).toBe('1f0000a0-0000-4000-8000-000000000002')
+
+      // The same cursor for another query's list is not issued.
+      await expectNotEmulated(
+        await call(target, 'POST', '/v1/search', {
+          body: searchBody({ query: 'probe', start_cursor: searchCursor })
+        })
+      )
+      expect(
+        (
+          await call(target, 'POST', '/v1/search', {
+            body: searchBody({ start_cursor: searchCursor })
+          })
+        ).status
+      ).toBe(200)
+
+      const blockCursor = field(
+        await jsonOf(await call(target, 'GET', `${blocks}?page_size=2`)),
+        'next_cursor'
+      )
+
+      const propertyCursor = field(
+        await jsonOf(await call(target, 'GET', `${property}?page_size=2`)),
+        'next_cursor'
+      )
+
+      expect(propertyCursor).toBe('c3ludGhldGljLXByb3BlcnR5LWN1cnNvcg')
+
+      await target.reset()
+
+      await expectNotEmulated(
+        await call(target, 'GET', `${blocks}?page_size=2&start_cursor=${String(blockCursor)}`)
+      )
+      await expectNotEmulated(
+        await call(target, 'GET', `${property}?page_size=2&start_cursor=${String(propertyCursor)}`)
+      )
+
+      // A property cursor issued after the reset is a new value.
+      const reissued = field(
+        await jsonOf(await call(target, 'GET', `${property}?page_size=2`)),
+        'next_cursor'
+      )
+
+      expect(reissued).not.toBe(propertyCursor)
+      expect(
+        (await call(target, 'GET', `${property}?page_size=2&start_cursor=${String(reissued)}`))
+          .status
+      ).toBe(200)
+    })
+  )
+
+  it.effect('refuses a search cursor after the matches changed', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+
+      // No fixture records a search answer without results.
+      await expectNotEmulated(
+        await call(target, 'POST', '/v1/search', {
+          body: searchBody({ query: 'yolk-conformance', page_size: 1 })
+        })
+      )
+
+      await call(target, 'POST', '/v1/pages', { body: createBody() })
+      await call(target, 'POST', '/v1/pages', { body: createBody() })
+
+      const first = await jsonOf(
+        await call(target, 'POST', '/v1/search', {
+          body: searchBody({ query: 'yolk-conformance', page_size: 1 })
+        })
+      )
+
+      await call(target, 'POST', '/v1/pages', { body: createBody() })
+      await expectNotEmulated(
+        await call(target, 'POST', '/v1/search', {
+          body: searchBody({
+            query: 'yolk-conformance',
+            page_size: 1,
+            start_cursor: String(field(first, 'next_cursor'))
+          })
+        })
+      )
+    })
   )
 
   it.effect('archives a page once; a second archive and creates under it are refused', () =>
@@ -479,18 +623,14 @@ describe('fail closed', () => {
       )
       expect(target.snapshot()).toEqual(after)
 
-      // The trashed page still reads back, and search no longer lists it.
+      // The trashed page still reads back; a search it would match is not emulated (no fixture
+      // records a search answer with a trashed page).
       expect(field(await jsonOf(await call(target, 'GET', path)), 'archived')).toBe(true)
-      expect(
-        field(
-          await jsonOf(
-            await call(target, 'POST', '/v1/search', {
-              body: searchBody({ query: 'yolk-conformance', page_size: 100 })
-            })
-          ),
-          'results'
-        )
-      ).toEqual([])
+      await expectNotEmulated(
+        await call(target, 'POST', '/v1/search', {
+          body: searchBody({ query: 'yolk-conformance', page_size: 100 })
+        })
+      )
     })
   )
 
@@ -564,8 +704,8 @@ describe('request-shape latitude', () => {
 
       const created = await call(target, 'POST', '/v1/pages', {
         body: {
-          ...createBody('Another title'),
-          parent: { page_id: (seeds.parentPageId ?? '').replaceAll('-', '') }
+          ...createBody(),
+          parent: { page_id: (seeds.parentPageId ?? '').replaceAll('-', '').toUpperCase() }
         }
       })
 
@@ -709,7 +849,7 @@ describe('faults', () => {
         .executeTyped({
           integration: notionConformanceIntegration,
           input: NotionSearchInput.make({
-            query: 'x',
+            query: 'yolk-search-probe',
             filter: { property: 'object', value: 'page' },
             pageSize: 1
           })
@@ -726,6 +866,39 @@ describe('faults', () => {
 })
 
 describe('seeds and the control plane', () => {
+  it.effect('minted page ids start above the seeded ones in the minted form', () =>
+    Effect.promise(async () => {
+      const target = await emulator({
+        seed: {
+          profile: 'empty',
+          impliedPages: [{ id: '1f0000e0-0000-4000-8000-000000000009', parent: null }]
+        }
+      })
+
+      expect(target.snapshot().counters).toEqual({ nextPageNumber: 10 })
+
+      const created = await jsonOf(
+        await call(target, 'POST', '/v1/pages', {
+          body: { ...createBody(), parent: { page_id: '1f0000e0-0000-4000-8000-000000000009' } }
+        })
+      )
+
+      expect(field(created, 'id')).toBe('1f0000e0-0000-4000-8000-000000000010')
+
+      // Archiving the created page leaves the seeded (implied) page untouched.
+      expect(
+        (
+          await call(target, 'PATCH', `/v1/pages/${String(field(created, 'id'))}`, {
+            body: { archived: true }
+          })
+        ).status
+      ).toBe(200)
+      expect(target.snapshot().impliedPages).toEqual([
+        { id: '1f0000e0-0000-4000-8000-000000000009', parent: null }
+      ])
+    })
+  )
+
   it.effect('rejects invalid seeds and options', () =>
     Effect.promise(async () => {
       // Parsed from JSON, as a host passing untyped input would.
@@ -749,6 +922,11 @@ describe('seeds and the control plane', () => {
             }
           },
           { seed: { pages: [{ id: 'not-an-id' }] } },
+          {
+            seed: {
+              impliedPages: [{ id: '1f000000-0000-4000-8000-000000000001', parent: null }]
+            }
+          },
           { baseUrl: 'https://api.notion.com/v1' },
           { drills: { nope: true } },
           { drills: { trashedPageNotFound: 1 } }

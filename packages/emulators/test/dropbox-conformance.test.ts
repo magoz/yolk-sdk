@@ -62,14 +62,21 @@ const inProcessLayer = (emulator: DropboxEmulator) =>
     EmulatorRoute.handler(contentOrigin, emulator.fetch)
   ])
 
-/** Real `FetchHttpClient` underneath; both origins rewritten to one server on 127.0.0.1:0. */
+/**
+ * Real `FetchHttpClient` underneath; each origin rewritten to its own server on 127.0.0.1:0,
+ * serving the emulator's handler for that origin (the rewrite loses the origin, and each route
+ * answers only on the origin its fixtures record).
+ */
 const emulatedLayer = (emulator: DropboxEmulator) =>
   Layer.unwrap(
-    serveFetchHandler(emulator.fetch).pipe(
-      Effect.map(server =>
+    Effect.all([
+      serveFetchHandler(emulator.fetchOn(apiOrigin)),
+      serveFetchHandler(emulator.fetchOn(contentOrigin))
+    ]).pipe(
+      Effect.map(([api, content]) =>
         EmulatedHttpClient.layer([
-          EmulatorRoute.url(apiOrigin, server.url),
-          EmulatorRoute.url(contentOrigin, server.url)
+          EmulatorRoute.url(apiOrigin, api.url),
+          EmulatorRoute.url(contentOrigin, content.url)
         ]).pipe(Layer.provide(FetchHttpClient.layer))
       )
     )
@@ -146,8 +153,8 @@ const requests = (entries: ReadonlyArray<DropboxLedgerEntry>) =>
 
 /**
  * The state without what a write case leaves by design: the id and rev counters (which only
- * advance, so a later create never reuses an id) and the deleted-entry records of the case's own
- * deletes (Dropbox keeps them; `include_deleted` reads them).
+ * advance, so a later create never reuses an id) and the deleted-entry record of an empty case
+ * folder it deleted (the delete fixture's `include_deleted` answer reads it).
  */
 const withoutCountersAndDeleted = ({
   counters: _counters,
@@ -169,7 +176,7 @@ const writeCaseIds = dropboxConformanceCases
 describe('cross-check A: in-process emulator through the real connector', () => {
   // What "ends at the seed" means: every read case leaves the exact seed; every write-reversible
   // case removes what it created and ends at the seed except the advanced counters and the
-  // deleted-entry records of its own case folder (and what was in it).
+  // deleted-entry record of its own empty case folder, if it deleted one.
   it.effect(
     'passes every Dropbox case; read cases leave the exact seed, write cases differ only in counters and their own deleted records',
     () =>
@@ -214,7 +221,6 @@ describe('cross-check A: in-process emulator through the real connector', () => 
               seed.counters.nextRevNumber
             )
             expect(seed.deleted, id).toEqual([])
-            expect(state.deleted.length, id).toBeGreaterThan(0)
             expect(
               state.deleted.every(record => record.pathLower.startsWith(caseNamespace)),
               id
@@ -254,7 +260,9 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           expect(uploads.map(entry => entry.bodyBytes)).toEqual([37, 37, 37, 37])
           expect(uploads.every(entry => entry.headers['dropbox-api-arg'] !== undefined)).toBe(true)
 
-          // The deleted case folder answers include_deleted with its deleted record.
+          // Only the deletes of empty case folders keep a record (the conflict and delete cases);
+          // the copy and upload cases delete folders with content, whose records no fixture shows.
+          expect(writeCaseIds.map(id => stateOf(id).deleted.length)).toEqual([1, 1, 0, 0])
           expect(stateOf('dropbox.files.delete-then-not-found').deleted).toEqual([
             {
               name: 'yolk-conformance-run-synthetic-delete',
@@ -276,11 +284,36 @@ describe('cross-check A: in-process emulator through the real connector', () => 
   )
 
   it.effect(
-    'passes every case on one shared emulator, and the leftover lookup finds nothing afterwards',
+    'passes every case on one shared emulator; the leftover lookup of the empty work folder is not emulated before or after',
     () =>
       withEmulator({}, emulator =>
         Effect.gen(function* () {
           const seeded = emulator.snapshot()
+
+          // No fixture records a listing of an empty folder, so the read-only lookup fails with
+          // its action-failed error (the live runner prints its lookup-failed WARN) and writes
+          // nothing.
+          const lookup = findDropboxConformanceLeftovers.pipe(
+            Effect.provide(portsOver(inProcessLayer(emulator)))
+          )
+
+          const expectLookupNotEmulated = (failed: unknown) => {
+            expect(failed).toMatchObject({
+              _tag: 'DropboxConformanceActionFailed',
+              actionId: 'dropbox.list_folder',
+              code: 'dropbox_list_folder_failed',
+              status: 400
+            })
+            expect(emulator.ledger.entries().at(-1)).toMatchObject({
+              route: '/2/files/list_folder',
+              status: 400,
+              notEmulated: expect.stringContaining('empty folder')
+            })
+          }
+
+          expectLookupNotEmulated(yield* Effect.flip(lookup))
+          expect(emulator.snapshot()).toEqual(seeded)
+          emulator.ledger.clear()
 
           const report = yield* runConformance(dropboxConformanceCases, {
             target: { kind: 'in-process' },
@@ -293,14 +326,14 @@ describe('cross-check A: in-process emulator through the real connector', () => 
             withoutCountersAndDeleted(seeded)
           )
 
-          const leftovers = yield* findDropboxConformanceLeftovers.pipe(
-            Effect.provide(portsOver(inProcessLayer(emulator)))
-          )
-
-          expect(leftovers).toEqual([])
           expect(emulator.ledger.entries().every(entry => entry.notEmulated === undefined)).toBe(
             true
           )
+
+          const afterRun = emulator.snapshot()
+
+          expectLookupNotEmulated(yield* Effect.flip(lookup))
+          expect(emulator.snapshot()).toEqual(afterRun)
         })
       ),
     60_000
@@ -448,7 +481,7 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
       {
         id: 'dropbox.files.delete-then-not-found',
         tag: 'DropboxConformanceActionFailed',
-        message: 'dropbox.get_metadata failed: dropbox_not_found (HTTP 409)'
+        message: 'dropbox.get_metadata failed: dropbox_get_metadata_failed (HTTP 400)'
       }
     ],
     [

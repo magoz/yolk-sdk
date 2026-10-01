@@ -90,5 +90,8 @@ the write case, and `--record` stages verified recordings only in the gitignored
 
 For offline tests, the experimental
 [Notion emulator](../api-reference/emulators#notion-emulator) (`@yolk-sdk/emulators/notion`) is a
-stateful, fixture-only stand-in at `Notion-Version: 2025-09-03` that passes these cases (and the
-leftover lookup) through the real connector actions over the connector ports.
+stateful, fixture-only stand-in at `Notion-Version: 2025-09-03` that passes these cases through
+the real connector actions over the connector ports. The leftover lookup fails against it on a clean
+workspace and after the write case: no fixture records a search answer without matches or with a
+trashed page, so the emulator answers it not-emulated (HTTP 400) and the runner prints its
+lookup-failed `WARN`.

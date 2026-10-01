@@ -103,8 +103,8 @@ There is no root export or barrel.
   routes without a fixture
   (`GET /3/companyinformation`, `GET /3/customers`) cite no case ids and use minimal shapes named
   after the connector's read fields; the check warns about them.
-- Fixture-only rule (lasting; every new emulator and route follows it): response behaviour comes
-  only from the committed fixtures. A request matching a recorded request's shape, within the
+- Fixture-only rule (lasting; every new emulator and route follows it, without exceptions):
+  response behaviour comes only from the committed fixtures. A request matching a recorded request's shape, within the
   documented request-shape latitude, gets that fixture's response, copied as data (default content
   equals the fixture byte for byte); everything else (unknown routes and methods, missing or
   invalid credentials, missing or other headers and query parameters, unknown models, non-streamed
@@ -160,9 +160,12 @@ There is no root export or barrel.
   internal, no Node builtins). Build a response before consuming its fault; a response that cannot
   be built, or a stateful route handler that throws, answers an evidence-tagged 500 in the
   service's error envelope, recorded in the ledger (`responseError`); that recovery never depends
-  on the injectable clock (a clock that throws falls back to a fixed synthetic date).
-- Every fetch-handler emulator is built on `src/emulator-kernel.ts` (the `/email` port emulator is
-  not; see below): fault and scripted-turn state (strict
+  on the injectable clock (a clock that throws falls back to a fixed synthetic date). The
+  fixture-only `/dropbox` and `/notion` answer `{ error: { type: 'emulator_error' } }` instead and
+  their recovery reads no clock at all (see below).
+- Every model and fixture-route fetch-handler emulator is built on `src/emulator-kernel.ts` (the
+  `/email` port emulator is not; the stateful `/fortnox` and `/microsoft` keep their own wrappers,
+  and `/dropbox` and `/notion` share `src/stateful-emulator.ts`; see below): fault and scripted-turn state (strict
   decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
   status-fault and scripted-error responses, the `/_emulate/*` control plane, coverage, evidence
   tagging, and route binding (`serve` throws `EmulatorRouteUnmapped`). Wire cores add only request
@@ -278,9 +281,9 @@ There is no root export or barrel.
   never writes. `lastmodified` is not emulated (the state tracks no modification times).
 - Microsoft Graph (`src/microsoft.ts` + `src/microsoft/*`) follows the Fortnox shape; see the
   README for its routes and wire claims. Non-obvious rules: behaviour comes only from the
-  conformance fixtures; anything they do not show fails closed (400 `Synthetic*`) unless a case
-  needs it to run, and each such exception is listed under the README's "Emulator extrapolations
-  (no fixture)" (with the one opt-in extra, `copyInProgressPolls`, labelled as such). Route
+  conformance fixtures; anything they do not show fails closed (400 `Synthetic*`). Its README's
+  "Emulator extrapolations (no fixture)" list predates the fixture-only rule as now stated: it is
+  legacy to remove, never a precedent; no new emulator or route may add such an exception. Route
   params are matched on the raw path and decoded once; `@odata.nextLink` reuses the raw path.
   Created ids and change keys come from counters that only advance, so the state-equals-seed
   proof excludes only the counters. The first message write to reach the
@@ -291,41 +294,62 @@ There is no root export or barrel.
   names such as `x-amz-signature`); `test/emulator-http.test.ts` keeps both name rules in step
   with `@yolk-sdk/conformance`'s.
 - Dropbox (`src/dropbox.ts` + `src/dropbox/*`) and Notion (`src/notion.ts` + `src/notion/*`) are
-  stateful AND fixture-only: entity state lives on `@emulators/core` (as for Microsoft), and the
-  shared wrapper `src/stateful-emulator.ts` answers everything the fixtures do not show with the
-  ledgered 400 not-emulated, never a guessed provider envelope or a 404. Each route is
-  `statefulRoute(evidence, body, admit, run)`: `admit` checks the request shape without reading
-  state (route, bearer, header rules such as `Notion-Version: 2025-09-03`, body kind, exact body
-  keys, values), so a refused shape uses up no fault; then the first status fault; then `run` in
-  the core, which may still refuse what the state cannot answer as a fixture does (and writes
-  nothing then). Fault statuses are 400-599 with an `emulator_fault` default body; recovery answers
+  stateful AND fixture-only, without exceptions: every answer value comes from a committed fixture
+  (through the seed or the request) or is a minted value (created ids, revs, and the hashes derived
+  from them, cursors, request ids, timestamps from the injectable clock); anything else answers the
+  ledgered 400 not-emulated, never a guessed provider envelope, a 404, or synthesized content. An
+  entity a fixture only names (a parent folder of a seeded path, a page named only by id) is held
+  as `implied`: lookups and references resolve through it, but an answer that would render it is
+  not emulated, and Notion search considers only pages whose content the state holds. An empty
+  listing or search page is no fixture's answer either, so the read-only leftover lookups fail
+  against the default seeds (not-emulated, nothing written) and the runners print their
+  lookup-failed `WARN`; never answer an empty page to make them pass. Entity state lives on
+  `@emulators/core`; the shared wrapper
+  `src/stateful-emulator.ts` holds the ledger, faults, and control plane. Each route is
+  `statefulRoute(evidence, body, admit, plan)`: `admit` checks the request shape without reading
+  state (origin, bearer, header rules such as `Notion-Version: 2025-09-03`, body kind, exact body
+  keys, values); `plan` reads the state without writing and refuses what the state cannot answer
+  as a fixture does, or returns the commit; only then is the first status fault decided; then the
+  commit writes. Plan, fault, and commit run synchronously in the core, so a not-emulated request
+  (by shape or by state) never uses up a fault, and a faulted request writes nothing. Each route
+  answers only on its recorded origin (`fetch` reads it from the URL; `fetchOn(origin)` serves one
+  origin behind a loopback rewrite). Cursors are accepted only when issued by this emulator, for
+  the same list, since the last reset or seed (reset and seed clear the registry; cursor values are
+  never reissued), and when the list still renders exactly as at issue; never decode a cursor to
+  trust it. Minted id and rev counters start above the highest seeded value in the minted form.
+  Jobs are handed to the core under a never-reset job id (the ledger sequence resets). Recorded
+  headers are never credential headers (refused at build); a JSON header (`Dropbox-API-Arg`) is
+  ledgered parsed with credential-named keys redacted at any depth, or as `<redacted>` when
+  unparseable. Fault statuses are 400-599 with an `emulator_fault` default body; recovery answers
   (unknown routes 400, handler failure 500, closed 503) read no clock, so a throwing clock only
-  fails the routes that read it (Dropbox uploads, Notion page creates) with a ledgered 500 before
+  fails the commits that read it (Dropbox uploads, Notion page creates) with a ledgered 500 before
   any write. Wire shapes and error envelopes come from the fixtures (Dropbox's 409 `error_summary`
   bodies byte for byte in `dropboxEmulatorErrorBodies`); `test/dropbox.test.ts` and
-  `test/notion.test.ts` replay every fixture and compare each complete response (the drift test of
-  the data copies), learning only emulator-minted values (Dropbox ids, revs, and hashes from write
-  answers; Notion property cursors; request ids). Extrapolations the cases need are listed in the
-  README under each emulator's "Emulator extrapolations (no fixture)". Write cases end at the seed
-  except the advancing counters and what the provider keeps after a delete (Dropbox deleted-entry
-  records of the case's own folder, Notion the case's own trashed page); the cross-check tests
-  prove exactly that. Drill knobs (`drills`, booleans) each fail exactly one case.
+  `test/notion.test.ts` replay every fixture and compare each complete response byte for byte (the
+  drift test of the data copies), substituting only minted values at exact field paths (Dropbox
+  created ids, revs, and hashes from write answers, each learned once; Notion top-level
+  `request_id`). Write cases end at the seed except the advancing counters and what the provider
+  keeps after a delete that a fixture records (Dropbox: the deleted-entry record of an empty case
+  folder; Notion: the case's own trashed page); the cross-check tests prove exactly that. Drill
+  knobs (`drills`, booleans) each fail exactly one case.
 - Request-shape latitude (`/dropbox`, the only accepted deviations): any bearer value (never
-  checked or stored); extra request headers; JSON key order; `content-type` media-type parameters;
-  any path, query, and cursor string (looked up in the state); any `list_folder` `limit` from 1 to
-  2000 and any `search_v2` `options.max_results` from 1 to 1000; any upload body bytes; and which of
-  the two origins carried a request (one handler serves both; the paths never overlap). Everything
-  else (other keys, booleans, modes, query parameters, ids or revs where the fixtures send paths, and
-  the root folder) is not emulated. Copies change together: this bullet, the `src/dropbox.ts`
-  header, `README.md` (Dropbox emulator), and `apps/docs/content/docs/api-reference/emulators.mdx`.
-- Request-shape latitude (`/notion`, the only accepted deviations): any bearer value (never checked
-  or stored); extra request headers; JSON key order; `content-type` media-type parameters; the
-  order of query parameters; Notion ids with or without dashes, in any case; any search `query`,
-  title text, and cursor string (looked up in the state); and any `page_size` from 1 to 100.
-  `Notion-Version` must be `2025-09-03`. Everything else (other keys, filters, booleans, sorts,
-  query parameters, and repeated or missing `page_size`) is not emulated. Copies change together:
-  this bullet, the `src/notion.ts` header, `README.md` (Notion emulator), and
+  checked or stored); extra request headers; JSON key order; `content-type` media-type
+  parameters; any path and search query (looked up in the state); any `list_folder` `limit` from
+  1 to 2000 and any `search_v2` `options.max_results` from 1 to 1000; and any upload body bytes.
+  Everything else (other keys, booleans, modes, query parameters, another origin, ids or revs
+  where the fixtures send paths, the root folder, and cursors not issued since the last reset or
+  whose listing changed) is not emulated. Copies change together: this bullet, the
+  `src/dropbox.ts` header, `README.md` (Dropbox emulator), and
   `apps/docs/content/docs/api-reference/emulators.mdx`.
+- Request-shape latitude (`/notion`, the only accepted deviations): any bearer value (never
+  checked or stored); extra request headers; JSON key order; `content-type` media-type
+  parameters; the order of query parameters; Notion ids with or without dashes, in any case; any
+  search `query` (looked up in the state); and any `page_size` from 1 to 100 whose page shows
+  only recorded results (the data source query: 1). `Notion-Version` must be `2025-09-03`.
+  Everything else (other keys, filters, booleans, sorts, query parameters, titles, repeated or
+  missing `page_size`, and cursors not issued for the same list since the last reset or whose
+  list changed) is not emulated. Copies change together: this bullet, the `src/notion.ts` header,
+  `README.md` (Notion emulator), and `apps/docs/content/docs/api-reference/emulators.mdx`.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -389,10 +413,13 @@ connector, handler failures, every fixture's complete envelopes, faults includin
 `retry-after`, seeds, control plane), and `test/microsoft-conformance.test.ts` (all eleven
 Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
 proof, and the drills), `test/dropbox.test.ts` and `test/notion.test.ts` (manifest, every
-fixture's complete responses, the data copies, every fail-closed refusal writing nothing and using
-no fault, the latitude, the clock-safe recovery, credential redaction, faults including 429
-`retry-after` through the real connector, seeds, control plane), and
+fixture's complete responses byte for byte, the data copies, every fail-closed refusal (by shape
+and by state) writing nothing and using no fault, origins, cursor issuance and provenance, the
+latitude, the clock-safe recovery, credential and `Dropbox-API-Arg` redaction, minted values above
+seeded ones, the never-reset job id under a ledger clear, faults including 429 `retry-after`
+through the real connector, seeds, control plane), and
 `test/dropbox-conformance.test.ts` and `test/notion-conformance.test.ts` (all eight cases of each
 in-process with one emulator per case and on one shared emulator, and over a loopback socket; the
-state-equals-seed proof; the leftover lookups; one drill per case failing exactly that case).
+state-equals-seed proof; the leftover lookups failing not-emulated on an empty listing or search
+and answering a planted leftover; one drill per case failing exactly that case).
 Loopback sockets only; never call real services.

@@ -4,9 +4,13 @@
  *
  * Entry shapes and the default entries follow the synthetic Dropbox conformance fixtures, copied
  * as data (the same paths, ids, revs, sizes, content hashes, and timestamps as the fixtures and
- * `dropboxConformanceFixtureSeeds`), never imported from SDK code. Where no fixture records a
- * value, the default is synthesized and says so below: the `/Conformance`, `/Conformance/Paging`,
- * `/Conformance/Search`, and `/Conformance/Work` folder ids (no fixture shows them).
+ * `dropboxConformanceFixtureSeeds`), never imported from SDK code. The parent folders the seeded
+ * paths need (`/Conformance`, `/Conformance/Paging`, `/Conformance/Search`, `/Conformance/Work`)
+ * are `implied`: no fixture shows their metadata, so they hold paths together but any answer that
+ * would render one is not emulated.
+ *
+ * Minted values never repeat seeded ones: the id and rev counters start above the highest seeded
+ * id (`id:SyntheticEntryNNNNNNNN`) and rev (`a1b2c3d4e5f6NNNN`) in the minted form.
  *
  * @experimental
  */
@@ -49,14 +53,20 @@ export const DropboxEmulatorEntry = Schema.Struct({
   parentId: Schema.NullOr(EntryId),
   name: EntryName,
   /** `null` for a folder. */
-  file: Schema.NullOr(DropboxEmulatorFile)
+  file: Schema.NullOr(DropboxEmulatorFile),
+  /**
+   * `true` for an entry no fixture shows, held only because a seeded path needs it: lookups pass
+   * through it, but an answer that would render it is not emulated.
+   */
+  implied: Schema.Boolean
 })
 
 export type DropboxEmulatorEntry = typeof DropboxEmulatorEntry.Type
 
 /**
  * What Dropbox keeps of a deleted entry (`include_deleted` lookups answer it): its name and paths
- * as they were. `delete_v2` records one for the deleted folder and every entry under it.
+ * as they were. `delete_v2` records one only for an empty folder, the only delete whose
+ * `include_deleted` answer a fixture records.
  */
 export const DropboxEmulatorDeleted = Schema.Struct({
   name: EntryName,
@@ -107,7 +117,9 @@ export const DropboxEmulatorEntrySeed = Schema.Struct({
   size: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   contentHash: Schema.optionalKey(Schema.String),
   clientModified: Schema.optionalKey(Timestamp),
-  serverModified: Schema.optionalKey(Timestamp)
+  serverModified: Schema.optionalKey(Timestamp),
+  /** An entry no fixture shows (default `false`); see `DropboxEmulatorEntry.implied`. */
+  implied: Schema.optionalKey(Schema.Boolean)
 })
 
 export type DropboxEmulatorEntrySeed = typeof DropboxEmulatorEntrySeed.Type
@@ -142,7 +154,7 @@ const issueMessage = (issue: Schema.SchemaError['issue']): string =>
 export const syntheticContentHash = (suffix: string): string => suffix.padStart(64, '0')
 
 // Default entries. Fixture-derived: every file, the `paging-two` folder, and every path, id, rev,
-// size, content hash, and timestamp of them. Synthesized: the ids of the `/Conformance`,
+// size, content hash, and timestamp of them. Implied (never rendered): the `/Conformance`,
 // `/Conformance/Paging`, `/Conformance/Search`, and `/Conformance/Work` folders.
 
 const file = (
@@ -170,9 +182,15 @@ const folder = (path: string, id: string): DropboxEmulatorEntrySeed => ({
   kind: 'folder'
 })
 
+/** A parent folder no fixture shows. */
+const impliedFolder = (path: string, id: string): DropboxEmulatorEntrySeed => ({
+  ...folder(path, id),
+  implied: true
+})
+
 const defaultEntries: ReadonlyArray<DropboxEmulatorEntrySeed> = [
-  folder('/Conformance', 'id:SyntheticConformanceFolder'),
-  folder('/Conformance/Paging', 'id:SyntheticPagingFolder0000'),
+  impliedFolder('/Conformance', 'id:SyntheticConformanceFolder'),
+  impliedFolder('/Conformance/Paging', 'id:SyntheticPagingFolder0000'),
   file(
     '/Conformance/Paging/paging-one.txt',
     'id:SyntheticPagingFile0001',
@@ -198,7 +216,7 @@ const defaultEntries: ReadonlyArray<DropboxEmulatorEntrySeed> = [
     '10',
     '2026-09-20T11:00:00Z'
   ),
-  folder('/Conformance/Search', 'id:SyntheticSearchFolder0000'),
+  impliedFolder('/Conformance/Search', 'id:SyntheticSearchFolder0000'),
   file(
     '/Conformance/Search/yolk-search-probe-1.txt',
     'id:SyntheticSearchFile0001',
@@ -215,7 +233,7 @@ const defaultEntries: ReadonlyArray<DropboxEmulatorEntrySeed> = [
     '22',
     '2026-09-20T12:00:00Z'
   ),
-  folder('/Conformance/Work', 'id:SyntheticWorkFolder00000'),
+  impliedFolder('/Conformance/Work', 'id:SyntheticWorkFolder00000'),
   file(
     '/Conformance/copy-source.txt',
     'id:SyntheticCopySource001',
@@ -232,6 +250,15 @@ const profileEntries = (
 ): ReadonlyArray<DropboxEmulatorEntrySeed> => (profile === 'default' ? defaultEntries : [])
 
 const defaultTimestamp = '2026-09-20T10:00:00Z'
+
+/** The form of minted ids (`id:SyntheticEntry00000001`) and revs (`a1b2c3d4e5f60101`). */
+const mintedIdPattern = /^id:SyntheticEntry(\d+)$/
+
+const mintedRevPattern = /^a1b2c3d4e5f6(\d+)$/
+
+/** The highest number among `values` in a minted form (0 when none is). */
+const highestMinted = (values: ReadonlyArray<string>, pattern: RegExp): number =>
+  Math.max(0, ...values.map(value => Number(pattern.exec(value)?.[1] ?? 0)))
 
 const duplicate = (values: ReadonlyArray<string>): string | undefined =>
   values.find((value, index) => values.indexOf(value) !== index)
@@ -286,6 +313,7 @@ const stateFromSeed = (seed: DropboxEmulatorSeed): DropboxEmulatorState | string
       id: entry.id,
       parentId: parentEntry?.id ?? null,
       name,
+      implied: entry.implied ?? false,
       file:
         entry.kind === 'folder'
           ? null
@@ -302,7 +330,20 @@ const stateFromSeed = (seed: DropboxEmulatorSeed): DropboxEmulatorState | string
   return {
     entries,
     deleted: seed.deleted ?? [],
-    counters: { nextIdNumber: 1, nextRevNumber: 101 }
+    counters: {
+      nextIdNumber:
+        highestMinted(
+          entries.map(entry => entry.id),
+          mintedIdPattern
+        ) + 1,
+      nextRevNumber: Math.max(
+        101,
+        highestMinted(
+          entries.flatMap(entry => entry.file?.rev ?? []),
+          mintedRevPattern
+        ) + 1
+      )
+    }
   }
 }
 

@@ -256,10 +256,32 @@ describe('cross-check A: in-process emulator through the real connector', () => 
   )
 
   it.effect(
-    'passes every case on one shared emulator; the leftover lookup ignores the trashed case page',
+    'passes every case on one shared emulator; the leftover lookup is not emulated before or after it',
     () =>
       withEmulator({}, emulator =>
         Effect.gen(function* () {
+          const lookup = findNotionConformanceLeftovers.pipe(
+            Effect.provide(portsOver(inProcessLayer(emulator)))
+          )
+
+          // No fixture records a search answer without results, so on the clean workspace the
+          // read-only lookup fails with its action-failed error (the live runner prints its
+          // lookup-failed WARN) and writes nothing.
+          const seeded = emulator.snapshot()
+
+          expect(yield* Effect.flip(lookup)).toMatchObject({
+            _tag: 'NotionConformanceActionFailed',
+            code: 'notion_search_failed',
+            status: 400
+          })
+          expect(emulator.ledger.entries().at(-1)).toMatchObject({
+            route: '/v1/search',
+            status: 400,
+            notEmulated: expect.stringContaining('without matches')
+          })
+          expect(emulator.snapshot()).toEqual(seeded)
+          emulator.ledger.clear()
+
           const report = yield* runConformance(notionConformanceCases, {
             target: { kind: 'in-process' },
             now,
@@ -267,15 +289,23 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           })
 
           expectAllPassed(report)
-
-          const leftovers = yield* findNotionConformanceLeftovers.pipe(
-            Effect.provide(portsOver(inProcessLayer(emulator)))
-          )
-
-          expect(leftovers).toEqual([])
           expect(emulator.ledger.entries().every(entry => entry.notEmulated === undefined)).toBe(
             true
           )
+
+          // The archived case page now matches the lookup's search, and no fixture records a
+          // search answer with a trashed page: the lookup fails closed instead of guessing.
+          const afterRun = emulator.snapshot()
+          const failed = yield* Effect.flip(lookup)
+
+          expect(emulator.snapshot()).toEqual(afterRun)
+
+          expect(failed).toMatchObject({
+            _tag: 'NotionConformanceActionFailed',
+            code: 'notion_search_failed',
+            status: 400
+          })
+          expect(emulator.ledger.entries().at(-1)?.notEmulated).toContain('trashed page')
         })
       ),
     60_000
@@ -328,6 +358,10 @@ describe('cross-check B: emulated over a loopback socket', () => {
     () =>
       withEmulators({}, emulators =>
         Effect.gen(function* () {
+          const seeds = new Map(
+            [...emulators].map(([id, emulator]) => [id, emulator.snapshot()] as const)
+          )
+
           const report = yield* runAll(emulators, { kind: 'emulated' }, emulatedLayer)
 
           expectAllPassed(report)
@@ -346,14 +380,18 @@ describe('cross-check B: emulated over a loopback socket', () => {
           }
 
           for (const id of readCaseIds) {
-            const emulator = emulatorFor(emulators, id)
-
-            expect(emulator.snapshot(), id).toEqual(
-              (yield* Effect.promise(() => makeNotionEmulator()).pipe(
-                Effect.tap(fresh => Effect.promise(() => fresh.close()))
-              )).snapshot()
-            )
+            expect(emulatorFor(emulators, id).snapshot(), id).toEqual(seeds.get(id))
           }
+
+          // The write case leaves only its own trashed page and the advanced counter.
+          const archived = emulatorFor(emulators, archiveCaseId).snapshot()
+          const seed = seeds.get(archiveCaseId) ?? archived
+
+          expect(withoutCounterAndTrashedCasePages(archived)).toEqual(
+            withoutCounterAndTrashedCasePages(seed)
+          )
+          expect(archived.pages.length).toBe(seed.pages.length + 1)
+          expect(archived.counters.nextPageNumber).toBe(seed.counters.nextPageNumber + 1)
         })
       ),
     60_000

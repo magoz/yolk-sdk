@@ -5,17 +5,21 @@
  *
  * It never imports SDK code: its wire shapes, error envelopes, and default seed are copied as data
  * from the synthetic Notion conformance fixtures, and every route names the conformance cases it
- * follows in `notionEmulatorRoutes`. Only the routes those eight cases (with their cleanup and
- * leftover lookup) send are emulated. Response behaviour comes only from the fixtures: anything
- * they do not show answers one ledgered 400 not-emulated and writes nothing.
+ * follows in `notionEmulatorRoutes`. Only the routes those eight cases (with their cleanup) send
+ * are emulated. Response behaviour comes only from the fixtures: anything they do not show answers
+ * one ledgered 400 not-emulated, writes nothing, and uses up no fault. That includes a search
+ * without matches or matching a trashed page, so the read-only leftover lookup fails on a clean
+ * workspace and after the write case (the live runner prints its lookup-failed WARN). Search
+ * considers only the pages whose content the state holds; an implied page never matches.
  *
- * Request-shape latitude (the only accepted deviations from the fixture requests): any bearer
- * value (never checked or stored); extra request headers; JSON key order; `content-type`
- * media-type parameters; the order of query parameters; Notion ids with or without dashes, in any
- * case; any search `query`, title text, and cursor string (looked up in the state); and any
- * `page_size` from 1 to 100. `Notion-Version` must be `2025-09-03`. Everything else (other keys,
- * filters, booleans, sorts, query parameters, and repeated or missing `page_size`) is not
- * emulated.
+ * Request-shape latitude (`/notion`, the only accepted deviations): any bearer value (never
+ * checked or stored); extra request headers; JSON key order; `content-type` media-type
+ * parameters; the order of query parameters; Notion ids with or without dashes, in any case; any
+ * search `query` (looked up in the state); and any `page_size` from 1 to 100 whose page shows
+ * only recorded results (the data source query: 1). `Notion-Version` must be `2025-09-03`.
+ * Everything else (other keys, filters, booleans, sorts, query parameters, titles, repeated or
+ * missing `page_size`, and cursors not issued for the same list since the last reset or whose
+ * list changed) is not emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeNotionEmulator` (importing this module has no side effects).
@@ -66,6 +70,7 @@ export {
   NotionEmulatorBotUser,
   NotionEmulatorDataSource,
   NotionEmulatorDatabase,
+  NotionEmulatorImpliedPage,
   NotionEmulatorPage,
   NotionEmulatorParent,
   NotionEmulatorProfile,
@@ -92,10 +97,11 @@ export const NotionFaultMatch = StatefulFaultMatch
 export type NotionFaultMatch = typeof StatefulFaultMatch.Type
 
 /**
- * A status fault (400-599): answer matching requests with this status, headers, and body before
- * the route runs, so nothing is written. The body defaults to
+ * A status fault (400-599): answer matching requests with this status, headers, and body instead
+ * of the route's write, so nothing is written. The body defaults to
  * `{ error: { type: 'emulator_fault', message } }`; `count` limits how many requests it answers.
- * Requests that are not emulated never reach a fault and use none up.
+ * Only a request the emulator would answer reaches a fault: a request that is not emulated, by
+ * its shape or by the state, never uses one up.
  */
 export const NotionFault = StatefulFault
 
@@ -193,7 +199,9 @@ export const makeNotionEmulator = async (
       rejectDoubleEncodedPropertyId: drills.rejectDoubleEncodedPropertyId === true,
       rowParentAsDatabase: drills.rowParentAsDatabase === true,
       trashedPageNotFound: drills.trashedPageNotFound === true
-    }
+    },
+    cursors: new Map(),
+    propertyCursorCounter: { next: 1 }
   }
 
   // Loaded lazily: the core imports Node builtins and reads files at import time.
@@ -209,8 +217,9 @@ export const makeNotionEmulator = async (
         header('notion-version') === notionEmulatorVersion
           ? undefined
           : `Notion-Version other than ${notionEmulatorVersion} (the version every fixture sends) is not emulated`,
-      recordHeaders: ['notion-version'],
-      clearRuntime: () => undefined,
+      recordHeaders: [{ name: 'notion-version', json: false }],
+      // Property cursor numbers keep advancing, so a cursor from before a reset is never reissued.
+      clearRuntime: () => env.cursors.clear(),
       runtimeState: () => ({}),
       seedSummary: state => ({
         pages: state.pages.length,

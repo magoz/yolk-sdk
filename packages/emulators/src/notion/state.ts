@@ -5,10 +5,14 @@
  *
  * Entity shapes and the default entities follow the synthetic Notion conformance fixtures (API
  * version 2025-09-03), copied as data (the same ids, titles, properties, timestamps, and URLs as
- * the fixtures and `notionConformanceFixtureSeeds`), never imported from SDK code. Where no
- * fixture records a value, the default is synthesized and says so below: the blocks page itself,
- * the parent page of the write case, the database's parent page, and the second data source row
- * (the query fixture's `next_cursor` names it; no fixture shows it).
+ * the fixtures and `notionConformanceFixtureSeeds`), never imported from SDK code. Pages a fixture
+ * only names by id (the blocks page, the write case's parent page, the database's parent page, and
+ * the second data source row the query fixture's `next_cursor` names) are `impliedPages`: their ids
+ * resolve where a fixture names them, but no content is invented for them, so any answer that
+ * would render one is not emulated.
+ *
+ * Minted page ids never repeat seeded ones: the page counter starts above the highest seeded id
+ * in the minted form (`1f0000e0-0000-4000-8000-NNNNNNNNNNNN`).
  *
  * Pages and other objects are stored with their wire fields (`properties`, `parent`, rich text)
  * as JSON, answered as stored. A page's `properties` value is what the page object answers; the
@@ -125,6 +129,18 @@ export const NotionEmulatorDataSource = Schema.Struct({
 
 export type NotionEmulatorDataSource = typeof NotionEmulatorDataSource.Type
 
+/**
+ * A page a fixture names by id but never shows (no title, properties, or timestamps): accepted
+ * where a fixture names it (a block parent, a create parent, a database parent, a query row), never
+ * rendered. `parent` is set only for a data source row.
+ */
+export const NotionEmulatorImpliedPage = Schema.Struct({
+  id: NotionId,
+  parent: Schema.NullOr(NotionEmulatorParent)
+})
+
+export type NotionEmulatorImpliedPage = typeof NotionEmulatorImpliedPage.Type
+
 const Counter = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
 const Counters = Schema.Struct({
@@ -136,6 +152,7 @@ const Counters = Schema.Struct({
 export const NotionEmulatorStateSchema = Schema.Struct({
   botUser: NotionEmulatorBotUser,
   pages: Schema.Array(NotionEmulatorPage),
+  impliedPages: Schema.Array(NotionEmulatorImpliedPage),
   blocks: Schema.Array(NotionEmulatorBlock),
   propertyItems: Schema.Array(NotionEmulatorPropertyItems),
   databases: Schema.Array(NotionEmulatorDatabase),
@@ -150,6 +167,7 @@ export const NotionEmulatorStateSchema = Schema.Struct({
 export type NotionEmulatorState = {
   botUser: NotionEmulatorBotUser
   pages: ReadonlyArray<NotionEmulatorPage>
+  impliedPages: ReadonlyArray<NotionEmulatorImpliedPage>
   blocks: ReadonlyArray<NotionEmulatorBlock>
   propertyItems: ReadonlyArray<NotionEmulatorPropertyItems>
   databases: ReadonlyArray<NotionEmulatorDatabase>
@@ -170,6 +188,7 @@ export const NotionEmulatorSeed = Schema.Struct({
   profile: Schema.optionalKey(NotionEmulatorProfile),
   botUser: Schema.optionalKey(NotionEmulatorBotUser),
   pages: Schema.optionalKey(Schema.Array(NotionEmulatorPage)),
+  impliedPages: Schema.optionalKey(Schema.Array(NotionEmulatorImpliedPage)),
   blocks: Schema.optionalKey(Schema.Array(NotionEmulatorBlock)),
   propertyItems: Schema.optionalKey(Schema.Array(NotionEmulatorPropertyItems)),
   databases: Schema.optionalKey(Schema.Array(NotionEmulatorDatabase)),
@@ -202,23 +221,11 @@ export const titleProperty = (items: ReadonlyArray<Schema.Json>): Schema.JsonObj
   title: [...items]
 })
 
-/** `https://www.notion.so/<Title-Slug>-<id without dashes>`, as the fixtures write page URLs. */
-export const notionPageUrl = (title: string, id: string): string => {
-  const slug = title
-    .split(/[^A-Za-z0-9]+/)
-    .filter(part => part.length > 0)
-    .join('-')
-
-  const compact = id.replaceAll('-', '')
-
-  return `https://www.notion.so/${slug.length === 0 ? compact : `${slug}-${compact}`}`
-}
-
-// Default entities. Fixture-derived: the bot user, the two search pages, the title page with its
-// two annotated title items, the three paragraph blocks, the property page with its `Notes`
-// property and three rich-text segments, the database, its data source and first row. Synthesized:
-// the blocks page itself, the write case's parent page, the database's parent page, and the second
-// row (only the query fixture's `next_cursor` names it).
+// Default entities, copied from the fixtures: the bot user, the two search pages, the title page
+// with its two annotated title items, the three paragraph blocks, the property page with its
+// `Notes` property and three rich-text segments, the database, its data source, and its first row.
+// Implied (named by a fixture, never shown): the blocks page, the write case's parent page, the
+// database's parent page, and the second row.
 
 const seededAt = '2026-09-20T09:00:00.000Z'
 
@@ -236,7 +243,7 @@ const annotations = (bold: boolean): Schema.JsonObject => ({
 const workspacePage = (
   id: string,
   title: ReadonlyArray<Schema.Json>,
-  plainTitle: string,
+  url: string,
   extra: Schema.JsonObject = {}
 ): NotionEmulatorPage => ({
   id,
@@ -245,18 +252,16 @@ const workspacePage = (
   archived: false,
   inTrash: false,
   properties: { ...extra, title: titleProperty(title) },
-  url: notionPageUrl(plainTitle, id)
+  url
 })
 
-const searchPage = (index: number): NotionEmulatorPage => ({
-  ...workspacePage(
+const searchPage = (index: number): NotionEmulatorPage =>
+  workspacePage(
     `1f0000a0-0000-4000-8000-00000000000${index}`,
     [plainRichText(`yolk-search-probe ${index}`)],
-    `yolk-search-probe ${index}`
-  ),
-  // The search fixture's URL carries a shortened id (30 hex digits); copied as is.
-  url: `https://www.notion.so/yolk-search-probe-${index}-1f0000a0000040008000000000000${index}`
-})
+    // The search fixture's URL carries a shortened id (30 hex digits); copied as is.
+    `https://www.notion.so/yolk-search-probe-${index}-1f0000a0000040008000000000000${index}`
+  )
 
 /** A rich text item with annotations, as the title fixture writes it. */
 const annotatedRichText = (text: string, bold: boolean): Schema.JsonObject => ({
@@ -270,16 +275,10 @@ const annotatedRichText = (text: string, bold: boolean): Schema.JsonObject => ({
 const titlePage = workspacePage(
   '1f000000-0000-4000-8000-000000000001',
   [annotatedRichText('Synthetic ', false), annotatedRichText('Title Page', true)],
-  'Synthetic Title Page'
+  'https://www.notion.so/Synthetic-Title-Page-1f000000000040008000000000000001'
 )
 
 const blocksPageId = '1f000000-0000-4000-8000-000000000002'
-
-const blocksPage = workspacePage(
-  blocksPageId,
-  [plainRichText('Synthetic Blocks Page')],
-  'Synthetic Blocks Page'
-)
 
 const propertyPageId = '1f000000-0000-4000-8000-000000000003'
 
@@ -290,15 +289,11 @@ const segment = (index: number) => plainRichText(`Synthetic segment ${index} `)
 const propertyPage = workspacePage(
   propertyPageId,
   [plainRichText('Synthetic Property Page')],
-  'Synthetic Property Page',
+  'https://www.notion.so/Synthetic-Property-Page-1f000000000040008000000000000003',
   { Notes: { id: propertyId, type: 'rich_text', rich_text: [segment(1)] } }
 )
 
-const parentPage = workspacePage(
-  '1f000000-0000-4000-8000-000000000005',
-  [plainRichText('Synthetic Parent Page')],
-  'Synthetic Parent Page'
-)
+const parentPageId = '1f000000-0000-4000-8000-000000000005'
 
 const databaseId = '1f000000-0000-4000-8000-000000000004'
 
@@ -306,28 +301,24 @@ const dataSourceId = '1f0000d0-0000-4000-8000-000000000001'
 
 const databaseParentId = '1f0000d0-0000-4000-8000-0000000000aa'
 
-const databaseParentPage = workspacePage(
-  databaseParentId,
-  [plainRichText('Synthetic Database Parent')],
-  'Synthetic Database Parent'
-)
+const rowParent: NotionEmulatorParent = {
+  type: 'data_source_id',
+  data_source_id: dataSourceId,
+  database_id: databaseId
+}
 
-const row = (number: number): NotionEmulatorPage => {
-  const id = `1f0000d0-0000-4000-8000-000000000${number}`
-  const title = `Synthetic task ${number - 100}`
-
-  return {
-    id,
-    times: null,
-    parent: { type: 'data_source_id', data_source_id: dataSourceId, database_id: databaseId },
-    archived: false,
-    inTrash: false,
-    properties: {
-      Name: { id: 'title', type: 'title', title: [plainRichText(title)] },
-      Done: { id: 'Syn%3Ad', type: 'checkbox', checkbox: false }
-    },
-    url: notionPageUrl(title, id)
-  }
+/** The query fixture's row (its row object carries no timestamps). */
+const firstRow: NotionEmulatorPage = {
+  id: '1f0000d0-0000-4000-8000-000000000101',
+  times: null,
+  parent: rowParent,
+  archived: false,
+  inTrash: false,
+  properties: {
+    Name: { id: 'title', type: 'title', title: [plainRichText('Synthetic task 1')] },
+    Done: { id: 'Syn%3Ad', type: 'checkbox', checkbox: false }
+  },
+  url: 'https://www.notion.so/Synthetic-task-1-1f0000d0000040008000000000000101'
 }
 
 const paragraph = (index: number): NotionEmulatorBlock => ({
@@ -357,16 +348,12 @@ const profileEntities = (profile: NotionEmulatorProfile): ProfileEntities =>
   profile === 'default'
     ? {
         botUser: defaultBotUser,
-        pages: [
-          searchPage(1),
-          searchPage(2),
-          titlePage,
-          blocksPage,
-          propertyPage,
-          parentPage,
-          databaseParentPage,
-          row(101),
-          row(102)
+        pages: [searchPage(1), searchPage(2), titlePage, propertyPage, firstRow],
+        impliedPages: [
+          { id: blocksPageId, parent: null },
+          { id: parentPageId, parent: null },
+          { id: databaseParentId, parent: null },
+          { id: '1f0000d0-0000-4000-8000-000000000102', parent: rowParent }
         ],
         blocks: [paragraph(1), paragraph(2), paragraph(3)],
         propertyItems: [
@@ -388,7 +375,7 @@ const profileEntities = (profile: NotionEmulatorProfile): ProfileEntities =>
             archived: false,
             createdTime: seededAt,
             lastEditedTime: seededAt,
-            url: `https://www.notion.so/${databaseId.replaceAll('-', '')}`
+            url: 'https://www.notion.so/1f000000000040008000000000000004'
           }
         ],
         dataSources: [
@@ -408,6 +395,7 @@ const profileEntities = (profile: NotionEmulatorProfile): ProfileEntities =>
     : {
         botUser: defaultBotUser,
         pages: [],
+        impliedPages: [],
         blocks: [],
         propertyItems: [],
         databases: [],
@@ -417,14 +405,18 @@ const profileEntities = (profile: NotionEmulatorProfile): ProfileEntities =>
 const duplicate = (values: ReadonlyArray<string>): string | undefined =>
   values.find((value, index) => values.indexOf(value) !== index)
 
+/** The minted page id form (`1f0000e0-0000-4000-8000-000000000001`). */
+const mintedPageIdPattern = /^1f0000e0-0000-4000-8000-(\d{12})$/
+
 /** Integrity problems a decoded seed can still have (duplicates, dangling references). */
 const seedProblem = (entities: ProfileEntities): string | undefined => {
   const pageIds = entities.pages.map(page => page.id)
+  const knownPageIds = [...pageIds, ...entities.impliedPages.map(page => page.id)]
   const databaseIds = entities.databases.map(database => database.id)
   const dataSourceIds = entities.dataSources.map(source => source.id)
 
   const duplicates: ReadonlyArray<readonly [string, string | undefined]> = [
-    ['object id', duplicate([...pageIds, ...databaseIds, ...dataSourceIds])],
+    ['object id', duplicate([...knownPageIds, ...databaseIds, ...dataSourceIds])],
     ['block id', duplicate(entities.blocks.map(block => block.id))],
     [
       'property item list',
@@ -436,15 +428,15 @@ const seedProblem = (entities: ProfileEntities): string | undefined => {
     if (value !== undefined) return `duplicate ${label} ${value}`
   }
 
-  for (const page of entities.pages) {
+  for (const page of [...entities.pages, ...entities.impliedPages]) {
     const parent = page.parent
 
-    if (parent.type === 'page_id' && !pageIds.includes(parent.page_id)) {
+    if (parent?.type === 'page_id' && !knownPageIds.includes(parent.page_id)) {
       return `page ${page.id} references missing parent page ${parent.page_id}`
     }
 
     if (
-      parent.type === 'data_source_id' &&
+      parent?.type === 'data_source_id' &&
       !entities.dataSources.some(
         source => source.id === parent.data_source_id && source.databaseId === parent.database_id
       )
@@ -453,7 +445,7 @@ const seedProblem = (entities: ProfileEntities): string | undefined => {
     }
   }
 
-  const block = entities.blocks.find(candidate => !pageIds.includes(candidate.pageId))
+  const block = entities.blocks.find(candidate => !knownPageIds.includes(candidate.pageId))
 
   if (block !== undefined) return `block ${block.id} references missing page ${block.pageId}`
 
@@ -461,7 +453,9 @@ const seedProblem = (entities: ProfileEntities): string | undefined => {
 
   if (items !== undefined) return `property items reference missing page ${items.pageId}`
 
-  const database = entities.databases.find(candidate => !pageIds.includes(candidate.parent.page_id))
+  const database = entities.databases.find(
+    candidate => !knownPageIds.includes(candidate.parent.page_id)
+  )
 
   if (database !== undefined) {
     return `database ${database.id} references missing parent page ${database.parent.page_id}`
@@ -481,6 +475,7 @@ const stateFromSeed = (seed: NotionEmulatorSeed): NotionEmulatorState | string =
   const entities: ProfileEntities = {
     botUser: seed.botUser ?? profile.botUser,
     pages: seed.pages ?? profile.pages,
+    impliedPages: seed.impliedPages ?? profile.impliedPages,
     blocks: seed.blocks ?? profile.blocks,
     propertyItems: seed.propertyItems ?? profile.propertyItems,
     databases: seed.databases ?? profile.databases,
@@ -489,7 +484,15 @@ const stateFromSeed = (seed: NotionEmulatorSeed): NotionEmulatorState | string =
 
   const problem = seedProblem(entities)
 
-  return problem ?? { ...entities, counters: { nextPageNumber: 1 } }
+  // Minted ids start above every seeded id in the minted form, so none repeats.
+  const highest = Math.max(
+    0,
+    ...[...entities.pages, ...entities.impliedPages].map(page =>
+      Number(mintedPageIdPattern.exec(page.id)?.[1] ?? 0)
+    )
+  )
+
+  return problem ?? { ...entities, counters: { nextPageNumber: highest + 1 } }
 }
 
 /** Decode and build a seed; a string is the reason it is invalid. */

@@ -13,16 +13,19 @@
  * request:
  *
  * 1. route match on the raw path (path parameters decoded once; unknown routes and methods, and
- *    invalid percent-encoding, are not emulated);
+ *    invalid percent-encoding, are not emulated), and the origin the route is recorded on;
  * 2. a non-empty `Authorization: Bearer` credential (never checked, stored, forwarded, or
  *    ledgered) and the emulator's header rules;
  * 3. the body the route takes (none, JSON with an `application/json` media type, or raw bytes);
  * 4. the route's request-shape check, which reads no state;
- * 5. the first matching status fault (answered before the route runs, so nothing is written);
- * 6. the stateful route in the core runtime, which may still refuse a request the state cannot
- *    answer the way a fixture does (not emulated, nothing written).
+ * 5. in the core runtime, the route's plan: a pure, state-reading eligibility check that refuses
+ *    what the state cannot answer the way a fixture does, and otherwise returns a commit;
+ * 6. the first matching status fault, decided only for an eligible request (nothing is written);
+ * 7. the commit, the only step that writes.
  *
- * Steps 1 to 4 use up no fault. A route that throws answers an evidence-tagged 500 emulator error
+ * A request that is not emulated (steps 1 to 5) never uses up a fault. The plan, the fault
+ * decision, and the commit run synchronously together, so no other request interleaves. A route
+ * that throws answers an evidence-tagged 500 emulator error
  * (`responseError` in the ledger); a closed emulator answers 503. No recovery answer reads the
  * injectable clock, so a failing clock cannot change it. Every response of a matched route
  * carries `x-emulator-evidence: unverified` when the route is unverified. Ledgered bodies and
@@ -39,7 +42,8 @@ import {
   handlerFailedResponse,
   isCredentialHeaderName,
   redactCredentialFields,
-  redactCredentialQuery
+  redactCredentialQuery,
+  redactedCredentialValue
 } from './emulator-http.ts'
 import {
   emulatorEvidenceHeader,
@@ -131,7 +135,10 @@ export type StatefulLedgerEntry = {
   readonly body?: Schema.Json
   /** Length of a raw (non-JSON) request body. */
   readonly bodyBytes?: number
-  /** The non-credential request headers the emulator records (lower-case names). */
+  /**
+   * The non-credential request headers the emulator records (lower-case names); a JSON header is
+   * recorded with credential-named keys redacted at any depth, or as `<redacted>` when unparseable.
+   */
   readonly headers: Readonly<Record<string, string>>
   readonly status: number
   /** Evidence of the matched route; `unknown-route` for requests on no route. */
@@ -179,35 +186,41 @@ export type RunContext<Env> = {
   readonly seq: number
 }
 
-/** An admitted request: its state-reading, state-writing part. */
+/** The writing part of an eligible request: applies its change and answers. */
+export type Commit = () => Response
+
+/** An admitted request: its pure, state-reading eligibility check, returning the commit. */
 export type Admission<State, Env> = {
-  readonly run: (state: State, context: RunContext<Env>) => Response | NotEmulated
+  readonly plan: (state: State, context: RunContext<Env>) => Commit | NotEmulated
 }
 
 export type RouteBody = 'none' | 'json' | 'bytes'
 
 export type StatefulRoute<State, Env> = EmulatorRouteEvidence & {
+  /** The origin a fixture records the route on; another origin is not emulated. Omitted: any. */
+  readonly origin?: string
   readonly body: RouteBody
   /** The request-shape check (reads no state): an admission, or not emulated. */
   readonly admit: (request: EmulatedRequest, env: Env) => Admission<State, Env> | NotEmulated
 }
 
 /**
- * A route of the table: its evidence, the body it takes, its request-shape check `admit` (no
- * state), and `run`, the stateful part that only ever sees an admitted input.
+ * A route of the table: its evidence (and recorded origin), the body it takes, its request-shape
+ * check `admit` (no state), and `plan`, which only ever sees an admitted input: it reads the state
+ * without writing and answers not emulated or the commit that writes.
  */
 export const statefulRoute = <State, Env, Input>(
-  evidence: EmulatorRouteEvidence,
+  evidence: EmulatorRouteEvidence & { readonly origin?: string },
   body: RouteBody,
   admit: (request: EmulatedRequest, env: Env) => Input | NotEmulated,
-  run: (state: State, input: Input, context: RunContext<Env>) => Response | NotEmulated
+  plan: (state: State, input: Input, context: RunContext<Env>) => Commit | NotEmulated
 ): StatefulRoute<State, Env> => ({
   ...evidence,
   body,
   admit: (request, env) => {
     const input = admit(request, env)
 
-    return isNotEmulated(input) ? input : { run: (state, context) => run(state, input, context) }
+    return isNotEmulated(input) ? input : { plan: (state, context) => plan(state, input, context) }
   }
 })
 
@@ -215,6 +228,7 @@ export const statefulRoute = <State, Env, Input>(
 export const routeEvidence = <State, Env>({
   body: _body,
   admit: _admit,
+  origin: _origin,
   ...evidence
 }: StatefulRoute<State, Env>): EmulatorRouteEvidence => evidence
 
@@ -356,6 +370,9 @@ export type StatefulCore<State> = {
  */
 export type CoreDispatch<State> = (state: State, request: Request) => Response
 
+/** A request header the ledger records. */
+export type RecordedHeader = { readonly name: string; readonly json: boolean }
+
 export type StatefulEmulatorConfig<State, Env> = {
   readonly routes: ReadonlyArray<StatefulRoute<State, Env>>
   readonly env: Env
@@ -364,8 +381,12 @@ export type StatefulEmulatorConfig<State, Env> = {
   readonly buildSeed: (input: unknown) => State | string
   /** Header rules every request must meet (after the credential); a string is not emulated. */
   readonly requestProblem?: (header: (name: string) => string | undefined) => string | undefined
-  /** Non-credential request headers the ledger records (lower-case names). */
-  readonly recordHeaders: ReadonlyArray<string>
+  /**
+   * Non-credential request headers the ledger records (lower-case names). A `json` header is
+   * parsed and its credential-named keys redacted at any depth; an unparseable value is recorded
+   * as `<redacted>`. A credential header name is refused when the emulator is built.
+   */
+  readonly recordHeaders: ReadonlyArray<RecordedHeader>
   /** Clear runtime data (cursors) on reset and seed. */
   readonly clearRuntime: () => void
   /** Extra `/_emulate/state` fields (runtime data). */
@@ -376,8 +397,16 @@ export type StatefulEmulatorConfig<State, Env> = {
 }
 
 export type StatefulEmulatorApi<State, Seed> = {
-  /** The fetch handler (API routes and `/_emulate/*`). Never rejects. */
+  /**
+   * The fetch handler (API routes and `/_emulate/*`); a request arrives on the origin of its URL.
+   * Never rejects.
+   */
   readonly fetch: (request: Request) => Promise<Response>
+  /**
+   * The fetch handler for requests that arrive on `origin` whatever their URL says (serve it on
+   * a loopback server behind `EmulatedHttpClient`, which rewrites the origin). Never rejects.
+   */
+  readonly fetchOn: (origin: string) => (request: Request) => Promise<Response>
   readonly ledger: {
     readonly entries: () => ReadonlyArray<StatefulLedgerEntry>
     readonly clear: () => void
@@ -443,8 +472,11 @@ const readBytes = (request: Request): Promise<Uint8Array | undefined> =>
 const isControlPath = (path: string): boolean =>
   path === '/_emulate' || path.startsWith('/_emulate/')
 
-/** Header the wrapper sets on core requests: the ledger sequence number of the forwarded job. */
-const requestSeqHeader = 'x-emulator-request-seq'
+/**
+ * Header the wrapper sets on core requests: the id of the forwarded job, from a counter that
+ * never resets (the ledger sequence does), so a ledger clear never makes two jobs share an id.
+ */
+const jobIdHeader = 'x-emulator-job-id'
 
 type MutableLedgerEntry = {
   seq: number
@@ -471,6 +503,10 @@ type MutableFaultState = {
 
 type Job<State, Env> = {
   readonly admission: Admission<State, Env>
+  /** Ledger sequence number of the request (for synthetic request ids). */
+  readonly seq: number
+  /** Answers the first matching fault (consuming it), or `undefined` when none matches. */
+  readonly decideFault: () => Response | undefined
   notEmulated?: string
 }
 
@@ -486,6 +522,17 @@ const withEvidence = (response: Response, evidence: EmulatorEvidence): Response 
     statusText: response.statusText,
     headers
   })
+}
+
+/** A recorded header value: JSON with credential-named keys redacted, or the plain value. */
+const recordedHeaderValue = (header: RecordedHeader, value: string): string => {
+  if (!header.json) return value
+
+  const parsed = parseJsonText(value)
+
+  return parsed === undefined
+    ? redactedCredentialValue
+    : JSON.stringify(redactCredentialFields(parsed))
 }
 
 const snapshotEntry = (entry: MutableLedgerEntry): StatefulLedgerEntry => ({
@@ -504,26 +551,33 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
   config: StatefulEmulatorConfig<State, Env>,
   createCore: (dispatch: CoreDispatch<State>) => Promise<StatefulCore<State>>
 ): Promise<StatefulEmulatorApi<State, Seed>> => {
+  const credentialHeader = config.recordHeaders.find(header => isCredentialHeaderName(header.name))
+
+  if (credentialHeader !== undefined) {
+    throw new Error(`the ledger never records the credential header ${credentialHeader.name}`)
+  }
+
   const match = routeMatcher(config.routes)
   const manifest = config.routes.map(routeEvidence)
   const jobs = new Map<number, Job<State, Env>>()
+  let nextJobId = 1
 
+  // Plan, fault decision, and commit run synchronously together: no request interleaves.
   const dispatch: CoreDispatch<State> = (state, request) => {
-    const seq = Number(request.headers.get(requestSeqHeader) ?? 'NaN')
-    const job = jobs.get(seq)
+    const job = jobs.get(Number(request.headers.get(jobIdHeader) ?? 'NaN'))
 
     if (job === undefined) return handlerFailedResponse()
 
     try {
-      const result = job.admission.run(state, { env: config.env, seq })
+      const planned = job.admission.plan(state, { env: config.env, seq: job.seq })
 
-      if (isNotEmulated(result)) {
-        job.notEmulated = result.reason
+      if (isNotEmulated(planned)) {
+        job.notEmulated = planned.reason
 
-        return notEmulatedResponse(result.reason)
+        return notEmulatedResponse(planned.reason)
       }
 
-      return result
+      return job.decideFault() ?? planned()
     } catch {
       return handlerFailedResponse()
     }
@@ -630,7 +684,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     return notEmulatedResponse(reason)
   }
 
-  /** Everything after the route match: credential, headers, body, shape, fault, then the core. */
+  /** Everything after the route match: credential, headers, body, shape, then the core. */
   const routed = async (
     request: Request,
     url: URL,
@@ -705,25 +759,32 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
     if (isNotEmulated(admitted)) return refuse(entry, admitted.reason)
 
-    const fault = takeFault(request.method.toUpperCase(), url.pathname)
+    const method = request.method.toUpperCase()
+    const jobId = nextJobId++
 
-    if (fault !== undefined) {
-      const response = applyFault(fault)
+    const job: Job<State, Env> = {
+      admission: admitted,
+      seq: entry.seq,
+      decideFault: () => {
+        const fault = takeFault(method, url.pathname)
 
-      entry.fault = 'status'
+        if (fault === undefined) return undefined
 
-      return response
+        const response = applyFault(fault)
+
+        entry.fault = 'status'
+
+        return response
+      }
     }
 
-    const job: Job<State, Env> = { admission: admitted }
-
-    jobs.set(entry.seq, job)
+    jobs.set(jobId, job)
 
     try {
       const response = await core.fetch(
         new Request(new URL(url.pathname, core.baseUrl), {
           method: 'POST',
-          headers: { [requestSeqHeader]: String(entry.seq) }
+          headers: { [jobIdHeader]: String(jobId) }
         })
       )
 
@@ -737,11 +798,11 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
       return response
     } finally {
-      jobs.delete(entry.seq)
+      jobs.delete(jobId)
     }
   }
 
-  const emulatedApi = async (request: Request, url: URL): Promise<Response> => {
+  const emulatedApi = async (request: Request, url: URL, arrivedOn: string): Promise<Response> => {
     const matched = match(request.method, url.pathname)
 
     const entry: MutableLedgerEntry = {
@@ -754,10 +815,10 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       evidence: matched?.route.evidence ?? 'unknown-route'
     }
 
-    for (const name of config.recordHeaders) {
-      const value = request.headers.get(name)
+    for (const header of config.recordHeaders) {
+      const value = request.headers.get(header.name)
 
-      if (value !== null) entry.headers[name] = value
+      if (value !== null) entry.headers[header.name] = recordedHeaderValue(header, value)
     }
 
     entries.push(entry)
@@ -769,6 +830,15 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     }
 
     entry.route = matched.route.path
+
+    if (matched.route.origin !== undefined && matched.route.origin !== arrivedOn) {
+      entry.status = 400
+
+      return withEvidence(
+        refuse(entry, `this route is recorded on ${matched.route.origin} only`),
+        matched.route.evidence
+      )
+    }
 
     // Error recovery still answers through the route: the fallback 500 is evidence-tagged and
     // the ledger records the status actually sent.
@@ -901,7 +971,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     return matched === undefined ? failed : withEvidence(failed, matched.route.evidence)
   }
 
-  const handle = async (request: Request): Promise<Response> => {
+  const handle = async (request: Request, origin: string | undefined): Promise<Response> => {
     if (closed) {
       return emulatorError(503, 'the emulator is closed')
     }
@@ -910,11 +980,17 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
     return isControlPath(url.pathname)
       ? controlPlane(request, url.pathname)
-      : emulatedApi(request, url)
+      : emulatedApi(request, url, origin ?? url.origin)
   }
 
+  const fetchOn =
+    (origin: string | undefined) =>
+    (request: Request): Promise<Response> =>
+      handle(request, origin).catch(() => lastResort(request))
+
   return {
-    fetch: request => handle(request).catch(() => lastResort(request)),
+    fetch: fetchOn(undefined),
+    fetchOn: origin => fetchOn(origin),
     ledger: {
       entries: () => entries.map(snapshotEntry),
       clear: clearLedger

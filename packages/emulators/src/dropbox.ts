@@ -5,17 +5,20 @@
  *
  * It never imports SDK code: its wire shapes, error envelopes, and default seed are copied as data
  * from the synthetic Dropbox conformance fixtures, and every route names the conformance cases it
- * follows in `dropboxEmulatorRoutes`. Only the routes those eight cases (with their cleanup and
- * leftover lookup) send are emulated. Response behaviour comes only from the fixtures: anything
- * they do not show answers one ledgered 400 not-emulated and writes nothing.
+ * follows in `dropboxEmulatorRoutes`. Only the routes those eight cases (with their cleanup) send
+ * are emulated, each on the origin its fixtures record. Response behaviour comes only from the
+ * fixtures: anything they do not show answers one ledgered 400 not-emulated, writes nothing, and
+ * uses up no fault. That includes a listing of an empty folder, so the read-only leftover lookup
+ * fails against the default seed's empty work folder (the live runner prints its lookup-failed
+ * WARN).
  *
- * Request-shape latitude (the only accepted deviations from the fixture requests): any bearer
- * value (never checked or stored); extra request headers; JSON key order; `content-type`
- * media-type parameters; any path, query, and cursor string (looked up in the state); any
- * `list_folder` `limit` from 1 to 2000 and any `search_v2` `options.max_results` from 1 to 1000;
- * any upload body bytes; and which of the two origins carried a request (one handler serves both;
- * the paths never overlap). Everything else (other keys, booleans, modes, query parameters, ids or
- * revs where the fixtures send paths, and the root folder) is not emulated.
+ * Request-shape latitude (`/dropbox`, the only accepted deviations): any bearer value (never
+ * checked or stored); extra request headers; JSON key order; `content-type` media-type
+ * parameters; any path and search query (looked up in the state); any `list_folder` `limit` from
+ * 1 to 2000 and any `search_v2` `options.max_results` from 1 to 1000; and any upload body bytes.
+ * Everything else (other keys, booleans, modes, query parameters, another origin, ids or revs
+ * where the fixtures send paths, the root folder, and cursors not issued since the last reset or
+ * whose listing changed) is not emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeDropboxEmulator` (importing this module has no side effects).
@@ -56,7 +59,9 @@ export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.t
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export {
+  dropboxEmulatorApiOrigin,
   dropboxEmulatorBasePath,
+  dropboxEmulatorContentOrigin,
   dropboxEmulatorErrorBodies,
   type DropboxEmulatorDrills
 } from './dropbox/api.ts'
@@ -72,12 +77,6 @@ export {
   type DropboxEmulatorState
 } from './dropbox/state.ts'
 
-/** Origin of the RPC routes (`/2/files/...`). */
-export const dropboxEmulatorApiOrigin = 'https://api.dropboxapi.com'
-
-/** Origin of the upload route (`/2/files/upload`); route it to the same emulator. */
-export const dropboxEmulatorContentOrigin = 'https://content.dropboxapi.com'
-
 /**
  * Route evidence manifest: every emulated route, whether it writes, and the conformance cases
  * whose (currently synthetic, unverified) wire claims it follows. Kept in sync with the handlers
@@ -92,10 +91,11 @@ export const DropboxFaultMatch = StatefulFaultMatch
 export type DropboxFaultMatch = typeof StatefulFaultMatch.Type
 
 /**
- * A status fault (400-599): answer matching requests with this status, headers, and body before
- * the route runs, so nothing is written. The body defaults to
+ * A status fault (400-599): answer matching requests with this status, headers, and body instead
+ * of the route's write, so nothing is written. The body defaults to
  * `{ error: { type: 'emulator_fault', message } }`; `count` limits how many requests it answers.
- * Requests that are not emulated never reach a fault and use none up.
+ * Only a request the emulator would answer reaches a fault: a request that is not emulated, by
+ * its shape or by the state, never uses one up.
  */
 export const DropboxFault = StatefulFault
 
@@ -188,12 +188,9 @@ export const makeDropboxEmulator = async (
       env,
       initial,
       buildSeed: buildSeedState,
-      recordHeaders: ['dropbox-api-arg'],
-      clearRuntime: () => {
-        env.cursors.clear()
-        env.cursorCounters.list = 1
-        env.cursorCounters.search = 1
-      },
+      recordHeaders: [{ name: 'dropbox-api-arg', json: true }],
+      // Cursor numbers keep advancing, so a cursor issued before a reset is never issued again.
+      clearRuntime: () => env.cursors.clear(),
       runtimeState: () => ({ cursors: cursors() }),
       seedSummary: state => ({ entries: state.entries.length }),
       inputInvalid

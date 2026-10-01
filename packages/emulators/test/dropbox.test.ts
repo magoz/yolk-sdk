@@ -32,6 +32,7 @@ import {
   type DropboxFault
 } from '../src/dropbox.ts'
 import { EmulatorRoute, InProcessHttpClient } from '../src/router.ts'
+import { makeStatefulEmulator } from '../src/stateful-emulator.ts'
 
 const api = new URL(dropboxApiBaseUrl).origin
 
@@ -226,42 +227,52 @@ describe('fixture data copies', () => {
         expect(field(await jsonOf(response), 'path_display'), path).toBe(path)
       }
 
-      for (const path of [seeds.pagingFolderPath, seeds.workFolderPath]) {
-        expect((await rpc(target, 'list_folder', { path, limit: 2000 })).status, path).toBe(200)
-      }
+      expect(
+        (await rpc(target, 'list_folder', { path: seeds.pagingFolderPath, limit: 2000 })).status
+      ).toBe(200)
+      // The seeded work folder is empty: no fixture records an empty listing.
+      await expectNotEmulated(
+        await rpc(target, 'list_folder', { path: seeds.workFolderPath, limit: 2000 })
+      )
     })
   )
 })
 
-// Keys whose values the emulator mints for created entries (ids, revs, and content hashes derived
-// from the rev): learned from write responses only, then substituted in later requests and
-// expected bodies. Seeded values and everything else must match exactly.
-const mintedKeys: ReadonlySet<string> = new Set(['id', 'rev', 'content_hash'])
-
-const writeRoutes: ReadonlySet<string> = new Set([
-  'create_folder_v2',
-  'copy_v2',
-  'move_v2',
-  'upload'
+// The values the emulator mints itself, by route and exact field path: created ids, new revs, and
+// the content hashes derived from those revs. A fixture value is learned the first time one of
+// these paths shows it and must map to the same emulator value wherever it appears again (a move
+// keeps the copy's id; a copy keeps the source's content hash, which is never learned). Every other
+// byte of every response must equal the fixture.
+const mintedPaths = new Map<string, ReadonlyArray<ReadonlyArray<string>>>([
+  ['create_folder_v2', [['metadata', 'id']]],
+  [
+    'copy_v2',
+    [
+      ['metadata', 'id'],
+      ['metadata', 'rev']
+    ]
+  ],
+  ['move_v2', [['metadata', 'rev']]],
+  ['upload', [['id'], ['rev'], ['content_hash']]]
 ])
 
-const learn = (expected: unknown, actual: unknown, ids: Map<string, string>): void => {
-  if (Array.isArray(expected) && Array.isArray(actual)) {
-    expected.forEach((item, index) => learn(item, actual[index], ids))
+const at = (value: unknown, path: ReadonlyArray<string>): unknown =>
+  path.reduce<unknown>((current, key) => field(current, key), value)
 
-    return
-  }
+const learn = (
+  route: string,
+  expected: unknown,
+  actual: unknown,
+  ids: Map<string, string>
+): void => {
+  for (const path of mintedPaths.get(route) ?? []) {
+    const from = at(expected, path)
+    const to = at(actual, path)
 
-  if (!Predicate.isObject(expected) || !Predicate.isObject(actual)) return
+    if (!Predicate.isString(from) || !Predicate.isString(to)) continue
 
-  for (const [key, value] of Object.entries(expected)) {
-    const other = actual[key]
-
-    if (mintedKeys.has(key) && Predicate.isString(value) && Predicate.isString(other)) {
-      if (value !== other) ids.set(value, other)
-    } else {
-      learn(value, other, ids)
-    }
+    // Learned once: a later appearance of the same fixture value must map to the same value.
+    if (!ids.has(from)) ids.set(from, to)
   }
 }
 
@@ -276,10 +287,9 @@ const substituted = (text: string, ids: ReadonlyMap<string, string>): string => 
 }
 
 describe('fixture envelopes', () => {
-  // Replays every Dropbox fixture's requests, in order, against a fresh emulator and compares each
-  // complete response (status, content type, and the whole body) with the fixture: error bodies
-  // byte for byte, JSON bodies after the ids, revs, and hashes the emulator minted for created
-  // entries replace the fixture's.
+  // Replays every Dropbox fixture's requests, in order, against a fresh emulator (the clock at the
+  // upload fixture's time) and compares each complete response with the fixture byte for byte:
+  // status, content type, and the whole body, after the minted values above replace the fixture's.
   for (const fixture of dropboxConformanceFixtures) {
     it.effect(fixture.id, () =>
       Effect.promise(async () => {
@@ -316,23 +326,51 @@ describe('fixture envelopes', () => {
           const text = await response.text()
           const recorded = 'body' in expected ? (expected.body ?? '') : ''
 
-          if (expected.status !== 200) {
-            expect(text, label).toBe(recorded)
+          if (expected.status === 200) learn(route, JSON.parse(recorded), JSON.parse(text), ids)
 
-            continue
-          }
-
-          const actual: unknown = JSON.parse(text)
-
-          if (writeRoutes.has(route)) learn(JSON.parse(recorded), actual, ids)
-
-          expect(actual, label).toEqual(JSON.parse(substituted(recorded, ids)))
+          expect(text, label).toBe(substituted(recorded, ids))
         }
 
         expect(target.ledger.entries().every(entry => entry.notEmulated === undefined)).toBe(true)
       })
     )
   }
+
+  it.effect('a minted value that changes between appearances fails the comparison', () =>
+    Effect.promise(async () => {
+      // The drill gives the moved file a new id: the move answer no longer equals the fixture's
+      // (the copy's id, learned on copy_v2, must reappear on move_v2).
+      const target = await emulator({ drills: { moveMintsNewId: true } })
+      const ids = new Map<string, string>()
+
+      const fixture = dropboxConformanceFixtures.find(
+        candidate => candidate.caseId === 'dropbox.files.copy-move-metadata'
+      )
+
+      let mismatched = 0
+
+      for (const exchange of fixture?.exchanges ?? []) {
+        const route = exchange.request.url.slice(exchange.request.url.indexOf('/files/') + 7)
+
+        const response = await target.fetch(
+          new Request(exchange.request.url, {
+            method: 'POST',
+            headers: { ...exchange.request.headers, authorization: `Bearer ${token}` },
+            body: substituted(JSON.stringify(exchange.request.body ?? null), ids)
+          })
+        )
+
+        const text = await response.text()
+        const recorded = 'body' in exchange.response ? (exchange.response.body ?? '') : ''
+
+        if (response.status === 200) learn(route, JSON.parse(recorded), JSON.parse(text), ids)
+
+        if (text !== substituted(recorded, ids)) mismatched += 1
+      }
+
+      expect(mismatched).toBe(1)
+    })
+  )
 })
 
 describe('fail closed', () => {
@@ -366,85 +404,134 @@ describe('fail closed', () => {
     })
   )
 
-  it.effect('refuses missing credentials, other bodies, query parameters, and shapes', () =>
-    Effect.promise(async () => {
-      const target = await emulator()
-      const before = target.snapshot()
-      const mixed = { path: dropboxConformanceFixtureSeeds.mixedCasePath }
+  it.effect(
+    'refuses missing credentials, bodies, queries, shapes, and states, using no fault',
+    () =>
+      Effect.promise(async () => {
+        const target = await emulator()
+        const before = target.snapshot()
+        const mixed = { path: dropboxConformanceFixtureSeeds.mixedCasePath }
 
-      const refused: ReadonlyArray<readonly [string, Promise<Response>]> = [
-        ['no bearer', rpc(target, 'get_metadata', mixed, { authorization: null })],
-        ['empty bearer', rpc(target, 'get_metadata', mixed, { authorization: 'Bearer ' })],
-        ['basic auth', rpc(target, 'get_metadata', mixed, { authorization: 'Basic eDp5' })],
-        [
-          'text body',
-          rpc(target, 'get_metadata', mixed, { headers: { 'content-type': 'text/plain' } })
-        ],
-        ['invalid JSON', rpc(target, 'get_metadata', undefined, { rawBody: '{' })],
-        ['array body', rpc(target, 'get_metadata', [mixed])],
-        ['extra key', rpc(target, 'get_metadata', { ...mixed, include_media_info: true })],
-        [
-          'include_deleted false',
-          rpc(target, 'get_metadata', { ...mixed, include_deleted: false })
-        ],
-        ['root path', rpc(target, 'get_metadata', { path: '' })],
-        ['id path', rpc(target, 'get_metadata', { path: 'id:SyntheticMixedCaseFile01' })],
-        ['rev path', rpc(target, 'get_metadata', { path: 'rev:a1b2c3d4e5f60010' })],
-        ['dot path', rpc(target, 'get_metadata', { path: '/Conformance/../x' })],
-        ['trailing slash', rpc(target, 'get_metadata', { path: '/Conformance/' })],
-        ['folder metadata', rpc(target, 'get_metadata', { path: '/Conformance' })],
-        [
-          'include_deleted on a live entry',
-          rpc(target, 'get_metadata', { ...mixed, include_deleted: true })
-        ],
-        ['list without limit', rpc(target, 'list_folder', { path: work })],
-        ['list limit 0', rpc(target, 'list_folder', { path: work, limit: 0 })],
-        ['list limit 2001', rpc(target, 'list_folder', { path: work, limit: 2001 })],
-        ['list recursive', rpc(target, 'list_folder', { path: work, limit: 2, recursive: false })],
-        ['list a file', rpc(target, 'list_folder', { path: mixed.path, limit: 2 })],
-        ['list a missing folder', rpc(target, 'list_folder', { path: `${work}/absent`, limit: 2 })],
-        ['unknown list cursor', rpc(target, 'list_folder/continue', { cursor: 'AAHx' })],
-        ['unknown search cursor', rpc(target, 'search/continue_v2', { cursor: 'AAHx' })],
-        [
-          'search without filename_only',
-          rpc(target, 'search_v2', { query: 'x', options: { max_results: 1 } })
-        ],
-        [
-          'search filename_only false',
-          rpc(target, 'search_v2', {
-            query: 'x',
-            options: { max_results: 1, filename_only: false }
-          })
-        ],
-        [
-          'search path option',
-          rpc(target, 'search_v2', {
-            query: 'x',
-            options: { max_results: 1, filename_only: true, path: work }
-          })
-        ],
-        [
-          'query parameter',
-          target.fetch(
-            new Request(`${api}/2/files/get_metadata?arg=x`, {
-              method: 'POST',
-              headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-              body: JSON.stringify(mixed)
+        // An unlimited fault on every route: no refused request may reach it.
+        target.faults.add({ kind: 'status', status: 503 })
+
+        const refused: ReadonlyArray<readonly [string, Promise<Response>]> = [
+          ['no bearer', rpc(target, 'get_metadata', mixed, { authorization: null })],
+          ['empty bearer', rpc(target, 'get_metadata', mixed, { authorization: 'Bearer ' })],
+          ['basic auth', rpc(target, 'get_metadata', mixed, { authorization: 'Basic eDp5' })],
+          [
+            'text body',
+            rpc(target, 'get_metadata', mixed, { headers: { 'content-type': 'text/plain' } })
+          ],
+          ['invalid JSON', rpc(target, 'get_metadata', undefined, { rawBody: '{' })],
+          ['array body', rpc(target, 'get_metadata', [mixed])],
+          ['extra key', rpc(target, 'get_metadata', { ...mixed, include_media_info: true })],
+          [
+            'include_deleted false',
+            rpc(target, 'get_metadata', { ...mixed, include_deleted: false })
+          ],
+          ['root path', rpc(target, 'get_metadata', { path: '' })],
+          ['id path', rpc(target, 'get_metadata', { path: 'id:SyntheticMixedCaseFile01' })],
+          ['rev path', rpc(target, 'get_metadata', { path: 'rev:a1b2c3d4e5f60010' })],
+          ['dot path', rpc(target, 'get_metadata', { path: '/Conformance/../x' })],
+          ['trailing slash', rpc(target, 'get_metadata', { path: '/Conformance/' })],
+          ['folder metadata', rpc(target, 'get_metadata', { path: '/Conformance' })],
+          [
+            'include_deleted on a live entry',
+            rpc(target, 'get_metadata', { ...mixed, include_deleted: true })
+          ],
+          ['list an empty folder', rpc(target, 'list_folder', { path: work, limit: 2000 })],
+          ['list without limit', rpc(target, 'list_folder', { path: work })],
+          ['list limit 0', rpc(target, 'list_folder', { path: work, limit: 0 })],
+          ['list limit 2001', rpc(target, 'list_folder', { path: work, limit: 2001 })],
+          [
+            'list recursive',
+            rpc(target, 'list_folder', { path: work, limit: 2, recursive: false })
+          ],
+          ['list a file', rpc(target, 'list_folder', { path: mixed.path, limit: 2 })],
+          [
+            'list a missing folder',
+            rpc(target, 'list_folder', { path: `${work}/absent`, limit: 2 })
+          ],
+          ['unknown list cursor', rpc(target, 'list_folder/continue', { cursor: 'AAHx' })],
+          [
+            'unissued list cursor in the minted form',
+            rpc(target, 'list_folder/continue', { cursor: 'AAHsyntheticListCursor0001' })
+          ],
+          ['unknown search cursor', rpc(target, 'search/continue_v2', { cursor: 'AAHx' })],
+          [
+            'not found under a missing parent',
+            rpc(target, 'get_metadata', { path: `${work}/a/b` })
+          ],
+          [
+            'not found under a file',
+            rpc(target, 'get_metadata', { path: `${mixed.path ?? ''}/child` })
+          ],
+          [
+            'include_deleted without a recorded delete',
+            rpc(target, 'get_metadata', { path: `${work}/absent`, include_deleted: true })
+          ],
+          [
+            'list a folder with implied folders',
+            rpc(target, 'list_folder', { path: '/Conformance', limit: 2 })
+          ],
+          [
+            'search without matches',
+            rpc(target, 'search_v2', {
+              query: 'nothing-matches',
+              options: { max_results: 1, filename_only: true }
             })
-          )
+          ],
+          [
+            'search matching a folder',
+            rpc(target, 'search_v2', {
+              query: 'paging',
+              options: { max_results: 5, filename_only: true }
+            })
+          ],
+          [
+            'search without filename_only',
+            rpc(target, 'search_v2', { query: 'x', options: { max_results: 1 } })
+          ],
+          [
+            'search filename_only false',
+            rpc(target, 'search_v2', {
+              query: 'x',
+              options: { max_results: 1, filename_only: false }
+            })
+          ],
+          [
+            'search path option',
+            rpc(target, 'search_v2', {
+              query: 'x',
+              options: { max_results: 1, filename_only: true, path: work }
+            })
+          ],
+          [
+            'query parameter',
+            target.fetch(
+              new Request(`${api}/2/files/get_metadata?arg=x`, {
+                method: 'POST',
+                headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+                body: JSON.stringify(mixed)
+              })
+            )
+          ]
         ]
-      ]
 
-      for (const [label, response] of refused) {
-        await expectNotEmulated(await response, label)
-      }
+        for (const [label, response] of refused) {
+          await expectNotEmulated(await response, label)
+        }
 
-      expect(target.snapshot()).toEqual(before)
-    })
+        expect(target.snapshot()).toEqual(before)
+        expect(target.faults.list()[0]).toMatchObject({ applied: 0 })
+        // An eligible request does reach the fault.
+        expect((await rpc(target, 'get_metadata', mixed)).status).toBe(503)
+      })
   )
 
   it.effect(
-    'refuses writes the fixtures do not show, before and inside the route, writing nothing',
+    'refuses writes the fixtures do not show, by shape and by state, writing nothing and using no fault',
     () =>
       Effect.promise(async () => {
         const target = await emulator()
@@ -457,6 +544,8 @@ describe('fail closed', () => {
           autorename: false,
           strict_conflict: true
         }
+
+        target.faults.add({ kind: 'status', status: 503 })
 
         const refused: ReadonlyArray<readonly [string, Promise<Response>]> = [
           [
@@ -475,6 +564,7 @@ describe('fail closed', () => {
           ['delete a file', rpc(target, 'delete_v2', { path: source })],
           ['delete a missing path', rpc(target, 'delete_v2', { path: `${work}/absent` })],
           ['delete a missing id', rpc(target, 'delete_v2', { path: 'id:SyntheticNothing' })],
+          ['delete an implied folder', rpc(target, 'delete_v2', { path: work })],
           [
             'delete with parent_rev',
             rpc(target, 'delete_v2', { path: work, parent_rev: 'a1b2c3d4e5f60001' })
@@ -558,54 +648,189 @@ describe('fail closed', () => {
 
         expect(target.snapshot()).toEqual(before)
         expect(target.ledger.entries().every(entry => entry.notEmulated !== undefined)).toBe(true)
+        expect(target.ledger.entries().every(entry => entry.fault === undefined)).toBe(true)
+        expect(target.faults.list()[0]).toMatchObject({ applied: 0 })
       })
   )
 
-  it.effect('refuses a listing or search continued after the state changed', () =>
+  it.effect('deletes keep a record only for an empty folder, the delete a fixture records', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const source = dropboxConformanceFixtureSeeds.copySourcePath ?? ''
+
+      await rpc(target, 'create_folder_v2', { path: `${work}/empty`, autorename: false })
+      await rpc(target, 'create_folder_v2', { path: `${work}/full`, autorename: false })
+      await rpc(target, 'copy_v2', {
+        from_path: source,
+        to_path: `${work}/full/copied`,
+        autorename: false
+      })
+
+      expect((await rpc(target, 'delete_v2', { path: `${work}/empty` })).status).toBe(200)
+      expect((await rpc(target, 'delete_v2', { path: `${work}/full` })).status).toBe(200)
+      expect(target.snapshot().deleted.map(record => record.pathDisplay)).toEqual([`${work}/empty`])
+      expect(
+        (await rpc(target, 'get_metadata', { path: `${work}/empty`, include_deleted: true })).status
+      ).toBe(200)
+
+      expect((await rpc(target, 'get_metadata', { path: `${work}/full` })).status).toBe(409)
+      await expectNotEmulated(
+        await rpc(target, 'get_metadata', { path: `${work}/full`, include_deleted: true })
+      )
+
+      // Its former content has no parent folder any more: no fixture records that lookup.
+      await expectNotEmulated(await rpc(target, 'get_metadata', { path: `${work}/full/copied` }))
+      await expectNotEmulated(
+        await rpc(target, 'get_metadata', { path: `${work}/full/copied`, include_deleted: true })
+      )
+    })
+  )
+
+  it.effect('refuses a listing continued after its folder changed in any way', () =>
     Effect.promise(async () => {
       const target = await emulator()
       const paging = dropboxConformanceFixtureSeeds.pagingFolderPath ?? ''
+      const list = async () => jsonOf(await rpc(target, 'list_folder', { path: paging, limit: 1 }))
 
-      const listed = await jsonOf(await rpc(target, 'list_folder', { path: paging, limit: 1 }))
+      const resume = (listed: unknown) =>
+        rpc(target, 'list_folder/continue', { cursor: field(listed, 'cursor') })
+
+      // A new child.
+      const beforeCreate = await list()
 
       await rpc(target, 'create_folder_v2', { path: `${paging}/new`, autorename: false })
+      await expectNotEmulated(await resume(beforeCreate), 'new child')
+      await rpc(target, 'delete_v2', { path: `${paging}/new` })
+
+      // A rename with the same ids.
+      const beforeRename = await list()
+
+      await rpc(target, 'move_v2', {
+        from_path: `${paging}/paging-three.txt`,
+        to_path: `${paging}/paging-3.txt`,
+        autorename: false
+      })
+      await expectNotEmulated(await resume(beforeRename), 'renamed child')
+
+      // A new rev under the same id and name.
+      const beforeUpdate = await list()
+
+      const three = await jsonOf(
+        await rpc(target, 'get_metadata', { path: `${paging}/paging-3.txt` })
+      )
+
+      expect(
+        (
+          await uploadCall(
+            target,
+            {
+              path: field(three, 'id'),
+              mode: { '.tag': 'update', update: field(three, 'rev') },
+              autorename: false,
+              strict_conflict: true
+            },
+            'v2'
+          )
+        ).status
+      ).toBe(200)
+      await expectNotEmulated(await resume(beforeUpdate), 'updated child')
+
+      // The last page's cursor (has_more false) is not a delta cursor either.
+      const all = await jsonOf(await rpc(target, 'list_folder', { path: paging, limit: 2000 }))
+
+      expect(field(all, 'has_more')).toBe(false)
+      await expectNotEmulated(await resume(all), 'finished listing')
+
+      // An unchanged listing continues.
+      const unchanged = await list()
+
+      expect((await resume(unchanged)).status).toBe(200)
+    })
+  )
+
+  it.effect('refuses a search continued after its matches changed in any way', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const searchFolder = '/Conformance/Search'
+
+      const search = async () =>
+        jsonOf(
+          await rpc(target, 'search_v2', {
+            query: 'yolk-search-probe',
+            options: { max_results: 1, filename_only: true }
+          })
+        )
+
+      const resume = (searched: unknown) =>
+        rpc(target, 'search/continue_v2', { cursor: field(searched, 'cursor') })
+
+      // A match renamed so that it no longer matches.
+      const beforeMove = await search()
+
+      await rpc(target, 'move_v2', {
+        from_path: `${searchFolder}/yolk-search-probe-2.txt`,
+        to_path: `${work}/moved.txt`,
+        autorename: false
+      })
+      await expectNotEmulated(await resume(beforeMove), 'match moved away')
+      await rpc(target, 'move_v2', {
+        from_path: `${work}/moved.txt`,
+        to_path: `${searchFolder}/yolk-search-probe-2.txt`,
+        autorename: false
+      })
+
+      // A match moved within the results (same id, new rev).
+      const beforeRev = await search()
+
+      await rpc(target, 'move_v2', {
+        from_path: `${searchFolder}/yolk-search-probe-2.txt`,
+        to_path: `${searchFolder}/yolk-search-probe-2b.txt`,
+        autorename: false
+      })
+      await expectNotEmulated(await resume(beforeRev), 'match renamed')
+
+      // A new match.
+      const beforeNew = await search()
+
+      await uploadCall(
+        target,
+        {
+          path: `${searchFolder}/yolk-search-probe-3.txt`,
+          mode: 'add',
+          autorename: false,
+          strict_conflict: true
+        },
+        'x'
+      )
+      await expectNotEmulated(await resume(beforeNew), 'new match')
+
+      // An unchanged search continues; its last page carries no cursor.
+      const unchanged = await search()
+      const second = await resume(unchanged)
+
+      expect(second.status).toBe(200)
+      expect(field(await jsonOf(second), 'has_more')).toBe(true)
+    })
+  )
+
+  it.effect('refuses cursors issued before a reset, and never issues one again', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const paging = dropboxConformanceFixtureSeeds.pagingFolderPath ?? ''
+      const listed = await jsonOf(await rpc(target, 'list_folder', { path: paging, limit: 1 }))
+
+      expect(field(listed, 'cursor')).toBe('AAHsyntheticListCursor0001')
+
+      await target.reset()
+
       await expectNotEmulated(
         await rpc(target, 'list_folder/continue', { cursor: field(listed, 'cursor') })
       )
 
-      // The last page's cursor (has_more false) is not a delta cursor here either.
-      const all = await jsonOf(await rpc(target, 'list_folder', { path: work, limit: 2000 }))
+      const again = await jsonOf(await rpc(target, 'list_folder', { path: paging, limit: 1 }))
 
-      expect(field(all, 'has_more')).toBe(false)
-      await expectNotEmulated(
-        await rpc(target, 'list_folder/continue', { cursor: field(all, 'cursor') })
-      )
-
-      const searched = await jsonOf(
-        await rpc(target, 'search_v2', {
-          query: 'yolk-search-probe',
-          options: { max_results: 1, filename_only: true }
-        })
-      )
-
-      await rpc(target, 'move_v2', {
-        from_path: '/Conformance/Search/yolk-search-probe-2.txt',
-        to_path: `${work}/moved.txt`,
-        autorename: false
-      })
-
-      // A moved match is still the same entry: continuing answers it at its new path.
-      const continued = await jsonOf(
-        await rpc(target, 'search/continue_v2', { cursor: field(searched, 'cursor') })
-      )
-
-      const matches = field(continued, 'matches')
-      const first = Array.isArray(matches) ? matches[0] : undefined
-
-      expect(field(field(field(first, 'metadata'), 'metadata'), 'path_display')).toBe(
-        `${work}/moved.txt`
-      )
-      expect(target.cursors().map(cursor => cursor.kind)).toEqual(['list', 'list', 'search'])
+      expect(field(again, 'cursor')).toBe('AAHsyntheticListCursor0002')
+      expect(target.cursors().map(cursor => cursor.cursor)).toEqual(['AAHsyntheticListCursor0002'])
     })
   )
 
@@ -653,15 +878,14 @@ describe('request-shape latitude', () => {
             authorization: 'bearer another-synthetic-token'
           }
         ),
-        rpc(target, 'list_folder', { limit: 2000, path: work }),
+        rpc(target, 'list_folder', { limit: 2000, path: '/Conformance/Paging' }),
         rpc(target, 'list_folder', { path: '/CONFORMANCE/paging', limit: 1 }),
         rpc(target, 'search_v2', {
           options: { filename_only: true, max_results: 1000 },
           query: 'PROBE'
         }),
-        // The upload route answers on either origin (one handler serves both).
         target.fetch(
-          new Request(`${api}/2/files/upload`, {
+          new Request(`${content}/2/files/upload`, {
             method: 'POST',
             headers: {
               authorization: `Bearer ${token}`,
@@ -688,6 +912,66 @@ describe('request-shape latitude', () => {
           'size'
         )
       ).toBe(4)
+    })
+  )
+})
+
+describe('origins', () => {
+  it.effect('answers each route only on the origin its fixtures record', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const before = target.snapshot()
+
+      const arg = JSON.stringify({
+        path: `${work}/origin.txt`,
+        mode: 'add',
+        autorename: false,
+        strict_conflict: true
+      })
+
+      const uploadOn = (origin: string, handler = target.fetch) =>
+        handler(
+          new Request(`${origin}/2/files/upload`, {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${token}`,
+              'content-type': 'application/octet-stream',
+              'dropbox-api-arg': arg
+            },
+            body: 'x'
+          })
+        )
+
+      const metadataOn = (origin: string, handler = target.fetch) =>
+        handler(
+          new Request(`${origin}/2/files/get_metadata`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ path: dropboxConformanceFixtureSeeds.mixedCasePath })
+          })
+        )
+
+      const loopback = 'http://127.0.0.1:9'
+
+      for (const [label, response] of [
+        ['upload on the RPC origin', uploadOn(api)],
+        ['RPC on the content origin', metadataOn(content)],
+        ['upload on another origin', uploadOn(loopback)],
+        ['RPC on another origin', metadataOn(loopback)],
+        ['upload through the RPC handler', uploadOn(loopback, target.fetchOn(api))],
+        ['RPC through the content handler', metadataOn(loopback, target.fetchOn(content))]
+      ] as const) {
+        const refused = await response
+
+        await expectNotEmulated(refused, label)
+        expect(refused.headers.get(emulatorEvidenceHeader), label).toBe('unverified')
+      }
+
+      expect(target.snapshot()).toEqual(before)
+
+      // Through the per-origin handlers (as behind a loopback rewrite), each route answers.
+      expect((await metadataOn(loopback, target.fetchOn(api))).status).toBe(200)
+      expect((await uploadOn(loopback, target.fetchOn(content))).status).toBe(200)
     })
   )
 })
@@ -770,6 +1054,101 @@ describe('credential redaction', () => {
       expect(recorded).not.toContain(token)
     })
   )
+})
+
+describe('Dropbox-API-Arg in the ledger', () => {
+  const secret = 'synthetic-arg-secret'
+
+  it.effect('records the argument with credential fields redacted at any depth', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+
+      const accepted = {
+        path: `${work}/arg.txt`,
+        mode: 'add',
+        autorename: false,
+        strict_conflict: true
+      }
+
+      const rejected = {
+        ...accepted,
+        access_token: secret,
+        mode: { '.tag': 'update', update: 'a1b2c3d4e5f60030', nested: { authorization: secret } }
+      }
+
+      expect((await uploadCall(target, accepted, 'x')).status).toBe(200)
+      await expectNotEmulated(await uploadCall(target, rejected, 'x'))
+      await expectNotEmulated(
+        await uploadCall(target, accepted, 'x', { 'dropbox-api-arg': `{"token": "${secret}", ` })
+      )
+      await expectNotEmulated(
+        await target.fetch(
+          new Request(`${content}/2/files/upload_session/start`, {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${token}`,
+              'dropbox-api-arg': JSON.stringify({ close: false, api_key: secret })
+            },
+            body: 'x'
+          })
+        )
+      )
+
+      const recorded = target.ledger
+        .entries()
+        .map(entry => entry.headers['dropbox-api-arg'])
+        .map(value => (value === undefined || value === '<redacted>' ? value : JSON.parse(value)))
+
+      expect(recorded).toEqual([
+        accepted,
+        {
+          ...accepted,
+          access_token: '<redacted>',
+          mode: {
+            '.tag': 'update',
+            update: 'a1b2c3d4e5f60030',
+            nested: { authorization: '<redacted>' }
+          }
+        },
+        '<redacted>',
+        { close: false, api_key: '<redacted>' }
+      ])
+
+      const everything = JSON.stringify([
+        target.ledger.entries(),
+        await jsonOf(await target.fetch(new Request(`${api}/_emulate/ledger`)))
+      ])
+
+      expect(everything).not.toContain(secret)
+    })
+  )
+
+  it('refuses to record a credential header', async () => {
+    const core = {
+      fetch: () => Promise.resolve(new Response(null)),
+      baseUrl: 'http://127.0.0.1',
+      snapshot: () => ({}),
+      restore: () => Promise.resolve(),
+      close: () => Promise.resolve()
+    }
+
+    await expect(
+      makeStatefulEmulator(
+        {
+          routes: [],
+          env: {},
+          initial: {},
+          buildSeed: () => ({}),
+          recordHeaders: [{ name: 'X-Api-Key', json: false }],
+          clearRuntime: () => undefined,
+          runtimeState: () => ({}),
+          seedSummary: () => ({}),
+          inputInvalid: (_input, reason) => new Error(reason)
+        },
+        () => Promise.resolve(core)
+      )
+    ).rejects.toThrow('credential header')
+  })
 })
 
 describe('faults', () => {
@@ -889,7 +1268,7 @@ describe('faults', () => {
       const result = yield* dropboxListFolderAction
         .executeTyped({
           integration: dropboxConformanceIntegration,
-          input: DropboxListFolderInput.make({ path: work, limit: 2 })
+          input: DropboxListFolderInput.make({ path: '/Conformance/Paging', limit: 2 })
         })
         .pipe(Effect.provide(connectorLayer(target)))
 
@@ -943,6 +1322,84 @@ describe('seeds and the control plane', () => {
     })
   )
 
+  it.effect('minted ids and revs start above the seeded ones in the minted form', () =>
+    Effect.promise(async () => {
+      const target = await emulator({
+        seed: {
+          entries: [
+            { path: '/Keep', id: 'id:SyntheticEntry00000007', kind: 'folder' },
+            {
+              path: '/Keep/kept.txt',
+              id: 'id:SyntheticEntry00000002',
+              kind: 'file',
+              rev: 'a1b2c3d4e5f60500'
+            },
+            { path: '/Work', id: 'id:SyntheticWork', kind: 'folder' }
+          ]
+        }
+      })
+
+      expect(target.snapshot().counters).toEqual({ nextIdNumber: 8, nextRevNumber: 501 })
+
+      const created = await jsonOf(
+        await rpc(target, 'create_folder_v2', { path: '/Work/new', autorename: false })
+      )
+
+      expect(field(field(created, 'metadata'), 'id')).toBe('id:SyntheticEntry00000008')
+
+      const uploaded = await jsonOf(
+        await uploadCall(
+          target,
+          { path: '/Work/new/file.txt', mode: 'add', autorename: false, strict_conflict: true },
+          'x'
+        )
+      )
+
+      expect(field(uploaded, 'rev')).toBe('a1b2c3d4e5f60501')
+
+      // Deleting the created folder by its id leaves the seeded entries untouched.
+      expect(
+        (await rpc(target, 'delete_v2', { path: field(field(created, 'metadata'), 'id') })).status
+      ).toBe(200)
+      expect(target.snapshot().entries.map(entry => entry.id)).toEqual([
+        'id:SyntheticEntry00000007',
+        'id:SyntheticEntry00000002',
+        'id:SyntheticWork'
+      ])
+    })
+  )
+
+  it.effect('a ledger clear while a request awaits dispatch never swaps two requests', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+
+      // The first request is in flight (its ledger entry is seq 1) when the ledger clears, so the
+      // second request is ledgered as seq 1 too; each must still run its own write.
+      const first = rpc(target, 'create_folder_v2', { path: `${work}/first`, autorename: false })
+
+      target.ledger.clear()
+
+      const second = rpc(target, 'create_folder_v2', { path: `${work}/second`, autorename: false })
+
+      const answers = await Promise.all([first, second])
+
+      expect(answers.map(response => response.status)).toEqual([200, 200])
+      expect(
+        await Promise.all(
+          answers.map(async response => field(field(await jsonOf(response), 'metadata'), 'name'))
+        )
+      ).toEqual(['first', 'second'])
+      expect(target.ledger.entries().map(entry => entry.seq)).toEqual([1])
+      expect(
+        target
+          .snapshot()
+          .entries.filter(entry => entry.name === 'first' || entry.name === 'second')
+          .map(entry => entry.name)
+          .toSorted()
+      ).toEqual(['first', 'second'])
+    })
+  )
+
   it.effect('reset restores the seed and clears the ledger, faults, and cursors', () =>
     Effect.promise(async () => {
       const target = await emulator()
@@ -950,7 +1407,7 @@ describe('seeds and the control plane', () => {
 
       await rpc(target, 'create_folder_v2', { path: `${work}/r`, autorename: false })
       await rpc(target, 'delete_v2', { path: `${work}/r` })
-      await rpc(target, 'list_folder', { path: work, limit: 1 })
+      await rpc(target, 'list_folder', { path: '/Conformance/Paging', limit: 1 })
       target.faults.add({ kind: 'status', status: 503 })
 
       expect(target.snapshot()).not.toEqual(seeded)
