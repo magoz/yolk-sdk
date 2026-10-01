@@ -89,10 +89,10 @@ const jsonNumberPattern = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/
 
 /**
  * True when `text` looks like JSON that parses to something other than itself: an object, an
- * array, a string (`"..."`), or a number (`1.2345678e7`). Such text is checked and recorded in its
- * parsed form too.
+ * array, a string (`"..."`), or a number (`1.2345678e7`). Such text is checked in its parsed form
+ * too.
  */
-export const looksLikeJson = (text: string): boolean => {
+const looksLikeJson = (text: string): boolean => {
   const trimmed = text.trim()
 
   return (
@@ -104,15 +104,23 @@ export const looksLikeJson = (text: string): boolean => {
 }
 
 /**
- * True when `text` repeats a secret raw, percent-decoded, or, when it looks like JSON and parses,
- * in any key, string value, or number of the parsed value or in the value as it would be recorded.
+ * True when `text` repeats a secret raw, percent-decoded, or, when it parses as JSON, in any key,
+ * string value, or number of the parsed value or in the value as it would be recorded (so `\u`
+ * escapes and normalised numbers such as `1.2345678e7` are caught). `parse` is `'json-looking'`
+ * (only text that looks like JSON, for query parts, headers, and path segments) or `'any'` (any
+ * text, for a body). The one place this escape and number logic lives.
  */
-export const textRepeatsSecret = (text: string, secrets: ReadonlyArray<string>): boolean => {
+export const textRepeatsSecret = (
+  text: string,
+  secrets: ReadonlyArray<string>,
+  parse: 'json-looking' | 'any' = 'json-looking'
+): boolean => {
   if (meaningful(secrets).length === 0) return false
 
   if (repeatsSecret(text, secrets)) return true
 
-  const parsed = looksLikeJson(text) ? parseJsonText(text) : undefined
+  const parsed =
+    text !== '' && (parse === 'any' || looksLikeJson(text)) ? parseJsonText(text) : undefined
 
   return (
     parsed !== undefined &&

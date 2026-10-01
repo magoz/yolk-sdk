@@ -161,6 +161,25 @@ const expectRefusedWithoutFault = async (
   return text
 }
 
+/**
+ * A request repeating the credential (in any checked part) is ledgered with constant text only:
+ * a standard method, `/<unrecognised>`, its route template, an empty query, no headers or body.
+ */
+const expectConstantEntry = (target: GithubEmulator, method: string) => {
+  // The refused request is the one before the valid request `expectRefusedWithoutFault` sends.
+  expect(target.ledger.entries().at(-2)).toEqual({
+    seq: expect.any(Number),
+    method,
+    path: '/<unrecognised>',
+    route: expect.stringMatching(/^\//),
+    query: {},
+    headers: {},
+    status: 400,
+    evidence: 'unverified',
+    notEmulated: expect.stringMatching(/ repeats the credential$/)
+  })
+}
+
 /** Every `/_emulate/*` read, as text. */
 const controlReads = (target: GithubEmulator) =>
   Promise.all(
@@ -1143,6 +1162,8 @@ describe('the bearer value is never ledgered or echoed', () => {
       reason
     )
 
+    expectConstantEntry(target, method)
+
     const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
 
     // Neither the bearer nor any reversible encoding of it (the `\u0053` escape of its `S`).
@@ -1165,7 +1186,7 @@ describe('the bearer value is never ledgered or echoed', () => {
       'the request body repeats the credential'
     )
 
-    expect(target.ledger.entries()[0]?.body).toBeUndefined()
+    expectConstantEntry(target, 'POST')
     expect([text, ...(await controlReads(target))].join('\n')).not.toContain('12345678')
   })
 
@@ -1183,7 +1204,20 @@ describe('the bearer value is never ledgered or echoed', () => {
       repo('/labels?per_page=2'),
       { accept: '{"n":[1.2345678e7]}' },
       'a recorded request header repeats the credential'
-    ]
+    ],
+    // A repeated key: every pair is checked (never one value per key), in both orders.
+    ['a repeated key, exponent last', repo('/labels?per_page=2&q=safe&q=1.2345678e7'), {}, 'query'],
+    [
+      'a repeated key, exponent first',
+      repo('/labels?per_page=2&q=1.2345678e7&q=safe'),
+      {},
+      'query'
+    ],
+    ['a repeated key, literal last', repo('/labels?per_page=2&q=safe&q=12345678'), {}, 'query'],
+    ['a repeated key, literal first', repo('/labels?per_page=2&q=12345678&q=safe'), {}, 'query'],
+    // A path segment is checked in its parsed form too (a file path may look like a number).
+    ['a path segment', repo('/contents/1.2345678e7'), {}, 'the request path repeats'],
+    ['a path segment, literal', repo('/contents/docs/12345678'), {}, 'the request path repeats']
   ] as const)(
     'an exponent-notation number repeating an all-digit bearer in %s',
     async (_label, path, options, reason) => {
@@ -1195,12 +1229,30 @@ describe('the bearer value is never ledgered or echoed', () => {
         reason
       )
 
+      expectConstantEntry(target, 'GET')
+
       const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
 
       expect(seen.join('\n')).not.toContain('12345678')
       expect(seen.join('\n')).not.toContain('1.2345678e7')
     }
   )
+
+  it('records every pair of a repeated key, in order (never one value per key)', async () => {
+    const target = await emulator()
+
+    // Refused by the route (a repeated key is not emulated), but recorded: no pair repeats the
+    // credential, so the ledger keeps them all.
+    await expectNotEmulated(
+      await call(target, 'GET', repo('/labels?per_page=2&q=a&per_page=3&q=b')),
+      'repeated query parameters'
+    )
+
+    expect(target.ledger.entries()[0]?.query).toEqual({
+      per_page: '["2","3"]',
+      q: '["a","b"]'
+    })
+  })
 
   it('answers recognised requests without the bearer anywhere', async () => {
     const target = await emulator()

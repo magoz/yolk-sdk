@@ -16,6 +16,8 @@
 import { Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
 import {
+  exactBodyKeys,
+  exactQuery,
   isJsonObject,
   isNotEmulated,
   notEmulated,
@@ -219,61 +221,13 @@ const otherRepository = (state: GithubEmulatorState, input: RepoInput): NotEmula
     ? undefined
     : notEmulated('a repository other than the seeded one is not emulated')
 
-/** Exactly the `required` query keys plus any `optional` ones, each once; or not emulated. */
-const queryOf = (
-  request: EmulatedRequest,
-  required: ReadonlyArray<string>,
-  optional: ReadonlyArray<string> = []
-): Readonly<Record<string, string>> | NotEmulated => {
-  const keys = [...request.query.keys()]
-
-  if (keys.length !== new Set(keys).size) {
-    return notEmulated('repeated query parameters are not emulated')
-  }
-
-  // Constant text: a request's own keys are never echoed into a reason.
-  if (keys.some(key => !required.includes(key) && !optional.includes(key))) {
-    return notEmulated('a query parameter this route does not take is not emulated')
-  }
-
-  const missing = required.find(key => !keys.includes(key))
-
-  return missing === undefined
-    ? Object.fromEntries(request.query)
-    : notEmulated(`requests without query parameter ${missing} are not emulated on this route`)
-}
-
 const withoutQuery = (request: EmulatedRequest): NotEmulated | undefined => {
-  const query = queryOf(request, [])
+  const query = exactQuery(request, [])
 
   return isNotEmulated(query) ? query : undefined
 }
 
 const issueNumberOf = (request: EmulatedRequest): number => Number(request.params.issueNumber)
-
-/**
- * A JSON object body with exactly the `required` keys, or not emulated with constant text (unlike
- * the shared `exactObject`, a request's own keys are never echoed into a reason).
- */
-const exactBody = (
-  value: Schema.Json | undefined,
-  label: string,
-  required: ReadonlyArray<string>
-): Schema.JsonObject | NotEmulated => {
-  if (!isJsonObject(value)) return notEmulated(`${label} must be a JSON object`)
-
-  const keys = Object.keys(value)
-
-  if (keys.some(key => !required.includes(key))) {
-    return notEmulated(`${label} has a key this route does not take`)
-  }
-
-  const missing = required.find(key => !keys.includes(key))
-
-  return missing === undefined
-    ? value
-    : notEmulated(`${label} without '${missing}' is not emulated`)
-}
 
 const nonEmptyString = (value: Schema.Json | undefined, label: string): string | NotEmulated =>
   Predicate.isString(value) && value.length > 0
@@ -401,7 +355,7 @@ const listLabels: Route = statefulRoute(
   repoEvidence('GET', '/labels', false, [pagingCase, labelCase]),
   'none',
   (request): LabelsInput | NotEmulated => {
-    const query = queryOf(request, ['per_page'], ['page'])
+    const query = exactQuery(request, ['per_page'], ['page'])
 
     if (isNotEmulated(query)) return query
 
@@ -519,7 +473,7 @@ const searchIssues: Route = statefulRoute(
   evidence('GET', '/search/issues', false, [validationCase]),
   'none',
   (request): RepoInput | NotEmulated => {
-    const query = queryOf(request, ['q'])
+    const query = exactQuery(request, ['q'])
 
     if (isNotEmulated(query)) return query
 
@@ -602,7 +556,7 @@ const createComment: Route = statefulRoute(
 
     if (isNotEmulated(issue)) return issue
 
-    const body = exactBody(request.json, 'the comment body', ['body'])
+    const body = exactBodyKeys(request.json, 'the comment body', ['body'])
 
     if (isNotEmulated(body)) return body
 
@@ -659,7 +613,7 @@ const listComments: Route = statefulRoute(
   }),
   'none',
   (request): CommentsInput | NotEmulated => {
-    const query = queryOf(request, ['per_page', 'since'])
+    const query = exactQuery(request, ['per_page', 'since'])
 
     if (isNotEmulated(query)) return query
 
@@ -756,7 +710,7 @@ const addLabels: Route = statefulRoute(
 
     if (isNotEmulated(issue)) return issue
 
-    const body = exactBody(request.json, 'the labels body', ['labels'])
+    const body = exactBodyKeys(request.json, 'the labels body', ['labels'])
 
     if (isNotEmulated(body)) return body
 
@@ -875,7 +829,7 @@ const createIssue: Route = statefulRoute(
 
     if (query !== undefined) return query
 
-    const body = exactBody(request.json, 'the issue body', ['title', 'body'])
+    const body = exactBodyKeys(request.json, 'the issue body', ['title', 'body'])
 
     if (isNotEmulated(body)) return body
 

@@ -1371,14 +1371,19 @@ emulator mints (it never mints anything else):
   answered with constant text only: the path `/<unrecognised>`, a standard method or `<other>`, an
   empty query, no body, and a constant reason (`no emulated GitHub route for this method and path`,
   `an unrecognisable Authorization header is not emulated`).
-- **Credentials.** For a recognised request the bearer value is scrubbed from the ledgered method,
-  path, query keys and values, recorded headers, and every not-emulated message, and a path, query
-  key or value, recorded header, or body that repeats it (raw, percent-decoded, or in any parsed
-  JSON key, string value, or number) is refused with constant text; text repeating it in any form
-  is recorded whole as `<redacted>`. A recorded header or query key that looks like JSON is
-  recorded parsed with credential-named keys redacted at any depth, or whole as `<redacted>` when
-  it does not parse. Refusals never echo a request's own query or body keys, and empty query
-  components (a bare `?`, a stray `&`) are refused.
+- **Credentials.** A recognised request that repeats the bearer value in its raw path, any decoded
+  path segment, any query key or value, any recorded header, or its body (raw, percent-decoded, or
+  parsed as JSON with `\u` escapes undone and numbers such as `1.2345678e7` normalised: path
+  segments, query parts, and headers when they look like JSON, the body always) is refused and
+  ledgered with constant text only: a standard method, the path `/<unrecognised>`, its route
+  template, an empty query, no headers or body, and a constant reason
+  (`the query repeats the credential`, for example). Any other recognised request has the bearer
+  value scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons
+  included); its recorded query keeps every pair (a repeated key as a JSON array of its values, in
+  order), and recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are
+  recorded parsed with credential-named keys redacted at any depth, or as `<redacted>` when they do
+  not parse, whatever the header's declared format. Refusals never echo a request's own query or
+  body keys, and empty query components (a bare `?`, a stray `&`) are refused.
 - **Request-shape latitude (`/github`, the only accepted deviations).** Any bearer value of at least
   8 non-space characters that occurs nowhere else in the request (never checked, stored, or
   ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the order
@@ -1414,19 +1419,19 @@ State and seeds: the authenticated `viewer` (the author of everything created he
 name; `createdHere` marks issues created here), comments, `deletedComments`, files (path, blob sha,
 UTF-8 text), and the counters. The default seed is the synthetic fixture entities with the values of
 `githubConformanceFixtureSeeds`: the five paging-fixture labels, open work issue 1 labelled `bug`,
-and `docs/synthetic-notes.txt`. Pass
-`seed: { profile?, viewer?, repository?, labels?, issues?, files?, nextIssueNumber?, nextCommentId? }`
-(lists replace the profile's) with profiles `'default'` or `'empty'`. `reset()`, `seed(next)`, and
-`snapshot()` behave as in the Dropbox emulator.
+and `docs/synthetic-notes.txt`. Pass a `seed` with any of `profile`, `viewer`, `repository`,
+`labels`, `issues`, `files`, `nextIssueNumber`, and `nextCommentId` (lists replace the profile's)
+with profiles `'default'` or `'empty'`. `reset()`, `seed(next)`, and `snapshot()` behave as in the
+Dropbox emulator.
 
 Faults, the ledger (which records the `Accept` and `X-GitHub-Api-Version` headers), and the control
 plane behave as in the Dropbox emulator; a 429 fault with `retry-after` reaches the connector as
 `github_rate_limited`.
 
-**Drill knobs (tests only).**
-`drills: { linkOmitsNext, notFoundOmitsDocumentationUrl, validationWithoutErrors, contentUnfolded, sinceExcludesEqual, addAnswerOmitsLabel, closeWithoutClosedAt }`
-(booleans) each make the emulator disagree with exactly one GitHub case, only to prove that case
-catches it.
+**Drill knobs (tests only).** The `drills` booleans `linkOmitsNext`,
+`notFoundOmitsDocumentationUrl`, `validationWithoutErrors`, `contentUnfolded`, `sinceExcludesEqual`,
+`addAnswerOmitsLabel`, and `closeWithoutClosedAt` each make the emulator disagree with exactly one
+GitHub case, only to prove that case catches it.
 
 ## Evidence
 

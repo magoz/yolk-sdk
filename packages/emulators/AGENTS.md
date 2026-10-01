@@ -462,37 +462,44 @@ There is no root export or barrel.
   method (each raw pattern matched in full; a `g` or `y` flag is refused at build) and any
   `Authorization` header is exactly `Bearer <at least 8 non-space characters>`; everything else is
   ledgered with constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty
-  query, no body, a constant reason). For a recognised request the bearer value is scrubbed from the
-  ledgered method, path, query, recorded headers, and every not-emulated reason (plan-time reasons
-  included), and a path, query key or value, recorded header, or body repeating it (raw,
-  percent-decoded, or in any parsed JSON key, string, or number) is refused with constant text; text
-  that repeats it in any form is recorded whole as `<redacted>`. JSON-looking recorded headers and
-  query keys are recorded parsed with credential-named keys redacted (or `<redacted>` when they do
-  not parse), whatever the header's declared format. Empty query components are refused, and GitHub
-  refusals never echo a request's own query or body keys. Every answer value comes from a fixture
-  (through the seed or the request) or is minted: created issue numbers and comment ids from
-  counters that only advance (the default seed starts them at the fixtures' created values, issue 42
-  and comment 9000000001, and end at the last addressable number and id, after which creates are
-  refused before any fault; a seed's counters lie above its seeded numbers, and no seeded node id,
-  of an issue or a label, may use a minted `node_id` form at or above its counter), the issue `id`/
-  `node_id` and comment `node_id` derived from them in the fixtures' form, and timestamps from the
-  injectable clock (whole seconds). Issue numbers below the counter that the state does not hold are
-  implied (never rendered); numbers at or above it answer the not-found fixture's 404 byte for byte.
-  Error bodies are the fixtures' byte for byte (`githubEmulatorErrorBodies`). `Link` paging is
-  minted only on the label listing, in the paging fixture's exact form (relations `prev`, `next`,
-  `last`, `first`; the page after the last answers `[]`; a listing that fits one page carries none,
-  as the label fixture records); label pages are page numbers the client computes, not cursors, and
-  the label list never changes within a seed (no route writes labels), so there is no cursor
-  registry. Writes follow only the recorded flows (comment create/delete on an open held issue; one
-  repository label added that sorts after the issue's labels, or removed unless it is the issue's
-  last (no fixture records an empty answer); issue create; rename and close-as-completed of an issue
-  created here); anything else, including the lifecycle restore's close as `not_planned`, a comment
-  listing of more than one comment, rendering an issue that holds comments, and the leftover
-  lookup's open-issue listing (so `findGithubConformanceLeftovers` fails and runners print their
-  lookup-failed WARN), is not emulated. A write case ends at the seed except the counters, the
-  deleted comment's id (`deletedComments`, so a second delete answers the recorded 404), and the
-  lifecycle case's closed issue (GitHub cannot delete issues); the cross-checks prove exactly that.
-  Drill knobs (`drills`, booleans) each fail exactly one case.
+  query, no body, a constant reason). A recognised request that repeats the bearer value in its raw
+  path, any decoded path segment, any query key or value, any recorded header, or its body (raw,
+  percent-decoded, or parsed as JSON with `\u` escapes undone and numbers such as `1.2345678e7`
+  normalised: path segments, query parts, and headers when they look like JSON, the body always) is
+  refused and ledgered with constant text only: a standard method, the path `/<unrecognised>`, its
+  route template, an empty query, no headers or body, and a constant reason
+  (`the query repeats the credential`, for example). Any other recognised request has the bearer
+  value scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons
+  included); its recorded query keeps every pair (a repeated key as a JSON array of its values, in
+  order), and recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are
+  recorded parsed with credential-named keys redacted at any depth, or as `<redacted>` when they do
+  not parse, whatever the header's declared format. Empty query components are refused, and GitHub
+  refusals never echo a request's own query or body keys (they use the wrapper's constant-reason
+  `exactQuery` and `exactBodyKeys`, which a later fail-closed emulator uses too). Every answer value
+  comes from a fixture (through the seed or the request) or is minted: created issue numbers and
+  comment ids from counters that only advance (the default seed starts them at the fixtures' created
+  values, issue 42 and comment 9000000001, and end at the last addressable number and id, after
+  which creates are refused before any fault; a seed's counters lie above its seeded numbers, and no
+  seeded node id, of an issue or a label, may use a minted `node_id` form at or above its counter),
+  the issue `id`/ `node_id` and comment `node_id` derived from them in the fixtures' form, and
+  timestamps from the injectable clock (whole seconds). Issue numbers below the counter that the
+  state does not hold are implied (never rendered); numbers at or above it answer the not-found
+  fixture's 404 byte for byte. Error bodies are the fixtures' byte for byte
+  (`githubEmulatorErrorBodies`). `Link` paging is minted only on the label listing, in the paging
+  fixture's exact form (relations `prev`, `next`, `last`, `first`; the page after the last answers
+  `[]`; a listing that fits one page carries none, as the label fixture records); label pages are
+  page numbers the client computes, not cursors, and the label list never changes within a seed (no
+  route writes labels), so there is no cursor registry. Writes follow only the recorded flows
+  (comment create/delete on an open held issue; one repository label added that sorts after the
+  issue's labels, or removed unless it is the issue's last (no fixture records an empty answer);
+  issue create; rename and close-as-completed of an issue created here); anything else, including
+  the lifecycle restore's close as `not_planned`, a comment listing of more than one comment,
+  rendering an issue that holds comments, and the leftover lookup's open-issue listing (so
+  `findGithubConformanceLeftovers` fails and runners print their lookup-failed WARN), is not
+  emulated. A write case ends at the seed except the counters, the deleted comment's id
+  (`deletedComments`, so a second delete answers the recorded 404), and the lifecycle case's closed
+  issue (GitHub cannot delete issues); the cross-checks prove exactly that. Drill knobs (`drills`,
+  booleans) each fail exactly one case.
 - Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
   non-space characters that occurs nowhere else in the request (never checked, stored, or ledgered);
   extra request headers; JSON key order; `content-type` media-type parameters; the order of query
@@ -607,5 +614,7 @@ through the real connector, clock-safe recovery, seeds, control plane),
 ending at its seed except the counters, the deleted comment's id, and the closed lifecycle issue;
 all cases twice in sequence on one emulator; the leftover lookup failing closed; one drill per case
 failing exactly that case), and `test/stateful-emulator.test.ts` (the shared wrapper's `{name+}`
-parameters, raw parameter patterns, and opt-in fail-closed mode over a fake core, and the unchanged
-behaviour without it). Loopback sockets only; never call real services.
+parameters, raw parameter patterns matched in full (alternation and lazy quantifiers included), the
+opt-in fail-closed mode over a fake core (credential-repeating requests ledgered with constant text
+only, scrubbed plan-time reasons), the constant-reason `exactBodyKeys` and `exactQuery`, and the
+unchanged behaviour without fail-closed mode). Loopback sockets only; never call real services.

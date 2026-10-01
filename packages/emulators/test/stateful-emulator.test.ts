@@ -8,13 +8,17 @@
  */
 import { Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
+import type * as Schema from 'effect/Schema'
 import {
+  exactBodyKeys,
   exactObject,
+  exactQuery,
   isNotEmulated,
   makeStatefulEmulator,
   notEmulated,
   routeMatcher,
   statefulRoute,
+  type EmulatedRequest,
   type StatefulEmulatorConfig,
   type StatefulRoute
 } from '../src/stateful-emulator.ts'
@@ -161,6 +165,29 @@ describe('route templates', () => {
     expect(match('GET', '/things/ABCabc')).toBeUndefined()
   })
 
+  it('tries alternation and lazy quantifiers against the whole parameter', () => {
+    const route = (path: string, pattern: RegExp) =>
+      statefulRoute<State, undefined, string>(
+        { ...echo, path, params: { id: pattern } },
+        'none',
+        () => '',
+        () => () => new Response('')
+      )
+
+    const match = routeMatcher([
+      route('/alternation/{id}', /[0-9]+|[0-9]+-[a-z]+/),
+      route('/lazy/{id}', /[a-z]+?/)
+    ])
+
+    // The first alternative alone matches only `12`; the whole value matches the second.
+    expect(match('GET', '/alternation/12-ab')?.params).toEqual({ id: '12-ab' })
+    expect(match('GET', '/alternation/12')?.params).toEqual({ id: '12' })
+    expect(match('GET', '/alternation/12-ab%2F')).toBeUndefined()
+    // A lazy quantifier alone matches only `a`; anchored, it takes the whole value.
+    expect(match('GET', '/lazy/abc')?.params).toEqual({ id: 'abc' })
+    expect(match('GET', '/lazy/abc1')).toBeUndefined()
+  })
+
   it('refuses a raw pattern with the g or y flag (matches depend on earlier ones)', () => {
     for (const pattern of [/^[a-z]+$/g, /[a-z]+/y]) {
       const flagged = statefulRoute<State, undefined, string>(
@@ -243,7 +270,22 @@ describe('fail-closed mode', () => {
       'the request body repeats the credential',
       'a recorded request header repeats the credential'
     ])
-    expect(api.ledger.entries()[3]?.headers).toEqual({ 'x-note': '<redacted>' })
+
+    // Every such request is ledgered with constant text only: nothing request-derived.
+    for (const entry of api.ledger.entries()) {
+      expect(entry).toEqual({
+        seq: expect.any(Number),
+        method: 'POST',
+        path: '/<unrecognised>',
+        route: '/notes/{id}',
+        query: {},
+        headers: {},
+        status: 400,
+        evidence: 'unverified',
+        notEmulated: expect.stringMatching(/ repeats the credential$/)
+      })
+    }
+
     expect(api.snapshot()).toEqual({ writes: 0 })
 
     const texts = await Promise.all(refused.map(response => response.text()))
@@ -313,6 +355,50 @@ describe('fail-closed mode: plan-time reasons and recorded headers', () => {
     // Without fail-closed mode a header declared plain is recorded as sent (the earlier
     // behaviour, which Dropbox and Notion keep).
     expect(legacy.ledger.entries()[0]?.headers).toEqual({ 'x-note': value })
+  })
+})
+
+describe('constant-text shape checks (exactBodyKeys, exactQuery)', () => {
+  const request = (query: string, json?: Schema.Json): EmulatedRequest => ({
+    method: 'POST',
+    path: '/x',
+    params: {},
+    query: new URLSearchParams(query),
+    header: () => undefined,
+    json,
+    bytes: undefined
+  })
+
+  const reasonOf = (result: unknown): string => (isNotEmulated(result) ? result.reason : 'admitted')
+
+  // A request key that carries text (here another credential) is never echoed into a reason.
+  const foreign = '{"access_token":"synthetic-other-secret"}'
+
+  it('exactBodyKeys answers the object or a constant reason', () => {
+    expect(exactBodyKeys({ a: 1 }, 'the body', ['a'])).toEqual({ a: 1 })
+    expect(exactBodyKeys({ a: 1, b: 2 }, 'the body', ['a'], ['b'])).toEqual({ a: 1, b: 2 })
+    expect(reasonOf(exactBodyKeys({ a: 1, [foreign]: 2 }, 'the body', ['a']))).toBe(
+      'the body has a key this route does not take'
+    )
+    expect(reasonOf(exactBodyKeys({}, 'the body', ['a']))).toBe(
+      "the body without 'a' is not emulated"
+    )
+    expect(reasonOf(exactBodyKeys([foreign], 'the body', ['a']))).toBe(
+      'the body must be a JSON object'
+    )
+  })
+
+  it('exactQuery answers the values or a constant reason', () => {
+    expect(exactQuery(request('a=1&b=2'), ['a'], ['b'])).toEqual({ a: '1', b: '2' })
+    expect(reasonOf(exactQuery(request(`a=1&${encodeURIComponent(foreign)}=1`), ['a']))).toBe(
+      'a query parameter this route does not take is not emulated'
+    )
+    expect(reasonOf(exactQuery(request('a=1&a=2'), ['a']))).toBe(
+      'repeated query parameters are not emulated'
+    )
+    expect(reasonOf(exactQuery(request(''), ['a']))).toBe(
+      'requests without query parameter a are not emulated on this route'
+    )
   })
 })
 

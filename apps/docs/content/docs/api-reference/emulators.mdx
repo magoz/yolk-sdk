@@ -787,9 +787,8 @@ none), `GET .../issues/{number}` (the recorded 404 for a number the repository h
 (`per_page=100`), and delete (204, then the recorded 404), issue label add and remove (the recorded
 404 for a repository label not on the issue; removing an issue's last label is not emulated), and
 issue create, rename, and close as completed. Every route needs exactly
-`Authorization: Bearer <token>` (at least 8 non-space characters; never stored or ledgered, and
-refused when the path, a query key or value, a recorded header, or the body repeats it, in any
-form), `Accept: application/vnd.github+json` (`githubEmulatorAccept`), and
+`Authorization: Bearer <token>` (at least 8 non-space characters; never stored or ledgered),
+`Accept: application/vnd.github+json` (`githubEmulatorAccept`), and
 `X-GitHub-Api-Version: 2026-03-10` (`githubEmulatorApiVersion`), and answers only on the recorded
 origin `https://api.github.com` (`githubEmulatorOrigin`): `fetch` reads the origin from the request
 URL; behind a loopback rewrite, serve `fetchOn(githubEmulatorOrigin)`.
@@ -807,18 +806,27 @@ keeps both), so a write case ends at the seed except those and the counters.
 It fails closed: only a request whose raw path is exactly an emulated route shape under that route's
 method, with no `Authorization` header or exactly `Bearer <token>`, is recognised. Every other
 request is ledgered and answered with constant text only (the path `/<unrecognised>`, a standard
-method or `<other>`, no query or body, a constant reason). JSON-looking recorded headers and query
-keys are recorded parsed with credential-named keys redacted, or as `<redacted>` when they do not
-parse; refusals never echo a request's own query or body keys; empty query components are refused.
-It is **fixture-only**: anything else answers the ledgered 400 not-emulated before anything is
-written and before any fault is chosen, for example other routes, issue creates with labels or
-assignees, updates other than the two recorded ones (so the lifecycle case's failure-path restore,
-which closes as `not_planned`, is not emulated), adding a label the repository lacks (it would
-create it), a comment listing of more than one comment, rendering an issue that holds comments
-(every fixture answers `comments: 0`), and writes to closed or implied issues. That includes the
-open-issue listing of the read-only leftover lookup `findGithubConformanceLeftovers`, which no
-fixture records: the lookup fails (`github_validation`, HTTP 400), and the repository runner prints
-its lookup-failed WARN instead of leftover warnings.
+method or `<other>`, no query or body, a constant reason). A recognised request that repeats the
+bearer value in its raw path, any decoded path segment, any query key or value, any recorded header,
+or its body (raw, percent-decoded, or parsed as JSON with `\u` escapes undone and numbers such as
+`1.2345678e7` normalised: path segments, query parts, and headers when they look like JSON, the body
+always) is refused and ledgered with constant text only: a standard method, the path
+`/<unrecognised>`, its route template, an empty query, no headers or body, and a constant reason
+(`the query repeats the credential`, for example). Any other recognised request has the bearer value
+scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons included); its
+recorded query keeps every pair (a repeated key as a JSON array of its values, in order), and
+recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are recorded parsed
+with credential-named keys redacted at any depth, or as `<redacted>` when they do not parse,
+whatever the header's declared format. Also, refusals never echo a request's own query or body keys;
+empty query components are refused. It is **fixture-only**: anything else answers the ledgered 400
+not-emulated before anything is written and before any fault is chosen, for example other routes,
+issue creates with labels or assignees, updates other than the two recorded ones (so the lifecycle
+case's failure-path restore, which closes as `not_planned`, is not emulated), adding a label the
+repository lacks (it would create it), a comment listing of more than one comment, rendering an
+issue that holds comments (every fixture answers `comments: 0`), and writes to closed or implied
+issues. That includes the open-issue listing of the read-only leftover lookup
+`findGithubConformanceLeftovers`, which no fixture records: the lookup fails (`github_validation`,
+HTTP 400), and the repository runner prints its lookup-failed WARN instead of leftover warnings.
 
 - Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
   non-space characters that occurs nowhere else in the request (never checked, stored, or ledgered);

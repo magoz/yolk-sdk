@@ -17,10 +17,19 @@
  * (every path parameter matches its raw pattern in full) under that route's method, and any
  * `Authorization` header is exactly `Bearer <token>`. Every other request is ledgered and answered
  * with constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no
- * body, a constant reason). The bearer value is never checked, stored, forwarded, or ledgered: it
- * is scrubbed from everything ledgered and every refusal, and a path, query key or value, recorded
- * header, or body that repeats it (raw, percent-decoded, or in any parsed JSON form) is refused
- * with constant text. Refusals never echo a request's own query or body keys.
+ * body, a constant reason). The bearer value is never checked, stored, forwarded, or ledgered. A
+ * recognised request that repeats the bearer value in its raw path, any decoded path segment, any
+ * query key or value, any recorded header, or its body (raw, percent-decoded, or parsed as JSON
+ * with `\u` escapes undone and numbers such as `1.2345678e7` normalised: path segments, query
+ * parts, and headers when they look like JSON, the body always) is refused and ledgered with
+ * constant text only: a standard method, the path `/<unrecognised>`, its route template, an empty
+ * query, no headers or body, and a constant reason (`the query repeats the credential`, for
+ * example). Any other recognised request has the bearer value scrubbed from its ledgered fields and
+ * every not-emulated reason (plan-time reasons included); its recorded query keeps every pair (a
+ * repeated key as a JSON array of its values, in order), and recorded headers and query keys and
+ * values that start like JSON (`{`, `[`, `"`) are recorded parsed with credential-named keys
+ * redacted at any depth, or as `<redacted>` when they do not parse, whatever the header's declared
+ * format. Refusals never echo a request's own query or body keys.
  *
  * Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
  * non-space characters that occurs nowhere else in the request (never checked, stored, or

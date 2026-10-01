@@ -58,8 +58,8 @@ import {
   unrecognisedMethod
 } from './stateful-secrets.ts'
 
-// Kept as exports of this wrapper too (the shared helpers now live in `./stateful-secrets.ts`).
-export { parseJsonText, scrubSecrets, unrecognisedLedgerPath }
+// Kept as an export of this wrapper (the Todoist and Telegram APIs import it from here).
+export { parseJsonText }
 
 /** Statuses a fault may answer on a fixture-only route: 400-599 (never a success). */
 export const StatefulFixtureFaultStatus = Schema.Int.check(
