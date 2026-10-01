@@ -91,14 +91,24 @@ export type NotionIssuedCursor = {
 export type NotionApiEnv = {
   /** Clock in epoch milliseconds (created page timestamps only). */
   readonly now: () => number
-  /** Origin of property item `next_url` values, for example `https://api.notion.com`. */
-  readonly origin: string
   readonly drills: Readonly<Record<keyof NotionEmulatorDrills, boolean>>
   /** Issued cursors by list and value (runtime-only; cleared by reset and seed). */
   readonly cursors: Map<string, NotionIssuedCursor>
   /** Property cursor numbers; never reset, so a cursor issued before a reset is never reissued. */
   readonly propertyCursorCounter: { next: number }
+  /**
+   * The cursor generation: advanced by every reset and seed (never rewound). Search and block
+   * cursors are the next result's id only in the generation that first issued that id for that
+   * list; a later generation issues a distinct value, so a cursor from before a reset or seed is
+   * never accepted again, even after the same first-page request.
+   */
+  readonly generation: { current: number }
+  /** The generation that first issued each list's raw id cursor (never cleared). */
+  readonly firstIssued: Map<string, number>
 }
+
+/** The origin every Notion fixture records; another origin is not emulated. */
+export const notionEmulatorOrigin = 'https://api.notion.com'
 
 type Route = StatefulRoute<NotionEmulatorState, NotionApiEnv>
 
@@ -129,7 +139,8 @@ const evidence = (
   kind: 'connector' as const,
   write,
   caseIds,
-  evidence: 'unverified' as const
+  evidence: 'unverified' as const,
+  origin: notionEmulatorOrigin
 })
 
 // Responses.
@@ -377,8 +388,23 @@ const issue = (
 }
 
 /**
+ * The cursor value for the next item `id` of a list (in a commit): the id itself, as the fixtures
+ * record, in the generation that first issued it for this list; a distinct value in any later
+ * generation (after a reset or seed), so no cursor value crosses a reset or seed.
+ */
+const idCursor = (env: NotionApiEnv, listKey: string, id: string): string => {
+  const key = `${listKey}\u0000${id}`
+  const first = env.firstIssued.get(key)
+  const generation = env.generation.current
+
+  if (first === undefined) env.firstIssued.set(key, generation)
+
+  return first === undefined || first === generation ? id : `${id}.g${generation}`
+}
+
+/**
  * The commit answering one page of an id-cursor list (search results, blocks): the next cursor is
- * the next item's id, as the fixtures record, issued for this list.
+ * the next item's id, as the fixtures record (see `idCursor`), issued for this list.
  */
 const idListPage = (
   env: NotionApiEnv,
@@ -398,12 +424,14 @@ const idListPage = (
   const next = items[end]
 
   return () => {
-    if (next !== undefined) issue(env, listKey, next.id, end, fingerprint)
+    const cursor = next === undefined ? null : idCursor(env, listKey, next.id)
+
+    if (cursor !== null) issue(env, listKey, cursor, end, fingerprint)
 
     return ok(
       list(
         items.slice(start, end).map(item => item.rendered),
-        next?.id ?? null,
+        cursor,
         type
       )
     )
@@ -471,6 +499,14 @@ const search: Route = statefulRoute(
     if (matches.some(isTrashed)) {
       return notEmulated(
         'a search matching a trashed page is not emulated (no fixture records one)'
+      )
+    }
+
+    // The search fixture's results all carry timestamps; a page shown only as a query row has
+    // none, so no fixture records it as a search result.
+    if (matches.some(page => page.times === null)) {
+      return notEmulated(
+        'a search matching a page shown only as a query row is not emulated (no fixture records one)'
       )
     }
 
@@ -678,6 +714,11 @@ const blockChildren: Route = statefulRoute(
 
     const blocks = state.blocks.filter(block => block.pageId === input.blockId)
 
+    // The block fixture records only nonempty pages of children.
+    if (blocks.length === 0) {
+      return notEmulated('a page without recorded child blocks is not emulated')
+    }
+
     return idListPage(
       env,
       `blocks\u0000${input.blockId}`,
@@ -788,7 +829,7 @@ const propertyItems: Route = statefulRoute(
           next_url:
             nextCursor === null
               ? null
-              : `${env.origin}${notionEmulatorBasePath}/pages/${items.pageId}/properties/${items.propertyId}?start_cursor=${nextCursor}`,
+              : `${notionEmulatorOrigin}${notionEmulatorBasePath}/pages/${items.pageId}/properties/${items.propertyId}?start_cursor=${nextCursor}`,
           type: items.type,
           [items.type]: {}
         }

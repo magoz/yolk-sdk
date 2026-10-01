@@ -524,6 +524,23 @@ const withEvidence = (response: Response, evidence: EmulatorEvidence): Response 
   })
 }
 
+/**
+ * The recorded query: credential-named keys redacted, and any value that parses as a JSON object or
+ * array (Dropbox's browser-style `arg` parameter, for example) recorded with its credential-named
+ * keys redacted at any depth, as a recorded JSON header is.
+ */
+const recordedQuery = (query: URLSearchParams): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    Object.entries(redactCredentialQuery(query)).map(([key, value]) => {
+      const parsed =
+        value.trimStart().startsWith('{') || value.trimStart().startsWith('[')
+          ? parseJsonText(value)
+          : undefined
+
+      return [key, parsed === undefined ? value : JSON.stringify(redactCredentialFields(parsed))]
+    })
+  )
+
 /** A recorded header value: JSON with credential-named keys redacted, or the plain value. */
 const recordedHeaderValue = (header: RecordedHeader, value: string): string => {
   if (!header.json) return value
@@ -809,7 +826,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       seq: nextSeq++,
       method: request.method,
       path: url.pathname,
-      query: redactCredentialQuery(url.searchParams),
+      query: recordedQuery(url.searchParams),
       headers: {},
       status: 0,
       evidence: matched?.route.evidence ?? 'unknown-route'

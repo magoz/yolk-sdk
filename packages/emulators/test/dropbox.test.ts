@@ -804,7 +804,8 @@ describe('fail closed', () => {
       )
       await expectNotEmulated(await resume(beforeNew), 'new match')
 
-      // An unchanged search continues; its last page carries no cursor.
+      // An unchanged search continues. The new match is still there (three matches), so this page
+      // still has more.
       const unchanged = await search()
       const second = await resume(unchanged)
 
@@ -1121,6 +1122,39 @@ describe('Dropbox-API-Arg in the ledger', () => {
 
       expect(everything).not.toContain(secret)
     })
+  )
+
+  it.effect(
+    'records a browser-style JSON `arg` query parameter with credential fields redacted',
+    () =>
+      Effect.promise(async () => {
+        const target = await emulator()
+
+        const arg = JSON.stringify({ path: `${work}/q.txt`, nested: { access_token: secret } })
+
+        await expectNotEmulated(
+          await target.fetch(
+            new Request(`${content}/2/files/upload?arg=${encodeURIComponent(arg)}`, {
+              method: 'POST',
+              headers: { authorization: `Bearer ${token}` },
+              body: 'x'
+            })
+          )
+        )
+
+        const recorded = target.ledger.entries().at(-1)?.query.arg
+
+        expect(recorded === undefined ? undefined : JSON.parse(recorded)).toEqual({
+          path: `${work}/q.txt`,
+          nested: { access_token: '<redacted>' }
+        })
+        expect(
+          JSON.stringify([
+            target.ledger.entries(),
+            await jsonOf(await target.fetch(new Request(`${api}/_emulate/ledger`)))
+          ])
+        ).not.toContain(secret)
+      })
   )
 
   it('refuses to record a credential header', async () => {

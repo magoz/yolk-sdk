@@ -313,10 +313,14 @@ There is no root export or barrel.
   commit writes. Plan, fault, and commit run synchronously in the core, so a not-emulated request
   (by shape or by state) never uses up a fault, and a faulted request writes nothing. Each route
   answers only on its recorded origin (`fetch` reads it from the URL; `fetchOn(origin)` serves one
-  origin behind a loopback rewrite). Cursors are accepted only when issued by this emulator, for
-  the same list, since the last reset or seed (reset and seed clear the registry; cursor values are
-  never reissued), and when the list still renders exactly as at issue; never decode a cursor to
-  trust it. Minted id and rev counters start above the highest seeded value in the minted form.
+  origin behind a loopback rewrite; Dropbox's RPC and content routes and every Notion route carry
+  their recorded origin). Cursors are accepted only when issued by this emulator, for the same list,
+  since the last reset or seed (reset and seed clear the registry), and when the list still renders
+  exactly as at issue; never decode a cursor to trust it. No cursor value crosses a reset or seed:
+  Dropbox and Notion property cursors come from counters that never reset, and Notion search and
+  block cursors are the next result's id (the fixture's value) only in the generation that first
+  issued that id for that list, a distinct `<id>.g<generation>` afterwards (every reset and seed
+  starts a generation). Minted id and rev counters start above the highest seeded value in the minted form.
   Jobs are handed to the core under a never-reset job id (the ledger sequence resets). Recorded
   headers are never credential headers (refused at build); a JSON header (`Dropbox-API-Arg`) is
   ledgered parsed with credential-named keys redacted at any depth, or as `<redacted>` when
@@ -346,9 +350,9 @@ There is no root export or barrel.
   parameters; the order of query parameters; Notion ids with or without dashes, in any case; any
   search `query` (looked up in the state); and any `page_size` from 1 to 100 whose page shows
   only recorded results (the data source query: 1). `Notion-Version` must be `2025-09-03`.
-  Everything else (other keys, filters, booleans, sorts, query parameters, titles, repeated or
-  missing `page_size`, and cursors not issued for the same list since the last reset or whose
-  list changed) is not emulated. Copies change together: this bullet, the `src/notion.ts` header,
+  Everything else (other keys, filters, booleans, sorts, query parameters, another origin,
+  titles, repeated or missing `page_size`, and cursors not issued for the same list since the
+  last reset or whose list changed) is not emulated. Copies change together: this bullet, the `src/notion.ts` header,
   `README.md` (Notion emulator), and `apps/docs/content/docs/api-reference/emulators.mdx`.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /

@@ -703,9 +703,10 @@ Wire behavior the cases claim:
   only emulator-generated values (change keys and etags, draft conversation and internet message
   ids, created ids, and `innerError` request ids and dates).
 
-Emulator extrapolations (no fixture). The cases need each of these to run, except request-shape
-latitude (accepted request variations; no invented wire behaviour) and the last, which is opt-in
-and off by default:
+Emulator extrapolations (no fixture). This list predates the fixture-only rule as now stated
+(`AGENTS.md`): it is legacy, to be removed, and never a precedent for another emulator or route. The
+cases need each of these to run, except request-shape latitude (accepted request variations; no
+invented wire behaviour) and the last, which is opt-in and off by default:
 
 - **Concurrency window.** The first write (update or move) to reach the handler holds the message
   for `conflictWindowMs` (default 25); an overlapping write gets 409; non-overlapping writes both
@@ -930,7 +931,7 @@ Dropbox case, only to prove that case catches it.
 > loaded lazily by `makeNotionEmulator`, so importing the subpath has no side effects.
 
 `await makeNotionEmulator(options?)` returns
-`{ fetch, fetchOn, baseUrl, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has
+`{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has
 its own state; `await close()` when done. It emulates only what the eight Notion conformance cases
 (with their cleanup) send, so the Notion connector and the cases run unchanged against it. The
 read-only leftover lookup (`findNotionConformanceLeftovers`) fails against it whenever its search
@@ -938,7 +939,10 @@ for `yolk-conformance` has no match (a clean workspace) or matches a trashed pag
 case): no fixture records either answer, so the search answers the ledgered 400 not-emulated
 (nothing is written) and the lookup fails with `NotionConformanceActionFailed`
 (`notion_search_failed`, HTTP 400); the live runner turns that into its lookup-failed `WARN`. It
-answers when every match is an untrashed page. Route `https://api.notion.com` to it:
+answers when every match is an untrashed page with timestamps. Every route answers only on the
+origin its fixtures record, `https://api.notion.com` (`notionEmulatorOrigin`): `fetch` reads the
+origin from the request URL (in-process routing keeps it); behind a loopback rewrite, which loses
+it, serve `fetchOn(notionEmulatorOrigin)`. Route `https://api.notion.com` to it:
 
 ```ts
 import { makeNotionEmulator } from '@yolk-sdk/emulators/notion'
@@ -995,32 +999,38 @@ emulator mints (it never mints anything else):
 - **Minted values.** Created page ids (`1f0000e0-0000-4000-8000-000000000001`, ...) come from a
   counter that only advances and starts above the highest seeded id in that form; created pages take
   their timestamps from the injectable `now` clock; request ids come from the ledger sequence;
-  property item cursors come from a counter that never resets (the first is the fixture's value). A
-  reversible run ends at the seed except the counter and its own page, in the trash.
+  property item cursors come from a counter that never resets (the first is the fixture's value);
+  search and block cursors are the next result's id (the fixture's value) only in the generation
+  that first issued that id for that list, and `<id>.g<generation>` after a reset or seed (each
+  starts a generation). A reversible run ends at the seed except the counter and its own page, in
+  the trash.
 - **Implied pages.** Pages a fixture only names by id (the blocks page, the write case's parent page,
   the database's parent page, and the second data source row) are `impliedPages`: their ids resolve
   where a fixture names them (a block parent, a create parent, a database parent, the query's next
   row), but no content exists for them, so any answer that would render one is not emulated.
 - **Search scope.** Search considers only the pages whose content the state holds (the `pages`):
-  an implied page has no known title, so it never matches a search.
+  an implied page has no known title, so it never matches a search. A search answers only matches
+  in the shape the search fixture records (untrashed pages with timestamps): a match that is
+  trashed, or shown only as a query row (no timestamps), makes the search not emulated.
 - **Cursors.** A cursor is accepted only when this emulator issued it for the same list (the same
   search query, block parent, or property) since the last reset or seed, and the list renders
-  exactly as when it was issued.
+  exactly as when it was issued. No cursor value crosses a reset or seed (see minted values), so a
+  pre-reset cursor stays refused even after the same first-page request.
 - **Request-shape latitude (`/notion`, the only accepted deviations).** Any bearer value (never
   checked or stored); extra request headers; JSON key order; `content-type` media-type parameters;
   the order of query parameters; Notion ids with or without dashes, in any case; any search `query`
   (looked up in the state); and any `page_size` from 1 to 100 whose page shows only recorded results
   (the data source query: 1). `Notion-Version` must be `2025-09-03`. Everything else (other keys,
-  filters, booleans, sorts, query parameters, titles, repeated or missing `page_size`, and cursors
+  filters, booleans, sorts, query parameters, another origin, titles, repeated or missing `page_size`, and cursors
   not issued for the same list since the last reset or whose list changed) is not emulated.
 
 Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
 `notEmulated` in the ledger), writes nothing, and uses up no fault: unknown routes and methods (other
-users, comments, block reads or updates, database queries, page deletes), a missing bearer or
+users, comments, block reads or updates, database queries, page deletes), another origin, a missing bearer or
 `Notion-Version`, query parameters on routes that take none, other search filters and keys, a search
-without matches or whose matches include a trashed page, `sorts`, `filter`, or `start_cursor` on the data source query,
+without matches or whose matches include a trashed page or a page shown only as a query row, `sorts`, `filter`, or `start_cursor` on the data source query,
 a query page that would show a row no fixture shows (or a last page), the cursors above, children
-of anything but a page, a property with no seeded item list (or a singly encoded property id), a
+of anything but a page or of a page without recorded child blocks, a property with no seeded item list (or a singly encoded property id), a
 missing database or data source, a read of an implied page or of a page shown only as a query row,
 page creates with `children`, a database parent, another title, more than one title item,
 annotations, or a missing or trashed parent, page updates other than `{ archived: true }`, and
@@ -1031,8 +1041,8 @@ State and seeds: the bot user, pages (`parent`, trash flags, `properties` as sto
 pages, blocks, paginated property items, databases, data sources, and the page counter. The default
 seed is the synthetic fixture entities with the same ids as `notionConformanceFixtureSeeds`. Pass
 `seed: { profile?, botUser?, pages?, impliedPages?, blocks?, propertyItems?, databases?,
-dataSources? }` (lists replace the profile's) with profiles `'default'` or `'empty'`. `baseUrl`
-(default `https://api.notion.com`) is the origin of `next_url` values. `reset()`, `seed(next)`, and
+dataSources? }` (lists replace the profile's) with profiles `'default'` or `'empty'`. Property
+item `next_url` values name the recorded origin. `reset()`, `seed(next)`, and
 `snapshot()` behave as in the Dropbox emulator; reset and seed also clear issued cursors.
 
 Faults, the ledger (which records the `Notion-Version` header), and the control plane behave as in

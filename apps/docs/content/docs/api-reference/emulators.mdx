@@ -555,14 +555,14 @@ behaviour, minted values, and refusals in full.
 > when you create an emulator). It is fixture-only, without exceptions: it answers only what the
 > conformance fixtures show.
 
-| Export                                                 | Purpose                                                                                                                  |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `makeNotionEmulator(options?)`                         | `Promise` of `{ fetch, fetchOn, baseUrl, ledger, faults, reset, seed, snapshot, coverage, close }`                       |
-| `notionEmulatorRoutes`                                 | Route evidence manifest (10 routes, all `unverified`; two are connector write routes)                                    |
-| `NotionEmulatorSeed`, `NotionEmulatorProfile`          | Typed seed schema (`profile`, `botUser`, `pages`, `impliedPages`, `blocks`, `propertyItems`, `databases`, `dataSources`) |
-| `NotionFault`                                          | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }`                              |
-| `NotionEmulatorInputInvalid`                           | Invalid seed, fault, or option passed to the JS API                                                                      |
-| `notionEmulatorDefaultOrigin`, `notionEmulatorVersion` | `https://api.notion.com` and `2025-09-03`                                                                                |
+| Export                                          | Purpose                                                                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `makeNotionEmulator(options?)`                  | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`                                |
+| `notionEmulatorRoutes`                          | Route evidence manifest (10 routes, all `unverified`; two are connector write routes)                                    |
+| `NotionEmulatorSeed`, `NotionEmulatorProfile`   | Typed seed schema (`profile`, `botUser`, `pages`, `impliedPages`, `blocks`, `propertyItems`, `databases`, `dataSources`) |
+| `NotionFault`                                   | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }`                              |
+| `NotionEmulatorInputInvalid`                    | Invalid seed, fault, or option passed to the JS API                                                                      |
+| `notionEmulatorOrigin`, `notionEmulatorVersion` | `https://api.notion.com` and `2025-09-03`                                                                                |
 
 ```ts
 import { makeNotionEmulator } from '@yolk-sdk/emulators/notion'
@@ -586,19 +586,27 @@ the connector's second percent-encoding names it), and the database / data sourc
 database, and `POST /data_sources/{id}/query` with `page_size: 1` answers the recorded first row,
 whose parent is the data source, and the next row's id as its cursor. Lists page with `has_more`
 and `next_cursor`, and the last page carries `next_cursor: null`. Every route needs
-`Authorization: Bearer <non-empty>` (never stored or ledgered) and `Notion-Version: 2025-09-03`.
+`Authorization: Bearer <non-empty>` (never stored or ledgered) and `Notion-Version: 2025-09-03`,
+and answers only on the recorded origin `https://api.notion.com` (`notionEmulatorOrigin`): `fetch`
+reads the origin from the request URL; behind a loopback rewrite, serve
+`fetchOn(notionEmulatorOrigin)`.
 
 Every answer value comes from a fixture, or is a value the emulator mints (created page ids from a
 counter that starts above the seeded ones, their timestamps from the injectable `now` clock,
-request ids, and property cursors). Pages a fixture only names by id (the blocks page, the parent
+request ids, and cursors). Pages a fixture only names by id (the blocks page, the parent
 pages, the next query row) are implied: their ids resolve where a fixture names them, but they are
 never rendered, and search considers only the pages whose content the state holds, so an implied
-page never matches. A cursor is accepted only when this emulator issued it for the same list since the
-last reset and the list renders exactly as when it was issued. Anything else answers one ledgered
-400 not-emulated, writes nothing, and uses up no fault: unknown routes and methods, other
-`Notion-Version` values, query parameters a route does not take, a missing `page_size`, other
-search filters, a search without matches or whose matches include a trashed page, `sorts` and query filters, a query
-page that would show an unrecorded row, creates with `children`, under a database, or with another
+page never matches. A cursor is accepted only when this emulator issued it for the same list since
+the last reset or seed and the list renders exactly as when it was issued. No cursor value crosses
+a reset or seed: property cursors come from a counter that never resets, and search and block
+cursors are the next result's id (the fixture's value) only in the generation that first issued
+that id for that list, `<id>.g<generation>` afterwards, so a pre-reset cursor stays refused even
+after the same first-page request. Anything else answers one ledgered
+400 not-emulated, writes nothing, and uses up no fault: unknown routes and methods, another
+origin, other `Notion-Version` values, query parameters a route does not take, a missing `page_size`, other
+search filters, a search without matches or whose matches include a trashed page or a page shown
+only as a query row, children of a page without recorded child blocks, `sorts` and query filters, a
+query page that would show an unrecorded row, creates with `children`, under a database, or with another
 title, page updates other than `{ archived: true }`, and archiving a missing or already trashed
 page. So `findNotionConformanceLeftovers` fails against a clean workspace or after the write case
 (no match, or a trashed match) with `NotionConformanceActionFailed` (HTTP 400), which the live
@@ -609,7 +617,7 @@ runner reports as its lookup-failed `WARN`.
   order of query parameters; Notion ids with or without dashes, in any case; any search `query`
   (looked up in the state); and any `page_size` from 1 to 100 whose page shows only recorded results
   (the data source query: 1). `Notion-Version` must be `2025-09-03`. Everything else (other keys,
-  filters, booleans, sorts, query parameters, titles, repeated or missing `page_size`, and cursors
+  filters, booleans, sorts, query parameters, another origin, titles, repeated or missing `page_size`, and cursors
   not issued for the same list since the last reset or whose list changed) is not emulated.
 
 The default seed is the synthetic fixture entities with the same ids as

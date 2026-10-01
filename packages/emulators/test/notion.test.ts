@@ -57,6 +57,10 @@ type CallOptions = {
   readonly authorization?: string | null
   readonly version?: string | null
   readonly headers?: Record<string, string>
+  /** The request URL origin (default the recorded `https://api.notion.com`). */
+  readonly origin?: string
+  /** The handler to call (default `target.fetch`). */
+  readonly handler?: (request: Request) => Promise<Response>
 }
 
 const call = (
@@ -83,7 +87,9 @@ const call = (
     headers.set('content-type', 'application/json')
   }
 
-  return target.fetch(new Request(`${origin}${path}`, { method, headers, body }))
+  return (options.handler ?? target.fetch)(
+    new Request(`${options.origin ?? origin}${path}`, { method, headers, body })
+  )
 }
 
 const field = (value: unknown, key: string): unknown =>
@@ -342,6 +348,34 @@ describe('fail closed', () => {
             })
           ],
           [
+            'children of a page without recorded child blocks',
+            call(target, 'GET', `/v1/blocks/${seeds.titlePageId}/children?page_size=2`)
+          ],
+          [
+            'children of an implied page without recorded child blocks',
+            call(target, 'GET', `/v1/blocks/${seeds.parentPageId}/children?page_size=2`)
+          ],
+          [
+            'search matching a page shown only as a query row',
+            call(target, 'POST', '/v1/search', {
+              body: searchBody({ query: 'Synthetic task', page_size: 100 })
+            })
+          ],
+          [
+            'search matching shown pages and a query row',
+            call(target, 'POST', '/v1/search', {
+              body: searchBody({ query: 'synthetic', page_size: 100 })
+            })
+          ],
+          ['another origin', call(target, 'GET', page, { origin: 'http://127.0.0.1:9' })],
+          [
+            'another origin through its own handler',
+            call(target, 'GET', page, {
+              origin: 'http://127.0.0.1:9',
+              handler: target.fetchOn('http://127.0.0.1:9')
+            })
+          ],
+          [
             'search unknown cursor',
             call(target, 'POST', '/v1/search', { body: searchBody({ start_cursor: 'nope' }) })
           ],
@@ -557,6 +591,57 @@ describe('fail closed', () => {
       await expectNotEmulated(
         await call(target, 'GET', `${property}?page_size=2&start_cursor=${String(propertyCursor)}`)
       )
+
+      // A search or block cursor reissued after a fresh first-page request is distinct too: the
+      // pre-reset value (the fixture's) stays refused, and only the new one continues.
+      const continues = async (first: Response, next: (cursor: string) => Promise<Response>) => {
+        const fresh = String(field(await jsonOf(first), 'next_cursor'))
+
+        return { fresh, status: (await next(fresh)).status }
+      }
+
+      const searchAgain = () => call(target, 'POST', '/v1/search', { body: searchBody() })
+
+      const searchFrom = (cursor: string) =>
+        call(target, 'POST', '/v1/search', { body: searchBody({ start_cursor: cursor }) })
+
+      const blocksAgain = () => call(target, 'GET', `${blocks}?page_size=2`)
+
+      const blocksFrom = (cursor: string) =>
+        call(target, 'GET', `${blocks}?page_size=2&start_cursor=${cursor}`)
+
+      const afterReset = {
+        search: await continues(await searchAgain(), searchFrom),
+        blocks: await continues(await blocksAgain(), blocksFrom)
+      }
+
+      expect(afterReset).toEqual({
+        search: { fresh: `${searchCursor}.g1`, status: 200 },
+        blocks: { fresh: `${String(blockCursor)}.g1`, status: 200 }
+      })
+      await expectNotEmulated(await searchFrom(searchCursor), 'pre-reset search cursor')
+      await expectNotEmulated(await blocksFrom(String(blockCursor)), 'pre-reset block cursor')
+
+      // The same after a seed: the cursors of both earlier generations stay refused.
+      await target.seed({})
+
+      const afterSeed = {
+        search: await continues(await searchAgain(), searchFrom),
+        blocks: await continues(await blocksAgain(), blocksFrom)
+      }
+
+      expect(afterSeed).toEqual({
+        search: { fresh: `${searchCursor}.g2`, status: 200 },
+        blocks: { fresh: `${String(blockCursor)}.g2`, status: 200 }
+      })
+
+      for (const stale of [searchCursor, afterReset.search.fresh]) {
+        await expectNotEmulated(await searchFrom(stale), `stale search cursor ${stale}`)
+      }
+
+      for (const stale of [String(blockCursor), afterReset.blocks.fresh]) {
+        await expectNotEmulated(await blocksFrom(stale), `stale block cursor ${stale}`)
+      }
 
       // A property cursor issued after the reset is a new value.
       const reissued = field(
@@ -927,7 +1012,6 @@ describe('seeds and the control plane', () => {
               impliedPages: [{ id: '1f000000-0000-4000-8000-000000000001', parent: null }]
             }
           },
-          { baseUrl: 'https://api.notion.com/v1' },
           { drills: { nope: true } },
           { drills: { trashedPageNotFound: 1 } }
         ])

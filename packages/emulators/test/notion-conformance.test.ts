@@ -56,10 +56,14 @@ const portsOver = <E>(httpLayer: Layer.Layer<HttpClient.HttpClient, E>) =>
 const inProcessLayer = (emulator: NotionEmulator) =>
   InProcessHttpClient.layer([EmulatorRoute.handler(origin, emulator.fetch)])
 
-/** Real `FetchHttpClient` underneath; the origin rewritten to a server on 127.0.0.1:0. */
+/**
+ * Real `FetchHttpClient` underneath; the origin rewritten to a server on 127.0.0.1:0 serving the
+ * emulator's handler for the recorded origin (the rewrite loses the origin, and every route
+ * answers only on the origin its fixtures record).
+ */
 const emulatedLayer = (emulator: NotionEmulator) =>
   Layer.unwrap(
-    serveFetchHandler(emulator.fetch).pipe(
+    serveFetchHandler(emulator.fetchOn(origin)).pipe(
       Effect.map(server =>
         EmulatedHttpClient.layer([EmulatorRoute.url(origin, server.url)]).pipe(
           Layer.provide(FetchHttpClient.layer)

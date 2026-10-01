@@ -10,16 +10,18 @@
  * one ledgered 400 not-emulated, writes nothing, and uses up no fault. That includes a search
  * without matches or matching a trashed page, so the read-only leftover lookup fails on a clean
  * workspace and after the write case (the live runner prints its lookup-failed WARN). Search
- * considers only the pages whose content the state holds; an implied page never matches.
+ * considers only the pages whose content the state holds (an implied page never matches) and
+ * refuses a match shown only as a query row. Every route answers only on the recorded origin
+ * `https://api.notion.com` (`fetchOn(origin)` serves it behind a loopback rewrite).
  *
  * Request-shape latitude (`/notion`, the only accepted deviations): any bearer value (never
  * checked or stored); extra request headers; JSON key order; `content-type` media-type
  * parameters; the order of query parameters; Notion ids with or without dashes, in any case; any
  * search `query` (looked up in the state); and any `page_size` from 1 to 100 whose page shows
  * only recorded results (the data source query: 1). `Notion-Version` must be `2025-09-03`.
- * Everything else (other keys, filters, booleans, sorts, query parameters, titles, repeated or
- * missing `page_size`, and cursors not issued for the same list since the last reset or whose
- * list changed) is not emulated.
+ * Everything else (other keys, filters, booleans, sorts, query parameters, another origin,
+ * titles, repeated or missing `page_size`, and cursors not issued for the same list since the
+ * last reset or whose list changed) is not emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeNotionEmulator` (importing this module has no side effects).
@@ -61,6 +63,7 @@ export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export {
   notionEmulatorBasePath,
+  notionEmulatorOrigin,
   notionEmulatorVersion,
   type NotionEmulatorDrills
 } from './notion/api.ts'
@@ -79,9 +82,6 @@ export {
   NotionEmulatorStateSchema,
   type NotionEmulatorState
 } from './notion/state.ts'
-
-/** Origin the connector calls; also the origin of property item `next_url` values. */
-export const notionEmulatorDefaultOrigin = 'https://api.notion.com'
 
 /**
  * Route evidence manifest: every emulated route, whether it writes, and the conformance cases
@@ -128,36 +128,14 @@ export type NotionEmulatorOptions = {
   readonly seed?: NotionEmulatorSeed
   /** Clock in epoch milliseconds (created page timestamps). Defaults to `Date.now`. */
   readonly now?: () => number
-  /** Origin of property item `next_url` values. Defaults to `https://api.notion.com`. */
-  readonly baseUrl?: string
   /** Drill knobs (tests only): make the emulator disagree with one conformance claim. */
   readonly drills?: NotionEmulatorDrills
 }
 
-export type NotionEmulator = StatefulEmulatorApi<NotionEmulatorState, NotionEmulatorSeed> & {
-  /** Origin of property item `next_url` values. */
-  readonly baseUrl: string
-}
+export type NotionEmulator = StatefulEmulatorApi<NotionEmulatorState, NotionEmulatorSeed>
 
 const inputInvalid = (input: StatefulInputKind, reason: string) =>
   new NotionEmulatorInputInvalid({ input, reason })
-
-const validOrigin = (input: string): string | undefined => {
-  if (!URL.canParse(input)) {
-    return undefined
-  }
-
-  const url = new URL(input)
-
-  const bare =
-    (url.pathname === '/' || url.pathname === '') &&
-    url.search === '' &&
-    url.hash === '' &&
-    url.username === '' &&
-    url.password === ''
-
-  return (url.protocol === 'http:' || url.protocol === 'https:') && bare ? url.origin : undefined
-}
 
 /**
  * Create a stateful Notion emulator on the `@emulators/core` custom runtime. Each call has its
@@ -174,22 +152,12 @@ export const makeNotionEmulator = async (
     throw inputInvalid('seed', initial)
   }
 
-  const origin = validOrigin(options.baseUrl ?? notionEmulatorDefaultOrigin)
-
-  if (origin === undefined) {
-    throw inputInvalid(
-      'option',
-      'baseUrl must be an http(s) origin without path, query, hash, or credentials'
-    )
-  }
-
   checkBooleanDrills(options.drills, notionEmulatorDrillKnobs, inputInvalid)
 
   const drills = options.drills ?? {}
 
   const env: NotionApiEnv = {
     now: options.now ?? (() => Date.now()),
-    origin,
     drills: {
       searchRepeatsResults: drills.searchRepeatsResults === true,
       botUserAsPerson: drills.botUserAsPerson === true,
@@ -201,7 +169,9 @@ export const makeNotionEmulator = async (
       trashedPageNotFound: drills.trashedPageNotFound === true
     },
     cursors: new Map(),
-    propertyCursorCounter: { next: 1 }
+    propertyCursorCounter: { next: 1 },
+    generation: { current: 0 },
+    firstIssued: new Map()
   }
 
   // Loaded lazily: the core imports Node builtins and reads files at import time.
@@ -218,8 +188,12 @@ export const makeNotionEmulator = async (
           ? undefined
           : `Notion-Version other than ${notionEmulatorVersion} (the version every fixture sends) is not emulated`,
       recordHeaders: [{ name: 'notion-version', json: false }],
-      // Property cursor numbers keep advancing, so a cursor from before a reset is never reissued.
-      clearRuntime: () => env.cursors.clear(),
+      // Cursor values never cross a reset or seed: property cursor numbers keep advancing, and the
+      // generation makes later search and block cursors distinct from earlier ones.
+      clearRuntime: () => {
+        env.cursors.clear()
+        env.generation.current += 1
+      },
       runtimeState: () => ({}),
       seedSummary: state => ({
         pages: state.pages.length,
@@ -264,5 +238,5 @@ export const makeNotionEmulator = async (
     }
   )
 
-  return { ...api, baseUrl: origin }
+  return api
 }
