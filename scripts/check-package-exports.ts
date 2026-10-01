@@ -231,6 +231,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './xai',
       './opencode',
       './email',
+      './r2',
       './node',
       './fortnox',
       './microsoft',

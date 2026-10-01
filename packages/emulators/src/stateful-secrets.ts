@@ -1,7 +1,9 @@
 /**
  * Credential guarding and the fail-closed ledger constants shared by both stateful wrappers
  * (internal; imported by `src/stateful-fixture.ts` and `src/stateful-emulator.ts`, which issue #139
- * consolidates). No Node builtin and no core import, so both wrappers stay runtime-portable.
+ * consolidates, and by the `src/r2.ts` port emulator, which uses `textRepeatsSecret` and the
+ * predicate form of the same closure, `textClosureOutcome`). No Node builtin and no core import, so
+ * both wrappers stay runtime-portable.
  *
  * A guarded secret (a request-carried credential value the wrapper extracted from a recognised
  * request shape) must never reach the ledger, a response, or `/_emulate/*`: `scrubSecrets` removes
@@ -211,31 +213,27 @@ export const tolerantJsonUnescape = (text: string): string =>
 /** What the closure of a text found: the secret, its fixpoint without the secret, or a cap. */
 export type SecretClosureOutcome = 'repeats' | 'clear' | 'capped'
 
+/** What the closure of a text found: a matching text, its fixpoint without one, or a cap. */
+export type TextClosureOutcome = 'matches' | 'clear' | 'capped'
+
 /**
- * The closure of `text` against `secrets`: starting from the raw text, a breadth-first walk
+ * The closure of `text` against a predicate: starting from the raw text, a breadth-first walk
  * applying either total transform (`tolerantPercentDecode`, `tolerantJsonUnescape`) to every text
  * of the previous round, deduplicated, until no new text appears (a fixpoint); every text is
- * checked for a secret as a substring. Both transforms never lengthen a text and strictly shorten
- * it when they change it, so every branch ends. `capped` when a cap of `secretClosureCaps` is hit
- * first. No JSON is parsed and nothing can fail. Numbers need no handling: a recognisable bearer
- * never fits the JSON-number alphabet.
+ * tested with `matches`. Both transforms never lengthen a text and strictly shorten it when they
+ * change it, so every branch ends. `capped` when a cap of `secretClosureCaps` is hit first. No
+ * JSON is parsed and nothing can fail (unless `matches` throws).
  */
-export const secretClosureOutcome = (
+export const textClosureOutcome = (
   text: string,
-  secrets: ReadonlyArray<string>
-): SecretClosureOutcome => {
-  const guarded = meaningful(secrets)
-
-  if (guarded.length === 0) return 'clear'
-
+  matches: (candidate: string) => boolean
+): TextClosureOutcome => {
   const seen = new Set([text])
   let characters = 0
   let frontier: ReadonlyArray<string> = [text]
 
   for (let round = 0; frontier.length > 0; round += 1) {
-    if (frontier.some(candidate => guarded.some(secret => candidate.includes(secret)))) {
-      return 'repeats'
-    }
+    if (frontier.some(matches)) return 'matches'
 
     if (round === secretClosureCaps.rounds) return 'capped'
 
@@ -264,6 +262,26 @@ export const secretClosureOutcome = (
   }
 
   return 'clear'
+}
+
+/**
+ * The closure of `text` against `secrets` (`textClosureOutcome`, every text checked for a secret
+ * as a substring). Numbers need no handling: a recognisable bearer never fits the JSON-number
+ * alphabet.
+ */
+export const secretClosureOutcome = (
+  text: string,
+  secrets: ReadonlyArray<string>
+): SecretClosureOutcome => {
+  const guarded = meaningful(secrets)
+
+  if (guarded.length === 0) return 'clear'
+
+  const outcome = textClosureOutcome(text, candidate =>
+    guarded.some(secret => candidate.includes(secret))
+  )
+
+  return outcome === 'matches' ? 'repeats' : outcome
 }
 
 /**

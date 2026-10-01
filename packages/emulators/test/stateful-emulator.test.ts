@@ -28,6 +28,7 @@ import {
   isRecognisableBearerValue,
   secretClosureCaps,
   secretClosureOutcome,
+  textClosureOutcome,
   textRepeatsSecret,
   tolerantJsonUnescape,
   tolerantPercentDecode
@@ -684,6 +685,32 @@ describe('fail-closed credential guard', () => {
       'clear'
     )
     expect(textRepeatsSecret('anything', [])).toBe(false)
+  })
+
+  it('textClosureOutcome walks the same closure for any predicate, and secrets use it', () => {
+    const bearer = /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/i
+    const matches = (text: string) => bearer.test(text)
+
+    for (const text of [
+      'Bearer synthetic-token-0001',
+      'Bearer%20synthetic-token-0001',
+      encodeURIComponent(encodeURIComponent('Bearer synthetic-token-0001')),
+      '"Bearer\\u0020synthetic-token-0001"'
+    ]) {
+      expect(textClosureOutcome(text, matches), text).toBe('matches')
+    }
+
+    expect(textClosureOutcome('no token here %41 \\u0041', matches)).toBe('clear')
+    expect(textClosureOutcome('%' + '25'.repeat(100) + '41', () => false)).toBe('capped')
+
+    // The secret closure is exactly the text closure with a substring predicate.
+    for (const depth of [0, 3, 64, 65]) {
+      const viaText = textClosureOutcome(encoded(depth), text => text.includes(secret))
+
+      expect(secretClosureOutcome(encoded(depth), [secret]), String(depth)).toBe(
+        viaText === 'matches' ? 'repeats' : viaText
+      )
+    }
   })
 
   it('the two transforms are total: every malformed sequence is left as it is', () => {

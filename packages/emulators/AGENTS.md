@@ -15,6 +15,7 @@ Effect `HttpClient` routing that points code at them.
 | `@yolk-sdk/emulators/xai`       | `src/xai.ts`                             | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                                                                    |
 | `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`                        | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                                                                             |
 | `@yolk-sdk/emulators/email`     | `src/email.ts`                           | Fixture-driven fake `EmailClient` backend (plain JSON `call`), its seed, faults, ledger, and manifest                                                                                   |
+| `@yolk-sdk/emulators/r2`        | `src/r2.ts`                              | Fixture-driven fake `R2Presigner` and `R2ObjectClient` backend (plain JSON `call`), its seed, faults, ledger, and manifest                                                              |
 | `@yolk-sdk/emulators/node`      | `src/node.ts`                            | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                                                                          |
 | `@yolk-sdk/emulators/fortnox`   | `src/fortnox.ts`                         | Stateful Fortnox emulator on `@emulators/core`: ledger, faults, control plane                                                                                                           |
 | `@yolk-sdk/emulators/microsoft` | `src/microsoft.ts`                       | Stateful Microsoft Graph emulator on `@emulators/core` (Graph + copy monitor)                                                                                                           |
@@ -35,6 +36,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                      | `src/emulator-http.ts`                   | Shared fault/scripted-error status and header validators (all emulators)                                                                                                                |
 | (internal)                      | `src/route-evidence.ts`                  | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                                                                       |
 | (internal)                      | `src/email-fixtures.ts`                  | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                                                                     |
+| (internal)                      | `src/r2-fixtures.ts`                     | Verbatim data copy of the R2 conformance `PortFixture`s (re-exported as `r2EmulatorFixtures`)                                                                                           |
 | (internal)                      | `src/fortnox/state.ts`                   | Fortnox state/seed schemas, default seed (fixture entities), profiles, totals                                                                                                           |
 | (internal)                      | `src/fortnox/api.ts`                     | Fortnox route table (evidence + handlers), quirks, `ErrorInformation` codes                                                                                                             |
 | (internal)                      | `src/microsoft/state.ts`                 | Microsoft state/seed schemas, default seed (fixture entities), profiles, instants                                                                                                       |
@@ -82,10 +84,11 @@ There is no root export or barrel.
   is added to `src/stateful-emulator.ts` backward compatibly (shared helpers go to
   `src/stateful-secrets.ts`), with tests (`test/stateful-emulator.test.ts`), never as a third
   wrapper.
-- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain
-  Web fetch handlers (no Effect runtime needed, no Node builtins); `email` is a plain structural
-  object (no HTTP, socket, TLS, MIME, or mail library); `node`, `fortnox`, `microsoft`, `dropbox`,
-  `notion`, `todoist`, `telegram`, `github`, and `google` are the Node subpaths.
+- `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are
+  plain Web fetch handlers (no Effect runtime needed, no Node builtins); `email` and `r2` are plain
+  structural objects (no HTTP, socket, TLS, MIME, mail library, SigV4 signer, or S3 client); `node`,
+  `fortnox`, `microsoft`, `dropbox`, `notion`, `todoist`, `telegram`, `github`, and `google` are the
+  Node subpaths.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
 - `@emulators/core` is Apache-2.0 and a dependency (not vendored or bundled; `tsdown` never bundles
@@ -300,6 +303,51 @@ There is no root export or barrel.
   fixture is chosen. The bullet has four copies that change together with `test/email.test.ts`:
   this one, the `src/email.ts` header, `README.md` (Email emulator), and
   `apps/docs/content/docs/api-reference/emulators.mdx` (Email emulator).
+- `/r2` is a port emulator like `/email` (no kernel, no core): `call(port, method, request)` answers
+  one `R2Presigner` or `R2ObjectClient` call as plain JSON (`{ response }`, `{ failure }`, or
+  `{ notEmulated }`), and `r2PortsLayerFromBackend` in `@yolk-sdk/connectors/r2-storage/conformance`
+  bridges it to both ports. Response behaviour comes ONLY from the fixtures in `src/r2-fixtures.ts`,
+  a verbatim copy of the connector `r2ConformanceFixtures` (`test/r2-conformance.test.ts` fails on
+  drift and replays every fixture byte for byte; update both together). The in-memory bucket (seeded
+  with `r2EmulatorDefaultSeed`, the object the get fixtures read, or `seed`) only selects the first
+  matching fixture consistent with it (preferring fixtures unused since reset) and records what that
+  fixture says happened (an object created or replaced under the etag the fixture names); it never
+  invents an etag, a byte, or a failure. Presigning writes nothing. The connector cannot delete R2
+  objects, so a write case leaves its object (`create-if-absent.txt`, `update-if-match.txt`) and a
+  second run on the same emulator fails both write cases without writing, as a reused run id does
+  live. Credentials: every credential field (the shared port scan's `isPortCredentialKey` names) is
+  dropped at any depth before anything is compared or recorded. Every `bodyBase64` must be canonical
+  standard base64 of UTF-8 text (else `uncheckable-body`, before anything is recorded); its decoded
+  text is checked with the request's own texts, and the ledger records it only as `<redacted>` plus
+  `bodyBytes` (the decoded length). A request that still carries a credential is refused as
+  `credential-in-request`: any string key, string value, number, or decoded body that repeats a
+  dropped credential value (the fail-closed closure `textRepeatsSecret` of
+  `src/stateful-secrets.ts`, imported, never copied), or that holds, once the exact canonical
+  placeholders are blanked out, a SigV4 credential name, a credential query parameter, or a token
+  the shared scan flags (`bearerPattern` and `apiKeyPatterns`: bearer tokens, API-key prefixes, JSON
+  Web Tokens, PEM private keys; copied, kept in step by `test/r2.test.ts`), raw, within three
+  percent and three escape rounds (the rules of `findR2PortFixtureSecrets`), or anywhere in the
+  fail-closed closure `textClosureOutcome` (the predicate form of the same closure; a cap refuses).
+  These refusals, calls outside the manifest (`unknown-method`: port and method `<unrecognised>`),
+  and non-object requests (`invalid-request`) are ledgered with constant text only (request
+  `<redacted>`); none uses a fault or changes state. Its manifest routes are `PORT <Port>.<method>`;
+  `PORT R2ObjectClient.put` is the only write and needs a pending entry
+  (`{ manifest: 'r2', method: 'PORT', path: 'R2ObjectClient.put' }`) in
+  `scripts/emulator-evidence-pending.json` until an owner-approved live run against a practice
+  bucket verifies it. Keep ledger, faults (`failure` on a `port` and `method`, with an optional
+  deep-subset `match`), `reset`, `state`, and `coverage`.
+- Request-shape latitude (`/r2`, the only one): credential fields are never compared or recorded,
+  and JSON key order is not compared. Everything else (the endpoint, bucket, key, content type,
+  `maxBytes`, `expectedEtag`, the put `condition`, `bodyBase64`, and `maxUploadBytes`) must equal a
+  fixture request exactly, so only the fixtures' `run-synthetic` run id is emulated. A `bodyBase64`
+  must be canonical standard base64 of UTF-8 text (else `uncheckable-body`); it is compared as sent
+  but recorded only as its decoded length. No key or value, the decoded body included, may carry a
+  credential (else `credential-in-request`). Anything else fails closed with a ledgered
+  `notEmulated` answer (`unknown-method`, `invalid-request`, `uncheckable-body`,
+  `credential-in-request`, `no-matching-fixture`, `state-conflict`). Faults apply only after a
+  matching, state-consistent fixture is chosen. The bullet has four copies that change together with
+  `test/r2.test.ts`: this one, the `src/r2.ts` header, `README.md` (R2 emulator), and
+  `apps/docs/content/docs/api-reference/emulators.mdx` (R2 emulator).
 - Fortnox state lives in the core runtime (JSON state, replaced per `reset`/`seed` generation);
   the ledger, faults, auth, and the `/_emulate/*` control plane live in the wrapper
   (`src/fortnox.ts`), because the core reserves `/_emulate`. The bearer token is never forwarded
@@ -631,7 +679,8 @@ There is no root export or barrel.
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
   `XAiGrokEmulatorInputInvalid` / `OpenCodeGoEmulatorInputInvalid` for invalid input
-  (`EmailEmulatorInputInvalid` for an invalid email seed or fault).
+  (`EmailEmulatorInputInvalid` for an invalid email seed or fault, `R2EmulatorInputInvalid` for an
+  invalid R2 seed or fault).
 - Emulator bodies are pull-driven (one chunk per pull) and the ledger counts chunks handed over
   (network chunks; a Gateway chunk may pack several SSE events); chunk faults that cannot take
   effect answer 500 and are not consumed, never a silent no-op.
@@ -680,7 +729,22 @@ socket, drills, and 401 / 429 / dropped / truncated faults through the real fetc
 transitions, faults, reset, coverage, and seed validation), `test/email-conformance.test.ts`
 (cross-check A: every email case against one shared in-process emulator and each case alone, ending
 as seeded plus the documented Sent copy; one drill fault per case failing exactly that case; a
-failed restore reported; fixture and manifest parity), `test/fortnox.test.ts` (routes, quirks, auth,
+failed restore reported; fixture and manifest parity), `test/r2.test.ts` (answers only from
+fixtures, the latitude, the credential keys in step with `isPortCredentialKey`, every fail-closed
+reason as a refusal row (ledgered, state unchanged, a match-all fault unused and still answering
+the next valid request), the credential guard on the real refusal text, ledger, state, coverage,
+and faults (repeats raw, percent-encoded, JSON-escaped, as keys, and as numbers; SigV4 names and
+credential parameters, encoded and escaped; bearer and API-key-shaped tokens raw, encoded,
+escaped, nested, and as keys; base64 bodies holding a credential; non-canonical, non-UTF-8, and
+non-string bodies, with and without a credential, refused as `uncheckable-body`; put bytes
+recorded only as `bodyBytes`; the canonical placeholders recorded), at least every string either
+port scan flags refused, bucket state transitions, faults, reset, coverage, and seed
+validation), `test/r2-conformance.test.ts` (all six R2 cases through the real port seam
+in-process, in sequence on one emulator and each alone, ending at the seed plus the write cases'
+objects; a reused run id failing both writes without writing; the credentials never reaching the
+ledger, state, coverage, or faults, and every ledgered request passing both port scans; one drill
+fault per case failing exactly that case; the byte-for-byte fixture replay; fixture, manifest, and
+seed parity), `test/fortnox.test.ts` (routes, quirks, auth,
 faults through the real connector, profiles, control plane), `test/fortnox-conformance.test.ts` (all
 seven Fortnox cases in-process and over a loopback socket, the ledger showing the restores, the
 state-equals-seed proof for the reversible cases, and one drill per knob), `test/microsoft.test.ts`
@@ -751,6 +815,7 @@ case failing exactly that case), and `test/stateful-emulator.test.ts` (the share
 included), the opt-in fail-closed mode over a fake core (credential-repeating requests ledgered with
 constant text only, scrubbed plan-time reasons, a route's decoded body views checked like its raw
 body, a throwing view refused with a declared `DecodedViewRefusal` reason, else as uncheckable with
-its own constant reason, never echoing request text), the constant-reason `exactBodyKeys` and
+its own constant reason, never echoing request text; `textClosureOutcome`, the predicate form of
+the secret closure, agreeing with it), the constant-reason `exactBodyKeys` and
 `exactQuery`, and the unchanged behaviour without fail-closed mode). Loopback sockets only; never
 call real services.

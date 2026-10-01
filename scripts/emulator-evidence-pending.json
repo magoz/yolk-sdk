@@ -58,6 +58,13 @@
       "expires": "2026-11-29"
     },
     {
+      "manifest": "r2",
+      "method": "PORT",
+      "path": "R2ObjectClient.put",
+      "reason": "R2 emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice bucket through a host R2ObjectClient implementation (tracking #115).",
+      "expires": "2026-11-29"
+    },
+    {
       "manifest": "fortnox",
       "method": "PUT",
       "path": "/3/customers/{CustomerNumber}",
