@@ -210,6 +210,48 @@
       "path": "/v1/pages/{pageId}",
       "reason": "Notion emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of notion.pages.archive-in-trash.",
       "expires": "2026-11-29"
+    },
+    {
+      "manifest": "todoist",
+      "method": "POST",
+      "path": "/api/v1/tasks",
+      "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close, todoist.tasks.due-dates, and todoist.projects.delete-then-not-found.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "todoist",
+      "method": "POST",
+      "path": "/api/v1/tasks/{taskId}",
+      "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close and todoist.tasks.due-dates.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "todoist",
+      "method": "POST",
+      "path": "/api/v1/tasks/{taskId}/close",
+      "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "todoist",
+      "method": "POST",
+      "path": "/api/v1/projects",
+      "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close, todoist.tasks.due-dates, todoist.projects.parent-id, and todoist.projects.delete-then-not-found.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "todoist",
+      "method": "DELETE",
+      "path": "/api/v1/projects/{projectId}",
+      "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close, todoist.tasks.due-dates, todoist.projects.parent-id, and todoist.projects.delete-then-not-found.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "telegram",
+      "method": "POST",
+      "path": "/bot{token}/sendMessage",
+      "reason": "Telegram emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of telegram.messages.send-message (write-irreversible: one message to the practice chat, started only by its exact case id).",
+      "expires": "2026-11-29"
     }
   ]
 }

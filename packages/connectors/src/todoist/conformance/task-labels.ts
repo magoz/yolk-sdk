@@ -36,7 +36,7 @@ export const todoistTaskLabelsFixture: WireFixture = {
         body: JSON.stringify({
           id: '6XSyntheticLabel',
           user_id: '10000001',
-          project_id: '6XSyntheticPage0',
+          project_id: '6XSyntheticWork0',
           section_id: null,
           parent_id: null,
           added_by_uid: '10000001',

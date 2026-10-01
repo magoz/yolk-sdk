@@ -11,9 +11,9 @@ routes an Effect `HttpClient` to them instead of the real service. The email emu
 port-level fake instead: a plain-JSON `EmailClient` backend. Emulators never import other
 `@yolk-sdk/*` code: their wire shapes follow the conformance fixtures (verified recordings for the
 Gateway, synthetic placeholders elsewhere), and each emulated route names the conformance cases it
-follows. The package depends on `effect`; the Node-only `fortnox`, `microsoft`, `dropbox`, and
-`notion` subpaths also depend on the upstream `@emulators/core` runtime (Apache-2.0, pinned to
-exactly `0.12.0`).
+follows. The package depends on `effect`; the Node-only `fortnox`, `microsoft`, `dropbox`, `notion`,
+`todoist`, and `telegram` subpaths also depend on the upstream `@emulators/core` runtime
+(Apache-2.0, pinned to exactly `0.12.0`).
 
 There is no root export. Import an explicit subpath.
 
@@ -626,6 +626,129 @@ state, in the trash. Faults, the ledger (which records the `Notion-Version` head
 plane behave as in the Dropbox emulator. The `drills` option (eight booleans, one per Notion case)
 is a test-only drill knob that makes exactly the matching conformance case fail.
 
+## Todoist emulator
+
+`@yolk-sdk/emulators/todoist`
+
+> **Experimental, Node only.** A stateful, fixture-only stand-in for the Todoist API v1 routes the
+> Todoist conformance cases use, built on the same `@emulators/core` runtime (loaded lazily when you
+> create an emulator).
+
+| Export                                          | Purpose                                                                                                |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `makeTodoistEmulator(options?)`                 | `Promise` of `{ fetch, ledger, faults, cursors, reset, seed, snapshot, coverage, close }`              |
+| `todoistEmulatorRoutes`                         | Route evidence manifest (nine routes, all `unverified`; five are connector write routes)               |
+| `TodoistEmulatorSeed`, `TodoistEmulatorProfile` | Typed seed schema (`profile`, `userId`, `projects`, `tasks`, `labels`); profiles `default` and `empty` |
+| `TodoistFault`                                  | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }`    |
+| `TodoistEmulatorInputInvalid`                   | Invalid seed or fault passed to the JS API                                                             |
+| `todoistEmulatorDefaultOrigin`                  | `https://api.todoist.com`                                                                              |
+
+```ts
+import { makeTodoistEmulator } from '@yolk-sdk/emulators/todoist'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const todoist = await makeTodoistEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://api.todoist.com', todoist.fetch)
+])
+```
+
+It serves, under `/api/v1` with `Authorization: Bearer <token>` (at least 8 characters; never stored
+or ledgered, and refused when the path, query, or body repeats it): `GET /tasks` (active tasks of a
+project, REST v1 cursor paging with `next_cursor`), task create, read, update, and close, `GET
+/labels`, and project create, read, and delete (which removes the project's task). Case projects are
+named `yolk-conformance-<runId>-<case>` with any `run-` run id, so a live runner's `run-<hex>` ids
+work. Bodies, 404 envelopes (`{ error, error_code, error_extra, error_tag, http_code }`), cursors,
+and due objects follow the synthetic fixtures; created ids (reserved prefix `6XEmu`, which seeds may
+not use) and `event_id`s come from counters that only advance, timestamps from the injectable `now`
+clock, and cursors are valid only as issued since the last reset or seed.
+
+It is **fixture-only**, with no synthesised answers: anything the fixtures do not record answers one
+ledgered 400 `{ error: { type: 'not_emulated', message } }` before anything is written and before
+any fault is chosen, for example other routes, body fields such as `labels` or `due_string`, other
+due values, task listings other than the paging project with `limit=2` or a case project created
+here without `limit`, unpaged label listings larger than `limit`, a closed task, reading a seeded
+project (no fixture records its object), writes to seeded items (only items created through the
+recorded create flow are updated, closed, or deleted), and a second task in a case project or a
+second sub-project (the fixtures record `child_order: 1` only). That includes the project listing
+(`GET /projects`) of the read-only leftover lookup `findTodoistConformanceLeftovers`, which no
+fixture records: the lookup fails (`todoist_list_projects_failed`, HTTP 400), and the repository
+runners print their lookup-failed WARN instead of leftover warnings.
+
+Unrecognised requests (no emulated route under that HTTP method, or raw id segments that are not
+Todoist ids) are ledgered and answered with constant text only: the path `/<unrecognised>`, a
+standard method or `<other>`, no query or body, and a constant reason. So is a request whose
+`Authorization` header is present but is not one recognisable bearer, whatever its route: its
+credential cannot be extracted and scrubbed.
+
+Run write cases sequentially on one emulator, or `reset()` between cases: a seeded parent takes one
+case project at a time (the fixtures record `child_order: 1` only), so concurrent write cases, or a
+case that failed before its cleanup, make later project creates answer not-emulated (a definitive
+rejection: nothing is created).
+
+Accepted request-shape latitude: any credential value of at least 8 characters that occurs nowhere
+else in the request (its path, query, or body; never checked against anything, stored, or ledgered);
+extra request headers; `content-type` parameters; query parameters in any order; any Todoist id
+(1-64 of `[A-Za-z0-9_-]`) of an existing item where a fixture has an id (reads: seeded or created
+tasks and created projects; task listings: the paging project with `limit=2` and case projects
+created here without `limit`; writes: only items created through the recorded create flow; a new
+project's `parent_id`: a seeded project); any `run-` run id (at most 40 characters) in a case
+project name; any non-empty task `content`; a task update sending `content`, `due_datetime`, or
+both; a label listing `limit` of 1 to 200 that covers every label. The `drills` option
+(`cursorRestarts`, `notFoundWithoutError`, `taskLabelsAsIds`, `listIncludesClosed`, `ignoreDue`,
+`createOmitsParent`, `deleteKeepsTasks`) is a test-only knob that makes exactly one Todoist case
+fail.
+
+## Telegram emulator
+
+`@yolk-sdk/emulators/telegram`
+
+> **Experimental, Node only.** A stateful, fixture-only stand-in for the Telegram Bot API routes the
+> Telegram conformance cases use, built on the same `@emulators/core` runtime (loaded lazily when
+> you create an emulator).
+
+| Export                                            | Purpose                                                                                              |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `makeTelegramEmulator(options?)`                  | `Promise` of `{ fetch, ledger, faults, reset, seed, snapshot, coverage, close }`                     |
+| `telegramEmulatorRoutes`                          | Route evidence manifest (four routes, all `unverified`; `sendMessage` is a connector write route)    |
+| `TelegramEmulatorSeed`, `TelegramEmulatorProfile` | Typed seed schema (`profile`, `bot`, `chats`, `files`, `nextMessageId`); profiles `default`, `empty` |
+| `TelegramFault`                                   | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }`  |
+| `TelegramEmulatorInputInvalid`                    | Invalid seed or fault passed to the JS API                                                           |
+| `telegramEmulatorDefaultOrigin`                   | `https://api.telegram.org`                                                                           |
+
+It serves `POST /bot<token>/getChat` (a member chat, or the recorded 400 `chat not found`), `GET
+/bot<token>/getFile?file_id=...`, the hosted file download `GET /file/bot<token>/<file_path>`, and
+`POST /bot<token>/sendMessage`. **The bot token is required but never stored, forwarded, ledgered,
+or echoed.** The emulator fails closed: only a request whose raw path is exactly one of these route
+shapes (the strict token on the raw segment, an emulated method, no other path text) is recognised,
+and its token is taken from that exact segment. Every other request is ledgered and answered with
+constant text only (the path `/<unrecognised>`, a standard method or `<other>`, no query or body, a
+constant reason), so an encoded separator, a malformed token, or extra segments carry nothing into
+the ledger. For a recognised request, the token and its secret part are scrubbed from the ledgered
+method, path (`/bot<redacted>/...`), query keys and values, and every not-emulated message, and a
+query, remaining path, or body that repeats them (raw, percent-decoded, or in any parsed JSON key,
+string value, or number) is refused with constant text. A token whose bot id is `0` names no bot
+(`getChat` answers the recorded 401). A send is irreversible on the real service; the emulator
+records it in its state (`sentMessages`) and never delivers anything.
+
+It is **fixture-only**, like the Todoist emulator: anything else answers the ledgered 400
+not-emulated. Accepted request-shape latitude: any credential value of at least 8 characters that
+occurs nowhere else in the request (its path, query, or body; never checked against anything,
+stored, or ledgered); extra request headers; `content-type` parameters; a well-formed
+`<digits>:<secret>` bot token with a secret of at least 8 characters (the bot id `0` names no bot);
+any well-formed `chat_id` string (an integer or a public `@username`; one the bot is not in answers
+the recorded 400 on `getChat`); any non-empty message `text`. The `drills` option (`getChatOkFalse`,
+`errorsAs200`, `fileSizeOffByOne`, `sendOkFalse`) makes exactly one Telegram case fail.
+
+Both emulators share faults (status only, 400-599, chosen only after the request passed every check,
+including the route's eligibility check against the state, and answered before the commit, so a
+refused request never uses one and nothing is written; a 429 reaches the connector as
+`todoist_rate_limited` / `telegram_rate_limited`), the ledger (credential-named query and body keys
+redacted, guarded credential values scrubbed), clock-free recovery (a handler that throws answers an
+evidence-tagged 500 `emulator_error` recorded with `responseError`; a closed emulator answers 503),
+and the `/_emulate/*` control plane (`ledger`, `faults`, `reset`, `state`, `seed`, `coverage`).
+
 ## Node server
 
 `@yolk-sdk/emulators/node`
@@ -641,17 +764,19 @@ delivery survives the socket; a body stream error drops the connection.
 
 ## Evidence
 
-Emulated routes carry evidence: `verified` routes follow a live observation dated by
-`observedAt`; `unverified` routes follow synthetic placeholders. Fetch-handler emulators tag every
-response from an unverified route with `x-emulator-evidence: unverified`; the email emulator's
-plain-JSON replies carry no header, so it records the evidence on each ledger entry instead. The Gateway route is verified (`observedAt: '2026-09-30'`): the
-emulator follows the verified live Gateway recordings, and the Yolk repository checks its response
-shapes against each recording. The OpenAI, Anthropic, Codex, Grok, OpenCode Go, subscription-usage, email, Fortnox, Microsoft, Dropbox, and Notion routes are unverified,
-like the synthetic fixtures they follow. The email write routes are connector writes: until an
-owner-approved live run against a practice mailbox, through a host `EmailClient` implementation,
-verifies them, the repository lists them in a time-bounded allowlist
-(`scripts/emulator-evidence-pending.json`), and the evidence check reports them as PENDING
-warnings until each entry's expiry date and fails again after it. The four Fortnox
-write routes, the eleven Microsoft write routes, the five Dropbox write routes, and the two Notion
-write routes are held in the same pending list until a live run against a Fortnox test company, a
-Microsoft practice tenant, a Dropbox practice account, or a Notion practice workspace verifies them.
+Emulated routes carry evidence: `verified` routes follow a live observation dated by `observedAt`;
+`unverified` routes follow synthetic placeholders. Fetch-handler emulators tag every response from
+an unverified route with `x-emulator-evidence: unverified`; the email emulator's plain-JSON replies
+carry no header, so it records the evidence on each ledger entry instead. The Gateway route is
+verified (`observedAt: '2026-09-30'`): the emulator follows the verified live Gateway recordings,
+and the Yolk repository checks its response shapes against each recording. The OpenAI, Anthropic,
+Codex, Grok, OpenCode Go, subscription-usage, email, Fortnox, Microsoft, Dropbox, Notion, Todoist,
+and Telegram routes are unverified, like the synthetic fixtures they follow. The email write routes
+are connector writes: until an owner-approved live run against a practice mailbox, through a host
+`EmailClient` implementation, verifies them, the repository lists them in a time-bounded allowlist
+(`scripts/emulator-evidence-pending.json`), and the evidence check reports them as PENDING warnings
+until each entry's expiry date and fails again after it. The four Fortnox write routes, the eleven
+Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five Todoist
+write routes, and the Telegram `sendMessage` route are held in the same pending list until a live
+run against a Fortnox test company, a Microsoft practice tenant, a Dropbox practice account, a
+Notion practice workspace, a Todoist practice account, or a practice bot verifies them.

@@ -141,7 +141,9 @@ const packages: ReadonlyArray<PackageManifest> = [
       './fortnox',
       './microsoft',
       './dropbox',
-      './notion'
+      './notion',
+      './todoist',
+      './telegram'
     ]
   }
 ]
@@ -381,7 +383,24 @@ const main = async () => {
           'const notionUser = await notionEmulator.fetch(new Request("https://api.notion.com/v1/users/me", { headers: { authorization: "Bearer synthetic", "notion-version": "2025-09-03" } }))',
           'if (notionUser.status !== 200 || notionUser.headers.get("x-emulator-evidence") !== "unverified" || (await notionUser.json()).type !== "bot") throw new Error("Notion emulator smoke failed")',
           'if ((await notionEmulator.fetch(new Request("https://api.notion.com/v1/users/me", { headers: { authorization: "Bearer synthetic", "notion-version": "2022-06-28" } }))).status !== 400) throw new Error("Notion emulator must fail closed")',
-          'await notionEmulator.close()'
+          'await notionEmulator.close()',
+          'const todoistEmulatorModule = await import("@yolk-sdk/emulators/todoist")',
+          'if (todoistEmulatorModule.todoistEmulatorRoutes.length !== 9 || !todoistEmulatorModule.todoistEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Todoist emulator manifest mismatch")',
+          'const todoistEmulator = await todoistEmulatorModule.makeTodoistEmulator()',
+          'const todoistTasks = await todoistEmulator.fetch(new Request("https://api.todoist.com/api/v1/tasks?project_id=6XSyntheticPage0&limit=2", { headers: { authorization: "Bearer synthetic" } }))',
+          'const todoistPage = await todoistTasks.json()',
+          'if (todoistTasks.status !== 200 || todoistTasks.headers.get("x-emulator-evidence") !== "unverified" || todoistPage.results.length !== 2 || todoistPage.next_cursor !== "SyntheticTaskCursor0001") throw new Error("Todoist emulator smoke failed")',
+          'const todoistRefused = await todoistEmulator.fetch(new Request("https://api.todoist.com/api/v1/sections", { headers: { authorization: "Bearer synthetic" } }))',
+          'if (todoistRefused.status !== 400 || (await todoistRefused.json()).error.type !== "not_emulated") throw new Error("Todoist emulator must fail closed")',
+          'await todoistEmulator.close()',
+          'const telegramEmulatorModule = await import("@yolk-sdk/emulators/telegram")',
+          'if (telegramEmulatorModule.telegramEmulatorRoutes.length !== 4 || !telegramEmulatorModule.telegramEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Telegram emulator manifest mismatch")',
+          'const telegramEmulator = await telegramEmulatorModule.makeTelegramEmulator()',
+          'const telegramChat = await telegramEmulator.fetch(new Request("https://api.telegram.org/bot1:synthetic-smoke-token/getChat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ chat_id: "-1001000000001" }) }))',
+          'if (telegramChat.status !== 200 || (await telegramChat.json()).ok !== true) throw new Error("Telegram emulator smoke failed")',
+          'const telegramRefused = await telegramEmulator.fetch(new Request("https://api.telegram.org/bot1:synthetic-smoke-token/deleteMessage", { method: "POST" }))',
+          'if (telegramRefused.status !== 400 || (await telegramRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(telegramEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("Telegram emulator must fail closed without echoing the token")',
+          'await telegramEmulator.close()'
         ].join('\n')
     )
 

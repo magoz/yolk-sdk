@@ -119,3 +119,8 @@ download refuses the recording (the case itself still runs and reports normally)
 pass are staged only in the gitignored `.conformance-recordings/telegram/` for manual scrubbing and
 promotion. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental [Telegram emulator](../api-reference/emulators#telegram-emulator)
+(`@yolk-sdk/emulators/telegram`) is a stateful, fixture-only stand-in that passes these cases,
+including the send (recorded in its state, never delivered), without ever keeping or echoing the
+bot token from the URL path.

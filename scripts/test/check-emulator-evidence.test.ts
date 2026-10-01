@@ -8,11 +8,15 @@ import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortno
 import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
 import { microsoftConformanceFixtures } from '../../packages/connectors/src/microsoft/conformance/index.ts'
 import { notionConformanceFixtures } from '../../packages/connectors/src/notion/conformance/index.ts'
+import { telegramConformanceFixtures } from '../../packages/connectors/src/telegram/conformance/index.ts'
+import { todoistConformanceFixtures } from '../../packages/connectors/src/todoist/conformance/index.ts'
 import { dropboxEmulatorRoutes } from '../../packages/emulators/src/dropbox.ts'
 import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
 import { fortnoxEmulatorRoutes } from '../../packages/emulators/src/fortnox.ts'
 import { microsoftEmulatorRoutes } from '../../packages/emulators/src/microsoft.ts'
 import { notionEmulatorRoutes } from '../../packages/emulators/src/notion.ts'
+import { telegramEmulatorRoutes } from '../../packages/emulators/src/telegram.ts'
+import { todoistEmulatorRoutes } from '../../packages/emulators/src/todoist.ts'
 import type { EmulatorRouteEvidence } from '../../packages/emulators/src/route-evidence.ts'
 import {
   checkEmulatorEvidence,
@@ -206,7 +210,9 @@ describe('checkEmulatorEvidence', () => {
     ...fortnoxConformanceFixtures,
     ...microsoftConformanceFixtures,
     ...dropboxConformanceFixtures,
-    ...notionConformanceFixtures
+    ...notionConformanceFixtures,
+    ...todoistConformanceFixtures,
+    ...telegramConformanceFixtures
   ]
 
   const hasVerifiedFixture = (caseId: string) =>
@@ -258,7 +264,9 @@ describe('checkEmulatorEvidence', () => {
     ['Fortnox', fortnoxConformanceFixtures],
     ['Microsoft', microsoftConformanceFixtures],
     ['Dropbox', dropboxConformanceFixtures],
-    ['Notion', notionConformanceFixtures]
+    ['Notion', notionConformanceFixtures],
+    ['Todoist', todoistConformanceFixtures],
+    ['Telegram', telegramConformanceFixtures]
   ])(
     'fails unbacked-verified for a verified route citing only still-unverified repo cases (%s)',
     (_name, fixtures) => {
@@ -501,6 +509,14 @@ describe('repo emulator manifests', () => {
     .filter(notionRoute => notionRoute.write)
     .map(notionRoute => `${notionRoute.method} ${notionRoute.path}`)
 
+  const todoistWriteRoutes = todoistEmulatorRoutes
+    .filter(todoistRoute => todoistRoute.write)
+    .map(todoistRoute => `${todoistRoute.method} ${todoistRoute.path}`)
+
+  const telegramWriteRoutes = telegramEmulatorRoutes
+    .filter(telegramRoute => telegramRoute.write)
+    .map(telegramRoute => `${telegramRoute.method} ${telegramRoute.path}`)
+
   const failedRoutes = (report: ReturnType<typeof repoCheck>, manifest: string) =>
     report.findings
       .filter(finding => finding.severity === 'fail' && finding.manifest === manifest)
@@ -538,6 +554,8 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('microsoft.onedrive.copy-accepted-monitor')).toBe(true)
     expect(knownConformanceCaseIds.has('dropbox.files.upload-rev-precondition')).toBe(true)
     expect(knownConformanceCaseIds.has('notion.pages.archive-in-trash')).toBe(true)
+    expect(knownConformanceCaseIds.has('todoist.tasks.list-cursor-paging')).toBe(true)
+    expect(knownConformanceCaseIds.has('telegram.messages.send-message')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
       'openai',
@@ -552,7 +570,9 @@ describe('repo emulator manifests', () => {
       'fortnox',
       'microsoft',
       'dropbox',
-      'notion'
+      'notion',
+      'todoist',
+      'telegram'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -614,7 +634,9 @@ describe('repo emulator manifests', () => {
       ...fortnoxWriteRoutes,
       ...microsoftWriteRoutes,
       ...dropboxWriteRoutes,
-      ...notionWriteRoutes
+      ...notionWriteRoutes,
+      ...todoistWriteRoutes,
+      ...telegramWriteRoutes
     ])
     expect(fortnoxWriteRoutes).toEqual([
       'PUT /3/customers/{CustomerNumber}',
@@ -643,6 +665,24 @@ describe('repo emulator manifests', () => {
       'POST /2/files/upload'
     ])
     expect(notionWriteRoutes).toEqual(['POST /v1/pages', 'PATCH /v1/pages/{pageId}'])
+    expect(todoistWriteRoutes).toEqual([
+      'POST /api/v1/tasks',
+      'POST /api/v1/tasks/{taskId}',
+      'POST /api/v1/tasks/{taskId}/close',
+      'POST /api/v1/projects',
+      'DELETE /api/v1/projects/{projectId}'
+    ])
+    expect(telegramWriteRoutes).toEqual(['POST /bot{token}/sendMessage'])
+    // Fixture-only: every Todoist and Telegram route cites a case (no uncited route).
+    expect(
+      report.findings
+        .filter(
+          finding =>
+            (finding.manifest === 'todoist' || finding.manifest === 'telegram') &&
+            finding.kind === 'no-case-ids'
+        )
+        .map(finding => finding.route)
+    ).toEqual([])
   })
 
   it('ships one pending entry per email write route, at most 60 days out, naming the live run', () => {
@@ -756,7 +796,9 @@ describe('repo emulator manifests', () => {
 
   it.each([
     ['dropbox', 'Dropbox', () => dropboxWriteRoutes],
-    ['notion', 'Notion', () => notionWriteRoutes]
+    ['notion', 'Notion', () => notionWriteRoutes],
+    ['todoist', 'Todoist', () => todoistWriteRoutes],
+    ['telegram', 'Telegram', () => telegramWriteRoutes]
   ] as const)(
     'ships one pending entry per %s write route, at most 60 days out, naming the live run',
     (manifest, _label, writeRoutes) => {
@@ -776,7 +818,9 @@ describe('repo emulator manifests', () => {
 
   it.each([
     ['dropbox', () => dropboxWriteRoutes],
-    ['notion', () => notionWriteRoutes]
+    ['notion', () => notionWriteRoutes],
+    ['todoist', () => todoistWriteRoutes],
+    ['telegram', () => telegramWriteRoutes]
   ] as const)(
     'fails the unverified %s write routes without the pending file or after it expires',
     (manifest, writeRoutes) => {
@@ -883,6 +927,12 @@ describe('repo emulator manifests', () => {
       'WARN  dropbox  POST /2/files/get_metadata  unverified evidence'
     )
     expect(result.stdout).toContain('WARN  notion  GET /v1/users/me  unverified evidence')
+    expect(result.stdout).toContain(
+      'WARN  todoist  POST /api/v1/projects  PENDING until 2026-11-29'
+    )
+    expect(result.stdout).toContain(
+      'WARN  telegram  POST /bot{token}/sendMessage  PENDING until 2026-11-29'
+    )
 
     // The PENDING count comes from the pending file, not a hard-coded number.
     const pendingLine = result.stdout.split('\n').find(line => line.startsWith('PENDING: '))
