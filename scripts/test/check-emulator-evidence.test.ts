@@ -905,8 +905,9 @@ describe('repo emulator manifests', () => {
       expect(failedRoutes(report, 'microsoft')).toEqual(microsoftWriteRoutes)
     }
 
-    // The day after the last Fortnox allowance expires (dates from the pending file), the Fortnox
-    // routes fail while the Microsoft routes, still within their own allowance, do not.
+    // Each allowance is independent (dates from the pending file): the day after the last Fortnox
+    // allowance expires, the Fortnox routes fail; on the day after the EARLIER of the two expiries,
+    // the other emulator's routes, still within their own allowance, do not.
     const fortnoxExpiry = repoPending.entries
       .filter(entry => entry.manifest === 'fortnox')
       .map(entry => entry.expires)
@@ -915,16 +916,22 @@ describe('repo emulator manifests', () => {
 
     expect(fortnoxExpiry).toBeDefined()
 
-    const dayAfterFortnoxExpiry = new Date(
-      Date.parse(`${fortnoxExpiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
-    )
+    const dayAfter = (date: string | undefined) =>
+      new Date(Date.parse(`${date ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000)
 
-    expect(dayAfterFortnoxExpiry.toISOString().slice(0, 10) <= (microsoftExpiry ?? '')).toBe(true)
+    expect(failedRoutes(repoCheck(dayAfter(fortnoxExpiry)), 'fortnox')).toEqual(fortnoxWriteRoutes)
 
-    const betweenExpiries = repoCheck(dayAfterFortnoxExpiry)
+    const [earlier, later] =
+      (fortnoxExpiry ?? '') < (microsoftExpiry ?? '')
+        ? (['fortnox', 'microsoft'] as const)
+        : (['microsoft', 'fortnox'] as const)
 
-    expect(failedRoutes(betweenExpiries, 'fortnox')).toEqual(fortnoxWriteRoutes)
-    expect(failedRoutes(betweenExpiries, 'microsoft')).toEqual([])
+    const earlierExpiry = earlier === 'fortnox' ? fortnoxExpiry : microsoftExpiry
+    const laterExpiry = later === 'fortnox' ? fortnoxExpiry : microsoftExpiry
+
+    if (earlierExpiry !== laterExpiry) {
+      expect(failedRoutes(repoCheck(dayAfter(earlierExpiry)), later)).toEqual([])
+    }
   })
 
   it.each([
@@ -1056,7 +1063,7 @@ describe('repo emulator manifests', () => {
     expect(result.stdout).toContain('WARN  email  PORT EmailClient.getMessage  unverified evidence')
     expect(result.stdout).toContain('WARN  r2  PORT R2ObjectClient.put  PENDING until 2026-11-29')
     expect(result.stdout).toContain('WARN  r2  PORT R2ObjectClient.get  unverified evidence')
-    expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-10-31')
+    expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-11-29')
     expect(result.stdout).toContain('WARN  microsoft  POST /v1.0/$batch  PENDING until 2026-11-27')
     expect(result.stdout).toContain('WARN  dropbox  POST /2/files/upload  PENDING until 2026-11-29')
     expect(result.stdout).toContain(
