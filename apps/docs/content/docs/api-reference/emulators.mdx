@@ -13,8 +13,8 @@ port-level fakes instead: plain-JSON backends for `EmailClient` and for `R2Presi
 conformance fixtures (verified recordings for the Gateway, synthetic placeholders elsewhere), and
 each emulated route names the conformance cases it follows. The package depends on `effect`; the
 Node-only `fortnox`, `microsoft`, `dropbox`, `notion`, `todoist`, `telegram`, `github`, `google`,
-and `linkedin-search` subpaths also depend on the upstream `@emulators/core` runtime (Apache-2.0,
-pinned to exactly `0.12.0`).
+`linkedin-search`, and `mcp` subpaths also depend on the upstream `@emulators/core` runtime
+(Apache-2.0, pinned to exactly `0.12.0`).
 
 There is no root export. Import an explicit subpath.
 
@@ -551,10 +551,15 @@ test-only drill knob that makes the matching conformance case fail.
 | `makeDropboxEmulator(options?)`                            | `Promise` of `{ fetch, fetchOn, ledger, faults, cursors, reset, seed, snapshot, coverage, close }`          |
 | `dropboxEmulatorRoutes`                                    | Route evidence manifest (10 routes, all `unverified`; five are connector write routes)                      |
 | `DropboxEmulatorSeed`, `DropboxEmulatorProfile`            | Typed seed schema (`profile`, `entries` by display path, `deleted`)                                         |
-| `DropboxFault`                                             | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }`                 |
+| `DropboxFault`                                             | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }`         |
 | `dropboxEmulatorErrorBodies`                               | The fixtures' 409 `error_summary` envelopes, byte for byte (`notFound`, `folderConflict`, `uploadConflict`) |
 | `DropboxEmulatorInputInvalid`                              | Invalid seed, fault, or option passed to the JS API                                                         |
 | `dropboxEmulatorApiOrigin`, `dropboxEmulatorContentOrigin` | `https://api.dropboxapi.com` (RPC) and `https://content.dropboxapi.com` (upload)                            |
+
+In a fault's `match`, `method` is the HTTP method, `path` the raw request path (a trailing `*`
+makes it a prefix), and `route` a route template of the manifest; a `route` that names no manifest
+row is rejected when the fault is added. The Notion, GitHub, Google, LinkedIn search, and MCP
+faults take the same `match`.
 
 Each route answers only on the origin its fixtures record. `fetch` reads the origin from the
 request URL (in-process routing keeps it); behind a loopback rewrite, serve `fetchOn(origin)` for
@@ -627,7 +632,7 @@ lists the routes, wire behaviour, minted values, and refusals in full.
 | `makeNotionEmulator(options?)`                  | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`                                |
 | `notionEmulatorRoutes`                          | Route evidence manifest (10 routes, all `unverified`; two are connector write routes)                                    |
 | `NotionEmulatorSeed`, `NotionEmulatorProfile`   | Typed seed schema (`profile`, `botUser`, `pages`, `impliedPages`, `blocks`, `propertyItems`, `databases`, `dataSources`) |
-| `NotionFault`                                   | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }`                              |
+| `NotionFault`                                   | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }`                      |
 | `NotionEmulatorInputInvalid`                    | Invalid seed, fault, or option passed to the JS API                                                                      |
 | `notionEmulatorOrigin`, `notionEmulatorVersion` | `https://api.notion.com` and `2025-09-03`                                                                                |
 
@@ -829,7 +834,7 @@ and the `/_emulate/*` control plane (`ledger`, `faults`, `reset`, `state`, `seed
 | `makeGithubEmulator(options?)`                     | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`                                 |
 | `githubEmulatorRoutes`                             | Route evidence manifest (11 routes, all `unverified`; six are connector write routes)                                     |
 | `GithubEmulatorSeed`, `GithubEmulatorProfile`      | Typed seed schema (`profile`, `viewer`, `repository`, `labels`, `issues`, `files`, counters); profiles `default`, `empty` |
-| `GithubFault`                                      | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }`                               |
+| `GithubFault`                                      | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }`                       |
 | `GithubEmulatorInputInvalid`                       | Invalid seed, fault, or option passed to the JS API                                                                       |
 | `githubEmulatorOrigin`                             | `https://api.github.com`                                                                                                  |
 | `githubEmulatorErrorBodies`                        | The fixtures' not-found, label, and validation error bodies, byte for byte                                                |
@@ -944,14 +949,14 @@ test-only knob that makes exactly the matching conformance case fail.
 > routes the Google conformance cases use, built on the same `@emulators/core` runtime (loaded
 > lazily when you create an emulator).
 
-| Export                                                  | Purpose                                                                                     |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `makeGoogleEmulator(options?)`                          | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`   |
-| `googleEmulatorRoutes`                                  | Route evidence manifest (24 routes, all `unverified`; 15 are connector write routes)        |
-| `GoogleEmulatorSeed`, `GoogleEmulatorProfile`           | Typed seed schema (messages, implied entities, attachments, calendars, events, Drive files) |
-| `GoogleFault`                                           | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }` |
-| `GoogleEmulatorInputInvalid`                            | Invalid seed, fault, or option passed to the JS API                                         |
-| `googleEmulatorGmailOrigin`, `googleEmulatorApisOrigin` | `https://gmail.googleapis.com` and `https://www.googleapis.com`                             |
+| Export                                                  | Purpose                                                                                             |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `makeGoogleEmulator(options?)`                          | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`           |
+| `googleEmulatorRoutes`                                  | Route evidence manifest (24 routes, all `unverified`; 15 are connector write routes)                |
+| `GoogleEmulatorSeed`, `GoogleEmulatorProfile`           | Typed seed schema (messages, implied entities, attachments, calendars, events, Drive files)         |
+| `GoogleFault`                                           | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }` |
+| `GoogleEmulatorInputInvalid`                            | Invalid seed, fault, or option passed to the JS API                                                 |
+| `googleEmulatorGmailOrigin`, `googleEmulatorApisOrigin` | `https://gmail.googleapis.com` and `https://www.googleapis.com`                                     |
 
 ```ts
 import {
@@ -1078,15 +1083,15 @@ conformance case fail.
 > routes the LinkedIn search conformance cases use, built on the same `@emulators/core` runtime
 > (loaded lazily when you create an emulator).
 
-| Export                                                                       | Purpose                                                                                     |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `makeLinkedInSearchEmulator(options?)`                                       | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`   |
-| `linkedInSearchEmulatorRoutes`                                               | Route evidence manifest (3 routes, all `unverified` reads)                                  |
-| `LinkedInSearchEmulatorSeed`                                                 | Typed seed schema (searches, profiles, absent profile URLs, rejected keys per origin)       |
-| `LinkedInSearchFault`                                                        | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }` |
-| `LinkedInSearchEmulatorInputInvalid`                                         | Invalid seed, fault, or option passed to the JS API                                         |
-| `linkedInSearchEmulatorExaOrigin`, `linkedInSearchEmulatorEnrichLayerOrigin` | `https://api.exa.ai` and `https://enrichlayer.com`                                          |
-| `linkedInSearchEmulatorErrorBodies`                                          | The fixtures' 401 and 404 bodies, byte for byte                                             |
+| Export                                                                       | Purpose                                                                                             |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `makeLinkedInSearchEmulator(options?)`                                       | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`           |
+| `linkedInSearchEmulatorRoutes`                                               | Route evidence manifest (3 routes, all `unverified` reads)                                          |
+| `LinkedInSearchEmulatorSeed`                                                 | Typed seed schema (searches, profiles, absent profile URLs, rejected keys per origin)               |
+| `LinkedInSearchFault`                                                        | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }` |
+| `LinkedInSearchEmulatorInputInvalid`                                         | Invalid seed, fault, or option passed to the JS API                                                 |
+| `linkedInSearchEmulatorExaOrigin`, `linkedInSearchEmulatorEnrichLayerOrigin` | `https://api.exa.ai` and `https://enrichlayer.com`                                                  |
+| `linkedInSearchEmulatorErrorBodies`                                          | The fixtures' 401 and 404 bodies, byte for byte                                                     |
 
 ```ts
 import {
@@ -1165,6 +1170,112 @@ action's failure code, so a 429 fault reaches it as `linkedin_search_failed` wit
 `drills` option (seven booleans, one per LinkedIn search case) is a test-only knob that makes
 exactly the matching conformance case fail.
 
+## MCP emulator
+
+`@yolk-sdk/emulators/mcp`
+
+> **Experimental, Node only.** A stateful, fixture-only stand-in for the two synthetic MCP servers
+> of the `@yolk-sdk/mcp/conformance` fixtures, built on the same `@emulators/core` runtime (loaded
+> lazily when you create an emulator).
+
+| Export                                 | Purpose                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `makeMcpEmulator(options?)`            | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`  |
+| `mcpEmulatorRoutes`                    | Route evidence manifest (9 rows: one `RPC <origin><path>#<method>` per method, plus `GET`) |
+| `McpEmulatorSeed`                      | Typed seed schema (`modernListing`: `one-page` or `two-pages`; sessions are never seeded)  |
+| `McpFault`                             | A status fault (400-599) or `{ kind: 'truncate-after-chunks', chunks, match?, count? }`    |
+| `McpEmulatorInputInvalid`              | Invalid seed, fault, or option passed to the JS API                                        |
+| `mcpEmulatorOrigin`                    | `https://mcp.example.test` (paths `/modern/mcp` and `/legacy/mcp`)                         |
+| `mcpEmulatorReservedInvalidCredential` | `yolk-conformance-invalid-credential-0000`, answered the recorded 401 on the era probe     |
+| `mcpEmulatorFixtures`                  | The sixteen synthetic MCP fixtures, copied as data                                         |
+
+Setup fragment (not a runnable example): it builds the emulator and the `HttpClient` layer to
+provide to the code under test, which then targets `https://mcp.example.test/{modern,legacy}/mcp`
+with a synthetic `Authorization: Bearer` header; `await mcp.close()` when done.
+
+```ts
+import { makeMcpEmulator, mcpEmulatorOrigin } from '@yolk-sdk/emulators/mcp'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const mcp = await makeMcpEmulator()
+
+const httpLayer = InProcessHttpClient.layer([EmulatorRoute.handler(mcpEmulatorOrigin, mcp.fetch)])
+```
+
+It serves profile `synthetic-modern` on `https://mcp.example.test/modern/mcp` (stateless
+`2026-07-28`: `server/discover`, `tools/list`, and `tools/call`, JSON answers) and profile
+`synthetic-legacy` on `https://mcp.example.test/legacy/mcp` (the era probe's recorded 400 fallback,
+`initialize`, `notifications/initialized`, the standing `GET` answered 405, `tools/list`, and
+`tools/call`, SSE answers), so `@yolk-sdk/mcp/client` and the MCP conformance cases run unchanged
+against it. Every request needs `Authorization: Bearer <token>` (a recognisable bearer); behind a
+loopback rewrite, serve `fetchOn(mcpEmulatorOrigin)`.
+
+Every answer is a fixture's, byte for byte, with only the request id substituted at the recorded
+place (the top-level `id` of a JSON answer, or of the SSE response event's payload; notification
+events and SSE `id:` lines stay byte for byte), the minted session id in the recorded
+`mcp-session-id` header, and the cursor of the current generation. `initialize` mints
+`yolk-emu-session-<n>` from a counter that never resets (a form no seed holds); at most 256 sessions
+are held, and another `initialize` is refused before any fault; `reset` and `seed` clear the
+sessions. With `seed: { modernListing: 'two-pages' }`, `tools/list` answers the recorded paged
+listing, whose first page issues `synthetic-cursor-0001` in the generation that first issues it and
+`<cursor>.g<generation>` after a reset or seed; the second page answers only the cursor issued in
+the current generation. The bearer is never stored, ledgered, or echoed: routes see only its digest,
+compared only with the digest of the public reserved invalid credential to answer its recorded 401.
+Scope: the bearer is never copied from the request into a response, the state, or `/_emulate/*`; the
+output guard also refuses a prepared fixture answer, minted session id, or cursor that happens to
+contain it, but the emulator's other constants (state values such as `initializing`, wrapper headers
+such as `x-emulator-evidence`) and host-configured control-plane data (a fault body) may
+coincidentally equal a bearer and are not checked. A request that repeats the bearer in any header
+name or value (not only the recorded headers), its path, query, or body, and a request whose
+prepared answer or minted session id or cursor would repeat it (a bearer such as
+`yolk-emu-session-1`, or `synthetic-mcp`, inside the recorded `yolk-synthetic-mcp`), is refused
+before any fault is decided or anything is written. Every refusal, by shape or by state, is one 400
+not-emulated ledgered with constant text only (`/<unrecognised>`, no query, headers, or body), and
+it writes nothing and uses up no fault.
+
+- Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
+  `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
+  `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]`, that
+  occurs nowhere else in the request (any header name or value included) and in no answer or value
+  the request would store (never stored or ledgered; only its digest is compared, with the digest of
+  the public reserved invalid credential `yolk-conformance-invalid-credential-0000`, which answers
+  the recorded 401 on the era probe); extra request headers, except `mcp-*` headers other than
+  `mcp-method`, `mcp-name`, `mcp-protocol-version`, and `mcp-session-id`; a recorded header value
+  sent as several headers that the HTTP layer joins into the recorded value; JSON key order; any
+  JSON-RPC request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters
+  where the recording has an id; any non-empty `name` and `version` (and no other key) in the
+  `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this
+  emulator minted since the last reset or seed where the recording sends `mcp-session-id`
+  (initializing for `notifications/initialized`, ready otherwise); and, with the seed's `two-pages`
+  listing, the cursor this emulator issued in the current generation on the second page.
+  `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
+  (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET` on the modern
+  profile, JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
+  `prompts/*`, batches and client-sent responses, other members, a JSON body repeating a key
+  (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
+  arguments, protocol versions, or capabilities, extra client-info keys, and a legacy `initialize`
+  client info other than the recorded one), the MCP headers `accept`, `content-type`, `mcp-method`,
+  `mcp-protocol-version`, `mcp-name`, and `last-event-id` other than the recorded values or present
+  where none is recorded, any other `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing
+  where recorded or present where not, an unknown session or one in the wrong phase, a cursor not
+  issued in the current generation, the reserved invalid credential on anything but the era probe, a
+  bearer repeated anywhere in the request, and a bearer an answer or a minted session id or cursor
+  would repeat) is not emulated.
+
+Not emulated: `DELETE`, `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`, `tasks/*`,
+JSON-RPC batches and client-sent responses, a JSON body repeating a key, `mcp-*` headers no
+recording carries (such as `mcp-param-*`), cursors the emulator did not issue, any other tool or
+arguments, and a missing `Authorization`. Status and `truncate-after-chunks` faults apply only after
+a request is admitted and planned, and a faulted request writes nothing: a truncation sends the
+prepared answer cut short and never runs its commit (a truncated `initialize` mints no session; a
+truncated first page issues no cursor). Truncating a legacy SSE answer after its first chunk ends
+the stream before the response, so the client fails as an `McpError` at its timeout instead of
+hanging. In `match`, `method` is the HTTP method and `route` one manifest row; a `route` naming no
+row is rejected when the fault is added. `makeMcpEmulator` throws when a copied recording is not
+canonical JSON. The ledger, recovery, and the control plane behave as in the Dropbox emulator. The
+`drills` option (nine booleans, one per MCP case) is a test-only knob that makes exactly the
+matching conformance case fail.
+
 ## Node server
 
 `@yolk-sdk/emulators/node`
@@ -1187,8 +1298,9 @@ replies carry no header, so they record the evidence on each ledger entry instea
 is verified (`observedAt: '2026-09-30'`): the emulator follows the verified live Gateway recordings,
 and the Yolk repository checks its response shapes against each recording. The OpenAI, Anthropic,
 Codex, Grok, OpenCode Go, subscription-usage, email, R2, Fortnox, Microsoft, Dropbox, Notion,
-Todoist, Telegram, GitHub, Google, and LinkedIn search routes are unverified, like the synthetic
-fixtures they follow (the LinkedIn search routes are reads, so none is held in the pending list).
+Todoist, Telegram, GitHub, Google, LinkedIn search, and MCP routes are unverified, like the
+synthetic fixtures they follow (the LinkedIn search routes and the MCP rows are reads, so none is
+held in the pending list).
 The email write routes are connector writes: until an owner-approved live run against a practice
 mailbox, through a host `EmailClient` implementation, verifies them, the repository lists them in a
 time-bounded allowlist (`scripts/emulator-evidence-pending.json`), and the evidence check reports

@@ -157,7 +157,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './telegram',
       './github',
       './google',
-      './linkedin-search'
+      './linkedin-search',
+      './mcp'
     ]
   }
 ]
@@ -455,7 +456,19 @@ const main = async () => {
           'if (linkedInRejected.status !== 401 || JSON.stringify([linkedInEmulator.ledger.entries(), linkedInEmulator.snapshot()]).includes("yolk-conformance-invalid-enrich-layer-key")) throw new Error("LinkedIn search emulator must answer the recorded 401 without keeping the key")',
           'const linkedInRefused = await linkedInEmulator.fetch(new Request("https://api.exa.ai/search?q=synthetic-smoke-token", { method: "POST", headers: { authorization: "Bearer synthetic-smoke-token", "content-type": "application/json" }, body: linkedInSearchBody }))',
           'if (linkedInRefused.status !== 400 || (await linkedInRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(linkedInEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("LinkedIn search emulator must fail closed without echoing the key")',
-          'await linkedInEmulator.close()'
+          'await linkedInEmulator.close()',
+          'const mcpEmulatorModule = await import("@yolk-sdk/emulators/mcp")',
+          'if (mcpEmulatorModule.mcpEmulatorRoutes.length !== 9 || !mcpEmulatorModule.mcpEmulatorRoutes.every(route => route.evidence === "unverified" && !route.write)) throw new Error("MCP emulator manifest mismatch")',
+          'const mcpEmulator = await mcpEmulatorModule.makeMcpEmulator()',
+          'const mcpProbe = (bearer, url = "https://mcp.example.test/modern/mcp") => new Request(url, { method: "POST", headers: { authorization: `Bearer ${bearer}`, accept: "application/json, text/event-stream", "content-type": "application/json", "mcp-method": "server/discover", "mcp-protocol-version": "2026-07-28" }, body: JSON.stringify({ jsonrpc: "2.0", id: "smoke-probe", method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientInfo": { name: "yolk", version: "0.1.0" }, "io.modelcontextprotocol/clientCapabilities": {} } } }) })',
+          'const mcpDiscovered = await mcpEmulator.fetch(mcpProbe("synthetic-smoke-token"))',
+          'const mcpDiscoverBody = await mcpDiscovered.json()',
+          'if (mcpDiscovered.status !== 200 || mcpDiscovered.headers.get("x-emulator-evidence") !== "unverified" || mcpDiscoverBody.id !== "smoke-probe" || !mcpDiscoverBody.result.supportedVersions.includes("2026-07-28")) throw new Error("MCP emulator smoke failed")',
+          'const mcpRejected = await mcpEmulator.fetch(mcpProbe(mcpEmulatorModule.mcpEmulatorReservedInvalidCredential))',
+          'if (mcpRejected.status !== 401 || !mcpRejected.headers.get("www-authenticate")?.startsWith("Bearer") || JSON.stringify([mcpEmulator.ledger.entries(), mcpEmulator.snapshot()]).includes(mcpEmulatorModule.mcpEmulatorReservedInvalidCredential)) throw new Error("MCP emulator must answer the recorded 401 without keeping the credential")',
+          'const mcpRefused = await mcpEmulator.fetch(mcpProbe("synthetic-smoke-token", "https://mcp.example.test/modern/mcp?q=synthetic-smoke-token"))',
+          'if (mcpRefused.status !== 400 || (await mcpRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(mcpEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("MCP emulator must fail closed without echoing the token")',
+          'await mcpEmulator.close()'
         ].join('\n')
     )
 

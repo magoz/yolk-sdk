@@ -234,12 +234,12 @@ const rules: ReadonlyArray<BoundaryRule> = [
   },
   // Node builtins and the Node-only `@emulators/core` stay behind the Node subpaths: the loopback
   // server (`src/node.ts`) and the stateful Fortnox, Microsoft, Dropbox, Notion, Todoist,
-  // Telegram, GitHub, Google, and LinkedIn search emulators (`src/fortnox.ts`, `src/fortnox/**`,
-  // `src/microsoft.ts`, `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`, `src/notion.ts`,
-  // `src/notion/**`, `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`, `src/telegram/**`,
-  // `src/github.ts`, `src/github/**`, `src/google.ts`, `src/google/**`, `src/linkedin-search.ts`,
-  // `src/linkedin-search/**`). Their shared wrappers
-  // (`src/stateful-emulator.ts`, `src/stateful-fixture.ts`) and the helpers both import
+  // Telegram, GitHub, Google, LinkedIn search, and MCP emulators (`src/fortnox.ts`,
+  // `src/fortnox/**`, `src/microsoft.ts`, `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`,
+  // `src/notion.ts`, `src/notion/**`, `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`,
+  // `src/telegram/**`, `src/github.ts`, `src/github/**`, `src/google.ts`, `src/google/**`,
+  // `src/linkedin-search.ts`, `src/linkedin-search/**`, `src/mcp.ts`, `src/mcp/**`). Their shared
+  // wrappers (`src/stateful-emulator.ts`, `src/stateful-fixture.ts`) and the helpers both import
   // (`src/stateful-secrets.ts`) stay runtime-portable and take the core from them.
   {
     packageDir: 'packages/emulators/src',
@@ -263,7 +263,9 @@ const rules: ReadonlyArray<BoundaryRule> = [
       'packages/emulators/src/google.ts',
       'packages/emulators/src/google',
       'packages/emulators/src/linkedin-search.ts',
-      'packages/emulators/src/linkedin-search'
+      'packages/emulators/src/linkedin-search',
+      'packages/emulators/src/mcp.ts',
+      'packages/emulators/src/mcp'
     ]
   }
 ]

@@ -459,8 +459,8 @@ describe('emulators import rules', () => {
     }
   })
 
-  // The stateful Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and
-  // LinkedIn search emulators.
+  // The stateful Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google,
+  // LinkedIn search, and MCP emulators.
   it('allows node: and @emulators/core only in src/node.ts and the stateful emulators', () => {
     const root = fixtureDirectory()
 
@@ -491,7 +491,9 @@ describe('emulators import rules', () => {
       'packages/emulators/src/google.ts',
       'packages/emulators/src/google/gmail.ts',
       'packages/emulators/src/linkedin-search.ts',
-      'packages/emulators/src/linkedin-search/state.ts'
+      'packages/emulators/src/linkedin-search/state.ts',
+      'packages/emulators/src/mcp.ts',
+      'packages/emulators/src/mcp/state.ts'
     ]
 
     const forbidden = [
@@ -516,7 +518,9 @@ describe('emulators import rules', () => {
       'packages/emulators/src/google-helpers.ts',
       'packages/emulators/src/googleish/api.ts',
       'packages/emulators/src/linkedin-search-helpers.ts',
-      'packages/emulators/src/linkedin/api.ts'
+      'packages/emulators/src/linkedin/api.ts',
+      'packages/emulators/src/mcp-helpers.ts',
+      'packages/emulators/src/mcpish/api.ts'
     ]
 
     for (const rel of [...allowed, ...forbidden]) {

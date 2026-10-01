@@ -4,8 +4,12 @@
  * no `g` or `y` flag), the fail-closed mode (constant-text ledger entries for unrecognised
  * requests and Authorization headers, every parameter patterned at build, the bearer guarded as a
  * secret in queries, recorded headers, bodies, a route's decoded body views, and plan-time
- * reasons), the opt-in per-origin bearer digest (`bearerDigest`), and that an emulator without
- * `failClosed` keeps the earlier behaviour (the Dropbox and Notion suites cover it fully).
+ * reasons), the opt-in per-origin bearer digest (`bearerDigest`), route variants (manifest rows,
+ * ledger routes, coverage, `match.route`, build checks), truncation faults on streamed commits
+ * (`makeChunkedStatefulEmulator`; one that cannot apply answers 500 unused), constant refusals
+ * (`constantRefusals`: no request text before admission, a match-all fault unused), and that an
+ * emulator without these options keeps the earlier behaviour (the Dropbox and Notion suites cover
+ * it fully).
  */
 import { createHash } from 'node:crypto'
 import { Predicate, Result } from 'effect'
@@ -16,11 +20,17 @@ import {
   exactBodyKeys,
   exactObject,
   exactQuery,
+  isJsonObject,
   isNotEmulated,
+  makeChunkedStatefulEmulator,
   makeStatefulEmulator,
   notEmulated,
+  repeatsJsonKey,
+  routeManifest,
   routeMatcher,
   statefulRoute,
+  streamedCommit,
+  type CoreDispatch,
   type EmulatedRequest,
   type StatefulEmulatorConfig,
   type StatefulRoute
@@ -1135,6 +1145,538 @@ describe('constant-text shape checks (exactBodyKeys, exactQuery)', () => {
     await api.fetch(get('/raw', { authorization: 'Bearer synthetic-wrapper-secret' }))
 
     expect(seen).toEqual(['%74he_name=a%20b', ''])
+  })
+})
+
+describe('opt-in route variants, truncation faults, and constant refusals', () => {
+  const variant = (name: string) => ({
+    method: 'RPC',
+    path: `https://api.example.test/rpc#${name}`,
+    kind: 'connector' as const,
+    write: false,
+    caseIds: ['synthetic.case'],
+    evidence: 'unverified' as const
+  })
+
+  const read = variant('read').path
+  const bump = variant('bump').path
+
+  /**
+   * One JSON endpoint answering two manifest rows: `read` (two chunks, writes nothing) and `bump`
+   * (two chunks; its commit writes once and would persist `minted-bump-0001`).
+   */
+  const rpc: StatefulRoute<State, undefined> = {
+    method: 'POST',
+    path: '/rpc',
+    kind: 'connector',
+    write: false,
+    caseIds: ['synthetic.case'],
+    evidence: 'unverified',
+    variants: [variant('read'), variant('bump')],
+    body: 'json',
+    admit: request => {
+      const name = isJsonObject(request.json) ? request.json['name'] : undefined
+
+      const twoChunks = () => ({
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+        chunks: ['one ', 'two']
+      })
+
+      switch (name) {
+        case 'read':
+          return { variant: read, plan: () => streamedCommit(twoChunks()) }
+        case 'bump':
+          return {
+            variant: bump,
+            plan: state =>
+              state.writes > 0
+                ? notEmulated('the synthetic counter moves once')
+                : streamedCommit(
+                    {
+                      status: 200,
+                      headers: { 'x-minted': 'minted-header-0001' },
+                      chunks: ['bumped ', 'once']
+                    },
+                    () => {
+                      state.writes += 1
+                    },
+                    ['minted-bump-0001']
+                  )
+          }
+        case 'plain':
+          return { variant: read, plan: () => () => new Response('plain') }
+        case 'split':
+          return {
+            variant: read,
+            plan: () =>
+              streamedCommit({ status: 200, headers: {}, chunks: ['abc-split-', 'token-xyz'] })
+          }
+        case 'stray':
+          return { variant: variant('stray').path, plan: () => () => new Response('stray') }
+        default:
+          return notEmulated('no synthetic name')
+      }
+    }
+  }
+
+  type Options = {
+    readonly constantRefusals?: boolean
+    readonly guardOutput?: boolean
+    readonly guardAllHeaders?: boolean
+    readonly uniqueJsonKeys?: boolean
+  }
+
+  const config = (
+    routes: ReadonlyArray<StatefulRoute<State, undefined>>,
+    options: Options
+  ): StatefulEmulatorConfig<State, undefined> => ({
+    routes,
+    env: undefined,
+    initial: { writes: 0 },
+    buildSeed: () => ({ writes: 0 }),
+    recordHeaders: [{ name: 'x-note', json: false }],
+    failClosed: {
+      unrecognised: 'synthetic: no route',
+      unrecognisedAuthorization: 'synthetic: unrecognisable authorization'
+    },
+    constantRefusals: options.constantRefusals ?? true,
+    guardOutput: options.guardOutput ?? false,
+    guardAllHeaders: options.guardAllHeaders ?? false,
+    uniqueJsonKeys: options.uniqueJsonKeys ?? false,
+    clearRuntime: () => undefined,
+    runtimeState: () => ({}),
+    seedSummary: () => ({}),
+    inputInvalid: (input, reason) => new Error(`${input}: ${reason}`)
+  })
+
+  const fakeCore = () => {
+    let state = { writes: 0 }
+
+    return async (dispatch: CoreDispatch<State>) => ({
+      fetch: (request: Request) => Promise.resolve(dispatch(state, request)),
+      baseUrl: 'http://core.invalid',
+      snapshot: () => ({ ...state }),
+      restore: (next: State) => {
+        state = { ...next }
+
+        return Promise.resolve()
+      },
+      close: () => Promise.resolve()
+    })
+  }
+
+  /** The chunked wrapper (truncation faults) with constant refusals unless told otherwise. */
+  const make = (
+    options: Options = {},
+    routes: ReadonlyArray<StatefulRoute<State, undefined>> = [rpc]
+  ) => makeChunkedStatefulEmulator<State, undefined, unknown>(config(routes, options), fakeCore())
+
+  const call = (
+    api: { fetch: (request: Request) => Promise<Response> },
+    name: string,
+    send: { readonly bearer?: string; readonly headers?: Record<string, string> } = {}
+  ) =>
+    api.fetch(
+      new Request('https://api.example.test/rpc', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${send.bearer ?? 'synthetic-wrapper-secret'}`,
+          'content-type': 'application/json',
+          'x-note': 'note',
+          ...send.headers
+        },
+        body: JSON.stringify({ name })
+      })
+    )
+
+  const post = (api: { fetch: (request: Request) => Promise<Response> }, body: string) =>
+    api.fetch(
+      new Request('https://api.example.test/rpc', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer synthetic-wrapper-secret',
+          'content-type': 'application/json'
+        },
+        body
+      })
+    )
+
+  it('variants are the manifest rows, ledger routes, and coverage rows', async () => {
+    const api = await make()
+
+    expect(routeManifest(rpc).map(row => `${row.method} ${row.path}`)).toEqual([
+      `RPC ${read}`,
+      `RPC ${bump}`
+    ])
+
+    await call(api, 'read')
+    await call(api, 'read')
+    await call(api, 'bump')
+    await call(api, 'nothing')
+
+    expect(api.ledger.entries().map(entry => [entry.route, entry.status])).toEqual([
+      [read, 200],
+      [read, 200],
+      [bump, 200],
+      ['/rpc', 400]
+    ])
+    expect(api.coverage().routes.map(row => [row.path, row.requests])).toEqual([
+      [read, 2],
+      [bump, 1]
+    ])
+  })
+
+  it('refuses to build inconsistent variants or constant refusals without fail-closed', async () => {
+    await expect(
+      make({}, [{ ...rpc, variants: [{ ...variant('read'), evidence: 'verified' }] }])
+    ).rejects.toThrow("must carry its route's evidence")
+    await expect(
+      make({}, [{ ...rpc, variants: [variant('read'), variant('read')] }])
+    ).rejects.toThrow('repeats a route template or another variant path')
+    await expect(make({}, [{ ...rpc, variants: [] }])).rejects.toThrow('empty variants list')
+
+    for (const option of ['constantRefusals', 'guardAllHeaders', 'guardOutput'] as const) {
+      await expect(build([echo], false, { [option]: true })).rejects.toThrow(
+        `${option} needs fail-closed mode`
+      )
+    }
+  })
+
+  it('an admission naming no row of its route answers the 500 emulator error', async () => {
+    const api = await make()
+    const answer = await call(api, 'stray')
+
+    expect(answer.status).toBe(500)
+    expect(api.ledger.entries().at(-1)?.responseError).toBe(
+      'the route admitted the request as no row of its manifest'
+    )
+  })
+
+  it('truncates a streamed answer after its chunks, matched by route row', async () => {
+    const api = await make()
+
+    api.faults.add({ kind: 'truncate-after-chunks', chunks: 1, match: { route: read }, count: 1 })
+
+    // The fault matches only the read row: a bump is answered whole.
+    expect(await (await call(api, 'bump')).text()).toBe('bumped once')
+    expect(await (await call(api, 'read')).text()).toBe('one ')
+    expect(await (await call(api, 'read')).text()).toBe('one two')
+    expect(api.ledger.entries().map(entry => entry.fault ?? null)).toEqual([
+      null,
+      'truncate-after-chunks',
+      null
+    ])
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([1])
+  })
+
+  it('a truncation that cannot apply answers 500 and is not used up', async () => {
+    const api = await make()
+
+    api.faults.add({ kind: 'truncate-after-chunks', chunks: 2, match: { route: read } })
+
+    // A streamed answer of no more chunks, and an answer that is not streamed.
+    expect((await call(api, 'read')).status).toBe(500)
+    expect((await call(api, 'plain')).status).toBe(500)
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([0])
+    expect(api.ledger.entries().map(entry => entry.responseError)).toEqual([
+      expect.stringContaining('emulator fault cannot apply'),
+      expect.stringContaining('emulator fault cannot apply')
+    ])
+  })
+
+  it('a truncated writing row answers the prepared answer cut short and writes nothing', async () => {
+    const api = await make()
+
+    api.faults.add({ kind: 'truncate-after-chunks', chunks: 1, match: { route: bump }, count: 1 })
+
+    expect(await (await call(api, 'bump')).text()).toBe('bumped ')
+    expect(api.snapshot()).toEqual({ writes: 0 })
+    expect(api.ledger.entries().at(-1)).toMatchObject({ fault: 'truncate-after-chunks' })
+
+    // The fault is used up; the next bump commits (once) and is answered whole.
+    expect(await (await call(api, 'bump')).text()).toBe('bumped once')
+    expect(api.snapshot()).toEqual({ writes: 1 })
+  })
+
+  it('match.route must name a manifest row (an unknown route or a variant template refused)', async () => {
+    const api = await make()
+
+    for (const route of ['https://api.example.test/rpc#nothing', '/rpc']) {
+      expect(() => api.faults.add({ kind: 'status', status: 503, match: { route } })).toThrow(
+        'match.route must name a manifest row of this emulator'
+      )
+
+      const posted = await api.fetch(
+        new Request('https://api.example.test/_emulate/faults', {
+          method: 'POST',
+          body: JSON.stringify({
+            faults: [
+              { kind: 'status', status: 503 },
+              { kind: 'status', status: 503, match: { route } }
+            ]
+          })
+        })
+      )
+
+      // A list is added whole or not at all.
+      expect(posted.status).toBe(400)
+      expect(await posted.text()).toContain('match.route must name a manifest row')
+    }
+
+    expect(api.faults.list()).toEqual([])
+  })
+
+  it('without chunkFaults, a truncation fault is invalid input (the earlier behaviour)', async () => {
+    const api = await makeStatefulEmulator<State, undefined, unknown>(config([rpc], {}), fakeCore())
+
+    // Parsed from JSON, as untyped host input would be.
+    const truncation = JSON.parse('{ "kind": "truncate-after-chunks", "chunks": 1 }')
+
+    expect(() => api.faults.add(truncation)).toThrow('fault')
+
+    const posted = await api.fetch(
+      new Request('https://api.example.test/_emulate/faults', {
+        method: 'POST',
+        body: JSON.stringify({ kind: 'truncate-after-chunks', chunks: 1 })
+      })
+    )
+
+    expect(posted.status).toBe(400)
+    expect(api.faults.list()).toEqual([])
+  })
+
+  it('constant refusals keep no request text; admitted requests are recorded', async () => {
+    const api = await make()
+
+    api.faults.add({ kind: 'status', status: 503 })
+
+    // Refused by shape (admit), then by state (plan) after one admitted write.
+    expect((await call(api, 'nothing')).status).toBe(400)
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([0])
+
+    api.faults.clear()
+    expect((await call(api, 'bump')).status).toBe(200)
+    api.faults.add({ kind: 'status', status: 503 })
+    expect((await call(api, 'bump')).status).toBe(400)
+    expect(api.snapshot()).toEqual({ writes: 1 })
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([0])
+
+    // The unused match-all fault still answers the next valid request.
+    expect((await call(api, 'read')).status).toBe(503)
+
+    const [byRequest, admitted, byState, faulted] = api.ledger.entries()
+
+    for (const [refused, route, reason] of [
+      [byRequest, '/rpc', 'no synthetic name'],
+      [byState, bump, 'the synthetic counter moves once']
+    ] as const) {
+      expect(refused).toEqual({
+        seq: expect.any(Number),
+        method: 'POST',
+        path: '/<unrecognised>',
+        route,
+        query: {},
+        headers: {},
+        status: 400,
+        evidence: 'unverified',
+        notEmulated: reason
+      })
+    }
+
+    expect(admitted).toMatchObject({
+      path: '/rpc',
+      route: bump,
+      headers: { 'x-note': 'note' },
+      body: { name: 'bump' }
+    })
+    expect(faulted).toMatchObject({ route: read, status: 503, fault: 'status' })
+  })
+
+  /** A refusal row: a 400, the constant entry, nothing written, and the fault left unused. */
+  const expectConstantRefusal = async (
+    api: Awaited<ReturnType<typeof make>>,
+    answer: Response,
+    reason: string,
+    secret: string
+  ) => {
+    const text = await answer.text()
+
+    expect(answer.status).toBe(400)
+    expect(JSON.parse(text)).toEqual({
+      error: { type: 'not_emulated', message: `Not emulated: ${reason}` }
+    })
+    expect(text).not.toContain(secret)
+    expect([...answer.headers.values()].join('\n')).not.toContain(secret)
+    expect(api.ledger.entries().at(-1)).toEqual({
+      seq: expect.any(Number),
+      method: 'POST',
+      path: '/<unrecognised>',
+      route: '/rpc',
+      query: {},
+      headers: {},
+      status: 400,
+      evidence: 'unverified',
+      notEmulated: reason
+    })
+    expect(api.snapshot()).toEqual({ writes: 0 })
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([0])
+
+    const reads = await Promise.all(
+      ['ledger', 'state', 'coverage', 'faults'].map(route =>
+        api
+          .fetch(new Request(`https://api.example.test/_emulate/${route}`))
+          .then(response => response.text())
+      )
+    )
+
+    expect(reads.join('\n')).not.toContain(secret)
+
+    // The unused match-all fault still answers the next valid request.
+    expect((await call(api, 'read')).status).toBe(503)
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([1])
+  }
+
+  it('guardOutput refuses a prepared answer or persisted text holding the bearer', async () => {
+    for (const [name, bearer] of [
+      ['bump', 'minted-bump-0001'],
+      ['bump', 'minted-header-0001'],
+      ['split', 'split-token'],
+      ['read', 'synthetic-wrapper-secret']
+    ] as const) {
+      const api = await make({ guardOutput: true })
+
+      api.faults.add({ kind: 'status', status: 503 })
+
+      if (name === 'read') {
+        // The answer holds no bearer: answered by the fault, as before.
+        expect((await call(api, name, { bearer })).status).toBe(503)
+        continue
+      }
+
+      const answer = await call(api, name, { bearer })
+
+      await expectConstantRefusal(api, answer, 'the answer would repeat the credential', bearer)
+    }
+  })
+
+  it('guardOutput takes only streamed commits; without it, answers are not checked', async () => {
+    const guarded = await make({ guardOutput: true })
+
+    expect((await call(guarded, 'plain')).status).toBe(500)
+    expect(guarded.ledger.entries().at(-1)?.responseError).toBe('the route handler failed')
+
+    const unguarded = await make()
+
+    expect((await call(unguarded, 'bump', { bearer: 'minted-bump-0001' })).status).toBe(200)
+  })
+
+  it('guardAllHeaders refuses a repeat in any header name or value, raw or encoded', async () => {
+    const secret = 'synthetic-wrapper-secret'
+
+    const repeats: ReadonlyArray<Record<string, string>> = [
+      { 'x-other': secret },
+      { 'x-other': `prefix ${secret.replace('s', '%73')}` },
+      { 'x-other': secret.replace('s', '\\u0073') },
+      { [`x-${secret}`]: '1' }
+    ]
+
+    for (const headers of repeats) {
+      const api = await make({ guardAllHeaders: true })
+
+      api.faults.add({ kind: 'status', status: 503 })
+
+      const answer = await call(api, 'bump', { headers })
+
+      await expectConstantRefusal(api, answer, 'a request header repeats the credential', secret)
+    }
+
+    // Without the option, only recorded headers are checked (the earlier behaviour).
+    const api = await make()
+
+    expect((await call(api, 'bump', { headers: { 'x-other': secret } })).status).toBe(200)
+  })
+
+  it('uniqueJsonKeys refuses a body repeating a key, after unescaping, at any depth', async () => {
+    for (const body of [
+      '{"name":"read","name":"bump"}',
+      '{"name":"read","n\\u0061me":"read"}',
+      '{"name":"read","x":{"a":1,"a":2}}'
+    ]) {
+      const api = await make({ uniqueJsonKeys: true })
+
+      api.faults.add({ kind: 'status', status: 503 })
+
+      expect((await post(api, body)).status).toBe(400)
+      expect(api.ledger.entries().at(-1)?.notEmulated).toBe(
+        'a JSON body with a repeated key is not emulated'
+      )
+      expect(api.faults.list().map(fault => fault.applied)).toEqual([0])
+    }
+
+    const api = await make({ uniqueJsonKeys: true })
+
+    // Equal keys in sibling objects, or inside strings, are no repeat.
+    expect((await post(api, '{"name":"read","x":[{"a":1},{"a":2}],"y":"\\"name\\""}')).status).toBe(
+      200
+    )
+
+    // Without the option, JSON.parse keeps the last value (the earlier behaviour).
+    const lenient = await make()
+
+    expect(await (await post(lenient, '{"name":"read","name":"bump"}')).text()).toBe('bumped once')
+  })
+
+  it('without constantRefusals, a fail-closed refusal keeps its recorded fields', async () => {
+    const api = await make({ constantRefusals: false })
+
+    await call(api, 'nothing')
+
+    expect(api.ledger.entries().at(-1)).toMatchObject({
+      path: '/rpc',
+      route: '/rpc',
+      headers: { 'x-note': 'note' },
+      body: { name: 'nothing' },
+      notEmulated: 'no synthetic name'
+    })
+  })
+})
+
+describe('match.route on an emulator without variants', () => {
+  it('names a route template; an unknown route is rejected when the fault is added', async () => {
+    const api = await build([echo, write], true)
+
+    api.faults.add({ kind: 'status', status: 503, match: { route: '/notes/{id}' } })
+
+    expect(() =>
+      api.faults.add({ kind: 'status', status: 503, match: { route: '/nope' } })
+    ).toThrow('match.route must name a manifest row of this emulator')
+
+    const authorization = 'Bearer synthetic-wrapper-secret'
+
+    expect((await api.fetch(get('/files/a', { authorization }))).status).toBe(200)
+
+    const posted = await api.fetch(
+      new Request('https://api.example.test/notes/1', {
+        method: 'POST',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: '{}'
+      })
+    )
+
+    expect(posted.status).toBe(503)
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([1])
+  })
+})
+
+describe('repeatsJsonKey', () => {
+  it('compares keys after unescaping, per object, never inside strings', () => {
+    expect(repeatsJsonKey('{"a":1,"a":2}')).toBe(true)
+    expect(repeatsJsonKey('{"a":1,"\\u0061":2}')).toBe(true)
+    expect(repeatsJsonKey('[{"a":{"b":1,"b":2}}]')).toBe(true)
+    expect(repeatsJsonKey('{"a":{"a":1},"b":[{"a":1},{"a":2}]}')).toBe(false)
+    expect(repeatsJsonKey('{"a":"\\"a\\":1,\\"a\\"","b":"{\\"a\\":2}"}')).toBe(false)
+    expect(repeatsJsonKey('{"a\\\\":1,"a":2}')).toBe(false)
   })
 })
 
