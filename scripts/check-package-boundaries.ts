@@ -229,8 +229,8 @@ const rules: ReadonlyArray<BoundaryRule> = [
   // Telegram, and GitHub emulators (`src/fortnox.ts`, `src/fortnox/**`, `src/microsoft.ts`,
   // `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`, `src/notion.ts`, `src/notion/**`,
   // `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`, `src/telegram/**`, `src/github.ts`,
-  // `src/github/**`). Their shared wrappers
-  // (`src/stateful-emulator.ts`, `src/stateful-fixture.ts`) stay runtime-portable and take the core
+  // `src/github/**`). Their shared wrappers (`src/stateful-emulator.ts`, `src/stateful-fixture.ts`)
+  // and the helpers both import (`src/stateful-secrets.ts`) stay runtime-portable and take the core
   // from them.
   {
     packageDir: 'packages/emulators/src',

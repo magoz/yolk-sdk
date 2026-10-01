@@ -44,6 +44,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                      | `src/dropbox/{state,api}.ts`             | Dropbox state/seed schemas and default seed; route table, fixture error envelopes, metadata, cursors                                                                         |
 | (internal)                      | `src/notion/{state,api}.ts`              | Notion state/seed schemas and default seed; route table, error envelopes, object rendering, cursor paging                                                                    |
 | (internal)                      | `src/stateful-fixture.ts`                | Shared wrapper of the fixture-only stateful emulators (Todoist, Telegram): ledger, faults, 400 not-emulated, recovery, control plane                                         |
+| (internal)                      | `src/stateful-secrets.ts`                | Credential guarding (`repeatsSecret`, `jsonRepeatsSecret`, `textRepeatsSecret`, `scrubSecrets`) and unrecognised-ledger constants, shared by both stateful wrappers          |
 | (internal)                      | `src/todoist/{state,api}.ts`             | Todoist state/seed schemas and default seed (fixture entities); route table, matching, handlers, drills                                                                      |
 | (internal)                      | `src/telegram/{state,api}.ts`            | Telegram state/seed schemas and default seed (fixture entities); route table, token-aware resolution, handlers, drills                                                       |
 | (internal)                      | `src/github/{state,api}.ts`              | GitHub state/seed schemas and default seed (fixture entities); route table with raw parameter patterns, error bodies, `Link` paging, drills                                  |
@@ -69,11 +70,13 @@ There is no root export or barrel.
   (for example the manifest, from the evidence check) has no side effects. The shared wrappers
   `src/stateful-emulator.ts` and `src/stateful-fixture.ts` never import the core: each subpath hands
   them the runtime. They are two wrappers for the same job, kept apart only because the PRs landed
-  in parallel; consolidating them is tracked in issue #139. Until then, build a new
-  fixture-only stateful emulator on `src/stateful-emulator.ts` (as `/github` is), in its opt-in
-  fail-closed mode; a guarantee only `src/stateful-fixture.ts` has is added to
-  `src/stateful-emulator.ts` backward compatibly, with tests (`test/stateful-emulator.test.ts`),
-  never as a third wrapper.
+  in parallel; consolidating them is tracked in issue #139. They already share one neutral module,
+  `src/stateful-secrets.ts` (credential guarding and the unrecognised-ledger constants); neither
+  wrapper imports the other. Until #139, build a new fixture-only stateful emulator on
+  `src/stateful-emulator.ts` (as `/github` is), in its opt-in fail-closed mode; a guarantee only
+  `src/stateful-fixture.ts` has is added to `src/stateful-emulator.ts` backward compatibly (shared
+  helpers go to `src/stateful-secrets.ts`), with tests (`test/stateful-emulator.test.ts`), never as
+  a third wrapper.
 - `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain
   Web fetch handlers (no Effect runtime needed, no Node builtins); `email` is a plain structural
   object (no HTTP, socket, TLS, MIME, or mail library); `node`, `fortnox`, `microsoft`, `dropbox`,
@@ -455,50 +458,57 @@ There is no root export or barrel.
   `src/stateful-emulator.ts` in its opt-in fail-closed mode (`failClosed`): every route path
   parameter has a raw pattern (`params`; owner and repository names, decimal issue numbers and
   comment ids, plain label names, a multi-segment `{path+}` of plain file path segments), so a
-  request is recognised only when its raw path is exactly an emulated route shape under that
-  route's method and any `Authorization` header is one recognisable bearer
-  (`Bearer <at least 8 non-space characters>`); everything else is ledgered with constant text only
-  (`/<unrecognised>`, a standard method or `<other>`, an empty query, no body, a constant reason).
-  For a recognised request the bearer value is scrubbed from the ledgered method, path, query,
-  recorded headers, and every not-emulated reason, and a path, query, or body repeating it (raw,
-  percent-decoded, or in any parsed JSON key, string, or number) is refused with constant text.
-  Every answer value comes from a fixture (through the seed or the request) or is minted: created
-  issue numbers and comment ids from counters that only advance (the default seed starts them at
-  the fixtures' created values, issue 42 and comment 9000000001; a seed's counters lie above its
-  seeded numbers, and a seed may not use the minted `id`/`node_id` forms at or above them), the
-  issue `id`/`node_id` and comment `node_id` derived from them in the fixtures' form, and
-  timestamps from the injectable clock (whole seconds). Issue numbers below the counter that the
-  state does not hold are implied (never rendered); numbers at or above it answer the not-found
-  fixture's 404 byte for byte. Error bodies are the fixtures' byte for byte
-  (`githubEmulatorErrorBodies`). `Link` paging is minted only on the label listing, in the paging
-  fixture's exact form (relations `prev`, `next`, `last`, `first`; the page after the last answers
-  `[]`; a listing that fits one page carries none, as the label fixture records); label pages are
-  page numbers the client computes, not cursors, and the label list never changes, so there is no
-  cursor registry. Writes follow only the recorded flows (comment create/delete on an open held
-  issue; one repository label added that sorts after the issue's labels, or removed; issue create;
-  rename and close-as-completed of an issue created here); anything else, including the lifecycle
-  restore's close as `not_planned`, a comment listing of more than one comment, rendering an issue
-  that holds comments, and the leftover lookup's open-issue listing (so
-  `findGithubConformanceLeftovers` fails and runners print their lookup-failed WARN), is not
-  emulated. A write case ends at the seed except the counters, the deleted comment's id
-  (`deletedComments`, so a second delete answers the recorded 404), and the lifecycle case's closed
-  issue (GitHub cannot delete issues); the cross-checks prove exactly that. Drill knobs (`drills`,
-  booleans) each fail exactly one case.
+  request is recognised only when its raw path is exactly an emulated route shape under that route's
+  method (each raw pattern matched in full; a `g` or `y` flag is refused at build) and any
+  `Authorization` header is exactly `Bearer <at least 8 non-space characters>`; everything else is
+  ledgered with constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty
+  query, no body, a constant reason). For a recognised request the bearer value is scrubbed from the
+  ledgered method, path, query, recorded headers, and every not-emulated reason (plan-time reasons
+  included), and a path, query key or value, recorded header, or body repeating it (raw,
+  percent-decoded, or in any parsed JSON key, string, or number) is refused with constant text; text
+  that repeats it in any form is recorded whole as `<redacted>`. JSON-looking recorded headers and
+  query keys are recorded parsed with credential-named keys redacted (or `<redacted>` when they do
+  not parse), whatever the header's declared format. Empty query components are refused, and GitHub
+  refusals never echo a request's own query or body keys. Every answer value comes from a fixture
+  (through the seed or the request) or is minted: created issue numbers and comment ids from
+  counters that only advance (the default seed starts them at the fixtures' created values, issue 42
+  and comment 9000000001, and end at the last addressable number and id, after which creates are
+  refused before any fault; a seed's counters lie above its seeded numbers, and no seeded node id,
+  of an issue or a label, may use a minted `node_id` form at or above its counter), the issue `id`/
+  `node_id` and comment `node_id` derived from them in the fixtures' form, and timestamps from the
+  injectable clock (whole seconds). Issue numbers below the counter that the state does not hold are
+  implied (never rendered); numbers at or above it answer the not-found fixture's 404 byte for byte.
+  Error bodies are the fixtures' byte for byte (`githubEmulatorErrorBodies`). `Link` paging is
+  minted only on the label listing, in the paging fixture's exact form (relations `prev`, `next`,
+  `last`, `first`; the page after the last answers `[]`; a listing that fits one page carries none,
+  as the label fixture records); label pages are page numbers the client computes, not cursors, and
+  the label list never changes within a seed (no route writes labels), so there is no cursor
+  registry. Writes follow only the recorded flows (comment create/delete on an open held issue; one
+  repository label added that sorts after the issue's labels, or removed unless it is the issue's
+  last (no fixture records an empty answer); issue create; rename and close-as-completed of an issue
+  created here); anything else, including the lifecycle restore's close as `not_planned`, a comment
+  listing of more than one comment, rendering an issue that holds comments, and the leftover
+  lookup's open-issue listing (so `findGithubConformanceLeftovers` fails and runners print their
+  lookup-failed WARN), is not emulated. A write case ends at the seed except the counters, the
+  deleted comment's id (`deletedComments`, so a second delete answers the recorded 404), and the
+  lifecycle case's closed issue (GitHub cannot delete issues); the cross-checks prove exactly that.
+  Drill knobs (`drills`, booleans) each fail exactly one case.
 - Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
-  non-space characters that occurs nowhere else in the request (never checked, stored, or
-  ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the order
-  of query parameters; any non-empty issue title and comment body, and any issue body text; any
-  comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1
-  to 100, with no `page` or a `page` from 2 to one past the last page; any issue search `q` that
-  starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256
-  characters (answered the recorded 422); any issue number the repository has not reached (answered
-  the recorded 404); and any issue, comment, repository label, or file the state holds where a
-  fixture has one, under the per-route state rules. `Accept` must be `application/vnd.github+json`
-  and `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query
-  parameters, another origin or repository, a repeated query key, an explicit `page=1`, and a
-  comment listing `per_page` other than 100) is not emulated. Copies change together with
-  `test/github.test.ts`: this bullet, the `src/github.ts` header, `README.md` (GitHub emulator),
-  and `apps/docs/content/docs/api-reference/emulators.mdx` (GitHub emulator).
+  non-space characters that occurs nowhere else in the request (never checked, stored, or ledgered);
+  extra request headers; JSON key order; `content-type` media-type parameters; the order of query
+  parameters; any non-empty issue title and comment body, and any issue body text; any comment
+  listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to 100,
+  with no `page` or a `page` from 2 to one past the last page; any issue search `q` that starts with
+  the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256 characters
+  (answered the recorded 422); any issue number the repository has not reached (answered the
+  recorded 404); and any issue, comment, repository label, or file the state holds where a fixture
+  has one, under the per-route state rules. `Authorization` must be exactly `Bearer <token>` (that
+  spelling, one space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version`
+  `2026-03-10`. Everything else (other keys and values, query parameters, empty query components
+  such as a bare `?` or a stray `&`, another origin or repository, a repeated query key, an explicit
+  `page=1`, and a comment listing `per_page` other than 100) is not emulated. Copies change together
+  with `test/github.test.ts`: this bullet, the `src/github.ts` header, `README.md` (GitHub
+  emulator), and `apps/docs/content/docs/api-reference/emulators.mdx` (GitHub emulator).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -547,55 +557,55 @@ not-emulated outcomes through the real Go provider), `test/subscription-usage.te
 Codex, and Grok usage routes: recorded bodies, not-emulated rejections, shape-checked scripted and
 default bodies, faults, control plane, and untouched model-route manifests),
 `test/subscription-usage-conformance.test.ts` (the four usage cases in-process and over a loopback
-socket, drills, and 401 / 429 / dropped / truncated faults through the real fetchers), `test/email.test.ts` (answers only from fixtures, the latitude,
-every fail-closed reason, state transitions, faults, reset, coverage, and seed validation),
-`test/email-conformance.test.ts` (cross-check A: every email case against one shared in-process
-emulator and each case alone, ending as seeded plus the documented Sent copy; one drill fault per
-case failing exactly that case; a failed restore reported; fixture and manifest parity),
-`test/fortnox.test.ts` (routes, quirks, auth, faults through the real connector, profiles, control
-plane), `test/fortnox-conformance.test.ts` (all seven Fortnox cases in-process and over a
-loopback socket, the ledger showing the restores, the state-equals-seed proof for the reversible
-cases, and one drill per knob), `test/microsoft.test.ts` (manifest, fail closed including nested
-body keys, query allowlist, auth, credential redaction, calendar overlap, immutable ids, the
-concurrent-write rule, attachments, `$batch`, folders, the copy monitor through the real
-connector, handler failures, every fixture's complete envelopes, faults including 429
-`retry-after`, seeds, control plane), and `test/microsoft-conformance.test.ts` (all eleven
-Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
-proof, and the drills), `test/dropbox.test.ts` and `test/notion.test.ts` (manifest, every
-fixture's complete responses byte for byte, the data copies, every fail-closed refusal (by shape
-and by state) writing nothing and using no fault, origins, cursor issuance and provenance, the
-latitude, the clock-safe recovery, credential and `Dropbox-API-Arg` redaction, minted values above
-seeded ones, the never-reset job id under a ledger clear, faults including 429 `retry-after`
-through the real connector, seeds, control plane),
-`test/dropbox-conformance.test.ts` and `test/notion-conformance.test.ts` (all eight cases of each
-in-process with one emulator per case and on one shared emulator, and over a loopback socket; the
-state-equals-seed proof; the leftover lookups failing not-emulated on an empty listing or search
-and answering a planted leftover; one drill per case failing exactly that case),
-`test/todoist.test.ts` and `test/telegram.test.ts` (manifest, the fixture drift tests, the latitude,
-every fail-closed path refused with a genuinely matching match-all fault installed: 400, nothing
-written, the fault unused and still answering the next valid request; credentials never ledgered or
-echoed on the refusal paths the tables list (Telegram: the token and its secret part in path
-segments, query keys and values, and plain, percent-encoded, JSON-escaped, and numeric body forms,
-checked against responses and every `/_emulate/*` read; Todoist: the bearer value in a query key or
-value, the path, and plain, JSON-escaped, and numeric body keys and values); seeded-project reads
-and seeded-item writes refused; seed ids in the minted namespace rejected; 429 faults through the
-real connectors; clock-safe recovery; seeds; control plane), and `test/todoist-conformance.test.ts`
-/ `test/telegram-conformance.test.ts` (cross-checks A and B: every case in-process and over a
-loopback socket, each comparing every emulator's snapshot with its seed afterwards: equal except the
-id counters (and the one recorded Telegram send); all seven Todoist cases run sequentially against
-one shared emulator, ending at the seed except counters; a `run-<hex>` run id; the leftover lookup
+socket, drills, and 401 / 429 / dropped / truncated faults through the real fetchers),
+`test/email.test.ts` (answers only from fixtures, the latitude, every fail-closed reason, state
+transitions, faults, reset, coverage, and seed validation), `test/email-conformance.test.ts`
+(cross-check A: every email case against one shared in-process emulator and each case alone, ending
+as seeded plus the documented Sent copy; one drill fault per case failing exactly that case; a
+failed restore reported; fixture and manifest parity), `test/fortnox.test.ts` (routes, quirks, auth,
+faults through the real connector, profiles, control plane), `test/fortnox-conformance.test.ts` (all
+seven Fortnox cases in-process and over a loopback socket, the ledger showing the restores, the
+state-equals-seed proof for the reversible cases, and one drill per knob), `test/microsoft.test.ts`
+(manifest, fail closed including nested body keys, query allowlist, auth, credential redaction,
+calendar overlap, immutable ids, the concurrent-write rule, attachments, `$batch`, folders, the copy
+monitor through the real connector, handler failures, every fixture's complete envelopes, faults
+including 429 `retry-after`, seeds, control plane), and `test/microsoft-conformance.test.ts` (all
+eleven Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
+proof, and the drills), `test/dropbox.test.ts` and `test/notion.test.ts` (manifest, every fixture's
+complete responses byte for byte, the data copies, every fail-closed refusal (by shape and by state)
+writing nothing and using no fault, origins, cursor issuance and provenance, the latitude, the
+clock-safe recovery, credential and `Dropbox-API-Arg` redaction, minted values above seeded ones,
+the never-reset job id under a ledger clear, faults including 429 `retry-after` through the real
+connector, seeds, control plane), `test/dropbox-conformance.test.ts` and
+`test/notion-conformance.test.ts` (all eight cases of each in-process with one emulator per case and
+on one shared emulator, and over a loopback socket; the state-equals-seed proof; the leftover
+lookups failing not-emulated on an empty listing or search and answering a planted leftover; one
+drill per case failing exactly that case), `test/todoist.test.ts` and `test/telegram.test.ts`
+(manifest, the fixture drift tests, the latitude, every fail-closed path refused with a genuinely
+matching match-all fault installed: 400, nothing written, the fault unused and still answering the
+next valid request; credentials never ledgered or echoed on the refusal paths the tables list
+(Telegram: the token and its secret part in path segments, query keys and values, and plain,
+percent-encoded, JSON-escaped, and numeric body forms, checked against responses and every
+`/_emulate/*` read; Todoist: the bearer value in a query key or value, the path, and plain,
+JSON-escaped, and numeric body keys and values); seeded-project reads and seeded-item writes
+refused; seed ids in the minted namespace rejected; 429 faults through the real connectors;
+clock-safe recovery; seeds; control plane), and `test/todoist-conformance.test.ts` /
+`test/telegram-conformance.test.ts` (cross-checks A and B: every case in-process and over a loopback
+socket, each comparing every emulator's snapshot with its seed afterwards: equal except the id
+counters (and the one recorded Telegram send); all seven Todoist cases run sequentially against one
+shared emulator, ending at the seed except counters; a `run-<hex>` run id; the leftover lookup
 failing closed (its project listing has no fixture); and one drill per case failing exactly that
-case), `test/github.test.ts` (manifest, the data copies, the drift test replaying every fixture
-byte for byte (status, every header, body) with minted values substituted only at exact field
-paths on a second run, the latitude, every fail-closed refusal (by shape and by state) asserting a
-ledgered 400, an unchanged state, and an unused match-all fault that still answers the next valid request,
+case), `test/github.test.ts` (manifest, the data copies, the drift test replaying every fixture byte
+for byte (status, every header, body) with minted values substituted only at exact field paths on a
+second run, the latitude, every fail-closed refusal (by shape and by state) asserting a ledgered
+400, an unchanged state, and an unused match-all fault that still answers the next valid request,
 constant-text unrecognised shapes and Authorization headers, the bearer never ledgered or echoed
 (query keys and values raw and percent-encoded, path, recorded header, plain, JSON-escaped, and
 numeric body forms, checked against responses and every `/_emulate/*` read), origins, 429 faults
 through the real connector, clock-safe recovery, seeds, control plane),
 `test/github-conformance.test.ts` (all seven cases in-process and over a loopback socket, each
 ending at its seed except the counters, the deleted comment's id, and the closed lifecycle issue;
-all cases twice in sequence on one emulator; the leftover lookup failing closed; one drill per
-case failing exactly that case), and `test/stateful-emulator.test.ts` (the shared wrapper's
-`{name+}` parameters, raw parameter patterns, and opt-in fail-closed mode over a fake core, and the
-unchanged behaviour without it). Loopback sockets only; never call real services.
+all cases twice in sequence on one emulator; the leftover lookup failing closed; one drill per case
+failing exactly that case), and `test/stateful-emulator.test.ts` (the shared wrapper's `{name+}`
+parameters, raw parameter patterns, and opt-in fail-closed mode over a fake core, and the unchanged
+behaviour without it). Loopback sockets only; never call real services.

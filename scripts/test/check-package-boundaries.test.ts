@@ -393,7 +393,8 @@ describe('emulators import rules', () => {
     }
   })
 
-  it('allows node: builtins and @emulators/core only in src/node.ts and the Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, and GitHub emulators', () => {
+  // The stateful Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, and GitHub emulators.
+  it('allows node: and @emulators/core only in src/node.ts and the stateful emulators', () => {
     const root = fixtureDirectory()
 
     scaffoldEmulators(root)
@@ -436,6 +437,7 @@ describe('emulators import rules', () => {
       'packages/emulators/src/notion-helpers.ts',
       'packages/emulators/src/notionish/api.ts',
       'packages/emulators/src/stateful-fixture.ts',
+      'packages/emulators/src/stateful-secrets.ts',
       'packages/emulators/src/todoist-helpers.ts',
       'packages/emulators/src/telegramish/api.ts',
       'packages/emulators/src/github-helpers.ts',

@@ -16,7 +16,6 @@
 import { Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
 import {
-  exactObject,
   isJsonObject,
   isNotEmulated,
   notEmulated,
@@ -27,8 +26,9 @@ import {
   type StatefulRoute
 } from '../stateful-emulator.ts'
 import {
-  githubFilePathPattern,
+  githubFilePathSource,
   githubLabelNamePattern,
+  githubMaxCommentId,
   githubMaxIssueNumber,
   githubOwnerPattern,
   githubRepoPattern,
@@ -54,6 +54,9 @@ export const githubEmulatorAccept = 'application/vnd.github+json'
 
 /** Content type of every GitHub JSON response, as the fixtures record it. */
 const githubContentType = 'application/json; charset=utf-8'
+
+/** The origin of the raw file URLs the contents fixture records (`download_url`). */
+const rawOrigin = 'https://raw.githubusercontent.com'
 
 /** Drill knobs (tests only): each makes the emulator disagree with one conformance claim. */
 export type GithubEmulatorDrills = {
@@ -147,9 +150,11 @@ const repoParams = { owner: githubOwnerPattern, repo: githubRepoPattern }
 
 const issueNumberPattern = /^[1-9][0-9]{0,9}$/
 
-const commentIdPattern = /^[1-9][0-9]{0,14}$/
+/** Fifteen digits at most: every id up to `githubMaxCommentId`. */
+const commentIdPattern = new RegExp(`^[1-9][0-9]{0,${String(githubMaxCommentId).length - 1}}$`)
 
-const filePathParam = new RegExp(`^(?=.{1,200}$)${githubFilePathPattern.source.slice(1)}`)
+/** A plain file path of at most 200 characters (the seed's path pattern and length bound). */
+const filePathParam = new RegExp(`^(?=.{1,200}$)${githubFilePathSource}$`)
 
 const evidence = (
   method: string,
@@ -226,10 +231,9 @@ const queryOf = (
     return notEmulated('repeated query parameters are not emulated')
   }
 
-  const unknown = keys.find(key => !required.includes(key) && !optional.includes(key))
-
-  if (unknown !== undefined) {
-    return notEmulated(`query parameter ${unknown} is not emulated on this route`)
+  // Constant text: a request's own keys are never echoed into a reason.
+  if (keys.some(key => !required.includes(key) && !optional.includes(key))) {
+    return notEmulated('a query parameter this route does not take is not emulated')
   }
 
   const missing = required.find(key => !keys.includes(key))
@@ -246,6 +250,30 @@ const withoutQuery = (request: EmulatedRequest): NotEmulated | undefined => {
 }
 
 const issueNumberOf = (request: EmulatedRequest): number => Number(request.params.issueNumber)
+
+/**
+ * A JSON object body with exactly the `required` keys, or not emulated with constant text (unlike
+ * the shared `exactObject`, a request's own keys are never echoed into a reason).
+ */
+const exactBody = (
+  value: Schema.Json | undefined,
+  label: string,
+  required: ReadonlyArray<string>
+): Schema.JsonObject | NotEmulated => {
+  if (!isJsonObject(value)) return notEmulated(`${label} must be a JSON object`)
+
+  const keys = Object.keys(value)
+
+  if (keys.some(key => !required.includes(key))) {
+    return notEmulated(`${label} has a key this route does not take`)
+  }
+
+  const missing = required.find(key => !keys.includes(key))
+
+  return missing === undefined
+    ? value
+    : notEmulated(`${label} without '${missing}' is not emulated`)
+}
 
 const nonEmptyString = (value: Schema.Json | undefined, label: string): string | NotEmulated =>
   Predicate.isString(value) && value.length > 0
@@ -416,7 +444,8 @@ const listLabels: Route = statefulRoute(
 
     return answer(() => {
       const target = (page: number) =>
-        `<${githubEmulatorOrigin}/repositories/${state.repository.id}/labels?per_page=${input.perPage}&page=${page}>`
+        `<${githubEmulatorOrigin}/repositories/${state.repository.id}/labels` +
+        `?per_page=${input.perPage}&page=${page}>`
 
       // The paging fixture's relations and order: prev, next, last, first.
       const relations = [
@@ -552,7 +581,7 @@ const getContents: Route = statefulRoute(
         url: `${repoApi(state)}/contents/${file.path}?ref=${defaultBranch}`,
         html_url: `${repoHtml(state)}/blob/${defaultBranch}/${file.path}`,
         git_url: `${repoApi(state)}/git/blobs/${file.sha}`,
-        download_url: `https://raw.githubusercontent.com/${owner}/${repo}/${defaultBranch}/${file.path}`,
+        download_url: `${rawOrigin}/${owner}/${repo}/${defaultBranch}/${file.path}`,
         type: 'file',
         content: foldedBase64(file.text, !env.drills.contentUnfolded),
         encoding: 'base64'
@@ -573,7 +602,7 @@ const createComment: Route = statefulRoute(
 
     if (isNotEmulated(issue)) return issue
 
-    const body = exactObject(request.json, 'the comment body', ['body'])
+    const body = exactBody(request.json, 'the comment body', ['body'])
 
     if (isNotEmulated(body)) return body
 
@@ -592,6 +621,11 @@ const createComment: Route = statefulRoute(
 
     if (issue.state !== 'open') {
       return notEmulated('commenting on a closed issue is not emulated (no fixture records one)')
+    }
+
+    // Refused before any fault: a comment past the maximum could never be deleted again.
+    if (state.counters.nextCommentId > githubMaxCommentId) {
+      return notEmulated('the emulator has run out of comment ids')
     }
 
     return () => {
@@ -722,7 +756,7 @@ const addLabels: Route = statefulRoute(
 
     if (isNotEmulated(issue)) return issue
 
-    const body = exactObject(request.json, 'the labels body', ['labels'])
+    const body = exactBody(request.json, 'the labels body', ['labels'])
 
     if (isNotEmulated(body)) return body
 
@@ -812,9 +846,16 @@ const removeLabel: Route = statefulRoute(
       return answer(() => json(404, githubEmulatorErrorBodies.labelNotOnIssue))
     }
 
-    return () => {
-      const labels = issue.labels.filter(name => name !== input.label)
+    const labels = issue.labels.filter(name => name !== input.label)
 
+    // The fixture's removal answers the remaining labels; no fixture records an empty answer.
+    if (labels.length === 0) {
+      return notEmulated(
+        'removing the last label of an issue is not emulated (no fixture records it)'
+      )
+    }
+
+    return () => {
       state.issues = state.issues.map(candidate =>
         candidate.number === issue.number ? { ...candidate, labels } : candidate
       )
@@ -834,7 +875,7 @@ const createIssue: Route = statefulRoute(
 
     if (query !== undefined) return query
 
-    const body = exactObject(request.json, 'the issue body', ['title', 'body'])
+    const body = exactBody(request.json, 'the issue body', ['title', 'body'])
 
     if (isNotEmulated(body)) return body
 

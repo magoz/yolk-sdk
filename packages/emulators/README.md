@@ -1301,8 +1301,8 @@ const httpLayer = InProcessHttpClient.layer([
 await github.close()
 ```
 
-Routes (every request needs `Authorization: Bearer <at least 8 non-space characters>`, whose value
-is never checked, stored, forwarded, or ledgered, `Accept: application/vnd.github+json`, and
+Routes (every request needs exactly `Authorization: Bearer <at least 8 non-space characters>`, whose
+value is never checked, stored, forwarded, or ledgered, `Accept: application/vnd.github+json`, and
 `X-GitHub-Api-Version: 2026-03-10`, what every fixture sends; bodies are JSON; `{owner}/{repo}` is
 the seeded repository):
 
@@ -1316,7 +1316,7 @@ the seeded repository):
 | `GET /repos/{owner}/{repo}/issues/{issueNumber}/comments`         | `per_page=100`, `since`: the issue's comments updated at or after `since` (0 or 1)    |
 | `DELETE /repos/{owner}/{repo}/issues/comments/{commentId}`        | 204; the recorded 404 when this emulator deleted it already                           |
 | `POST /repos/{owner}/{repo}/issues/{issueNumber}/labels`          | `{ labels: [name] }`: one repository label added; answers the issue labels            |
-| `DELETE /repos/{owner}/{repo}/issues/{issueNumber}/labels/{name}` | The remaining labels; the recorded 404 for a repository label not on the issue        |
+| `DELETE /repos/{owner}/{repo}/issues/{issueNumber}/labels/{name}` | The remaining labels (never none); the recorded 404 for a label not on the issue      |
 | `POST /repos/{owner}/{repo}/issues`                               | `{ title, body }`: 201 and the open issue                                             |
 | `PATCH /repos/{owner}/{repo}/issues/{issueNumber}`                | `{ title }` or `{ state: "closed", state_reason: "completed" }` on an issue made here |
 
@@ -1328,7 +1328,7 @@ Wire behavior, as the fixtures record it:
   the first page; the page after the last answers `[]` with `prev`, `last`, and `first`). A listing
   that fits one page carries no `Link`, as the label fixture records. No other route mints `Link`.
   Label pages are page numbers the client computes, as GitHub's are, not cursors: the label list
-  never changes in the emulator, so no page can drift. The `Link` URLs name
+  never changes within a seed (no route writes labels), so no page can drift. The `Link` URLs name
   `/repositories/{id}/labels`, which is not emulated (the connector never follows them).
 - **Errors.** The not-found, comment, label, and validation bodies are the fixtures' byte for byte
   (`githubEmulatorErrorBodies`), with `content-type: application/json; charset=utf-8`.
@@ -1341,50 +1341,58 @@ Wire behavior, as the fixtures record it:
 Every answer value comes from a fixture, through the seed or the request, except the values the
 emulator mints (it never mints anything else):
 
-- **Minted values.** Created issue numbers and comment ids come from counters that only advance;
-  the default seed starts them at the fixtures' created values (issue `42`, comment `9000000001`),
-  and a seed's counters must lie above every seeded number. A created issue's `id`
-  (`3000000000 + number`) and `node_id` (`I_kwSynthetic<number>`), and a comment's `node_id`
-  (`IC_kwSynthetic<id>`), derive from the minted value in the fixtures' form; a seed may not use
-  those forms at or above its counters. Timestamps come from the injectable `now` clock, in whole
-  seconds.
+- **Minted values.** Created issue numbers and comment ids come from counters that only advance; the
+  default seed starts them at the fixtures' created values (issue `42`, comment `9000000001`), and a
+  seed's counters must lie above every seeded number. They end at the last addressable issue number
+  (ten digits) and comment id (fifteen digits, what the delete route takes); past that, a create is
+  refused before any fault. A created issue's `id` (`3000000000 + number`) and `node_id`
+  (`I_kwSynthetic<number>`), and a comment's `node_id` (`IC_kwSynthetic<id>`), derive from the
+  minted value in the fixtures' form; no seeded node id (of an issue or a label; node ids are unique
+  across both) may use those forms at or above its counter. Timestamps come from the injectable
+  `now` clock, in whole seconds.
 - **Implied issues.** Issue numbers below `nextIssueNumber` that the state does not hold are
   implied (the repository reached them, but no fixture shows them): any answer that would render
   one is not emulated. Numbers at or above it answer the not-found fixture's 404.
 - **State rules.** Comments and label changes apply to issues the state holds and that are open;
   only issues created here are renamed or closed; a label add takes one repository label not yet on
   the issue that sorts after the issue's labels (the fixture's answer is both appended and in name
-  order); a comment listing shows at most one comment (the order of several is not recorded); an
-  issue holding comments is never rendered (every fixture answers `comments: 0`); a comment delete
-  of an id this emulator never held is not emulated.
+  order); a label removal leaves at least one label (no fixture records an empty answer); a comment
+  listing shows at most one comment (the order of several is not recorded); an issue holding
+  comments is never rendered (every fixture answers `comments: 0`); a comment delete of an id this
+  emulator never held is not emulated.
 - **Kept after writes.** A deleted comment's id stays in `deletedComments` (the comment fixture's
   second delete answers 404), and a closed issue stays in the repository (GitHub cannot delete
   issues). A write case ends at the seed except those and the counters.
 - **Fail closed.** A request is recognised only when its raw path is exactly an emulated route
   shape (every path parameter matches its raw pattern: owner and repository names, decimal issue
   numbers and comment ids, plain label names, plain file paths) under that route's method, and any
-  `Authorization` header is one recognisable bearer. Every other request (an unknown route or
+  `Authorization` header is exactly `Bearer <token>`. Every other request (an unknown route or
   method, an encoded character, a malformed or duplicated `Authorization` header) is ledgered and
   answered with constant text only: the path `/<unrecognised>`, a standard method or `<other>`, an
   empty query, no body, and a constant reason (`no emulated GitHub route for this method and path`,
   `an unrecognisable Authorization header is not emulated`).
 - **Credentials.** For a recognised request the bearer value is scrubbed from the ledgered method,
-  path, query keys and values, recorded headers, and every not-emulated message, and a path, query,
-  or body that repeats it (raw, percent-decoded, or in any parsed JSON key, string value, or number)
-  is refused with constant text.
-- **Request-shape latitude (`/github`, the only accepted deviations).** Any bearer value of at
-  least 8 non-space characters that occurs nowhere else in the request (never checked, stored, or
+  path, query keys and values, recorded headers, and every not-emulated message, and a path, query
+  key or value, recorded header, or body that repeats it (raw, percent-decoded, or in any parsed
+  JSON key, string value, or number) is refused with constant text; text repeating it in any form
+  is recorded whole as `<redacted>`. A recorded header or query key that looks like JSON is
+  recorded parsed with credential-named keys redacted at any depth, or whole as `<redacted>` when
+  it does not parse. Refusals never echo a request's own query or body keys, and empty query
+  components (a bare `?`, a stray `&`) are refused.
+- **Request-shape latitude (`/github`, the only accepted deviations).** Any bearer value of at least
+  8 non-space characters that occurs nowhere else in the request (never checked, stored, or
   ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the order
   of query parameters; any non-empty issue title and comment body, and any issue body text; any
-  comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1
-  to 100, with no `page` or a `page` from 2 to one past the last page; any issue search `q` that
-  starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256
+  comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to
+  100, with no `page` or a `page` from 2 to one past the last page; any issue search `q` that starts
+  with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256
   characters (answered the recorded 422); any issue number the repository has not reached (answered
   the recorded 404); and any issue, comment, repository label, or file the state holds where a
-  fixture has one, under the per-route state rules. `Accept` must be `application/vnd.github+json`
-  and `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query
-  parameters, another origin or repository, a repeated query key, an explicit `page=1`, and a
-  comment listing `per_page` other than 100) is not emulated.
+  fixture has one, under the per-route state rules. `Authorization` must be exactly `Bearer <token>`
+  (that spelling, one space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version`
+  `2026-03-10`. Everything else (other keys and values, query parameters, empty query components
+  such as a bare `?` or a stray `&`, another origin or repository, a repeated query key, an explicit
+  `page=1`, and a comment listing `per_page` other than 100) is not emulated.
 
 Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
 `notEmulated` in the ledger), writes nothing, and uses up no fault: other routes (issue and pull
@@ -1406,18 +1414,19 @@ State and seeds: the authenticated `viewer` (the author of everything created he
 name; `createdHere` marks issues created here), comments, `deletedComments`, files (path, blob sha,
 UTF-8 text), and the counters. The default seed is the synthetic fixture entities with the values of
 `githubConformanceFixtureSeeds`: the five paging-fixture labels, open work issue 1 labelled `bug`,
-and `docs/synthetic-notes.txt`. Pass `seed: { profile?, viewer?, repository?, labels?, issues?,
-files?, nextIssueNumber?, nextCommentId? }` (lists replace the profile's) with profiles `'default'`
-or `'empty'`. `reset()`, `seed(next)`, and `snapshot()` behave as in the Dropbox emulator.
+and `docs/synthetic-notes.txt`. Pass
+`seed: { profile?, viewer?, repository?, labels?, issues?, files?, nextIssueNumber?, nextCommentId? }`
+(lists replace the profile's) with profiles `'default'` or `'empty'`. `reset()`, `seed(next)`, and
+`snapshot()` behave as in the Dropbox emulator.
 
 Faults, the ledger (which records the `Accept` and `X-GitHub-Api-Version` headers), and the control
 plane behave as in the Dropbox emulator; a 429 fault with `retry-after` reaches the connector as
 `github_rate_limited`.
 
-**Drill knobs (tests only).** `drills: { linkOmitsNext, notFoundOmitsDocumentationUrl,
-validationWithoutErrors, contentUnfolded, sinceExcludesEqual, addAnswerOmitsLabel,
-closeWithoutClosedAt }` (booleans) each make the emulator disagree with exactly one GitHub case,
-only to prove that case catches it.
+**Drill knobs (tests only).**
+`drills: { linkOmitsNext, notFoundOmitsDocumentationUrl, validationWithoutErrors, contentUnfolded, sinceExcludesEqual, addAnswerOmitsLabel, closeWithoutClosedAt }`
+(booleans) each make the emulator disagree with exactly one GitHub case, only to prove that case
+catches it.
 
 ## Evidence
 

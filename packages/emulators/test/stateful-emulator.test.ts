@@ -1,13 +1,16 @@
 /**
  * The shared `src/stateful-emulator.ts` wrapper's opt-in guarantees, over a fake core (no
- * `@emulators/core`): multi-segment `{name+}` parameters, raw parameter patterns, the
- * fail-closed mode (constant-text ledger entries for unrecognised requests and Authorization
- * headers, the bearer guarded as a secret, every parameter patterned at build), and that an
- * emulator without
- * `failClosed` keeps the earlier behaviour (the Dropbox and Notion suites cover it in full).
+ * `@emulators/core`): multi-segment `{name+}` parameters, raw parameter patterns (matched in full,
+ * no `g` or `y` flag), the fail-closed mode (constant-text ledger entries for unrecognised
+ * requests and Authorization headers, every parameter patterned at build, the bearer guarded as a
+ * secret in queries, recorded headers, bodies, and plan-time reasons), and that an emulator
+ * without `failClosed` keeps the earlier behaviour (the Dropbox and Notion suites cover it fully).
  */
+import { Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  exactObject,
+  isNotEmulated,
   makeStatefulEmulator,
   notEmulated,
   routeMatcher,
@@ -50,6 +53,28 @@ const write = statefulRoute<State, undefined, string>(
 
     return new Response('written')
   }
+)
+
+/** A route whose plan echoes token-carrying input into its reason (two halves of the bearer). */
+const echoPlan = statefulRoute<State, undefined, string>(
+  {
+    method: 'POST',
+    path: '/echo/{id}',
+    kind: 'connector',
+    write: false,
+    caseIds: ['synthetic.case'],
+    evidence: 'unverified',
+    params: { id: /^[0-9]+$/ }
+  },
+  'json',
+  request => {
+    const body = exactObject(request.json, 'the echo body', ['a', 'b'])
+
+    if (isNotEmulated(body)) return body
+
+    return [body.a, body.b].map(half => (Predicate.isString(half) ? half : '')).join('')
+  },
+  (_state, joined) => notEmulated(`the plan saw ${joined}`)
 )
 
 const build = (routes: ReadonlyArray<StatefulRoute<State, undefined>>, failClosed: boolean) => {
@@ -119,6 +144,35 @@ describe('route templates', () => {
     expect(match('GET', '/files/a/B')).toBeUndefined()
     expect(match('GET', '/files/%61')).toBeUndefined()
   })
+
+  it('a raw pattern must match the whole parameter, even when it is not anchored', () => {
+    const unanchored = statefulRoute<State, undefined, string>(
+      { ...echo, path: '/things/{id}', params: { id: /[a-z]+/ } },
+      'none',
+      () => '',
+      () => () => new Response('')
+    )
+
+    const match = routeMatcher([unanchored])
+
+    expect(match('GET', '/things/abc')?.params).toEqual({ id: 'abc' })
+    // `abc` is only part of `abc%2Fdef`: no shape of this route (never decoded to `abc/def`).
+    expect(match('GET', '/things/abc%2Fdef')).toBeUndefined()
+    expect(match('GET', '/things/ABCabc')).toBeUndefined()
+  })
+
+  it('refuses a raw pattern with the g or y flag (matches depend on earlier ones)', () => {
+    for (const pattern of [/^[a-z]+$/g, /[a-z]+/y]) {
+      const flagged = statefulRoute<State, undefined, string>(
+        { ...echo, path: '/things/{id}', params: { id: pattern } },
+        'none',
+        () => '',
+        () => () => new Response('')
+      )
+
+      expect(() => routeMatcher([flagged])).toThrow('raw patterns take no g or y flag')
+    }
+  })
 })
 
 describe('fail-closed mode', () => {
@@ -135,7 +189,7 @@ describe('fail-closed mode', () => {
     await expect(build([unpatterned], false)).resolves.toBeDefined()
   })
 
-  it('ledgers unrecognised requests and Authorization headers with constant text only', async () => {
+  it('ledgers unrecognised requests and Authorization headers as constants', async () => {
     const api = await build([echo, write], true)
     const secret = 'synthetic-wrapper-secret'
 
@@ -187,7 +241,7 @@ describe('fail-closed mode', () => {
       'the query repeats the credential',
       'the request body repeats the credential',
       'the request body repeats the credential',
-      'query 1'
+      'a recorded request header repeats the credential'
     ])
     expect(api.ledger.entries()[3]?.headers).toEqual({ 'x-note': '<redacted>' })
     expect(api.snapshot()).toEqual({ writes: 0 })
@@ -212,8 +266,58 @@ describe('fail-closed mode', () => {
   })
 })
 
+describe('fail-closed mode: plan-time reasons and recorded headers', () => {
+  it('scrubs a plan-time reason that echoes token-carrying input', async () => {
+    const api = await build([echoPlan], true)
+    const secret = 'synthetic-wrapper-secret'
+
+    // Neither half repeats the bearer, so the request reaches the plan, which joins them.
+    const refused = await api.fetch(
+      new Request('https://api.example.test/echo/1', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ a: 'synthetic-wrapper', b: '-secret' })
+      })
+    )
+
+    const text = await refused.text()
+
+    expect(refused.status).toBe(400)
+    expect(api.ledger.entries()[0]?.notEmulated).toBe('the plan saw <redacted>')
+
+    const control = await Promise.all(
+      ['ledger', 'state', 'coverage', 'faults'].map(route =>
+        api.fetch(get(`/_emulate/${route}`)).then(response => response.text())
+      )
+    )
+
+    expect([text, JSON.stringify(api.ledger.entries()), ...control].join('\n')).not.toContain(
+      secret
+    )
+  })
+
+  it('records a JSON-looking header redacted even when it is declared plain', async () => {
+    const value = '{"nested":{"access_token":"synthetic-other-secret"}}'
+    const failClosed = await build([echo], true)
+    const legacy = await build([echo], false)
+
+    for (const api of [failClosed, legacy]) {
+      await api.fetch(
+        get('/files/a', { authorization: 'Bearer synthetic-wrapper-secret', 'x-note': value })
+      )
+    }
+
+    expect(failClosed.ledger.entries()[0]?.headers).toEqual({
+      'x-note': '{"nested":{"access_token":"<redacted>"}}'
+    })
+    // Without fail-closed mode a header declared plain is recorded as sent (the earlier
+    // behaviour, which Dropbox and Notion keep).
+    expect(legacy.ledger.entries()[0]?.headers).toEqual({ 'x-note': value })
+  })
+})
+
 describe('without fail-closed mode', () => {
-  it('keeps the earlier behaviour: any non-empty bearer, unknown routes ledgered as sent', async () => {
+  it('keeps the earlier behaviour: any bearer, unknown routes ledgered as sent', async () => {
     const api = await build([echo, write], false)
 
     expect((await api.fetch(get('/files/a', { authorization: 'Bearer x' }))).status).toBe(200)

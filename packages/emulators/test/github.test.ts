@@ -110,6 +110,10 @@ const call = (
 
 const repo = (path: string) => `${repoPath}${path}`
 
+const htmlRepo = 'https://github.com/yolk-synthetic/conformance-practice'
+
+const scopedRepo = 'repo:yolk-synthetic/conformance-practice'
+
 /** Assert a 400 not-emulated naming `reason`; returns the raw response (headers and body text). */
 const expectNotEmulated = async (response: Response, reason: string): Promise<string> => {
   expect(response.status).toBe(400)
@@ -135,7 +139,8 @@ const validRequest = (target: GithubEmulator) => call(target, 'GET', repo('/labe
 const expectRefusedWithoutFault = async (
   target: GithubEmulator,
   send: () => Promise<Response>,
-  reason: string
+  reason: string,
+  valid: (target: GithubEmulator) => Promise<Response> = validRequest
 ): Promise<string> => {
   const seed = target.snapshot()
 
@@ -150,7 +155,7 @@ const expectRefusedWithoutFault = async (
   expect(target.ledger.entries().at(-1)?.notEmulated).toContain(reason)
   expect(target.ledger.entries().at(-1)?.fault).toBeUndefined()
 
-  expect((await validRequest(target)).status).toBe(503)
+  expect((await valid(target)).status).toBe(503)
   expect(target.faults.list()[0]).toMatchObject({ applied: 1, remaining: 0 })
 
   return text
@@ -409,7 +414,7 @@ describe('drift: every fixture replayed, each complete response byte for byte', 
     )
   }
 
-  it('a second comment run mints comment 9000000002, substituted only at its id paths', async () => {
+  it('a second comment run mints comment 9000000002, substituted at its id paths', async () => {
     const fixture = githubCommentLifecycleFixture
     const target = await emulator({ now: scriptedClock([at('12:00:05'), at('12:00:05')]) })
 
@@ -420,7 +425,7 @@ describe('drift: every fixture replayed, each complete response byte for byte', 
 
     const minted = {
       url: `${origin}${repoPath}/issues/comments/${id}`,
-      html_url: `https://github.com/yolk-synthetic/conformance-practice/issues/1#issuecomment-${id}`,
+      html_url: `${htmlRepo}/issues/1#issuecomment-${id}`,
       id,
       node_id: `IC_kwSynthetic${id}`
     }
@@ -463,7 +468,7 @@ describe('drift: every fixture replayed, each complete response byte for byte', 
 })
 
 describe('request-shape latitude', () => {
-  it('accepts query parameters in any order, content-type parameters, and extra headers', async () => {
+  it('accepts query parameters in any order, content-type parameters, extra headers', async () => {
     const target = await emulator()
 
     expect((await createComment(target)).status).toBe(201)
@@ -486,7 +491,7 @@ describe('request-shape latitude', () => {
     expect(await jsonOf(created)).toMatchObject({ number: 42, title: 'Any title', body: '' })
   })
 
-  it('answers any since timestamp: later ones list nothing (the recorded empty listing)', async () => {
+  it('answers any since: later ones list nothing (the recorded empty listing)', async () => {
     const target = await emulator()
 
     await createComment(target)
@@ -526,7 +531,7 @@ describe('request-shape latitude', () => {
     )
   })
 
-  it('answers the recorded 404 for any number not reached and the 422 for any overlong search', async () => {
+  it('answers the recorded 404 for unreached numbers and the 422 for long searches', async () => {
     const target = await emulator()
 
     for (const number of ['42', '100', '9999999999']) {
@@ -543,7 +548,7 @@ describe('request-shape latitude', () => {
     expect(await search.text()).toBe(JSON.stringify(githubEmulatorErrorBodies.searchTooLong))
   })
 
-  it('the created issue reads back, renames keep updated_at, and closing stamps the clock', async () => {
+  it('a created issue reads back, renames keep updated_at, closing stamps the clock', async () => {
     const target = await emulator({ now: scriptedClock([at('12:00:00'), at('12:00:30')]) })
 
     await createIssue(target)
@@ -595,7 +600,13 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       {},
       'a repository other than the seeded one'
     ],
-    ['a query on an issue read', 'GET', repo('/issues/1?x=1'), {}, 'query parameter x'],
+    [
+      'a query on an issue read',
+      'GET',
+      repo('/issues/1?x=1'),
+      {},
+      'a query parameter this route does not take'
+    ],
     ['an implied issue (below the counter, not held)', 'GET', repo('/issues/5'), {}, 'implied'],
     ['labels without per_page', 'GET', repo('/labels'), {}, 'per_page'],
     ['labels per_page 0', 'GET', repo('/labels?per_page=0'), {}, 'per_page must be'],
@@ -615,13 +626,19 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       {},
       'repeated query parameters'
     ],
-    ['an unknown label query key', 'GET', repo('/labels?per_page=2&sort=name'), {}, 'sort'],
+    [
+      'an unknown label query key',
+      'GET',
+      repo('/labels?per_page=2&sort=name'),
+      {},
+      'a query parameter this route does not take'
+    ],
     [
       'a credential query key (redacted in the ledger)',
       'GET',
       repo('/labels?per_page=2&access_token=synthetic-secret'),
       {},
-      'access_token'
+      'a query parameter this route does not take'
     ],
     [
       'a search of at most 256 characters',
@@ -647,12 +664,18 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
     [
       'a search with sort',
       'GET',
-      `/search/issues?q=${encodeURIComponent(`repo:yolk-synthetic/conformance-practice ${'x'.repeat(300)}`)}&sort=created`,
+      `/search/issues?q=${encodeURIComponent(`${scopedRepo} ${'x'.repeat(300)}`)}&sort=created`,
       {},
-      'query parameter sort'
+      'a query parameter this route does not take'
     ],
     ['a missing file', 'GET', repo('/contents/docs/missing.txt'), {}, 'no seeded file'],
-    ['a contents ref', 'GET', repo('/contents/docs/synthetic-notes.txt?ref=main'), {}, 'ref'],
+    [
+      'a contents ref',
+      'GET',
+      repo('/contents/docs/synthetic-notes.txt?ref=main'),
+      {},
+      'a query parameter this route does not take'
+    ],
     [
       'comments without since',
       'GET',
@@ -672,7 +695,7 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       'GET',
       repo('/issues/1/comments?per_page=100&page=1'),
       {},
-      'query parameter page'
+      'a query parameter this route does not take'
     ],
     [
       'a since with milliseconds',
@@ -700,7 +723,7 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       'POST',
       repo('/issues/1/comments'),
       { body: { body: 'x', extra: 1 } },
-      "key 'extra'"
+      'has a key this route does not take'
     ],
     ['an empty comment', 'POST', repo('/issues/1/comments'), { body: { body: '' } }, 'non-empty'],
     [
@@ -729,7 +752,7 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       'POST',
       repo('/issues'),
       { body: { title: 'x', body: 'y', labels: ['bug'] } },
-      "key 'labels'"
+      'has a key this route does not take'
     ],
     [
       'an issue create with an empty title',
@@ -793,14 +816,39 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       repo('/issues/5/labels/bug'),
       {},
       'does not hold'
+    ],
+    [
+      // The default seed's work issue holds only `bug`: no fixture records the empty answer.
+      'removing the last label of an issue (the answer would be [])',
+      'DELETE',
+      repo('/issues/1/labels/bug'),
+      {},
+      'removing the last label'
+    ],
+    ['a bare ?', 'GET', repo('/issues/1?'), {}, 'empty query components'],
+    ['a trailing &', 'GET', repo('/labels?per_page=2&'), {}, 'empty query components'],
+    ['a doubled &', 'GET', repo('/labels?per_page=2&&page=2'), {}, 'empty query components'],
+    [
+      'a JSON-looking query key carrying another credential (never echoed)',
+      'GET',
+      repo(`/labels?per_page=2&${encodeURIComponent('{"access_token":"synthetic-secret"}')}=1`),
+      {},
+      'a query parameter this route does not take'
     ]
   ] as const)('%s', async (_label, method, path, options, reason) => {
     const target = await emulator()
 
-    await expectRefusedWithoutFault(target, () => call(target, method, path, options), reason)
+    const text = await expectRefusedWithoutFault(
+      target,
+      () => call(target, method, path, options),
+      reason
+    )
 
-    expect(JSON.stringify(target.ledger.entries())).not.toContain('synthetic-secret')
-    expect(JSON.stringify(target.ledger.entries())).not.toContain(token)
+    // The real response text, the ledger, and every `/_emulate/*` read.
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    expect(seen.join('\n')).not.toContain('synthetic-secret')
+    expect(seen.join('\n')).not.toContain(token)
   })
 
   // `setup` writes through the emulator first (recorded flows only).
@@ -869,6 +917,59 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
 
     await expectRefusedWithoutFault(target, () => call(target, method, path, options), reason)
   })
+
+  // By state, on a seed where the default valid request is itself refused: `valid` is another
+  // eligible request (it answers, so the unused fault answers it).
+  it.each([
+    [
+      'a label listing of a repository without labels (no fixture records an empty first page)',
+      (target: GithubEmulator) => target.seed({ profile: 'empty' }),
+      'GET',
+      repo('/labels?per_page=100'),
+      {},
+      'without labels',
+      (target: GithubEmulator) => call(target, 'GET', repo('/issues/1'))
+    ],
+    [
+      'an issue create past the last addressable number',
+      async (target: GithubEmulator) => {
+        await target.seed({ nextIssueNumber: 9_999_999_999 })
+        expect(await jsonOf(await createIssue(target))).toMatchObject({ number: 9_999_999_999 })
+      },
+      'POST',
+      repo('/issues'),
+      { body: { title: 'x', body: 'y' } },
+      'run out of emulated issue numbers',
+      validRequest
+    ],
+    [
+      'a comment create past the last addressable id (it could never be deleted)',
+      async (target: GithubEmulator) => {
+        const last = 999_999_999_999_999
+
+        await target.seed({ nextCommentId: last })
+        expect(await jsonOf(await createComment(target))).toMatchObject({ id: last })
+        // The last id is still addressable: it deletes.
+        expect((await call(target, 'DELETE', repo(`/issues/comments/${last}`))).status).toBe(204)
+      },
+      'POST',
+      repo('/issues/1/comments'),
+      { body: { body: 'x' } },
+      'run out of comment ids',
+      validRequest
+    ]
+  ] as const)('%s', async (_label, setup, method, path, options, reason, valid) => {
+    const target = await emulator()
+
+    await setup(target)
+
+    await expectRefusedWithoutFault(
+      target,
+      () => call(target, method, path, options),
+      reason,
+      valid
+    )
+  })
 })
 
 describe('unrecognised requests are ledgered without request text', () => {
@@ -916,6 +1017,8 @@ describe('an unrecognisable Authorization header is ledgered without request tex
   it.each([
     ['another scheme', `token ${secret}`, repo(`/labels?per_page=2&q=${secret}`)],
     ['a bearer shorter than 8 characters', 'Bearer short', repo('/labels?per_page=2')],
+    ['a lower-case scheme', `bearer ${secret}`, repo(`/labels?per_page=2&q=${secret}`)],
+    ['two spaces after the scheme', `Bearer  ${secret}`, repo(`/labels?per_page=2&q=${secret}`)],
     [
       'extra words, the value as a query key',
       `Bearer ${secret} extra`,
@@ -1005,7 +1108,31 @@ describe('the bearer value is never ledgered or echoed', () => {
       'GET',
       repo('/labels?per_page=2'),
       { apiVersion: secret },
-      'X-GitHub-Api-Version other'
+      'a recorded request header repeats the credential'
+    ],
+    [
+      // Astra's counterexample: a query key holding the bearer as a JSON `\u` escape.
+      'JSON-escaped in a query key',
+      'GET',
+      repo(
+        `/labels?per_page=2&${encodeURIComponent(`{"n":"${secret.replace('S', '\\u0053')}"}`)}=1`
+      ),
+      {},
+      'the query repeats the credential'
+    ],
+    [
+      'as a JSON string query value',
+      'GET',
+      repo(`/labels?per_page=2&q=${encodeURIComponent(`"${secret.replace('S', '\\u0053')}"`)}`),
+      {},
+      'the query repeats the credential'
+    ],
+    [
+      'JSON-escaped in a recorded header',
+      'GET',
+      repo('/labels?per_page=2'),
+      { apiVersion: `{"v":"${secret.replace('S', '\\u0053')}"}` },
+      'a recorded request header repeats the credential'
     ]
   ] as const)('%s', async (_label, method, path, options, reason) => {
     const target = await emulator()
@@ -1016,9 +1143,11 @@ describe('the bearer value is never ledgered or echoed', () => {
       reason
     )
 
-    expect(
-      [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))].join('\n')
-    ).not.toContain(secret)
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    // Neither the bearer nor any reversible encoding of it (the `\u0053` escape of its `S`).
+    expect(seen.join('\n')).not.toContain(secret)
+    expect(seen.join('\n')).not.toContain('ecretValue')
   })
 
   // JSON numbers normalise (`1.2345678e7` parses to `12345678`): an all-digit bearer must still
@@ -1040,6 +1169,39 @@ describe('the bearer value is never ledgered or echoed', () => {
     expect([text, ...(await controlReads(target))].join('\n')).not.toContain('12345678')
   })
 
+  it.each([
+    ['a query value', repo('/labels?per_page=2&q=1.2345678e7'), {}, 'the query repeats'],
+    ['a query key', repo('/labels?per_page=2&1.2345678e7=1'), {}, 'the query repeats'],
+    [
+      'a recorded header',
+      repo('/labels?per_page=2'),
+      { apiVersion: '1.2345678e7' },
+      'a recorded request header repeats the credential'
+    ],
+    [
+      'a number inside a JSON recorded header',
+      repo('/labels?per_page=2'),
+      { accept: '{"n":[1.2345678e7]}' },
+      'a recorded request header repeats the credential'
+    ]
+  ] as const)(
+    'an exponent-notation number repeating an all-digit bearer in %s',
+    async (_label, path, options, reason) => {
+      const target = await emulator()
+
+      const text = await expectRefusedWithoutFault(
+        target,
+        () => call(target, 'GET', path, { ...options, authorization: 'Bearer 12345678' }),
+        reason
+      )
+
+      const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+      expect(seen.join('\n')).not.toContain('12345678')
+      expect(seen.join('\n')).not.toContain('1.2345678e7')
+    }
+  )
+
   it('answers recognised requests without the bearer anywhere', async () => {
     const target = await emulator()
 
@@ -1052,6 +1214,42 @@ describe('the bearer value is never ledgered or echoed', () => {
     const texts = await Promise.all(responses.map(response => response.text()))
 
     expect([...texts, ...(await controlReads(target))].join('\n')).not.toContain(token)
+  })
+})
+
+describe('JSON-looking recorded headers are redacted, whatever their declared format', () => {
+  // Both recorded headers are declared plain (`json: false`); fail-closed mode still recognises a
+  // JSON-looking value. The request is refused (another `Accept`), and neither the response nor
+  // any `/_emulate/*` read carries the credential.
+  it.each([
+    [
+      'valid JSON with a nested credential field',
+      '{"nested":{"access_token":"synthetic-other-secret"}}',
+      '{"nested":{"access_token":"<redacted>"}}'
+    ],
+    [
+      'a JSON-escaped credential field name',
+      '{"acc\\u0065ss_token":"synthetic-other-secret"}',
+      '{"access_token":"<redacted>"}'
+    ],
+    ['a numeric credential field', '{"api_key":12345678901}', '{"api_key":"<redacted>"}'],
+    ['malformed JSON', '{"access_token":"synthetic-other-secret"', '<redacted>'],
+    ['a malformed JSON string', '"synthetic-other-secret', '<redacted>']
+  ] as const)('%s', async (_label, accept, recorded) => {
+    const target = await emulator()
+
+    const text = await expectRefusedWithoutFault(
+      target,
+      () => call(target, 'GET', repo('/issues/1'), { accept }),
+      'Accept other than'
+    )
+
+    expect(target.ledger.entries().at(-2)?.headers.accept).toBe(recorded)
+
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    expect(seen.join('\n')).not.toContain('synthetic-other-secret')
+    expect(seen.join('\n')).not.toContain('12345678901')
   })
 })
 
@@ -1117,7 +1315,7 @@ describe('faults', () => {
     })
   )
 
-  it('answers the default emulator-fault body and validates faults (400-599, headers)', async () => {
+  it('answers the default emulator-fault body; validates faults (400-599, headers)', async () => {
     const target = await emulator()
 
     target.faults.add({ kind: 'status', status: 500, count: 1 })
@@ -1138,7 +1336,7 @@ describe('faults', () => {
 })
 
 describe('clock-safe recovery', () => {
-  it('a throwing clock fails only the writes that read it (500, ledgered), never recovery', async () => {
+  it('a throwing clock fails only the writes that read it (500, ledgered)', async () => {
     const target = await emulator({
       now: () => {
         throw new Error('synthetic clock failure')
@@ -1286,6 +1484,27 @@ describe('seeds', () => {
           reason: 'minted form',
           options: { seed: { issues: [issue({ nodeId: 'I_kwSynthetic50' })] } }
         },
+        // Node ids are global across types: every minted form is reserved for every seeded node id.
+        {
+          reason: 'node id I_kwSynthetic42 uses a minted form',
+          options: { seed: { labels: [{ ...label('bug'), nodeId: 'I_kwSynthetic42' }] } }
+        },
+        {
+          reason: 'node id IC_kwSynthetic9000000001 uses a minted form',
+          options: { seed: { issues: [issue({ nodeId: 'IC_kwSynthetic9000000001' })] } }
+        },
+        {
+          reason: 'duplicate node id a',
+          options: { seed: { labels: [label('bug'), { ...label('question'), id: 2 }] } }
+        },
+        {
+          reason: 'duplicate node id I_kwCustom1',
+          options: {
+            seed: { labels: [{ ...label('bug'), nodeId: 'I_kwCustom1' }], issues: [issue({})] }
+          }
+        },
+        // A comment id past fifteen digits could never be deleted (the delete route's pattern).
+        { reason: 'nextCommentId', options: { seed: { nextCommentId: 1_000_000_000_000_000 } } },
         { reason: 'unknown drill knob nope', options: { drills: { nope: true } } },
         { reason: 'must be a boolean', options: { drills: { linkOmitsNext: 'yes' } } }
       ])

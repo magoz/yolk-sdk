@@ -9,30 +9,34 @@
  * behaviour comes only from the fixtures: anything they do not show answers one ledgered 400
  * not-emulated, writes nothing, and uses up no fault. That includes the leftover lookup's
  * open-issue listing (`GET /repos/{owner}/{repo}/issues`, no fixture), so the read-only lookup
- * fails and the live runner prints its lookup-failed WARN. Every route answers only on the recorded origin
- * `https://api.github.com` (`fetchOn(origin)` serves it behind a loopback rewrite).
+ * fails and the live runner prints its lookup-failed WARN. Every route answers only on the
+ * recorded origin `https://api.github.com` (`fetchOn(origin)` serves it behind a loopback
+ * rewrite).
  *
  * Fail closed: a request is recognised only when its raw path is exactly an emulated route shape
- * (every path parameter matches its raw pattern) under that route's method, and any
- * `Authorization` header is one recognisable bearer. Every other request is ledgered and answered
+ * (every path parameter matches its raw pattern in full) under that route's method, and any
+ * `Authorization` header is exactly `Bearer <token>`. Every other request is ledgered and answered
  * with constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no
  * body, a constant reason). The bearer value is never checked, stored, forwarded, or ledgered: it
- * is scrubbed from everything ledgered and every refusal, and a path, query, or body that repeats
- * it is refused.
+ * is scrubbed from everything ledgered and every refusal, and a path, query key or value, recorded
+ * header, or body that repeats it (raw, percent-decoded, or in any parsed JSON form) is refused
+ * with constant text. Refusals never echo a request's own query or body keys.
  *
  * Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
  * non-space characters that occurs nowhere else in the request (never checked, stored, or
- * ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the
- * order of query parameters; any non-empty issue title and comment body, and any issue body text;
- * any comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page`
- * from 1 to 100, with no `page` or a `page` from 2 to one past the last page; any issue search `q`
- * that starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer
- * than 256 characters (answered the recorded 422); any issue number the repository has not reached
+ * ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the order
+ * of query parameters; any non-empty issue title and comment body, and any issue body text; any
+ * comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1
+ * to 100, with no `page` or a `page` from 2 to one past the last page; any issue search `q` that
+ * starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than
+ * 256 characters (answered the recorded 422); any issue number the repository has not reached
  * (answered the recorded 404); and any issue, comment, repository label, or file the state holds
- * where a fixture has one, under the per-route state rules. `Accept` must be
- * `application/vnd.github+json` and `X-GitHub-Api-Version` `2026-03-10`. Everything else (other
- * keys and values, query parameters, another origin or repository, a repeated query key, an
- * explicit `page=1`, and a comment listing `per_page` other than 100) is not emulated.
+ * where a fixture has one, under the per-route state rules. `Authorization` must be exactly
+ * `Bearer <token>` (that spelling, one space), `Accept` `application/vnd.github+json`, and
+ * `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query parameters,
+ * empty query components such as a bare `?` or a stray `&`, another origin or repository, a
+ * repeated query key, an explicit `page=1`, and a comment listing `per_page` other than 100) is not
+ * emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeGithubEmulator` (importing this module has no side effects).
@@ -156,10 +160,10 @@ const inputInvalid = (input: StatefulInputKind, reason: string) =>
   new GithubEmulatorInputInvalid({ input, reason })
 
 /** The constant reason of a request on no emulated route shape. */
-export const githubUnrecognisedReason = 'no emulated GitHub route for this method and path'
+const githubUnrecognisedReason = 'no emulated GitHub route for this method and path'
 
 /** The constant reason of a request whose `Authorization` header is not one recognisable bearer. */
-export const githubUnrecognisedAuthorizationReason =
+const githubUnrecognisedAuthorizationReason =
   'an unrecognisable Authorization header is not emulated'
 
 /**
@@ -205,13 +209,14 @@ export const makeGithubEmulator = async (
       initial,
       buildSeed: buildSeedState,
       requestProblem: header => {
+        // The values every fixture sends.
         if (header('accept') !== githubEmulatorAccept) {
-          return `Accept other than ${githubEmulatorAccept} (what every fixture sends) is not emulated`
+          return `Accept other than ${githubEmulatorAccept} is not emulated`
         }
 
         return header('x-github-api-version') === githubEmulatorApiVersion
           ? undefined
-          : `X-GitHub-Api-Version other than ${githubEmulatorApiVersion} (what every fixture sends) is not emulated`
+          : `X-GitHub-Api-Version other than ${githubEmulatorApiVersion} is not emulated`
       },
       recordHeaders: [
         { name: 'accept', json: false },

@@ -36,9 +36,14 @@ export const githubRepoPattern = /^[A-Za-z0-9._-]{1,100}$/
 /** A label name in plain characters (the conformance seed pattern; never percent-encoded). */
 export const githubLabelNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/
 
+/**
+ * The source of a relative file path whose segments never start with a dot (the conformance seed
+ * pattern), unanchored, so the route's raw pattern can add its length bound explicitly.
+ */
+export const githubFilePathSource = '[A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*'
+
 /** A relative file path whose segments never start with a dot (the conformance seed pattern). */
-export const githubFilePathPattern =
-  /^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/
+export const githubFilePathPattern = new RegExp(`^${githubFilePathSource}$`)
 
 /** A GitHub timestamp as the fixtures write it: whole seconds, UTC. */
 export const githubTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
@@ -51,6 +56,11 @@ const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 export const githubMaxIssueNumber = 9_999_999_999
 
 const IssueNumber = PositiveInt.check(Schema.isLessThanOrEqualTo(githubMaxIssueNumber))
+
+/** The largest comment id the emulator addresses (fifteen digits, the delete route's pattern). */
+export const githubMaxCommentId = 999_999_999_999_999
+
+const CommentId = PositiveInt.check(Schema.isLessThanOrEqualTo(githubMaxCommentId))
 
 const LabelName = Schema.String.check(Schema.isPattern(githubLabelNamePattern))
 
@@ -125,7 +135,7 @@ export type GithubEmulatorIssue = typeof GithubEmulatorIssue.Type
 
 /** A comment created here on an issue. */
 export const GithubEmulatorComment = Schema.Struct({
-  id: PositiveInt,
+  id: CommentId,
   issueNumber: IssueNumber,
   body: Schema.String,
   user: GithubEmulatorUser,
@@ -147,10 +157,10 @@ export const GithubEmulatorFile = Schema.Struct({
 export type GithubEmulatorFile = typeof GithubEmulatorFile.Type
 
 const Counters = Schema.Struct({
-  /** The number the next created issue takes. */
-  nextIssueNumber: IssueNumber,
-  /** The id the next created comment takes. */
-  nextCommentId: PositiveInt
+  /** The number the next created issue takes (one past the maximum when exhausted). */
+  nextIssueNumber: PositiveInt.check(Schema.isLessThanOrEqualTo(githubMaxIssueNumber + 1)),
+  /** The id the next created comment takes (one past the maximum when exhausted). */
+  nextCommentId: PositiveInt.check(Schema.isLessThanOrEqualTo(githubMaxCommentId + 1))
 })
 
 /** The whole emulator state (JSON-compatible; what `snapshot()` returns). */
@@ -162,7 +172,7 @@ export const GithubEmulatorStateSchema = Schema.Struct({
   issues: Schema.Array(GithubEmulatorIssue),
   comments: Schema.Array(GithubEmulatorComment),
   /** Ids of comments deleted here (a second delete answers the recorded 404). */
-  deletedComments: Schema.Array(PositiveInt),
+  deletedComments: Schema.Array(CommentId),
   files: Schema.Array(GithubEmulatorFile),
   counters: Counters
 })
@@ -200,7 +210,7 @@ export const GithubEmulatorSeed = Schema.Struct({
   issues: Schema.optionalKey(Schema.Array(GithubEmulatorSeedIssue)),
   files: Schema.optionalKey(Schema.Array(GithubEmulatorFile)),
   nextIssueNumber: Schema.optionalKey(IssueNumber),
-  nextCommentId: Schema.optionalKey(PositiveInt)
+  nextCommentId: Schema.optionalKey(CommentId)
 })
 
 export type GithubEmulatorSeed = typeof GithubEmulatorSeed.Type
@@ -277,7 +287,9 @@ const workIssue: GithubEmulatorSeedIssue = {
 const notesFile: GithubEmulatorFile = {
   path: 'docs/synthetic-notes.txt',
   sha: '5f1c0ffee5f1c0ffee5f1c0ffee5f1c0ffee0001',
-  text: 'Synthetic conformance notes for the practice repository: café, naïve, façade.\nSecond synthetic line.\n'
+  text:
+    'Synthetic conformance notes for the practice repository: café, naïve, façade.\n' +
+    'Second synthetic line.\n'
 }
 
 type ProfileParts = {
@@ -319,7 +331,11 @@ const seedProblem = (parts: ProfileParts): string | undefined => {
     ['label id', duplicate(parts.labels.map(entry => entry.id))],
     ['issue number', duplicate(parts.issues.map(issue => issue.number))],
     ['issue id', duplicate(parts.issues.map(issue => issue.id))],
-    ['issue node id', duplicate(parts.issues.map(issue => issue.nodeId))],
+    // Node ids are global across types (labels and issues alike).
+    [
+      'node id',
+      duplicate([...parts.labels.map(entry => entry.nodeId), ...parts.issues.map(i => i.nodeId)])
+    ],
     ['file path', duplicate(parts.files.map(file => file.path))]
   ]
 
@@ -341,14 +357,26 @@ const seedProblem = (parts: ProfileParts): string | undefined => {
     }
 
     // Minted ids never collide with seeded ones.
-    const mintedNumber = /^I_kwSynthetic(\d+)$/.exec(issue.nodeId)?.[1]
-
-    if (
-      issue.id >= mintedIssueIdBase + parts.counters.nextIssueNumber ||
-      (mintedNumber !== undefined && Number(mintedNumber) >= parts.counters.nextIssueNumber)
-    ) {
+    if (issue.id >= mintedIssueIdBase + parts.counters.nextIssueNumber) {
       return `issue ${issue.number} uses an id in the minted form at or above nextIssueNumber`
     }
+  }
+
+  // Every minted node id form is reserved across all seeded node ids, of issues and labels alike.
+  const reserved = [...parts.labels.map(entry => entry.nodeId), ...parts.issues.map(i => i.nodeId)]
+    .map(nodeId => {
+      const issueNumber = /^I_kwSynthetic(\d+)$/.exec(nodeId)?.[1]
+      const commentId = /^IC_kwSynthetic(\d+)$/.exec(nodeId)?.[1]
+
+      return (issueNumber !== undefined && Number(issueNumber) >= parts.counters.nextIssueNumber) ||
+        (commentId !== undefined && Number(commentId) >= parts.counters.nextCommentId)
+        ? nodeId
+        : undefined
+    })
+    .find(nodeId => nodeId !== undefined)
+
+  if (reserved !== undefined) {
+    return `node id ${reserved} uses a minted form at or above its counter`
   }
 
   const prefix = parts.files.find(file =>

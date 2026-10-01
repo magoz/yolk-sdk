@@ -757,15 +757,16 @@ and the `/_emulate/*` control plane (`ledger`, `faults`, `reset`, `state`, `seed
 > the GitHub conformance cases use, built on the same `@emulators/core` runtime (loaded lazily when
 > you create an emulator).
 
-| Export                                        | Purpose                                                                                                                   |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `makeGithubEmulator(options?)`                | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`                                 |
-| `githubEmulatorRoutes`                        | Route evidence manifest (11 routes, all `unverified`; six are connector write routes)                                     |
-| `GithubEmulatorSeed`, `GithubEmulatorProfile` | Typed seed schema (`profile`, `viewer`, `repository`, `labels`, `issues`, `files`, counters); profiles `default`, `empty` |
-| `GithubFault`                                 | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }`                               |
-| `GithubEmulatorInputInvalid`                  | Invalid seed, fault, or option passed to the JS API                                                                       |
-| `githubEmulatorOrigin`                        | `https://api.github.com`                                                                                                  |
-| `githubEmulatorErrorBodies`                   | The fixtures' not-found, label, and validation error bodies, byte for byte                                                |
+| Export                                             | Purpose                                                                                                                   |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `makeGithubEmulator(options?)`                     | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`                                 |
+| `githubEmulatorRoutes`                             | Route evidence manifest (11 routes, all `unverified`; six are connector write routes)                                     |
+| `GithubEmulatorSeed`, `GithubEmulatorProfile`      | Typed seed schema (`profile`, `viewer`, `repository`, `labels`, `issues`, `files`, counters); profiles `default`, `empty` |
+| `GithubFault`                                      | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }`                               |
+| `GithubEmulatorInputInvalid`                       | Invalid seed, fault, or option passed to the JS API                                                                       |
+| `githubEmulatorOrigin`                             | `https://api.github.com`                                                                                                  |
+| `githubEmulatorErrorBodies`                        | The fixtures' not-found, label, and validation error bodies, byte for byte                                                |
+| `githubEmulatorAccept`, `githubEmulatorApiVersion` | `application/vnd.github+json` and `2026-03-10`, the header values every request needs                                     |
 
 ```ts
 import { makeGithubEmulator } from '@yolk-sdk/emulators/github'
@@ -784,49 +785,55 @@ none), `GET .../issues/{number}` (the recorded 404 for a number the repository h
 `GET /search/issues` (the recorded 422 for a repository-scoped query longer than 256 characters),
 `GET .../contents/{path}` (base64 folded every 60 characters), comment create, listing `since`
 (`per_page=100`), and delete (204, then the recorded 404), issue label add and remove (the recorded
-404 for a repository label not on the issue), and issue create, rename, and close as completed.
-Every route needs `Authorization: Bearer <token>` (at least 8 non-space characters; never stored or
-ledgered, and refused when the path, query, or body repeats it), `Accept:
-application/vnd.github+json`, and `X-GitHub-Api-Version: 2026-03-10`, and answers only on the
-recorded origin `https://api.github.com` (`githubEmulatorOrigin`): `fetch` reads the origin from the
-request URL; behind a loopback rewrite, serve `fetchOn(githubEmulatorOrigin)`.
+404 for a repository label not on the issue; removing an issue's last label is not emulated), and
+issue create, rename, and close as completed. Every route needs exactly
+`Authorization: Bearer <token>` (at least 8 non-space characters; never stored or ledgered, and
+refused when the path, a query key or value, a recorded header, or the body repeats it, in any
+form), `Accept: application/vnd.github+json` (`githubEmulatorAccept`), and
+`X-GitHub-Api-Version: 2026-03-10` (`githubEmulatorApiVersion`), and answers only on the recorded
+origin `https://api.github.com` (`githubEmulatorOrigin`): `fetch` reads the origin from the request
+URL; behind a loopback rewrite, serve `fetchOn(githubEmulatorOrigin)`.
 
-Every answer value comes from a fixture, or is a value the emulator mints: created issue numbers
-and comment ids from counters that only advance (the default seed starts at the fixtures' issue
-`42` and comment `9000000001`, and a seed's counters lie above its seeded numbers), the issue and
-comment ids derived from them in the fixtures' form, and timestamps from the injectable `now` clock.
-Issue numbers below the counter that the state does not hold are implied, never rendered. Label
-pages are page numbers, not cursors, and the label list never changes. A deleted comment's id and a
-closed issue stay in the state (GitHub keeps both), so a write case ends at the seed except those
-and the counters.
+Every answer value comes from a fixture, or is a value the emulator mints: created issue numbers and
+comment ids from counters that only advance (the default seed starts at the fixtures' issue `42` and
+comment `9000000001`, a seed's counters lie above its seeded numbers, no seeded node id may use a
+minted form at or above its counter, and a create past the last addressable number or id is
+refused), the issue and comment ids derived from them in the fixtures' form, and timestamps from the
+injectable `now` clock. Issue numbers below the counter that the state does not hold are implied,
+never rendered. Label pages are page numbers, not cursors, and the label list never changes within a
+seed (no route writes labels). A deleted comment's id and a closed issue stay in the state (GitHub
+keeps both), so a write case ends at the seed except those and the counters.
 
-It fails closed: only a request whose raw path is exactly an emulated route shape under that
-route's method, with no `Authorization` header or one recognisable bearer, is recognised. Every
-other request is ledgered and answered with constant text only (the path `/<unrecognised>`, a
-standard method or `<other>`, no query or body, a constant reason). It is **fixture-only**: anything
-else answers the ledgered 400 not-emulated before anything is written and before any fault is
-chosen, for example other routes, issue creates with labels or assignees, updates other than the
-two recorded ones (so the lifecycle case's failure-path restore, which closes as `not_planned`, is
-not emulated), adding a label the repository lacks (it would create it), a comment listing of more
-than one comment, rendering an issue that holds comments (every fixture answers `comments: 0`),
-and writes to closed or implied issues. That includes the open-issue listing of the read-only
-leftover lookup `findGithubConformanceLeftovers`, which no fixture records: the lookup fails
-(`github_validation`, HTTP 400), and the repository runner prints its lookup-failed WARN instead of
-leftover warnings.
+It fails closed: only a request whose raw path is exactly an emulated route shape under that route's
+method, with no `Authorization` header or exactly `Bearer <token>`, is recognised. Every other
+request is ledgered and answered with constant text only (the path `/<unrecognised>`, a standard
+method or `<other>`, no query or body, a constant reason). JSON-looking recorded headers and query
+keys are recorded parsed with credential-named keys redacted, or as `<redacted>` when they do not
+parse; refusals never echo a request's own query or body keys; empty query components are refused.
+It is **fixture-only**: anything else answers the ledgered 400 not-emulated before anything is
+written and before any fault is chosen, for example other routes, issue creates with labels or
+assignees, updates other than the two recorded ones (so the lifecycle case's failure-path restore,
+which closes as `not_planned`, is not emulated), adding a label the repository lacks (it would
+create it), a comment listing of more than one comment, rendering an issue that holds comments
+(every fixture answers `comments: 0`), and writes to closed or implied issues. That includes the
+open-issue listing of the read-only leftover lookup `findGithubConformanceLeftovers`, which no
+fixture records: the lookup fails (`github_validation`, HTTP 400), and the repository runner prints
+its lookup-failed WARN instead of leftover warnings.
 
 - Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
-  non-space characters that occurs nowhere else in the request (never checked, stored, or
-  ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the order
-  of query parameters; any non-empty issue title and comment body, and any issue body text; any
-  comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1
-  to 100, with no `page` or a `page` from 2 to one past the last page; any issue search `q` that
-  starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256
-  characters (answered the recorded 422); any issue number the repository has not reached (answered
-  the recorded 404); and any issue, comment, repository label, or file the state holds where a
-  fixture has one, under the per-route state rules. `Accept` must be `application/vnd.github+json`
-  and `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query
-  parameters, another origin or repository, a repeated query key, an explicit `page=1`, and a
-  comment listing `per_page` other than 100) is not emulated.
+  non-space characters that occurs nowhere else in the request (never checked, stored, or ledgered);
+  extra request headers; JSON key order; `content-type` media-type parameters; the order of query
+  parameters; any non-empty issue title and comment body, and any issue body text; any comment
+  listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to 100,
+  with no `page` or a `page` from 2 to one past the last page; any issue search `q` that starts with
+  the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256 characters
+  (answered the recorded 422); any issue number the repository has not reached (answered the
+  recorded 404); and any issue, comment, repository label, or file the state holds where a fixture
+  has one, under the per-route state rules. `Authorization` must be exactly `Bearer <token>` (that
+  spelling, one space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version`
+  `2026-03-10`. Everything else (other keys and values, query parameters, empty query components
+  such as a bare `?` or a stray `&`, another origin or repository, a repeated query key, an explicit
+  `page=1`, and a comment listing `per_page` other than 100) is not emulated.
 
 Faults, the ledger (which records the `Accept` and `X-GitHub-Api-Version` headers), clock-free
 recovery, and the control plane behave as in the Dropbox emulator; a 429 fault reaches the
@@ -855,9 +862,10 @@ carry no header, so it records the evidence on each ledger entry instead. The Ga
 verified (`observedAt: '2026-09-30'`): the emulator follows the verified live Gateway recordings,
 and the Yolk repository checks its response shapes against each recording. The OpenAI, Anthropic,
 Codex, Grok, OpenCode Go, subscription-usage, email, Fortnox, Microsoft, Dropbox, Notion, Todoist,
-Telegram, and GitHub routes are unverified, like the synthetic fixtures they follow. The email
-write routes are connector writes: until an owner-approved live run against a practice mailbox, through a host
-`EmailClient` implementation, verifies them, the repository lists them in a time-bounded allowlist
+Telegram, and GitHub routes are unverified, like the synthetic fixtures they follow. The email write
+routes are connector writes: until an owner-approved live run against a practice mailbox, through a
+host `EmailClient` implementation, verifies them, the repository lists them in a time-bounded
+allowlist
 (`scripts/emulator-evidence-pending.json`), and the evidence check reports them as PENDING warnings
 until each entry's expiry date and fails again after it. The four Fortnox write routes, the eleven
 Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five Todoist

@@ -210,7 +210,8 @@ const expectEndsAtSeed = (
     stateReason: 'completed',
     createdHere: true,
     title:
-      'yolk-conformance run-synthetic lifecycle renamed: synthetic conformance issue, safe to ignore'
+      'yolk-conformance run-synthetic lifecycle renamed: ' +
+      'synthetic conformance issue, safe to ignore'
   })
 }
 
