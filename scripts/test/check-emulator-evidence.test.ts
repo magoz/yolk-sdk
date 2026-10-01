@@ -780,7 +780,21 @@ describe('repo emulator manifests', () => {
     for (const entry of r2Entries) {
       // At most 60 days from 2026-09-30.
       expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
-      expect(entry.reason).toContain('owner-approved live run against a practice bucket')
+      expect(entry.reason).toContain(
+        'owner-approved live run of r2.objects.create-if-absent and r2.objects.update-if-match'
+      )
+      expect(entry.reason).toContain('against a practice bucket')
+
+      // The named ids are exactly the R2 write cases the route cites.
+      const writeCaseIds = r2EmulatorRoutes.find(route => route.write)?.caseIds ?? []
+
+      expect(writeCaseIds).toEqual(['r2.objects.create-if-absent', 'r2.objects.update-if-match'])
+
+      for (const caseId of writeCaseIds) {
+        expect(entry.reason, caseId).toContain(caseId)
+        expect(knownConformanceCaseIds.has(caseId), caseId).toBe(true)
+      }
+
       expect(entry.reason).toContain('tracking #115')
     }
   })

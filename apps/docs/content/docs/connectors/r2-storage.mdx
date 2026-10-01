@@ -146,9 +146,9 @@ const r2Layer = r2PortsLayerFromBackend(replay.backend)
 
 The fixture-driven fake in [`@yolk-sdk/emulators/r2`](../api-reference/emulators#r2-emulator) is
 itself a backend: pass it directly (`r2PortsLayerFromBackend(makeR2Emulator())`). It keeps a bucket
-that decides which fixture answers, so all six cases also run in sequence on one emulator. Neither
-is a production adapter. Live verification needs a host implementation of `R2Presigner`
-and `R2ObjectClient` connected to a practice bucket: the connectors package ships no SigV4 signer
-or S3 client, and the shared connector runner records HTTP wire fixtures, not port fixtures, so no
-live R2 runner ships in the repository. See
+that decides which fixture answers, so all six cases also run in sequence on one emulator. None of
+these (the bridge, the replay backend, or the emulator) is a production adapter. Live verification
+needs a host implementation of `R2Presigner` and `R2ObjectClient` connected to a practice bucket:
+the connectors package ships no SigV4 signer or S3 client, and the shared connector runner records
+HTTP wire fixtures, not port fixtures, so no live R2 runner ships in the repository. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the fixture type.

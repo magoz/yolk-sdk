@@ -1519,9 +1519,8 @@ credential placeholders: run both `scanPortFixtureForSecrets` and `findR2PortFix
 case, raw or percent-, JSON-, `\x`-, or HTML-escape-decoded up to the stated depth);
 `scrubR2PortFixture` rewrites live ones except escaped URLs, so rerun both scans after it. The
 fixture-driven fake in `@yolk-sdk/emulators/r2` plugs into `r2PortsLayerFromBackend` the same way
-(connectors never depend on emulators). Live verification needs a host implementation of both
-ports; no live R2 runner ships. The case table
-lives in the
+(connectors never depend on emulators). Live verification needs a host implementation of both ports;
+no live R2 runner ships. The case table lives in the
 [R2 conformance guide](../../apps/docs/content/docs/connectors/r2-storage.mdx#conformance-cases).
 
 ## Host-only file capabilities

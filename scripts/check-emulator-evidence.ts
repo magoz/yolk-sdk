@@ -20,8 +20,7 @@
  *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, email
  *   port, and R2 port fixtures).
  * - WARN: a route's evidence is `unverified` (fetch-handler emulators tag their responses
- *   `x-emulator-evidence: unverified`; the email and R2 port emulators tag
- *   their ledger entries).
+ *   `x-emulator-evidence: unverified`; the email and R2 port emulators tag their ledger entries).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
  *   the future, or missing on verified evidence.
  * - WARN: any other route cites no case ids.

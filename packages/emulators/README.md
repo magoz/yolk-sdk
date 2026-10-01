@@ -564,17 +564,22 @@ fails them without writing, as a reused run id does against a live bucket.
 Credentials never reach the ledger or any other output. Every credential field (`credential(s)`,
 `accessKeyId`, `secretAccessKey`, `sessionToken`, `token`, and the other names the shared port scan
 classifies as credentials) is dropped at any depth before anything is compared or recorded. Every
-`bodyBase64` (put bytes) must be canonical standard base64 of UTF-8 text, or the request is refused
-(`uncheckable-body`) with a constant ledger entry whose request is `<redacted>`; the decoded text is
-checked like the rest of the request, and the ledger records the body only as `<redacted>` plus its
-decoded length (`bodyBytes`). A request that still carries a credential is refused
-(`credential-in-request`) with the same constant entry: any string key, string value, number, or
-decoded body that repeats a dropped credential value, or that holds, outside the exact canonical
-synthetic placeholders, `X-Amz-Credential`, `X-Amz-Signature`, `X-Amz-Security-Token`, a credential
-query parameter, or a token the shared scan flags (a bearer token, a common API-key prefix, a JSON
-Web Token, a PEM private key). Each text is checked raw, within three rounds of percent-decoding and
-three of escape-decoding (the rules of the R2 conformance guard), and through any depth of
-percent-encoding and JSON escaping, failing closed past a work cap. A presign answer is the
+refusal is ledgered with constant text only (request `<redacted>`), uses no fault, and changes no
+state; only a request equal to a fixture request is recorded, with every `bodyBase64` as
+`<redacted>` plus its decoded length (`bodyBytes`). Every `bodyBase64` (put bytes) must be canonical
+standard base64 of UTF-8 text (else `uncheckable-body`), and its decoded text is checked like the
+rest of the request. A request is refused as `credential-in-request` when any key, string value,
+number (as printed or as its digit string), or decoded body repeats a value found under a credential
+field (any non-empty key, string, or number, with no minimum length), or holds, outside the exact
+canonical synthetic placeholders, `X-Amz-Credential`, `X-Amz-Signature`, `X-Amz-Security-Token`, a
+credential query parameter, or a token the shared scan flags (a bearer token, a common API-key
+prefix, a JSON Web Token, a PEM private key). Each text is checked raw, within three rounds of
+percent-decoding and three of escape-decoding (`\uXXXX`, `\xXX`, and numeric HTML references, as the
+R2 conformance guard decodes), and through any depth of percent-encoding and JSON escaping, failing
+closed past a work cap. A request with an own `__proto__` key at any depth is refused as
+`invalid-request`, and one the checks cannot walk (cyclic, or nested too deeply) as
+`uncheckable-request`: `call` never throws. The copied key, parameter, and token lists have one test
+sample each, counted against the list and checked against the shared scan. A presign answer is the
 fixture's URL, which carries only those placeholders.
 
 - Request-shape latitude: credential fields are never compared or recorded, and JSON key order is
@@ -582,21 +587,25 @@ fixture's URL, which carries only those placeholders.
   `expectedEtag`, the put `condition`, `bodyBase64`, and `maxUploadBytes`) must equal a fixture
   request exactly, so only the fixtures' `run-synthetic` run id is emulated. A `bodyBase64` must be
   canonical standard base64 of UTF-8 text (else `uncheckable-body`); it is compared as sent but
-  recorded only as its decoded length. No key or value, the decoded body included, may carry a
-  credential (else `credential-in-request`).
+  recorded only as its decoded length. No object may have an own `__proto__` key (else
+  `invalid-request`), and no key or value, the decoded body included, may carry a credential or
+  repeat a dropped credential value of any length (else `credential-in-request`). Every refusal is
+  ledgered with constant text only (request `<redacted>`).
 
-Anything else fails closed with a ledgered `notEmulated` answer (the port analogue of HTTP 400): a
-port and method outside the manifest (`unknown-method`; ledgered as `<unrecognised>` with a
-`<redacted>` request), a request that is not an object (`invalid-request`; request `<redacted>`), a
-body that cannot be checked (`uncheckable-body`), a credential outside the credential fields
-(`credential-in-request`), no matching fixture (`no-matching-fixture`), or no matching fixture
-consistent with the bucket (`state-conflict`). None uses a fault or changes the bucket. Faults
-(`kind: 'failure'`, a `port` and `method`, an optional deep-subset `match` on the request, an
-optional `count`, and the `failure` to answer) apply only to a call a fixture would answer and
-change no state. `ledger` records every call (credential-free request, outcome, fixture or fault id,
-reason), `state()` returns the current bucket, `reset()` restores the seed and clears the ledger,
-faults, and fixture use, and `coverage()` reports calls per route, refusals, and unused fixtures. An
-invalid seed or fault throws `R2EmulatorInputInvalid`.
+Anything else fails closed with a ledgered `notEmulated` answer (the port analogue of HTTP 400),
+with constant text only: a port and method outside the manifest (`unknown-method`; ledgered as
+`<unrecognised>`), a request that is not an object or has an own `__proto__` key
+(`invalid-request`), a body that cannot be checked (`uncheckable-body`), a credential outside the
+credential fields (`credential-in-request`), a request the checks cannot walk
+(`uncheckable-request`; ledgered as `<unrecognised>`), no matching fixture (`no-matching-fixture`),
+or no matching fixture consistent with the bucket (`state-conflict`). None uses a fault or changes
+the bucket. Faults (`kind: 'failure'`, a `port` and `method`, an optional deep-subset `match` on the
+request, an optional `count`, and the `failure` to answer) apply only to a call a fixture would
+answer and change no state. `ledger` records every call (the fixture request of an answered or
+faulted call, `<redacted>` for a refusal; outcome, fixture or fault id, reason), `state()` returns
+the current bucket, `reset()` restores the seed and clears the ledger, faults, and fixture use, and
+`coverage()` reports calls per route, refusals, and unused fixtures. An invalid seed or fault throws
+`R2EmulatorInputInvalid`.
 
 `r2EmulatorRoutes` names each emulated method as `PORT <Port>.<method>` with the R2 cases it
 follows: `R2Presigner.presignPutObject`, `R2ObjectClient.get`, and `R2ObjectClient.put` (the only

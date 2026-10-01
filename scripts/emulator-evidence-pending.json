@@ -61,7 +61,7 @@
       "manifest": "r2",
       "method": "PORT",
       "path": "R2ObjectClient.put",
-      "reason": "R2 emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice bucket through a host R2ObjectClient implementation (tracking #115).",
+      "reason": "R2 emulator follows synthetic port fixtures; awaiting the owner-approved live run of r2.objects.create-if-absent and r2.objects.update-if-match against a practice bucket through a host R2ObjectClient implementation (tracking #115).",
       "expires": "2026-11-29"
     },
     {

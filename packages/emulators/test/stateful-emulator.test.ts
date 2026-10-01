@@ -703,6 +703,12 @@ describe('fail-closed credential guard', () => {
     expect(textClosureOutcome('no token here %41 \\u0041', matches)).toBe('clear')
     expect(textClosureOutcome('%' + '25'.repeat(100) + '41', () => false)).toBe('capped')
 
+    // The GitHub and Google semantics are unchanged: secrets under four characters are not
+    // guarded by the shared helpers (the R2 port emulator guards those at its own call site).
+    expect(textRepeatsSecret('fixtures/object.txt', ['txt'])).toBe(false)
+    expect(secretClosureOutcome('fixtures/object.txt', ['txt'])).toBe('clear')
+    expect(textRepeatsSecret('fixtures/object.text', ['text'])).toBe(true)
+
     // The secret closure is exactly the text closure with a substring predicate.
     for (const depth of [0, 3, 64, 65]) {
       const viaText = textClosureOutcome(encoded(depth), text => text.includes(secret))

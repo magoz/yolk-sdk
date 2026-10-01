@@ -17,32 +17,43 @@
  * happened (an object created or replaced under the etag the fixture names). It never invents an
  * etag, a byte, a failure, or a response. Presigning writes nothing.
  *
- * Credentials: every credential field (the keys the shared port scan classifies as credentials,
- * such as `credential(s)`, `accessKeyId`, `secretAccessKey`, `sessionToken`) is dropped at any
- * depth before anything is compared or recorded. Every `bodyBase64` (put bytes) must be canonical
- * standard base64 of UTF-8 text, or the request is refused as `uncheckable-body`; its decoded text
- * is checked with the request's own texts, and the ledger records it only as `<redacted>` plus the
- * decoded byte length (`bodyBytes`). A request that still carries a credential is refused as
- * `credential-in-request`: any string key, string value, number, or decoded body that repeats a
- * dropped credential value (the fail-closed closure `textRepeatsSecret` of `stateful-secrets.ts`),
- * or that holds, once the exact canonical synthetic placeholders are blanked out, a SigV4
- * credential name (`X-Amz-Credential`, `X-Amz-Signature`, `X-Amz-Security-Token`), a credential
- * query parameter, or a token the shared scan flags (a bearer token, a common API-key prefix, a
- * JSON Web Token, a PEM private key): raw, within three percent and three escape rounds (the rules
- * of the R2 conformance guard `findR2PortFixtureSecrets`), or anywhere in the fail-closed closure
- * `textClosureOutcome` (a work cap refuses). These refusals, and requests that are not an emulated
- * route (`unknown-method`) or not a JSON object (`invalid-request`), are ledgered with constant
- * text only (request `<redacted>`), use no fault, and change no state.
+ * Credentials: every credential field (the shared port scan's `isPortCredentialKey` names, copied
+ * in `r2-guard.ts`) is dropped at any depth before anything is compared or recorded. Every refusal
+ * (`unknown-method`, `invalid-request`, `uncheckable-body`, `credential-in-request`,
+ * `uncheckable-request`, `no-matching-fixture`, `state-conflict`) is ledgered with constant text
+ * only (request `<redacted>`; port and method `<unrecognised>` for `unknown-method` and
+ * `uncheckable-request`), uses no fault, and changes no state. Only a request equal to a fixture
+ * request (minus credential fields) is recorded, so the ledger holds fixture text, with every
+ * `bodyBase64` as `<redacted>` plus `bodyBytes` (the decoded length). An own `__proto__` key at any
+ * depth is `invalid-request`. Every `bodyBase64` must be canonical standard base64 of UTF-8 text
+ * (else `uncheckable-body`); its decoded text is checked with the request's own texts. A request is
+ * `credential-in-request` when any key, string value, number (as printed and, for an integer, as
+ * its digit string), or decoded body repeats a guarded value, or holds, once the exact canonical
+ * placeholders are blanked out, a SigV4 credential name, a credential query parameter, or a token
+ * the shared scan flags (a bearer token, an API-key prefix, a JSON Web Token, a PEM private key).
+ * Guarded values are every non-empty key, string, and number under a credential field (a numeric
+ * string also in its number forms), with no minimum length, unlike the shared helpers. Both checks
+ * run raw, in R2's own decodings (`decodedVariants`: up to three percent and three escape rounds,
+ * with `\uXXXX`, `\xXX`, and numeric HTML references), and through the shared fail-closed closure
+ * (`textClosureOutcome` of `stateful-secrets.ts`, imported, never copied; a cap refuses). A request
+ * the checks cannot walk (cyclic, or nested too deeply) is `uncheckable-request`: `call` never
+ * throws. The copied credential key, parameter, and token lists live in `r2-guard.ts`;
+ * `test/r2.test.ts` holds one sample per entry of each, asserts each sample count equals its list's
+ * length, and checks every sample against the shared scan (`isPortCredentialKey`,
+ * `scanPortFixtureForSecrets`) and the emulator, so an entry added here without a sample fails. A
+ * name or pattern the shared scan adds later is not enforced until it is copied here with a sample.
  *
- * Request-shape latitude (the only one): credential fields are never compared or recorded, and
- * JSON key order is not compared. Everything else (the endpoint, bucket, key, content type,
- * `maxBytes`, `expectedEtag`, the put `condition`, `bodyBase64`, and `maxUploadBytes`) must equal
- * a fixture request exactly, so only the fixtures' `run-synthetic` run id is emulated. A
- * `bodyBase64` must be canonical standard base64 of UTF-8 text (else `uncheckable-body`); it is
- * compared as sent but recorded only as its decoded length. No key or value, the decoded body
- * included, may carry a credential (else `credential-in-request`). Anything that does not match
- * (an unknown port or method, no matching fixture, or no fixture consistent with the bucket) fails
- * closed with a ledgered `notEmulated` answer, the port analogue of HTTP 400.
+ * Request-shape latitude (the only one): credential fields are never compared or recorded, and JSON
+ * key order is not compared. Everything else (the endpoint, bucket, key, content type, `maxBytes`,
+ * `expectedEtag`, the put `condition`, `bodyBase64`, and `maxUploadBytes`) must equal a fixture
+ * request exactly, so only the fixtures' `run-synthetic` run id is emulated. A `bodyBase64` must be
+ * canonical standard base64 of UTF-8 text (else `uncheckable-body`); it is compared as sent but
+ * recorded only as its decoded length. No object may have an own `__proto__` key (else
+ * `invalid-request`), and no key or value, the decoded body included, may carry a credential or
+ * repeat a dropped credential value of any length (else `credential-in-request`). Every refusal is
+ * ledgered with constant text only (request `<redacted>`). Anything that does not match (an unknown
+ * port or method, no matching fixture, or no fixture consistent with the bucket) fails closed with
+ * a ledgered `notEmulated` answer, the port analogue of HTTP 400.
  *
  * @experimental
  */
@@ -59,7 +70,13 @@ import {
   type EmulatorEvidence,
   type EmulatorRouteEvidence
 } from './route-evidence.ts'
-import { textClosureOutcome, textRepeatsSecret } from './stateful-secrets.ts'
+import {
+  guardedValues,
+  hasOwnProtoKey,
+  textCarriesCredential,
+  textsOf,
+  withoutCredentials
+} from './r2-guard.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
@@ -234,6 +251,7 @@ export type R2EmulatorNotEmulatedReason =
   | 'invalid-request'
   | 'uncheckable-body'
   | 'credential-in-request'
+  | 'uncheckable-request'
   | 'no-matching-fixture'
   | 'state-conflict'
 
@@ -243,6 +261,7 @@ const notEmulatedText: Record<R2EmulatorNotEmulatedReason, string> = {
   'uncheckable-body': 'uncheckable-body: a bodyBase64 is not canonical base64 of UTF-8 text',
   'credential-in-request':
     'credential-in-request: the request carries a credential outside its credential fields',
+  'uncheckable-request': 'uncheckable-request: the request could not be checked',
   'no-matching-fixture': 'no-matching-fixture: no fixture matches this request',
   'state-conflict': 'state-conflict: no matching fixture is consistent with the emulated bucket'
 }
@@ -260,14 +279,13 @@ export type R2EmulatorReply =
 
 export type R2EmulatorLedgerEntry = {
   readonly seq: number
-  /** The port, or `<unrecognised>` for a call outside the manifest. */
+  /** The port, or `<unrecognised>` for an `unknown-method` or `uncheckable-request` refusal. */
   readonly port: string
-  /** The method, or `<unrecognised>` for a call outside the manifest. */
+  /** The method, or `<unrecognised>` for an `unknown-method` or `uncheckable-request` refusal. */
   readonly method: string
   /**
-   * The request as received without credential fields and with every `bodyBase64` value replaced
-   * by `<redacted>`, or `<redacted>` whole for a call refused as `unknown-method`,
-   * `invalid-request`, `uncheckable-body`, or `credential-in-request`.
+   * For an answered or faulted call, the request without credential fields (a fixture request) with
+   * every `bodyBase64` value replaced by `<redacted>`; `<redacted>` whole for every refusal.
    */
   readonly request: Schema.Json
   /** The decoded byte length of a recorded request's top-level `bodyBase64`. */
@@ -344,210 +362,6 @@ const numberField = (value: Schema.Json | undefined, key: string): number | unde
   return Predicate.isNumber(field) ? field : undefined
 }
 
-// Credential guard.
-
-// The credential field names of the shared port scan (`isPortCredentialKey` in
-// `@yolk-sdk/conformance`): `credential(s)` plus the credential field names, AWS-style
-// `accessKeyId` / `secretAccessKey` / `sessionToken` included. `test/r2.test.ts` keeps them in
-// step.
-const credentialKeyPattern =
-  /^(?:credentials?|(?:access|refresh|id|auth|api|session|private|bearer|oauth)[_-]?token|token|client[_-]?secret|secret(?:[_-]?key)?|private[_-]?key|password|passwd|api[_-]?key|access[_-]?key[_-]?id|secret[_-]?access[_-]?key|authorization)$/i
-
-/** Every string and number under a credential field, at any depth (the values to guard). */
-const credentialValues = (value: Schema.Json): ReadonlyArray<string> => {
-  if (Predicate.isString(value)) return [value]
-
-  if (Predicate.isNumber(value)) return [String(value)]
-
-  if (Array.isArray(value)) return value.flatMap(credentialValues)
-
-  return isJsonObject(value) ? Object.values(value).flatMap(credentialValues) : []
-}
-
-/** The values of every credential field of `value`, at any depth. */
-const guardedValues = (value: Schema.Json): ReadonlyArray<string> => {
-  if (Array.isArray(value)) return value.flatMap(guardedValues)
-
-  if (!isJsonObject(value)) return []
-
-  return Object.entries(value).flatMap(([key, item]) =>
-    credentialKeyPattern.test(key) ? credentialValues(item) : guardedValues(item)
-  )
-}
-
-/** A copy without credential fields, at any depth (`redactPortPayload` of the shared scan). */
-const withoutCredentials = (value: Schema.Json): Schema.Json => {
-  if (Array.isArray(value)) return value.map(withoutCredentials)
-
-  if (!isJsonObject(value)) return value
-
-  const copy: Record<string, Schema.Json> = {}
-
-  for (const [key, item] of Object.entries(value)) {
-    if (!credentialKeyPattern.test(key)) {
-      copy[key] = withoutCredentials(item)
-    }
-  }
-
-  return copy
-}
-
-/** Every object key, string value, and number (as JavaScript prints it) of `value`. */
-const textsOf = (value: Schema.Json): ReadonlyArray<string> => {
-  if (Predicate.isString(value)) return [value]
-
-  if (Predicate.isNumber(value)) return [String(value)]
-
-  if (Array.isArray(value)) return value.flatMap(textsOf)
-
-  return isJsonObject(value)
-    ? Object.entries(value).flatMap(([key, item]) => [key, ...textsOf(item)])
-    : []
-}
-
-// The SigV4 rules of the R2 conformance guard (`findR2PortFixtureSecrets` in
-// `@yolk-sdk/connectors/r2-storage/conformance`), copied: the exact canonical placeholder
-// occurrences are blanked out, then any credential name left in any decoding layer is refused.
-
-/** The canonical placeholders (`syntheticPortCredentialParams`), as the fixtures write them. */
-const canonicalPlaceholders = new Map<string, string>([
-  ['x-amz-signature', 'yolk-synthetic-signature'],
-  [
-    'x-amz-credential',
-    encodeURIComponent('yolk-synthetic-access-key-id/20260930/auto/s3/aws4_request')
-  ]
-])
-
-const canonicalNamesAt = /(^|[?&])(x-amz-signature|x-amz-credential)=/gi
-
-const canonicalValueEnd = /^(?:[&#\s"<>]|$)/
-
-const withoutCanonicalPlaceholders = (text: string): string => {
-  let masked = text
-
-  for (const match of text.matchAll(canonicalNamesAt)) {
-    const nameStart = match.index + (match[1] ?? '').length
-    const valueStart = match.index + match[0].length
-    const placeholder = canonicalPlaceholders.get((match[2] ?? '').toLowerCase()) ?? ''
-    const valueEnd = valueStart + placeholder.length
-
-    if (
-      placeholder.length > 0 &&
-      text.startsWith(placeholder, valueStart) &&
-      canonicalValueEnd.test(text.slice(valueEnd))
-    ) {
-      const blank = ' '.repeat(valueEnd - nameStart)
-
-      masked = `${masked.slice(0, nameStart)}${blank}${masked.slice(valueEnd)}`
-    }
-  }
-
-  return masked
-}
-
-const percentDecodedOnce = (text: string): string =>
-  text.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
-    String.fromCharCode(Number.parseInt(hex, 16))
-  )
-
-const codePoint = (value: number): string => String.fromCodePoint(Math.min(value, 0x10ffff))
-
-const escapesDecodedOnce = (text: string): string =>
-  text.replace(
-    /\\u([0-9A-Fa-f]{4})|\\x([0-9A-Fa-f]{2})|\\\\|&#[xX]([0-9A-Fa-f]{1,6});?|&#([0-9]{1,7});?/g,
-    (match, unicode?: string, hex?: string, entityHex?: string, entity?: string) => {
-      const hexDigits = unicode ?? hex ?? entityHex
-
-      if (hexDigits !== undefined) return codePoint(Number.parseInt(hexDigits, 16))
-
-      if (entity !== undefined) return codePoint(Number.parseInt(entity, 10))
-
-      return match === '\\\\' ? '\\' : match
-    }
-  )
-
-const maxRoundsPerDecoding = 3
-
-/** `text` and every variant within three percent rounds and three escape rounds, in any order. */
-const decodedVariants = (text: string): ReadonlyArray<string> => {
-  const seen = new Set<string>([text])
-
-  let frontier: ReadonlyArray<{ text: string; percent: number; escapes: number }> = [
-    { text, percent: 0, escapes: 0 }
-  ]
-
-  while (frontier.length > 0) {
-    frontier = frontier.flatMap(variant =>
-      [
-        ...(variant.percent < maxRoundsPerDecoding
-          ? [{ ...variant, text: percentDecodedOnce(variant.text), percent: variant.percent + 1 }]
-          : []),
-        ...(variant.escapes < maxRoundsPerDecoding
-          ? [{ ...variant, text: escapesDecodedOnce(variant.text), escapes: variant.escapes + 1 }]
-          : [])
-      ].filter(candidate => {
-        if (seen.has(candidate.text)) return false
-
-        seen.add(candidate.text)
-
-        return true
-      })
-    )
-  }
-
-  return [...seen]
-}
-
-const sigV4CredentialNames = /x-amz-credential|x-amz-signature|x-amz-security-token/i
-
-// A credential query or form parameter of the shared port scan (`hasLiveCredentialParam`): a name
-// at the start or after `?` / `&`, `=`, and a value (any character but `&` or `#`).
-const credentialParamAt =
-  /(?:^|[?&])(?:api[_-]?key|key|token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth|secret|password|client[_-]?secret|x-amz-signature|x-amz-credential|x-amz-security-token)=[^&#]/i
-
-// The shared scan's token patterns (`bearerPattern` and `apiKeyPatterns` of
-// `@yolk-sdk/conformance`), copied: a bearer token, common API-key prefixes, JSON Web Tokens, and
-// PEM private keys. `test/r2.test.ts` keeps them in step with `scanPortFixtureForSecrets`.
-const tokenPatterns: ReadonlyArray<RegExp> = [
-  /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/i,
-  /\bsk-[A-Za-z0-9_-]{16,}/,
-  /\b[sr]k_(live|test)_[A-Za-z0-9]{16,}/,
-  /\bxai-[A-Za-z0-9]{20,}/,
-  /\bvck_[A-Za-z0-9]{16,}/,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/,
-  /\bAKIA[0-9A-Z]{16}\b/,
-  /\bAIza[0-9A-Za-z_-]{35}/,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/
-]
-
-/** True when `text` holds a SigV4 credential name, a credential parameter, or a token. */
-const credentialText = (text: string): boolean =>
-  sigV4CredentialNames.test(text) ||
-  credentialParamAt.test(text) ||
-  tokenPatterns.some(pattern => pattern.test(text))
-
-/**
- * True when `text`, once its exact canonical placeholder occurrences are blanked out, holds a
- * credential (`credentialText`) raw, in any variant within three percent and three escape rounds
- * (the R2 guard's decodings), or anywhere in the fail-closed closure of `textClosureOutcome`
- * (any depth of percent-encoding and JSON escaping; a work cap counts as a credential).
- */
-const carriesCredential = (text: string): boolean => {
-  const masked = withoutCanonicalPlaceholders(text)
-
-  return (
-    decodedVariants(masked).some(credentialText) ||
-    textClosureOutcome(masked, credentialText) !== 'clear'
-  )
-}
-
-/** True when `text` repeats a guarded value or carries a credential. */
-const textCarriesCredential = (text: string, secrets: ReadonlyArray<string>): boolean =>
-  carriesCredential(text) || textRepeatsSecret(text, secrets)
-
 /** The field that carries put bytes as base64; checked and recorded only as decoded text. */
 const bodyField = 'bodyBase64'
 
@@ -606,7 +420,9 @@ const containsSubset = (value: Schema.Json | undefined, pattern: Schema.Json): b
   if (isJsonObject(pattern)) {
     return (
       isJsonObject(value) &&
-      Object.entries(pattern).every(([key, item]) => containsSubset(value[key], item))
+      Object.entries(pattern).every(
+        ([key, item]) => Object.hasOwn(value, key) && containsSubset(value[key], item)
+      )
     )
   }
 
@@ -816,14 +632,16 @@ const seedProblem = (seed: R2EmulatorSeed): string | undefined => {
 /**
  * Create an R2 emulator. Each call has its own buckets, ledger, faults, and fixture use.
  *
- * `call(port, method, request)` answers in this order: a port and method outside the manifest, a
- * non-object request, or a request that carries a credential outside its credential fields fails
- * closed with a constant ledger entry; otherwise the fixtures whose port, method, and
- * credential-free request match are checked against the buckets, and the first consistent one
- * (preferring one not used since the last reset) is chosen; no match (`no-matching-fixture`) or no
- * consistent match (`state-conflict`) fails closed. Only then does the first active matching fault
- * answer its failure (changing nothing); otherwise the chosen fixture answers and updates the
- * buckets. Every call is written to the ledger without credential fields.
+ * `call(port, method, request)` answers in this order: a port and method outside the manifest
+ * (`unknown-method`), a non-object request or one with an own `__proto__` key (`invalid-request`),
+ * a `bodyBase64` that is not canonical base64 of UTF-8 text (`uncheckable-body`), or a credential
+ * outside the credential fields (`credential-in-request`) fails closed; otherwise the fixtures
+ * whose port, method, and credential-free request match are checked against the buckets, and the
+ * first consistent one (preferring one not used since the last reset) is chosen; no match
+ * (`no-matching-fixture`) or no consistent match (`state-conflict`) fails closed. Only then does
+ * the first active matching fault answer its failure (changing nothing); otherwise the chosen
+ * fixture answers and updates the buckets. Every refusal is ledgered with constant text only; a
+ * request the checks cannot walk is refused as `uncheckable-request`, so `call` never throws.
  *
  * Throws `R2EmulatorInputInvalid` for an invalid seed.
  */
@@ -876,7 +694,7 @@ export const makeR2Emulator = (options: R2EmulatorOptions = {}): R2Emulator => {
     return { notEmulated: { reason: notEmulatedText[reason] } }
   }
 
-  const call = (port: string, method: string, rawRequest: Schema.Json): R2EmulatorReply => {
+  const answer = (port: string, method: string, rawRequest: Schema.Json): R2EmulatorReply => {
     const target = bound.get(routePath(port, method))
 
     if (target === undefined) {
@@ -894,17 +712,16 @@ export const makeR2Emulator = (options: R2EmulatorOptions = {}): R2Emulator => {
     }
 
     const evidence = target.route.evidence
+
+    // Every refusal below records constant text only: no request text reaches the ledger unless
+    // the request equals a fixture request (minus credential fields).
     const constant = { port, method, request: r2EmulatorRedacted, evidence }
 
-    if (!isJsonObject(rawRequest)) {
+    if (!isJsonObject(rawRequest) || hasOwnProtoKey(rawRequest)) {
       return refuse(constant, 'invalid-request')
     }
 
     const request = withoutCredentials(rawRequest)
-
-    if (!isJsonObject(request)) {
-      return refuse(constant, 'invalid-request')
-    }
 
     // Bytes are checked as the text they decode to; anything else cannot be checked.
     const bodies = bodyValues(request).map(bodyText)
@@ -914,44 +731,42 @@ export const makeR2Emulator = (options: R2EmulatorOptions = {}): R2Emulator => {
       return refuse(constant, 'uncheckable-body')
     }
 
-    const secrets = guardedValues(rawRequest)
+    const guarded = guardedValues(rawRequest)
 
     if (
-      [...textsOf(request), ...decodedBodies].some(text => textCarriesCredential(text, secrets))
+      [...textsOf(request), ...decodedBodies].some(text => textCarriesCredential(text, guarded))
     ) {
       return refuse(constant, 'credential-in-request')
-    }
-
-    const bodyBytes = byteLength(stringField(request, bodyField))
-
-    const recorded = (
-      entry: Omit<R2EmulatorLedgerEntry, 'seq' | 'port' | 'method' | 'request' | 'evidence'>
-    ) => {
-      const base = { port, method, request: withoutBodies(request), evidence, ...entry }
-
-      record(bodyBytes === undefined ? base : { ...base, bodyBytes })
     }
 
     const matching = r2EmulatorFixtures.filter(
       fixture =>
         fixture.port === port &&
         fixture.method === method &&
+        isJsonObject(fixture.request) &&
         Equal.equals(withoutCredentials(fixture.request), request)
     )
 
     if (matching.length === 0) {
-      recorded({ outcome: 'not-emulated', reason: 'no-matching-fixture' })
-
-      return { notEmulated: { reason: notEmulatedText['no-matching-fixture'] } }
+      return refuse(constant, 'no-matching-fixture')
     }
 
     const consistent = matching.filter(fixture => target.model.consistent(state, request, fixture))
     const chosen = consistent.find(fixture => !used.has(fixture.id)) ?? consistent[0]
 
     if (chosen === undefined) {
-      recorded({ outcome: 'not-emulated', reason: 'state-conflict' })
+      return refuse(constant, 'state-conflict')
+    }
 
-      return { notEmulated: { reason: notEmulatedText['state-conflict'] } }
+    // From here on the request equals a fixture request: what is recorded is fixture text, with
+    // the body only as its decoded length.
+    const bodyBytes = byteLength(stringField(request, bodyField))
+    const ledgerRequest = withoutBodies(request)
+
+    const recorded = (entry: Pick<R2EmulatorLedgerEntry, 'outcome' | 'fixtureId' | 'faultId'>) => {
+      const base = { port, method, request: ledgerRequest, evidence, ...entry }
+
+      record(bodyBytes === undefined ? base : { ...base, bodyBytes })
     }
 
     // Faults apply only to a call a fixture would answer: a refused call above leaves every fault
@@ -983,6 +798,27 @@ export const makeR2Emulator = (options: R2EmulatorOptions = {}): R2Emulator => {
     return chosen.failure === undefined
       ? { response: chosen.response }
       : { failure: chosen.failure }
+  }
+
+  /**
+   * `answer`, never throwing: a request the checks cannot walk (a cyclic or too deeply nested
+   * value) is ledgered with constant text and answered not-emulated. Every check runs before any
+   * fault is used or any state changes, so a throw leaves both untouched.
+   */
+  const call = (port: string, method: string, rawRequest: Schema.Json): R2EmulatorReply => {
+    try {
+      return answer(port, method, rawRequest)
+    } catch {
+      return refuse(
+        {
+          port: r2EmulatorUnrecognised,
+          method: r2EmulatorUnrecognised,
+          request: r2EmulatorRedacted,
+          evidence: 'unknown-method'
+        },
+        'uncheckable-request'
+      )
+    }
   }
 
   const faultState = (fault: (typeof faults)[number]): R2EmulatorFaultState => ({

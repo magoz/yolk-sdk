@@ -19,6 +19,12 @@ import {
   type R2EmulatorLedgerEntry,
   type R2EmulatorSeed
 } from '../src/r2.ts'
+import {
+  isR2CredentialKey,
+  r2CredentialKeyNames,
+  r2CredentialParamNames,
+  r2TokenPatterns
+} from '../src/r2-guard.ts'
 
 const fixture = (id: string): R2EmulatorFixture =>
   r2EmulatorFixtures.find(candidate => candidate.id === id) ?? expect.fail(`no fixture ${id}`)
@@ -55,14 +61,30 @@ const failure = { kind: 'error', code: 'transport_failed', message: 'Synthetic f
 
 const syntheticBearerToken = 'synthetic-bearer-token-0001'
 
-/** Synthetic values shaped like the shared scan's API-key and token patterns. */
-const tokens: ReadonlyArray<readonly [string, string]> = [
-  ['AWS access key id', `AKIA${'SYNTHETIC'}0000000`],
+/**
+ * One synthetic sample per entry of `r2TokenPatterns`, in order (assembled from parts so no
+ * literal reads as a real token): a new pattern without a sample fails the parity test.
+ */
+const tokenSamples: ReadonlyArray<readonly [string, string]> = [
+  ['bearer token', `Bearer ${syntheticBearerToken}`],
   ['secret key', `sk-${'synthetic-key'}-0000000000`],
-  ['GitHub token', `ghp_${'SYNTHETIC'}0000000000000000000`],
+  ['Stripe-style key', `rk_test_${'SYNTHETIC'}0000000000`],
+  ['xAI key', `xai-${'SYNTHETIC'}00000000000000`],
+  ['Vercel key', `vck_${'SYNTHETIC'}0000000000`],
+  ['GitHub token', `ghs_${'SYNTHETIC'}00000000000000`],
+  ['fine-grained GitHub token', `github_pat_${'SYNTHETIC'}_00000000000000`],
+  ['AWS access key id', `AKIA${'SYNTHETIC'}0000000`],
+  ['Google API key', `AIza${'SyntheticGoogleKey'}_${'0'.repeat(16)}`],
+  ['Slack token', `xoxb-${'synthetic'}-0000`],
   ['JSON Web Token', `eyJ${'SYNTHETIC'}.eyJ${'SYNTHETIC'}.${'SYNTHETIC'}sig`],
   ['private key', `-----BEGIN ${'SYNTHETIC'} PRIVATE KEY-----`]
 ]
+
+/** The API-key-shaped samples (every token sample but the bearer). */
+const tokens = tokenSamples.slice(1)
+
+const awsKeySample =
+  tokenSamples.find(([label]) => label === 'AWS access key id')?.[1] ?? expect.fail('no sample')
 
 const reasons = {
   unknown: 'unknown-method: the port and method have no emulated route',
@@ -70,8 +92,20 @@ const reasons = {
   credential:
     'credential-in-request: the request carries a credential outside its credential fields',
   uncheckable: 'uncheckable-body: a bodyBase64 is not canonical base64 of UTF-8 text',
+  uncheckableRequest: 'uncheckable-request: the request could not be checked',
   noMatch: 'no-matching-fixture: no fixture matches this request',
   conflict: 'state-conflict: no matching fixture is consistent with the emulated bucket'
+} as const
+
+/** The ledgered reason code of each refusal. */
+const reasonCodes = {
+  unknown: 'unknown-method',
+  invalid: 'invalid-request',
+  credential: 'credential-in-request',
+  uncheckable: 'uncheckable-body',
+  uncheckableRequest: 'uncheckable-request',
+  noMatch: 'no-matching-fixture',
+  conflict: 'state-conflict'
 } as const
 
 /** Runtime-only input for validation tests: a JSON copy typed as whatever the API expects. */
@@ -120,7 +154,17 @@ const expectRefused = (
   const reply = emulator.call(port, method, request)
 
   expect(reply).toEqual({ notEmulated: { reason: reasons[reason] } })
-  expect(emulator.ledger.entries().at(-1)).toMatchObject({ outcome: 'not-emulated' })
+  // Every refusal is ledgered with constant text only: no request text, no body length.
+  expect(emulator.ledger.entries().at(-1)).toEqual({
+    seq: emulator.ledger.entries().length,
+    port: reason === 'unknown' || reason === 'uncheckableRequest' ? '<unrecognised>' : port,
+    method: reason === 'unknown' || reason === 'uncheckableRequest' ? '<unrecognised>' : method,
+    request: '<redacted>',
+    outcome: 'not-emulated',
+    evidence:
+      reason === 'unknown' || reason === 'uncheckableRequest' ? 'unknown-method' : 'unverified',
+    reason: reasonCodes[reason]
+  })
   expect(emulator.state()).toEqual(before)
   expect(emulator.faults.list().find(item => item.id === fault.id)).toMatchObject({
     applied: 0
@@ -206,41 +250,78 @@ describe('R2 emulator: answers only from fixtures', () => {
     }
   })
 
-  it('drops exactly the keys @yolk-sdk/conformance classifies as port credentials', () => {
-    const keys = [
-      'credential',
+  it('drops a field for every copied credential key name, each one the shared scan drops', () => {
+    // One sample per entry of `r2CredentialKeyNames`, in order: a new entry without a sample fails.
+    const samples = [
       'Credentials',
-      'accessKeyId',
+      'access_token',
+      'refreshToken',
+      'id-token',
+      'AUTH_TOKEN',
+      'apiToken',
+      'sessionToken',
+      'private_token',
+      'bearerToken',
+      'oauth_token',
+      'token',
+      'client_secret',
+      'secretKey',
+      'private-key',
+      'password',
+      'passwd',
+      'API_KEY',
       'access_key_id',
       'secretAccessKey',
-      'secret_access_key',
-      'sessionToken',
-      'password',
-      'api_key',
-      'token',
-      'secret',
-      'authorization',
-      'accountId',
-      'account_id',
-      'maxBytes',
-      'credentialRef',
-      'tokens',
-      'region'
+      'Authorization'
     ]
 
-    for (const key of keys) {
+    expect(samples).toHaveLength(r2CredentialKeyNames.length)
+
+    samples.forEach((sample, index) => {
+      expect(new RegExp(`^(?:${r2CredentialKeyNames[index]})$`, 'i').test(sample), sample).toBe(
+        true
+      )
+      expect(isPortCredentialKey(sample), sample).toBe(true)
+      expect(isR2CredentialKey(sample), sample).toBe(true)
+
       const emulator = makeR2Emulator()
 
       const reply = emulator.call('R2Presigner', 'presignPutObject', {
         ...presignRequest,
-        [key]: 'v'
+        [sample]: '<v>'
       })
 
-      // A dropped key matches the fixture; a kept one is compared and refused.
-      expect('response' in reply, key).toBe(isPortCredentialKey(key))
-      expect(JSON.stringify(emulator.ledger.entries()).includes(`"${key}"`), key).toBe(
-        !isPortCredentialKey(key)
+      // A dropped key matches the fixture, and only the fixture's request is recorded.
+      expect(reply, sample).toEqual({ response: presign.response })
+      expect(emulator.ledger.entries()[0]?.request, sample).toEqual(presign.request)
+    })
+  })
+
+  it('compares every other key, refusing with constant text whatever it is named', () => {
+    for (const key of [
+      'accountId',
+      'account_id',
+      'aws_secret_access_key',
+      'aws_session_token',
+      'x-api-key',
+      'credentialRef',
+      'tokens',
+      'region',
+      'maxBytes'
+    ]) {
+      expect(isPortCredentialKey(key), key).toBe(false)
+      expect(isR2CredentialKey(key), key).toBe(false)
+
+      const emulator = makeR2Emulator()
+
+      expectRefused(
+        emulator,
+        'R2Presigner.presignPutObject',
+        ['R2Presigner', 'presignPutObject', { ...presignRequest, [key]: 'synthetic-value-0002' }],
+        'noMatch'
       )
+      expect(observable(emulator, []), key).not.toContain('synthetic-value-0002')
+      expect(observable(emulator, []), key).not.toContain(`"${key}"`)
     }
   })
 })
@@ -314,12 +395,69 @@ describe('R2 emulator: fails closed', () => {
     for (const [route, request] of variants) {
       const [port, method] = validCall[route]
 
+      // The refusal is ledgered with constant text only (asserted by `expectRefused`).
       expectRefused(emulator, route, [port, method, request], 'noMatch')
-      // The refused request is recorded (credential-free, bytes only as a length) for diagnosis.
-      expect(emulator.ledger.entries().at(-2)).toMatchObject({
-        request: 'bodyBase64' in request ? { ...request, bodyBase64: '<redacted>' } : request,
-        reason: 'no-matching-fixture'
-      })
+      expect(observable(emulator, []), JSON.stringify(request)).not.toMatch(
+        /run-0123abcd|other synthetic body|"kind":"none"|fixtures\/other/
+      )
+    }
+  })
+
+  it('refuses an own __proto__ key at any depth as invalid, with a constant entry', () => {
+    const withKey = (request: Schema.JsonObject, json: string): Schema.JsonObject =>
+      asObject(JSON.parse(`${JSON.stringify(request).slice(0, -1)},${json}}`))
+
+    const rows: ReadonlyArray<readonly [RouteName, Schema.JsonObject]> = [
+      ['R2ObjectClient.get', withKey(getRequest, '"__proto__":7')],
+      ['R2ObjectClient.get', withKey(getRequest, '"__proto__":{"maxBytes":1}')],
+      [
+        'R2ObjectClient.put',
+        asObject(
+          JSON.parse(
+            JSON.stringify(putRequest).replace(
+              '"kind":"absent"',
+              '"kind":"absent","__proto__":{"x":1}'
+            )
+          )
+        )
+      ],
+      ['R2ObjectClient.get', withKey(getRequest, '"credentials":{"__proto__":"x"}')]
+    ]
+
+    for (const [route, request] of rows) {
+      const [port, method] = validCall[route]
+      const emulator = makeR2Emulator()
+
+      expectRefused(emulator, route, [port, method, request], 'invalid')
+    }
+
+    expect(Object.hasOwn(rows[0]?.[1] ?? {}, '__proto__')).toBe(true)
+  })
+
+  it('answers a request the checks cannot walk with a constant entry, never a throw', () => {
+    const cyclic: Array<Schema.Json> = []
+
+    cyclic.push(cyclic)
+
+    let deep: Schema.Json = 'synthetic-deep-value'
+
+    for (let depth = 0; depth < 200_000; depth += 1) {
+      deep = [deep]
+    }
+
+    for (const request of [
+      { ...getRequest, extra: cyclic },
+      { ...getRequest, extra: deep }
+    ]) {
+      const emulator = makeR2Emulator()
+
+      expectRefused(
+        emulator,
+        'R2ObjectClient.get',
+        ['R2ObjectClient', 'get', request],
+        'uncheckableRequest'
+      )
+      expect(observable(emulator, [])).not.toContain('synthetic-deep-value')
     }
   })
 
@@ -359,6 +497,12 @@ describe('R2 emulator: credential guard', () => {
       .map(character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`)
       .join('')
 
+  const entities = (text: string) =>
+    [...text].map(character => `&#${character.charCodeAt(0)};`).join('')
+
+  const hexEntities = (text: string) =>
+    [...text].map(character => `&#x${character.charCodeAt(0).toString(16)};`).join('')
+
   const repeats: ReadonlyArray<readonly [string, Schema.JsonObject]> = [
     ['raw in a value', { ...getRequest, key: `fixtures/${secret}.txt` }],
     ['percent-encoded', { ...getRequest, key: percent(secret) }],
@@ -368,6 +512,11 @@ describe('R2 emulator: credential guard', () => {
       'escaped then percent-encoded',
       { ...getRequest, key: encodeURIComponent(jsonEscaped(secret)) }
     ],
+    ['as a decimal HTML reference', { ...getRequest, key: `&#115;${secret.slice(1)}` }],
+    ['as a \\x escape', { ...getRequest, key: `\\x73${secret.slice(1)}` }],
+    ['fully entity-encoded', { ...getRequest, key: entities(secret) }],
+    ['fully hex-entity-encoded', { ...getRequest, key: hexEntities(secret) }],
+    ['as an entity-encoded object key', { ...getRequest, extra: { [entities(secret)]: true } }],
     ['as an object key', { ...getRequest, extra: { [secret]: true } }],
     ['as a percent-encoded key', { ...getRequest, [percent(secret)]: 1 }],
     ['in an array', { ...getRequest, tags: ['a', `${secret}`] }]
@@ -402,6 +551,150 @@ describe('R2 emulator: credential guard', () => {
     })
   }
 
+  it('repeats a non-ASCII credential value through a JSON escape the shared closure keeps', () => {
+    const emulator = makeR2Emulator()
+    const nonAscii = 'synthetic-live-s\u00e9cret'
+
+    expectRefused(
+      emulator,
+      'R2ObjectClient.get',
+      [
+        'R2ObjectClient',
+        'get',
+        { ...getRequest, key: 'synthetic-live-s\\u00e9cret', secretAccessKey: nonAscii }
+      ],
+      'credential'
+    )
+    expect(observable(emulator, [])).not.toContain('synthetic-live-s')
+  })
+
+  it('guards the keys inside a credential field like its values', () => {
+    const emulator = makeR2Emulator()
+
+    expectRefused(
+      emulator,
+      'R2ObjectClient.get',
+      [
+        'R2ObjectClient',
+        'get',
+        {
+          ...getRequest,
+          key: 'fixtures/synthetic-live-key.txt',
+          credentials: { 'synthetic-live-key': true }
+        }
+      ],
+      'credential'
+    )
+    expect(observable(emulator, [])).not.toContain('synthetic-live-key')
+  })
+
+  it('matches numbers by their digit strings as well as their printed form', () => {
+    const rows: ReadonlyArray<Schema.JsonObject> = [
+      // A zero-padded string credential repeated as a number.
+      { ...getRequest, part: 12345678, accessKeyId: '0012345678' },
+      // A number credential repeated inside a zero-padded string.
+      { ...getRequest, key: 'fixtures/0012345678', secretAccessKey: 12345678 },
+      // A large number printed as `1e+21` repeated as its digits, and the reverse.
+      { ...getRequest, key: `fixtures/1${'0'.repeat(21)}`, secretAccessKey: 1e21 },
+      { ...getRequest, part: 1e21, secretAccessKey: `1${'0'.repeat(21)}` },
+      { ...getRequest, part: 1e21, secretAccessKey: '1e21' }
+    ]
+
+    for (const request of rows) {
+      const emulator = makeR2Emulator()
+
+      expectRefused(
+        emulator,
+        'R2ObjectClient.get',
+        ['R2ObjectClient', 'get', request],
+        'credential'
+      )
+      expect(observable(emulator, []), JSON.stringify(request)).not.toMatch(/12345678|e\+21|0{21}/)
+    }
+  })
+
+  it('refuses a sample of every copied credential parameter name, as the shared scan does', () => {
+    // One sample per entry of `r2CredentialParamNames`, in order.
+    const samples = [
+      'k?api-key=v1',
+      'key=v1',
+      'k&token=v1',
+      'k?accessToken=v1',
+      'k?refresh_token=v1',
+      'k?idtoken=v1',
+      'auth=v1',
+      'k?secret=v1',
+      'password=v1',
+      'k?client-secret=v1',
+      'k?X-Amz-Signature=v1',
+      'k?x-amz-credential=v1',
+      'k?X-AMZ-SECURITY-TOKEN=v1'
+    ]
+
+    expect(samples).toHaveLength(r2CredentialParamNames.length)
+
+    samples.forEach((sample, index) => {
+      expect(
+        new RegExp(`(?:^|[?&])(?:${r2CredentialParamNames[index]})=`, 'i').test(sample),
+        sample
+      ).toBe(true)
+
+      const asFixture: PortFixture = {
+        id: 'r2.param-sample',
+        port: 'R2ObjectClient',
+        method: 'get',
+        request: { ...getRequest, key: sample },
+        response: null
+      }
+
+      expect(
+        scanPortFixtureForSecrets(asFixture).map(issue => issue.kind),
+        sample
+      ).toContain('credential_query_param')
+
+      const emulator = makeR2Emulator()
+
+      expectRefused(
+        emulator,
+        'R2ObjectClient.get',
+        ['R2ObjectClient', 'get', { ...getRequest, key: sample }],
+        'credential'
+      )
+    })
+  })
+
+  it('refuses a sample of every copied token pattern, as the shared scan does', () => {
+    expect(tokenSamples).toHaveLength(r2TokenPatterns.length)
+
+    tokenSamples.forEach(([label, sample], index) => {
+      expect(r2TokenPatterns[index]?.test(sample), label).toBe(true)
+
+      const asFixture: PortFixture = {
+        id: 'r2.token-sample',
+        port: 'R2ObjectClient',
+        method: 'get',
+        request: { ...getRequest, key: sample },
+        response: null
+      }
+
+      expect(
+        scanPortFixtureForSecrets(asFixture).some(
+          issue => issue.kind === 'bearer_token' || issue.kind === 'api_key'
+        ),
+        label
+      ).toBe(true)
+
+      const emulator = makeR2Emulator()
+
+      expectRefused(
+        emulator,
+        'R2ObjectClient.get',
+        ['R2ObjectClient', 'get', { ...getRequest, key: sample }],
+        'credential'
+      )
+    })
+  })
+
   it('guards nested and numeric credential values, numbers included', () => {
     const emulator = makeR2Emulator()
 
@@ -426,12 +719,25 @@ describe('R2 emulator: credential guard', () => {
     ).toEqual(['<redacted>', '<redacted>'])
   })
 
-  it('does not guard values shorter than four characters (they would match ordinary text)', () => {
-    const emulator = makeR2Emulator()
+  it('guards credential values of any length: a short value repeated anywhere refuses', () => {
+    for (const value of ['txt', 'ob', '.']) {
+      const emulator = makeR2Emulator()
 
-    expect(
-      emulator.call('R2ObjectClient', 'get', { ...getRequest, secretAccessKey: 'txt' })
-    ).toEqual({ response: withinBudget.response })
+      expectRefused(
+        emulator,
+        'R2ObjectClient.get',
+        ['R2ObjectClient', 'get', { ...getRequest, secretAccessKey: value }],
+        'credential'
+      )
+    }
+
+    // An empty value guards nothing; a value repeated nowhere is simply dropped.
+    for (const value of ['', 'Q#Z']) {
+      expect(
+        makeR2Emulator().call('R2ObjectClient', 'get', { ...getRequest, secretAccessKey: value }),
+        value
+      ).toEqual({ response: withinBudget.response })
+    }
   })
 
   const sigV4: ReadonlyArray<readonly [string, Schema.JsonObject]> = [
@@ -467,7 +773,7 @@ describe('R2 emulator: credential guard', () => {
     })
   }
 
-  it('records the exact canonical placeholders, which both scans accept', () => {
+  it('accepts the exact canonical placeholders as no credential (a plain no-match)', () => {
     const emulator = makeR2Emulator()
 
     const request = {
@@ -476,7 +782,7 @@ describe('R2 emulator: credential guard', () => {
     }
 
     expectRefused(emulator, 'R2ObjectClient.get', ['R2ObjectClient', 'get', request], 'noMatch')
-    expect(emulator.ledger.entries()[0]?.request).toEqual(request)
+    expect(observable(emulator, [])).not.toContain('yolk-synthetic-signature')
   })
 
   it('refuses at least every string either port scan of the R2 guard flags', () => {
@@ -578,7 +884,9 @@ describe('R2 emulator: put bodies and token patterns', () => {
     ['a JSON-escaped credential value', `{"v":"\\u0073${secret.slice(1)}"}`],
     ['a bearer token', `Authorization: Bearer ${syntheticBearerToken}`],
     ['a SigV4 signature', 'https://h.example.test/b/k?X-Amz-Signature=0a1b2c3d'],
-    ['an API key', `key ${tokens[0]?.[1] ?? ''}`]
+    ['an API key', `key ${awsKeySample}`],
+    ['an entity-encoded credential value', `body &#115;${secret.slice(1)}`],
+    ['a \\x-escaped credential value', `body \\x73${secret.slice(1)}`]
   ]
 
   for (const [label, text] of credentialBodies) {
@@ -654,10 +962,20 @@ describe('R2 emulator: put bodies and token patterns', () => {
       putWith(String(putRequest.bodyBase64), { extra: [{ bodyBase64: 'YQ' }] }),
       'uncheckable'
     )
-    // Under a credential field the whole value is dropped before any check: the fixture matches.
+    // Under a credential field the whole value is dropped before any check: never decoded.
     expect(
-      emulator.call('R2ObjectClient', 'put', { ...putRequest, credentials: { bodyBase64: 'YQ' } })
-    ).toHaveProperty('response')
+      emulator.call('R2ObjectClient', 'get', {
+        ...getRequest,
+        credentials: { bodyBase64: 'not base64!' }
+      })
+    ).toEqual({ response: withinBudget.response })
+    // Its key is guarded like its value: on a put, `bodyBase64` repeats the request's own key.
+    expectRefused(
+      emulator,
+      'R2ObjectClient.put',
+      ['R2ObjectClient', 'put', { ...putRequest, credentials: { bodyBase64: '<v>' } }],
+      'credential'
+    )
   })
 
   const tokenRequests: ReadonlyArray<readonly [string, Schema.JsonObject]> = [
@@ -675,8 +993,8 @@ describe('R2 emulator: put bodies and token patterns', () => {
       `an API-key-shaped value (${label})`,
       { ...getRequest, nested: [{ note: `x ${token}` }] }
     ]),
-    ['an API key as a key', { ...getRequest, [tokens[0]?.[1] ?? 'x']: true }],
-    ['an escaped API key', { ...getRequest, key: (tokens[0]?.[1] ?? '').replace('A', '%41') }]
+    ['an API key as a key', { ...getRequest, [awsKeySample]: true }],
+    ['an escaped API key', { ...getRequest, key: awsKeySample.replace('A', '%41') }]
   ]
 
   for (const [label, request] of tokenRequests) {
