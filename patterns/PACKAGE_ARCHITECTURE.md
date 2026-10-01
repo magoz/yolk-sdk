@@ -50,6 +50,7 @@ metadata.
 - MCP APIs use explicit subpaths:
   - `@yolk-sdk/mcp/client`
   - `@yolk-sdk/mcp/client/node`
+  - `@yolk-sdk/mcp/conformance` (experimental: the generic MCP conformance cases, target, seeds, observing `HttpClient`, era filter, and synthetic fixtures)
   - `@yolk-sdk/mcp/core`
   - `@yolk-sdk/mcp/protocol`
   - `@yolk-sdk/mcp/server`
@@ -61,7 +62,7 @@ metadata.
 - `@yolk-sdk/harness` owns run lifecycle (coordinator, store, inbox, driver, outcome). Public subpaths: `./coordinator`, `./store`, `./inbox`, `./driver`, `./driver/memory`, `./driver/durable-object`, and `./outcome`. It does not replace `@yolk-sdk/agent/loop`.
 - `@yolk-sdk/conformance` (experimental) owns wire fixtures, port fixtures (`PortFixture`: one recorded call through a host port that is not HTTP), offline fail-closed replay, wire faults, recording over a host-provided `HttpClient`, conformance case definitions, and the safety-gated case runner. Public subpaths: `./fixture`, `./replay`, `./record`, `./case`, and `./runner`; there is no root export. It performs no network I/O itself.
 - `@yolk-sdk/emulators` (experimental) owns emulators for outside services and the `HttpClient` routing to them. Public subpaths: `./router` (Effect `EmulatedHttpClient` / `InProcessHttpClient` layers), `./gateway` (Vercel AI Gateway fetch-handler emulator and its route evidence manifest), `./openai` (OpenAI Chat Completions fetch-handler emulator and its manifest; both share the internal `chat-completions.ts` core), `./anthropic` (Anthropic Messages fetch-handler emulator and its manifest, on the internal `messages.ts` core), `./codex` and `./xai` (ChatGPT Codex and xAI Grok CLI proxy Responses fetch-handler emulators and their manifests, on the internal `responses.ts` core), `./opencode` (OpenCode Go fetch-handler emulator for chat, Messages, Responses, and usage, and its manifest, on the internal fixture-only `fixture-route.ts` core that also serves the Anthropic, Codex, and Grok subscription-usage routes; every model and fixture-route fetch-handler emulator shares the internal `emulator-kernel.ts`; the stateful emulators do not), `./email` (a fixture-driven fake `EmailClient` backend exposed as a plain-JSON `call`, with its seed, faults, ledger, and manifest; no socket, TLS, MIME, or mail library), `./r2` (a fixture-driven fake `R2Presigner` and `R2ObjectClient` backend exposed as a plain-JSON `call(port, method, request)`, with its seed, faults, ledger, and manifest; no SigV4 signer or S3 client), `./node` (loopback server; Node subpath), `./fortnox` (experimental stateful Fortnox emulator on the upstream `@emulators/core` custom runtime; Node subpath), `./microsoft` (experimental stateful Microsoft Graph emulator on the same runtime, including the OneDrive copy monitor URL; Node subpath), `./dropbox` and `./notion` (experimental stateful, fixture-only Dropbox and Notion emulators on the same runtime, sharing the internal `stateful-emulator.ts` wrapper; Node subpaths), `./todoist` and `./telegram` (experimental stateful, fixture-only Todoist API v1 and Telegram Bot API emulators on the same runtime, sharing the internal `stateful-fixture.ts` wrapper; Node subpaths), `./github` (experimental stateful, fixture-only GitHub REST emulator on the same runtime and the `stateful-emulator.ts` wrapper in its fail-closed mode; Node subpath), `./google` (experimental stateful, fixture-only Gmail, Calendar, and Drive emulator on the same runtime, on the internal `stateful-emulator.ts` wrapper in its fail-closed mode; Node subpath), and `./linkedin-search` (experimental stateful, fixture-only Exa and Enrich Layer emulator on the same runtime and wrapper, in its fail-closed mode with the per-origin bearer digest; Node subpath); there is no root export.
-- Provider wire fixtures and conformance cases live under `@yolk-sdk/agent/providers/<vendor>/conformance` (currently `anthropic` (Messages and Claude usage), `openai` (OpenAI chat, Codex Responses, and Codex usage), `opencode` (Go protocols and usage), `vercel`, and `xai` (Grok Responses and usage)) and `@yolk-sdk/connectors/<provider>/conformance` (currently `dropbox`, `email`, `fortnox`, `github`, `google`, `linkedin-search`, `microsoft`, `notion`, `r2-storage`, `telegram`, and `todoist`; `email` and `r2-storage` use port fixtures over host ports (`EmailClient`; `R2Presigner` and `R2ObjectClient`) instead of HTTP wire fixtures); see the conformance import rule under [Dependency Direction](#dependency-direction).
+- Provider wire fixtures and conformance cases live under `@yolk-sdk/agent/providers/<vendor>/conformance` (currently `anthropic` (Messages and Claude usage), `openai` (OpenAI chat, Codex Responses, and Codex usage), `opencode` (Go protocols and usage), `vercel`, and `xai` (Grok Responses and usage)), `@yolk-sdk/mcp/conformance` (the generic MCP cases, run through the real `@yolk-sdk/mcp/client`; products supply only targets and seeds), and `@yolk-sdk/connectors/<provider>/conformance` (currently `dropbox`, `email`, `fortnox`, `github`, `google`, `linkedin-search`, `microsoft`, `notion`, `r2-storage`, `telegram`, and `todoist`; `email` and `r2-storage` use port fixtures over host ports (`EmailClient`; `R2Presigner` and `R2ObjectClient`) instead of HTTP wire fixtures); see the conformance import rule under [Dependency Direction](#dependency-direction).
 - OpenAI/Codex, Vercel AI Gateway, OpenCode Go, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, Grok, and OpenCode Go also expose best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
@@ -77,7 +78,7 @@ metadata.
 - Emulator internals live under `packages/emulators/src/*`, not app code.
 - Area tests mirror source layout:
   - `packages/agent/test/{protocol,loop,runtime,client,compaction,tools,react,oauth,providers,skillset,voice,property}`
-  - `packages/mcp/test/{client,server}`
+  - `packages/mcp/test/{client,server,conformance}`
   - `packages/sandbox/test/{core,agent,vercel}.test.ts`
   - `packages/vercel-workflows/test`
   - `packages/harness/test`
@@ -100,6 +101,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/connectors -> never @yolk-sdk/emulators (emulators plug into connector ports structurally)
 @yolk-sdk/agent/providers/*/conformance -> @yolk-sdk/conformance/* (see conformance import rule below)
 @yolk-sdk/connectors/**/conformance -> @yolk-sdk/conformance/* (see conformance import rule below)
+@yolk-sdk/mcp/conformance -> @yolk-sdk/conformance/* + @yolk-sdk/mcp/client + eventsource-parser (the client's own ^3.0.0 range, so one copy resolves; verified in-repo by a parity test) (see conformance import rule below)
 @yolk-sdk/agent/client -> @yolk-sdk/agent/protocol + Effect HTTP/Stream + runtime-only browser WebSocket/Blob/File/FileReader APIs
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol} + Effect
@@ -110,7 +112,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/agent core -> no @yolk-sdk/knowledge, @yolk-sdk/mcp, app, Next, provider SDKs
 ```
 
-Conformance import rule (canonical statement; other docs reference it): in `packages/agent/src`, only code under `providers/*/conformance/` may import `@yolk-sdk/conformance/*` (any subpath); in `packages/connectors/src`, only code under a `conformance/` directory may. Package tests may import it.
+Conformance import rule (canonical statement; other docs reference it): in `packages/agent/src`, only code under `providers/*/conformance/` may import `@yolk-sdk/conformance/*` (any subpath); in `packages/connectors/src`, only code under a `conformance/` directory may; in `packages/mcp/src`, only code under `src/conformance/` may. Package tests may import it.
 
 ## Tree-Shaking Constraints
 

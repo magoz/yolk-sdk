@@ -297,6 +297,72 @@ describe('conformance and connector import rules', () => {
     }
   })
 
+  it('allows @yolk-sdk/conformance and the mcp cases only under mcp src/conformance', () => {
+    const root = fixtureDirectory()
+
+    scaffoldConformance(root)
+    write(
+      root,
+      'packages/mcp/package.json',
+      JSON.stringify({
+        name: '@yolk-sdk/mcp',
+        exports: {
+          './client': './src/client/index.ts',
+          './conformance': './src/conformance/index.ts'
+        }
+      })
+    )
+    write(root, 'packages/mcp/src/conformance/index.ts', `export const cases = 1\n`)
+
+    const importConformance = `import { fixture } from '@yolk-sdk/conformance/fixture'\n\nexport const probe = fixture\n`
+
+    write(root, 'packages/mcp/src/conformance/cases.ts', importConformance)
+    write(root, 'packages/mcp/src/conformance/nested/fixture.ts', importConformance)
+    write(root, 'packages/mcp/src/client/client.ts', importConformance)
+    write(root, 'packages/mcp/src/server/server.ts', importConformance)
+    write(root, 'packages/mcp/src/client/conformance/leak.ts', importConformance)
+    write(
+      root,
+      'packages/mcp/src/client/rel-conformance.ts',
+      `import { fixture } from '../../../conformance/src/fixture.ts'\n\nexport const probe = fixture\n`
+    )
+    write(
+      root,
+      'packages/mcp/src/client/rel-cases.ts',
+      `import { cases } from '../conformance/index.ts'\n\nexport const probe = cases\n`
+    )
+    write(
+      root,
+      'packages/mcp/src/server/subpath-cases.ts',
+      `import { cases } from '@yolk-sdk/mcp/conformance'\n\nexport const probe = cases\n`
+    )
+
+    expect(violationsFor(root, 'packages/mcp/src/conformance/cases.ts')).toEqual([])
+    expect(violationsFor(root, 'packages/mcp/src/conformance/nested/fixture.ts')).toEqual([])
+
+    for (const rel of [
+      'packages/mcp/src/client/rel-cases.ts',
+      'packages/mcp/src/server/subpath-cases.ts'
+    ]) {
+      expect(
+        violationsFor(root, rel).map(violation => violation.forbidden),
+        rel
+      ).toContain('@yolk-sdk/mcp/conformance')
+    }
+
+    for (const rel of [
+      'packages/mcp/src/client/client.ts',
+      'packages/mcp/src/server/server.ts',
+      'packages/mcp/src/client/conformance/leak.ts',
+      'packages/mcp/src/client/rel-conformance.ts'
+    ]) {
+      expect(
+        violationsFor(root, rel).map(violation => violation.forbidden),
+        rel
+      ).toContain('@yolk-sdk/conformance')
+    }
+  })
+
   it('allows @yolk-sdk/agent in connectors only from src/agent.ts', () => {
     const root = fixtureDirectory()
 

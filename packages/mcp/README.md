@@ -28,6 +28,7 @@ Published package metadata requires Node.js 22+; `client/node` and `server/node`
 | --------------------------- | ---------------------------------------------------------------------- |
 | `@yolk-sdk/mcp/client`      | Official full-core client plus Effect/Yolk list and call helpers       |
 | `@yolk-sdk/mcp/client/node` | Official stdio client transport plus NodeServices convenience wrappers |
+| `@yolk-sdk/mcp/conformance` | Experimental MCP conformance cases, target, seeds, and fixtures        |
 | `@yolk-sdk/mcp/core`        | Official MCP v2 wire schemas                                           |
 | `@yolk-sdk/mcp/protocol`    | Yolk JSON-RPC/MCP adapter helpers                                      |
 | `@yolk-sdk/mcp/server`      | Official full-core server plus Yolk tool-only server primitives        |
@@ -157,6 +158,81 @@ import { makeMcpToolServer, runStdioMcpServer } from '@yolk-sdk/mcp/server'
 For legacy HTTP requests, an unreadable or already consumed body produces a JSON-RPC
 invalid-request error (`-32600`) rather than an Effect defect. Malformed JSON remains a parse error
 (`-32700`).
+
+## Conformance cases (experimental)
+
+`@yolk-sdk/mcp/conformance` holds nine `read` conformance cases for `@yolk-sdk/conformance/runner`.
+They check the wire claims the remote client relies on: era negotiation, the modern stateless
+headers, the legacy session, response encoding, the tool listing, a read call, a tool error, an
+unknown tool, and a rejected credential. Every case runs the real `listRemoteMcpServerTools` and
+`callRemoteMcpServerTool` through an observing `HttpClient`. The observer never sends a request of
+its own (it may refuse to forward one, see below). It never keeps `authorization` or any other
+credential-named header, never keeps the URL query, and never keeps a raw `mcp-session-id` value
+(only evidence: an equality class such as `session#1`). It keeps request and response bodies
+exactly as received; they may reflect anything a server echoes, credentials and session ids
+included, so they are sensitive: in memory only, never logged or persisted. Persisted or printed
+output is the live runner's job.
+
+A case that calls a tool (`mcp.modern.stateless`, `mcp.errors.unknown-tool`,
+`mcp.tools.call-read`, `mcp.tools.call-tool-error`) is protected by the observer's fail-closed call
+gate. The `tools/call` is forwarded only when every exchange of the call operation is fully
+understood, that operation's own listing (made right before the call) is complete, and that
+listing proves the call safe: the absent tool is not listed, or the read tool is marked
+`readOnlyHint: true`. Anything else, including any uncertainty (a 202 answer to a request, a
+message delivered on a GET, an unparseable body, an unterminated stream, two responses for one id,
+an unknown shape), refuses to forward. A refusal before any forwarded call fails the precondition
+with zero forwarded calls; a refused client retry after a forwarded call is reported as a retry.
+Earlier preflight listings stay as friendly early failures. Answers are read as the SDK reads them:
+JSON with `JSON.parse` semantics, and event streams with the SDK's own parser
+(the same `eventsource-parser` the client resolves, verified in-repo by a parity test; a consumer
+install whose package manager does not dedupe could still resolve two copies), fed the decoder
+chunks the client's `TextDecoderStream` emits.
+
+Mismatch messages carry only structural facts (methods, statuses, counts, positions, codes), never
+body text or the target URL. A client failure a case re-raises is reported as the client words it
+(it can quote a server body) and is sanitized by the runner. A host provides an `HttpClient`, an
+`McpConformanceTarget` (server URL, headers, era, protocol version, timeout), and
+`McpConformanceConfig` seeds. The cases name no product: provider targets and seeds live with the
+provider. `selectMcpConformanceCases` leaves out the cases of the other era. The synthetic fixtures
+replay on `https://mcp.example.test/modern/mcp` and `https://mcp.example.test/legacy/mcp`. See the
+conformance API reference for every claim.
+
+```ts
+import { Effect, Layer } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { runConformance } from '@yolk-sdk/conformance/runner'
+import {
+  McpConformanceConfig,
+  McpConformanceTarget,
+  mcpConformanceCases,
+  selectMcpConformanceCases
+} from '@yolk-sdk/mcp/conformance'
+
+const target = {
+  name: 'docs',
+  url: 'https://example.com/mcp',
+  headers: {},
+  era: 'modern',
+  protocolVersion: '2026-07-28',
+  timeoutMs: 30_000
+} as const
+
+const { applicable } = selectMcpConformanceCases(mcpConformanceCases, target.era)
+
+const report = await Effect.runPromise(
+  runConformance(applicable, {
+    target: { kind: 'live', account: 'practice' },
+    layer: () =>
+      Layer.mergeAll(
+        FetchHttpClient.layer,
+        Layer.succeed(McpConformanceTarget, target),
+        Layer.succeed(McpConformanceConfig, {})
+      )
+  })
+)
+```
+
+No case is observed live yet. Only code under `src/conformance/` may import `@yolk-sdk/conformance`.
 
 ## Host responsibilities
 

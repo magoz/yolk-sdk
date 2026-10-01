@@ -306,6 +306,78 @@ from the model-route suites (`anthropicClaudeUsageConformanceCases`,
 `*UsageConformanceFixtures`). `pnpm conformance:usage --family claude|codex|grok` is a dry-run
 probe with the same owner-approval and CI rules.
 
+## MCP conformance
+
+> **Experimental.** Conformance/testing only.
+
+`@yolk-sdk/mcp/conformance` exports nine `read` cases (`mcpConformanceCases`) that check the wire
+claims `@yolk-sdk/mcp/client` relies on. Each case runs the real client operations
+(`listRemoteMcpServerTools`, `callRemoteMcpServerTool`) and wraps the host's `HttpClient` with the
+observing client (`makeMcpObservingHttpClient`). The observer never sends a request of its own. It
+keeps the method, the URL, allowlisted MCP headers, the JSON request body, the status, allowlisted
+answer headers, the media type and the answer body. Its guarantees are exactly these:
+
+- it never keeps `authorization` or any other credential-named header;
+- it never keeps the URL query (origin and path only);
+- it never keeps a raw `mcp-session-id` value, only evidence (`McpObservedSession`: an equality
+  class such as `session#1`, and whether it is visible ASCII);
+- request and response bodies are kept exactly as received. They may reflect anything a server
+  echoes, credentials and session ids included, so they are sensitive: in memory only, never
+  logged or persisted. Persisted or printed output is the live runner's job.
+
+A case that calls a tool (`mcp.modern.stateless`, `mcp.errors.unknown-tool`,
+`mcp.tools.call-read`, `mcp.tools.call-tool-error`) is protected by the observer's fail-closed call
+gate. The `tools/call` is forwarded only when every exchange of the call operation is fully
+understood, that operation's own listing (made right before the call) is complete, and that
+listing proves the call safe: the absent tool is not listed, or the read tool is marked
+`readOnlyHint: true`. Anything else, including any uncertainty (a 202 answer to a request, a
+message delivered on a GET, an unparseable body, an unterminated stream, two responses for one id,
+an unknown shape), refuses to forward. A refusal before any forwarded call fails the precondition
+with zero forwarded calls; a refused client retry after a forwarded call is reported as a retry.
+Earlier preflight listings stay as friendly early failures. Answers are read as the SDK reads them:
+JSON with `JSON.parse` semantics, and event streams with the SDK's own parser
+(the same `eventsource-parser` the client resolves, verified in-repo by a parity test; a consumer
+install whose package manager does not dedupe could still resolve two copies), fed the decoder
+chunks the client's `TextDecoderStream` emits.
+
+Mismatch messages carry only structural facts (methods, statuses, counts, positions, codes), never
+body text or the target URL. A client failure a case re-raises is reported as the client words it
+(it can quote a server body) and is sanitized by the runner (`sanitizeConformanceMessage`). A
+response or listing page delivered on a `last-event-id` GET (SEP-1699 resumption) is not accepted
+(unverified), although the SDK accepts it. Cases name no product: they read the
+`McpConformanceTarget` service (`name`, `url`, `headers`, `era`, `protocolVersion`, `timeoutMs`, and
+optional `invalidCredentialHeaders`) and the `McpConformanceConfig` seeds (`readTool`,
+`invalidArguments`, `expectedTools`, `notReadOnly`, and `absentToolName`, default
+`yolk_conformance_absent`). A case whose seed is missing fails with a `precondition:` mismatch before
+any request.
+
+| Case                              | Claim                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mcp.negotiation.era`             | The first request is POST `server/discover` with the `_meta` envelope, `mcp-protocol-version: 2026-07-28` and `mcp-method`. Classified as the SDK classifies it, the answer selects `target.era`: modern when the discover result is valid for the 2026 schema and `supportedVersions` lists `2026-07-28`; legacy for any other discover result (invalid, or without that version), any JSON-RPC error but a modern -32022, or a 4xx other than 401/403. Never 5xx, 401 or 403, and at most one corrective -32022 retry. |
+| `mcp.modern.stateless`            | No answer carries `mcp-session-id`. Every request carries the envelope, `mcp-protocol-version` and `mcp-method` equal to the body method (tools/call: also `mcp-name`, the encoded tool name). Every `result` is an object carrying `resultType: "complete"`. The absent-tool call is forwarded only when no raw wire listing names the tool.                                                                                                                                                                            |
+| `mcp.legacy.session`              | `initialize` answers a supported `protocolVersion` (equal to `target.protocolVersion`) and `capabilities.tools`. Any session id is visible ASCII, echoed and accepted. `notifications/initialized` gets 202 with no body. The standing GET gets 405 or an event stream (unverified).                                                                                                                                                                                                                                     |
+| `mcp.transport.response-encoding` | Every 2xx answer to a request is JSON or an SSE stream that ends. Among the events the client reads (completed, non-empty data, no `event:` or `event: message`), every one is JSON and the response appears exactly once. Priming events, other event types and notifications after the response are allowed. A 202 has no body.                                                                                                                                                                                        |
+| `mcp.tools.list`                  | The server advertises `capabilities.tools`. Every page lists tools with a `name` and an object `inputSchema` (`type: "object"`); cursors are followed, never repeat, and the last page has none. Listed tools and `McpResolvedTool`s correspond one to one, with `title`, `outputSchema` and the five modeled annotation keys unchanged; adapted names stay unique.                                                                                                                                                      |
+| `mcp.tools.call-read`             | Precondition: the listing, and the call operation's own complete listing (the call gate), mark `readTool` `readOnlyHint: true`. The call answers a `result` object with `isError` absent or false; with an `outputSchema`, `structuredContent` passes SDK validation.                                                                                                                                                                                                                                                    |
+| `mcp.tools.call-tool-error`       | Same precondition. `invalidArguments` answer a `result` object with `isError: true` and text content, not a JSON-RPC error (unverified: some servers answer -32602).                                                                                                                                                                                                                                                                                                                                                     |
+| `mcp.errors.unknown-tool`         | Precondition: no raw wire listing names `absentToolName`, and the call gate forwards the call only when the call operation's own complete listing proves it absent. Its tools/call gets a JSON-RPC error with the request id (HTTP 200, or 400 for modern targets), never a 5xx or a `result`, and fails as `McpError` with `cause: "protocol"`.                                                                                                                                                                         |
+| `mcp.auth.rejected`               | The first request, with the invalid credential merged over the non-credential target headers, gets 401 with a `Bearer` challenge anywhere in `WWW-Authenticate`; no listing follows, and the error is `McpError` with `cause: "transport"`.                                                                                                                                                                                                                                                                              |
+
+`mcp.modern.*` and `mcp.legacy.*` cases apply to one era only. `selectMcpConformanceCases(cases,
+era)` returns the `applicable` cases for `runConformance` and the `notApplicable` ones (with a
+reason) for a dry run to list. The synthetic fixtures (`mcpConformanceFixtures`, sixteen,
+`evidence: 'unverified'`) use two synthetic servers on one reserved origin.
+`https://mcp.example.test/modern/mcp` answers JSON statelessly. `https://mcp.example.test/legacy/mcp`
+answers SSE in session `yolk-synthetic-session-0001`. The exchanges are in the order the pinned SDK
+sends them, the request bodies carry its exact ids and `_meta` envelope, and `authorization` is never
+recorded. `mcpConformanceSyntheticTarget(era)` and `mcpConformanceFixtureSeeds` replay them.
+
+The cases also run in-process against `makeMcpToolServer().handleHttpRequest`. Five cases apply
+there: era, stateless, response encoding, listing and unknown tool. The legacy session never happens
+because the client negotiates the modern era. The two call cases stop at their precondition, because
+the tool server publishes no `readOnlyHint`. The auth case does not apply, because the tool server
+has no authentication. No case is observed live yet; provider targets and live runs come later.
+
 ## Connector conformance
 
 > **Experimental.** Conformance/testing only.

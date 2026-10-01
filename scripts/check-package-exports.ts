@@ -122,6 +122,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       '.',
       './client',
       './client/node',
+      './conformance',
       './core',
       './protocol',
       './server',
