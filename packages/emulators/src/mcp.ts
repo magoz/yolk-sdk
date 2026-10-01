@@ -59,9 +59,14 @@
  * ledgered, or echoed: routes see only its digest (the wrapper's opt-in `bearerDigest`; SHA-256 of
  * the origin, a space, and the bearer), which they compare only with the digest of the public
  * reserved invalid credential `yolk-conformance-invalid-credential-0000` (itself a recognisable
- * bearer) to answer its recorded 401 byte for byte. `makeMcpEmulator` also throws when a copied
- * recording is not canonical JSON (every JSON body and SSE `data:` payload equal to
- * `JSON.stringify(JSON.parse(text))`), which id substitution relies on.
+ * bearer) to answer its recorded 401 byte for byte. Scope: the bearer is never copied from the
+ * request into a response, the state, or `/_emulate/*`; the output guard also refuses a prepared
+ * fixture answer, minted session id, or cursor that happens to contain it, but the emulator's other
+ * constants (state values such as `initializing`, wrapper headers such as `x-emulator-evidence`)
+ * and host-configured control-plane data (a fault body) may coincidentally equal a bearer and are
+ * not checked. `makeMcpEmulator` also throws when a copied recording is not canonical JSON (every
+ * JSON body and SSE `data:` payload equal to `JSON.stringify(JSON.parse(text))`), which id
+ * substitution relies on.
  *
  * Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
  * `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character

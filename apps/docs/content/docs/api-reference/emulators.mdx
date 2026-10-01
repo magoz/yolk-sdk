@@ -1221,12 +1221,17 @@ listing, whose first page issues `synthetic-cursor-0001` in the generation that 
 `<cursor>.g<generation>` after a reset or seed; the second page answers only the cursor issued in
 the current generation. The bearer is never stored, ledgered, or echoed: routes see only its digest,
 compared only with the digest of the public reserved invalid credential to answer its recorded 401.
-A request that repeats the bearer in any header name or value (not only the recorded headers), its
-path, query, or body, and a request whose prepared answer or minted session id or cursor would
-repeat it (a bearer such as `yolk-emu-session-1`, or `synthetic-mcp`, inside the recorded
-`yolk-synthetic-mcp`), is refused before any fault is decided or anything is written. Every refusal,
-by shape or by state, is one 400 not-emulated ledgered with constant text only (`/<unrecognised>`,
-no query, headers, or body), and it writes nothing and uses up no fault.
+Scope: the bearer is never copied from the request into a response, the state, or `/_emulate/*`; the
+output guard also refuses a prepared fixture answer, minted session id, or cursor that happens to
+contain it, but the emulator's other constants (state values such as `initializing`, wrapper headers
+such as `x-emulator-evidence`) and host-configured control-plane data (a fault body) may
+coincidentally equal a bearer and are not checked. A request that repeats the bearer in any header
+name or value (not only the recorded headers), its path, query, or body, and a request whose
+prepared answer or minted session id or cursor would repeat it (a bearer such as
+`yolk-emu-session-1`, or `synthetic-mcp`, inside the recorded `yolk-synthetic-mcp`), is refused
+before any fault is decided or anything is written. Every refusal, by shape or by state, is one 400
+not-emulated ledgered with constant text only (`/<unrecognised>`, no query, headers, or body), and
+it writes nothing and uses up no fault.
 
 - Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in

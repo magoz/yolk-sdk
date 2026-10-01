@@ -789,28 +789,32 @@ There is no root export or barrel.
   never stored, ledgered, or echoed: routes see only its `bearerDigest` (SHA-256 of the origin, a
   space, and the bearer), compared only with the digest of the public reserved invalid credential
   `yolk-conformance-invalid-credential-0000` (a recognisable bearer, checked at build), which
-  answers the recorded 401 byte for byte on the era probe and is refused anywhere else. Every
-  refusal, by shape or by state, is ledgered with constant text only (`/<unrecognised>`, a standard
-  method or `<other>`, an empty query, no headers or body, a constant reason, and the route template
-  or row), writes nothing, and uses up no fault. Every plan prepares its answer (`StreamedCommit`);
-  its commit (minting or readying a session, issuing a cursor) runs only when no fault answers.
-  Status and `truncate-after-chunks` faults apply only after admission and plan, and a faulted
-  request writes nothing: a truncation sends the prepared answer cut short and never commits (a
-  truncated `initialize` holds no session and moves neither the counter nor the cap; a truncated
-  first page issues no cursor, so its continuation is refused). `match.route` selects one row (a
-  value naming no row is rejected when the fault is added) and `match.method` is the HTTP method; a
-  truncation of a bodiless answer cannot apply (500, unused). `makeMcpEmulator` throws when a copied
-  recording is not canonical JSON (every JSON body and SSE `data:` payload equal to
-  `JSON.stringify(JSON.parse(text))`), which id substitution relies on, so provider recordings in
-  another form fail loudly. Not emulated: `DELETE`, `ping`, `resources/*`, `prompts/*`, `logging/*`,
-  `completion/*`, `tasks/*`, batches, client-sent responses, a JSON body repeating a key, `mcp-*`
-  headers no recording carries (such as `mcp-param-*`; routes see header names through
-  `EmulatedRequest.headerNames`), cursors the emulator did not issue, other tools or arguments, and
-  a missing `Authorization`. `test/mcp.test.ts` replays every fixture byte for byte, alone (with the
-  recorded ids, and again with other ids substituted only at the recorded place) and all one-page
-  fixtures in suite order on one emulator, substituting only the minted session id in the
-  `mcp-session-id` header. Drill knobs (`drills`, booleans) each fail exactly one case, on every era
-  whose answers they change.
+  answers the recorded 401 byte for byte on the era probe and is refused anywhere else. Scope: the
+  bearer is never copied from the request into a response, the state, or `/_emulate/*`; the output
+  guard also refuses a prepared fixture answer, minted session id, or cursor that happens to contain
+  it, but the emulator's other constants (state values such as `initializing`, wrapper headers such
+  as `x-emulator-evidence`) and host-configured control-plane data (a fault body) may coincidentally
+  equal a bearer and are not checked. Every refusal, by shape or by state, is ledgered with constant
+  text only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no headers or body,
+  a constant reason, and the route template or row), writes nothing, and uses up no fault. Every
+  plan prepares its answer (`StreamedCommit`); its commit (minting or readying a session, issuing a
+  cursor) runs only when no fault answers. Status and `truncate-after-chunks` faults apply only
+  after admission and plan, and a faulted request writes nothing: a truncation sends the prepared
+  answer cut short and never commits (a truncated `initialize` holds no session and moves neither
+  the counter nor the cap; a truncated first page issues no cursor, so its continuation is refused).
+  `match.route` selects one row (a value naming no row is rejected when the fault is added) and
+  `match.method` is the HTTP method; a truncation of a bodiless answer cannot apply (500, unused).
+  `makeMcpEmulator` throws when a copied recording is not canonical JSON (every JSON body and SSE
+  `data:` payload equal to `JSON.stringify(JSON.parse(text))`), which id substitution relies on, so
+  provider recordings in another form fail loudly. Not emulated: `DELETE`, `ping`, `resources/*`,
+  `prompts/*`, `logging/*`, `completion/*`, `tasks/*`, batches, client-sent responses, a JSON body
+  repeating a key, `mcp-*` headers no recording carries (such as `mcp-param-*`; routes see header
+  names through `EmulatedRequest.headerNames`), cursors the emulator did not issue, other tools or
+  arguments, and a missing `Authorization`. `test/mcp.test.ts` replays every fixture byte for byte,
+  alone (with the recorded ids, and again with other ids substituted only at the recorded place) and
+  all one-page fixtures in suite order on one emulator, substituting only the minted session id in
+  the `mcp-session-id` header. Drill knobs (`drills`, booleans) each fail exactly one case, on every
+  era whose answers they change.
 - Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
   `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]`, that

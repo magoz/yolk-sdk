@@ -1963,12 +1963,16 @@ header and chunk) and the minted session id or cursor the request would store ar
 bearer, and a hit is refused with the constant credential-repeat entry
 (`the answer would repeat the credential`), no fault used and nothing written. So a bearer such as
 `yolk-emu-session-1` on a fresh emulator, or `synthetic-mcp` (inside the recorded
-`yolk-synthetic-mcp`), never reaches a response, the state, or `/_emulate/*`. The bearer is never
-stored, ledgered, or echoed: routes see only its digest (the wrapper's opt-in `bearerDigest`:
-SHA-256 of the origin, a space, and the bearer), which they compare only with the digest of the
-public reserved invalid credential `yolk-conformance-invalid-credential-0000`
-(`mcpEmulatorReservedInvalidCredential`, itself a recognisable bearer) to answer the recorded 401 on
-the era probe.
+`yolk-synthetic-mcp`), never reaches a response, the state, or `/_emulate/*`. Scope: the bearer is
+never copied from the request into a response, the state, or `/_emulate/*`; the output guard also
+refuses a prepared fixture answer, minted session id, or cursor that happens to contain it, but the
+emulator's other constants (state values such as `initializing`, wrapper headers such as
+`x-emulator-evidence`) and host-configured control-plane data (a fault body) may coincidentally
+equal a bearer and are not checked. The bearer is never stored, ledgered, or echoed: routes see only
+its digest (the wrapper's opt-in `bearerDigest`: SHA-256 of the origin, a space, and the bearer),
+which they compare only with the digest of the public reserved invalid credential
+`yolk-conformance-invalid-credential-0000` (`mcpEmulatorReservedInvalidCredential`, itself a
+recognisable bearer) to answer the recorded 401 on the era probe.
 
 - **Request-shape latitude (`/mcp`, the only accepted deviations).** Any bearer value in the RFC
   6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
