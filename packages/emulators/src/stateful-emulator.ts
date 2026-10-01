@@ -1,7 +1,7 @@
 /**
  * Shared wrapper of the fixture-only stateful connector emulators (internal; used by `/dropbox`,
- * `/notion`, `/github`, `/google`, and `/linkedin-search`, not by the earlier `/fortnox` and
- * `/microsoft` emulators, which keep their own).
+ * `/notion`, `/github`, `/google`, `/linkedin-search`, and `/mcp`, not by the earlier `/fortnox`
+ * and `/microsoft` emulators, which keep their own).
  *
  * The emulator state lives in an `@emulators/core` custom runtime that the Node-only subpath
  * creates and hands in (this module imports no Node builtin and never imports the core); the
@@ -92,6 +92,18 @@
  * repeats the bearer answers the 500 emulator error (`responseError`). Without it, routes see no
  * digest, as before.
  *
+ * Three more opt-ins serve `/mcp`, whose JSON-RPC methods share one HTTP endpoint; a route or
+ * emulator that does not take them behaves exactly as before. A route may answer several manifest
+ * rows (`variants`, for example `RPC <origin><path>#<method>`): its admission names the row,
+ * which becomes the request's ledger route, its coverage row, and what a fault's `match.route`
+ * compares (a request refused before admission keeps the route template). A plan may return a
+ * `StreamedCommit` (its answer's chunk count known before the commit), and an emulator built with
+ * `makeChunkedStatefulEmulator` also takes `truncate-after-chunks` faults, decided where a status
+ * fault is (after the plan, before the commit); one that cannot take effect answers 500 and is not
+ * used up. In fail-closed mode, `constantRefusals` ledgers every refusal with constant text only
+ * (`/<unrecognised>`, no query, headers, or body), so request text reaches the ledger only once a
+ * route admitted the request.
+ *
  * @experimental
  */
 import { Data, Predicate, Result } from 'effect'
@@ -169,10 +181,17 @@ const FaultStatus = EmulatorResponseStatus.check(
 
 const FaultCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
-/** Optional fault filter; an omitted field matches every request. `path` ending in `*` is a prefix. */
+const ChunkCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+
+/**
+ * Optional fault filter; an omitted field matches every request. `path` ending in `*` is a prefix.
+ * `route` is compared with the request's ledger route: the template of its matched route, or the
+ * manifest variant its route admitted it as (see `StatefulRouteBinding.variants`).
+ */
 export const StatefulFaultMatch = Schema.Struct({
   method: Schema.optionalKey(Schema.String),
-  path: Schema.optionalKey(Schema.String)
+  path: Schema.optionalKey(Schema.String),
+  route: Schema.optionalKey(Schema.String)
 })
 
 /**
@@ -193,9 +212,30 @@ export const StatefulFault = Schema.Struct({
 
 export type StatefulFault = typeof StatefulFault.Type
 
-export type StatefulFaultState = {
+/**
+ * Opt-in (`makeChunkedStatefulEmulator`): send the first `chunks` body chunks of a streamed answer
+ * (`StreamedCommit`), then close the body cleanly (a truncated answer). It is decided where a
+ * status fault is, after the plan and before the commit; one that cannot take effect (the answer
+ * is not streamed, or has no more than `chunks` chunks) answers the 500 emulator error and is not
+ * used up, never a silent no-op.
+ */
+export const StatefulTruncateFault = Schema.Struct({
+  kind: Schema.Literal('truncate-after-chunks'),
+  chunks: ChunkCount,
+  match: Schema.optionalKey(StatefulFaultMatch),
+  count: Schema.optionalKey(FaultCount)
+})
+
+export type StatefulTruncateFault = typeof StatefulTruncateFault.Type
+
+/** A status fault, or (`makeChunkedStatefulEmulator`) a truncation fault. */
+export const StatefulStreamFault = Schema.Union([StatefulFault, StatefulTruncateFault])
+
+export type StatefulStreamFault = typeof StatefulStreamFault.Type
+
+export type StatefulFaultState<Fault = StatefulFault> = {
   readonly id: number
-  readonly fault: StatefulFault
+  readonly fault: Fault
   /** Remaining matching requests; `undefined` for an unlimited fault. */
   readonly remaining: number | undefined
   readonly applied: number
@@ -228,8 +268,8 @@ export type StatefulLedgerEntry = {
   readonly evidence: EmulatorEvidence | 'unknown-route'
   /** Why the request was answered 400 not-emulated. */
   readonly notEmulated?: string
-  /** Set when a fault answered the request. */
-  readonly fault?: 'status'
+  /** Set when a fault answered the request (`truncate-after-chunks` cut its streamed body). */
+  readonly fault?: 'status' | 'truncate-after-chunks'
   /** Set when the emulator could not build the response, or a route threw (answered 500). */
   readonly responseError?: string
 }
@@ -282,9 +322,40 @@ export type RunContext<Env> = {
 /** The writing part of an eligible request: applies its change and answers. */
 export type Commit = () => Response
 
+/** A streamed answer: its status, headers, and body chunks (sent one per pull). */
+export type StreamedAnswer = {
+  readonly status: number
+  readonly headers: Readonly<Record<string, string>>
+  /** The body chunks; none answers no body at all. */
+  readonly chunks: ReadonlyArray<string>
+}
+
+/**
+ * A commit whose answer is streamed in exactly `chunks` chunks. The count is known when the plan
+ * returns it, so a `truncate-after-chunks` fault (`makeChunkedStatefulEmulator`) is decided before
+ * anything is written; a commit whose answer has another count answers the 500 emulator error.
+ */
+export type StreamedCommit = {
+  readonly chunks: number
+  readonly commit: () => StreamedAnswer
+}
+
+export const streamedCommit = (chunks: number, commit: () => StreamedAnswer): StreamedCommit => ({
+  chunks,
+  commit
+})
+
+/** What a plan returns: a commit, a streamed commit, or not emulated. */
+export type Planned = Commit | StreamedCommit | NotEmulated
+
 /** An admitted request: its pure, state-reading eligibility check, returning the commit. */
 export type Admission<State, Env> = {
-  readonly plan: (state: State, context: RunContext<Env>) => Commit | NotEmulated
+  readonly plan: (state: State, context: RunContext<Env>) => Planned
+  /**
+   * The path of the manifest variant the request was admitted as (`StatefulRouteBinding.variants`):
+   * required when the route has variants, absent otherwise.
+   */
+  readonly variant?: string
 }
 
 export type RouteBody = 'none' | 'json' | 'bytes'
@@ -322,6 +393,16 @@ export type StatefulRouteBinding = {
    * reason is replaced by the uncheckable reason. Owned by the route, never derived from a request.
    */
   readonly viewRefusalReasons?: ReadonlyArray<string>
+  /**
+   * Opt-in: the manifest rows this route answers INSTEAD of its own (for example one row per
+   * JSON-RPC method on one HTTP endpoint, `{ method: 'RPC', path: '<origin><path>#<method>' }`).
+   * Each admission names its row (`Admission.variant`), which becomes the request's ledger route,
+   * its coverage row, and what a fault's `match.route` compares; a request refused before it is
+   * admitted keeps the route's own template. Every variant carries the route's evidence, and no
+   * variant path repeats another manifest row or a route template (checked at build). Omitted:
+   * the route is its own manifest row, as before.
+   */
+  readonly variants?: ReadonlyArray<EmulatorRouteEvidence>
 }
 
 export type StatefulRoute<State, Env> = EmulatorRouteEvidence &
@@ -340,7 +421,7 @@ export const statefulRoute = <State, Env, Input>(
   evidence: EmulatorRouteEvidence & StatefulRouteBinding,
   body: RouteBody,
   admit: (request: EmulatedRequest, env: Env) => Input | NotEmulated,
-  plan: (state: State, input: Input, context: RunContext<Env>) => Commit | NotEmulated
+  plan: (state: State, input: Input, context: RunContext<Env>) => Planned
 ): StatefulRoute<State, Env> => ({
   ...evidence,
   body,
@@ -359,8 +440,14 @@ export const routeEvidence = <State, Env>({
   params: _params,
   decodedViews: _decodedViews,
   viewRefusalReasons: _viewRefusalReasons,
+  variants: _variants,
   ...evidence
 }: StatefulRoute<State, Env>): EmulatorRouteEvidence => evidence
+
+/** The manifest rows of a route: its variants, or the route itself (`routeEvidence`). */
+export const routeManifest = <State, Env>(
+  route: StatefulRoute<State, Env>
+): ReadonlyArray<EmulatorRouteEvidence> => route.variants ?? [routeEvidence(route)]
 
 /** A percent-decoded path segment, or `undefined` for invalid percent-encoding. */
 export const decodeSegment = (segment: string): string | undefined => {
@@ -683,6 +770,15 @@ export type StatefulEmulatorConfig<State, Env> = {
    * digest, as before.
    */
   readonly bearerDigest?: (bearer: string, origin: string) => string
+  /**
+   * Opt-in, fail-closed mode only (checked at build): every refusal is ledgered with constant text
+   * only, like an unrecognised request (`/<unrecognised>`, a standard method or `<other>`, an
+   * empty query, no headers or body), keeping only its constant route (template or variant) and
+   * reason, so a ledger entry holds request text only once the route admitted the request. Route
+   * reasons must then be constants. Omitted: refusals keep the request's recorded fields, as
+   * before.
+   */
+  readonly constantRefusals?: boolean
   /** Clear runtime data (cursors) on reset and seed. */
   readonly clearRuntime: () => void
   /** Extra `/_emulate/state` fields (runtime data). */
@@ -692,7 +788,7 @@ export type StatefulEmulatorConfig<State, Env> = {
   readonly inputInvalid: (input: StatefulInputKind, reason: string) => Error
 }
 
-export type StatefulEmulatorApi<State, Seed> = {
+export type StatefulEmulatorApi<State, Seed, Fault = StatefulFault> = {
   /**
    * The fetch handler (API routes and `/_emulate/*`); a request arrives on the origin of its URL.
    * Never rejects.
@@ -709,8 +805,8 @@ export type StatefulEmulatorApi<State, Seed> = {
   }
   readonly faults: {
     /** Add a fault; throws the emulator's input-invalid error for an invalid fault. */
-    readonly add: (fault: StatefulFault) => StatefulFaultState
-    readonly list: () => ReadonlyArray<StatefulFaultState>
+    readonly add: (fault: Fault) => StatefulFaultState<Fault>
+    readonly list: () => ReadonlyArray<StatefulFaultState<Fault>>
     readonly clear: () => void
   }
   /** Restore the current seed and clear the ledger, faults, and runtime data (cursors). */
@@ -733,6 +829,13 @@ const decodeFault = Schema.decodeUnknownResult(StatefulFault, strict)
 
 const decodeFaultList = Schema.decodeUnknownResult(
   Schema.Union([StatefulFault, Schema.Struct({ faults: Schema.Array(StatefulFault) })]),
+  strict
+)
+
+const decodeStreamFault = Schema.decodeUnknownResult(StatefulStreamFault, strict)
+
+const decodeStreamFaultList = Schema.decodeUnknownResult(
+  Schema.Union([StatefulStreamFault, Schema.Struct({ faults: Schema.Array(StatefulStreamFault) })]),
   strict
 )
 
@@ -835,9 +938,15 @@ const missingBearerReason =
 const pathMatches = (pattern: string, path: string): boolean =>
   pattern.endsWith('*') ? path.startsWith(pattern.slice(0, -1)) : pattern === path
 
-const faultMatches = (fault: StatefulFault, method: string, path: string): boolean =>
+const faultMatches = (
+  fault: StatefulStreamFault,
+  method: string,
+  path: string,
+  route: string | undefined
+): boolean =>
   (fault.match?.method === undefined || fault.match.method.toUpperCase() === method) &&
-  (fault.match?.path === undefined || pathMatches(fault.match.path, path))
+  (fault.match?.path === undefined || pathMatches(fault.match.path, path)) &&
+  (fault.match?.route === undefined || fault.match.route === route)
 
 const faultBody = (status: number): Schema.Json => ({
   error: { type: 'emulator_fault', message: `Emulator fault: status ${status}.` }
@@ -876,23 +985,32 @@ type MutableLedgerEntry = {
   status: number
   evidence: EmulatorEvidence | 'unknown-route'
   notEmulated?: string
-  fault?: 'status'
+  fault?: 'status' | 'truncate-after-chunks'
   responseError?: string
 }
 
 type MutableFaultState = {
   readonly id: number
-  readonly fault: StatefulFault
+  readonly fault: StatefulStreamFault
   remaining: number | undefined
   applied: number
 }
+
+/** How the first matching fault shapes an eligible request's answer. */
+type FaultDecision =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'answer'; readonly response: Response }
+  | { readonly kind: 'truncate'; readonly after: number }
 
 type Job<State, Env> = {
   readonly admission: Admission<State, Env>
   /** Ledger sequence number of the request (for synthetic request ids). */
   readonly seq: number
-  /** Answers the first matching fault (consuming it), or `undefined` when none matches. */
-  readonly decideFault: () => Response | undefined
+  /**
+   * Decides the first matching fault for an answer of `chunks` streamed chunks (`undefined` for an
+   * answer that is not streamed), using it up when it applies.
+   */
+  readonly decideFault: (chunks: number | undefined) => FaultDecision
   /** Guarded credential values, scrubbed from a plan's not-emulated reason. */
   readonly secrets: ReadonlyArray<string>
   notEmulated?: string
@@ -949,22 +1067,79 @@ const recordedHeaderValue = (header: RecordedHeader, value: string): string => {
     : JSON.stringify(redactCredentialFields(parsed))
 }
 
+/** The request text a ledger entry records (constant in a `constantRefusals` refusal). */
+type RecordedFields = Pick<MutableLedgerEntry, 'method' | 'path' | 'query' | 'headers'> & {
+  body?: Schema.Json
+  bodyBytes?: number
+}
+
+/** `constantRefusals`: a refused request's entry keeps only constant text. */
+const blankEntry = (entry: MutableLedgerEntry) => {
+  entry.method = unrecognisedMethod(entry.method.toUpperCase())
+  entry.path = unrecognisedLedgerPath
+  entry.query = {}
+  entry.headers = {}
+  delete entry.body
+  delete entry.bodyBytes
+}
+
 const snapshotEntry = (entry: MutableLedgerEntry): StatefulLedgerEntry => ({
   ...entry,
   query: { ...entry.query },
   headers: { ...entry.headers }
 })
 
-const snapshotFault = (state: MutableFaultState): StatefulFaultState => ({ ...state })
+const snapshotFault = (state: MutableFaultState): StatefulFaultState<StatefulStreamFault> => ({
+  ...state
+})
+
+const isStreamedCommit = (planned: Commit | StreamedCommit): planned is StreamedCommit =>
+  !Predicate.isFunction(planned)
 
 /**
- * Build the wrapper over a core runtime. `createCore` receives the dispatch the core must run for
- * every request (its only route) and returns the runtime adapter.
+ * A streamed answer's body, strictly pull-driven (one chunk per pull), closed cleanly after
+ * `after` chunks when a truncation fault applies; no body at all for an answer without chunks.
  */
-export const makeStatefulEmulator = async <State, Env, Seed>(
+const streamedResponse = (answer: StreamedAnswer, after: number | undefined): Response => {
+  if (answer.chunks.length === 0) {
+    return new Response(null, { status: answer.status, headers: answer.headers })
+  }
+
+  const encoder = new TextEncoder()
+  const sent = after === undefined ? answer.chunks : answer.chunks.slice(0, after)
+  let next = 0
+
+  const body = new ReadableStream<Uint8Array>(
+    {
+      pull: controller => {
+        const chunk = sent[next]
+
+        if (chunk === undefined) {
+          controller.close()
+
+          return
+        }
+
+        next += 1
+        controller.enqueue(encoder.encode(chunk))
+      }
+    },
+    { highWaterMark: 0 }
+  )
+
+  return new Response(body, { status: answer.status, headers: answer.headers })
+}
+
+/**
+ * Build the wrapper over a core runtime (`makeStatefulEmulator`, or with truncation faults
+ * `makeChunkedStatefulEmulator`). `createCore` receives the dispatch the core must run for every
+ * request (its only route) and returns the runtime adapter.
+ */
+const buildStatefulEmulator = async <State, Env, Seed>(
   config: StatefulEmulatorConfig<State, Env>,
-  createCore: (dispatch: CoreDispatch<State>) => Promise<StatefulCore<State>>
-): Promise<StatefulEmulatorApi<State, Seed>> => {
+  createCore: (dispatch: CoreDispatch<State>) => Promise<StatefulCore<State>>,
+  chunkFaults: boolean
+): Promise<StatefulEmulatorApi<State, Seed, StatefulStreamFault>> => {
   const credentialHeader = config.recordHeaders.find(header => isCredentialHeaderName(header.name))
 
   if (credentialHeader !== undefined) {
@@ -973,6 +1148,36 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
   if (config.bearerDigest !== undefined && config.failClosed === undefined) {
     throw new Error('bearerDigest needs fail-closed mode (failClosed)')
+  }
+
+  if (config.constantRefusals === true && config.failClosed === undefined) {
+    throw new Error('constantRefusals needs fail-closed mode (failClosed)')
+  }
+
+  const constantRefusals = config.constantRefusals === true
+  const templates = new Set(config.routes.map(route => route.path))
+  const variantRows = new Set<string>()
+
+  for (const route of config.routes) {
+    if (route.variants === undefined) continue
+
+    if (route.variants.length === 0) {
+      throw new Error(`route ${route.method} ${route.path} has an empty variants list`)
+    }
+
+    for (const variant of route.variants) {
+      const where = `variant ${variant.method} ${variant.path} of ${route.method} ${route.path}`
+
+      if (variant.evidence !== route.evidence) {
+        throw new Error(`${where} must carry its route's evidence`)
+      }
+
+      if (templates.has(variant.path) || variantRows.has(variant.path)) {
+        throw new Error(`${where} repeats a route template or another variant path`)
+      }
+
+      variantRows.add(variant.path)
+    }
   }
 
   if (config.failClosed !== undefined) {
@@ -988,7 +1193,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
   }
 
   const match = routeMatcher(config.routes)
-  const manifest = config.routes.map(routeEvidence)
+  const manifest = config.routes.flatMap(routeManifest)
   const jobs = new Map<number, Job<State, Env>>()
   let nextJobId = 1
 
@@ -1009,7 +1214,19 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
         return notEmulatedResponse(reason)
       }
 
-      return job.decideFault() ?? planned()
+      const streamed = isStreamedCommit(planned)
+      const decision = job.decideFault(streamed ? planned.chunks : undefined)
+
+      if (decision.kind === 'answer') return decision.response
+
+      if (!streamed) return planned()
+
+      const answer = planned.commit()
+
+      // The plan declared the chunk count a truncation fault was decided against.
+      if (answer.chunks.length !== planned.chunks) return handlerFailedResponse()
+
+      return streamedResponse(answer, decision.kind === 'truncate' ? decision.after : undefined)
     } catch {
       return handlerFailedResponse()
     }
@@ -1029,8 +1246,8 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     nextSeq = 1
   }
 
-  const addFault = (input: unknown): StatefulFaultState | string => {
-    const decoded = decodeFault(input)
+  const addFault = (input: unknown): StatefulFaultState<StatefulStreamFault> | string => {
+    const decoded = chunkFaults ? decodeStreamFault(input) : decodeFault(input)
 
     if (Result.isFailure(decoded)) {
       return issueMessage(decoded.failure.issue)
@@ -1048,32 +1265,40 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     return snapshotFault(state)
   }
 
-  const takeFault = (method: string, path: string): MutableFaultState | undefined =>
+  const takeFault = (
+    method: string,
+    path: string,
+    route: string | undefined
+  ): MutableFaultState | undefined =>
     faultStates.find(
       state =>
         (state.remaining === undefined || state.remaining > 0) &&
-        faultMatches(state.fault, method, path)
+        faultMatches(state.fault, method, path, route)
     )
 
+  const spend = (state: MutableFaultState) => {
+    state.applied += 1
+
+    if (state.remaining !== undefined) {
+      state.remaining -= 1
+    }
+  }
+
   /** Build the fault's response first: a response that cannot be built must not consume it. */
-  const applyFault = (state: MutableFaultState): Response => {
-    const headers = new Headers(state.fault.headers ?? {})
-    const body = state.fault.body ?? faultBody(state.fault.status)
+  const applyFault = (state: MutableFaultState, fault: StatefulFault): Response => {
+    const headers = new Headers(fault.headers ?? {})
+    const body = fault.body ?? faultBody(fault.status)
 
     if (!headers.has('content-type')) {
       headers.set('content-type', Predicate.isString(body) ? 'text/plain' : 'application/json')
     }
 
     const response = new Response(Predicate.isString(body) ? body : JSON.stringify(body), {
-      status: state.fault.status,
+      status: fault.status,
       headers
     })
 
-    state.applied += 1
-
-    if (state.remaining !== undefined) {
-      state.remaining -= 1
-    }
+    spend(state)
 
     return response
   }
@@ -1103,7 +1328,9 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     routes: manifest.map(route => ({
       ...route,
       requests: entries.filter(
-        entry => entry.route === route.path && entry.method.toUpperCase() === route.method
+        entry =>
+          entry.route === route.path &&
+          (variantRows.has(route.path) || entry.method.toUpperCase() === route.method)
       ).length
     })),
     unknownRouteRequests: entries.filter(entry => entry.evidence === 'unknown-route').length,
@@ -1195,7 +1422,8 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     entry: MutableLedgerEntry,
     matched: MatchedRoute<State, Env>,
     secrets: ReadonlyArray<string>,
-    arrivedOn: string
+    arrivedOn: string,
+    recorded: RecordedFields
   ): Promise<Response> => {
     const header = (name: string): string | undefined =>
       isCredentialHeaderName(name) ? undefined : (request.headers.get(name) ?? undefined)
@@ -1245,8 +1473,12 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
         if (parsed === undefined) return refused('the request body is not valid JSON')
 
-        // Redacted before it is stored: a refused request's body stays in the ledger too.
-        entry.body = redactCredentialFields(parsed)
+        // Redacted before it is stored: a refused request's body stays in the ledger too (with
+        // `constantRefusals`, only once the route admits the request).
+        recorded.body = redactCredentialFields(parsed)
+
+        if (!constantRefusals) entry.body = recorded.body
+
         json = parsed
 
         break
@@ -1257,7 +1489,9 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
         if (bytes === undefined) return refused('the request body is unreadable')
 
-        entry.bodyBytes = bytes.byteLength
+        recorded.bodyBytes = bytes.byteLength
+
+        if (!constantRefusals) entry.bodyBytes = recorded.bodyBytes
 
         break
       }
@@ -1301,6 +1535,32 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
     if (isNotEmulated(admitted)) return refused(admitted.reason)
 
+    // A route with variants admits a request as exactly one of them; a route without none.
+    const variants = matched.route.variants
+    const variant = admitted.variant
+
+    if (
+      variants === undefined ? variant !== undefined : !variants.some(row => row.path === variant)
+    ) {
+      entry.responseError = 'the route admitted the request as no row of its manifest'
+
+      return emulatorError(500, 'the emulator could not build the response')
+    }
+
+    if (variant !== undefined) entry.route = variant
+
+    // `constantRefusals`: the request text is recorded only now that the route admitted it.
+    if (constantRefusals) {
+      entry.method = recorded.method
+      entry.path = recorded.path
+      entry.query = recorded.query
+      entry.headers = recorded.headers
+
+      if (recorded.body !== undefined) entry.body = recorded.body
+
+      if (recorded.bodyBytes !== undefined) entry.bodyBytes = recorded.bodyBytes
+    }
+
     const method = request.method.toUpperCase()
     const jobId = nextJobId++
 
@@ -1308,16 +1568,34 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       admission: admitted,
       seq: entry.seq,
       secrets,
-      decideFault: () => {
-        const fault = takeFault(method, url.pathname)
+      decideFault: chunks => {
+        const state = takeFault(method, url.pathname, entry.route)
 
-        if (fault === undefined) return undefined
+        if (state === undefined) return { kind: 'none' }
 
-        const response = applyFault(fault)
+        const fault = state.fault
 
-        entry.fault = 'status'
+        if (fault.kind === 'status') {
+          const response = applyFault(state, fault)
 
-        return response
+          entry.fault = 'status'
+
+          return { kind: 'answer', response }
+        }
+
+        // A truncation that cannot take effect answers 500 and is not used up (never a no-op).
+        if (chunks === undefined || fault.chunks >= chunks) {
+          entry.responseError =
+            `emulator fault cannot apply: truncate-after-chunks after ${fault.chunks} chunk(s) ` +
+            'needs a streamed answer of more chunks'
+
+          return { kind: 'answer', response: emulatorError(500, 'emulator fault cannot apply') }
+        }
+
+        spend(state)
+        entry.fault = 'truncate-after-chunks'
+
+        return { kind: 'truncate', after: fault.chunks }
       }
     }
 
@@ -1337,7 +1615,11 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
         return emulatorError(500, 'the emulator could not build the response')
       }
 
-      if (job.notEmulated !== undefined) entry.notEmulated = job.notEmulated
+      if (job.notEmulated !== undefined) {
+        entry.notEmulated = job.notEmulated
+
+        if (constantRefusals) blankEntry(entry)
+      }
 
       return response
     } finally {
@@ -1419,14 +1701,11 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
           )
         : recordedQueryPairs(url.searchParams, scrub)
 
-    const entry: MutableLedgerEntry = {
-      seq: nextSeq++,
+    const recorded: RecordedFields = {
       method: scrub(request.method),
       path: scrub(url.pathname),
       query,
-      headers: {},
-      status: 0,
-      evidence: matched?.route.evidence ?? 'unknown-route'
+      headers: {}
     }
 
     for (const header of config.recordHeaders) {
@@ -1434,13 +1713,36 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
       if (value === null) continue
 
-      const recorded = recordedHeaderValue(header, value)
+      const text = recordedHeaderValue(header, value)
 
       // Fail-closed mode recognises a JSON-looking value whatever the header's declared format.
-      entry.headers[header.name] = scrub(
-        failClosed === undefined ? recorded : recordedJsonLooking(recorded)
+      recorded.headers[header.name] = scrub(
+        failClosed === undefined ? text : recordedJsonLooking(text)
       )
     }
+
+    const evidence = matched?.route.evidence ?? 'unknown-route'
+
+    // `constantRefusals`: constant text until the route admits the request.
+    const entry: MutableLedgerEntry = constantRefusals
+      ? {
+          seq: nextSeq++,
+          method: unrecognisedMethod(request.method.toUpperCase()),
+          path: unrecognisedLedgerPath,
+          query: {},
+          headers: {},
+          status: 0,
+          evidence
+        }
+      : {
+          seq: nextSeq++,
+          method: recorded.method,
+          path: recorded.path,
+          query: recorded.query,
+          headers: { ...recorded.headers },
+          status: 0,
+          evidence
+        }
 
     entries.push(entry)
 
@@ -1463,11 +1765,13 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
     // Error recovery still answers through the route: the fallback 500 is evidence-tagged and
     // the ledger records the status actually sent.
-    const response = await routed(request, url, entry, matched, secrets, arrivedOn).catch(() => {
-      entry.responseError = 'the emulator could not build or produce the response'
+    const response = await routed(request, url, entry, matched, secrets, arrivedOn, recorded).catch(
+      () => {
+        entry.responseError = 'the emulator could not build or produce the response'
 
-      return emulatorError(500, 'the emulator could not build the response')
-    })
+        return emulatorError(500, 'the emulator could not build the response')
+      }
+    )
 
     const tagged = withEvidence(response, matched.route.evidence)
 
@@ -1519,7 +1823,9 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
           return allow('GET, POST, DELETE')
         }
 
-        const decoded = decodeFaultList(await jsonBody())
+        const input = await jsonBody()
+
+        const decoded = chunkFaults ? decodeStreamFaultList(input) : decodeFaultList(input)
 
         if (Result.isFailure(decoded)) {
           return emulatorError(400, `invalid fault: ${issueMessage(decoded.failure.issue)}`)
@@ -1648,6 +1954,53 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     }
   }
 }
+
+/** The fault states of an emulator without truncation faults (its decoder takes status faults). */
+const statusFaultStates = (
+  states: ReadonlyArray<StatefulFaultState<StatefulStreamFault>>
+): ReadonlyArray<StatefulFaultState> =>
+  states.flatMap(state => {
+    const fault = state.fault
+
+    return fault.kind === 'status' ? [{ ...state, fault }] : []
+  })
+
+/**
+ * Build the wrapper over a core runtime. `createCore` receives the dispatch the core must run for
+ * every request (its only route) and returns the runtime adapter. Faults are status faults only.
+ */
+export const makeStatefulEmulator = async <State, Env, Seed>(
+  config: StatefulEmulatorConfig<State, Env>,
+  createCore: (dispatch: CoreDispatch<State>) => Promise<StatefulCore<State>>
+): Promise<StatefulEmulatorApi<State, Seed>> => {
+  const api = await buildStatefulEmulator<State, Env, Seed>(config, createCore, false)
+
+  return {
+    ...api,
+    faults: {
+      add: fault => {
+        const [added] = statusFaultStates([api.faults.add(fault)])
+
+        if (added === undefined) throw config.inputInvalid('fault', 'a status fault is required')
+
+        return added
+      },
+      list: () => statusFaultStates(api.faults.list()),
+      clear: api.faults.clear
+    }
+  }
+}
+
+/**
+ * `makeStatefulEmulator` that also takes `truncate-after-chunks` faults
+ * (`StatefulTruncateFault`), which cut a streamed answer (`StreamedCommit`). Opt-in: the other
+ * emulators keep status faults only.
+ */
+export const makeChunkedStatefulEmulator = <State, Env, Seed>(
+  config: StatefulEmulatorConfig<State, Env>,
+  createCore: (dispatch: CoreDispatch<State>) => Promise<StatefulCore<State>>
+): Promise<StatefulEmulatorApi<State, Seed, StatefulStreamFault>> =>
+  buildStatefulEmulator<State, Env, Seed>(config, createCore, true)
 
 /** Throws `inputInvalid('option', ...)` unless every drill knob is a known boolean (or absent). */
 export const checkBooleanDrills = (

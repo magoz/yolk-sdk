@@ -14,12 +14,14 @@ import { notionConformanceFixtures } from '../../packages/connectors/src/notion/
 import { githubConformanceFixtures } from '../../packages/connectors/src/github/conformance/index.ts'
 import { telegramConformanceFixtures } from '../../packages/connectors/src/telegram/conformance/index.ts'
 import { todoistConformanceFixtures } from '../../packages/connectors/src/todoist/conformance/index.ts'
+import { mcpConformanceFixtures } from '../../packages/mcp/src/conformance/index.ts'
 import { dropboxEmulatorRoutes } from '../../packages/emulators/src/dropbox.ts'
 import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
 import { r2EmulatorRoutes } from '../../packages/emulators/src/r2.ts'
 import { fortnoxEmulatorRoutes } from '../../packages/emulators/src/fortnox.ts'
 import { googleEmulatorRoutes } from '../../packages/emulators/src/google.ts'
 import { linkedInSearchEmulatorRoutes } from '../../packages/emulators/src/linkedin-search.ts'
+import { mcpEmulatorRoutes } from '../../packages/emulators/src/mcp.ts'
 import { microsoftEmulatorRoutes } from '../../packages/emulators/src/microsoft.ts'
 import { notionEmulatorRoutes } from '../../packages/emulators/src/notion.ts'
 import { githubEmulatorRoutes } from '../../packages/emulators/src/github.ts'
@@ -223,7 +225,8 @@ describe('checkEmulatorEvidence', () => {
     ...telegramConformanceFixtures,
     ...githubConformanceFixtures,
     ...googleConformanceFixtures,
-    ...linkedInSearchConformanceFixtures
+    ...linkedInSearchConformanceFixtures,
+    ...mcpConformanceFixtures
   ]
 
   const hasVerifiedFixture = (caseId: string) =>
@@ -280,7 +283,8 @@ describe('checkEmulatorEvidence', () => {
     ['Telegram', telegramConformanceFixtures],
     ['GitHub', githubConformanceFixtures],
     ['Google', googleConformanceFixtures],
-    ['LinkedIn search', linkedInSearchConformanceFixtures]
+    ['LinkedIn search', linkedInSearchConformanceFixtures],
+    ['MCP', mcpConformanceFixtures]
   ])(
     'fails unbacked-verified for a verified route citing only still-unverified repo cases (%s)',
     (_name, fixtures) => {
@@ -585,6 +589,7 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('github.issues.lifecycle-close')).toBe(true)
     expect(knownConformanceCaseIds.has('google.gmail.send-practice-address')).toBe(true)
     expect(knownConformanceCaseIds.has('linkedin-search.errors.profile-not-found')).toBe(true)
+    expect(knownConformanceCaseIds.has('mcp.auth.rejected')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
       'openai',
@@ -605,7 +610,8 @@ describe('repo emulator manifests', () => {
       'telegram',
       'github',
       'google',
-      'linkedin-search'
+      'linkedin-search',
+      'mcp'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -649,6 +655,21 @@ describe('repo emulator manifests', () => {
           route.caseIds.map(caseId => repoFixtureEvidenceByCase.get(caseId)),
           `${name} ${route.path}`
         ).toEqual(route.caseIds.map(() => ['unverified']))
+      }
+    }
+
+    // Each MCP case has a modern and a legacy fixture, both unverified.
+    expect(mcpEmulatorRoutes.length).toBeGreaterThan(0)
+
+    for (const route of mcpEmulatorRoutes) {
+      expect(route.evidence, route.path).toBe('unverified')
+
+      for (const caseId of route.caseIds) {
+        expect(repoFixtureEvidenceByCase.get(caseId), `${route.path} ${caseId}`).toEqual(
+          mcpConformanceFixtures
+            .filter(fixture => fixture.caseId === caseId)
+            .map(() => 'unverified')
+        )
       }
     }
 
@@ -741,10 +762,12 @@ describe('repo emulator manifests', () => {
       'PATCH /drive/v3/files/{fileId}',
       'DELETE /drive/v3/files/{fileId}'
     ])
-    // Fixture-only: every Todoist, Telegram, GitHub, Google, and LinkedIn search route cites a
-    // case (no uncited route). Every LinkedIn search route is a read: no pending entry.
+    // Fixture-only: every Todoist, Telegram, GitHub, Google, LinkedIn search, and MCP route cites a
+    // case (no uncited route). Every LinkedIn search and MCP row is a read: no pending entry.
     expect(linkedInSearchEmulatorRoutes.filter(route => route.write)).toEqual([])
     expect(repoPending.entries.filter(entry => entry.manifest === 'linkedin-search')).toEqual([])
+    expect(mcpEmulatorRoutes.filter(route => route.write)).toEqual([])
+    expect(repoPending.entries.filter(entry => entry.manifest === 'mcp')).toEqual([])
     expect(
       report.findings
         .filter(
@@ -753,7 +776,8 @@ describe('repo emulator manifests', () => {
               finding.manifest === 'telegram' ||
               finding.manifest === 'github' ||
               finding.manifest === 'google' ||
-              finding.manifest === 'linkedin-search') &&
+              finding.manifest === 'linkedin-search' ||
+              finding.manifest === 'mcp') &&
             finding.kind === 'no-case-ids'
         )
         .map(finding => finding.route)
@@ -1064,6 +1088,10 @@ describe('repo emulator manifests', () => {
       'WARN  linkedin-search  GET /api/v2/profile  unverified evidence (3 case(s))'
     )
     expect(result.stdout).not.toContain('linkedin-search  POST /search  PENDING')
+    expect(result.stdout).toContain(
+      'WARN  mcp  RPC https://mcp.example.test/legacy/mcp#tools/call  unverified evidence (3 case(s))'
+    )
+    expect(result.stdout).not.toMatch(/mcp {2}\S+ \S+ {2}PENDING/)
 
     // The PENDING count comes from the pending file, not a hard-coded number.
     const pendingLine = result.stdout.split('\n').find(line => line.startsWith('PENDING: '))

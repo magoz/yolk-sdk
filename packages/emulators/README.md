@@ -17,11 +17,12 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim, the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
-conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, Google, and LinkedIn search
-emulators are stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion
+conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and
+MCP emulators are stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion
 `/v1` routes, the Todoist API v1 routes, the Telegram Bot API routes, the GitHub REST routes, the
-Gmail, Calendar, and Drive routes, and the Exa and Enrich Layer routes their conformance cases use:
-they answer only what the fixtures show and refuse everything else with a 400 not-emulated.
+Gmail, Calendar, and Drive routes, the Exa and Enrich Layer routes, and the two synthetic MCP
+servers their conformance cases use: they answer only what the fixtures show and refuse everything
+else with a 400 not-emulated.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -56,6 +57,7 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/github`          | `makeGithubEmulator`, `githubEmulatorRoutes`, seed and fault schemas (Node only)                                    |
 | `@yolk-sdk/emulators/google`          | `makeGoogleEmulator`, `googleEmulatorRoutes`, seed and fault schemas (Gmail, Calendar, Drive; Node only)            |
 | `@yolk-sdk/emulators/linkedin-search` | `makeLinkedInSearchEmulator`, `linkedInSearchEmulatorRoutes`, seed and fault schemas (Exa, Enrich Layer; Node only) |
+| `@yolk-sdk/emulators/mcp`             | `makeMcpEmulator`, `mcpEmulatorRoutes`, seed and fault schemas (synthetic MCP servers; Node only)                   |
 
 ## Routing
 
@@ -1882,21 +1884,145 @@ profileAnswersEmptyObject, emailAnswerOmitsEmail, exaUnauthorizedAs5xx,
 enrichLayerUnauthorizedAs2xx, absentProfileAs2xx }` (booleans) each make the emulator disagree with
 exactly one LinkedIn search case, only to prove that case catches it.
 
+## MCP emulator
+
+> **Node only.** `@yolk-sdk/emulators/mcp` runs on the same pinned `@emulators/core` runtime,
+> loaded lazily by `makeMcpEmulator`, so importing the subpath has no side effects.
+
+`await makeMcpEmulator(options?)` returns
+`{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has its own
+state and session counter; `await close()` when done. It emulates the two synthetic servers of the
+`@yolk-sdk/mcp/conformance` fixtures, so `@yolk-sdk/mcp/client` and the MCP conformance cases run
+unchanged against it: profile `synthetic-modern` on `https://mcp.example.test/modern/mcp`
+(stateless `2026-07-28`, JSON answers) and profile `synthetic-legacy` on
+`https://mcp.example.test/legacy/mcp` (an `initialize` handshake, sessions, SSE answers). Both
+answer only on that origin (`mcpEmulatorOrigin`); behind a loopback rewrite, serve
+`fetchOn(mcpEmulatorOrigin)`:
+
+```ts
+import { makeMcpEmulator, mcpEmulatorOrigin } from '@yolk-sdk/emulators/mcp'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const mcp = await makeMcpEmulator()
+
+const httpLayer = InProcessHttpClient.layer([EmulatorRoute.handler(mcpEmulatorOrigin, mcp.fetch)])
+// Remote server config: { type: 'remote', url: 'https://mcp.example.test/modern/mcp',
+// headers: { authorization: 'Bearer <a synthetic token>' } }
+// ...run the code under test, then:
+await mcp.close()
+```
+
+Routes (`mcpEmulatorRoutes`: one `RPC <origin><path>#<method>` row per recorded JSON-RPC method of
+each profile, plus the legacy `GET` row; every row is a read, and every request needs
+`Authorization: Bearer <token>`, a recognisable bearer):
+
+| Row                                     | Answer (the recorded bytes)                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------- |
+| `/modern/mcp#server/discover`           | The modern discover result                                                      |
+| `/modern/mcp#tools/list`                | The one-page listing, or the paged listing's pages (seed `two-pages`)           |
+| `/modern/mcp#tools/call`                | The read result, the `isError` tool result, or the absent tool's 400 error      |
+| `/legacy/mcp#server/discover`           | The recorded 400 JSON-RPC error that makes the client fall back to `initialize` |
+| `/legacy/mcp#initialize`                | The SSE `initialize` result with a minted `mcp-session-id`                      |
+| `/legacy/mcp#notifications/initialized` | 202, no body, on an initializing session (which becomes ready)                  |
+| `/legacy/mcp#tools/list`                | The SSE listing, on a ready session                                             |
+| `/legacy/mcp#tools/call`                | The three recorded SSE call answers, on a ready session                         |
+| `GET /legacy/mcp`                       | 405, no body, on a ready session                                                |
+| `/{modern,legacy}/mcp#server/discover`  | With the reserved invalid credential: the recorded 401, byte for byte           |
+
+Every answer comes from a fixture, byte for byte (the copies live in `mcpEmulatorFixtures`), with
+exactly three request-derived or minted substitutions:
+
+- **The request id**, at exactly the recorded place: the top-level `id` of a JSON answer, or the
+  `id` of the SSE response event's payload. Notification events and SSE `id:` lines stay byte for
+  byte, and an answer that does not carry the recorded request id (the legacy era probe's
+  `id: null` error, the 401) is unchanged.
+- **The session id.** `initialize` mints `yolk-emu-session-<n>`, `n` from a counter that never
+  resets (reset, seed, and a ledger clear never rewind it), a form no seed can hold (seeds hold no
+  sessions); the SSE answers carry the session's id in the recorded `mcp-session-id` header. At most
+  256 sessions are held (`mcpEmulatorSessionCap`): another `initialize` is refused before any
+  fault. `reset()` and `seed()` clear the sessions.
+- **The cursor.** With `seed: { modernListing: 'two-pages' }`, the first page issues the recorded
+  `synthetic-cursor-0001` in the generation that first issues it and `<cursor>.g<generation>` after
+  a reset or seed (each starts a generation); the second page answers only the cursor issued in the
+  current generation.
+
+**Fail closed: the shared rule, and the reserved credential seen only as a digest.** MCP follows the
+shared fail-closed rule of the stateful wrapper, exactly as the GitHub emulator states it above, with
+its opt-in constant refusals: every refusal, by shape or by state, is ledgered with constant text
+only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no headers or body, a
+constant reason, and the route template or row), so request text reaches the ledger only once a
+request equals a recorded one. A recognised request that repeats its bearer in the path, the query,
+the recorded headers (`accept`, `content-type`, `mcp-method`, `mcp-name`, `mcp-protocol-version`,
+`mcp-session-id`), or the body, through any depth of percent-encoding or JSON escaping, is refused
+the same way. The bearer is never stored, ledgered, or echoed: routes see only its digest (the
+wrapper's opt-in `bearerDigest`: SHA-256 of the origin, a space, and the bearer), which they compare
+only with the digest of the public reserved invalid credential
+`yolk-conformance-invalid-credential-0000` (`mcpEmulatorReservedInvalidCredential`, itself a
+recognisable bearer) to answer the recorded 401 on the era probe.
+
+- **Request-shape latitude (`/mcp`, the only accepted deviations).** Any bearer value in the RFC
+  6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
+  character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside
+  `[0-9.eE+-]`, that occurs nowhere else in the request (never stored or ledgered; only its digest
+  is compared, with the digest of the public reserved invalid credential
+  `yolk-conformance-invalid-credential-0000`, which answers the recorded 401 on the era probe);
+  extra request headers other than the MCP headers the fixtures record; JSON key order; any JSON-RPC
+  request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters where the
+  recording has an id; any non-empty `name` and `version` (and no other key) in the `_meta` client
+  info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted
+  since the last reset or seed where the recording sends `mcp-session-id` (initializing for
+  `notifications/initialized`, ready otherwise); and, with the seed's `two-pages` listing, the
+  cursor this emulator issued in the current generation on the second page. `Authorization` must be
+  exactly `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any
+  query, other HTTP methods such as `DELETE` or a `GET` on the modern profile, JSON-RPC methods no
+  fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches and
+  client-sent responses, other members, a `null`, negative, or fractional id, other params (other
+  tools, arguments, protocol versions, or capabilities, extra client-info keys, and a legacy
+  `initialize` client info other than the recorded one), the MCP headers `accept`, `content-type`,
+  `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id` other than the recorded
+  values or present where none is recorded, `mcp-session-id` missing where recorded or present where
+  not, an unknown session or one in the wrong phase, a cursor not issued in the current generation,
+  the reserved invalid credential on anything but the era probe, and a bearer repeated anywhere in
+  the request) is not emulated.
+
+Not emulated (a constant-text 400 that writes nothing and uses up no fault): `DELETE` (the client
+never sends it), `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`, `tasks/*`,
+JSON-RPC batches and client-sent responses, cursors this emulator did not issue, any other tool or
+arguments, any other origin, path, or query, and a missing `Authorization` (no fixture records the
+answer to one). A closed emulator answers 503; a route that throws answers an evidence-tagged 500
+with `responseError` in the ledger.
+
+Faults are status faults (400-599) and `truncate-after-chunks` faults (`McpFault`), decided only
+after a request is admitted and planned; `match.route` selects one manifest row (for example
+`https://mcp.example.test/legacy/mcp#tools/list`). An SSE answer has two chunks (the notification,
+then the response) and a JSON answer one, so truncating an SSE answer after one chunk ends the
+stream before its response: the client fails the operation as an `McpError` at its timeout, never
+hangs. A truncation that cannot apply (a 202 or 405 has no chunk) answers 500 and is not used up.
+The ledger, coverage (per row), recovery, and the control plane behave as in the Dropbox emulator;
+`/_emulate/state` also reports `nextSession`, `cursorGeneration`, and `issuedCursor`.
+
+**Drill knobs (tests only).** `drills: { discoverCarriesErrorResponse, discoverWithoutResultType,
+sessionIdNotVisibleAscii, discoverAnsweredTwice, writeToolMarkedReadOnly, readCallAnswersToolError,
+invalidCallAnswersRpcError, absentCallAnswersResult, unauthorizedWithoutChallenge }` (booleans) each
+make the emulator disagree with exactly one MCP conformance case, only to prove that case catches
+it.
+
 ## Evidence
 
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
 `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
 `emailEmulatorRoutes`, `r2EmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`,
 `dropboxEmulatorRoutes`, `notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`,
-`githubEmulatorRoutes`, `googleEmulatorRoutes`, and `linkedInSearchEmulatorRoutes` list every
+`githubEmulatorRoutes`, `googleEmulatorRoutes`, `linkedInSearchEmulatorRoutes`, and
+`mcpEmulatorRoutes` (one `RPC <origin><path>#<method>` row per JSON-RPC method) list every
 emulated route with `method`, `path`, `kind`, `write`, the conformance `caseIds` it follows,
 `evidence` (`verified` or `unverified`), and `observedAt`. Every response from an unverified route
 of a fetch-handler emulator carries `x-emulator-evidence: unverified`; the email and R2 emulators
 record evidence on each ledger entry instead, since their plain-JSON replies carry no header. The
 Gateway route is `verified` (`observedAt: '2026-09-30'`): its wire shapes are checked against the
 verified live recordings. Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage
-routes, email, R2, Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and
-LinkedIn search) is unverified, like the synthetic fixtures it follows.
+routes, email, R2, Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google,
+LinkedIn search, and MCP) is unverified, like the synthetic fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes
@@ -1912,10 +2038,11 @@ R2 emulator's one write route, `PORT R2ObjectClient.put`, is held in the same li
 owner-approved live run against a practice bucket, through a host `R2ObjectClient`
 implementation, verifies it.
 
-All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and LinkedIn search
-routes are currently `unverified` (no live recording yet), including four Fortnox, eleven Microsoft,
-five Dropbox, two Notion, five Todoist, one Telegram, six GitHub, and fifteen Google connector write
-routes (the three LinkedIn search routes are reads, so none of them needs an entry). Until an
+All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and
+MCP routes are currently `unverified` (no live recording yet), including four Fortnox, eleven
+Microsoft, five Dropbox, two Notion, five Todoist, one Telegram, six GitHub, and fifteen Google
+connector write routes (the three LinkedIn search routes and the nine MCP rows are reads, so none of
+them needs an entry). Until an
 owner-approved live run verifies them, the repository lists them in a visible, time-bounded
 allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry date): the
 check reports them as PENDING warnings until that date and fails again after it.
@@ -1940,5 +2067,5 @@ await server.close()
 ## License
 
 `@yolk-sdk/emulators` is MIT. The Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub,
-and Google emulators depend on (does not vendor or bundle) the Apache-2.0
+Google, LinkedIn search, and MCP emulators depend on (does not vendor or bundle) the Apache-2.0
 [`@emulators/core`](https://github.com/vercel-labs/emulate) package, which ships no `NOTICE` file.

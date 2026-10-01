@@ -18,7 +18,7 @@
  *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat,
  *   Codex Responses, Anthropic Messages, Grok Responses, OpenCode Go, subscription-usage (Claude,
  *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google,
- *   LinkedIn search, email port, and R2 port fixtures).
+ *   LinkedIn search, MCP, email port, and R2 port fixtures).
  * - WARN: a route's evidence is `unverified` (fetch-handler emulators tag their responses
  *   `x-emulator-evidence: unverified`; the email and R2 port emulators tag their ledger entries).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
@@ -87,6 +87,8 @@ import { telegramConformanceCases } from '../packages/connectors/src/telegram/co
 import { telegramConformanceFixtures } from '../packages/connectors/src/telegram/conformance/index.ts'
 import { todoistConformanceCases } from '../packages/connectors/src/todoist/conformance/cases.ts'
 import { todoistConformanceFixtures } from '../packages/connectors/src/todoist/conformance/index.ts'
+import { mcpConformanceCases } from '../packages/mcp/src/conformance/cases.ts'
+import { mcpConformanceFixtures } from '../packages/mcp/src/conformance/index.ts'
 import {
   anthropicEmulatorRoutes,
   anthropicSubscriptionUsageEmulatorRoutes
@@ -102,6 +104,7 @@ import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
 import { githubEmulatorRoutes } from '../packages/emulators/src/github.ts'
 import { googleEmulatorRoutes } from '../packages/emulators/src/google.ts'
 import { linkedInSearchEmulatorRoutes } from '../packages/emulators/src/linkedin-search.ts'
+import { mcpEmulatorRoutes } from '../packages/emulators/src/mcp.ts'
 import { microsoftEmulatorRoutes } from '../packages/emulators/src/microsoft.ts'
 import { notionEmulatorRoutes } from '../packages/emulators/src/notion.ts'
 import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
@@ -209,7 +212,8 @@ export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'telegram', routes: telegramEmulatorRoutes },
   { name: 'github', routes: githubEmulatorRoutes },
   { name: 'google', routes: googleEmulatorRoutes },
-  { name: 'linkedin-search', routes: linkedInSearchEmulatorRoutes }
+  { name: 'linkedin-search', routes: linkedInSearchEmulatorRoutes },
+  { name: 'mcp', routes: mcpEmulatorRoutes }
 ]
 
 /** The repo's pending-evidence allowlist. */
@@ -333,6 +337,7 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...githubConformanceCases.map(testCase => testCase.id),
   ...googleConformanceCases.map(testCase => testCase.id),
   ...linkedInSearchConformanceCases.map(testCase => testCase.id),
+  ...mcpConformanceCases.map(testCase => testCase.id),
   ...emailConformanceCases.map(testCase => testCase.id),
   ...r2ConformanceCases.map(testCase => testCase.id)
 ])
@@ -374,8 +379,8 @@ export const portFixtureEvidence = (
 /**
  * Evidence of every committed Gateway, OpenAI chat, Codex Responses, Anthropic Messages, Grok
  * Responses, OpenCode Go, subscription-usage (Claude, Codex, Grok), Fortnox, Microsoft, Dropbox,
- * Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, email port, and R2 port fixture, by
- * case id.
+ * Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, MCP, email port, and R2 port
+ * fixture, by case id.
  */
 export const repoFixtureEvidenceByCase: ReadonlyMap<
   string,
@@ -399,6 +404,7 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ...githubConformanceFixtures,
   ...googleConformanceFixtures,
   ...linkedInSearchConformanceFixtures,
+  ...mcpConformanceFixtures,
   ...portFixtureEvidence(emailConformanceCases, emailConformanceFixtures),
   ...portFixtureEvidence(r2ConformanceCases, r2ConformanceFixtures)
 ])

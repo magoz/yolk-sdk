@@ -4,8 +4,12 @@
  * no `g` or `y` flag), the fail-closed mode (constant-text ledger entries for unrecognised
  * requests and Authorization headers, every parameter patterned at build, the bearer guarded as a
  * secret in queries, recorded headers, bodies, a route's decoded body views, and plan-time
- * reasons), the opt-in per-origin bearer digest (`bearerDigest`), and that an emulator without
- * `failClosed` keeps the earlier behaviour (the Dropbox and Notion suites cover it fully).
+ * reasons), the opt-in per-origin bearer digest (`bearerDigest`), route variants (manifest rows,
+ * ledger routes, coverage, `match.route`, build checks), truncation faults on streamed commits
+ * (`makeChunkedStatefulEmulator`; one that cannot apply answers 500 unused), constant refusals
+ * (`constantRefusals`: no request text before admission, a match-all fault unused), and that an
+ * emulator without these options keeps the earlier behaviour (the Dropbox and Notion suites cover
+ * it fully).
  */
 import { createHash } from 'node:crypto'
 import { Predicate, Result } from 'effect'
@@ -16,11 +20,16 @@ import {
   exactBodyKeys,
   exactObject,
   exactQuery,
+  isJsonObject,
   isNotEmulated,
+  makeChunkedStatefulEmulator,
   makeStatefulEmulator,
   notEmulated,
+  routeManifest,
   routeMatcher,
   statefulRoute,
+  streamedCommit,
+  type CoreDispatch,
   type EmulatedRequest,
   type StatefulEmulatorConfig,
   type StatefulRoute
@@ -1135,6 +1144,295 @@ describe('constant-text shape checks (exactBodyKeys, exactQuery)', () => {
     await api.fetch(get('/raw', { authorization: 'Bearer synthetic-wrapper-secret' }))
 
     expect(seen).toEqual(['%74he_name=a%20b', ''])
+  })
+})
+
+describe('opt-in route variants, truncation faults, and constant refusals', () => {
+  const variant = (name: string) => ({
+    method: 'RPC',
+    path: `https://api.example.test/rpc#${name}`,
+    kind: 'connector' as const,
+    write: false,
+    caseIds: ['synthetic.case'],
+    evidence: 'unverified' as const
+  })
+
+  const read = variant('read').path
+  const bump = variant('bump').path
+
+  /** One JSON endpoint answering two manifest rows: `read` (two chunks) and `bump` (writes). */
+  const rpc: StatefulRoute<State, undefined> = {
+    method: 'POST',
+    path: '/rpc',
+    kind: 'connector',
+    write: false,
+    caseIds: ['synthetic.case'],
+    evidence: 'unverified',
+    variants: [variant('read'), variant('bump')],
+    body: 'json',
+    admit: request => {
+      const name = isJsonObject(request.json) ? request.json['name'] : undefined
+
+      const twoChunks = () => ({
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+        chunks: ['one ', 'two']
+      })
+
+      switch (name) {
+        case 'read':
+          return { variant: read, plan: () => streamedCommit(2, twoChunks) }
+        case 'bump':
+          return {
+            variant: bump,
+            plan: state =>
+              state.writes > 0
+                ? notEmulated('the synthetic counter moves once')
+                : streamedCommit(1, () => {
+                    state.writes += 1
+
+                    return { status: 200, headers: {}, chunks: ['bumped'] }
+                  })
+          }
+        case 'plain':
+          return { variant: read, plan: () => () => new Response('plain') }
+        case 'miscounted':
+          return { variant: read, plan: () => streamedCommit(3, twoChunks) }
+        case 'stray':
+          return { variant: variant('stray').path, plan: () => () => new Response('stray') }
+        default:
+          return notEmulated('no synthetic name')
+      }
+    }
+  }
+
+  const config = (
+    routes: ReadonlyArray<StatefulRoute<State, undefined>>,
+    constantRefusals: boolean
+  ): StatefulEmulatorConfig<State, undefined> => ({
+    routes,
+    env: undefined,
+    initial: { writes: 0 },
+    buildSeed: () => ({ writes: 0 }),
+    recordHeaders: [{ name: 'x-note', json: false }],
+    failClosed: {
+      unrecognised: 'synthetic: no route',
+      unrecognisedAuthorization: 'synthetic: unrecognisable authorization'
+    },
+    constantRefusals,
+    clearRuntime: () => undefined,
+    runtimeState: () => ({}),
+    seedSummary: () => ({}),
+    inputInvalid: (input, reason) => new Error(`${input}: ${reason}`)
+  })
+
+  const fakeCore = () => {
+    let state = { writes: 0 }
+
+    return async (dispatch: CoreDispatch<State>) => ({
+      fetch: (request: Request) => Promise.resolve(dispatch(state, request)),
+      baseUrl: 'http://core.invalid',
+      snapshot: () => ({ ...state }),
+      restore: (next: State) => {
+        state = { ...next }
+
+        return Promise.resolve()
+      },
+      close: () => Promise.resolve()
+    })
+  }
+
+  /** The chunked wrapper (truncation faults) with constant refusals unless told otherwise. */
+  const make = (
+    options: { readonly constantRefusals?: boolean } = {},
+    routes: ReadonlyArray<StatefulRoute<State, undefined>> = [rpc]
+  ) =>
+    makeChunkedStatefulEmulator<State, undefined, unknown>(
+      config(routes, options.constantRefusals ?? true),
+      fakeCore()
+    )
+
+  const call = (api: { fetch: (request: Request) => Promise<Response> }, name: string) =>
+    api.fetch(
+      new Request('https://api.example.test/rpc', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer synthetic-wrapper-secret',
+          'content-type': 'application/json',
+          'x-note': 'note'
+        },
+        body: JSON.stringify({ name })
+      })
+    )
+
+  it('variants are the manifest rows, ledger routes, and coverage rows', async () => {
+    const api = await make()
+
+    expect(routeManifest(rpc).map(row => `${row.method} ${row.path}`)).toEqual([
+      `RPC ${read}`,
+      `RPC ${bump}`
+    ])
+
+    await call(api, 'read')
+    await call(api, 'read')
+    await call(api, 'bump')
+    await call(api, 'nothing')
+
+    expect(api.ledger.entries().map(entry => [entry.route, entry.status])).toEqual([
+      [read, 200],
+      [read, 200],
+      [bump, 200],
+      ['/rpc', 400]
+    ])
+    expect(api.coverage().routes.map(row => [row.path, row.requests])).toEqual([
+      [read, 2],
+      [bump, 1]
+    ])
+  })
+
+  it('refuses to build inconsistent variants or constant refusals without fail-closed', async () => {
+    await expect(
+      make({}, [{ ...rpc, variants: [{ ...variant('read'), evidence: 'verified' }] }])
+    ).rejects.toThrow("must carry its route's evidence")
+    await expect(
+      make({}, [{ ...rpc, variants: [variant('read'), variant('read')] }])
+    ).rejects.toThrow('repeats a route template or another variant path')
+    await expect(make({}, [{ ...rpc, variants: [] }])).rejects.toThrow('empty variants list')
+    await expect(build([echo], false, { constantRefusals: true })).rejects.toThrow(
+      'constantRefusals needs fail-closed mode'
+    )
+  })
+
+  it('an admission naming no row of its route answers the 500 emulator error', async () => {
+    const api = await make()
+    const answer = await call(api, 'stray')
+
+    expect(answer.status).toBe(500)
+    expect(api.ledger.entries().at(-1)?.responseError).toBe(
+      'the route admitted the request as no row of its manifest'
+    )
+  })
+
+  it('truncates a streamed answer after its chunks, matched by route row', async () => {
+    const api = await make()
+
+    api.faults.add({ kind: 'truncate-after-chunks', chunks: 1, match: { route: read }, count: 1 })
+
+    // The fault matches only the read row: a bump is answered whole.
+    expect(await (await call(api, 'bump')).text()).toBe('bumped')
+    expect(await (await call(api, 'read')).text()).toBe('one ')
+    expect(await (await call(api, 'read')).text()).toBe('one two')
+    expect(api.ledger.entries().map(entry => entry.fault ?? null)).toEqual([
+      null,
+      'truncate-after-chunks',
+      null
+    ])
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([1])
+  })
+
+  it('a truncation that cannot apply answers 500 and is not used up', async () => {
+    const api = await make()
+
+    api.faults.add({ kind: 'truncate-after-chunks', chunks: 2, match: { route: read } })
+
+    // A streamed answer of no more chunks, and an answer that is not streamed.
+    expect((await call(api, 'read')).status).toBe(500)
+    expect((await call(api, 'plain')).status).toBe(500)
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([0])
+    expect(api.ledger.entries().map(entry => entry.responseError)).toEqual([
+      expect.stringContaining('emulator fault cannot apply'),
+      expect.stringContaining('emulator fault cannot apply')
+    ])
+  })
+
+  it('a streamed commit whose answer has another chunk count answers 500', async () => {
+    const api = await make()
+
+    expect((await call(api, 'miscounted')).status).toBe(500)
+    expect(api.ledger.entries().at(-1)?.responseError).toBe('the route handler failed')
+  })
+
+  it('without chunkFaults, a truncation fault is invalid input (the earlier behaviour)', async () => {
+    const api = await makeStatefulEmulator<State, undefined, unknown>(
+      config([rpc], true),
+      fakeCore()
+    )
+
+    // Parsed from JSON, as untyped host input would be.
+    const truncation = JSON.parse('{ "kind": "truncate-after-chunks", "chunks": 1 }')
+
+    expect(() => api.faults.add(truncation)).toThrow('fault')
+
+    const posted = await api.fetch(
+      new Request('https://api.example.test/_emulate/faults', {
+        method: 'POST',
+        body: JSON.stringify({ kind: 'truncate-after-chunks', chunks: 1 })
+      })
+    )
+
+    expect(posted.status).toBe(400)
+    expect(api.faults.list()).toEqual([])
+  })
+
+  it('constant refusals keep no request text; admitted requests are recorded', async () => {
+    const api = await make()
+
+    api.faults.add({ kind: 'status', status: 503 })
+
+    // Refused by shape (admit), then by state (plan) after one admitted write.
+    expect((await call(api, 'nothing')).status).toBe(400)
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([0])
+
+    api.faults.clear()
+    expect((await call(api, 'bump')).status).toBe(200)
+    api.faults.add({ kind: 'status', status: 503 })
+    expect((await call(api, 'bump')).status).toBe(400)
+    expect(api.snapshot()).toEqual({ writes: 1 })
+    expect(api.faults.list().map(fault => fault.applied)).toEqual([0])
+
+    // The unused match-all fault still answers the next valid request.
+    expect((await call(api, 'read')).status).toBe(503)
+
+    const [byRequest, admitted, byState, faulted] = api.ledger.entries()
+
+    for (const [refused, route, reason] of [
+      [byRequest, '/rpc', 'no synthetic name'],
+      [byState, bump, 'the synthetic counter moves once']
+    ] as const) {
+      expect(refused).toEqual({
+        seq: expect.any(Number),
+        method: 'POST',
+        path: '/<unrecognised>',
+        route,
+        query: {},
+        headers: {},
+        status: 400,
+        evidence: 'unverified',
+        notEmulated: reason
+      })
+    }
+
+    expect(admitted).toMatchObject({
+      path: '/rpc',
+      route: bump,
+      headers: { 'x-note': 'note' },
+      body: { name: 'bump' }
+    })
+    expect(faulted).toMatchObject({ route: read, status: 503, fault: 'status' })
+  })
+
+  it('without constantRefusals, a fail-closed refusal keeps its recorded fields', async () => {
+    const api = await make({ constantRefusals: false })
+
+    await call(api, 'nothing')
+
+    expect(api.ledger.entries().at(-1)).toMatchObject({
+      path: '/rpc',
+      route: '/rpc',
+      headers: { 'x-note': 'note' },
+      body: { name: 'nothing' },
+      notEmulated: 'no synthetic name'
+    })
   })
 })
 

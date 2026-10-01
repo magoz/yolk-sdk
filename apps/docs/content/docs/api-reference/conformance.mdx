@@ -376,7 +376,10 @@ The cases also run in-process against `makeMcpToolServer().handleHttpRequest`. F
 there: era, stateless, response encoding, listing and unknown tool. The legacy session never happens
 because the client negotiates the modern era. The two call cases stop at their precondition, because
 the tool server publishes no `readOnlyHint`. The auth case does not apply, because the tool server
-has no authentication. No case is observed live yet; provider targets and live runs come later.
+has no authentication. The MCP emulator (`@yolk-sdk/emulators/mcp`) answers both synthetic servers
+from these fixtures and passes every applicable case offline (give the target a synthetic
+`Authorization: Bearer` header). No case is observed live yet; provider targets and live runs come
+later.
 
 ## Connector conformance
 

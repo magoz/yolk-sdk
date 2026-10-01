@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, fixture-driven fake EmailClient and R2 (R2Presigner, R2ObjectClient) backends, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, Telegram, GitHub, Google (Gmail, Calendar, Drive), and LinkedIn search (Exa, Enrich Layer) emulators, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, fixture-driven fake EmailClient and R2 (R2Presigner, R2ObjectClient) backends, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, Telegram, GitHub, Google (Gmail, Calendar, Drive), LinkedIn search (Exa, Enrich Layer), and synthetic MCP emulators, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -101,6 +101,10 @@
     "./linkedin-search": {
       "types": "./src/linkedin-search.ts",
       "default": "./src/linkedin-search.ts"
+    },
+    "./mcp": {
+      "types": "./src/mcp.ts",
+      "default": "./src/mcp.ts"
     }
   },
   "files": [
@@ -209,6 +213,11 @@
         "types": "./dist/linkedin-search.d.mts",
         "import": "./dist/linkedin-search.mjs",
         "default": "./dist/linkedin-search.mjs"
+      },
+      "./mcp": {
+        "types": "./dist/mcp.d.mts",
+        "import": "./dist/mcp.mjs",
+        "default": "./dist/mcp.mjs"
       }
     }
   },
@@ -225,6 +234,7 @@
   "devDependencies": {
     "@yolk-sdk/agent": "workspace:^",
     "@yolk-sdk/conformance": "workspace:^",
-    "@yolk-sdk/connectors": "workspace:^"
+    "@yolk-sdk/connectors": "workspace:^",
+    "@yolk-sdk/mcp": "workspace:^"
   }
 }
