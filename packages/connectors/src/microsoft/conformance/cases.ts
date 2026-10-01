@@ -7,7 +7,8 @@
  * host-supplied `MicrosoftConformanceConfig` seed identities. The connector has no calendar
  * actions yet: the calendar cases send raw Graph v1.0 requests through the same ports, the shared
  * token resolution, and the shared Graph failure mapping, and pin expected Graph behaviour
- * (unverified until a live run) for hosts and the upcoming emulator. The same cases run on replay
+ * (unverified until a live run) for hosts and the Microsoft Graph emulator
+ * (`@yolk-sdk/emulators/microsoft`). The same cases run on replay
  * fixtures, an emulator, or by hand against a practice tenant. None is observed live yet
  * (`observed` absent = unverified).
  *

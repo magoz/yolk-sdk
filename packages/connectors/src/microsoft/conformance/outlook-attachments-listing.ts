@@ -4,8 +4,9 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * Attachment listing (an inline image and a regular PDF) and retrieval of each listed file attachment.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:microsoft --live --account <label> --record` stages a replacement in a
- * gitignored directory; see the script header for the manual scrub-and-promote step.
+ * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a
+ * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
+ * step.
  */
 export const microsoftOutlookAttachmentsListingFixture: WireFixture = {
   id: 'microsoft.outlook.attachments-listing.synthetic',

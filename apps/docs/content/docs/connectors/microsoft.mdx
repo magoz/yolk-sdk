@@ -15,7 +15,7 @@ experimental conformance cases only.
 `@yolk-sdk/conformance/runner`. Outlook and OneDrive cases run the real connector actions. **The
 connector has no calendar actions yet:** the calendar cases send raw Graph v1.0 requests through the
 same connector ports and pin expected Graph behaviour (unverified until a live run) for hosts and
-the upcoming emulator. The claims are as currently understood; none is observed live yet.
+the emulator. The claims are as currently understood; none is observed live yet.
 
 | Case id                                            | Safety             | Seeds                                                       | Claim (as currently understood)                                                                                                                                                                                                                   |
 | -------------------------------------------------- | ------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -56,9 +56,16 @@ also handed, with its full message, to `ConformanceCleanupReporter` from
 `@yolk-sdk/connectors/conformance` (default: `Effect.logWarning`), since the interruption may
 replace it (an ambiguous create's report starts with the case id, since several cases share one
 create action); a definitive create rejection created nothing and is not reported. The repository
-runner (`pnpm conformance:microsoft`) does not turn Ctrl-C into an interruption, so the reporter
-applies to hosts that interrupt the run fiber. Removed folders stay in the OneDrive recycle bin, and
-permanently deleted drafts may be kept by retention policies. No case sends mail or invitations.
+runner (`pnpm conformance:microsoft`) turns a first Ctrl-C into an interruption and prints these
+reports on stderr as `WARN` lines. Like the shared runners, it prints every line of a live run (the
+report, `WARN` lines, the run's own failure, staging output) with the live access token redacted,
+since Graph can echo it into a field a case reports. Removed folders stay in the OneDrive recycle bin, and permanently
+deleted drafts may be kept by retention policies. No case sends mail or invitations.
 
 The shipped fixtures are synthetic (`evidence: 'unverified'`). See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental
+[Microsoft Graph emulator](../api-reference/emulators#microsoft-graph-emulator)
+(`@yolk-sdk/emulators/microsoft`) is a stateful stand-in that passes these cases through real
+connector actions and raw calendar requests over the connector ports.

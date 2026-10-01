@@ -5,31 +5,36 @@ Effect `HttpClient` routing that points code at them.
 
 ## Subpaths
 
-| Subpath                         | Source                      | Role                                                                                                                                     |
-| ------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/emulators/router`    | `src/router.ts`             | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                 |
-| `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`            | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                 |
-| `@yolk-sdk/emulators/openai`    | `src/openai.ts`             | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                          |
-| `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`          | Anthropic Messages fetch-handler emulator and its manifest                                                                               |
-| `@yolk-sdk/emulators/codex`     | `src/codex.ts`              | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
-| `@yolk-sdk/emulators/xai`       | `src/xai.ts`                | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
-| `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`           | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                              |
-| `@yolk-sdk/emulators/email`     | `src/email.ts`              | Fixture-driven fake `EmailClient` backend (plain JSON `call`), its seed, faults, ledger, and manifest                                    |
-| `@yolk-sdk/emulators/node`      | `src/node.ts`               | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
-| `@yolk-sdk/emulators/fortnox`   | `src/fortnox.ts`            | Stateful Fortnox emulator on `@emulators/core`: ledger, faults, control plane                                                            |
-| (internal)                      | `src/emulator-kernel.ts`    | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
-| (internal)                      | `src/chat-completions.ts`   | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
-| (internal)                      | `src/messages.ts`           | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
-| (internal)                      | `src/responses.ts`          | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai` (not `/opencode`, which is fixture-only)                   |
-| (internal)                      | `src/fixture-route.ts`      | Fixture-only route core (`makeFixtureRouteEmulator`): recorded answers, 400 not-emulated otherwise; used by every Go and usage route     |
-| (internal)                      | `src/subscription-usage.ts` | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go               |
-| (internal)                      | `src/*-recordings.ts`       | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                             |
-| (internal)                      | `src/emulator-compose.ts`   | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                  |
-| (internal)                      | `src/emulator-http.ts`      | Shared fault/scripted-error status and header validators (all emulators)                                                                 |
-| (internal)                      | `src/route-evidence.ts`     | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
-| (internal)                      | `src/email-fixtures.ts`     | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                      |
-| (internal)                      | `src/fortnox/state.ts`      | Fortnox state/seed schemas, default seed (fixture entities), profiles, totals                                                            |
-| (internal)                      | `src/fortnox/api.ts`        | Fortnox route table (evidence + handlers), quirks, `ErrorInformation` codes                                                              |
+| Subpath                         | Source                                   | Role                                                                                                                                     |
+| ------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`    | `src/router.ts`                          | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                 |
+| `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`                         | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                 |
+| `@yolk-sdk/emulators/openai`    | `src/openai.ts`                          | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                          |
+| `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`                       | Anthropic Messages fetch-handler emulator and its manifest                                                                               |
+| `@yolk-sdk/emulators/codex`     | `src/codex.ts`                           | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
+| `@yolk-sdk/emulators/xai`       | `src/xai.ts`                             | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
+| `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`                        | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                              |
+| `@yolk-sdk/emulators/email`     | `src/email.ts`                           | Fixture-driven fake `EmailClient` backend (plain JSON `call`), its seed, faults, ledger, and manifest                                    |
+| `@yolk-sdk/emulators/node`      | `src/node.ts`                            | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
+| `@yolk-sdk/emulators/fortnox`   | `src/fortnox.ts`                         | Stateful Fortnox emulator on `@emulators/core`: ledger, faults, control plane                                                            |
+| `@yolk-sdk/emulators/microsoft` | `src/microsoft.ts`                       | Stateful Microsoft Graph emulator on `@emulators/core` (Graph + copy monitor)                                                            |
+| (internal)                      | `src/emulator-kernel.ts`                 | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
+| (internal)                      | `src/chat-completions.ts`                | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
+| (internal)                      | `src/messages.ts`                        | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
+| (internal)                      | `src/responses.ts`                       | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai` (not `/opencode`, which is fixture-only)                   |
+| (internal)                      | `src/fixture-route.ts`                   | Fixture-only route core (`makeFixtureRouteEmulator`): recorded answers, 400 not-emulated otherwise; used by every Go and usage route     |
+| (internal)                      | `src/subscription-usage.ts`              | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go               |
+| (internal)                      | `src/*-recordings.ts`                    | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                             |
+| (internal)                      | `src/emulator-compose.ts`                | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                  |
+| (internal)                      | `src/emulator-http.ts`                   | Shared fault/scripted-error status and header validators (all emulators)                                                                 |
+| (internal)                      | `src/route-evidence.ts`                  | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
+| (internal)                      | `src/email-fixtures.ts`                  | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                      |
+| (internal)                      | `src/fortnox/state.ts`                   | Fortnox state/seed schemas, default seed (fixture entities), profiles, totals                                                            |
+| (internal)                      | `src/fortnox/api.ts`                     | Fortnox route table (evidence + handlers), quirks, `ErrorInformation` codes                                                              |
+| (internal)                      | `src/microsoft/state.ts`                 | Microsoft state/seed schemas, default seed (fixture entities), profiles, instants                                                        |
+| (internal)                      | `src/microsoft/api.ts`                   | Microsoft route table (evidence, query allowlist, auth flag), matching, registration                                                     |
+| (internal)                      | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                      |
+| (internal)                      | `src/microsoft/{calendar,mail,drive}.ts` | Calendar, Outlook (with `$batch`), and OneDrive (with copy monitor) handlers                                                             |
 
 There is no root export or barrel.
 
@@ -41,13 +46,15 @@ There is no root export or barrel.
   `@yolk-sdk/conformance`, and `@yolk-sdk/connectors` (workspace devDependencies); connectors never
   import emulators.
 - `node:` builtins and `@emulators/core` (Node-only: it imports Node builtins and reads files at
-  import time) are allowed only in `src/node.ts`, `src/fortnox.ts`, and `src/fortnox/**` (also
-  enforced). `src/fortnox.ts` imports the core lazily (`await import`) inside
-  `makeFortnoxEmulator`, so importing the subpath (for example the manifest, from the evidence
+  import time) are allowed only in `src/node.ts`, `src/fortnox.ts`, `src/fortnox/**`,
+  `src/microsoft.ts`, and `src/microsoft/**` (also enforced). `src/fortnox.ts` and
+  `src/microsoft.ts` import the core lazily (`await import`) inside `makeFortnoxEmulator` /
+  `makeMicrosoftEmulator`, so importing the subpath (for example the manifest, from the evidence
   check) has no side effects.
 - `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain
   Web fetch handlers (no Effect runtime needed, no Node builtins); `email` is a plain structural
-  object (no HTTP, socket, TLS, MIME, or mail library); `node` and `fortnox` are the Node subpaths.
+  object (no HTTP, socket, TLS, MIME, or mail library); `node`, `fortnox`, and `microsoft` are the Node
+  subpaths.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
 - `@emulators/core` is Apache-2.0 and a dependency (not vendored or bundled; `tsdown` never bundles
@@ -78,11 +85,13 @@ There is no root export or barrel.
   (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`,
   `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`,
   `anthropicSubscriptionUsageEmulatorRoutes`, `codexSubscriptionUsageEmulatorRoutes`,
-  `xAiGrokSubscriptionUsageEmulatorRoutes`, `fortnoxEmulatorRoutes`). Each manifest route
+  `xAiGrokSubscriptionUsageEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`).
+  Each manifest route
   needs its own handler: the fetch-handler emulators use `bindRouteHandlers`
   (`src/route-evidence.ts`), which pairs them at construction and throws `EmulatorRouteUnmapped`
-  for a manifest route without a handler or a handler without a manifest route; Fortnox derives
-  both from one table in `src/fortnox/api.ts`. Fortnox routes without a fixture
+  for a manifest route without a handler or a handler without a manifest route; Fortnox and
+  Microsoft derive both from one table (`src/fortnox/api.ts`, `src/microsoft/api.ts`). Fortnox
+  routes without a fixture
   (`GET /3/companyinformation`, `GET /3/customers`) cite no case ids and use minimal shapes named
   after the connector's read fields; the check warns about them.
 - Fixture-only rule (lasting; every new emulator and route follows it): response behaviour comes
@@ -101,8 +110,9 @@ There is no root export or barrel.
   latitude, not-emulated answer, faults, and parity test, below; it does not use the kernel). The earlier model routes (`/gateway`, `/openai`,
   `/anthropic`, `/codex`, `/xai` Messages and Responses) predate the rule and keep their synthetic
   behaviour and 404 fallback unchanged; do not copy that behaviour into new routes. The stateful
-  `/fortnox` emulator is not fixture-only: it keeps entity state on `@emulators/core`, answers
-  unknown routes with a ledgered 404, and fails closed on anything not emulated (below).
+  `/fortnox` and `/microsoft` emulators are not fixture-only: they keep entity state on
+  `@emulators/core`, answer unknown routes with a ledgered 404 in the provider's error envelope, and
+  fail closed on anything not emulated (below).
 - Request-shape latitude (fixture-only HTTP routes, the only accepted deviations): any credential
   value (never checked or stored); extra request headers; JSON key order; any string value except the
   discriminators `model`, `role`, `type`, and `phase`; any positive integer where the recording has
@@ -118,7 +128,7 @@ There is no root export or barrel.
   `x-grok-client-version`, and `x-grok-client-mode: headless`). Fault and scripted-error statuses on
   fixture-only routes are 400-599 only.
 - Evidence policy: unknown emulated API routes fail closed and are written to the ledger (404 JSON
-  on the earlier model-route emulators and `/fortnox`, 400 not-emulated on fixture-only routes; control-plane
+  on the earlier model-route emulators, `/fortnox`, and `/microsoft`, 400 not-emulated on fixture-only routes; control-plane
   requests are never recorded); unverified routes answer but carry
   `x-emulator-evidence: unverified` (the `/email` port emulator has no headers: its ledger entries
   carry `evidence`), are tagged in the ledger, and are listed by the evidence check; evidence older
@@ -130,13 +140,15 @@ There is no root export or barrel.
   warning, reported first). Never weaken the rule, extend an expiry silently, or add an entry
   without a reason; verify the route with an owner-approved live run and delete the entry (the
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
-  write routes are pending (tracking #115), and so are the four Fortnox write routes; expiry dates
-  live only in that file.
-- Emulators never redirect and always send a body: fault and scripted-error statuses exclude 1xx,
+  write routes are pending (tracking #115), and so are the four Fortnox write routes and the eleven
+  Microsoft write routes; expiry dates live only in that file.
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
-  turn is added. All emulators share these validators (`src/emulator-http.ts`, internal, no Node
-  builtins). Build a response before consuming its fault; a response that cannot be built
-  answers an evidence-tagged 500 recorded in the ledger (`responseError`).
+  turn is added. Route statuses follow the fixtures instead (for example a bodiless 204, or a 202
+  with a monitor `Location`). All emulators share these validators (`src/emulator-http.ts`,
+  internal, no Node builtins). Build a response before consuming its fault; a response that cannot
+  be built, or a stateful route handler that throws, answers an evidence-tagged 500 in the
+  service's error envelope, recorded in the ledger (`responseError`); that recovery never depends
+  on the injectable clock (a clock that throws falls back to a fixed synthetic date).
 - Every fetch-handler emulator is built on `src/emulator-kernel.ts` (the `/email` port emulator is
   not; see below): fault and scripted-turn state (strict
   decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
@@ -252,6 +264,20 @@ There is no root export or barrel.
   no silent fallback. Query keys are allowlisted per route in the route
   table (`queryKeys`, empty by default) and checked before the handler runs, so a rejected write
   never writes. `lastmodified` is not emulated (the state tracks no modification times).
+- Microsoft Graph (`src/microsoft.ts` + `src/microsoft/*`) follows the Fortnox shape; see the
+  README for its routes and wire claims. Non-obvious rules: behaviour comes only from the
+  conformance fixtures; anything they do not show fails closed (400 `Synthetic*`) unless a case
+  needs it to run, and each such exception is listed under the README's "Emulator extrapolations
+  (no fixture)" (with the one opt-in extra, `copyInProgressPolls`, labelled as such). Route
+  params are matched on the raw path and decoded once; `@odata.nextLink` reuses the raw path.
+  Created ids and change keys come from counters that only advance, so the state-equals-seed
+  proof excludes only the counters. The first message write to reach the
+  handler holds the message for `conflictWindowMs`; an overlapping write gets 409, while
+  non-overlapping writes both apply. Copy monitors are runtime data (not in the state; cleared by
+  reset/seed). Ledgered bodies and queries redact credential-named keys (`redactCredentialFields`,
+  `redactCredentialQuery`, which also covers the conformance scan's `credential_query_param`
+  names such as `x-amz-signature`); `test/emulator-http.test.ts` keeps both name rules in step
+  with `@yolk-sdk/conformance`'s.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -271,7 +297,8 @@ There is no root export or barrel.
 `test/router.test.ts`, `test/router-redirects.test.ts` (redirects and `mapRequest` never escape
 the route table, with a second unrouted loopback server), `test/gateway.test.ts`,
 `test/openai.test.ts`, `test/chat-completions.test.ts` (shared core and per-emulator parameters,
-including each emulator's streamed framing), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
+including each emulator's streamed framing), `test/emulator-http.test.ts` (the credential header and
+query-parameter rules agree with the conformance ones), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the Gateway conformance
 cases in-process and over a loopback socket, a disagreement drill, and faults through the real
 provider, including 429 `retry-after` over the socket), `test/gateway-recordings.test.ts` (each
 verified Gateway fixture's recorded request sent to the emulator, with the response's status,
@@ -305,6 +332,12 @@ every fail-closed reason, state transitions, faults, reset, coverage, and seed v
 emulator and each case alone, ending as seeded plus the documented Sent copy; one drill fault per
 case failing exactly that case; a failed restore reported; fixture and manifest parity),
 `test/fortnox.test.ts` (routes, quirks, auth, faults through the real connector, profiles, control
-plane), and `test/fortnox-conformance.test.ts` (all seven Fortnox cases in-process and over a
+plane), `test/fortnox-conformance.test.ts` (all seven Fortnox cases in-process and over a
 loopback socket, the ledger showing the restores, the state-equals-seed proof for the reversible
-cases, and one drill per knob). Loopback sockets only; never call real services.
+cases, and one drill per knob), `test/microsoft.test.ts` (manifest, fail closed including nested
+body keys, query allowlist, auth, credential redaction, calendar overlap, immutable ids, the
+concurrent-write rule, attachments, `$batch`, folders, the copy monitor through the real
+connector, handler failures, every fixture's complete envelopes, faults including 429
+`retry-after`, seeds, control plane), and `test/microsoft-conformance.test.ts` (all eleven
+Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
+proof, and the drills). Loopback sockets only; never call real services.

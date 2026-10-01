@@ -4,9 +4,10 @@
  * `run-telegram-conformance.ts`, `run-github-conformance.ts`, `run-google-conformance.ts`; not a
  * CLI). Each runner supplies a
  * `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential, and ports)
- * and gets the same behaviour as the Microsoft runner, plus the owner-approval and CI gates. The
- * Fortnox runner (`run-fortnox-conformance.ts`) keeps its own module and imports individual exports
- * from here (its import list is the only list of them; see `scripts/AGENTS.md`):
+ * and gets the behaviour below, the owner-approval and CI gates included. The Fortnox and
+ * Microsoft runners (`run-fortnox-conformance.ts`, `run-microsoft-conformance.ts`) keep their own
+ * modules and import individual exports from here (their import lists are the only lists of them;
+ * see `scripts/AGENTS.md`):
  *
  * - DRY RUN by default: prints every case id, its safety, whether it would run under the chosen
  *   flags, and the seeds it still needs; no network call and no credential read.

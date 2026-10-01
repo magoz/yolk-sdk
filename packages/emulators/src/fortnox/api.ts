@@ -10,6 +10,7 @@
 import type { Hono } from '@emulators/core'
 import { Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
+import { handlerFailedResponse } from '../emulator-http.ts'
 import type { EmulatorRouteEvidence } from '../route-evidence.ts'
 import {
   buildRow,
@@ -1290,7 +1291,11 @@ export const parseJsonText = (text: string): Schema.Json | undefined => {
 /** `{Name}` path templates become `:Name` core route parameters. */
 const corePath = (template: string): string => template.replace(/\{([A-Za-z]+)\}/g, ':$1')
 
-/** Register every route of the table on the core app, over the generation's state. */
+/**
+ * Register every route of the table on the core app, over the generation's state. A handler that
+ * throws answers `handlerFailedResponse()`, which the wrapper turns into its `ErrorInformation`
+ * 500 with `responseError` in the ledger.
+ */
 export const registerFortnoxApi = (
   app: Hono,
   state: FortnoxEmulatorState,
@@ -1298,24 +1303,28 @@ export const registerFortnoxApi = (
 ): void => {
   for (const route of fortnoxApiRoutes) {
     app.on(route.method, corePath(route.path), async context => {
-      const query = new URL(context.req.url).searchParams
+      try {
+        const query = new URL(context.req.url).searchParams
 
-      // Fail closed on query parameters the route does not emulate, before the handler can write.
-      const unsupported = unsupportedQueryKey(query, route.queryKeys)
+        // Fail closed on query parameters the route does not emulate, before the handler can write.
+        const unsupported = unsupportedQueryKey(query, route.queryKeys)
 
-      if (unsupported !== undefined) return unsupported
+        if (unsupported !== undefined) return unsupported
 
-      const text = await context.req.text()
+        const text = await context.req.text()
 
-      return route.handler(
-        state,
-        {
-          params: context.req.param(),
-          query,
-          body: text === '' ? undefined : parseJsonText(text)
-        },
-        env
-      )
+        return await route.handler(
+          state,
+          {
+            params: context.req.param(),
+            query,
+            body: text === '' ? undefined : parseJsonText(text)
+          },
+          env
+        )
+      } catch {
+        return handlerFailedResponse()
+      }
     })
   }
 }

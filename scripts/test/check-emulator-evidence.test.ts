@@ -5,8 +5,10 @@ import { describe, expect, it } from 'vitest'
 import { vercelAiGatewayConformanceFixtures } from '../../packages/agent/src/providers/vercel/conformance/index.ts'
 import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
+import { microsoftConformanceFixtures } from '../../packages/connectors/src/microsoft/conformance/index.ts'
 import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
 import { fortnoxEmulatorRoutes } from '../../packages/emulators/src/fortnox.ts'
+import { microsoftEmulatorRoutes } from '../../packages/emulators/src/microsoft.ts'
 import type { EmulatorRouteEvidence } from '../../packages/emulators/src/route-evidence.ts'
 import {
   checkEmulatorEvidence,
@@ -195,7 +197,11 @@ describe('checkEmulatorEvidence', () => {
 
   // Repo cross-checks derive every expectation from the committed fixture data: which cases are
   // backed by a verified fixture, and which only by unverified ones.
-  const repoFixtures = [...vercelAiGatewayConformanceFixtures, ...fortnoxConformanceFixtures]
+  const repoFixtures = [
+    ...vercelAiGatewayConformanceFixtures,
+    ...fortnoxConformanceFixtures,
+    ...microsoftConformanceFixtures
+  ]
 
   const hasVerifiedFixture = (caseId: string) =>
     repoFixtures.some(fixture => fixture.caseId === caseId && fixture.evidence === 'verified')
@@ -242,26 +248,32 @@ describe('checkEmulatorEvidence', () => {
     expect(evidenceReportFailed(report)).toBe(false)
   })
 
-  it('fails unbacked-verified for a verified route citing only still-unverified repo cases (Fortnox)', () => {
-    const unverifiedCaseIds = [
-      ...new Set(fortnoxConformanceFixtures.map(fixture => fixture.caseId))
-    ].filter(caseId => !hasVerifiedFixture(caseId))
+  it.each([
+    ['Fortnox', fortnoxConformanceFixtures],
+    ['Microsoft', microsoftConformanceFixtures]
+  ])(
+    'fails unbacked-verified for a verified route citing only still-unverified repo cases (%s)',
+    (_name, fixtures) => {
+      const unverifiedCaseIds = [...new Set(fixtures.map(fixture => fixture.caseId))].filter(
+        caseId => !hasVerifiedFixture(caseId)
+      )
 
-    expect(unverifiedCaseIds).not.toEqual([])
+      expect(unverifiedCaseIds).not.toEqual([])
 
-    for (const caseId of unverifiedCaseIds) {
-      expect(repoFixtureEvidenceByCase.get(caseId)).not.toContain('verified')
+      for (const caseId of unverifiedCaseIds) {
+        expect(repoFixtureEvidenceByCase.get(caseId)).not.toContain('verified')
+      }
+
+      const report = repoCrossCheck([
+        route({ method: 'GET', caseIds: unverifiedCaseIds, observedAt: '2026-09-29' })
+      ])
+
+      expect(report.findings.map(finding => `${finding.severity}:${finding.kind}`)).toEqual([
+        'fail:unbacked-verified'
+      ])
+      expect(evidenceReportFailed(report)).toBe(true)
     }
-
-    const report = repoCrossCheck([
-      route({ method: 'GET', caseIds: unverifiedCaseIds, observedAt: '2026-09-29' })
-    ])
-
-    expect(report.findings.map(finding => `${finding.severity}:${finding.kind}`)).toEqual([
-      'fail:unbacked-verified'
-    ])
-    expect(evidenceReportFailed(report)).toBe(true)
-  })
+  )
 
   it('computes whole UTC days', () => {
     expect(evidenceAgeDays('2026-09-30', now)).toBe(0)
@@ -469,6 +481,10 @@ describe('repo emulator manifests', () => {
     .filter(fortnoxRoute => fortnoxRoute.write)
     .map(fortnoxRoute => `${fortnoxRoute.method} ${fortnoxRoute.path}`)
 
+  const microsoftWriteRoutes = microsoftEmulatorRoutes
+    .filter(microsoftRoute => microsoftRoute.write)
+    .map(microsoftRoute => `${microsoftRoute.method} ${microsoftRoute.path}`)
+
   const failedRoutes = (report: ReturnType<typeof repoCheck>, manifest: string) =>
     report.findings
       .filter(finding => finding.severity === 'fail' && finding.manifest === manifest)
@@ -503,6 +519,7 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('xai.grok.usage.snapshot')).toBe(true)
     expect(knownConformanceCaseIds.has('opencode.go.responses.stream.commentary-replay')).toBe(true)
     expect(knownConformanceCaseIds.has('opencode.go.usage.snapshot')).toBe(true)
+    expect(knownConformanceCaseIds.has('microsoft.onedrive.copy-accepted-monitor')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
       'openai',
@@ -514,7 +531,8 @@ describe('repo emulator manifests', () => {
       'xai-usage',
       'opencode',
       'email',
-      'fortnox'
+      'fortnox',
+      'microsoft'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -532,6 +550,9 @@ describe('repo emulator manifests', () => {
     ])
     expect(repoFixtureEvidenceByCase.get('openai.codex.stream.plain-text')).toEqual(['unverified'])
     expect(repoFixtureEvidenceByCase.get('xai.grok.stream.plain-text')).toEqual(['unverified'])
+    expect(repoFixtureEvidenceByCase.get('microsoft.calendar.cancel-semantics')).toEqual([
+      'unverified'
+    ])
 
     // Every new route (usage and OpenCode Go) is unverified and backed by unverified fixtures.
     for (const name of ['anthropic-usage', 'codex-usage', 'xai-usage', 'opencode']) {
@@ -560,12 +581,25 @@ describe('repo emulator manifests', () => {
       report.findings
         .filter(finding => finding.kind === 'pending-write')
         .map(finding => finding.route)
-    ).toEqual([...emailWriteRoutes, ...fortnoxWriteRoutes])
+    ).toEqual([...emailWriteRoutes, ...fortnoxWriteRoutes, ...microsoftWriteRoutes])
     expect(fortnoxWriteRoutes).toEqual([
       'PUT /3/customers/{CustomerNumber}',
       'POST /3/invoices',
       'PUT /3/invoices/{DocumentNumber}',
       'GET /3/invoices/{DocumentNumber}/email'
+    ])
+    expect(microsoftWriteRoutes).toEqual([
+      'POST /v1.0/users/{userId}/calendars/{calendarId}/events',
+      'PATCH /v1.0/users/{userId}/events/{eventId}',
+      'DELETE /v1.0/users/{userId}/events/{eventId}',
+      'POST /v1.0/users/{userId}/events/{eventId}/cancel',
+      'POST /v1.0/users/{userId}/messages',
+      'PATCH /v1.0/users/{userId}/messages/{messageId}',
+      'POST /v1.0/users/{userId}/messages/{messageId}/move',
+      'POST /v1.0/$batch',
+      'POST /v1.0/drives/{driveId}/items/{itemId}/children',
+      'DELETE /v1.0/drives/{driveId}/items/{itemId}',
+      'POST /v1.0/drives/{driveId}/items/{itemId}/copy'
     ])
   })
 
@@ -621,6 +655,61 @@ describe('repo emulator manifests', () => {
       expect(evidenceReportFailed(report)).toBe(true)
       expect(failedRoutes(report, 'fortnox')).toEqual(fortnoxWriteRoutes)
     }
+  })
+
+  it('ships one pending entry per Microsoft write route, at most 60 days out, naming the live run', () => {
+    const microsoftEntries = repoPending.entries.filter(entry => entry.manifest === 'microsoft')
+
+    expect(microsoftEntries.map(entry => `${entry.method} ${entry.path}`)).toEqual(
+      microsoftWriteRoutes
+    )
+
+    for (const entry of microsoftEntries) {
+      // At most 60 days from 2026-09-30.
+      expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+      expect(entry.reason).toContain('owner-approved')
+      expect(entry.reason).toContain('live run of microsoft.')
+    }
+  })
+
+  it('fails the unverified Microsoft write routes without the pending file or after it expires', () => {
+    const microsoftExpiry = repoPending.entries
+      .filter(entry => entry.manifest === 'microsoft')
+      .map(entry => entry.expires)
+      .toSorted()
+      .at(-1)
+
+    expect(microsoftExpiry).toBeDefined()
+
+    const dayAfterMicrosoftExpiry = new Date(
+      Date.parse(`${microsoftExpiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
+    )
+
+    for (const report of [repoCheck(now, []), repoCheck(dayAfterMicrosoftExpiry)]) {
+      expect(evidenceReportFailed(report)).toBe(true)
+      expect(failedRoutes(report, 'microsoft')).toEqual(microsoftWriteRoutes)
+    }
+
+    // The day after the last Fortnox allowance expires (dates from the pending file), the Fortnox
+    // routes fail while the Microsoft routes, still within their own allowance, do not.
+    const fortnoxExpiry = repoPending.entries
+      .filter(entry => entry.manifest === 'fortnox')
+      .map(entry => entry.expires)
+      .toSorted()
+      .at(-1)
+
+    expect(fortnoxExpiry).toBeDefined()
+
+    const dayAfterFortnoxExpiry = new Date(
+      Date.parse(`${fortnoxExpiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
+    )
+
+    expect(dayAfterFortnoxExpiry.toISOString().slice(0, 10) <= (microsoftExpiry ?? '')).toBe(true)
+
+    const betweenExpiries = repoCheck(dayAfterFortnoxExpiry)
+
+    expect(failedRoutes(betweenExpiries, 'fortnox')).toEqual(fortnoxWriteRoutes)
+    expect(failedRoutes(betweenExpiries, 'microsoft')).toEqual([])
   })
 
   it('the CLI clock is today unless the test-only --now flag sets it', () => {
@@ -693,6 +782,7 @@ describe('repo emulator manifests', () => {
     )
     expect(result.stdout).toContain('WARN  email  PORT EmailClient.getMessage  unverified evidence')
     expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-10-31')
+    expect(result.stdout).toContain('WARN  microsoft  POST /v1.0/$batch  PENDING until 2026-11-27')
 
     // The PENDING count comes from the pending file, not a hard-coded number.
     const pendingLine = result.stdout.split('\n').find(line => line.startsWith('PENDING: '))

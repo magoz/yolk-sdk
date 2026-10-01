@@ -17,7 +17,7 @@
  * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
  *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat,
  *   Codex Responses, Anthropic Messages, Grok Responses, OpenCode Go, subscription-usage (Claude,
- *   Codex, Grok), Fortnox, and email port fixtures).
+ *   Codex, Grok), Fortnox, Microsoft, and email port fixtures).
  * - WARN: a route's evidence is `unverified` (fetch-handler emulators tag their responses
  *   `x-emulator-evidence: unverified`; the email port emulator tags its ledger entries).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
@@ -68,6 +68,8 @@ import { emailConformanceCases } from '../packages/connectors/src/email/conforma
 import { emailConformanceFixtures } from '../packages/connectors/src/email/conformance/index.ts'
 import { fortnoxConformanceCases } from '../packages/connectors/src/fortnox/conformance/cases.ts'
 import { fortnoxConformanceFixtures } from '../packages/connectors/src/fortnox/conformance/index.ts'
+import { microsoftConformanceCases } from '../packages/connectors/src/microsoft/conformance/cases.ts'
+import { microsoftConformanceFixtures } from '../packages/connectors/src/microsoft/conformance/index.ts'
 import {
   anthropicEmulatorRoutes,
   anthropicSubscriptionUsageEmulatorRoutes
@@ -79,6 +81,7 @@ import {
 import { emailEmulatorRoutes } from '../packages/emulators/src/email.ts'
 import { fortnoxEmulatorRoutes } from '../packages/emulators/src/fortnox.ts'
 import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
+import { microsoftEmulatorRoutes } from '../packages/emulators/src/microsoft.ts'
 import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
 import { openCodeGoEmulatorRoutes } from '../packages/emulators/src/opencode.ts'
 import {
@@ -172,7 +175,8 @@ export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'xai-usage', routes: xAiGrokSubscriptionUsageEmulatorRoutes },
   { name: 'opencode', routes: openCodeGoEmulatorRoutes },
   { name: 'email', routes: emailEmulatorRoutes },
-  { name: 'fortnox', routes: fortnoxEmulatorRoutes }
+  { name: 'fortnox', routes: fortnoxEmulatorRoutes },
+  { name: 'microsoft', routes: microsoftEmulatorRoutes }
 ]
 
 /** The repo's pending-evidence allowlist. */
@@ -288,6 +292,7 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...xAiGrokUsageConformanceCases.map(testCase => testCase.id),
   ...openCodeGoConformanceCases.map(testCase => testCase.id),
   ...fortnoxConformanceCases.map(testCase => testCase.id),
+  ...microsoftConformanceCases.map(testCase => testCase.id),
   ...emailConformanceCases.map(testCase => testCase.id)
 ])
 
@@ -344,6 +349,7 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ...xAiGrokUsageConformanceFixtures,
   ...openCodeGoConformanceFixtures,
   ...fortnoxConformanceFixtures,
+  ...microsoftConformanceFixtures,
   ...portFixtureEvidence(emailConformanceCases, emailConformanceFixtures)
 ])
 

@@ -1263,7 +1263,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 host-supplied seed identities in a Microsoft 365 practice tenant. **The connector has no calendar
 actions yet:** the four calendar cases send raw Graph v1.0 requests through the same ports, token
 resolution, and Graph failure mapping, and pin expected Graph behaviour (unverified until a live
-run) for hosts and the upcoming emulator. Credentials bind through `microsoftConformanceIntegration` (`microsoft.oauth`, credential
+run) for hosts and the Microsoft Graph emulator (`@yolk-sdk/emulators/microsoft`). Credentials bind through `microsoftConformanceIntegration` (`microsoft.oauth`, credential
 ref `microsoft.conformance`). The case table, seeds, and claims live in the
 [Microsoft conformance guide](../../apps/docs/content/docs/connectors/microsoft.mdx#conformance-cases).
 
@@ -1279,14 +1279,15 @@ failure, no status, HTTP 408, or HTTP 5xx) fails with `MicrosoftConformanceActio
 `yolk-conformance` item. Each of these (a failed removal, an id-less create, an ambiguous create)
 raised while the case is being interrupted is also handed, with its full message, to
 `ConformanceCleanupReporter` (default: `Effect.logWarning`), since the interruption may replace it;
-an ambiguous create's report starts with the case id. The repository runner does not turn Ctrl-C
-into an interruption, so the reporter applies to hosts that interrupt the run fiber. No case sends
-mail or invitations.
-`pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account <label>`
-(with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by hand,
-`--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or
-nothing in `.conformance-recordings/microsoft/<run>/` (gitignored) for manual scrubbing and
-promotion.
+an ambiguous create's report starts with the case id. No case sends mail or invitations.
+`pnpm conformance:microsoft` in this repository dry-runs by default;
+`--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; with
+`MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by hand (a first
+Ctrl-C interrupts the run so a running write case still removes its item, and the reports above
+print on stderr as `WARN` lines; every live-run line is printed with the live access token
+redacted, as in the shared runners), `--allow-writes reversible` adds the write cases, and `--record`
+stages verified recordings all or nothing in `.conformance-recordings/microsoft/<run>/` (gitignored)
+for manual scrubbing and promotion.
 
 ### Notion conformance cases (experimental)
 

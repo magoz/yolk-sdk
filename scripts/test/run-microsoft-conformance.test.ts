@@ -1,8 +1,19 @@
 import { execFile } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Effect, Result } from 'effect'
+import { Deferred, Effect, Layer, Result } from 'effect'
+import { HttpClient } from 'effect/unstable/http'
 import { describe, expect, it } from 'vitest'
 import {
   isWireBase64BodyResponse,
@@ -11,14 +22,29 @@ import {
   type WireFixture
 } from '../../packages/conformance/src/fixture.ts'
 import type { WireRecorderApi } from '../../packages/conformance/src/record.ts'
+import { makeReplayHttpClient } from '../../packages/conformance/src/replay.ts'
 import type { ConformanceReport } from '../../packages/conformance/src/runner.ts'
 import {
+  microsoftCalendarCreateEventFixture,
   microsoftCalendarListRangeFixture,
   microsoftConformanceCases,
   microsoftConformanceFixtureSeeds,
+  microsoftConformanceFixtures,
   microsoftOneDriveCreateFolderFixture,
   microsoftOutlookPagingNextLinkFixture
 } from '../../packages/connectors/src/microsoft/conformance/index.ts'
+import {
+  liveInCiMessage,
+  nodeRecordingWriter,
+  ownerApprovalRequiredMessage,
+  recordingContainsAccessToken,
+  redactedLiveTokenMarker,
+  textContainsAccessToken,
+  type CliIo,
+  type CliSignal,
+  type RecordingWriter,
+  type SignalSource
+} from '../connector-conformance-internal.ts'
 import {
   accessTokenRequiredMessage,
   defaultRunOptions,
@@ -29,17 +55,22 @@ import {
   liveTarget,
   mergedFixtureSeeds,
   microsoftCaseSpecs,
+  microsoftRecoveryAdvice,
   parseRunArgs,
   planMicrosoftRun,
+  recordedTokenRefusal,
   recordingReviewChecklist,
   recordingRunId,
   recordingsRoot,
   renderFixtureModule,
   renderSeedsModule,
+  renderedTokenRefusal,
+  runMicrosoftInterruptibly,
+  runMicrosoftLive,
+  runMicrosoftLiveCli,
   stageRecordings,
   staleSharedSeeds,
-  type LiveInputs,
-  type RecordingWriter
+  type LiveInputs
 } from '../run-microsoft-conformance.ts'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -58,8 +89,9 @@ const readSeedFlags = [
 ]
 
 describe('run-microsoft-conformance arguments', () => {
-  it('defaults to a dry run with no writes, no account, and no seeds', () => {
+  it('defaults to a dry run with no writes, no approval, no account, and no seeds', () => {
     expect(parseRunArgs([])).toEqual(defaultRunOptions)
+    expect(defaultRunOptions.ownerApproved).toBe(false)
     expect(liveTarget(defaultRunOptions)).toEqual({
       kind: 'live',
       account: 'dry-run',
@@ -68,22 +100,40 @@ describe('run-microsoft-conformance arguments', () => {
     })
   })
 
-  it('requires an explicit synthetic --account label with --live', () => {
-    expect(() => parseRunArgs(['--live'])).toThrow(liveAccountRequiredMessage)
-    expect(() => parseRunArgs(['--live', '--account', 'Example Person'])).toThrow(
-      '--account must be a short synthetic label'
+  it('requires --owner-approved and an explicit synthetic --account label with --live', () => {
+    expect(() => parseRunArgs(['--live'])).toThrow(ownerApprovalRequiredMessage)
+    expect(() => parseRunArgs(['--live', '--account', 'practice'])).toThrow(
+      ownerApprovalRequiredMessage
     )
-    expect(parseRunArgs(['--live', '--account', 'practice'])).toMatchObject({
+    expect(() => parseRunArgs(['--live', '--owner-approved'])).toThrow(liveAccountRequiredMessage)
+    expect(() =>
+      parseRunArgs(['--live', '--owner-approved', '--account', 'Example Person'])
+    ).toThrow('--account must be a short synthetic label')
+    expect(parseRunArgs(['--live', '--owner-approved', '--account', 'practice'])).toMatchObject({
       live: true,
+      ownerApproved: true,
       account: 'practice'
     })
     expect(parseRunArgs(['--live', '--help']).help).toBe(true)
+  })
+
+  it('refuses --live whenever CI is non-empty, 0 and false included', () => {
+    const argv = ['--live', '--owner-approved', '--account', 'practice']
+
+    for (const ci of ['true', '1', '0', 'false']) {
+      expect(() => parseRunArgs(argv, { CI: ci }), ci).toThrow(liveInCiMessage)
+    }
+
+    expect(parseRunArgs(argv, { CI: '' }).live).toBe(true)
+    // A dry run is allowed in CI: it makes no request and reads no credential.
+    expect(parseRunArgs([], { CI: 'true' })).toEqual(defaultRunOptions)
   })
 
   it('reads write policy, record, and seeds from flags over env', () => {
     const options = parseRunArgs(
       [
         '--live',
+        '--owner-approved',
         '--account=practice',
         '--allow-writes',
         'reversible',
@@ -102,6 +152,7 @@ describe('run-microsoft-conformance arguments', () => {
       live: true,
       help: false,
       record: true,
+      ownerApproved: true,
       account: 'practice',
       allowWrites: 'reversible',
       seeds: { mailbox: 'ada@example.test', driveId: 'b!synthetic-drive-0001' }
@@ -154,7 +205,7 @@ describe('run-microsoft-conformance plan', () => {
     const report = dryRunReport(parseRunArgs(['--allow-writes', 'reversible']))
 
     expect(report.split('\n')).toEqual([
-      'DRY RUN: no network request was made. Pass --live --account <label> to run (needs MICROSOFT_ACCESS_TOKEN).',
+      'DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to run (needs MICROSOFT_ACCESS_TOKEN).',
       'Plan for a live target: allowWrites=reversible',
       'RUN   microsoft.calendar.list-range-returns-events  [read]  needs --range-start, --range-end, --event',
       'RUN   microsoft.calendar.timestamp-precision  [read]  needs --range-start, --range-end, --event, --event-start',
@@ -167,23 +218,75 @@ describe('run-microsoft-conformance plan', () => {
       'RUN   microsoft.outlook.concurrent-writes-same-message  [write-reversible]',
       'RUN   microsoft.onedrive.create-folder-roundtrip  [write-reversible]  needs --drive-parent',
       'RUN   microsoft.onedrive.copy-accepted-monitor  [write-reversible]  needs --drive, --drive-parent, --copy-source',
-      'Use a Microsoft 365 practice tenant only. Write cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations.'
+      "Use a Microsoft 365 practice tenant only, with the repository owner's approval; never in CI. Write cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations."
     ])
   })
 })
 
 describe('run-microsoft-conformance live refusal (no network)', () => {
   const live = (argv: ReadonlyArray<string>) =>
-    parseRunArgs(['--live', '--account', 'practice', ...argv])
+    parseRunArgs(['--live', '--owner-approved', '--account', 'practice', ...argv])
 
-  it('refuses without an account or an access token', () => {
-    expect(liveInputs({ ...defaultRunOptions, live: true }, {})).toEqual({
+  it('refuses in CI, without approval, an account, or an access token', () => {
+    const env = { MICROSOFT_ACCESS_TOKEN: 'synthetic-token' }
+
+    expect(liveInputs(live(readSeedFlags), { ...env, CI: 'false' })).toEqual({
+      refusal: liveInCiMessage
+    })
+    expect(liveInputs({ ...defaultRunOptions, live: true, account: 'practice' }, env)).toEqual({
+      refusal: ownerApprovalRequiredMessage
+    })
+    expect(liveInputs({ ...defaultRunOptions, live: true, ownerApproved: true }, env)).toEqual({
       refusal: liveAccountRequiredMessage
     })
     expect(liveInputs(live(readSeedFlags), {})).toEqual({ refusal: accessTokenRequiredMessage })
     expect(liveInputs(live(readSeedFlags), { MICROSOFT_ACCESS_TOKEN: '  ' })).toEqual({
       refusal: accessTokenRequiredMessage
     })
+  })
+
+  it('reads no credential when it refuses in CI, without approval, or without an account', () => {
+    // An environment whose token getter counts every read.
+    const counted = (extra: Readonly<Record<string, string>> = {}) => {
+      let reads = 0
+      const env = { ...extra }
+
+      Object.defineProperty(env, 'MICROSOFT_ACCESS_TOKEN', {
+        enumerable: true,
+        get: () => {
+          reads += 1
+
+          return 'synthetic-token'
+        }
+      })
+
+      return { env, reads: () => reads }
+    }
+
+    const refusals = [
+      [live(readSeedFlags), counted({ CI: 'false' })],
+      [{ ...defaultRunOptions, live: true, account: 'practice' }, counted()],
+      [{ ...defaultRunOptions, live: true, ownerApproved: true }, counted()]
+    ] as const
+
+    for (const [options, { env, reads }] of refusals) {
+      expect(liveInputs(options, env)).toHaveProperty('refusal')
+      expect(reads()).toBe(0)
+    }
+
+    // Parsing never reads it either, also when it refuses --live in CI.
+    const parsing = counted({ CI: 'true' })
+
+    expect(() =>
+      parseRunArgs(['--live', '--owner-approved', '--account', 'practice'], parsing.env)
+    ).toThrow(liveInCiMessage)
+    expect(parsing.reads()).toBe(0)
+
+    // The counter works: an accepted run reads the token.
+    const accepted = counted()
+
+    expect(liveInputs(live(readSeedFlags), accepted.env)).toHaveProperty('inputs')
+    expect(accepted.reads()).toBeGreaterThan(0)
   })
 
   it('refuses when a case that would run lacks its seed or a seed is invalid', () => {
@@ -258,7 +361,9 @@ describe('run-microsoft-conformance rendering', () => {
 
     expect(source).toContain("import type { WireFixture } from '@yolk-sdk/conformance/fixture'")
     expect(source).toContain('export const microsoftOutlookPagingNextLinkFixture: WireFixture = {')
-    expect(source).toContain('pnpm conformance:microsoft --live --account <label> --record')
+    expect(source).toContain(
+      'pnpm conformance:microsoft --live --owner-approved --account <label> --record'
+    )
   })
 })
 
@@ -340,7 +445,10 @@ const memoryWriter = (
       for (const dir of [...directories].filter(dir => isUnder(dir, path))) directories.delete(dir)
 
       for (const file of [...files.keys()].filter(file => isUnder(file, path))) files.delete(file)
-    }
+    },
+    // No symlinks in memory: every path is its own canonical location.
+    realpath: path => path,
+    inspect: path => ({ kind: 'present', realpath: path })
   }
 
   /** Directories and files strictly inside `recordingsRoot`. */
@@ -362,6 +470,42 @@ const folderId = microsoftOneDriveCreateFolderFixture.caseId
 
 const rangeRecorders = () =>
   new Map([[rangeId, recorderOf(microsoftCalendarListRangeFixture.exchanges)]])
+
+/** An opaque live token: no Bearer prefix, not JWT-shaped, no known API-key prefix. */
+const opaqueToken = 'opaque7c1d9e2b4a6f8e0d3c5b'
+
+/** `opaqueToken` with an interior JSON Unicode escape (`\u0037` is `7`), as JSON text. */
+const escapedOpaqueToken = `opaque\\u0037${opaqueToken.slice('opaque7'.length)}`
+
+const stageWithToken = (
+  recorders: ReadonlyMap<string, WireRecorderApi>,
+  writer: RecordingWriter,
+  accessToken: string = opaqueToken
+) =>
+  Effect.runPromise(
+    stageRecordings(
+      passedReport([...recorders.keys()]),
+      recorders,
+      { ...recordInputs, accessToken },
+      { writer, stagingDir, recordedAt: '2026-09-30' }
+    ).pipe(Effect.result)
+  )
+
+/** The calendar range recording with `from` replaced by `to` in its (raw JSON) response body. */
+const rangeWith = (from: string, to: string): WireFixture['exchanges'] => {
+  const [first, ...rest] = microsoftCalendarListRangeFixture.exchanges
+
+  if (isWireStreamResponse(first.response) || isWireBase64BodyResponse(first.response)) {
+    return expect.fail('expected a text calendar response')
+  }
+
+  expect(first.response.body).toContain(from)
+
+  return [
+    { ...first, response: { ...first.response, body: first.response.body.replace(from, to) } },
+    ...rest
+  ]
+}
 
 const stage = (
   recorders: ReadonlyMap<string, WireRecorderApi>,
@@ -522,6 +666,60 @@ describe('run-microsoft-conformance --record staging (offline)', () => {
     expect(operations).toEqual([])
   })
 
+  // An opaque (not JWT-shaped, as consumer tokens are) token in an event subject, or with an
+  // interior JSON escape (which rendering escapes again) in an etag: the secret scan cannot see
+  // it. The recorded exchanges are searched before anything is rendered.
+  for (const [label, from, to] of [
+    ['in an event subject', '"subject":"', `"subject":"${opaqueToken} `],
+    ['with an interior Unicode escape in an etag', 'DwAAABYAAAAsynthetic0001', escapedOpaqueToken]
+  ] as const) {
+    it(`writes nothing when a JSON body field echoes the live access token ${label}`, async () => {
+      const { writer, operations } = memoryWriter()
+      const echoed = rangeWith(from, to)
+
+      expect(recordingContainsAccessToken(echoed, opaqueToken)).toBe(true)
+
+      const result = await stageWithToken(new Map([[rangeId, recorderOf(echoed)]]), writer)
+
+      expect(failureMessage(result)).toBe(recordedTokenRefusal)
+      expect(operations).toEqual([])
+    })
+  }
+
+  it('the rendered-text check alone also finds the doubly escaped token', () => {
+    const spec = microsoftCaseSpecs.find(entry => entry.caseId === rangeId) ?? expect.fail('spec')
+
+    const rendered = renderFixtureModule(spec, {
+      ...microsoftCalendarListRangeFixture,
+      exchanges: rangeWith('DwAAABYAAAAsynthetic0001', escapedOpaqueToken)
+    })
+
+    expect(rendered).toContain('opaque\\\\u0037')
+    expect(textContainsAccessToken(rendered, opaqueToken)).toBe(true)
+  })
+
+  it('still refuses rendered files that carry the token when the recordings do not', async () => {
+    const { writer, operations } = memoryWriter()
+
+    // Only the rendered seeds module carries this value (the committed copy-source seed).
+    const seedValue = microsoftConformanceFixtureSeeds.copySourceItemId ?? expect.fail('seed')
+
+    expect(
+      recordingContainsAccessToken(microsoftCalendarListRangeFixture.exchanges, seedValue)
+    ).toBe(false)
+
+    const result = await stageWithToken(rangeRecorders(), writer, seedValue)
+
+    expect(failureMessage(result)).toBe(renderedTokenRefusal)
+    expect(operations).toEqual([])
+  })
+
+  it('stages the same recording when no field carries the token', async () => {
+    const { writer } = memoryWriter()
+
+    expect(Result.isSuccess(await stageWithToken(rangeRecorders(), writer))).toBe(true)
+  })
+
   it('refuses a staging directory that is not a direct child of the recordings root', async () => {
     for (const dir of [
       join(repoRoot, 'packages/connectors/src/microsoft/conformance'),
@@ -599,23 +797,525 @@ describe('run-microsoft-conformance --record staging (offline)', () => {
   })
 })
 
+describe('run-microsoft-conformance --record containment (real filesystem)', () => {
+  const stageUnder = (base: string) => {
+    const root = join(base, '.conformance-recordings', 'microsoft')
+
+    return {
+      root,
+      result: Effect.runPromise(
+        stageRecordings(passedReport([rangeId]), rangeRecorders(), recordInputs, {
+          writer: nodeRecordingWriter,
+          recordingsRoot: root,
+          containmentRoot: base,
+          stagingDir: join(root, runId),
+          recordedAt: '2026-09-30'
+        }).pipe(Effect.result)
+      )
+    }
+  }
+
+  it('refuses a symlinked recordings directory and writes nothing through it', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'yolk-recordings-')))
+
+    try {
+      const target = join(base, 'packages-like-target')
+
+      mkdirSync(target)
+      symlinkSync(target, join(base, '.conformance-recordings'))
+
+      const { root, result } = stageUnder(base)
+
+      expect(failureMessage(await result)).toBe(
+        `Refusing recordings under a symlinked or redirected directory (${root}); nothing was written`
+      )
+      expect(readdirSync(target)).toEqual([])
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a dangling symlinked recordings directory and creates nothing through it', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'yolk-recordings-')))
+
+    try {
+      const target = join(base, 'packages-like-target')
+
+      symlinkSync(target, join(base, '.conformance-recordings'))
+
+      const { root, result } = stageUnder(base)
+
+      expect(failureMessage(await result)).toBe(
+        `Refusing recordings under a symlinked or redirected directory (${root}); nothing was written`
+      )
+      expect(existsSync(target)).toBe(false)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('stages into a real directory under the containment root', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'yolk-recordings-')))
+
+    try {
+      const { root, result } = stageUnder(base)
+
+      expect(Result.isSuccess(await result)).toBe(true)
+      expect(readdirSync(join(root, runId)).sort()).toEqual(['calendar-list-range.ts', 'seeds.ts'])
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('re-checks containment immediately before publishing, and publishes nothing when it moved', async () => {
+    const { writer, operations, entriesUnderRoot } = memoryWriter()
+    let renames = 0
+
+    // The temp directory becomes a symlink after its files were written, before the rename.
+    const swapping: RecordingWriter = {
+      ...writer,
+      inspect: path =>
+        path === tempDir && operations.some(operation => operation.startsWith('write '))
+          ? { kind: 'refused' }
+          : writer.inspect(path),
+      rename: (from, to) => {
+        renames += 1
+        writer.rename(from, to)
+      }
+    }
+
+    expect(failureMessage(await stage(rangeRecorders(), swapping))).toBe(
+      `Writing the staged recordings failed; nothing was staged in ${stagingDir}`
+    )
+    expect(renames).toBe(0)
+    expect(entriesUnderRoot().filter(path => path.startsWith(stagingDir))).toEqual([])
+  })
+})
+
+// Live-run signal handling: an injected signal source, never real process signals.
+
+const fakeSignals = () => {
+  const handlers = new Map<CliSignal, Array<() => void>>()
+
+  const source: SignalSource = {
+    on: (signal, handler) => {
+      handlers.set(signal, [...(handlers.get(signal) ?? []), handler])
+    },
+    off: (signal, handler) => {
+      handlers.set(
+        signal,
+        (handlers.get(signal) ?? []).filter(registered => registered !== handler)
+      )
+    }
+  }
+
+  const emit = (signal: CliSignal) => {
+    for (const handler of handlers.get(signal) ?? []) handler()
+  }
+
+  const registered = () => [...handlers.values()].reduce((total, list) => total + list.length, 0)
+
+  return { source, emit, registered }
+}
+
+const fakeIo = () => {
+  const errors: Array<string> = []
+  const exitCodes: Array<number> = []
+  const forcedExits: Array<number> = []
+
+  const io: CliIo = {
+    error: message => {
+      errors.push(message)
+    },
+    setExitCode: code => {
+      exitCodes.push(code)
+    },
+    forceExit: code => {
+      forcedExits.push(code)
+    }
+  }
+
+  return { io, errors, exitCodes, forcedExits }
+}
+
+const exchangeAt = (fixture: WireFixture, index: number): WireExchange =>
+  fixture.exchanges[index] ?? expect.fail(`no exchange ${index} in ${fixture.id}`)
+
+/** A program that starts, then waits; its uninterruptible cleanup waits for `releaseCleanup`. */
+const runningProgram = () => {
+  const started = Effect.runSync(Deferred.make<void>())
+  const releaseCleanup = Effect.runSync(Deferred.make<void>())
+  const cleaned: Array<string> = []
+
+  const program = Deferred.succeed(started, undefined).pipe(
+    Effect.andThen(Deferred.await(Effect.runSync(Deferred.make<void>()))),
+    Effect.ensuring(
+      Deferred.await(releaseCleanup).pipe(
+        Effect.andThen(Effect.sync(() => cleaned.push('removed')))
+      )
+    )
+  )
+
+  return {
+    program,
+    cleaned,
+    started: Effect.runPromise(Deferred.await(started)),
+    releaseCleanup: () => Effect.runSync(Deferred.succeed(releaseCleanup, undefined))
+  }
+}
+
+describe('run-microsoft-conformance live runs are interruptible', () => {
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    it(`interrupts the run on ${signal}, lets the removal finish, and exits 130 with Microsoft advice`, async () => {
+      const signals = fakeSignals()
+      const { io, errors, exitCodes, forcedExits } = fakeIo()
+      const running = runningProgram()
+      const done = runMicrosoftInterruptibly(running.program, signals.source, io, { pid: 4242 })
+
+      await running.started
+      signals.emit(signal)
+      running.releaseCleanup()
+      await done
+
+      expect(running.cleaned).toEqual(['removed'])
+      expect(errors[0]).toContain(
+        `${signal}: interrupting the run (pid 4242); the running case's cleanup is attempted before exit`
+      )
+      expect(errors.at(-1)).toBe(`Interrupted. Read the WARN lines. ${microsoftRecoveryAdvice}`)
+      // This runner has no leftover lookup, so no message may promise one.
+      expect(errors.join('\n')).not.toContain('warns about the ones it finds')
+      // Where to look: optional seeds fall back to the token user's mailbox and default calendar.
+      expect(microsoftRecoveryAdvice).toContain(
+        "the token user's mailbox), in Drafts and Deleted Items"
+      )
+      expect(microsoftRecoveryAdvice).toContain('the default calendar')
+      expect(exitCodes).toEqual([130])
+      expect(forcedExits).toEqual([])
+      expect(signals.registered()).toBe(0)
+    })
+  }
+
+  it('ignores duplicates of one keypress, and force-exits on a signal a second or more later', async () => {
+    const signals = fakeSignals()
+    const { io, errors, forcedExits } = fakeIo()
+    const running = runningProgram()
+    let clock = 10_000
+
+    const done = runMicrosoftInterruptibly(running.program, signals.source, io, {
+      now: () => clock
+    })
+
+    await running.started
+
+    // One Ctrl-C: the node child receives SIGINT, then relayed SIGTERM and SIGINT within ms.
+    signals.emit('SIGINT')
+    clock += 2
+    signals.emit('SIGTERM')
+    clock += 997
+    signals.emit('SIGINT')
+
+    expect(forcedExits).toEqual([])
+    expect(errors).toHaveLength(1)
+
+    clock += 1
+    signals.emit('SIGINT')
+
+    expect(forcedExits).toEqual([130])
+    expect(errors[1]).toBe(
+      `Second SIGINT: exiting now without waiting for cleanup. ${microsoftRecoveryAdvice}`
+    )
+
+    running.releaseCleanup()
+    await done
+  })
+
+  it('prints the case-specific WARN when a real write case is interrupted and its removal fails', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes, forcedExits } = fakeIo()
+    const out: Array<string> = []
+    const sent = Effect.runSync(Deferred.make<void>())
+    const release = Effect.runSync(Deferred.make<void>())
+
+    // The create-event case: its create (0) answers, its claim's GET (1) is held, and after the
+    // interruption only the removal's DELETE (3) follows, answering 500, so the removal fails.
+    const created = microsoftCalendarCreateEventFixture
+    const removal = exchangeAt(created, 3)
+
+    const failedRemoval: WireFixture = {
+      ...created,
+      exchanges: [
+        exchangeAt(created, 0),
+        exchangeAt(created, 1),
+        {
+          ...removal,
+          response: {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+            body: '{"error":{"code":"ErrorInternalServerError","message":"Synthetic placeholder: server error."}}'
+          }
+        }
+      ]
+    }
+
+    const { client } = await Effect.runPromise(
+      makeReplayHttpClient(
+        microsoftConformanceFixtures.map(fixture =>
+          fixture.id === created.id ? failedRemoval : fixture
+        )
+      )
+    )
+
+    // Hold the first GET after the first create (earlier read cases send GETs too).
+    let createSeen = false
+    let held = false
+
+    const holding = HttpClient.transform(client, (response, request) => {
+      if (request.method === 'POST') {
+        createSeen = true
+      } else if (request.method === 'GET' && createSeen && !held) {
+        held = true
+
+        return response.pipe(
+          Effect.tap(() => Deferred.succeed(sent, undefined)),
+          Effect.tap(() => Deferred.await(release))
+        )
+      }
+
+      return response
+    })
+
+    const done = runMicrosoftInterruptibly(
+      runMicrosoftLive(
+        {
+          ...defaultRunOptions,
+          live: true,
+          ownerApproved: true,
+          account: 'practice',
+          allowWrites: 'reversible'
+        },
+        recordInputs,
+        {
+          http: Layer.succeed(HttpClient.HttpClient, holding),
+          out: line => out.push(line),
+          // stderr: the WARN lines share the stream with the runner's own messages.
+          err: line => io.error(line)
+        }
+      ),
+      signals.source,
+      io,
+      { pid: 4242 }
+    )
+
+    await Effect.runPromise(Deferred.await(sent))
+    signals.emit('SIGINT')
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+    Effect.runSync(Deferred.succeed(release, undefined))
+    await done
+
+    const removalFailed =
+      'microsoft.calendar.create-returns-event-id: restore failed; remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance). Restore error: microsoft.conformance.delete_event microsoft_delete_e... 500. Claim failed first: interrupted'
+
+    expect(errors[0]).toContain('SIGINT: interrupting the run (pid 4242)')
+    expect(errors.filter(line => line.startsWith('WARN '))).toEqual([`WARN ${removalFailed}`])
+    // The run ends with the case's own RestoreFailed (not interrupt-only): exit 1, no report.
+    expect(errors.at(-1)).toBe(removalFailed)
+    expect(exitCodes).toEqual([1])
+    expect(forcedExits).toEqual([])
+    expect(out).toEqual([])
+    expect(signals.registered()).toBe(0)
+  })
+
+  it('reports a failed run with exit code 1 and no signal handlers left behind', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes } = fakeIo()
+
+    await runMicrosoftInterruptibly(
+      Effect.fail(new Error('synthetic live failure')),
+      signals.source,
+      io
+    )
+
+    expect(errors).toEqual(['synthetic live failure'])
+    expect(exitCodes).toEqual([1])
+    expect(signals.registered()).toBe(0)
+  })
+})
+
+describe('run-microsoft-conformance live output is redacted of the live token', () => {
+  const liveToken = 'SyntheticMicrosoftGraphLiveToken000000000000001'
+  const firstCaseId = microsoftConformanceCases[0]?.id ?? expect.fail('no Microsoft case')
+
+  const liveOptions = {
+    ...defaultRunOptions,
+    live: true,
+    ownerApproved: true,
+    account: 'practice',
+    allowWrites: 'reversible' as const
+  }
+
+  for (const [label, echoed] of [
+    ['raw', liveToken],
+    ['base64-encoded', Buffer.from(`x${liveToken}`).toString('base64')]
+  ] as const) {
+    it(`prints no trace of a ${label} token echoed in a reported failure to stdout or stderr`, async () => {
+      const { client } = await Effect.runPromise(makeReplayHttpClient(microsoftConformanceFixtures))
+
+      let requests = 0
+
+      // The first case's first request fails with the token in its message, which the report
+      // prints as that case's failure.
+      const echoing = HttpClient.transform(client, response =>
+        ++requests === 1 ? Effect.die(new Error(`Graph answered ${echoed}`)) : response
+      )
+
+      const stdout: Array<string> = []
+      const stderr: Array<string> = []
+      const signals = fakeSignals()
+      const { io, errors, exitCodes } = fakeIo()
+      const exitCode = process.exitCode
+
+      try {
+        // The CLI's own entry: the run's lines and its CLI messages, each through the redaction.
+        await runMicrosoftLiveCli(
+          liveOptions,
+          { ...recordInputs, accessToken: liveToken },
+          signals.source,
+          io,
+          {
+            http: Layer.succeed(HttpClient.HttpClient, echoing),
+            out: line => stdout.push(line),
+            err: line => stderr.push(line)
+          }
+        )
+      } finally {
+        // A failed report sets the exit code of this process; keep the test run's own.
+        process.exitCode = exitCode
+      }
+
+      const printedOut = stdout.join('\n')
+      const printedErr = [...stderr, ...errors].join('\n')
+
+      expect(printedOut).toContain(`FAIL  ${firstCaseId}`)
+      expect(printedOut).toContain(redactedLiveTokenMarker)
+      expect(textContainsAccessToken(printedOut, liveToken)).toBe(false)
+      expect(textContainsAccessToken(printedErr, liveToken)).toBe(false)
+      expect(printedOut).not.toContain(echoed)
+      expect(printedErr).not.toContain(echoed)
+      expect(exitCodes).toEqual([])
+      expect(signals.registered()).toBe(0)
+    })
+  }
+
+  it('prints no trace of a token echoed in an interrupted removal failure (WARN and run failure on stderr)', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes, forcedExits } = fakeIo()
+    const stdout: Array<string> = []
+    const stderr: Array<string> = []
+    const sent = Effect.runSync(Deferred.make<void>())
+    const release = Effect.runSync(Deferred.make<void>())
+
+    const { client } = await Effect.runPromise(makeReplayHttpClient(microsoftConformanceFixtures))
+
+    // The create-event case: its claim's GET after the create is held until the interruption; its
+    // removal's DELETE then fails with the token in the failure message, which the case's
+    // RestoreFailed summarizes: printed as the WARN line (the run's err) and as the run's own
+    // failure (the CLI io), both on stderr.
+    let createSeen = false
+    let held = false
+
+    const echoing = HttpClient.transform(client, (response, request) => {
+      if (request.method === 'POST') {
+        createSeen = true
+      } else if (request.method === 'GET' && createSeen && !held) {
+        held = true
+
+        return response.pipe(
+          Effect.tap(() => Deferred.succeed(sent, undefined)),
+          Effect.tap(() => Deferred.await(release))
+        )
+      } else if (request.method === 'DELETE') {
+        return Effect.die(new Error(liveToken))
+      }
+
+      return response
+    })
+
+    const done = runMicrosoftLiveCli(
+      liveOptions,
+      { ...recordInputs, accessToken: liveToken },
+      signals.source,
+      io,
+      {
+        http: Layer.succeed(HttpClient.HttpClient, echoing),
+        out: line => stdout.push(line),
+        err: line => stderr.push(line)
+      },
+      { pid: 4242 }
+    )
+
+    await Effect.runPromise(Deferred.await(sent))
+    signals.emit('SIGINT')
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+    Effect.runSync(Deferred.succeed(release, undefined))
+    await done
+
+    const warns = stderr.filter(line => line.startsWith('WARN '))
+
+    expect(warns).toHaveLength(1)
+    expect(warns[0]).toContain('microsoft.calendar.create-returns-event-id: restore failed')
+    expect(warns[0]).toContain(redactedLiveTokenMarker)
+    expect(errors.at(-1)).toContain('microsoft.calendar.create-returns-event-id: restore failed')
+    expect(errors.at(-1)).toContain(redactedLiveTokenMarker)
+    expect(textContainsAccessToken([...stdout, ...stderr, ...errors].join('\n'), liveToken)).toBe(
+      false
+    )
+    expect(exitCodes).toEqual([1])
+    expect(forcedExits).toEqual([])
+    expect(stdout).toEqual([])
+    expect(signals.registered()).toBe(0)
+  })
+})
+
+const runCli = (argv: ReadonlyArray<string>, env: Readonly<Record<string, string>>) =>
+  new Promise<{ failed: boolean; stdout: string; stderr: string }>(resolvePromise => {
+    execFile(
+      process.execPath,
+      [tsxCli, runnerScript, ...argv],
+      { cwd: repoRoot, env: { ...process.env, ...env } },
+      (error, stdout, stderr) => {
+        resolvePromise({ failed: error !== null, stdout: String(stdout), stderr: String(stderr) })
+      }
+    )
+  })
+
 describe('run-microsoft-conformance CLI', () => {
   it('dry-runs by default without a token', async () => {
-    const result = await new Promise<{ failed: boolean; stdout: string }>(resolvePromise => {
-      execFile(
-        process.execPath,
-        [tsxCli, runnerScript],
-        { cwd: repoRoot, env: { ...process.env, MICROSOFT_ACCESS_TOKEN: '' } },
-        (error, stdout) => {
-          resolvePromise({ failed: error !== null, stdout: String(stdout) })
-        }
-      )
-    })
+    const result = await runCli([], { MICROSOFT_ACCESS_TOKEN: '', CI: '' })
 
     expect(result.failed).toBe(false)
     expect(result.stdout).toContain('DRY RUN: no network request was made')
     expect(result.stdout).toContain(
       'SKIP  microsoft.onedrive.copy-accepted-monitor  [write-reversible]  writes-not-allowed'
     )
+  })
+
+  it('refuses --live in CI before reading any token', async () => {
+    const result = await runCli(['--live', '--owner-approved', '--account', 'practice'], {
+      MICROSOFT_ACCESS_TOKEN: 'synthetic-token',
+      CI: 'true'
+    })
+
+    expect(result.failed).toBe(true)
+    expect(result.stderr).toContain(liveInCiMessage)
+  })
+
+  it('refuses --live without --owner-approved before reading any token', async () => {
+    const result = await runCli(['--live', '--account', 'practice'], {
+      MICROSOFT_ACCESS_TOKEN: 'synthetic-token',
+      CI: ''
+    })
+
+    expect(result.failed).toBe(true)
+    expect(result.stderr).toContain(ownerApprovalRequiredMessage)
   })
 })
