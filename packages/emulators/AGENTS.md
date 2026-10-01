@@ -324,11 +324,12 @@ There is no root export or barrel.
   Jobs are handed to the core under a never-reset job id (the ledger sequence resets). Recorded
   headers are never credential headers (refused at build); a JSON header (`Dropbox-API-Arg`) is
   ledgered parsed with credential-named keys redacted at any depth, or as `<redacted>` when
-  unparseable. Fault statuses are 400-599 with an `emulator_fault` default body; recovery answers
-  (unknown routes 400, handler failure 500, closed 503) read no clock, so a throwing clock only
-  fails the commits that read it (Dropbox uploads, Notion page creates) with a ledgered 500 before
-  any write. Wire shapes and error envelopes come from the fixtures (Dropbox's 409 `error_summary`
-  bodies byte for byte in `dropboxEmulatorErrorBodies`); `test/dropbox.test.ts` and
+  unparseable, and so is a query value that looks like JSON (starts with `{` or `[`, such as a
+  browser-style `arg`). Fault statuses are 400-599 with an `emulator_fault` default body; recovery
+  answers (unknown routes 400, handler failure 500, closed 503) read no clock, so a throwing clock
+  only fails the commits that read it (Dropbox uploads, Notion page creates) with a ledgered 500
+  before any write. Wire shapes and error envelopes come from the fixtures (Dropbox's 409
+  `error_summary` bodies byte for byte in `dropboxEmulatorErrorBodies`); `test/dropbox.test.ts` and
   `test/notion.test.ts` replay every fixture and compare each complete response byte for byte (the
   drift test of the data copies), substituting only minted values at exact field paths (Dropbox
   created ids, revs, and hashes from write answers, each learned once; Notion top-level

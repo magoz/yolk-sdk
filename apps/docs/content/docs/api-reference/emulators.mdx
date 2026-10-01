@@ -540,11 +540,11 @@ lookup-failed `WARN`.
 The default seed is the synthetic fixture entries at the paths of `dropboxConformanceFixtureSeeds`;
 profiles `default` and `empty`. Faults (statuses 400-599, default body
 `{ error: { type: 'emulator_fault', message } }`), the ledger (which records the `Dropbox-API-Arg`
-header with credential-named keys redacted, and an upload's length, never its bytes), and the
-`/_emulate/*` control plane behave as in the Microsoft Graph emulator; `reset` and `seed` also clear
-cursors. The `drills` option (eight booleans, one per Dropbox case) is a test-only drill knob that
-makes exactly the matching conformance case fail. The package README lists the routes, wire
-behaviour, minted values, and refusals in full.
+header and any JSON-looking query value with credential-named keys redacted, and an upload's length,
+never its bytes), and the `/_emulate/*` control plane behave as in the Microsoft Graph emulator;
+`reset` and `seed` also clear cursors. The `drills` option (eight booleans, one per Dropbox case) is
+a test-only drill knob that makes exactly the matching conformance case fail. The package README
+lists the routes, wire behaviour, minted values, and refusals in full.
 
 ## Notion emulator
 

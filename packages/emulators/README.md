@@ -914,11 +914,13 @@ state-reading eligibility check runs first, so a request that is not emulated ne
 The default body is `{ error: { type: 'emulator_fault', message } }` (never a guessed Dropbox body),
 so a 429 with `retry-after: 2` reaches the connector as `dropbox_rate_limited` with
 `retryAfterMs: 2000`. The ledger records method, raw path, route template, query (credential-named
-keys such as `authorization` and `access_token` redacted), the parsed JSON body (credential-named
-keys redacted), an upload's body length (never its bytes), the `Dropbox-API-Arg` header (parsed,
-credential-named keys redacted at any depth; an unparseable value is recorded as `<redacted>`),
-status, evidence, the applied fault, `notEmulated`, and any `responseError`. Control plane:
-`/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and `coverage`.
+keys such as `authorization` and `access_token` redacted; a value starting with `{` or `[`, such as
+a browser-style `arg`, parsed with credential-named keys redacted at any depth, or `<redacted>` when
+unparseable), the parsed JSON body (credential-named keys redacted), an upload's body length (never
+its bytes), the `Dropbox-API-Arg` header (parsed, credential-named keys redacted at any depth; an
+unparseable value is recorded as `<redacted>`), status, evidence, the applied fault, `notEmulated`,
+and any `responseError`. Control plane: `/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and
+`coverage`.
 
 **Drill knobs (tests only).** `drills: { listFolderSinglePage, getMetadataCaseSensitive,
 searchRepeatsMatches, notFoundAsPathLookup, folderConflictAsFile, deleteLeavesNoTombstone,
