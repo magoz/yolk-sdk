@@ -1,0 +1,119 @@
+---
+title: LinkedIn search conformance
+description: Experimental LinkedIn search conformance cases for tests and hand-run API checks.
+---
+
+LinkedIn search actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#linkedin-search). This page lists the
+experimental conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against the Exa and Enrich Layer APIs.
+
+`@yolk-sdk/connectors/linkedin-search/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Every case runs the real connector actions
+(`linkedin_search.search` through Exa, `linkedin_search.profile` and `linkedin_search.email`
+through Enrich Layer) over the connector ports, and checks one wire claim the connector relies on.
+Answers the actions decode only partly, or not at all (the profile is returned as any JSON value),
+are observed at the `ConnectorHttpClient` port the host provides; the cases send no request of
+their own. **Every case is a read**: the connector has no write action, so nothing is created,
+nothing needs cleaning up, and there is no leftover lookup. The claims are as currently understood;
+none is observed live yet.
+
+| Case id                                            | Safety | Seeds              | Claim (as currently understood)                                                                                                                                             |
+| -------------------------------------------------- | ------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `linkedin-search.search.people-results`            | `read` | `searchQuery`      | Exa accepts the bearer key (unverified) and answers 1 to 10 results, every decoded field a string, never null (unverified); each carries a `url` (a usefulness expectation) |
+| `linkedin-search.search.num-results-limit`         | `read` | `searchQuery`      | A control search with `numResults: 3` answers more than 2 people (a precondition); the same query with `numResults: 2` answers 1 or 2                                       |
+| `linkedin-search.profile.get-profile`              | `read` | `profileUrl`       | Enrich Layer accepts `linkedin_profile_url` (unverified) and answers a non-empty JSON object                                                                                |
+| `linkedin-search.email.lookup-answer`              | `read` | `profileUrl`       | The answer carries an `email` (string or null) or a numeric `email_queue_count` (which one, unverified), and the connector never reports `status: "unknown"`                |
+| `linkedin-search.errors.exa-unauthorized`          | `read` | none               | An unknown Exa key answers a 4xx status (unverified: 401), never 2xx or 5xx                                                                                                 |
+| `linkedin-search.errors.enrich-layer-unauthorized` | `read` | `profileUrl`       | An unknown Enrich Layer key answers a 4xx status for the profile and the email lookup (unverified: 401), never 2xx or 5xx                                                   |
+| `linkedin-search.errors.profile-not-found`         | `read` | `absentProfileUrl` | A profile URL that names no profile answers a 4xx status (unverified: 404), never an empty 2xx profile                                                                      |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- Exa accepts the API key as `Authorization: Bearer <key>`, which the connector sends (Exa
+  documents `x-api-key`).
+- Exa omits a missing `author`, `publishedDate`, or `title` rather than answering `null`. The
+  connector decodes each of `title`, `url`, `text`, `publishedDate`, and `author` as an optional
+  string, so a `null` fails the whole search with `validation_failed`; the case names every null
+  field it finds.
+- Enrich Layer still accepts the Proxycurl-era `linkedin_profile_url` query parameter that both
+  Enrich Layer actions send.
+- Which of the two shapes an email lookup answers (an `email` or a queued `email_queue_count`), and
+  that a queued lookup answers a number rather than `email_queue_count: null`, which the connector
+  would fail to decode.
+- An unknown Exa or Enrich Layer key answers HTTP 401, and a profile URL that names no profile
+  answers HTTP 404. The cases check only the 4xx class: the connector maps no status specially.
+
+The quirks the cases protect:
+
+- `linkedin_search.profile` returns any 2xx JSON body as the profile, so a missing profile or a
+  refused key must come back as a non-2xx status; a 2xx error envelope would be returned as a
+  profile. The error cases therefore require a 4xx status, never a 2xx and not a 5xx.
+- `linkedin_search.email` reports an answer with neither `email` nor `email_queue_count` as
+  `status: "unknown"`, and passes an answered `status` through unchanged. The email case requires
+  one of the two fields and checks the connector's own result: its `status` must never be
+  `unknown`, whether it falls back to it or Enrich Layer answered it.
+- `linkedin_search.search` sends `category: "people"`, `type: "auto"`, `contents: { text: true }`,
+  and `numResults` (default 10, passed through without a cap). There is no paging: one request
+  answers every result. The limit case sends two searches for the seeded query: a control with
+  `numResults: 3` (one more than the limit, the smallest paid control), which must answer more than
+  2 people (a `precondition:` mismatch otherwise, since only then can an ignored limit show), and
+  then the same query with `numResults: 2`.
+- `linkedin_search.profile` returns the 2xx body unchanged as `profile`. That is a property of the
+  connector, not a wire claim, so the profile case does not check it.
+
+Not covered: rate limiting. The connector maps every non-2xx answer, 429 included, to the action's
+failure code (`linkedin_search_failed`, `linkedin_profile_failed`, `linkedin_email_failed`) with
+the HTTP status and the raw body as `underlying`; it reads no `Retry-After` header and sets no
+`retryAfterMs`. A practice run cannot provoke a 429 without flooding the APIs, so no case claims it;
+a unit test pins the connector's 429 mapping instead. The email lookup for a profile that does not
+exist is not covered either: which answer it gets (a 404, or a 2xx with `email: null`) is unknown.
+
+`LinkedInSearchConformanceConfig` holds the seeds: `searchQuery` (an Exa people query that matches
+more than two people), `profileUrl` (a public `https://…/in/<slug>` profile URL Enrich Layer can
+enrich), and `absentProfileUrl` (a well-formed `https://…/in/<slug>` URL that names no profile). For
+`profileUrl`, use a profile whose owner consented to the lookup, for example the repository owner's
+own. The case schema accepts any host, so the synthetic fixtures replay on `linkedin.example.com`;
+the live runner requires `linkedin.com` profile URLs, so the not-found case exercises a missing
+profile rather than URL validation. Cases never hard-code account or people data, and a missing seed
+fails the case with a `precondition:` mismatch before any request. Credentials bind through
+`linkedInSearchConformanceIntegration()` (`linkedin-search.exa_api_key` with credential ref
+`linkedin-search.conformance.exa`, `linkedin-search.enrich_layer_api_key` with credential ref
+`linkedin-search.conformance.enrich-layer`);
+`linkedInSearchConformanceCredentials({ exaApiKey, enrichLayerApiKey })` keys the two API keys by
+slot id for `staticCredentialResolverLayer`. The error cases swap the `CredentialResolver` for one
+synthetic key the provider cannot know.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`): every person, company, and profile
+URL is obviously synthetic (`Synthetic Person 01`, `Example Synthetic Co`,
+`https://linkedin.example.com/in/synthetic-person-01`), email addresses are on `example.com`, and
+no fixture carries an API key or an `authorization` header. Every 2xx fixture body keeps only the
+keys and types its case reads, and in this repository a strict allowlist test
+(`packages/connectors/test/linkedin-search-conformance.test.ts`, whose comment lists exactly what
+it enforces) refuses anything in a 2xx body, request query, or seed that is not obviously
+synthetic.
+
+In this repository, `pnpm conformance:linkedin-search` dry-runs by default;
+`--live --owner-approved --account <label>` (refused whenever `CI` is non-empty) needs both keys
+from the environment only, never a flag: `EXA_API_KEY` and `ENRICH_LAYER_API_KEY`, each refused
+before any request unless it has 16 to 256 letters, digits, `_`, or `-`. Neither provider has a
+sandbox: these are real, paid keys (use dedicated low-credit ones), and the lookups touch real
+people. A live run therefore needs the repository owner's approval even though every case is a read.
+Every line a live run prints is redacted of both keys, and `--record` refuses to stage, or print a
+review checklist for, any recording, rendered file, or checklist line that carries either key (raw,
+percent-encoded, escaped, or base64-encoded), naming which key it found (never the key itself).
+Recordings that pass are staged only in the gitignored `.conformance-recordings/linkedin-search/`,
+each with its own provider's base URL as `endpoint`, and the review checklist lists every string
+value they hold.
+
+**Staged recordings hold real third parties' personal data, and this repository is public.**
+Search results name other people, and a profile can carry names, work history, other people's
+names and profile links, phone numbers, and image URLs. Never scrub them field by field: replace
+each recorded 2xx body wholesale with a minimal synthetic body that keeps only the keys and types
+the case reads, with obviously synthetic values (`Synthetic Person 01`,
+`https://linkedin.example.com/in/synthetic-person-01`, `example.com` addresses), and replace the
+seeded URLs and query in the requests and `seeds.ts` the same way. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

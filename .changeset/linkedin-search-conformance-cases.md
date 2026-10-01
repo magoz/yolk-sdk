@@ -1,0 +1,5 @@
+---
+'@yolk-sdk/connectors': patch
+---
+
+Add the experimental `@yolk-sdk/connectors/linkedin-search/conformance` subpath: seven read cases for the LinkedIn search connector (Exa people results with every decoded field a string and never `null`, the `numResults` limit honoured after a control search with `numResults: 3` shows more than two matches, the Enrich Layer profile answered as a non-empty object, the email lookup answering an `email` or a queued `email_queue_count` with the connector never reporting `status: "unknown"`, an unknown Exa key and an unknown Enrich Layer key each answering a 4xx status, and a profile URL that names no profile answering a 4xx status rather than an empty 2xx profile) with `LinkedInSearchConformanceConfig` seeds, `linkedInSearchConformanceCredentials` for the two API key slots, and minimal synthetic replay fixtures (a word-level allowlist test checks their 2xx bodies, request queries, and seeds). Rate limiting is not a case (the connector maps a 429 like any other non-2xx answer and reads no `Retry-After`). No case is observed live yet.

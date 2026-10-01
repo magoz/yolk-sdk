@@ -57,6 +57,7 @@
     "conformance:opencode": "tsx scripts/record-opencode-fixtures.ts",
     "conformance:telegram": "tsx scripts/run-telegram-conformance.ts",
     "conformance:todoist": "tsx scripts/run-todoist-conformance.ts",
+    "conformance:linkedin-search": "tsx scripts/run-linkedin-search-conformance.ts",
     "conformance:microsoft": "tsx scripts/run-microsoft-conformance.ts",
     "conformance:notion": "tsx scripts/run-notion-conformance.ts",
     "conformance:usage": "tsx scripts/record-usage-fixtures.ts",

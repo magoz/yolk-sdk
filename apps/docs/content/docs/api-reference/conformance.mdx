@@ -468,6 +468,21 @@ recipient is the seeded practice address. `findGoogleConformanceLeftovers` lists
 bounded, run labels and drafts, the work message in Trash, run events, and run Drive items. See
 [Google conformance cases](../connectors/google#conformance-cases).
 
+`@yolk-sdk/connectors/linkedin-search/conformance` exports seven LinkedIn search cases
+(`linkedInSearchConformanceCases`), their synthetic fixtures (`linkedInSearchConformanceFixtures`,
+whose people, companies, and profile URLs are all obviously synthetic), and the seeds they replay
+with (`linkedInSearchConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`,
+`CredentialResolver` (two API keys, one per slot: `linkedInSearchConformanceCredentials` keys them
+for `staticCredentialResolverLayer`), and `LinkedInSearchConformanceConfig` (an Exa people query, a
+profile URL, and a profile URL that names no profile). Every case runs the real connector actions
+and is a read: Exa people search results and its `numResults` limit, the Enrich Layer profile and
+email lookup answers, an unknown key at each provider, and a missing profile. Answers the actions
+decode only partly are observed at the `ConnectorHttpClient` port. There is nothing to clean up and
+no leftover lookup. Live recordings hold real third parties' personal data: promoting one replaces
+each recorded 2xx body wholesale with a minimal synthetic body that keeps only the keys and types
+the case reads. See [LinkedIn search conformance
+cases](../connectors/linkedin-search#conformance-cases).
+
 `@yolk-sdk/connectors/r2-storage/conformance` exports six port-level R2 cases
 (`r2ConformanceCases`), their synthetic `PortFixture`s (`r2ConformanceFixtures`), and the seeds they
 replay with (`r2ConformanceFixtureSeeds`). The connector never talks to R2 itself: the cases run

@@ -12,6 +12,7 @@
     "telegram",
     "github",
     "google",
+    "linkedin-search",
     "r2-storage"
   ]
 }

@@ -1,11 +1,11 @@
 /**
- * Shared pieces of the Dropbox, Notion, Todoist, Telegram, GitHub, and Google connector conformance
- * runners (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`, `run-todoist-conformance.ts`,
- * `run-telegram-conformance.ts`, `run-github-conformance.ts`, `run-google-conformance.ts`; not a
- * CLI). Each runner supplies a
- * `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential, and ports)
- * and gets the behaviour below, the owner-approval and CI gates included. The Fortnox and
- * Microsoft runners (`run-fortnox-conformance.ts`, `run-microsoft-conformance.ts`) keep their own
+ * Shared pieces of the Dropbox, Notion, Todoist, Telegram, GitHub, Google, and LinkedIn search
+ * connector conformance runners (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`,
+ * `run-todoist-conformance.ts`, `run-telegram-conformance.ts`, `run-github-conformance.ts`,
+ * `run-google-conformance.ts`, `run-linkedin-search-conformance.ts`; not a CLI). Each runner
+ * supplies a `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential,
+ * and ports) and gets the behaviour below, the owner-approval and CI gates included. The Fortnox
+ * and Microsoft runners (`run-fortnox-conformance.ts`, `run-microsoft-conformance.ts`) keep their own
  * modules and import individual exports from here (their import lists are the only lists of them;
  * see `scripts/AGENTS.md`):
  *
@@ -14,10 +14,12 @@
  * - `--live --owner-approved --account <label>`: runs against the real API with a
  *   `FetchHttpClient`. `--live` is refused whenever the `CI` environment variable is set to any
  *   non-empty value (`0` and `false` included) and without `--owner-approved` (the repository
- *   owner's explicit approval). The token comes from the environment only, never a flag. The label
- *   is synthetic and non-identifying (it is printed in reports and recorded in fixtures). Read cases
- *   always run; `--allow-writes reversible` adds the write-reversible cases. A write-irreversible
- *   case runs only when named by its exact id with `--allow-irreversible <case-id>` (repeatable),
+ *   owner's explicit approval). The token comes from the environment only, never a flag, and so
+ *   does each of a runner's `extraTokens` (a second provider's API key, required for `--live` and
+ *   guarded everywhere exactly like the token: see `liveSecrets`). The label is synthetic and
+ *   non-identifying (it is printed in reports and recorded in fixtures). Read cases always run;
+ *   `--allow-writes reversible` adds the write-reversible cases. A write-irreversible case runs
+ *   only when named by its exact id with `--allow-irreversible <case-id>` (repeatable),
  *   independent of `--allow-writes`; the flag exists only for runners that have such a case (today
  *   Telegram, GitHub, and Google), and is an unknown argument everywhere else.
  * - A runner whose provider puts the credential in request URLs (Telegram's `/bot<token>/`)
@@ -130,6 +132,26 @@ export type CaseSpec<K extends string> = {
   readonly fileName: string
   readonly exportName: string
   readonly doc: string
+  /**
+   * The API base URL recorded as this case's fixture `endpoint`, when it is not the runner's
+   * `endpoint` (a runner whose cases call two providers).
+   */
+  readonly endpoint?: string
+}
+
+/**
+ * A further secret a runner's cases need besides the access token (a second provider's API key).
+ * It comes from the environment only, never a flag, is required for `--live`, is checked against
+ * its `tokenFormat` before any request, and is guarded exactly like the access token (see
+ * `liveSecrets`).
+ */
+export type ExtraToken = {
+  /** Environment variable holding it (never a flag). */
+  readonly env: string
+  /** What it must grant, for the usage text. */
+  readonly scopes: string
+  /** The format it must have; `description` completes "<env> must be ...". */
+  readonly tokenFormat?: { readonly pattern: RegExp; readonly description: string }
 }
 
 /** Seed identities as plain optional strings, keyed by seed key. */
@@ -147,7 +169,12 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   readonly tokenEnv: string
   /** What the token must grant, for the usage text. */
   readonly tokenScopes: string
-  /** The API base URL recorded as each fixture `endpoint`. */
+  /**
+   * Further secrets the cases need (a second provider's API key), each from its own environment
+   * variable. `casePorts` receives them keyed by `env`.
+   */
+  readonly extraTokens?: ReadonlyArray<ExtraToken>
+  /** The API base URL recorded as each fixture `endpoint` (unless its case spec names another). */
   readonly endpoint: string
   /** What the write-reversible cases do, for the dry-run footer and usage (runners with some). */
   readonly writeNote?: string
@@ -184,11 +211,15 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   readonly decodeSeeds: (raw: unknown) => Option.Option<S>
   /** Why seeds are invalid, shown when `decodeSeeds` answers `None`. */
   readonly invalidSeedsMessage: string
-  /** The case layer over an `HttpClient`, the access token, and the seeds. */
+  /**
+   * The case layer over an `HttpClient`, the access token, the seeds, and the `extraTokens` keyed
+   * by `env` (empty for runners without any).
+   */
   readonly casePorts: (
     http: Layer.Layer<HttpClient.HttpClient>,
     accessToken: string,
-    seeds: S
+    seeds: S,
+    extraTokens: Readonly<Record<string, string>>
   ) => Layer.Layer<R>
   /** Extra request headers the recorder keeps (credential headers are always dropped). */
   readonly recordedRequestHeaders: ReadonlyArray<string>
@@ -233,6 +264,31 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   readonly nameKeys: RegExp
   /** JSON keys whose string values hold document or message text. */
   readonly textKeys: RegExp
+  /**
+   * List every string value of every staged exchange in the review checklist, whatever its key
+   * (instead of `nameKeys`/`textKeys` only), for recordings that are mostly personal data.
+   */
+  readonly listEveryString?: boolean
+  /**
+   * How the review checklist describes the staged data, for runners whose recordings hold
+   * someone else's data rather than the practice account's: `heading` replaces the REVIEW line,
+   * `seeds` the seeds.ts note, and `promote` the first step of the PROMOTE line (default `scrub`)
+   * and the usage text's promotion step (default `scrub the staged files`). The staged files'
+   * headers use `stagedFixture` (default `scrubbed and promoted by hand`, after the recording
+   * date) and `stagedSeeds` (default `a scrubbed recording`, in "synthetic until ... is promoted").
+   */
+  readonly reviewNotice?: {
+    readonly heading: string
+    readonly seeds: string
+    readonly promote: string
+    readonly stagedFixture: string
+    readonly stagedSeeds: string
+  }
+  /**
+   * The usage text's advice on what to run against, for providers without a practice
+   * environment (default: the `practiceTarget`, then `never a real one`).
+   */
+  readonly usageTarget?: string
 }
 
 /** A runner of any error and requirement type (only its data is read). */
@@ -285,6 +341,20 @@ export const liveInCiMessage =
 export const accessTokenRequiredMessage = (runner: { readonly tokenEnv: string }) =>
   `${runner.tokenEnv} is required for --live`
 
+/** Every environment variable a live run reads a secret from: the access token's, then extras. */
+export const tokenEnvs = (runner: {
+  readonly tokenEnv: string
+  readonly extraTokens?: ReadonlyArray<ExtraToken>
+}): ReadonlyArray<string> => [
+  runner.tokenEnv,
+  ...(runner.extraTokens ?? []).map(token => token.env)
+]
+
+const extraTokensUsage = (extraTokens: ReadonlyArray<ExtraToken> | undefined): string =>
+  (extraTokens ?? [])
+    .map(token => ` ${token.env} is read from the environment only too: ${token.scopes}.`)
+    .join('')
+
 /** Ids of the runner's write-irreversible cases (the only values `--allow-irreversible` takes). */
 export const irreversibleCaseIds = <K extends string, S extends SeedRecord<K>>(
   runner: RunnerData<K, S>
@@ -315,7 +385,7 @@ credential read.
 
 Options:
   --live                          Run against the real ${runner.displayName} API (needs
-                                  --owner-approved, ${runner.tokenEnv}, --account, and the seeds
+                                  --owner-approved, ${tokenEnvs(runner).join(', ')}, --account, and the seeds
                                   of every case that will run; refused whenever CI is non-empty)
   --owner-approved                confirm the repository owner approved this live run
   --account <label>               required with --live: synthetic, non-identifying label
@@ -326,7 +396,7 @@ Options:
   --record                        with --live: record the cases that passed, verify on replay,
                                   and stage them in a new run directory under
                                   .conformance-recordings/${runner.provider}/ (gitignored) for manual
-                                  scrubbing and promotion
+                                  ${runner.reviewNotice === undefined ? 'scrubbing and promotion' : 'promotion (see below)'}
 ${runner.seedSources
   .map(
     source =>
@@ -335,9 +405,9 @@ ${runner.seedSources
   .join('\n')}
   --help
 
-${runner.tokenEnv} is read from the environment only: ${runner.tokenScopes}. Use
-${runner.practiceTarget}, never a real one, and never run live in CI. Recordings are never written
-over committed fixtures: scrub the staged files, copy them into
+${runner.tokenEnv} is read from the environment only: ${runner.tokenScopes}.${extraTokensUsage(runner.extraTokens)} Use
+${runner.usageTarget ?? `${runner.practiceTarget}, never a real one`}, and never run live in CI. Recordings are never written
+over committed fixtures: ${runner.reviewNotice?.promote ?? 'scrub the staged files'}, copy them into
 packages/connectors/src/${runner.provider}/conformance/, and update the ${runner.displayName} conformance
 tests in the same change (fixture ids, evidence, and account change).`
 
@@ -549,7 +619,7 @@ export const dryRunReport = <K extends string, S extends SeedRecord<K>>(
   ].filter(Predicate.isNotUndefined)
 
   return [
-    `DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to run (needs ${runner.tokenEnv}).`,
+    `DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to run (needs ${tokenEnvs(runner).join(' and ')}).`,
     `Plan for a live target: allowWrites=${options.allowWrites}${irreversible}${options.record ? ', record' : ''}`,
     ...lines,
     [
@@ -563,13 +633,44 @@ export type LiveInputs<S> = {
   readonly account: string
   readonly accessToken: string
   readonly seeds: S
+  /** The runner's `extraTokens`, keyed by `env` (absent for runners without any). */
+  readonly extraTokens?: Readonly<Record<string, string>>
 }
 
 /**
+ * Every live secret of a run: the access token, then each extra token. Each one gets the same
+ * guards: every printed live-run line is redacted of it (`redactingLiveRunIo`, `redactingCliIo`),
+ * and staging refuses a recording, rendered file, or checklist line that carries it.
+ */
+export const liveSecrets = <S>(inputs: LiveInputs<S>): ReadonlyArray<string> => [
+  inputs.accessToken,
+  ...Object.values(inputs.extraTokens ?? {})
+]
+
+/**
+ * Every live secret with the name a staging refusal gives it: `the live access token` for a
+ * runner without `extraTokens` (the wording every single-token runner prints), otherwise
+ * `the live secret <ENV>`, so the owner learns which key leaked (never the key itself).
+ */
+export const namedLiveSecrets = <S>(
+  runner: { readonly tokenEnv: string; readonly extraTokens?: ReadonlyArray<ExtraToken> },
+  inputs: LiveInputs<S>
+): ReadonlyArray<{ readonly label: string; readonly secret: string }> =>
+  runner.extraTokens === undefined && inputs.extraTokens === undefined
+    ? [{ label: 'the live access token', secret: inputs.accessToken }]
+    : [
+        { label: `the live secret ${runner.tokenEnv}`, secret: inputs.accessToken },
+        ...Object.entries(inputs.extraTokens ?? {}).map(([env, secret]) => ({
+          label: `the live secret ${env}`,
+          secret
+        }))
+      ]
+
+/**
  * Everything a live run needs, or why it must refuse (before any network): CI, a missing owner
- * approval, account label, or access token, missing seeds for cases that will run, or seeds that
- * are not valid. `generated` (fresh from `runner.generatedSeeds` by default) is merged over the
- * flag/environment seeds.
+ * approval, account label, access token, or extra token, a token in the wrong format, missing seeds
+ * for cases that will run, or seeds that are not valid. `generated` (fresh from
+ * `runner.generatedSeeds` by default) is merged over the flag/environment seeds.
  */
 export const liveInputs = <K extends string, S extends SeedRecord<K>>(
   runner: RunnerData<K, S>,
@@ -599,6 +700,22 @@ export const liveInputs = <K extends string, S extends SeedRecord<K>>(
     return { refusal: `${runner.tokenEnv} must be ${runner.tokenFormat.description}` }
   }
 
+  const extraTokens: Record<string, string> = {}
+
+  for (const token of runner.extraTokens ?? []) {
+    const value = env[token.env]?.trim()
+
+    if (value === undefined || value.length === 0) {
+      return { refusal: `${token.env} is required for --live` }
+    }
+
+    if (token.tokenFormat !== undefined && !token.tokenFormat.pattern.test(value)) {
+      return { refusal: `${token.env} must be ${token.tokenFormat.description}` }
+    }
+
+    extraTokens[token.env] = value
+  }
+
   const missing = planRun(runner, options)
     .filter(entry => entry.skipReason === undefined)
     .flatMap(entry => entry.missingSeeds)
@@ -615,7 +732,10 @@ export const liveInputs = <K extends string, S extends SeedRecord<K>>(
     return { refusal: runner.invalidSeedsMessage }
   }
 
-  return { inputs: { account: options.account, accessToken, seeds: seeds.value } }
+  const inputs: LiveInputs<S> = { account: options.account, accessToken, seeds: seeds.value }
+
+  // `extraTokens` is present only for runners that declare some, so the others keep their shape.
+  return { inputs: runner.extraTokens === undefined ? inputs : { ...inputs, extraTokens } }
 }
 
 export class ConnectorRunFailed extends Schema.TaggedError<ConnectorRunFailed>()(
@@ -646,7 +766,7 @@ export const renderFixtureModule = <K extends string, S extends SeedRecord<K>>(
     '/**',
     ` * ${spec.doc}`,
     ' *',
-    ` * Verified recording (${fixture.recordedAt}), scrubbed and promoted by hand from`,
+    ` * Verified recording (${fixture.recordedAt}), ${runner.reviewNotice?.stagedFixture ?? 'scrubbed and promoted by hand'} from`,
     ` * \`pnpm conformance:${runner.provider} --live --owner-approved --account <label> --record\`.`,
     ' */',
     `export const ${spec.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
@@ -703,7 +823,7 @@ export const renderSeedsModule = <K extends string, S extends SeedRecord<K>>(
     seedsImport,
     '',
     '/**',
-    ` * Seed ${runner.seedNoun} used by the committed ${runner.displayName} fixtures (synthetic until a scrubbed recording is`,
+    ` * Seed ${runner.seedNoun} used by the committed ${runner.displayName} fixtures (synthetic until ${runner.reviewNotice?.stagedSeeds ?? 'a scrubbed recording'} is`,
     ` * promoted). Replaying the fixtures needs these exact seeds in \`${runner.configName}\`.`,
     ` * \`pnpm conformance:${runner.provider} --live --owner-approved --account <label> --record\` stages an`,
     ' * updated copy for manual promotion together with the fixtures it records.',
@@ -846,12 +966,17 @@ const isAllowedEmail = (email: string): boolean => {
   return allowedEmailDomains.some(allowed => domain === allowed || domain.endsWith(`.${allowed}`))
 }
 
-type ReviewKeys = { readonly nameKeys: RegExp; readonly textKeys: RegExp }
+type ReviewKeys = {
+  readonly nameKeys: RegExp
+  readonly textKeys: RegExp
+  readonly listEveryString?: boolean
+}
 
 type ReviewFindings = {
   readonly emails: Set<string>
   readonly names: Set<string>
   readonly texts: Set<string>
+  readonly strings: Set<string>
 }
 
 const collectStrings = (
@@ -867,7 +992,9 @@ const collectStrings = (
       }
     }
 
-    if (key !== undefined && value.trim().length > 0) {
+    if (keys.listEveryString === true) {
+      if (value.trim().length > 0) found.strings.add(value)
+    } else if (key !== undefined && value.trim().length > 0) {
       if (keys.textKeys.test(key)) found.texts.add(value)
       else if (keys.nameKeys.test(key)) found.names.add(value)
     }
@@ -911,12 +1038,19 @@ export const recordingReviewChecklist = <K extends string, S extends SeedRecord<
   seeds?: SeedRecord<K>
 ): ReadonlyArray<string> => {
   const lines = [
-    'REVIEW before promoting (staged files hold practice-account data):',
+    runner.reviewNotice?.heading ??
+      'REVIEW before promoting (staged files hold practice-account data):',
     '  also check ids, paths, URLs, cursors, and request ids by hand'
   ]
 
   for (const { spec, fixture } of recorded) {
-    const found: ReviewFindings = { emails: new Set(), names: new Set(), texts: new Set() }
+    const found: ReviewFindings = {
+      emails: new Set(),
+      names: new Set(),
+      texts: new Set(),
+      strings: new Set()
+    }
+
     let binaryBodies = 0
 
     for (const exchange of fixture.exchanges) {
@@ -950,6 +1084,7 @@ export const recordingReviewChecklist = <K extends string, S extends SeedRecord<
         : undefined,
       found.names.size > 0 ? `names: ${quotedList(found.names)}` : undefined,
       found.texts.size > 0 ? `text: ${quotedList(found.texts)}` : undefined,
+      found.strings.size > 0 ? `every string value: ${quotedList(found.strings)}` : undefined,
       binaryBodies > 0 ? `${binaryBodies} binary body: open it and check its content` : undefined
     ].filter(Predicate.isNotUndefined)
 
@@ -979,14 +1114,14 @@ export const recordingReviewChecklist = <K extends string, S extends SeedRecord<
     })
 
     lines.push(
-      `  seeds.ts: ${values.length === 0 ? 'no account seeds' : 'every account seed names practice-account data; replace each with a synthetic value'}`,
+      `  seeds.ts: ${values.length === 0 ? 'no account seeds' : (runner.reviewNotice?.seeds ?? 'every account seed names practice-account data; replace each with a synthetic value')}`,
       ...(values.length === 0 ? [] : [`    - seeds: ${values.join(', ')}`]),
       ...generated
     )
   }
 
   lines.push(
-    `PROMOTE by hand: scrub, copy into packages/connectors/src/${runner.provider}/conformance/, run pnpm format:fix,`,
+    `PROMOTE by hand: ${runner.reviewNotice?.promote ?? 'scrub'}, copy into packages/connectors/src/${runner.provider}/conformance/, run pnpm format:fix,`,
     `  and update the ${runner.displayName} conformance tests in the same change (fixture ids, evidence, account change).`
   )
 
@@ -1417,6 +1552,15 @@ export const recordingContainsAccessToken = (
   accessToken: string
 ): boolean => inspectExchanges(exchanges, accessToken, 'search') === 'token'
 
+/** The secret replay verification resolves by default (recordings never carry credentials). */
+const replayToken = 'replay-access-token'
+
+/** Replay values for the runner's `extraTokens`, keyed by `env`. */
+const replayExtraTokens = (runner: {
+  readonly extraTokens?: ReadonlyArray<ExtraToken>
+}): Readonly<Record<string, string>> =>
+  Object.fromEntries((runner.extraTokens ?? []).map(token => [token.env, replayToken]))
+
 /** Build a verified fixture for one passed case and prove it replays with the same case. */
 const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
   runner: ConnectorConformanceRunner<K, S, E, R>,
@@ -1439,12 +1583,19 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
         ? drained
         : runner.scrubRecording(drained, inputs.accessToken)
 
-    // Before anything printable is built from the recording: refuse any trace of the live token,
+    // Before anything printable is built from the recording: refuse any trace of a live secret,
     // and any body outside the guard's inspectable allowlist.
-    switch (inspectRecordingForAccessToken(exchanges, inputs.accessToken)) {
+    const verdicts = namedLiveSecrets(runner, inputs).map(({ label, secret }) => ({
+      label,
+      verdict: inspectRecordingForAccessToken(exchanges, secret)
+    }))
+
+    const leaked = verdicts.find(({ verdict }) => verdict === 'token')
+
+    switch (leaked === undefined ? worst(verdicts.map(({ verdict }) => verdict)) : 'token') {
       case 'token':
         return yield* new ConnectorRunFailed({
-          message: `${testCase.id}: the recording still contains the live access token; nothing was written`
+          message: `${testCase.id}: the recording still contains ${leaked?.label ?? 'a live secret'}; nothing was written`
         })
       case 'uninspectable':
         return yield* new ConnectorRunFailed({
@@ -1460,7 +1611,7 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
       evidence: 'verified',
       recordedAt,
       account: inputs.account,
-      endpoint: runner.endpoint,
+      endpoint: spec.endpoint ?? runner.endpoint,
       note: `Recorded from ${runner.practiceTarget} by pnpm conformance:${runner.provider} --live --record.`,
       exchanges
     })
@@ -1470,8 +1621,9 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
       layer: () =>
         runner.casePorts(
           ReplayHttpClient.layer([fixture]),
-          runner.replayAccessToken ?? 'replay-access-token',
-          inputs.seeds
+          runner.replayAccessToken ?? replayToken,
+          inputs.seeds,
+          replayExtraTokens(runner)
         )
     })
 
@@ -1663,14 +1815,15 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
     ]
 
     // Last line of defence, over exactly what would be written and printed (seeds included).
-    if (
-      [...files.map(file => file.contents), ...checklist].some(text =>
-        textContainsAccessToken(text, inputs.accessToken)
-      )
-    ) {
+    const texts = [...files.map(file => file.contents), ...checklist]
+
+    const carried = namedLiveSecrets(runner, inputs).find(({ secret }) =>
+      texts.some(text => textContainsAccessToken(text, secret))
+    )
+
+    if (carried !== undefined) {
       return yield* new ConnectorRunFailed({
-        message:
-          'The staged files or the review checklist would contain the live access token; nothing was written'
+        message: `The staged files or the review checklist would contain ${carried.label}; nothing was written`
       })
     }
 
@@ -1769,7 +1922,9 @@ export const leftoverWarnings = <K extends string, S extends SeedRecord<K>, E, R
   const advice = runner.leftoverAdvice ?? 'check it and remove it by hand'
 
   return lookup.pipe(
-    Effect.provide(runner.casePorts(http, inputs.accessToken, inputs.seeds)),
+    Effect.provide(
+      runner.casePorts(http, inputs.accessToken, inputs.seeds, inputs.extraTokens ?? {})
+    ),
     Effect.exit,
     Effect.map(exit =>
       Exit.isSuccess(exit)
@@ -1873,7 +2028,7 @@ export const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
   liveIo: LiveRunIo = processLiveRunIo
 ) =>
   Effect.gen(function* () {
-    const io = redactingLiveRunIo(liveIo, inputs.accessToken)
+    const io = liveSecrets(inputs).reduce(redactingLiveRunIo, liveIo)
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
     const recorderOptions = recorderOptionsFor(runner)
@@ -1902,7 +2057,13 @@ export const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
 
     const report = yield* runConformance(runner.cases, {
       target: liveTarget(options),
-      layer: testCase => runner.casePorts(httpFor(testCase), inputs.accessToken, inputs.seeds)
+      layer: testCase =>
+        runner.casePorts(
+          httpFor(testCase),
+          inputs.accessToken,
+          inputs.seeds,
+          inputs.extraTokens ?? {}
+        )
     }).pipe(Effect.provideService(ConformanceCleanupReporter, stderrCleanupReporter(io.err)))
 
     io.out(formatConformanceReport(report))
@@ -1964,7 +2125,7 @@ export const runConnectorConformanceCli = <K extends string, S extends SeedRecor
     }
 
     // The run's own failure and the after-interrupt leftover lines are redacted too.
-    const cliIo = redactingCliIo(processCliIo, checked.inputs.accessToken)
+    const cliIo = liveSecrets(checked.inputs).reduce(redactingCliIo, processCliIo)
 
     void runInterruptibly(runLive(runner, options, checked.inputs), processSignals, cliIo, {
       afterInterrupt: leftoverWarnings(
