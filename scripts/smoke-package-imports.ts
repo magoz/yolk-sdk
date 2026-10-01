@@ -139,7 +139,9 @@ const packages: ReadonlyArray<PackageManifest> = [
       './email',
       './node',
       './fortnox',
-      './microsoft'
+      './microsoft',
+      './dropbox',
+      './notion'
     ]
   }
 ]
@@ -362,7 +364,24 @@ const main = async () => {
           'const microsoftPage = await microsoftMessages.json()',
           'if (microsoftMessages.status !== 200 || microsoftMessages.headers.get("x-emulator-evidence") !== "unverified" || microsoftPage.value.length !== 2 || !microsoftPage["@odata.nextLink"].startsWith("https://graph.microsoft.com/v1.0/users/ada%40example.test/")) throw new Error("Microsoft emulator smoke failed")',
           'if ((await microsoftEmulator.fetch(new Request("https://graph.microsoft.com/v1.0/me/messages", { headers: { authorization: "Bearer synthetic" } }))).status !== 404) throw new Error("Microsoft emulator must fail closed")',
-          'await microsoftEmulator.close()'
+          'await microsoftEmulator.close()',
+          'const dropboxEmulatorModule = await import("@yolk-sdk/emulators/dropbox")',
+          'if (dropboxEmulatorModule.dropboxEmulatorRoutes.length !== 10 || !dropboxEmulatorModule.dropboxEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Dropbox emulator manifest mismatch")',
+          'const dropboxEmulator = await dropboxEmulatorModule.makeDropboxEmulator()',
+          'const dropboxListing = await dropboxEmulator.fetch(new Request("https://api.dropboxapi.com/2/files/list_folder", { method: "POST", headers: { authorization: "Bearer synthetic", "content-type": "application/json" }, body: JSON.stringify({ path: "/Conformance/Paging", limit: 2 }) }))',
+          'const dropboxPage = await dropboxListing.json()',
+          'if (dropboxListing.status !== 200 || dropboxListing.headers.get("x-emulator-evidence") !== "unverified" || dropboxPage.entries.length !== 2 || dropboxPage.has_more !== true) throw new Error("Dropbox emulator smoke failed")',
+          'const dropboxMissing = await dropboxEmulator.fetch(new Request("https://api.dropboxapi.com/2/files/get_metadata", { method: "POST", headers: { authorization: "Bearer synthetic", "content-type": "application/json" }, body: JSON.stringify({ path: "/Conformance/Work/absent" }) }))',
+          'if (dropboxMissing.status !== 409 || (await dropboxMissing.text()) !== dropboxEmulatorModule.dropboxEmulatorErrorBodies.notFound) throw new Error("Dropbox emulator not-found smoke failed")',
+          'if ((await dropboxEmulator.fetch(new Request("https://api.dropboxapi.com/2/files/list_folder/longpoll", { method: "POST", headers: { authorization: "Bearer synthetic", "content-type": "application/json" }, body: "{}" }))).status !== 400) throw new Error("Dropbox emulator must fail closed")',
+          'await dropboxEmulator.close()',
+          'const notionEmulatorModule = await import("@yolk-sdk/emulators/notion")',
+          'if (notionEmulatorModule.notionEmulatorRoutes.length !== 10 || !notionEmulatorModule.notionEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Notion emulator manifest mismatch")',
+          'const notionEmulator = await notionEmulatorModule.makeNotionEmulator()',
+          'const notionUser = await notionEmulator.fetch(new Request("https://api.notion.com/v1/users/me", { headers: { authorization: "Bearer synthetic", "notion-version": "2025-09-03" } }))',
+          'if (notionUser.status !== 200 || notionUser.headers.get("x-emulator-evidence") !== "unverified" || (await notionUser.json()).type !== "bot") throw new Error("Notion emulator smoke failed")',
+          'if ((await notionEmulator.fetch(new Request("https://api.notion.com/v1/users/me", { headers: { authorization: "Bearer synthetic", "notion-version": "2022-06-28" } }))).status !== 400) throw new Error("Notion emulator must fail closed")',
+          'await notionEmulator.close()'
         ].join('\n')
     )
 

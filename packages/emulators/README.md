@@ -16,7 +16,10 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim, and the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
-conformance cases use.
+conformance cases use. The Dropbox and Notion emulators are stateful stand-ins for the Dropbox RPC
+and upload routes and the Notion `/v1` routes their conformance cases use; like the fixture-only
+routes, they answer only what the fixtures show and refuse everything else with a 400
+not-emulated.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -43,6 +46,8 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/node`      | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
 | `@yolk-sdk/emulators/fortnox`   | `makeFortnoxEmulator`, `fortnoxEmulatorRoutes`, `fortnoxEmulatorQuirks`, seed and fault schemas (Node only) |
 | `@yolk-sdk/emulators/microsoft` | `makeMicrosoftEmulator`, `microsoftEmulatorRoutes`, seed and fault schemas (Node only)                      |
+| `@yolk-sdk/emulators/dropbox`   | `makeDropboxEmulator`, `dropboxEmulatorRoutes`, seed and fault schemas (Node only)                          |
+| `@yolk-sdk/emulators/notion`    | `makeNotionEmulator`, `notionEmulatorRoutes`, seed and fault schemas (Node only)                            |
 
 ## Routing
 
@@ -698,9 +703,10 @@ Wire behavior the cases claim:
   only emulator-generated values (change keys and etags, draft conversation and internet message
   ids, created ids, and `innerError` request ids and dates).
 
-Emulator extrapolations (no fixture). The cases need each of these to run, except request-shape
-latitude (accepted request variations; no invented wire behaviour) and the last, which is opt-in
-and off by default:
+Emulator extrapolations (no fixture). This list predates the fixture-only rule as now stated
+(`AGENTS.md`): it is legacy, to be removed, and never a precedent for another emulator or route. The
+cases need each of these to run, except request-shape latitude (accepted request variations; no
+invented wire behaviour) and the last, which is opt-in and off by default:
 
 - **Concurrency window.** The first write (update or move) to reach the handler holds the message
   for `conflictWindowMs` (default 25); an overlapping write gets 409; non-overlapping writes both
@@ -779,11 +785,283 @@ matching conformance case catches it. The timestamp and paging knobs fail only t
 view also fails the timestamp case's precondition, and an id-less create also fails the cancel
 case, which creates its event the same way.
 
+## Dropbox emulator
+
+> **Node only.** `@yolk-sdk/emulators/dropbox` runs on the same pinned `@emulators/core` runtime as
+> the Fortnox and Microsoft emulators, loaded lazily by `makeDropboxEmulator`, so importing the
+> subpath has no side effects.
+
+`await makeDropboxEmulator(options?)` returns
+`{ fetch, fetchOn, ledger, faults, cursors, reset, seed, snapshot, coverage, close }`. Each call has
+its own state; `await close()` when done. It emulates only what the eight Dropbox conformance
+cases (with their cleanup) send, so the Dropbox connector actions, the `createDropboxFile` /
+`updateDropboxFile` upload helpers, and the cases run unchanged against it. The read-only leftover
+lookup (`findDropboxConformanceLeftovers`) fails against the default seed: it lists the empty work
+folder, and no fixture records a listing of an empty folder, so that listing answers the ledgered
+400 not-emulated (nothing is written) and the lookup fails with `DropboxConformanceActionFailed`
+(`dropbox_list_folder_failed`, HTTP 400); the live runner turns that into its lookup-failed `WARN`.
+It lists a work folder that holds entries. Each route answers only on the origin its fixtures record: the RPC routes on
+`https://api.dropboxapi.com` (`dropboxEmulatorApiOrigin`) and the upload on
+`https://content.dropboxapi.com` (`dropboxEmulatorContentOrigin`). `fetch` takes the origin from the
+request URL (in-process routing keeps it); behind a loopback rewrite, which loses it, serve
+`fetchOn(origin)` for each origin on its own server:
+
+```ts
+import {
+  dropboxEmulatorApiOrigin,
+  dropboxEmulatorContentOrigin,
+  makeDropboxEmulator
+} from '@yolk-sdk/emulators/dropbox'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const dropbox = await makeDropboxEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler(dropboxEmulatorApiOrigin, dropbox.fetch),
+  EmulatorRoute.handler(dropboxEmulatorContentOrigin, dropbox.fetch)
+])
+// With serveFetchHandler: one server per origin, serving dropbox.fetchOn(origin).
+// ...run the code under test, then:
+await dropbox.close()
+```
+
+Routes (every one a `POST` under `/2`, `Authorization: Bearer <non-empty>`, whose value is never
+checked, stored, forwarded, or ledgered; RPC routes take a JSON body with no query string):
+
+| Route                            | Behavior                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `/2/files/list_folder`           | `{ path, limit }` of a folder: `{ entries, cursor, has_more }`, at most `limit` entries per page        |
+| `/2/files/list_folder/continue`  | `{ cursor }`: the next page of an unchanged listing; every page, the last included, carries a cursor    |
+| `/2/files/get_metadata`          | `{ path }`: file metadata, or 409 `path/not_found`; `include_deleted: true` after a recorded delete     |
+| `/2/files/search_v2`             | `{ query, options: { max_results, filename_only: true } }`: file name matches; a cursor with `has_more` |
+| `/2/files/search/continue_v2`    | `{ cursor }`: the next matches of an unchanged search (the last page has no cursor)                     |
+| `/2/files/create_folder_v2`      | `{ path, autorename: false }`: `{ metadata }` without `.tag`; an existing folder, any casing, is 409    |
+| `/2/files/delete_v2`             | `{ path }` (a path or `id:`) of a folder: `{ metadata }` tagged `folder`; the folder and its content go |
+| `/2/files/copy_v2`, `move_v2`    | `{ from_path, to_path, autorename: false }` of a file: `{ metadata }` (copy: new id; move: same id)     |
+| `/2/files/upload` (content host) | `Dropbox-API-Arg` `add` or `{ ".tag": "update", update: <rev> }` (by `id:`), `strict_conflict: true`    |
+
+Wire behavior, as the fixtures record it:
+
+- **Errors.** Route errors are HTTP 409 with the fixtures' `error_summary` envelopes, byte for byte
+  (`dropboxEmulatorErrorBodies`): `path/not_found/.` for a missing path in an existing folder,
+  `path/conflict/folder/..` for an existing folder, and `path/conflict/file/..` (a `reason`
+  object) for an `add` upload onto an existing file or an `update` naming a stale rev. A rejected
+  write changes nothing.
+- **Paths.** Lookups are case-insensitive; `path_lower` is the lower-cased path. `get_metadata`
+  answers `path_display` with the request's casing for every component but the last, which keeps
+  the stored casing, as the lower-cased lookup fixture records.
+- **Paging.** `list_folder` pages through a folder's entries and `search_v2` through the files
+  whose names contain the query, case-insensitively, as the paging and search fixtures record.
+- **Relocation.** `copy_v2` answers a new file with a new id and rev and the source's size, content
+  hash, and timestamps; `move_v2` keeps the id and timestamps and gets a new rev.
+- **Uploads.** `add` never overwrites; `update` replaces the file under the same id with a new rev
+  only when its rev is current.
+- **Deleted entries.** Deleting an empty folder keeps a deleted-entry record (state `deleted`), so
+  `get_metadata` with `include_deleted: true` answers the `deleted` metadata, as the delete fixture
+  records; afterwards `get_metadata` without it answers 409 `path/not_found`.
+
+Every answer value comes from a fixture, through the seed or the request, except the values the
+emulator mints (it never mints anything else):
+
+- **Minted values.** Created ids (`id:SyntheticEntry00000001`) and revs (`a1b2c3d4e5f60101`) come
+  from counters that only advance and start above the highest seeded id and rev in that form, so a
+  minted value never repeats a seeded one; a created file's content hash is 62 zeros and its rev's
+  last two digits, as the upload fixture writes it; upload timestamps come from the injectable `now`
+  clock; cursors (`AAHsyntheticListCursorNNNN`, `AAHsyntheticSearchCursorNNNN`) come from counters
+  that never reset. A reversible case therefore ends at the seed except the counters and the
+  deleted-entry record of an empty case folder it deleted.
+- **Implied folders.** The parent folders the seeded paths need (`/Conformance`,
+  `/Conformance/Paging`, `/Conformance/Search`, `/Conformance/Work`) are `implied`: no fixture shows
+  them, so lookups pass through them but any answer that would render one is not emulated.
+- **Cursors.** A cursor is accepted only when this emulator issued it since the last reset or seed
+  (reset and seed clear the registry; cursor values are never reissued) and the listing or search
+  it continues renders exactly as when it was issued. Cursors are runtime data, listed by
+  `cursors()` and `/_emulate/state`.
+- **Request-shape latitude (`/dropbox`, the only accepted deviations).** Any bearer value (never
+  checked or stored); extra request headers; JSON key order; `content-type` media-type parameters;
+  any path and search query (looked up in the state); any `list_folder` `limit` from 1 to 2000 and
+  any `search_v2` `options.max_results` from 1 to 1000; and any upload body bytes. Everything else
+  (other keys, booleans, modes, query parameters, another origin, ids or revs where the fixtures
+  send paths, the root folder, and cursors not issued since the last reset or whose listing
+  changed) is not emulated.
+
+Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
+`notEmulated` in the ledger), writes nothing, and uses up no fault: unknown routes and methods, a
+route on another origin, a missing bearer, query parameters, other content types, unknown or
+missing body keys, `autorename` or `include_deleted: false`, `strict_conflict: false`, other upload
+modes, the root folder, `id:` or `rev:` paths where the fixtures send paths, `get_metadata` of a
+folder or of a path whose parent folder is missing or a file, `include_deleted` without a recorded
+delete or on a live entry, listing a file, a missing folder, an empty folder, or a folder holding an
+implied one, a search without matches or matching a folder, a missing parent folder, deleting a file, a missing
+entry, or an implied folder, copying or moving a folder or onto an existing entry, an `add` upload
+onto a folder, an `update` upload of a missing file, and the cursors above. A route that throws (for
+example when the upload clock throws) answers an evidence-tagged 500 emulator error with
+`responseError` in the ledger, and a closed emulator answers 503.
+
+State and seeds: entries (files and folders by parent id; files carry rev, size, content hash, and
+timestamps; `implied` marks a folder no fixture shows), deleted-entry records, and counters. The
+default seed is the synthetic fixture entries at the paths of `dropboxConformanceFixtureSeeds`
+(the paging folder with three entries, the mixed-case file, two search matches, and the copy source,
+under implied folders). Pass `seed: { profile?, entries?, deleted? }` (entries by display path; a
+parent folder must be seeded too) with profiles `'default'` or `'empty'`. `reset()` restores the
+current seed and clears the ledger, faults, and cursors; `seed(next)` replaces the state;
+`snapshot()` returns a deep copy.
+
+Faults (`faults.add` or `POST /_emulate/faults`): `{ kind: 'status', status, headers?, body?,
+match?: { method?, path? }, count? }` with a status of 400-599 answers a matching request the
+emulator would otherwise answer, instead of its write (nothing is written): the route's pure,
+state-reading eligibility check runs first, so a request that is not emulated never uses one up.
+The default body is `{ error: { type: 'emulator_fault', message } }` (never a guessed Dropbox body),
+so a 429 with `retry-after: 2` reaches the connector as `dropbox_rate_limited` with
+`retryAfterMs: 2000`. The ledger records method, raw path, route template, query (credential-named
+keys such as `authorization` and `access_token` redacted; a value starting with `{` or `[`, such as
+a browser-style `arg`, parsed with credential-named keys redacted at any depth, or `<redacted>` when
+unparseable), the parsed JSON body (credential-named keys redacted), an upload's body length (never
+its bytes), the `Dropbox-API-Arg` header (parsed, credential-named keys redacted at any depth; an
+unparseable value is recorded as `<redacted>`), status, evidence, the applied fault, `notEmulated`,
+and any `responseError`. Control plane: `/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and
+`coverage`.
+
+**Drill knobs (tests only).** `drills: { listFolderSinglePage, getMetadataCaseSensitive,
+searchRepeatsMatches, notFoundAsPathLookup, folderConflictAsFile, deleteLeavesNoTombstone,
+moveMintsNewId, uploadIgnoresRev }` (booleans) each make the emulator disagree with exactly one
+Dropbox case, only to prove that case catches it.
+
+## Notion emulator
+
+> **Node only.** `@yolk-sdk/emulators/notion` runs on the same pinned `@emulators/core` runtime,
+> loaded lazily by `makeNotionEmulator`, so importing the subpath has no side effects.
+
+`await makeNotionEmulator(options?)` returns
+`{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has
+its own state; `await close()` when done. It emulates only what the eight Notion conformance cases
+(with their cleanup) send, so the Notion connector and the cases run unchanged against it. The
+read-only leftover lookup (`findNotionConformanceLeftovers`) fails against it whenever its search
+for `yolk-conformance` has no match (a clean workspace) or matches a trashed page (after the write
+case): no fixture records either answer, so the search answers the ledgered 400 not-emulated
+(nothing is written) and the lookup fails with `NotionConformanceActionFailed`
+(`notion_search_failed`, HTTP 400); the live runner turns that into its lookup-failed `WARN`. It
+answers when every match is an untrashed page with timestamps. Every route answers only on the
+origin its fixtures record, `https://api.notion.com` (`notionEmulatorOrigin`): `fetch` reads the
+origin from the request URL (in-process routing keeps it); behind a loopback rewrite, which loses
+it, serve `fetchOn(notionEmulatorOrigin)`. Route `https://api.notion.com` to it:
+
+```ts
+import { makeNotionEmulator } from '@yolk-sdk/emulators/notion'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const notion = await makeNotionEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://api.notion.com', notion.fetch)
+])
+// ...run the code under test, then:
+await notion.close()
+```
+
+Routes (under `/v1`; every request needs `Authorization: Bearer <non-empty>`, whose value is never
+checked, stored, forwarded, or ledgered, and `Notion-Version: 2025-09-03`, the version every fixture
+sends; bodies are JSON):
+
+| Route                                            | Behavior                                                                                              |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `POST /v1/search`                                | `{ query, filter: { property: "object", value: "page" }, page_size, start_cursor? }`: pages by title  |
+| `GET /v1/users/me`                               | The integration's bot user                                                                            |
+| `GET /v1/pages/{pageId}`                         | The page (trashed pages too); 404 `object_not_found` or 400 `validation_error` envelopes              |
+| `POST /v1/pages`                                 | The recorded create: a child of a page titled `yolk-conformance page: safe to delete`                 |
+| `PATCH /v1/pages/{pageId}`                       | `{ archived: true }`: the page with `archived` and `in_trash` true                                    |
+| `GET /v1/blocks/{blockId}/children`              | `page_size` (required), `start_cursor`: a page's child blocks                                         |
+| `GET /v1/pages/{pageId}/properties/{propertyId}` | `page_size` (required), `start_cursor`: the items of a paginated property                             |
+| `GET /v1/databases/{databaseId}`                 | The database with its `data_sources` (`{ id, name }`)                                                 |
+| `GET /v1/data_sources/{dataSourceId}`            | The data source: `properties` schema, `parent: { type: "database_id" }`, `database_parent`            |
+| `POST /v1/data_sources/{dataSourceId}/query`     | `{ page_size: 1 }`: the recorded first row, `parent: { type: "data_source_id" }`, and the next cursor |
+
+Wire behavior, as the fixtures record it:
+
+- **Version.** Every route needs `Notion-Version: 2025-09-03`; any other version (or none) is not
+  emulated.
+- **Cursor paging.** Lists answer `{ object: "list", results, next_cursor, has_more, type, <type>:
+{} }`, and the last page carries `next_cursor: null` (present, not absent). Search and block
+  cursors are the next result's id; property item cursors are opaque, with `property_item.next_url`
+  naming the property id as the page object returns it.
+- **Errors.** A page read of a well-formed id that addresses no page answers 404
+  `{ object: "error", status: 404, code: "object_not_found", message, request_id }`; a malformed id
+  answers 400 `validation_error`, with the fixtures' messages.
+- **Property ids.** The property id path segment is decoded once, so the connector's second
+  percent-encoding (`Syn%253Ap`) names the property the page returns as `Syn%3Ap`.
+- **Data source split.** The database lists its data sources; the data source holds the schema and
+  names its database; its query answers the recorded first row, whose parent names the data source,
+  with the next row's id (which the fixture only names) as `next_cursor`.
+- **Archive.** `archived: true` answers the page with `archived` and `in_trash` true and keeps
+  `last_edited_time`; the page still reads back (200) as archived.
+
+Every answer value comes from a fixture, through the seed or the request, except the values the
+emulator mints (it never mints anything else):
+
+- **Minted values.** Created page ids (`1f0000e0-0000-4000-8000-000000000001`, ...) come from a
+  counter that only advances and starts above the highest seeded id in that form; created pages take
+  their timestamps from the injectable `now` clock; request ids come from the ledger sequence;
+  property item cursors come from a counter that never resets (the first is the fixture's value);
+  search and block cursors are the next result's id (the fixture's value) only in the generation
+  that first issued that id for that list, and `<id>.g<generation>` after a reset or seed (each
+  starts a generation). A reversible run ends at the seed except the counter and its own page, in
+  the trash.
+- **Implied pages.** Pages a fixture only names by id (the blocks page, the write case's parent page,
+  the database's parent page, and the second data source row) are `impliedPages`: their ids resolve
+  where a fixture names them (a block parent, a create parent, a database parent, the query's next
+  row), but no content exists for them, so any answer that would render one is not emulated.
+- **Search scope.** Search considers only the pages whose content the state holds (the `pages`):
+  an implied page has no known title, so it never matches a search. A search answers only matches
+  in the shape the search fixture records (untrashed pages with timestamps): a match that is
+  trashed, or shown only as a query row (no timestamps), makes the search not emulated.
+- **Cursors.** A cursor is accepted only when this emulator issued it for the same list (the same
+  search query, block parent, or property) since the last reset or seed, and the list renders
+  exactly as when it was issued. No cursor value crosses a reset or seed (see minted values), so a
+  pre-reset cursor stays refused even after the same first-page request.
+- **Request-shape latitude (`/notion`, the only accepted deviations).** Any bearer value (never
+  checked or stored); extra request headers; JSON key order; `content-type` media-type parameters;
+  the order of query parameters; Notion ids with or without dashes, in any case; any search `query`
+  (looked up in the state); and any `page_size` from 1 to 100 whose page shows only recorded results
+  (the data source query: 1). `Notion-Version` must be `2025-09-03`. Everything else (other keys,
+  filters, booleans, sorts, query parameters, another origin, titles, repeated or missing `page_size`, and cursors
+  not issued for the same list since the last reset or whose list changed) is not emulated.
+
+Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
+`notEmulated` in the ledger), writes nothing, and uses up no fault: unknown routes and methods (other
+users, comments, block reads or updates, database queries, page deletes), another origin, a missing bearer or
+`Notion-Version`, query parameters on routes that take none, other search filters and keys, a search
+without matches or whose matches include a trashed page or a page shown only as a query row, `sorts`, `filter`, or `start_cursor` on the data source query,
+a query page that would show a row no fixture shows (or a last page), the cursors above, children
+of anything but a page or of a page without recorded child blocks, a property with no seeded item list (or a singly encoded property id), a
+missing database or data source, a read of an implied page or of a page shown only as a query row,
+page creates with `children`, a database parent, another title, more than one title item,
+annotations, or a missing or trashed parent, page updates other than `{ archived: true }`, and
+archiving a missing, implied, row, or already trashed page. A route that throws answers an
+evidence-tagged 500 emulator error with `responseError` in the ledger, and a closed emulator answers 503.
+
+State and seeds: the bot user, pages (`parent`, trash flags, `properties` as stored, `url`), implied
+pages, blocks, paginated property items, databases, data sources, and the page counter. The default
+seed is the synthetic fixture entities with the same ids as `notionConformanceFixtureSeeds`. Pass
+`seed: { profile?, botUser?, pages?, impliedPages?, blocks?, propertyItems?, databases?,
+dataSources? }` (lists replace the profile's) with profiles `'default'` or `'empty'`. Property
+item `next_url` values name the recorded origin. `reset()`, `seed(next)`, and
+`snapshot()` behave as in the Dropbox emulator; reset and seed also clear issued cursors.
+
+Faults, the ledger (which records the `Notion-Version` header), and the control plane behave as in
+the Dropbox emulator; a 429 fault with `retry-after` reaches the connector as
+`notion_rate_limited`.
+
+**Drill knobs (tests only).** `drills: { searchRepeatsResults, botUserAsPerson,
+envelopeStatusMismatch, omitTitlePlainText, blockCursorRepeats, rejectDoubleEncodedPropertyId,
+rowParentAsDatabase, trashedPageNotFound }` (booleans) each make the emulator disagree with exactly
+one Notion case, only to prove that case catches it.
+
 ## Evidence
 
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
 `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
-`emailEmulatorRoutes`, `fortnoxEmulatorRoutes`, and `microsoftEmulatorRoutes` list every emulated
+`emailEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`, `dropboxEmulatorRoutes`,
+and `notionEmulatorRoutes` list every emulated
 route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route of a fetch-handler emulator carries
@@ -791,7 +1069,7 @@ route with `method`, `path`,
 instead, since its plain-JSON replies carry no header. The Gateway route is `verified`
 (`observedAt: '2026-09-30'`): its wire shapes are checked against the verified live recordings.
 Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, email, Fortnox,
-and Microsoft) is unverified, like the synthetic fixtures it follows.
+Microsoft, Dropbox, and Notion) is unverified, like the synthetic fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes
@@ -804,8 +1082,8 @@ live run against a practice mailbox verifies them, the repository lists them in 
 time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry
 date): the check reports them as PENDING warnings until that date and fails again after it.
 
-All Fortnox and Microsoft routes are currently `unverified` (no live recording yet), including four
-Fortnox and eleven Microsoft connector write routes. Until an owner-approved live run verifies them, the repository lists them in a
+All Fortnox, Microsoft, Dropbox, and Notion routes are currently `unverified` (no live recording
+yet), including four Fortnox, eleven Microsoft, five Dropbox, and two Notion connector write routes. Until an owner-approved live run verifies them, the repository lists them in a
 visible, time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each
 entry's expiry date): the check reports them as PENDING warnings until that date and fails again
 after it.
@@ -829,6 +1107,6 @@ await server.close()
 
 ## License
 
-`@yolk-sdk/emulators` is MIT. The Fortnox and Microsoft emulators depend on (does not vendor or bundle) the
+`@yolk-sdk/emulators` is MIT. The Fortnox, Microsoft, Dropbox, and Notion emulators depend on (does not vendor or bundle) the
 Apache-2.0 [`@emulators/core`](https://github.com/vercel-labs/emulate) package, which ships no
 `NOTICE` file.

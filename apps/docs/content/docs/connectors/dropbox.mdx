@@ -105,3 +105,12 @@ whenever `CI` is non-empty) needs `DROPBOX_ACCESS_TOKEN` and the seeds, `--allow
 adds the write cases, and `--record` stages verified recordings only in the gitignored
 `.conformance-recordings/dropbox/` for manual scrubbing and promotion. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental
+[Dropbox emulator](../api-reference/emulators#dropbox-emulator) (`@yolk-sdk/emulators/dropbox`) is a
+stateful, fixture-only stand-in that passes these cases through the real connector actions and
+upload helpers over the connector ports; route both `https://api.dropboxapi.com` and
+`https://content.dropboxapi.com` to it (each route answers only on the origin its fixtures record).
+The leftover lookup fails against its default seed: no fixture records a listing of the empty work
+folder, so the emulator answers it not-emulated (HTTP 400) and the runner prints its lookup-failed
+`WARN`.

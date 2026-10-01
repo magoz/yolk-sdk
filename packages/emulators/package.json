@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, a fixture-driven fake EmailClient backend, stateful Fortnox and Microsoft Graph emulators, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, a fixture-driven fake EmailClient backend, stateful Fortnox, Microsoft Graph, Dropbox, and Notion emulators, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -69,6 +69,14 @@
     "./microsoft": {
       "types": "./src/microsoft.ts",
       "default": "./src/microsoft.ts"
+    },
+    "./dropbox": {
+      "types": "./src/dropbox.ts",
+      "default": "./src/dropbox.ts"
+    },
+    "./notion": {
+      "types": "./src/notion.ts",
+      "default": "./src/notion.ts"
     }
   },
   "files": [
@@ -137,6 +145,16 @@
         "types": "./dist/microsoft.d.mts",
         "import": "./dist/microsoft.mjs",
         "default": "./dist/microsoft.mjs"
+      },
+      "./dropbox": {
+        "types": "./dist/dropbox.d.mts",
+        "import": "./dist/dropbox.mjs",
+        "default": "./dist/dropbox.mjs"
+      },
+      "./notion": {
+        "types": "./dist/notion.d.mts",
+        "import": "./dist/notion.mjs",
+        "default": "./dist/notion.mjs"
       }
     }
   },

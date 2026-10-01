@@ -74,7 +74,9 @@ describe('credential names', () => {
       '$select',
       '$top',
       'startDateTime',
-      '@microsoft.graph.conflictBehavior'
+      '@microsoft.graph.conflictBehavior',
+      'Dropbox-API-Arg',
+      'Notion-Version'
     ]
 
     const disagreements = names.filter(
@@ -127,7 +129,11 @@ describe('credential names', () => {
       'X-Amz-Expires',
       'X-Amz-SignedHeaders',
       'keyboard',
-      'author'
+      'author',
+      'arg',
+      'page_size',
+      'start_cursor',
+      'filter_properties'
     ]
 
     // The fixture scan agrees on both lists, so the check below is not vacuous.
@@ -146,6 +152,17 @@ describe('credential names', () => {
     expect(Object.values(redactCredentialQuery(query)).every(value => value === '<redacted>')).toBe(
       true
     )
+  })
+
+  // Dropbox accepts the bearer as an `authorization` query parameter (browser-style requests); the
+  // scan does not report that name, but the emulator rule (which also applies the header rule)
+  // redacts it.
+  it('redacts the Dropbox authorization query parameter the scan does not report', () => {
+    expect(conformanceCallsCredentialQuery('authorization')).toBe(false)
+    expect(isCredentialQueryKey('authorization')).toBe(true)
+    expect(
+      redactCredentialQuery(new URLSearchParams('authorization=Bearer%20s&arg=%7B%7D&page_size=2'))
+    ).toEqual({ authorization: '<redacted>', arg: '{}', page_size: '2' })
   })
 
   it('redacts credential-named query keys only', () => {

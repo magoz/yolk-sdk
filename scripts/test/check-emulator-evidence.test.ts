@@ -3,12 +3,16 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { vercelAiGatewayConformanceFixtures } from '../../packages/agent/src/providers/vercel/conformance/index.ts'
+import { dropboxConformanceFixtures } from '../../packages/connectors/src/dropbox/conformance/index.ts'
 import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
 import { microsoftConformanceFixtures } from '../../packages/connectors/src/microsoft/conformance/index.ts'
+import { notionConformanceFixtures } from '../../packages/connectors/src/notion/conformance/index.ts'
+import { dropboxEmulatorRoutes } from '../../packages/emulators/src/dropbox.ts'
 import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
 import { fortnoxEmulatorRoutes } from '../../packages/emulators/src/fortnox.ts'
 import { microsoftEmulatorRoutes } from '../../packages/emulators/src/microsoft.ts'
+import { notionEmulatorRoutes } from '../../packages/emulators/src/notion.ts'
 import type { EmulatorRouteEvidence } from '../../packages/emulators/src/route-evidence.ts'
 import {
   checkEmulatorEvidence,
@@ -200,7 +204,9 @@ describe('checkEmulatorEvidence', () => {
   const repoFixtures = [
     ...vercelAiGatewayConformanceFixtures,
     ...fortnoxConformanceFixtures,
-    ...microsoftConformanceFixtures
+    ...microsoftConformanceFixtures,
+    ...dropboxConformanceFixtures,
+    ...notionConformanceFixtures
   ]
 
   const hasVerifiedFixture = (caseId: string) =>
@@ -250,7 +256,9 @@ describe('checkEmulatorEvidence', () => {
 
   it.each([
     ['Fortnox', fortnoxConformanceFixtures],
-    ['Microsoft', microsoftConformanceFixtures]
+    ['Microsoft', microsoftConformanceFixtures],
+    ['Dropbox', dropboxConformanceFixtures],
+    ['Notion', notionConformanceFixtures]
   ])(
     'fails unbacked-verified for a verified route citing only still-unverified repo cases (%s)',
     (_name, fixtures) => {
@@ -485,6 +493,14 @@ describe('repo emulator manifests', () => {
     .filter(microsoftRoute => microsoftRoute.write)
     .map(microsoftRoute => `${microsoftRoute.method} ${microsoftRoute.path}`)
 
+  const dropboxWriteRoutes = dropboxEmulatorRoutes
+    .filter(dropboxRoute => dropboxRoute.write)
+    .map(dropboxRoute => `${dropboxRoute.method} ${dropboxRoute.path}`)
+
+  const notionWriteRoutes = notionEmulatorRoutes
+    .filter(notionRoute => notionRoute.write)
+    .map(notionRoute => `${notionRoute.method} ${notionRoute.path}`)
+
   const failedRoutes = (report: ReturnType<typeof repoCheck>, manifest: string) =>
     report.findings
       .filter(finding => finding.severity === 'fail' && finding.manifest === manifest)
@@ -520,6 +536,8 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('opencode.go.responses.stream.commentary-replay')).toBe(true)
     expect(knownConformanceCaseIds.has('opencode.go.usage.snapshot')).toBe(true)
     expect(knownConformanceCaseIds.has('microsoft.onedrive.copy-accepted-monitor')).toBe(true)
+    expect(knownConformanceCaseIds.has('dropbox.files.upload-rev-precondition')).toBe(true)
+    expect(knownConformanceCaseIds.has('notion.pages.archive-in-trash')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
       'openai',
@@ -532,7 +550,9 @@ describe('repo emulator manifests', () => {
       'opencode',
       'email',
       'fortnox',
-      'microsoft'
+      'microsoft',
+      'dropbox',
+      'notion'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -554,8 +574,16 @@ describe('repo emulator manifests', () => {
       'unverified'
     ])
 
-    // Every new route (usage and OpenCode Go) is unverified and backed by unverified fixtures.
-    for (const name of ['anthropic-usage', 'codex-usage', 'xai-usage', 'opencode']) {
+    // Every new route (usage, OpenCode Go, Dropbox, Notion) is unverified and backed by unverified
+    // fixtures.
+    for (const name of [
+      'anthropic-usage',
+      'codex-usage',
+      'xai-usage',
+      'opencode',
+      'dropbox',
+      'notion'
+    ]) {
       const routes = emulatorManifests.find(manifest => manifest.name === name)?.routes ?? []
 
       expect(routes.length, name).toBeGreaterThan(0)
@@ -581,7 +609,13 @@ describe('repo emulator manifests', () => {
       report.findings
         .filter(finding => finding.kind === 'pending-write')
         .map(finding => finding.route)
-    ).toEqual([...emailWriteRoutes, ...fortnoxWriteRoutes, ...microsoftWriteRoutes])
+    ).toEqual([
+      ...emailWriteRoutes,
+      ...fortnoxWriteRoutes,
+      ...microsoftWriteRoutes,
+      ...dropboxWriteRoutes,
+      ...notionWriteRoutes
+    ])
     expect(fortnoxWriteRoutes).toEqual([
       'PUT /3/customers/{CustomerNumber}',
       'POST /3/invoices',
@@ -601,6 +635,14 @@ describe('repo emulator manifests', () => {
       'DELETE /v1.0/drives/{driveId}/items/{itemId}',
       'POST /v1.0/drives/{driveId}/items/{itemId}/copy'
     ])
+    expect(dropboxWriteRoutes).toEqual([
+      'POST /2/files/create_folder_v2',
+      'POST /2/files/delete_v2',
+      'POST /2/files/copy_v2',
+      'POST /2/files/move_v2',
+      'POST /2/files/upload'
+    ])
+    expect(notionWriteRoutes).toEqual(['POST /v1/pages', 'PATCH /v1/pages/{pageId}'])
   })
 
   it('ships one pending entry per email write route, at most 60 days out, naming the live run', () => {
@@ -712,6 +754,56 @@ describe('repo emulator manifests', () => {
     expect(failedRoutes(betweenExpiries, 'microsoft')).toEqual([])
   })
 
+  it.each([
+    ['dropbox', 'Dropbox', () => dropboxWriteRoutes],
+    ['notion', 'Notion', () => notionWriteRoutes]
+  ] as const)(
+    'ships one pending entry per %s write route, at most 60 days out, naming the live run',
+    (manifest, _label, writeRoutes) => {
+      const entries = repoPending.entries.filter(entry => entry.manifest === manifest)
+
+      expect(entries.map(entry => `${entry.method} ${entry.path}`)).toEqual(writeRoutes())
+
+      for (const entry of entries) {
+        // At most 60 days from 2026-09-30 (and from 2026-10-01, the day they were added).
+        expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+        expect(entry.reason).toContain('owner-approved')
+        expect(entry.reason).toContain(`live run of ${manifest}.`)
+        expect(entry.reason).toContain('tracking #115')
+      }
+    }
+  )
+
+  it.each([
+    ['dropbox', () => dropboxWriteRoutes],
+    ['notion', () => notionWriteRoutes]
+  ] as const)(
+    'fails the unverified %s write routes without the pending file or after it expires',
+    (manifest, writeRoutes) => {
+      const expiry = repoPending.entries
+        .filter(entry => entry.manifest === manifest)
+        .map(entry => entry.expires)
+        .toSorted()
+        .at(-1)
+
+      expect(expiry).toBeDefined()
+
+      const dayAfterExpiry = new Date(
+        Date.parse(`${expiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
+      )
+
+      for (const report of [repoCheck(now, []), repoCheck(dayAfterExpiry)]) {
+        expect(evidenceReportFailed(report)).toBe(true)
+        expect(failedRoutes(report, manifest)).toEqual(writeRoutes())
+      }
+
+      // On its last allowed day the routes still pass.
+      expect(failedRoutes(repoCheck(new Date(`${expiry ?? ''}T12:00:00.000Z`)), manifest)).toEqual(
+        []
+      )
+    }
+  )
+
   it('the CLI clock is today unless the test-only --now flag sets it', () => {
     const today = new Date('2026-09-30T08:00:00.000Z')
 
@@ -783,6 +875,14 @@ describe('repo emulator manifests', () => {
     expect(result.stdout).toContain('WARN  email  PORT EmailClient.getMessage  unverified evidence')
     expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-10-31')
     expect(result.stdout).toContain('WARN  microsoft  POST /v1.0/$batch  PENDING until 2026-11-27')
+    expect(result.stdout).toContain('WARN  dropbox  POST /2/files/upload  PENDING until 2026-11-29')
+    expect(result.stdout).toContain(
+      'WARN  notion  PATCH /v1/pages/{pageId}  PENDING until 2026-11-29'
+    )
+    expect(result.stdout).toContain(
+      'WARN  dropbox  POST /2/files/get_metadata  unverified evidence'
+    )
+    expect(result.stdout).toContain('WARN  notion  GET /v1/users/me  unverified evidence')
 
     // The PENDING count comes from the pending file, not a hard-coded number.
     const pendingLine = result.stdout.split('\n').find(line => line.startsWith('PENDING: '))
