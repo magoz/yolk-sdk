@@ -413,6 +413,34 @@ describe('pending evidence allowlist', () => {
     expect(evidenceReportFailed(report)).toBe(true)
   })
 
+  it('expires each entry on its own date, independently of the others', () => {
+    const otherWrite = route({
+      method: 'POST',
+      path: '/v1/items',
+      write: true,
+      caseIds: ['example.write.create'],
+      evidence: 'unverified',
+      observedAt: undefined
+    })
+
+    const entries = [
+      pendingEntry({ expires: '2026-10-31' }),
+      pendingEntry({ method: 'POST', path: '/v1/items', expires: '2026-11-29' })
+    ]
+
+    const failedPaths = (at: string) =>
+      checkPending([unverifiedWrite, otherWrite], entries, new Date(at))
+        .findings.filter(finding => finding.severity === 'fail')
+        .map(finding => finding.route)
+
+    // Between the two expiries only the earlier entry's route fails; after both, both fail.
+    expect(failedPaths('2026-11-01T00:00:00.000Z')).toEqual(['PUT /v1/items/{id}'])
+    expect(failedPaths('2026-11-30T00:00:00.000Z').toSorted()).toEqual([
+      'POST /v1/items',
+      'PUT /v1/items/{id}'
+    ])
+  })
+
   it('still fails unlisted unverified write routes (other manifest, method, or path)', () => {
     for (const entry of [
       pendingEntry({ manifest: 'other' }),
@@ -905,8 +933,9 @@ describe('repo emulator manifests', () => {
       expect(failedRoutes(report, 'microsoft')).toEqual(microsoftWriteRoutes)
     }
 
-    // The day after the last Fortnox allowance expires (dates from the pending file), the Fortnox
-    // routes fail while the Microsoft routes, still within their own allowance, do not.
+    // Each allowance is independent (dates from the pending file): on the day after the EARLIER of
+    // the Fortnox and Microsoft expiries, the other emulator's routes, still within their own
+    // allowance, do not fail. (The Fortnox test above checks its routes fail after their expiry.)
     const fortnoxExpiry = repoPending.entries
       .filter(entry => entry.manifest === 'fortnox')
       .map(entry => entry.expires)
@@ -915,16 +944,22 @@ describe('repo emulator manifests', () => {
 
     expect(fortnoxExpiry).toBeDefined()
 
-    const dayAfterFortnoxExpiry = new Date(
-      Date.parse(`${fortnoxExpiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
-    )
+    const dayAfterUtc = (date: string | undefined) =>
+      new Date(Date.parse(`${date ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000)
 
-    expect(dayAfterFortnoxExpiry.toISOString().slice(0, 10) <= (microsoftExpiry ?? '')).toBe(true)
+    const [earlier, later] =
+      (fortnoxExpiry ?? '') < (microsoftExpiry ?? '')
+        ? (['fortnox', 'microsoft'] as const)
+        : (['microsoft', 'fortnox'] as const)
 
-    const betweenExpiries = repoCheck(dayAfterFortnoxExpiry)
+    const earlierExpiry = earlier === 'fortnox' ? fortnoxExpiry : microsoftExpiry
+    const laterExpiry = later === 'fortnox' ? fortnoxExpiry : microsoftExpiry
 
-    expect(failedRoutes(betweenExpiries, 'fortnox')).toEqual(fortnoxWriteRoutes)
-    expect(failedRoutes(betweenExpiries, 'microsoft')).toEqual([])
+    // Equal dates leave no day in between; the unit test 'expires each entry on its own date'
+    // covers independence without depending on the repository's dates.
+    if (earlierExpiry !== laterExpiry) {
+      expect(failedRoutes(repoCheck(dayAfterUtc(earlierExpiry)), later)).toEqual([])
+    }
   })
 
   it.each([
@@ -1056,7 +1091,7 @@ describe('repo emulator manifests', () => {
     expect(result.stdout).toContain('WARN  email  PORT EmailClient.getMessage  unverified evidence')
     expect(result.stdout).toContain('WARN  r2  PORT R2ObjectClient.put  PENDING until 2026-11-29')
     expect(result.stdout).toContain('WARN  r2  PORT R2ObjectClient.get  unverified evidence')
-    expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-10-31')
+    expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-11-29')
     expect(result.stdout).toContain('WARN  microsoft  POST /v1.0/$batch  PENDING until 2026-11-27')
     expect(result.stdout).toContain('WARN  dropbox  POST /2/files/upload  PENDING until 2026-11-29')
     expect(result.stdout).toContain(
