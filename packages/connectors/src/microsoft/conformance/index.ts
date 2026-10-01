@@ -4,7 +4,8 @@
  *
  * The Outlook and OneDrive cases run the real connector actions. The connector has no calendar
  * actions yet: the calendar cases send raw Graph v1.0 requests through the same connector ports and
- * pin expected Graph behaviour (unverified until a live run) for hosts and the upcoming emulator.
+ * pin expected Graph behaviour (unverified until a live run) for hosts and the Microsoft Graph
+ * emulator (`@yolk-sdk/emulators/microsoft`).
  *
  * The current fixtures are synthetic placeholders (`evidence: 'unverified'`) shaped like the
  * Microsoft Graph wire.

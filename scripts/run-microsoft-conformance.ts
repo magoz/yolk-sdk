@@ -600,11 +600,9 @@ export class MicrosoftRunFailed extends Schema.TaggedError<MicrosoftRunFailed>()
   { message: Schema.String }
 ) {}
 
-/** Why `--record` refuses a recording in which the live access token appears. */
 export const recordedTokenRefusal =
   'A recorded exchange contains the live access token; nothing was written'
 
-/** Why `--record` refuses staged files or checklist lines that would contain the token. */
 export const renderedTokenRefusal =
   'The staged files or the review checklist would contain the live access token; nothing was written'
 
