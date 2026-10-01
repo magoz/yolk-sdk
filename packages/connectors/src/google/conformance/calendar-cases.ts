@@ -242,11 +242,13 @@ const withOwnEvent = <A, E, R>(
       }),
       unknownRecovery: `delete the event "${summary}" on ${calendarConformanceEventStart.slice(0, 10)} in calendar ${calendarId} by hand if it exists`,
       refuse: event =>
-        event.id === undefined
-          ? `an event without an id titled "${event.summary ?? ''}"`
-          : event.summary !== summary || (event.attendees?.length ?? 0) > 0
-            ? `event ${event.id} titled "${event.summary ?? ''}"`
-            : undefined,
+        Effect.succeed(
+          event.id === undefined
+            ? `an event without an id titled "${event.summary ?? ''}"`
+            : event.summary !== summary || (event.attendees?.length ?? 0) > 0
+              ? `event ${event.id} titled "${event.summary ?? ''}"`
+              : undefined
+        ),
       recovery: event =>
         `delete event ${eventIdOf(event)} in calendar ${calendarId} by hand if it still exists`,
       restore: event => ensureEventGone(calendarId, eventIdOf(event)),
@@ -340,10 +342,10 @@ const deletedCaseId = 'google.calendar.deleted-event-gone'
 
 export const calendarDeletedGoneCase: GoogleConformanceCase = defineConformanceCase({
   id: deletedCaseId,
-  title: 'A deleted event reads gone, and deleting it again answers 404 or 410',
+  title: 'A deleted event reads gone, and stays gone when deleted again',
   safety: 'write-reversible',
   docs: '`calendar.delete_event` sends DELETE .../calendars/{calendarId}/events/{eventId} and treats any 2xx as deleted without reading the body; a non-2xx answer is a failure with its status (404 `google_not_found`, 410 `calendar_delete_event_failed`). `calendar.get_event` decodes the event, whose optional `status` is kept.',
-  wire: 'For an event the case just created in the seeded calendar (run-scoped summary, no attendees), `calendar.delete_event` answers 2xx; `calendar.get_event` then answers 404 or 410, or the event with `status: "cancelled"` (unverified: which of them), never a live event; and deleting it again answers a failure with status 404 or 410 (unverified: that Calendar answers 410 Gone for an already deleted event), which the cleanup relies on to count an event as already deleted. So a second delete that succeeds, or a deleted event that still reads live, fails the case.',
+  wire: 'For an event the case just created in the seeded calendar (run-scoped summary, no attendees), `calendar.delete_event` answers 2xx; `calendar.get_event` then answers 404 or 410, or the event with `status: "cancelled"` (unverified: which of them), never a live event; and deleting it again answers 2xx or a failure with status 404 or 410 (unverified: which; the cleanup accepts any of them), after which `calendar.get_event` still reads it gone. So a deleted event that reads live, before or after the repeated delete, or a repeated delete that fails otherwise, fails the case.',
   fixtures: [calendarDeletedGoneFixture.id],
   run: withOwnEvent(deletedCaseId, 'deleted event', (calendarId, event, _summary, pending) =>
     Effect.gen(function* () {
@@ -366,9 +368,17 @@ export const calendarDeletedGoneCase: GoogleConformanceCase = defineConformanceC
       const again = yield* deleteEvent(calendarId, eventId).pipe(Effect.uninterruptible)
 
       yield* expectConformance(
-        isGoneFailure(again),
-        'expected deleting the deleted event again to answer 404 or 410',
+        Predicate.isTagged(again, 'Success') || isGoneFailure(again),
+        'expected deleting the deleted event again to answer 2xx, 404, or 410',
         { actual: outcomeOf(again) }
+      )
+
+      const still = yield* getEvent(calendarId, eventId)
+
+      yield* expectConformance(
+        readsGone(still),
+        'expected the deleted event to stay gone after the repeated delete',
+        { actual: outcomeOf(still) }
       )
     })
   )

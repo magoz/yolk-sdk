@@ -10,7 +10,7 @@ import {
   expectConformance,
   expectEqual
 } from '@yolk-sdk/conformance/case'
-import { classifyWriteExit } from '../../conformance/cleanup-reporter.ts'
+import { classifyWriteExit, failReportingForCase } from '../../conformance/cleanup-reporter.ts'
 import type { ActionResult } from '../../result.ts'
 import {
   gmailCreateLabelAction,
@@ -57,7 +57,6 @@ import {
   decodeBody,
   decodeOutput,
   decodeWriteAnswer,
-  failReportingFor,
   failureOf,
   GoogleConformanceActionFailed,
   googleConformanceIntegration as integration,
@@ -167,25 +166,42 @@ const listPageSize = 2
 
 const pageCap = 10
 
+/** Page size of the single listing the pages are compared with. */
+const singleListingSize = 100
+
+/** One `gmail.list` page of the label's messages. */
+const listPage = (labelId: string, maxResults: number, pageToken?: string) =>
+  gmailListAction
+    .executeTyped({
+      integration,
+      input: GmailListInput.make(
+        pageToken === undefined ? { labelId, maxResults } : { labelId, maxResults, pageToken }
+      )
+    })
+    .pipe(
+      Effect.flatMap(successValue(gmailListAction.id)),
+      Effect.flatMap(decodeOutput(GmailListPage, 'gmail.list to answer messages and nextPageToken'))
+    )
+
 export const gmailListPagingCase: GoogleConformanceCase = defineConformanceCase({
   id: 'google.gmail.list-page-token',
-  title: 'A label listing pages through nextPageToken to exactly the label messagesTotal',
+  title: 'A label listing pages through nextPageToken to the same messages as one large page',
   safety: 'read',
-  docs: '`gmail.list` sends GET /gmail/v1/users/me/messages with `labelIds`, `maxResults`, and an opaque `pageToken` passed through unchanged, and returns the JSON answer undecoded (`messages` of `{ id, threadId }` and `nextPageToken`); callers page by feeding `nextPageToken` back as `pageToken`. `gmail.get_label` sends GET .../labels/{id} and decodes `GmailLabel`, including the optional `messagesTotal`.',
-  wire: 'For the seeded paging label (3 to 20 messages), `gmail.get_label` answers a `messagesTotal`; `gmail.list` with that `labelId` and `maxResults: 2` answers at most two message ids per page and a `nextPageToken` while messages remain; feeding each token back as `pageToken` continues the listing with no id repeated within or across pages, and the page without `nextPageToken` ends it having listed exactly `messagesTotal` distinct messages (unverified: that `messagesTotal` counts exactly the messages the listing pages through, which needs a label with no message in Trash or Spam). So a `nextPageToken` missing while messages remain fails the case.',
+  docs: '`gmail.list` sends GET /gmail/v1/users/me/messages with `labelIds`, `maxResults`, and an opaque `pageToken` passed through unchanged, and returns the JSON answer undecoded (`messages` of `{ id, threadId }` and `nextPageToken`); callers page by feeding `nextPageToken` back as `pageToken`.',
+  wire: 'For the seeded paging label (3 to 20 messages), `gmail.list` with that `labelId` and `maxResults: 100` answers every message on one page (no `nextPageToken`); with `maxResults: 2` each page answers at most two message ids and a `nextPageToken` while messages remain, and feeding each token back as `pageToken` lists exactly the messages of the single page, none repeated within or across pages. So a `nextPageToken` missing while messages remain fails the case.',
   fixtures: [gmailListPagingFixture.id],
   run: Effect.gen(function* () {
     const labelId = yield* requireSeed('pagingLabelId')
+    const single = yield* listPage(labelId, singleListingSize)
+    const all = (single.messages ?? []).map(message => message.id)
 
-    const label = yield* getLabel(labelId).pipe(
-      Effect.flatMap(successValue(gmailGetLabelAction.id))
-    )
-
-    const total = label.messagesTotal
-
-    if (total === undefined || total <= listPageSize || total > listPageSize * pageCap) {
+    if (
+      single.nextPageToken !== undefined ||
+      all.length <= listPageSize ||
+      all.length > listPageSize * pageCap
+    ) {
       return yield* new ConformanceMismatch({
-        message: `precondition: the paging label must report a messagesTotal from ${listPageSize + 1} to ${listPageSize * pageCap}`
+        message: `precondition: the paging label must hold ${listPageSize + 1} to ${listPageSize * pageCap} messages`
       })
     }
 
@@ -193,22 +209,7 @@ export const gmailListPagingCase: GoogleConformanceCase = defineConformanceCase(
     let pageToken: string | undefined
 
     for (let page = 1; ; page++) {
-      const listing = yield* gmailListAction
-        .executeTyped({
-          integration,
-          input: GmailListInput.make(
-            pageToken === undefined
-              ? { labelId, maxResults: listPageSize }
-              : { labelId, maxResults: listPageSize, pageToken }
-          )
-        })
-        .pipe(
-          Effect.flatMap(successValue(gmailListAction.id)),
-          Effect.flatMap(
-            decodeOutput(GmailListPage, 'gmail.list to answer messages and nextPageToken')
-          )
-        )
-
+      const listing = yield* listPage(labelId, listPageSize, pageToken)
       const ids = (listing.messages ?? []).map(message => message.id)
 
       yield* expectConformance(
@@ -240,16 +241,23 @@ export const gmailListPagingCase: GoogleConformanceCase = defineConformanceCase(
     }
 
     yield* expectEqual(
-      seen.length,
-      total,
-      'expected the pages to list exactly the label messagesTotal messages'
+      [...seen].sort(),
+      [...all].sort(),
+      'expected the pages to list exactly the messages of the single listing'
     )
   })
 })
 
-/** Decoded byte length of a base64url string, or `undefined` when it does not decode. */
+/**
+ * Decoded byte length of a base64url string, or `undefined` when it does not decode. Padding is
+ * counted with one backward scan: an unanchored `/=+$/` is quadratic on long untrusted input.
+ */
 const base64UrlByteLength = (data: string): number | undefined => {
-  const unpadded = data.replace(/=+$/, '')
+  let end = data.length
+
+  while (end > 0 && data.charCodeAt(end - 1) === 61) end -= 1
+
+  const unpadded = data.slice(0, end)
   const base64 = unpadded.replaceAll('-', '+').replaceAll('_', '/')
   const padded = `${base64}${'='.repeat((4 - (base64.length % 4)) % 4)}`
   const decoded = Result.try(() => atob(padded))
@@ -259,10 +267,10 @@ const base64UrlByteLength = (data: string): number | undefined => {
 
 export const gmailAttachmentCase: GoogleConformanceCase = defineConformanceCase({
   id: 'google.gmail.attachment-base64url',
-  title: 'An attachment listed with its part size answers base64url data of exactly that size',
+  title: 'A listed attachment answers base64url data of exactly its size',
   safety: 'read',
   docs: '`gmail.list_attachments` sends GET .../messages/{id}?format=full and walks the payload `parts` for attachment metadata (`partId`, `filename`, `mimeType`, `body.size`, `body.attachmentId`), never content; `gmail.get_attachment` sends GET .../messages/{id}/attachments/{attachmentId}, requires `size` (a non-negative integer) and `data` in the base64url alphabet (no `+` or `/`), keeps `data`, and adds standard-base64 `contentBase64`.',
-  wire: 'For the seeded attachment message, `gmail.list_attachments` lists at least one part with an `attachmentId` and a `size`; `gmail.get_attachment` of it answers `data` in the base64url alphabet (a standard-base64 answer fails the connector decoding) that decodes to exactly `size` bytes, and that `size` equals the listed part size (unverified: that the payload part `body.size` and the attachment answer `size` agree).',
+  wire: 'For the seeded attachment message, `gmail.list_attachments` lists at least one part with an `attachmentId` and a `size`; `gmail.get_attachment` of it answers `data` in the base64url alphabet (a standard-base64 answer fails the connector decoding) that decodes to exactly `size` bytes. The listed part `size` is not compared: the connector never relies on it matching.',
   fixtures: [gmailAttachmentFixture.id],
   run: Effect.gen(function* () {
     const messageId = yield* requireSeed('attachmentMessageId')
@@ -290,11 +298,6 @@ export const gmailAttachmentCase: GoogleConformanceCase = defineConformanceCase(
       base64UrlByteLength(fetched.data) ?? null,
       fetched.size,
       'expected the base64url data to decode to exactly size bytes'
-    )
-    yield* expectEqual(
-      fetched.size,
-      attachment.size ?? null,
-      'expected the attachment size to equal the listed part size'
     )
   })
 })
@@ -385,9 +388,11 @@ export const gmailLabelLifecycleCase: GoogleConformanceCase = defineConformanceC
       }),
       unknownRecovery: `delete the Gmail label "${name}" by hand if it exists`,
       refuse: label =>
-        label.name === name && label.type !== 'system'
-          ? undefined
-          : `label ${label.id} named "${label.name}"`,
+        Effect.succeed(
+          label.name === name && label.type !== 'system'
+            ? undefined
+            : `label ${label.id} named "${label.name}"`
+        ),
       recovery: label =>
         `delete the Gmail label ${label.id} ("${name}") by hand if it still exists`,
       restore: label => ensureLabelAbsent(label.id),
@@ -476,6 +481,47 @@ const ensureDraftAbsent = (draftId: string, messageId: string) =>
     )
   })
 
+/** The draft message's recipient headers: a draft the case composed has none. */
+const recipientHeaderNames = /^(?:to|cc|bcc)$/i
+
+/**
+ * `undefined` when the composed draft is provably this run's own: its message (read with
+ * `format: "metadata"`) is the answered message, carries the `DRAFT` label, the run-scoped subject,
+ * and no recipient header. Otherwise the refused item: a foreign or unverifiable draft is never
+ * updated or deleted. Never fails (a failed read is an unverifiable draft).
+ */
+const refuseForeignDraft = (draft: GmailDraftAnswer, subject: string) =>
+  gmailGetMessageAction
+    .executeTyped({
+      integration,
+      input: GmailGetMessageInput.make({ id: draft.message.id, format: 'metadata' })
+    })
+    .pipe(
+      Effect.map(result => {
+        if (!Predicate.isTagged(result, 'Success')) {
+          return `draft ${draft.id}, whose message could not be read to prove it is this run's draft (${outcomeOf(result)})`
+        }
+
+        const message = result.value
+        const headers = message.payload?.headers ?? []
+
+        const own =
+          message.id === draft.message.id &&
+          (message.labelIds ?? []).includes('DRAFT') &&
+          header(headers, 'subject') === subject &&
+          !headers.some(entry => recipientHeaderNames.test(entry.name))
+
+        return own
+          ? undefined
+          : `draft ${draft.id}, which is not this run's draft (another subject, a recipient, or no DRAFT label)`
+      }),
+      Effect.catch(error =>
+        Effect.succeed(
+          `draft ${draft.id}, whose message could not be read to prove it is this run's draft (${error.cause})`
+        )
+      )
+    )
+
 /** Register the message id of a successful draft answer (a draft update replaces the message). */
 const registerDraftMessage = (
   current: Ref.Ref<string>,
@@ -485,10 +531,11 @@ const registerDraftMessage = (
 
 export const gmailDraftLifecycleCase: GoogleConformanceCase = defineConformanceCase({
   id: draftCaseId,
-  title: 'A draft round-trips its UTF-8 text through compose, update, and get_thread, then deletes',
+  title:
+    'A draft round-trips its subject and UTF-8 body through compose, update, and get_thread, then deletes',
   safety: 'write-reversible',
   docs: '`gmail.draft_compose` and `gmail.draft_update` build a text/plain MIME message (`Subject` RFC 2047-encoded when not ASCII, `Content-Type: text/plain; charset=utf-8`, the body as UTF-8 bytes, no transfer encoding), base64url-encode it, and send POST .../drafts `{ message: { raw } }` or PUT .../drafts/{id} `{ id, message: { raw } }`, returning the draft answer undecoded; `gmail.get_thread` with `format: "full"` decodes each text part from its base64url `body.data` as UTF-8 (then quoted-printable or base64 when the part says so), prefers text/plain, and keeps selected headers; `gmail.draft_delete` sends DELETE .../drafts/{id} and treats any 2xx as deleted without reading the (empty) body.',
-  wire: '`gmail.draft_compose` with no recipient, a run-scoped subject, and a body with non-ASCII characters answers a draft id and a message id and thread id; `gmail.get_thread` of that thread reads back the subject and exactly that body (trailing whitespace aside) as text/plain (unverified: that Gmail keeps the 8-bit part as written, so `body.data` carries the UTF-8 bytes the connector sent); `gmail.draft_update` of the same draft with a new subject and body answers the same draft id with a new message, which `gmail.get_thread` reads back the same way; `gmail.draft_delete` answers 2xx; afterwards `gmail.get_message` of the draft message answers `google_not_found` (unverified: deleting a draft deletes its message), and deleting the draft again answers `google_not_found` (unverified: 404 for a deleted draft), which the cleanup relies on. The draft has no recipient, so nothing can be sent; the case deletes it again, by id, even when a step fails.',
+  wire: '`gmail.draft_compose` with no recipient, a run-scoped ASCII subject, and a body with non-ASCII characters answers a draft id and a message id and thread id, and `gmail.get_message` of that message (`format: "metadata"`) reads the `DRAFT` label, the run-scoped subject, and no recipient header (checked before the case adopts the draft: a draft that is not provably its own is never updated or deleted); `gmail.get_thread` of that thread reads back the subject and exactly that body (trailing whitespace aside) as text/plain (unverified: that Gmail keeps the 8-bit part as written, so `body.data` carries the UTF-8 bytes the connector sent); `gmail.draft_update` of the same draft with a new subject and body answers the same draft id with a new message, which `gmail.get_thread` reads back the same way; `gmail.draft_delete` answers 2xx; afterwards `gmail.get_message` of the draft message answers `google_not_found` (unverified: deleting a draft deletes its message), and deleting the draft again answers 2xx or `google_not_found` (unverified: which), after which its message still answers `google_not_found`; the cleanup accepts either answer and then verifies the message is gone. The draft has no recipient, so nothing can be sent; the case deletes it again, by id, even when a step fails.',
   fixtures: [gmailDraftLifecycleFixture.id],
   run: Effect.gen(function* () {
     const subject = yield* runText('draft', 'synthetic conformance draft, safe to delete')
@@ -514,10 +561,7 @@ export const gmailDraftLifecycleCase: GoogleConformanceCase = defineConformanceC
           Effect.flatMap(result => Effect.as(registerDraftMessage(currentMessage, result), result))
         ),
       unknownRecovery: `delete the Gmail draft with subject "${subject}" by hand if it exists`,
-      refuse: (draft: GmailDraftAnswer) =>
-        draft.message.labelIds === undefined || draft.message.labelIds.includes('DRAFT')
-          ? undefined
-          : `draft ${draft.id} whose message is not a draft`,
+      refuse: (draft: GmailDraftAnswer) => refuseForeignDraft(draft, subject),
       recovery: draft => `delete the Gmail draft ${draft.id} by hand if it still exists`,
       restore: draft =>
         Effect.flatMap(Ref.get(currentMessage), messageId =>
@@ -578,9 +622,17 @@ export const gmailDraftLifecycleCase: GoogleConformanceCase = defineConformanceC
           const again = yield* deleteDraft(draft.id).pipe(Effect.uninterruptible)
 
           yield* expectConformance(
-            isNotFound(again),
-            'expected deleting the deleted draft again to answer google_not_found',
+            Predicate.isTagged(again, 'Success') || isNotFound(again),
+            'expected deleting the deleted draft again to answer 2xx or google_not_found',
             { actual: outcomeOf(again) }
+          )
+
+          const still = yield* getMessageMinimal(updated.message.id)
+
+          yield* expectConformance(
+            isNotFound(still),
+            'expected the draft message to stay gone after the repeated delete',
+            { actual: outcomeOf(still) }
           )
         })
     })
@@ -588,8 +640,6 @@ export const gmailDraftLifecycleCase: GoogleConformanceCase = defineConformanceC
 })
 
 const trashCaseId = 'google.gmail.trash-untrash'
-
-const sortedLabels = (labels: ReadonlyArray<string>) => [...labels].sort()
 
 /**
  * Bring the work message out of Trash with every label it had before: untrash when it still
@@ -620,10 +670,10 @@ const ensureMessageRestored = (messageId: string, before: ReadonlyArray<string>)
 
 export const gmailTrashUntrashCase: GoogleConformanceCase = defineConformanceCase({
   id: trashCaseId,
-  title: 'The work message trashed and untrashed reads back with exactly its earlier labels',
+  title: 'The work message trashed reads TRASH, and untrashed reads without it',
   safety: 'write-reversible',
   docs: '`gmail.trash` and `gmail.untrash` send POST .../messages/{id}/trash and .../untrash (no body) and return the message answer undecoded; `gmail.get_message` with `format: "minimal"` decodes `labelIds`. The connector has no other Trash model: a trashed message is one whose labels include `TRASH`.',
-  wire: 'For the seeded work message, not in Trash: `gmail.trash` answers the message with `TRASH` among its `labelIds`, and `gmail.get_message` lists `TRASH`; `gmail.untrash` answers the message without `TRASH`, and `gmail.get_message` then lists exactly the labels it had before the trash (unverified: that untrash restores every earlier label, INBOX included). The case refuses to start while the message is in Trash (so it never untrashes a message it did not trash), and untrashes it and re-adds missing earlier labels even when a step fails. Concurrent runs are not supported.',
+  wire: 'For the seeded work message, not in Trash: `gmail.trash` answers the message with `TRASH` among its `labelIds`, and `gmail.get_message` lists `TRASH`; `gmail.untrash` answers the message without `TRASH`, and `gmail.get_message` then lists no `TRASH`. Whether untrash restores every earlier label is not a connector claim: the cleanup always runs, untrashes the message if it is still in Trash, re-adds any earlier label it lacks, and verifies them all. The case refuses to start while the message is in Trash (so it never untrashes a message it did not trash). Concurrent runs are not supported.',
   fixtures: [gmailTrashUntrashFixture.id],
   run: Effect.gen(function* () {
     const messageId = yield* requireSeed('workMessageId')
@@ -643,11 +693,12 @@ export const gmailTrashUntrashCase: GoogleConformanceCase = defineConformanceCas
         .executeTyped({ integration, input: GmailMessageIdInput.make({ messageId }) })
         .pipe(Effect.flatMap(decodeWriteAnswer(GmailMessageLabels, gmailTrashAction.id))),
       unknownRecovery: `untrash message ${messageId} by hand if it is in Trash`,
-      refuse: message => (message.id === messageId ? undefined : `message ${message.id}`),
+      refuse: message =>
+        Effect.succeed(message.id === messageId ? undefined : `message ${message.id}`),
       recovery: () =>
         `untrash message ${messageId} by hand and re-add its labels ${before.join(', ')}`,
       restore: () => ensureMessageRestored(messageId, before),
-      use: (trashed, pending) =>
+      use: trashed =>
         Effect.gen(function* () {
           yield* expectConformance(
             (trashed.labelIds ?? []).includes('TRASH'),
@@ -670,12 +721,11 @@ export const gmailTrashUntrashCase: GoogleConformanceCase = defineConformanceCas
 
           const after = yield* messageLabels(messageId)
 
-          yield* expectEqual(
-            sortedLabels(after),
-            sortedLabels(before),
-            'expected untrash to restore exactly the labels the message had before'
+          yield* expectConformance(
+            !after.includes('TRASH'),
+            'expected get_message to list no TRASH after the untrash'
           )
-          yield* Ref.set(pending, false)
+          // `pending` stays set: the cleanup always restores and verifies the earlier labels.
         })
     })
   })
@@ -683,11 +733,18 @@ export const gmailTrashUntrashCase: GoogleConformanceCase = defineConformanceCas
 
 const sendCaseId = 'google.gmail.send-practice-address'
 
-/** The recipient headers (`To`, `Cc`, `Bcc`) of a MIME message, as `name: value` lines. */
-const recipientHeaders = (mime: string): ReadonlyArray<string> =>
-  (mime.split('\r\n\r\n', 1)[0] ?? '')
-    .split('\r\n')
-    .filter(line => /^(?:to|cc|bcc|resent-[a-z]+):/i.test(line))
+/**
+ * The recipient header lines (`To`, `Cc`, `Bcc`, `Resent-*`) of a MIME message's header block, which
+ * ends at the first empty line; any line break (CRLF, bare CR, bare LF) splits lines.
+ */
+const recipientHeaders = (mime: string): ReadonlyArray<string> => {
+  const lines = mime.split(/\r\n|\r|\n/)
+  const end = lines.indexOf('')
+
+  return (end === -1 ? lines : lines.slice(0, end)).filter(line =>
+    /^(?:to|cc|bcc|resent-[a-z]+):/i.test(line)
+  )
+}
 
 const base64UrlOfAscii = (text: string) =>
   btoa(text).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
@@ -697,9 +754,10 @@ export const gmailSendPracticeCase: GoogleConformanceCase = defineConformanceCas
   title: 'A message sent to the practice address answers an id that reads back its recipient',
   safety: 'write-irreversible',
   docs: '`gmail.send_message` takes a complete host-generated base64url MIME message, sends 7-bit MIME as one multipart media upload (POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart, `multipart/related`: `{}` JSON metadata, then the `message/rfc822` bytes), never retries, and on 2xx decodes `{ id, threadId? }` into `{ accepted: true, id, threadId }`; a non-2xx status among 400, 401, 403, 404, 405, 413, 415, 422, and 429 is `gmail_send_message_rejected`, any other `gmail_send_message_unknown` ("Reconcile before considering another send"). Success means submission, not delivery. The connector cannot unsend.',
-  wire: '`gmail.send_message` of a 7-bit text/plain message whose only recipient header is `To: <practiceAddress>` (the case refuses to send any other) and whose subject names the run id sends one multipart upload and answers 2xx with a message `id`; `gmail.get_message` of that id with `format: "metadata"` answers the `To` header equal to the practice address and the run-scoped `Subject`, so the answered id addresses the message sent. The message stays in the Sent folder and in the practice mailbox: this case is write-irreversible, runs only when requested by its exact id, and never sends to anyone but the seeded practice address.',
+  wire: '`gmail.send_message` of a 7-bit text/plain message whose only recipient header is `To: <practiceAddress>` (the case decodes `practiceAddress` again as exactly one plain address `local@domain`, with no display name, list, angle brackets, whitespace, or control characters, and the `runId` as `run-...`, and refuses anything else with a precondition before any request) and whose subject names the run id sends one multipart upload and answers 2xx with a message `id`; `gmail.get_message` of that id with `format: "metadata"` answers the `To` header equal to the practice address and the run-scoped `Subject`, so the answered id addresses the message sent. The message stays in the Sent folder and in the practice mailbox: this case is write-irreversible, runs only when requested by its exact id, and never sends to anyone but the seeded practice address.',
   fixtures: [gmailSendPracticeFixture.id],
   run: Effect.gen(function* () {
+    // Decoded again here (a host may bypass the branded types): exactly one plain address.
     const practiceAddress = yield* requireSeed('practiceAddress')
     const subject = yield* runText('send', 'synthetic conformance message, safe to delete')
     const mime = gmailConformancePracticeMime(practiceAddress, subject)
@@ -744,7 +802,9 @@ export const gmailSendPracticeCase: GoogleConformanceCase = defineConformanceCas
           : new GoogleConformanceActionFailed({ actionId, ...outcome.failure })
 
         // An interruption may replace this failure, and with it the advice to look for the message.
-        return yield* ambiguous ? failReportingFor(sendCaseId, unmask, error) : Effect.fail(error)
+        return yield* ambiguous
+          ? failReportingForCase(sendCaseId, unmask, error)
+          : Effect.fail(error)
       })
     )
 

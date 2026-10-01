@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Effect, Result } from 'effect'
+import { Effect, Layer, Result } from 'effect'
 import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
 import { describe, expect, it } from 'vitest'
 import {
@@ -26,7 +26,8 @@ import {
   gmailSendPracticeFixture,
   googleConformanceCases,
   googleConformanceFixtures,
-  googleConformanceFixtureSeeds
+  googleConformanceFixtureSeeds,
+  GoogleConformanceRunId
 } from '../../packages/connectors/src/google/conformance/index.ts'
 import {
   accessTokenRequiredMessage,
@@ -44,6 +45,9 @@ import {
   recorderOptionsFor,
   recordingReviewChecklist,
   recordingRunId,
+  redactAccessToken,
+  redactedLiveTokenMarker,
+  redactingCliIo,
   renderFixtureModule,
   renderSeedsModule,
   runInterruptibly,
@@ -51,6 +55,7 @@ import {
   stageRecordings,
   textContainsAccessToken,
   usage,
+  withheldTokenLine,
   type CliIo,
   type LiveInputs,
   type RecordingWriter,
@@ -591,7 +596,10 @@ describe('run-google-conformance --record staging (offline)', () => {
 })
 
 describe('run-google-conformance leftover warnings (read-only)', () => {
-  const driveOnly = { driveFolderId: 'synthetic-practice-folder-0001', runId: 'run-synthetic' }
+  const driveOnly = {
+    driveFolderId: 'synthetic-practice-folder-0001',
+    runId: GoogleConformanceRunId.make('run-synthetic')
+  }
 
   const listUrl = (() => {
     const original = new URL(driveFolderLifecycleFixture.exchanges[3]?.request.url ?? '')
@@ -717,6 +725,162 @@ describe('run-google-conformance live run wiring', () => {
 
     expect(printed).toContain(`FAIL  ${sendId}`)
     expect(printed).toContain('WARN could not look for leftovers')
+    expect(textContainsAccessToken(printed, liveToken)).toBe(false)
+  })
+})
+
+describe('run-google-conformance printed output redacts the live token', () => {
+  const labelId = gmailLabelLifecycleFixture.caseId
+
+  const { leftovers: _leftovers, ...withoutLookup } = googleRunner
+
+  const labelOnly = {
+    ...withoutLookup,
+    cases: googleConformanceCases.filter(testCase => testCase.id === labelId)
+  }
+
+  /** The label create answered with `name` (a field the case reads and reports when refused). */
+  const labelAnswer = (name: string) =>
+    JSON.stringify({ id: 'Label_9101', name, type: 'user', messageListVisibility: 'show' })
+
+  /** An HTTP client answering only the label create, with `name`; `hold` delays the answer. */
+  const labelClient = (name: string, hold: Promise<void> = Promise.resolve(), sent = () => {}) =>
+    HttpClient.make(request =>
+      Effect.gen(function* () {
+        sent()
+        yield* Effect.promise(() => hold)
+
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(labelAnswer(name), {
+            status: 200,
+            headers: { 'content-type': 'application/json; charset=UTF-8' }
+          })
+        )
+      })
+    )
+
+  it('replaces raw, percent-encoded, and base64 forms, and withholds escaped ones', () => {
+    expect(redactAccessToken(`name "${liveToken}" refused`, liveToken)).toBe(
+      `name "${redactedLiveTokenMarker}" refused`
+    )
+    expect(redactAccessToken(`x=${encodeURIComponent(`${liveToken}/`)}`, liveToken)).not.toContain(
+      liveToken
+    )
+
+    const base64 = redactAccessToken(Buffer.from(liveToken).toString('base64'), liveToken)
+
+    expect(base64).toContain(redactedLiveTokenMarker)
+    expect(textContainsAccessToken(base64, liveToken)).toBe(false)
+
+    const escaped = liveToken.replace('.', '\\u002e')
+
+    expect(redactAccessToken(`first\nname "${escaped}"\nlast`, liveToken)).toBe(
+      `first\n${withheldTokenLine}\nlast`
+    )
+  })
+
+  it('withholds a line holding a cut fragment of the token (a capped report)', () => {
+    const cut = `restore failed: name "${liveToken.slice(0, 20)}...`
+
+    expect(redactAccessToken(`first\n${cut}\nlast`, liveToken)).toBe(
+      `first\n${withheldTokenLine}\nlast`
+    )
+    // A short shared run (under 16 characters) is not a fragment: ordinary text stays.
+    expect(redactAccessToken(`token prefix ${liveToken.slice(0, 5)} only`, liveToken)).toBe(
+      `token prefix ${liveToken.slice(0, 5)} only`
+    )
+  })
+
+  for (const [label, name] of [
+    ['raw', liveToken],
+    ['base64-encoded', Buffer.from(`x${liveToken}`).toString('base64')]
+  ] as const) {
+    it(`prints no trace of a ${label} token echoed in a consumed field (the label name)`, async () => {
+      const lines: Array<string> = []
+
+      await Effect.runPromise(
+        runLive(labelOnly, live(['--allow-writes', 'reversible']), recordInputs, {
+          http: Layer.succeed(HttpClient.HttpClient, labelClient(name)),
+          out: line => {
+            lines.push(line)
+          },
+          err: line => {
+            lines.push(line)
+          }
+        })
+      )
+
+      const printed = lines.join('\n')
+
+      expect(printed).toContain(`FAIL  ${labelId}`)
+      expect(printed).toContain('cleanup refused')
+      expect(printed).toContain(redactedLiveTokenMarker)
+      expect(textContainsAccessToken(printed, liveToken)).toBe(false)
+    })
+  }
+
+  it('prints no trace of the token when the refusal is raised during an interruption', async () => {
+    const runLines: Array<string> = []
+    const cliLines: Array<string> = []
+
+    let handlers: Array<() => void> = []
+
+    let release = () => {}
+
+    let markSent = () => {}
+
+    const hold = new Promise<void>(resolvePromise => {
+      release = resolvePromise
+    })
+
+    const sent = new Promise<void>(resolvePromise => {
+      markSent = resolvePromise
+    })
+
+    const signals: SignalSource = {
+      on: (_signal, handler) => {
+        handlers = [...handlers, handler]
+      },
+      off: () => {
+        handlers = []
+      }
+    }
+
+    const io: CliIo = {
+      error: message => {
+        cliLines.push(message)
+      },
+      setExitCode: () => undefined,
+      forceExit: () => undefined
+    }
+
+    const done = runInterruptibly(
+      runLive(labelOnly, live(['--allow-writes', 'reversible']), recordInputs, {
+        http: Layer.succeed(HttpClient.HttpClient, labelClient(liveToken, hold, markSent)),
+        out: line => {
+          runLines.push(line)
+        },
+        err: line => {
+          runLines.push(line)
+        }
+      }),
+      signals,
+      redactingCliIo(io, liveToken),
+      { now: () => 0, pid: 4242, ...interruptOptionsFor(googleRunner) }
+    )
+
+    await sent
+    handlers[0]?.()
+    release()
+    await done
+
+    const printed = [...runLines, ...cliLines].join('\n')
+
+    // The case reported its refusal as a WARN line, and the run ended with that refusal.
+    expect(runLines.some(line => line.startsWith(`WARN ${labelId}: cleanup refused`))).toBe(true)
+    expect(cliLines.at(-1)).toContain(`${labelId}: cleanup refused`)
+    expect(cliLines.at(-1)).toContain(redactedLiveTokenMarker)
     expect(textContainsAccessToken(printed, liveToken)).toBe(false)
   })
 })

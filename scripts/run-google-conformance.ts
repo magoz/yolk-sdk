@@ -18,7 +18,8 @@
  * attendees (so no invitation is ever sent) created in `--calendar` and deleted by id; and a folder
  * created in `--drive-folder`, trashed, and deleted permanently by id. The one write-irreversible
  * case, `google.gmail.send-practice-address`, sends a real message whose ONLY recipient is
- * `--practice-address` (a mailbox the owner controls); Gmail cannot unsend, so it runs only when
+ * `--practice-address` (a mailbox the owner controls; the case itself refuses anything but exactly
+ * one plain address, before any request); Gmail cannot unsend, so it runs only when
  * named with `--allow-irreversible google.gmail.send-practice-address` (`--allow-writes` never
  * starts it). The runner generates a fresh random `runId` per invocation (never a flag) and prints
  * it before any case when the send will run. A definitive write rejection undoes nothing, and an
@@ -27,15 +28,18 @@
  * Gmail labels, `subject:yolk-conformance` drafts, the work message in Trash, run events in
  * `--calendar`, and run items in `--drive-folder`; nothing is changed automatically.
  *
- * The token travels only in the `Authorization` header, which the recorder never keeps; `--record`
+ * The token travels only in the `Authorization` header, which the recorder never keeps; every
+ * printed line (report, WARN lines, leftovers, failures) is redacted of the live token by the
+ * shared helper, since a provider can echo it into a reported field; `--record`
  * still refuses to stage any recording in which the live token survives anywhere (an echo in a body
  * or header; raw, percent-encoded, escaped, or base64-encoded) or that holds a body outside the
  * guard's inspectable allowlist (strict UTF-8 text without NUL characters), and stages verified
  * recordings all or nothing in a new run directory under the gitignored
  * `.conformance-recordings/google/`. Promotion is manual: scrub the staged files of
  * practice-account data (addresses, message, thread, draft, label, event, and file ids, subjects,
- * snippets, message and attachment bodies, names, page tokens, links), copy them into
- * `packages/connectors/src/google/conformance/`, run `pnpm format:fix`, and update
+ * snippets, message and attachment bodies, names, page tokens, links), set each Calendar and Drive
+ * fixture's `endpoint` to its own API base URL (staged recordings all carry the Gmail one), copy
+ * them into `packages/connectors/src/google/conformance/`, run `pnpm format:fix`, and update
  * `packages/connectors/test/google-conformance.test.ts` and
  * `scripts/test/run-google-conformance.test.ts` in the same change. See
  * `connector-conformance-internal.ts` for the shared gates.
@@ -140,7 +144,7 @@ export const googleCaseSpecs: ReadonlyArray<CaseSpec<GoogleConformanceSeedKey>> 
     optionalSeeds: [],
     fileName: 'gmail-list-paging.ts',
     exportName: 'gmailListPagingFixture',
-    doc: 'The seeded paging label read for its `messagesTotal`, then `gmail.list` pages of two chained through `nextPageToken`.'
+    doc: 'The seeded paging label listed on one page, then in `gmail.list` pages of two chained through `nextPageToken`.'
   },
   {
     caseId: 'google.gmail.attachment-base64url',
@@ -281,6 +285,11 @@ export const googleRunner = {
   seedsTypeName: 'GoogleConformanceSeeds',
   seedsExportName: 'googleConformanceFixtureSeeds',
   configName: 'GoogleConformanceConfig',
+  // Branded seeds: the rendered seeds module constructs them.
+  seedConstructors: {
+    practiceAddress: 'GooglePracticeAddress',
+    runId: 'GoogleConformanceRunId'
+  },
   decodeSeeds: Schema.decodeUnknownOption(GoogleConformanceSeeds),
   invalidSeedsMessage:
     '--practice-address must be a plain email address (no display name), the Gmail ids letters, digits, _ and -, --calendar a calendar id, the range bounds RFC 3339 instants with a Z or offset, and the Drive ids letters, digits, _ and - (10 or more)',

@@ -34,10 +34,15 @@
  * 4xx other than 408) changed nothing: the case fails and undoes NOTHING. An ambiguous outcome (a
  * transport or decoding failure, no status, HTTP 408, or HTTP 5xx) may have written anyway without
  * the case learning what: it fails with `GoogleConformanceActionFailed` (`writeOutcome: 'unknown'`)
- * naming the exact item to check by hand, and undoes nothing. A create that answers an item
- * outside the run namespace (another label name, a non-draft, another message, an event with
- * another summary or with attendees, a Drive item with another name, type, or parent, or a seeded
- * item) is never adopted: `GoogleConformanceCleanupRefused`. Every later write is masked too, so an
+ * naming the exact item to check by hand, and undoes nothing. Before adopting what a create
+ * answered (inside the same mask, before registering it), the case proves it is the run's own:
+ * the requested label name (not a system label), the work message, an event with the requested
+ * summary and no attendees, a Drive folder with the requested name, type, and parent (not a seeded
+ * item), and for a draft a `format: "metadata"` read of its message showing `DRAFT`, the run-scoped
+ * subject, and no recipient header. A foreign or unverifiable answer is never adopted, updated, or
+ * deleted: `GoogleConformanceCleanupRefused`. Every seed a case reads is decoded again with
+ * `GoogleConformanceSeeds` first (a host may bypass the branded types), so the send case refuses
+ * anything but exactly one plain practice address before any request. Every later write is masked too, so an
  * aborted request cannot land after the cleanup. The cleanup undoes by id and then verifies the
  * result; a failed cleanup is reported as `GoogleConformanceRestoreFailed` naming the item (never
  * swallowed), also through the `ConformanceCleanupReporter` when the case is being interrupted.
@@ -95,7 +100,9 @@ export {
   googleConformanceMarker,
   googleConformanceRunPrefix,
   GoogleConformanceRestoreFailed,
+  GoogleConformanceRunId,
   GoogleConformanceSeeds,
+  GooglePracticeAddress,
   type GoogleConformanceCase,
   type GoogleConformanceError,
   type GoogleConformanceRequirements,

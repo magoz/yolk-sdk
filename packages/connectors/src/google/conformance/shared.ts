@@ -1,18 +1,18 @@
 /**
  * Shared pieces of the Google conformance cases (internal): the seeds service, the errors, the
- * connector action shorthands, and `withOwnedWrite`, the write-ownership helper every write case
- * runs through. See `cases.ts` for the write-safety contract.
+ * connector action shorthands, and `withOwnedWrite`, the shared write-ownership helper
+ * (`../../conformance/owned-write.ts`) bound to the Google errors. See `cases.ts` for the
+ * write-safety contract.
  */
-import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
+import { Context, Data, Effect, Predicate, Ref, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ConformanceMismatch, type ConformanceCase } from '@yolk-sdk/conformance/case'
-import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
 import {
-  classifyWriteExit,
-  failReporting,
-  interruptPending,
-  reportCleanupProblem
-} from '../../conformance/cleanup-reporter.ts'
+  withOwnedWrite as sharedWithOwnedWrite,
+  type OwnedWrite,
+  type OwnedWriteErrors,
+  type Pending
+} from '../../conformance/owned-write.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import { ConnectorError } from '../../error.ts'
 import { ConnectorHttpClient, type ConnectorHttpResponse } from '../../http.ts'
@@ -20,11 +20,26 @@ import { makeIntegration, type ConnectorIntegration } from '../../integration.ts
 import type { ActionResult, ProviderFailure } from '../../result.ts'
 import { googleConnectorId, googleOAuthSlotId } from '../oauth.ts'
 
-/** An email address (the practice mailbox the send case writes to). */
-const EmailAddress = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/),
-  Schema.isMaxLength(254)
-)
+/** Longest local part an address may have (RFC 5321). */
+const localPartMaxLength = 64
+
+/**
+ * The practice mailbox the send case writes to: exactly ONE plain addr-spec (`local@domain`), with
+ * no display name, no list (comma or semicolon), no angle brackets, no quotes, no whitespace or
+ * control characters, a dot-separated local part of at most 64 characters, and a domain of at
+ * least two labels; at most 254 characters. Branded, so hosts building `GoogleConformanceConfig`
+ * by hand must construct it (`GooglePracticeAddress.make(...)`), and the send case decodes it again
+ * before building the message.
+ */
+export const GooglePracticeAddress = Schema.String.check(
+  Schema.isMaxLength(254),
+  Schema.isPattern(
+    /^[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/
+  ),
+  Schema.makeFilter(value => value.indexOf('@') <= localPartMaxLength)
+).pipe(Schema.brand('GooglePracticeAddress'))
+
+export type GooglePracticeAddress = typeof GooglePracticeAddress.Type
 
 /** A Gmail message or label id (letters, digits, `_`, `-`). */
 const GmailId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,100}$/))
@@ -43,24 +58,27 @@ const DriveId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{10,200}$/))
 
 /**
  * A run id: `run-` then lower-case letters, digits, and inner hyphens, at most 40 characters, the
- * same shape as the other connector conformance run ids.
+ * same shape as the other connector conformance run ids. Branded, like `GooglePracticeAddress`.
  */
-const RunId = Schema.String.check(
-  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  Schema.isMaxLength(40)
-)
+export const GoogleConformanceRunId = Schema.String.check(
+  Schema.isMaxLength(40),
+  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/)
+).pipe(Schema.brand('GoogleConformanceRunId'))
+
+export type GoogleConformanceRunId = typeof GoogleConformanceRunId.Type
 
 /**
  * Host-supplied seeds for the practice Google account. Cases never hard-code account data. A case
- * whose required seed is missing fails with a `precondition:` `ConformanceMismatch` before any
- * request.
+ * whose required seed is missing, or does not decode with this schema (each case decodes every seed
+ * it reads again, so a host that bypasses the types is still refused), fails with a `precondition:`
+ * `ConformanceMismatch` before any request.
  */
 export const GoogleConformanceSeeds = Schema.Struct({
   /**
    * The ONLY address the write-irreversible send case ever sends to: a practice mailbox the owner
    * controls (the practice account's own address works). Never a person's address.
    */
-  practiceAddress: Schema.optionalKey(EmailAddress),
+  practiceAddress: Schema.optionalKey(GooglePracticeAddress),
   /** A user label on 3 to 20 practice messages, none of them in Trash or Spam. */
   pagingLabelId: Schema.optionalKey(GmailId),
   /** A practice message with at least one file attachment Gmail stores apart (an `attachmentId`). */
@@ -76,8 +94,8 @@ export const GoogleConformanceSeeds = Schema.Struct({
   eventRangeStart: Schema.optionalKey(Instant),
   eventRangeEnd: Schema.optionalKey(Instant),
   /**
-   * A practice Drive folder holding 3 to 20 items (none trashed matter), which the token may write
-   * into: the folder case creates, trashes, and deletes a folder there.
+   * A practice Drive folder holding 3 to 20 untrashed items (trashed items are not counted), which
+   * the token may write into: the folder case creates, trashes, and deletes a folder there.
    */
   driveFolderId: Schema.optionalKey(DriveId),
   /** A practice file directly inside `driveFolderId`. */
@@ -87,7 +105,7 @@ export const GoogleConformanceSeeds = Schema.Struct({
    * folder name a case writes. Replay uses the fixed synthetic id of the fixtures; the live runner
    * generates a fresh random one per invocation.
    */
-  runId: Schema.optionalKey(RunId)
+  runId: Schema.optionalKey(GoogleConformanceRunId)
 })
 
 export type GoogleConformanceSeeds = typeof GoogleConformanceSeeds.Type
@@ -217,14 +235,44 @@ export type GoogleConformanceCase = ConformanceCase<
   GoogleConformanceRequirements
 >
 
+/** What a seed must be, named in the precondition when it does not decode. */
+const seedRules: Readonly<Record<GoogleConformanceSeedKey, string>> = {
+  practiceAddress:
+    'exactly one plain address local@domain: no display name, list, angle brackets, whitespace, or control characters',
+  pagingLabelId: 'a Gmail label id (letters, digits, _ and -)',
+  attachmentMessageId: 'a Gmail message id (letters, digits, _ and -)',
+  workMessageId: 'a Gmail message id (letters, digits, _ and -)',
+  calendarId: 'a calendar id',
+  eventRangeStart: 'an RFC 3339 instant with Z or an offset',
+  eventRangeEnd: 'an RFC 3339 instant with Z or an offset',
+  driveFolderId: 'a Drive id (10 or more letters, digits, _ and -)',
+  driveFileId: 'a Drive id (10 or more letters, digits, _ and -)',
+  runId: 'run- then lower-case letters, digits, and inner hyphens, at most 40 characters'
+}
+
+/**
+ * The seed `key`, decoded again with its `GoogleConformanceSeeds` schema (a host may bypass the
+ * types), or a `precondition:` mismatch when it is missing or invalid. Never sends a request.
+ */
 export const requireSeed = <K extends GoogleConformanceSeedKey>(key: K) =>
   Effect.gen(function* () {
     const seeds = yield* GoogleConformanceConfig
-    const value = seeds[key]
+
+    if (seeds[key] === undefined) {
+      return yield* new ConformanceMismatch({
+        message: `precondition: GoogleConformanceConfig.${key} is not configured`
+      })
+    }
+
+    const decoded = yield* Schema.decodeUnknownEffect(GoogleConformanceSeeds)({
+      [key]: seeds[key]
+    }).pipe(Effect.result)
+
+    const value = Result.isSuccess(decoded) ? decoded.success[key] : undefined
 
     if (value === undefined) {
       return yield* new ConformanceMismatch({
-        message: `precondition: GoogleConformanceConfig.${key} is not configured`
+        message: `precondition: GoogleConformanceConfig.${key} must be ${seedRules[key]}`
       })
     }
 
@@ -298,40 +346,6 @@ export const decodeWriteAnswer =
         )
       : Effect.succeed(result)
 
-/** Longest failure summary embedded in a `GoogleConformanceRestoreFailed` message. */
-const failureSummaryLength = 60
-
-const truncated = (text: string, length: number): string =>
-  text.length > length ? `${text.slice(0, length - 3).trimEnd()}...` : text
-
-/** Short, sanitized summary of a failure (credential patterns redacted). */
-export const failureSummary = (cause: Cause.Cause<unknown>): string => {
-  if (Cause.hasInterruptsOnly(cause)) {
-    return 'interrupted'
-  }
-
-  const error = Cause.findErrorOption(cause)
-  const value = Option.isSome(error) ? error.value : Cause.squash(cause)
-
-  if (value instanceof GoogleConformanceActionFailed) {
-    const status = value.status === undefined ? '' : ` ${value.status}`
-
-    return `${truncated(sanitizeConformanceMessage(`${value.actionId} ${value.code}`), failureSummaryLength - status.length)}${status}`
-  }
-
-  const tag = Predicate.hasProperty(value, '_tag') ? String(value._tag) : 'defect'
-  const message = Predicate.hasProperty(value, 'message') ? String(value.message) : ''
-
-  const raw =
-    message.length === 0
-      ? tag
-      : value instanceof ConformanceMismatch
-        ? message
-        : `${tag}: ${message}`
-
-  return truncated(sanitizeConformanceMessage(raw), failureSummaryLength)
-}
-
 /**
  * Run `effect` with the host's `ConnectorHttpClient` wrapped so every response is observed; the
  * requests and responses are the host's own, unchanged.
@@ -365,156 +379,41 @@ export const decodeBody = <A>(
         Effect.map(result => (Result.isSuccess(result) ? result.success : undefined))
       )
 
-/**
- * Fail with an unknown-outcome write `error`, first handing it to the `ConformanceCleanupReporter`
- * with the case id in front when the fiber is being interrupted: the action id alone does not say
- * which case left the item (both event cases share `calendar.create_event`). The raised error stays
- * unchanged. Only meaningful inside `Effect.uninterruptibleMask`.
- */
-export const failReportingFor = <E extends { readonly message: string }>(
-  caseId: string,
-  unmask: <A, E2, R>(effect: Effect.Effect<A, E2, R>) => Effect.Effect<A, E2, R>,
-  error: E
-): Effect.Effect<never, E> =>
-  Effect.gen(function* () {
-    if (yield* interruptPending(unmask)) {
-      yield* reportCleanupProblem({ message: `${caseId}: ${error.message}` })
-    }
+// Owned writes: the shared `withOwnedWrite` (`../../conformance/owned-write.ts`) runs the create,
+// its decoding, its classification, the ownership check, and the registration uninterruptibly
+// together; the cleanup undoes by id and verifies.
 
-    return yield* Effect.fail(error)
-  })
+export type { Pending }
 
-// Owned writes: the create, its decoding, its classification, and the registration run
-// uninterruptibly together; the cleanup undoes by id and verifies.
-
-/** `true` while the cleanup must still undo the created item; a case clears it once it proved it. */
-export type Pending = Ref.Ref<boolean>
-
-/**
- * Classify a create (see `classifyWriteExit`): no status, a 408 or 5xx, or a transport or decoding
- * failure is ambiguous (the error carries `recovery` for manual checking); any other 4xx is
- * definitive.
- */
-const classifyCreate = <A>(
-  actionId: string,
-  recovery: string,
-  exit: Exit.Exit<ActionResult<A>, ConnectorError>
-):
-  | { readonly kind: 'success'; readonly value: A }
-  | { readonly kind: 'rejected'; readonly error: GoogleConformanceActionFailed }
-  | { readonly kind: 'ambiguous'; readonly error: GoogleConformanceActionFailed } => {
-  const outcome = classifyWriteExit(exit)
-
-  switch (outcome.kind) {
-    case 'success':
-      return outcome
-    case 'rejected':
-      return {
-        kind: 'rejected',
-        error: new GoogleConformanceActionFailed({ actionId, ...outcome.failure })
-      }
-    case 'ambiguous':
-      return {
-        kind: 'ambiguous',
-        error: new GoogleConformanceActionFailed({
-          actionId,
-          ...outcome.failure,
-          writeOutcome: 'unknown',
-          recovery
-        })
-      }
-  }
-}
-
-export type OwnedWrite<T, A, E, R> = {
-  readonly caseId: string
-  readonly actionId: string
-  /** The create and its decoding; masked together with the classification and registration. */
-  readonly create: Effect.Effect<ActionResult<T>, ConnectorError, GoogleConformanceRequirements>
-  /** What to check by hand when the create outcome is unknown. */
-  readonly unknownRecovery: string
-  /** The item, when the answer lies outside the run namespace (never adopted), else `undefined`. */
-  readonly refuse: (value: T) => string | undefined
-  /** What to do by hand when the cleanup fails. */
-  readonly recovery: (value: T) => string
-  /** Undo the created item (by id) and verify it is undone. */
-  readonly restore: (
-    value: T
-  ) => Effect.Effect<void, GoogleConformanceError, GoogleConformanceRequirements>
-  readonly use: (value: T, pending: Pending) => Effect.Effect<A, E, R>
+const googleWriteErrors: OwnedWriteErrors<
+  GoogleConformanceActionFailed,
+  GoogleConformanceCleanupRefused,
+  GoogleConformanceRestoreFailed
+> = {
+  actionFailed: fields => new GoogleConformanceActionFailed(fields),
+  cleanupRefused: fields => new GoogleConformanceCleanupRefused(fields),
+  restoreFailed: fields => new GoogleConformanceRestoreFailed(fields),
+  isActionFailed: (value): value is GoogleConformanceActionFailed =>
+    value instanceof GoogleConformanceActionFailed,
+  // Both event cases share `calendar.create_event`: an unknown-outcome report names the case.
+  prefixUnknownReports: true
 }
 
 /**
- * Create one owned item, run `use`, then ALWAYS undo it while `pending` (uninterruptibly, also
- * after a failed claim or an interruption). A definitive create rejection undoes nothing; an
- * ambiguous one is reported with `unknownRecovery`; an answer outside the run namespace is refused.
- * A failed restore fails the case with `GoogleConformanceRestoreFailed`, which says whether the
- * claim itself held; otherwise the outcome of `use` is returned unchanged.
+ * Create one owned item, verify it is this run's own (`refuse`, inside the mask, before the
+ * registration), run `use`, then ALWAYS undo it while `pending`. A definitive create rejection
+ * undoes nothing; an ambiguous one is reported with `unknownRecovery` (with the case id in front
+ * when reported during an interruption); a refused answer is never adopted, updated, or deleted. A
+ * failed restore fails the case with `GoogleConformanceRestoreFailed`.
  */
-export const withOwnedWrite = <T, A, E, R>(spec: OwnedWrite<T, A, E, R>) =>
-  Effect.gen(function* () {
-    const pending: Pending = yield* Ref.make(false)
-
-    return yield* Effect.uninterruptibleMask(unmask =>
-      Effect.gen(function* () {
-        const created = classifyCreate(
-          spec.actionId,
-          spec.unknownRecovery,
-          yield* Effect.exit(spec.create)
-        )
-
-        switch (created.kind) {
-          case 'rejected':
-            return yield* created.error
-          case 'ambiguous':
-            return yield* failReportingFor(spec.caseId, unmask, created.error)
-          case 'success':
-            break
-        }
-
-        const refused = spec.refuse(created.value)
-
-        if (refused !== undefined) {
-          return yield* failReporting(
-            unmask,
-            new GoogleConformanceCleanupRefused({ caseId: spec.caseId, item: refused })
-          )
-        }
-
-        yield* Ref.set(pending, true)
-
-        const outcome = yield* Effect.exit(unmask(spec.use(created.value, pending)))
-
-        const restored = yield* Effect.exit(
-          Ref.get(pending).pipe(
-            Effect.flatMap(still => (still ? spec.restore(created.value) : Effect.void))
-          )
-        )
-
-        if (Exit.isFailure(restored)) {
-          const recovery = spec.recovery(created.value)
-
-          return yield* failReporting(
-            unmask,
-            Exit.isSuccess(outcome)
-              ? new GoogleConformanceRestoreFailed({
-                  caseId: spec.caseId,
-                  recovery,
-                  reason: failureSummary(restored.cause),
-                  caseOutcome: 'claim held'
-                })
-              : new GoogleConformanceRestoreFailed({
-                  caseId: spec.caseId,
-                  recovery,
-                  reason: failureSummary(restored.cause),
-                  caseOutcome: 'claim failed',
-                  claimFailure: failureSummary(outcome.cause)
-                }),
-            Exit.isFailure(outcome) && Cause.hasInterrupts(outcome.cause)
-          )
-        }
-
-        return yield* outcome
-      })
-    )
-  })
+export const withOwnedWrite = <T, A, E, R>(
+  spec: OwnedWrite<
+    T,
+    A,
+    E,
+    R,
+    GoogleConformanceRequirements,
+    GoogleConformanceRequirements,
+    GoogleConformanceRequirements
+  >
+) => sharedWithOwnedWrite(googleWriteErrors, spec)

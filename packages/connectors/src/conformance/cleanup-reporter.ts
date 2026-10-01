@@ -57,6 +57,24 @@ export const failReporting = <E extends { readonly message: string }>(
     return yield* Effect.fail(error)
   })
 
+/**
+ * Like `failReporting`, but the report carries `caseId` in front: an action id alone does not say
+ * which case left the item when several cases share one write action. The raised error stays
+ * unchanged. Only meaningful inside `Effect.uninterruptibleMask`.
+ */
+export const failReportingForCase = <E extends { readonly message: string }>(
+  caseId: string,
+  unmask: <A, E2, R>(effect: Effect.Effect<A, E2, R>) => Effect.Effect<A, E2, R>,
+  error: E
+): Effect.Effect<never, E> =>
+  Effect.gen(function* () {
+    if (yield* interruptPending(unmask)) {
+      yield* reportCleanupProblem({ message: `${caseId}: ${error.message}` })
+    }
+
+    return yield* Effect.fail(error)
+  })
+
 /** The classification of a failed write: its code, and its HTTP status when it had one. */
 export type WriteFailure =
   | { readonly code: string }

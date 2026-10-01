@@ -13,8 +13,8 @@ const answer = (labelIds: ReadonlyArray<string>) =>
   googleJson(200, { id: workMessageId, threadId: workMessageId, labelIds: [...labelIds] })
 
 /**
- * The seeded work message read, trashed (TRASH added), read in Trash, untrashed, and read back
- * with exactly its earlier labels.
+ * The seeded work message read, trashed (TRASH added), read in Trash, untrashed, and read without
+ * TRASH; then the cleanup reads its labels and verifies every earlier label is back.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
  * `pnpm conformance:google --live --owner-approved --account <label> --record` stages a
@@ -28,7 +28,7 @@ export const gmailTrashUntrashFixture: WireFixture = {
   recordedAt: '2026-09-30',
   account: 'synthetic',
   endpoint: 'https://gmail.googleapis.com',
-  note: 'Read the work message labels, trash it, read it with TRASH, untrash it, and read its earlier labels back. Synthetic placeholder shaped like the Gmail API; not recorded from a live service.',
+  note: 'Read the work message labels, trash it, read it with TRASH, untrash it, read it without TRASH, then the cleanup reads its labels twice (nothing to re-add). Synthetic placeholder shaped like the Gmail API; not recorded from a live service.',
   exchanges: [
     {
       request: read,
@@ -45,6 +45,14 @@ export const gmailTrashUntrashFixture: WireFixture = {
     {
       request: { method: 'POST', url: `${gmailSyntheticApi}/messages/${workMessageId}/untrash` },
       response: answer(before)
+    },
+    {
+      request: read,
+      response: googleJson(200, gmailSyntheticMinimalMessage(workMessageId, before))
+    },
+    {
+      request: read,
+      response: googleJson(200, gmailSyntheticMinimalMessage(workMessageId, before))
     },
     {
       request: read,

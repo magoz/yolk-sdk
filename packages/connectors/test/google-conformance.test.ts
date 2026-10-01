@@ -60,7 +60,9 @@ import {
   googleConformanceCases,
   googleConformanceFixtures,
   googleConformanceFixtureSeeds,
+  GoogleConformanceRunId,
   GoogleConformanceSeeds as GoogleConformanceSeedsSchema,
+  GooglePracticeAddress,
   type GoogleConformanceCase,
   type GoogleConformanceSeeds
 } from '@yolk-sdk/connectors/google/conformance'
@@ -217,13 +219,10 @@ describe('Google conformance cases', () => {
         [...testCase.wire.matchAll(/\bunverified: /g)].map(() => testCase.id)
       )
     ).toEqual([
-      'google.gmail.list-page-token',
-      'google.gmail.attachment-base64url',
       'google.gmail.not-found-envelope',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
-      'google.gmail.trash-untrash',
       'google.calendar.event-lifecycle',
       'google.calendar.deleted-event-gone',
       'google.calendar.deleted-event-gone'
@@ -505,7 +504,7 @@ const tampers: ReadonlyArray<{
     fixture: replaceResponse(gmailListPagingFixture, 1, () =>
       json(200, { ...jsonOf(gmailListPagingFixture, 1), nextPageToken: undefined })
     ),
-    message: 'expected the pages to list exactly the label messagesTotal messages'
+    message: 'expected the pages to list exactly the messages of the single listing'
   },
   {
     fixture: replaceResponse(gmailAttachmentFixture, 1, () =>
@@ -534,31 +533,18 @@ const tampers: ReadonlyArray<{
     message: 'expected get_message to drop the deleted label from the work message'
   },
   {
-    // A second delete of the deleted draft answers 204 instead of not found.
-    fixture: replaceResponse(gmailDraftLifecycleFixture, 6, () => ({
-      status: 204,
-      headers: {},
-      body: ''
-    })),
-    message: 'expected deleting the deleted draft again to answer google_not_found'
+    // The draft message reads back after the repeated delete.
+    fixture: replaceResponse(gmailDraftLifecycleFixture, 8, () =>
+      json(200, { id: '18f00000000000d2', threadId: '18f00000000000d1', labelIds: ['DRAFT'] })
+    ),
+    message: 'expected the draft message to stay gone after the repeated delete'
   },
   {
-    // Untrash loses IMPORTANT; the restore re-adds it.
-    fixture: withAppended(
-      replaceResponse(gmailTrashUntrashFixture, 4, () => minimalMessage(['INBOX'])),
-      [
-        { request: { method: 'GET', url: workMessageUrl }, response: minimalMessage(['INBOX']) },
-        {
-          request: { method: 'POST', url: `${gmailApi}/messages/18f00000000000b1/modify` },
-          response: minimalMessage(['INBOX', 'IMPORTANT'])
-        },
-        {
-          request: { method: 'GET', url: workMessageUrl },
-          response: minimalMessage(['INBOX', 'IMPORTANT'])
-        }
-      ]
+    // Untrash answers the message still in Trash; the restore verifies it is out again.
+    fixture: replaceResponse(gmailTrashUntrashFixture, 3, () =>
+      minimalMessage(['INBOX', 'IMPORTANT', 'TRASH'])
     ),
-    message: 'expected untrash to restore exactly the labels the message had before'
+    message: 'expected untrash to answer the message without the TRASH label'
   },
   {
     fixture: replaceResponse(
@@ -592,12 +578,13 @@ const tampers: ReadonlyArray<{
     message: 'expected update_event to rename the event and keep its start'
   },
   {
-    fixture: replaceResponse(calendarDeletedGoneFixture, 3, () => ({
-      status: 204,
-      headers: {},
-      body: ''
-    })),
-    message: 'expected deleting the deleted event again to answer 404 or 410'
+    // The event reads live again after the repeated delete.
+    fixture: replaceResponse(
+      calendarDeletedGoneFixture,
+      4,
+      replaceInBody('"status":"cancelled"', '"status":"confirmed"')
+    ),
+    message: 'expected the deleted event to stay gone after the repeated delete'
   },
   {
     fixture: replaceResponse(driveListPagingFixture, 1, () =>
@@ -706,7 +693,7 @@ describe('Google conformance drills (one per case)', () => {
 
   it.effect('a draft body Gmail stored changed fails the draft case and still deletes it', () =>
     Effect.gen(function* () {
-      const changed = replaceResponse(gmailDraftLifecycleFixture, 1, response =>
+      const changed = replaceResponse(gmailDraftLifecycleFixture, 2, response =>
         json(200, {
           ...JSON.parse(textBody(response)),
           messages: [
@@ -727,7 +714,7 @@ describe('Google conformance drills (one per case)', () => {
         withAppended(changed, [
           {
             request: { method: 'GET', url: `${gmailApi}/messages/18f00000000000d1?format=minimal` },
-            response: exchangeAt(gmailDraftLifecycleFixture, 5).response
+            response: exchangeAt(gmailDraftLifecycleFixture, 6).response
           }
         ])
       )
@@ -737,9 +724,10 @@ describe('Google conformance drills (one per case)', () => {
       )
       expect(exchangeIndices(entries)).toEqual([
         'POST drafts 0',
-        'GET threads/18f00000000000d1 1',
-        'DELETE drafts/r-8000000000000000001 4',
-        'GET messages/18f00000000000d1 7'
+        'GET messages/18f00000000000d1 1',
+        'GET threads/18f00000000000d1 2',
+        'DELETE drafts/r-8000000000000000001 5',
+        'GET messages/18f00000000000d1 9'
       ])
     })
   )
@@ -749,9 +737,11 @@ describe('Google conformance drills (one per case)', () => {
       const stillLive = (fixture: WireFixture) =>
         replaceResponse(fixture, 2, replaceInBody('"status":"cancelled"', '"status":"confirmed"'))
 
-      const live = withAppended(stillLive(calendarDeletedGoneFixture), [
-        exchangeAt(stillLive(calendarDeletedGoneFixture), 2)
-      ])
+      const live = replaceResponse(
+        stillLive(calendarDeletedGoneFixture),
+        4,
+        replaceInBody('"status":"cancelled"', '"status":"confirmed"')
+      )
 
       const { failure, entries, remaining } = yield* drill(calendarDeletedGoneCase, live)
 
@@ -896,19 +886,19 @@ describe('Google conformance restore', () => {
         withoutExchanges(
           replaceResponse(
             gmailDraftLifecycleFixture,
-            2,
+            3,
             withStatus(
               400,
               '{"error":{"code":400,"message":"Invalid draft","status":"INVALID_ARGUMENT"}}'
             )
           ),
-          [3, 5, 6]
+          [4, 6, 7, 8]
         ),
         [
           {
             // The update failed, so the draft still holds its first message.
             request: { method: 'GET', url: `${gmailApi}/messages/18f00000000000d1?format=minimal` },
-            response: exchangeAt(gmailDraftLifecycleFixture, 5).response
+            response: exchangeAt(gmailDraftLifecycleFixture, 6).response
           }
         ]
       )
@@ -922,37 +912,48 @@ describe('Google conformance restore', () => {
       })
       expect(exchangeIndices(entries)).toEqual([
         'POST drafts 0',
-        'GET threads/18f00000000000d1 1',
-        'PUT drafts/r-8000000000000000001 2',
-        'DELETE drafts/r-8000000000000000001 3',
-        'GET messages/18f00000000000d1 4'
+        'GET messages/18f00000000000d1 1',
+        'GET threads/18f00000000000d1 2',
+        'PUT drafts/r-8000000000000000001 3',
+        'DELETE drafts/r-8000000000000000001 4',
+        'GET messages/18f00000000000d1 5'
       ])
       expect(remaining).toEqual([])
     })
   )
 
-  it.effect('re-adds the labels untrash lost and restores the message out of Trash', () =>
-    Effect.gen(function* () {
-      const [, , , , , trashTamper] = tampers
+  it.effect(
+    're-adds the labels untrash lost, and the case still passes (not a connector claim)',
+    () =>
+      Effect.gen(function* () {
+        // Untrash loses IMPORTANT: the claim (no TRASH) holds; the cleanup re-adds the label.
+        const lost = withAppended(
+          replaceResponse(
+            replaceResponse(gmailTrashUntrashFixture, 4, () => minimalMessage(['INBOX'])),
+            5,
+            () => minimalMessage(['INBOX'])
+          ),
+          [
+            {
+              request: { method: 'POST', url: `${gmailApi}/messages/18f00000000000b1/modify` },
+              response: minimalMessage(['INBOX', 'IMPORTANT'])
+            }
+          ]
+        )
 
-      const { failure, entries, remaining } = yield* drill(
-        gmailTrashUntrashCase,
-        trashTamper?.fixture ?? expect.fail('missing trash tamper')
-      )
+        const { passed, entries, remaining } = yield* drill(gmailTrashUntrashCase, lost)
 
-      expect(failure).toEqual(
-        mismatch('expected untrash to restore exactly the labels the message had before')
-      )
-      expect(writeCalls(entries)).toEqual([
-        'POST messages/18f00000000000b1/trash',
-        'POST messages/18f00000000000b1/untrash',
-        'POST messages/18f00000000000b1/modify'
-      ])
-      expect(entries.find(entry => entry.url.endsWith('/modify'))?.bodyJson).toEqual({
-        addLabelIds: ['IMPORTANT']
+        expect(passed).toBe(true)
+        expect(writeCalls(entries)).toEqual([
+          'POST messages/18f00000000000b1/trash',
+          'POST messages/18f00000000000b1/untrash',
+          'POST messages/18f00000000000b1/modify'
+        ])
+        expect(entries.find(entry => entry.url.endsWith('/modify'))?.bodyJson).toEqual({
+          addLabelIds: ['IMPORTANT']
+        })
+        expect(remaining).toEqual([])
       })
-      expect(remaining).toEqual([])
-    })
   )
 
   it.effect('untrashes the message when a claim fails while it is in Trash', () =>
@@ -965,7 +966,7 @@ describe('Google conformance restore', () => {
       // in Trash, untrashes it, and verifies its earlier labels.
       const { failure, entries } = yield* drill(
         gmailTrashUntrashCase,
-        withAppended(withoutExchanges(notListed, [3, 4]), [
+        withAppended(withoutExchanges(notListed, [3, 4, 5, 6]), [
           {
             request: { method: 'GET', url: workMessageUrl },
             response: minimalMessage(['INBOX', 'IMPORTANT', 'TRASH'])
@@ -1272,6 +1273,178 @@ describe('Google conformance write ownership', () => {
   }
 })
 
+/**
+ * Seeds a host built without the types (from JSON, a config file, or a cast): the branded schema
+ * types never reached them, so only the cases' own decoding stands between them and a request.
+ */
+const untypedSeeds = (overrides: Readonly<Record<string, string>>): GoogleConformanceSeeds =>
+  JSON.parse(JSON.stringify({ ...googleConformanceFixtureSeeds, ...overrides }))
+
+const practiceAddressRule =
+  'precondition: GoogleConformanceConfig.practiceAddress must be exactly one plain address local@domain: no display name, list, angle brackets, whitespace, or control characters'
+
+describe('Google conformance send recipient safety (inside the case)', () => {
+  it('types practiceAddress and runId as branded seeds, so a plain string is a type error', () => {
+    const seeds: GoogleConformanceSeeds = {
+      // @ts-expect-error a plain string is not a GooglePracticeAddress: hosts construct it.
+      practiceAddress: 'practice@example.test',
+      // @ts-expect-error a plain string is not a GoogleConformanceRunId: hosts construct it.
+      runId: 'run-synthetic'
+    }
+
+    expect(Object.keys(seeds)).toEqual(['practiceAddress', 'runId'])
+    expect(() => GooglePracticeAddress.make('a@example.test, b@example.test')).toThrow()
+  })
+
+  for (const [label, address] of [
+    ['an address list', 'practice@example.test, other@example.test'],
+    ['a semicolon list', 'practice@example.test;other@example.test'],
+    ['a display name', 'Practice <practice@example.test>'],
+    ['angle brackets', '<practice@example.test>'],
+    ['a CRLF header injection', 'practice@example.test\r\nBcc: other@example.test'],
+    ['a bare LF header injection', 'practice@example.test\nBcc: other@example.test'],
+    ['a bare CR header injection', 'practice@example.test\rBcc: other@example.test'],
+    ['a NUL control character', 'practice@example.test\u0000'],
+    ['a tab', 'practice@example.test\t'],
+    ['inner whitespace', 'practice @example.test'],
+    ['a quoted local part', '"practice"@example.test'],
+    ['a group', 'list: practice@example.test;'],
+    ['an overlong local part', `${'a'.repeat(65)}@example.test`],
+    ['an overlong address', `a@${'b'.repeat(250)}.test`],
+    ['no domain dot', 'practice@localhost'],
+    ['an empty string', '']
+  ] as const) {
+    it.effect(`refuses ${label} with a precondition and sends nothing`, () =>
+      Effect.gen(function* () {
+        const { failure, entries } = yield* drill(
+          gmailSendPracticeCase,
+          gmailSendPracticeFixture,
+          untypedSeeds({ practiceAddress: address })
+        )
+
+        expect(failure).toEqual(mismatch(practiceAddressRule))
+        expect(entries).toEqual([])
+      })
+    )
+  }
+
+  for (const runId of ['mine-0000beef', 'run-synthetic\r\nBcc: other@example.test', 'run-UPPER']) {
+    it.effect(`refuses the run id ${JSON.stringify(runId)} before any request`, () =>
+      Effect.gen(function* () {
+        for (const testCase of [gmailSendPracticeCase, gmailDraftLifecycleCase]) {
+          const { failure, entries } = yield* drill(
+            testCase,
+            fixturesFor(testCase)[0] ?? expect.fail('no fixture'),
+            untypedSeeds({ runId })
+          )
+
+          expect(failure).toEqual(
+            mismatch(
+              'precondition: GoogleConformanceConfig.runId must be run- then lower-case letters, digits, and inner hyphens, at most 40 characters'
+            )
+          )
+          expect(entries).toEqual([])
+        }
+      })
+    )
+  }
+})
+
+describe('Google conformance draft adoption and repeated deletes', () => {
+  const metadataUrl = `${gmailApi}/messages/18f00000000000d1?format=metadata`
+
+  const withMetadata = (response: (original: WireResponse) => WireResponse) =>
+    withoutExchanges(
+      replaceResponse(gmailDraftLifecycleFixture, 1, response),
+      [2, 3, 4, 5, 6, 7, 8]
+    )
+
+  for (const [label, response, item] of [
+    [
+      'a valid unrelated draft (another subject)',
+      replaceInBody(
+        '"value":"yolk-conformance run-synthetic draft: synthetic conformance draft, safe to delete"',
+        '"value":"Quarterly plan (a person\'s draft)"'
+      ),
+      "draft r-8000000000000000001, which is not this run's draft (another subject, a recipient, or no DRAFT label)"
+    ],
+    [
+      'a draft with a recipient',
+      replaceInBody(
+        '{"name":"Content-Type"',
+        '{"name":"To","value":"someone@example.test"},{"name":"Content-Type"'
+      ),
+      "draft r-8000000000000000001, which is not this run's draft (another subject, a recipient, or no DRAFT label)"
+    ],
+    [
+      'an unverifiable draft (the metadata read fails)',
+      withStatus(503, serverError),
+      "draft r-8000000000000000001, whose message could not be read to prove it is this run's draft (gmail_get_message_failed 503)"
+    ]
+  ] as const) {
+    it.effect(`never adopts, updates, or deletes ${label}`, () =>
+      Effect.gen(function* () {
+        const { failure, entries, remaining } = yield* drill(
+          gmailDraftLifecycleCase,
+          withMetadata(response)
+        )
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'GoogleConformanceCleanupRefused',
+          message: `google.gmail.draft-compose-update-delete: cleanup refused; a write answered ${item}, outside the run namespace, so nothing was undone there; check it by hand.`
+        })
+        expect(exchangeIndices(entries)).toEqual(['POST drafts 0', `GET ${routeOf(metadataUrl)} 1`])
+        expect(writeCalls(entries)).toEqual(['POST drafts'])
+        expect(remaining).toEqual([])
+      })
+    )
+  }
+
+  it.effect('accepts a 2xx repeated draft delete when the message stays gone', () =>
+    Effect.gen(function* () {
+      const { passed } = yield* drill(
+        gmailDraftLifecycleCase,
+        replaceResponse(gmailDraftLifecycleFixture, 7, () => ({
+          status: 204,
+          headers: {},
+          body: ''
+        }))
+      )
+
+      expect(passed).toBe(true)
+    })
+  )
+
+  it.effect('accepts a 2xx repeated event delete when the event stays gone', () =>
+    Effect.gen(function* () {
+      const { passed } = yield* drill(
+        calendarDeletedGoneCase,
+        replaceResponse(calendarDeletedGoneFixture, 3, () => ({
+          status: 204,
+          headers: {},
+          body: ''
+        }))
+      )
+
+      expect(passed).toBe(true)
+    })
+  )
+
+  it.effect('fails a repeated event delete that answers another error', () =>
+    Effect.gen(function* () {
+      const { failure } = yield* drill(
+        calendarDeletedGoneCase,
+        replaceResponse(calendarDeletedGoneFixture, 3, withStatus(403, serverError))
+      )
+
+      expect(failure).toEqual(
+        mismatch('expected deleting the deleted event again to answer 2xx, 404, or 410')
+      )
+    })
+  )
+})
+
 describe('Google conformance send (write-irreversible)', () => {
   const sendOnly = (response: (original: WireResponse) => WireResponse) =>
     onlyCreate(replaceResponse(gmailSendPracticeFixture, 0, response))
@@ -1298,7 +1471,7 @@ describe('Google conformance send (write-irreversible)', () => {
         onlyCreate(gmailSendPracticeFixture),
         {
           ...googleConformanceFixtureSeeds,
-          practiceAddress: 'other-practice@example.test'
+          practiceAddress: GooglePracticeAddress.make('other-practice@example.test')
         }
       )
 
@@ -1462,7 +1635,9 @@ describe('Google conformance leftover detection (read-only)', () => {
 
       const found = yield* findGoogleConformanceLeftovers.pipe(
         Effect.provide(
-          portsOver(Layer.succeed(HttpClient.HttpClient, client), { runId: 'run-synthetic' })
+          portsOver(Layer.succeed(HttpClient.HttpClient, client), {
+            runId: GoogleConformanceRunId.make('run-synthetic')
+          })
         )
       )
 

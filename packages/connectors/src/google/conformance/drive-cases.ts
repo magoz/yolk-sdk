@@ -226,13 +226,15 @@ export const driveFolderLifecycleCase: GoogleConformanceCase = defineConformance
       }),
       unknownRecovery: `delete the Drive folder "${name}" in folder ${folderId} by hand if it exists`,
       refuse: folder =>
-        folder.name !== name ||
-        folder.mimeType !== googleDriveFolderMimeType ||
-        !parentsOf(folder).includes(folderId) ||
-        folder.id === seeds.driveFolderId ||
-        folder.id === seeds.driveFileId
-          ? `Drive item ${folder.id} named "${folder.name}"`
-          : undefined,
+        Effect.succeed(
+          folder.name !== name ||
+            folder.mimeType !== googleDriveFolderMimeType ||
+            !parentsOf(folder).includes(folderId) ||
+            folder.id === seeds.driveFolderId ||
+            folder.id === seeds.driveFileId
+            ? `Drive item ${folder.id} named "${folder.name}"`
+            : undefined
+        ),
       recovery: folder => `delete the Drive folder ${folder.id} by hand if it still exists`,
       restore: folder => ensureFolderDeleted(folder.id),
       use: (folder, pending) =>

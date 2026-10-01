@@ -67,10 +67,36 @@ const threadRequest = { method: 'GET', url: `${gmailSyntheticApi}/threads/${thre
 
 const deleteRequest = { method: 'DELETE', url: `${gmailSyntheticApi}/drafts/${draftId}` }
 
+/** The draft message as `format=metadata` answers it: the DRAFT label, the subject, no recipient. */
+const draftMetadata = googleJson(200, {
+  id: firstMessageId,
+  threadId,
+  labelIds: ['DRAFT'],
+  snippet: gmailConformanceDraftText,
+  sizeEstimate: 512,
+  historyId: '900020',
+  internalDate: '1790000000000',
+  payload: {
+    partId: '',
+    mimeType: 'text/plain',
+    filename: '',
+    headers: [
+      { name: 'Subject', value: subject },
+      { name: 'Content-Type', value: 'text/plain; charset=utf-8' }
+    ],
+    body: { size: 64 }
+  }
+})
+
+const updatedMessageRequest = {
+  method: 'GET',
+  url: `${gmailSyntheticApi}/messages/${updatedMessageId}?format=minimal`
+}
+
 /**
- * A draft without recipients composed with a UTF-8 body, read back through `get_thread`, updated,
- * read back again, deleted by id (204, empty body), its message gone (404), and deleted again
- * (404).
+ * A draft without recipients composed with a UTF-8 body, its message read (`format=metadata`) to
+ * prove it is the run's own, read back through `get_thread`, updated, read back again, deleted by id
+ * (204, empty body), its message gone (404), deleted again (404), and its message still gone.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
  * `pnpm conformance:google --live --owner-approved --account <label> --record` stages a
@@ -84,7 +110,7 @@ export const gmailDraftLifecycleFixture: WireFixture = {
   recordedAt: '2026-09-30',
   account: 'synthetic',
   endpoint: 'https://gmail.googleapis.com',
-  note: 'Compose a draft without recipients, read its thread, update it, read the thread again, delete the draft (204), read its message (404), and delete it again (404). Synthetic placeholder shaped like the Gmail API; not recorded from a live service.',
+  note: 'Compose a draft without recipients, read its message metadata (DRAFT, run subject, no recipient), read its thread, update it, read the thread again, delete the draft (204), read its message (404), delete it again (404), and read its message again (404). Synthetic placeholder shaped like the Gmail API; not recorded from a live service.',
   exchanges: [
     {
       request: {
@@ -94,6 +120,13 @@ export const gmailDraftLifecycleFixture: WireFixture = {
         body: { message: { raw: raw(subject, gmailConformanceDraftText) } }
       },
       response: draftAnswer(firstMessageId)
+    },
+    {
+      request: {
+        method: 'GET',
+        url: `${gmailSyntheticApi}/messages/${firstMessageId}?format=metadata`
+      },
+      response: draftMetadata
     },
     {
       request: threadRequest,
@@ -116,13 +149,8 @@ export const gmailDraftLifecycleFixture: WireFixture = {
       response: thread(updatedMessageId, updatedSubject, gmailConformanceUpdatedDraftText)
     },
     { request: deleteRequest, response: googleNoContent },
-    {
-      request: {
-        method: 'GET',
-        url: `${gmailSyntheticApi}/messages/${updatedMessageId}?format=minimal`
-      },
-      response: gmailNotFound
-    },
-    { request: deleteRequest, response: gmailNotFound }
+    { request: updatedMessageRequest, response: gmailNotFound },
+    { request: deleteRequest, response: gmailNotFound },
+    { request: updatedMessageRequest, response: gmailNotFound }
   ]
 }

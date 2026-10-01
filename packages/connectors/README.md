@@ -1459,14 +1459,19 @@ Every write names the invocation-unique `runId` (the fixtures replay with `run-s
 runner generates a fresh random id every time) or touches only the seeded work message. The create,
 its decoding, and its registration are not interruptible, and neither is any later write. A
 definitive rejection (HTTP 4xx other than 408) undoes nothing; an ambiguous write fails with
-`GoogleConformanceActionFailed` (`writeOutcome: 'unknown'`) naming the exact item; an answer outside
-the run namespace is never adopted (`GoogleConformanceCleanupRefused`). The label, draft, trash,
+`GoogleConformanceActionFailed` (`writeOutcome: 'unknown'`) naming the exact item; an answer the
+case cannot prove is its own (for a draft, a metadata read of its message: `DRAFT`, the run subject,
+no recipient) is never adopted, updated, or deleted (`GoogleConformanceCleanupRefused`). The label, draft, trash,
 event, and folder cases are write-reversible: the cleanup undoes by id, verifies, and fails with
 `GoogleConformanceRestoreFailed` when that fails. Events never have attendees (no invitation is ever
 sent), drafts never have recipients, and the folder case trashes its folder and then deletes it
 permanently, so nothing stays in Drive Trash. **The send case is write-irreversible:** Gmail cannot
 unsend; it sends one message whose only recipient is the seeded practice address, and runs only
 when a person names its exact id (`--allow-irreversible google.gmail.send-practice-address`).
+`practiceAddress` and `runId` are branded seed types (`GooglePracticeAddress`,
+`GoogleConformanceRunId`), and every case decodes the seeds it reads again before any request, so
+a list, display name, header injection, or control character fails a precondition and sends
+nothing, whether or not the host went through the runner.
 Before any write case, and again after an interrupt-only exit, the runner warns read-only about run
 labels and drafts, the work message in Trash, run events, and run Drive items
 (`findGoogleConformanceLeftovers`). `pnpm conformance:google` in this repository dry-runs by

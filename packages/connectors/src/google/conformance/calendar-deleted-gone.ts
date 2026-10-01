@@ -23,8 +23,8 @@ const boundaries = {
 }
 
 /**
- * A run-scoped event without attendees created, deleted by id (204), read back cancelled, and
- * deleted again (410 Gone).
+ * A run-scoped event without attendees created, deleted by id (204), read back cancelled, deleted
+ * again (410 Gone), and read back cancelled again.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
  * `pnpm conformance:google --live --owner-approved --account <label> --record` stages a
@@ -38,7 +38,7 @@ export const calendarDeletedGoneFixture: WireFixture = {
   recordedAt: '2026-09-30',
   account: 'synthetic',
   endpoint: 'https://www.googleapis.com/calendar/v3',
-  note: 'Create an event without attendees, delete it (204), read it back cancelled, and delete it again (410). Synthetic placeholder shaped like the Calendar API; not recorded from a live service.',
+  note: 'Create an event without attendees, delete it (204), read it back cancelled, delete it again (410), and read it back cancelled again. Synthetic placeholder shaped like the Calendar API; not recorded from a live service.',
   exchanges: [
     {
       request: {
@@ -81,6 +81,20 @@ export const calendarDeletedGoneFixture: WireFixture = {
       response: googleJson(
         410,
         googleErrorBody(410, 'Resource has been deleted', 'deleted', 'GONE')
+      )
+    },
+    {
+      request: { method: 'GET', url: eventUrl },
+      response: googleJson(
+        200,
+        calendarSyntheticEvent({
+          id: eventId,
+          summary,
+          description: 'Synthetic conformance event without attendees.',
+          status: 'cancelled',
+          updated: '2026-09-30T12:00:05.000Z',
+          ...boundaries
+        })
       )
     }
   ]

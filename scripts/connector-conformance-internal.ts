@@ -26,6 +26,12 @@
  *   cannot inspect (only strict UTF-8 text without NUL characters is inspectable: an allowlist,
  *   not a list of refused formats); a last check refuses rendered files or checklist lines carrying
  *   it.
+ * - Every line a live run prints (the report, cleanup WARN lines, leftover warnings, the run's own
+ *   failure, staging output) goes through `redactAccessToken`: a provider can echo the live token
+ *   into a field a case reports, before any staging guard runs. Raw, percent-encoded, and base64
+ *   forms are replaced by `<redacted live token>`; a line still holding an escaped or folded form is
+ *   withheld whole, and so is a line holding 16 or more consecutive token characters (a report
+ *   truncated inside an echoed token).
  * - `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After
  *   the run it builds `verified` fixtures for the cases that passed, re-runs each case on replay
  *   against its new fixture, and renders every fixture module plus the seeds module. Only if every
@@ -165,6 +171,11 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
   readonly seedsTypeName: string
   readonly seedsExportName: string
   readonly configName: string
+  /**
+   * Branded seeds: the schema (exported from the provider's `cases.ts`) whose `make` the rendered
+   * seeds module calls for that seed's value, for example Google's `GooglePracticeAddress`.
+   */
+  readonly seedConstructors?: Partial<Record<K, string>>
   /** Validate raw seed strings into the seeds type (`None` when any is invalid). */
   readonly decodeSeeds: (raw: unknown) => Option.Option<S>
   /** Why seeds are invalid, shown when `decodeSeeds` answers `None`. */
@@ -646,14 +657,46 @@ export const renderSeedsModule = <K extends string, S extends SeedRecord<K>>(
   runner: RunnerData<K, S>,
   seeds: SeedRecord<K>
 ): string => {
+  const constructors: Partial<Record<K, string>> = runner.seedConstructors ?? {}
+
   const entries = allSeedKeys(runner).flatMap(key => {
     const value = seeds[key]
+    const constructor = constructors[key]
 
-    return value === undefined ? [] : [`  ${key}: ${quoted(value)}`]
+    return value === undefined
+      ? []
+      : [
+          `  ${key}: ${constructor === undefined ? quoted(value) : `${constructor}.make(${quoted(value)})`}`
+        ]
   })
 
+  const names = [
+    ...new Set(
+      allSeedKeys(runner).flatMap(key => {
+        const constructor = constructors[key]
+
+        return constructor === undefined || seeds[key] === undefined ? [] : [constructor]
+      })
+    )
+  ].sort()
+
+  // The committed module's import, formatted as the formatter prints it (one line up to 100 columns).
+  const oneLineImport =
+    names.length === 0
+      ? `import type { ${runner.seedsTypeName} } from './cases.ts'`
+      : `import { ${[...names, `type ${runner.seedsTypeName}`].join(', ')} } from './cases.ts'`
+
+  const seedsImport =
+    oneLineImport.length <= 100
+      ? oneLineImport
+      : [
+          'import {',
+          [...names, `type ${runner.seedsTypeName}`].map(name => `  ${name}`).join(',\n'),
+          "} from './cases.ts'"
+        ].join('\n')
+
   return [
-    `import type { ${runner.seedsTypeName} } from './cases.ts'`,
+    seedsImport,
     '',
     '/**',
     ` * Seed ${runner.seedNoun} used by the committed ${runner.displayName} fixtures (synthetic until a scrubbed recording is`,
@@ -1085,6 +1128,57 @@ const textHasToken = (text: string, forms: ReadonlyArray<string>): boolean => {
 /** True when `text` holds the token (see `accessTokenForms`), raw, escaped, or encoded. */
 export const textContainsAccessToken = (text: string, accessToken: string): boolean =>
   textHasToken(text, accessTokenForms(accessToken))
+
+/** What a printed line carries instead of the live access token. */
+export const redactedLiveTokenMarker = '<redacted live token>'
+
+/** A printed line that still held the token after redaction (escaped, folded, double-encoded). */
+export const withheldTokenLine =
+  '<line withheld: it carried an encoded form of the live access token>'
+
+/**
+ * `text` with every form of the live access token that `textContainsAccessToken` looks for (see
+ * `accessTokenForms`: raw, percent-encoded, base64) replaced by `redactedLiveTokenMarker`; a line
+ * that still holds the token afterwards (escaped, folded, or double-encoded) is replaced whole by
+ * `withheldTokenLine`. Live runs print every line through it: a provider can echo the token into a
+ * field a case reports (a refused item's name, a leftover's title, a failure message).
+ */
+export const redactAccessToken = (text: string, accessToken: string): string => {
+  const forms = accessTokenForms(accessToken)
+  const longestFirst = [...forms].sort((left, right) => right.length - left.length)
+
+  return text
+    .split('\n')
+    .map(line => {
+      const replaced = longestFirst.reduce(
+        (current, form) => current.replaceAll(form, redactedLiveTokenMarker),
+        line
+      )
+
+      return textHasToken(replaced, forms) || hasTokenFragment(replaced, accessToken)
+        ? withheldTokenLine
+        : replaced
+    })
+    .join('\n')
+}
+
+/** Shortest run of consecutive token characters treated as a leaked fragment. */
+const tokenFragmentMinLength = 16
+
+/**
+ * True when `line` holds `tokenFragmentMinLength` or more consecutive characters of the token: a
+ * report or warning that a length cap cut in the middle of an echoed token still leaks a usable
+ * part of it, so such a line is withheld whole.
+ */
+const hasTokenFragment = (line: string, accessToken: string): boolean => {
+  if (accessToken.length < tokenFragmentMinLength) return false
+
+  for (let start = 0; start + tokenFragmentMinLength <= accessToken.length; start++) {
+    if (line.includes(accessToken.slice(start, start + tokenFragmentMinLength))) return true
+  }
+
+  return false
+}
 
 /** Every string (keys included) of a parsed JSON value. */
 const jsonStrings = (value: unknown): ReadonlyArray<string> => {
@@ -1656,6 +1750,20 @@ const processLiveRunIo: LiveRunIo = {
   err: line => console.error(line)
 }
 
+/** `io` printing every line through `redactAccessToken` with the live `accessToken`. */
+export const redactingLiveRunIo = (io: LiveRunIo, accessToken: string): LiveRunIo => ({
+  http: io.http,
+  out: line => io.out(redactAccessToken(line, accessToken)),
+  err: line => io.err(redactAccessToken(line, accessToken))
+})
+
+/** `io` printing every message through `redactAccessToken` with the live `accessToken`. */
+export const redactingCliIo = (io: CliIo, accessToken: string): CliIo => ({
+  error: message => io.error(redactAccessToken(message, accessToken)),
+  setExitCode: io.setExitCode,
+  forceExit: io.forceExit
+})
+
 /** Cleanup problems a case reports during an interruption, printed to `err` as WARN lines. */
 export const stderrCleanupReporter = (
   err: (line: string) => void
@@ -1686,9 +1794,11 @@ export const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
   runner: ConnectorConformanceRunner<K, S, E, R>,
   options: RunOptions<K>,
   inputs: LiveInputs<S>,
-  io: LiveRunIo = processLiveRunIo
+  liveIo: LiveRunIo = processLiveRunIo
 ) =>
   Effect.gen(function* () {
+    // Every printed line (report, cleanup WARNs, leftovers, staging output) is redacted first.
+    const io = redactingLiveRunIo(liveIo, inputs.accessToken)
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
     const recorderOptions = recorderOptionsFor(runner)
@@ -1778,7 +1888,10 @@ export const runConnectorConformanceCli = <K extends string, S extends SeedRecor
       return
     }
 
-    void runInterruptibly(runLive(runner, options, checked.inputs), processSignals, processCliIo, {
+    // The run's own failure and the after-interrupt leftover lines are redacted too.
+    const cliIo = redactingCliIo(processCliIo, checked.inputs.accessToken)
+
+    void runInterruptibly(runLive(runner, options, checked.inputs), processSignals, cliIo, {
       afterInterrupt: leftoverWarnings(
         runner,
         options,
