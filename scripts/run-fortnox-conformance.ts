@@ -4,8 +4,10 @@
  * Default: DRY RUN. Prints every case id, its safety, and whether it would run under the chosen
  * flags, then exits without any network call.
  *
- * `--live --account <label>`: runs the cases against the real Fortnox API with a `FetchHttpClient`
- * through the real connector actions. Requires `FORTNOX_ACCESS_TOKEN` (environment only, never a
+ * `--live --owner-approved --account <label>`: runs the cases against the real Fortnox API with a
+ * `FetchHttpClient` through the real connector actions. Refused whenever `CI` is non-empty (`0` and
+ * `false` included) and without `--owner-approved` (the repository owner's explicit approval), in
+ * both cases before any credential read. Requires `FORTNOX_ACCESS_TOKEN` (environment only, never a
  * flag) and the seed identities of every case that will run (flags or environment, see `usage`).
  * The label is synthetic and non-identifying (for example `practice`): it is printed in reports
  * and recorded in fixtures. Read cases always run; `--allow-writes reversible` adds the
@@ -18,13 +20,39 @@
  * `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After the
  * run it builds `verified` fixtures (today's date, the account label) for the cases that passed,
  * re-runs each case on replay against its new fixture, and renders every fixture module plus the
- * seeds module. Only if every recorded case verified and passed the secret scan does it write them,
- * all or nothing, to a NEW run directory under the GITIGNORED root
+ * seeds module. Only if every recorded case verified and passed the secret scan, no recorded
+ * exchange carries the live access token (the shared `recordingContainsAccessToken`, before
+ * rendering), and no rendered file or review-checklist line does either (`textContainsAccessToken`),
+ * does it write them, all or nothing, to a NEW run directory under the GITIGNORED root
  * `.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`: it writes the whole batch into
  * a sibling temp directory and publishes it with one rename, refuses an existing destination, and
- * leaves no run directory when anything fails. It never writes committed sources. It then prints a
- * review checklist (email-like strings outside `example.test`/`example.com`, names, `Comments`
- * values, and any PDF body).
+ * leaves no run directory when anything fails. It never writes committed sources. Like the shared
+ * connector runners (`connector-conformance-internal.ts`), it refuses a recordings directory that is
+ * not physically where it appears to be (every component checked with lstat, symlinks refused,
+ * dangling ones included, re-checked before the rename); this guards against misconfiguration, not
+ * a concurrent local process. It then prints a review checklist (email-like strings outside
+ * `example.test`/`example.com`, names, `Comments` values, and any PDF body).
+ *
+ * Live runs are interruptible (the shared `runInterruptibly`): the first SIGINT/SIGTERM interrupts
+ * the run fiber, so a running row or customer case still attempts its uninterruptible restore, and
+ * a restore that fails meanwhile prints a WARN line naming the case (`ConformanceCleanupReporter`,
+ * provided by `runFortnoxLive`); a duplicate signal within `duplicateSignalWindowMs` (one Ctrl-C
+ * reaches every process of the foreground group) is ignored, and a later one force-exits. An
+ * interrupt-only exit is 130.
+ *
+ * Every line a live run prints (the report, cleanup WARN lines, staging output, the run's own
+ * failure, and the interruption messages) goes through the shared `redactAccessToken`
+ * (`redactingLiveRunIo`, `redactingCliIo`), as in the shared runners: Fortnox can echo the live
+ * token into a field a case reports before any staging guard runs.
+ *
+ * Fortnox keeps its own runner rather than the shared `ConnectorConformanceRunner`: the preview
+ * case records a PDF body, which the shared per-body access-token guard
+ * (`inspectRecordingForAccessToken`) refuses as uninspectable, and the seeds module uses the
+ * branded `FortnoxDocumentNumber` / `FortnoxCustomerNumber` constructors. Instead, the recorded
+ * exchanges are searched before rendering with the PDF's bytes read as latin1 and lossy UTF-8 text
+ * (`recordingContainsAccessToken`), and the rendered text is searched again, where the PDF is
+ * `bodyBase64` text searched at every byte alignment. Neither finds a token inside a compressed PDF
+ * stream: the review checklist asks for the PDF to be opened and checked by hand.
  *
  * Promotion is manual: scrub the staged files of practice-company data, copy them into
  * `packages/connectors/src/fortnox/conformance/`, run `pnpm format:fix`, and update
@@ -38,13 +66,12 @@
  * Never run live in CI.
  */
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Effect, Layer, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
-import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/unstable/http'
 import type { ConformanceSafety } from '../packages/conformance/src/case.ts'
 import {
   isWireBase64BodyResponse,
@@ -70,16 +97,39 @@ import {
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '../packages/connectors/src/conformance/index.ts'
+import { ConformanceCleanupReporter } from '../packages/connectors/src/conformance/cleanup-reporter.ts'
 import { OAuthCredential } from '../packages/connectors/src/credential.ts'
 import {
   FortnoxConformanceConfig,
   FortnoxConformanceSeeds,
   fortnoxConformanceCases,
+  fortnoxConformanceCommentsMarker,
   fortnoxConformanceFixtureSeeds,
   type FortnoxConformanceCase,
   type FortnoxConformanceSeedKey
 } from '../packages/connectors/src/fortnox/conformance/index.ts'
 import { fortnoxApiBaseUrl } from '../packages/connectors/src/fortnox/index.ts'
+import {
+  liveInCiMessage,
+  nodeRecordingWriter,
+  ownerApprovalRequiredMessage,
+  physicallyContained,
+  processCliIo,
+  processLiveRunIo,
+  processSignals,
+  recordingContainsAccessToken,
+  redactingCliIo,
+  redactingLiveRunIo,
+  runInterruptibly,
+  stderrCleanupReporter,
+  textContainsAccessToken,
+  type CliIo,
+  type LiveRunIo,
+  type RecordingWriter,
+  type RunInterruptiblyOptions,
+  type SignalSource
+} from './connector-conformance-internal.ts'
+import { isCiEnvironment, workspaceRoot } from './fixture-probe-internal.ts'
 
 type SeedSource = {
   readonly key: FortnoxConformanceSeedKey
@@ -202,6 +252,8 @@ export type RunOptions = {
   readonly live: boolean
   readonly help: boolean
   readonly record: boolean
+  /** Explicit confirmation that the repository owner approved this live run. */
+  readonly ownerApproved: boolean
   /** Synthetic, non-identifying account label. Required with `--live`. */
   readonly account: string | undefined
   readonly allowWrites: 'none' | 'reversible'
@@ -215,6 +267,7 @@ export const defaultRunOptions: RunOptions = {
   live: false,
   help: false,
   record: false,
+  ownerApproved: false,
   account: undefined,
   allowWrites: 'none',
   allowIrreversible: [],
@@ -232,13 +285,16 @@ export const liveAccountRequiredMessage =
 
 export const accessTokenRequiredMessage = 'FORTNOX_ACCESS_TOKEN is required for --live'
 
-const usage = `Usage: pnpm conformance:fortnox [--live --account <label>] [options]
+const usage = `Usage: pnpm conformance:fortnox [--live --owner-approved --account <label>] [options]
 
-Dry run by default: prints each case, its safety, and whether it would run. No network I/O.
+Dry run by default: prints each case, its safety, and whether it would run. No network I/O and no
+credential read.
 
 Options:
-  --live                          Run against the real Fortnox API (needs FORTNOX_ACCESS_TOKEN,
-                                  --account, and the seeds of every case that will run)
+  --live                          Run against the real Fortnox API (needs --owner-approved,
+                                  FORTNOX_ACCESS_TOKEN, --account, and the seeds of every case
+                                  that will run; refused whenever CI is non-empty)
+  --owner-approved                confirm the repository owner approved this live run
   --account <label>               required with --live: synthetic, non-identifying label
                                   (lower-case letters, digits, hyphens; for example practice)
   --allow-writes <none|reversible>
@@ -258,14 +314,15 @@ ${fortnoxSeedSources
   --help
 
 FORTNOX_ACCESS_TOKEN is read from the environment only. Use a Fortnox developer test company,
-never a real one. Recordings are never written over committed fixtures: scrub the staged files,
-copy them into packages/connectors/src/fortnox/conformance/, and update the Fortnox conformance
-tests in the same change (fixture ids, evidence, and account change).`
+never a real one, and never run live in CI. Recordings are never written over committed fixtures:
+scrub the staged files, copy them into packages/connectors/src/fortnox/conformance/, and update
+the Fortnox conformance tests in the same change (fixture ids, evidence, and account change).`
 
 /**
  * Parse CLI arguments (without the node/script prefix) and seed environment variables. Throws on
  * unknown flags, missing values, invalid labels, unknown irreversible case ids, `--record`
- * without `--live`, and `--live` without `--account`.
+ * without `--live`, and `--live` in CI (`CI` non-empty), without `--owner-approved`, or without
+ * `--account`.
  */
 export const parseRunArgs = (
   argv: ReadonlyArray<string>,
@@ -274,6 +331,7 @@ export const parseRunArgs = (
   let live = false
   let help = false
   let record = false
+  let ownerApproved = false
   let account: string | undefined
   let allowWrites: RunOptions['allowWrites'] = 'none'
   const allowIrreversible: Array<string> = []
@@ -313,6 +371,9 @@ export const parseRunArgs = (
     switch (flag) {
       case '--live':
         live = true
+        break
+      case '--owner-approved':
+        ownerApproved = true
         break
       case '--help':
       case '-h':
@@ -367,11 +428,19 @@ export const parseRunArgs = (
     throw new Error('--record requires --live')
   }
 
+  if (!help && live && isCiEnvironment(env)) {
+    throw new Error(liveInCiMessage)
+  }
+
+  if (!help && live && !ownerApproved) {
+    throw new Error(ownerApprovalRequiredMessage)
+  }
+
   if (!help && live && account === undefined) {
     throw new Error(liveAccountRequiredMessage)
   }
 
-  return { live, help, record, account, allowWrites, allowIrreversible, seeds }
+  return { live, help, record, ownerApproved, account, allowWrites, allowIrreversible, seeds }
 }
 
 /** The live target the chosen flags describe (the dry run plans against the same target). */
@@ -425,10 +494,10 @@ export const dryRunReport = (options: RunOptions): string => {
   })
 
   return [
-    'DRY RUN: no network request was made. Pass --live --account <label> to run (needs FORTNOX_ACCESS_TOKEN).',
+    'DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to run (needs FORTNOX_ACCESS_TOKEN).',
     `Plan for a live target: allowWrites=${options.allowWrites}, allowIrreversible=[${options.allowIrreversible.join(', ')}]${options.record ? ', record' : ''}`,
     ...lines,
-    'Use a Fortnox developer test company only. Row and customer write cases restore what they change; the rejection case writes only if Fortnox wrongly accepts it.'
+    "Use a Fortnox developer test company only, with the repository owner's approval; never in CI. Row and customer write cases restore what they change; the rejection case writes only if Fortnox wrongly accepts it."
   ].join('\n')
 }
 
@@ -441,14 +510,22 @@ export type LiveInputs = {
 const decodeSeeds = Schema.decodeUnknownOption(FortnoxConformanceSeeds)
 
 /**
- * Everything a live run needs, or why it must refuse (before any network): a missing account
- * label or access token, missing seeds for cases that will run, or seeds that are not valid
- * Fortnox identifiers.
+ * Everything a live run needs, or why it must refuse (before any network): CI, a missing owner
+ * approval, account label, or access token, missing seeds for cases that will run, or seeds that
+ * are not valid Fortnox identifiers.
  */
 export const liveInputs = (
   options: RunOptions,
   env: Readonly<Record<string, string | undefined>>
 ): { readonly refusal: string } | { readonly inputs: LiveInputs } => {
+  if (isCiEnvironment(env)) {
+    return { refusal: liveInCiMessage }
+  }
+
+  if (!options.ownerApproved) {
+    return { refusal: ownerApprovalRequiredMessage }
+  }
+
   if (options.account === undefined) {
     return { refusal: liveAccountRequiredMessage }
   }
@@ -485,7 +562,11 @@ export class FortnoxRunFailed extends Schema.TaggedError<FortnoxRunFailed>()('Fo
   message: Schema.String
 }) {}
 
-const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+export const recordedTokenRefusal =
+  'A recorded exchange contains the live access token; nothing was written'
+
+export const renderedTokenRefusal =
+  'The staged files or the review checklist would contain the live access token; nothing was written'
 
 /** Gitignored root of staged recordings; one new directory per `--record` run. */
 export const recordingsRoot = join(workspaceRoot, '.conformance-recordings', 'fortnox')
@@ -526,7 +607,7 @@ export const renderFixtureModule = (spec: FortnoxCaseSpec, fixture: WireFixture)
     ` * ${spec.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}), scrubbed and promoted by hand from`,
-    ' * `pnpm conformance:fortnox --live --account <label> --record`.',
+    ' * `pnpm conformance:fortnox --live --owner-approved --account <label> --record`.',
     ' */',
     `export const ${spec.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''
@@ -655,37 +736,6 @@ const verifiedFixture = (
   )
 
 /**
- * Directory-level file side effects of `--record`; injectable so the staging gate is tested
- * offline without touching the filesystem.
- */
-export type RecordingWriter = {
-  readonly exists: (path: string) => boolean
-  /** Create a directory and any missing parents. */
-  readonly mkdir: (path: string) => void
-  readonly writeFile: (path: string, contents: string) => void
-  /** Rename a directory in one step (same filesystem). */
-  readonly rename: (from: string, to: string) => void
-  /** Remove a directory and everything in it. */
-  readonly rm: (path: string) => void
-}
-
-export const nodeRecordingWriter: RecordingWriter = {
-  exists: path => existsSync(path),
-  mkdir: path => {
-    mkdirSync(path, { recursive: true })
-  },
-  writeFile: (path, contents) => {
-    writeFileSync(path, contents, { flag: 'wx' })
-  },
-  rename: (from, to) => {
-    renameSync(from, to)
-  },
-  rm: path => {
-    rmSync(path, { recursive: true, force: true })
-  }
-}
-
-/**
  * A unique run directory name, `<YYYY-MM-DD>T<HHMMSS>Z-<suffix>` (UTC), so two recordings on the
  * same day never share a directory.
  */
@@ -701,6 +751,12 @@ export type StageRecordingsOptions = {
   readonly writer: RecordingWriter
   /** The gitignored recordings root (defaults to `recordingsRoot`). */
   readonly recordingsRoot?: string
+  /**
+   * The directory the recordings root must physically stay inside (defaults to the workspace
+   * root): every existing component between it and the run directory must resolve to exactly that
+   * lexical location, so no symlink can redirect the writes.
+   */
+  readonly containmentRoot?: string
   /**
    * The run directory to publish; must be a new, direct child of the recordings root (for example
    * `join(recordingsRoot, recordingRunId(now, suffix))`).
@@ -836,13 +892,17 @@ export const recordingReviewChecklist = (
 }
 
 /**
- * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan), then
- * renders every fixture module and the seeds module, writes them all into a sibling temp directory
- * (`<root>/.tmp-<run>`), and publishes that directory to `options.stagingDir` with one rename.
- * All or nothing: any failure (verification, a write, or the rename) leaves no staging directory,
- * and the temp directory is removed (best effort). A staging directory that is not a direct child
- * of the recordings root, or that already exists, is refused. Returns `undefined` when no case
- * passed.
+ * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan),
+ * refuses the recordings if any exchange carries the live access token
+ * (`recordingContainsAccessToken`), then renders every fixture module, the seeds module, and the
+ * review checklist, refuses them if any carries the token (`textContainsAccessToken`), writes the
+ * files into a sibling temp directory (`<root>/.tmp-<run>`), and publishes it to
+ * `options.stagingDir` with one rename. All or nothing: any failure (verification, either token
+ * check, a write, or the rename) leaves no staging directory, and the temp directory is removed
+ * (best effort). A staging directory that is not a direct child of the recordings root, that
+ * already exists, or that is not physically inside the containment root (a symlinked or redirected
+ * component, checked before and after creating the temp directory and again before the rename) is
+ * refused. Returns `undefined` when no case passed.
  */
 export const stageRecordings = (
   report: ConformanceReport,
@@ -869,6 +929,19 @@ export const stageRecordings = (
 
     const { writer } = options
     const tempDir = join(root, `.tmp-${runName}`)
+    const base = resolve(options.containmentRoot ?? workspaceRoot)
+
+    const refuseRedirect = Effect.suspend(() =>
+      physicallyContained(writer, base, [root, tempDir, stagingDir])
+        ? Effect.void
+        : Effect.fail(
+            new FortnoxRunFailed({
+              message: `Refusing recordings under a symlinked or redirected directory (${root}); nothing was written`
+            })
+          )
+    )
+
+    yield* refuseRedirect
 
     const refuseExisting = Effect.suspend(() =>
       writer.exists(stagingDir) || writer.exists(tempDir)
@@ -900,6 +973,17 @@ export const stageRecordings = (
       return undefined
     }
 
+    // The recorded exchanges themselves, before rendering: every URL, header, text body, and JSON
+    // string value and key (parsed, so JSON escapes are undone); the PDF's bytes are searched as
+    // text rather than refused.
+    if (
+      recorded.some(({ fixture }) =>
+        recordingContainsAccessToken(fixture.exchanges, inputs.accessToken)
+      )
+    ) {
+      return yield* new FortnoxRunFailed({ message: recordedTokenRefusal })
+    }
+
     // Everything verified: render every file before writing any of them.
     const files = [
       ...recorded.map(({ spec, fixture }) => ({
@@ -918,14 +1002,38 @@ export const stageRecordings = (
       }
     ]
 
+    const checklist = recordingReviewChecklist(recorded)
+
+    // Last line of defence, over exactly what would be written and printed (seeds included). The
+    // PDF body is base64 text here, which the check searches at every byte alignment; a JSON escape
+    // that rendering escaped again (`\\u0037`) is decoded too.
+    if (
+      [...files.map(file => file.contents), ...checklist].some(text =>
+        textContainsAccessToken(text, inputs.accessToken)
+      )
+    ) {
+      return yield* new FortnoxRunFailed({ message: renderedTokenRefusal })
+    }
+
     yield* refuseExisting
+    yield* refuseRedirect
 
     yield* Effect.try({
       try: () => {
         writer.mkdir(tempDir)
 
+        // Re-check after creating the temp directory, before any file is written.
+        if (!physicallyContained(writer, base, [tempDir])) {
+          throw new Error('recordings directory redirected')
+        }
+
         for (const file of files) {
           writer.writeFile(join(tempDir, file.name), file.contents)
+        }
+
+        // Re-check the temp and target directories immediately before publishing.
+        if (!physicallyContained(writer, base, [tempDir, stagingDir])) {
+          throw new Error('recordings directory redirected')
         }
 
         // Publish the complete batch in one step, only after every file is written.
@@ -947,19 +1055,26 @@ export const stageRecordings = (
     return {
       stagingDir,
       files: files.map(file => join(stagingDir, file.name)),
-      checklist: recordingReviewChecklist(recorded)
+      checklist
     }
   })
 
-const live = (options: RunOptions, env: Readonly<Record<string, string | undefined>>) =>
+/**
+ * One live run over checked inputs: every case (with the stderr WARN cleanup reporter provided
+ * around `runConformance`, so a row or customer restore that fails while the run is interrupted
+ * prints a WARN line naming the case), the report, and the `--record` staging. Every printed line
+ * (report, WARN lines, staging output) goes through the shared `redactingLiveRunIo` with the live
+ * access token, as in the shared runners: Fortnox can echo it into a field a case reports (an
+ * invoice number in the rejection case's failure, for example). `liveIo` is injectable so tests
+ * replay fixtures instead of calling Fortnox.
+ */
+export const runFortnoxLive = (
+  options: RunOptions,
+  inputs: LiveInputs,
+  liveIo: LiveRunIo = processLiveRunIo
+) =>
   Effect.gen(function* () {
-    const checked = liveInputs(options, env)
-
-    if ('refusal' in checked) {
-      return yield* new FortnoxRunFailed({ message: checked.refusal })
-    }
-
-    const inputs = checked.inputs
+    const io = redactingLiveRunIo(liveIo, inputs.accessToken)
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
     const httpFor = (testCase: FortnoxConformanceCase): Layer.Layer<HttpClient.HttpClient> =>
@@ -973,15 +1088,15 @@ const live = (options: RunOptions, env: Readonly<Record<string, string | undefin
 
               return Layer.succeed(HttpClient.HttpClient, client)
             })
-          ).pipe(Layer.provide(FetchHttpClient.layer))
-        : FetchHttpClient.layer
+          ).pipe(Layer.provide(io.http))
+        : io.http
 
     const report = yield* runConformance(fortnoxConformanceCases, {
       target: liveTarget(options),
       layer: testCase => casePorts(httpFor(testCase), inputs.accessToken, inputs.seeds)
-    })
+    }).pipe(Effect.provideService(ConformanceCleanupReporter, stderrCleanupReporter(io.err)))
 
-    console.log(formatConformanceReport(report))
+    io.out(formatConformanceReport(report))
 
     if (options.record) {
       const now = new Date()
@@ -993,9 +1108,9 @@ const live = (options: RunOptions, env: Readonly<Record<string, string | undefin
       })
 
       if (staged === undefined) {
-        console.log('No passed case to record.')
+        io.out('No passed case to record.')
       } else {
-        console.log(
+        io.out(
           [
             `Staged ${staged.files.length} files (gitignored) in ${relative(workspaceRoot, staged.stagingDir)}; nothing committed was changed.`,
             ...staged.checklist
@@ -1026,16 +1141,68 @@ const parseCliArgs = (): RunOptions | undefined => {
   }
 }
 
+/**
+ * What an interrupted Fortnox run may have left behind, and the signs of it the owner can see, for
+ * the interruption and forced-exit messages of `runInterruptibly` (Fortnox cases create no
+ * `yolk-conformance` items to look for, so the advice names the records the cases change).
+ */
+export const fortnoxRecoveryAdvice = `Check the records the cases change. Row case (--discount-invoice): rows of that invoice with DiscountType PERCENT and a Discount of 10 or 0 they did not have before mean its rows were not restored; set each row's Discount back by hand. Customer case (--customer): Comments equal to "${fortnoxConformanceCommentsMarker}" means that customer's Comments were not restored; put the original text back by hand. Rejection case (--missing-customer): an invoice for that customer number means Fortnox accepted the rejected create; cancel it by hand.`
+
+/** `runInterruptibly` options of the Fortnox runner: its recovery advice; its cases restore. */
+export const fortnoxInterruptOptions: Pick<
+  RunInterruptiblyOptions,
+  'recoveryAdvice' | 'hasCleanups'
+> = { recoveryAdvice: fortnoxRecoveryAdvice, hasCleanups: true }
+
+/**
+ * Run a live program so that SIGINT/SIGTERM interrupt it instead of killing the process (see
+ * `runInterruptibly`); signals and io are injectable so tests send no real signals.
+ */
+export const runFortnoxInterruptibly = <E>(
+  program: Effect.Effect<void, E>,
+  signals: SignalSource = processSignals,
+  io: CliIo = processCliIo,
+  options: Omit<RunInterruptiblyOptions, 'recoveryAdvice' | 'hasCleanups'> = {}
+): Promise<void> =>
+  runInterruptibly(program, signals, io, { ...options, ...fortnoxInterruptOptions })
+
+/**
+ * What `pnpm conformance:fortnox --live` runs once its inputs are checked: `runFortnoxLive`, made
+ * interruptible, with the run's own failure and the interruption messages printed through the
+ * shared `redactingCliIo` (and the run's lines through `redactingLiveRunIo`) with the live access
+ * token. Signals and io are injectable so tests send no real signals and print nothing.
+ */
+export const runFortnoxLiveCli = (
+  options: RunOptions,
+  inputs: LiveInputs,
+  signals: SignalSource = processSignals,
+  cliIo: CliIo = processCliIo,
+  liveIo: LiveRunIo = processLiveRunIo,
+  interruptOptions: Omit<RunInterruptiblyOptions, 'recoveryAdvice' | 'hasCleanups'> = {}
+): Promise<void> =>
+  runFortnoxInterruptibly(
+    runFortnoxLive(options, inputs, liveIo),
+    signals,
+    redactingCliIo(cliIo, inputs.accessToken),
+    interruptOptions
+  )
+
 const runCli = (options: RunOptions): void => {
   if (options.help) {
     console.log(usage)
   } else if (!options.live) {
     console.log(dryRunReport(options))
   } else {
-    Effect.runPromise(live(options, process.env)).catch(error => {
-      console.error(error instanceof Error ? error.message : error)
+    const checked = liveInputs(options, process.env)
+
+    if ('refusal' in checked) {
+      console.error(checked.refusal)
       process.exitCode = 1
-    })
+
+      return
+    }
+
+    void runFortnoxLiveCli(options, checked.inputs)
   }
 }
 

@@ -16,6 +16,7 @@ Effect `HttpClient` routing that points code at them.
 | `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`           | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                              |
 | `@yolk-sdk/emulators/email`     | `src/email.ts`              | Fixture-driven fake `EmailClient` backend (plain JSON `call`), its seed, faults, ledger, and manifest                                    |
 | `@yolk-sdk/emulators/node`      | `src/node.ts`               | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
+| `@yolk-sdk/emulators/fortnox`   | `src/fortnox.ts`            | Stateful Fortnox emulator on `@emulators/core`: ledger, faults, control plane                                                            |
 | (internal)                      | `src/emulator-kernel.ts`    | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
 | (internal)                      | `src/chat-completions.ts`   | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
 | (internal)                      | `src/messages.ts`           | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
@@ -24,25 +25,34 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                      | `src/subscription-usage.ts` | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go               |
 | (internal)                      | `src/*-recordings.ts`       | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                             |
 | (internal)                      | `src/emulator-compose.ts`   | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                  |
-| (internal)                      | `src/emulator-http.ts`      | Fault/scripted-error status and header validators                                                                                        |
+| (internal)                      | `src/emulator-http.ts`      | Shared fault/scripted-error status and header validators (all emulators)                                                                 |
 | (internal)                      | `src/route-evidence.ts`     | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
 | (internal)                      | `src/email-fixtures.ts`     | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                      |
+| (internal)                      | `src/fortnox/state.ts`      | Fortnox state/seed schemas, default seed (fixture entities), profiles, totals                                                            |
+| (internal)                      | `src/fortnox/api.ts`        | Fortnox route table (evidence + handlers), quirks, `ErrorInformation` codes                                                              |
 
 There is no root export or barrel.
 
 ## Boundaries
 
-- Dependencies: `effect` only. `src` never imports `@yolk-sdk/*`, React, or Next
+- Dependencies: `effect`, and `@emulators/core` pinned EXACT (`0.12.0`, no caret) for stateful
+  connector (and future MCP) emulators only. `src` never imports `@yolk-sdk/*`, React, or Next
   (`scripts/check-package-boundaries.ts` enforces this). Tests may import `@yolk-sdk/agent`,
   `@yolk-sdk/conformance`, and `@yolk-sdk/connectors` (workspace devDependencies); connectors never
   import emulators.
-- `node:` builtins are allowed only in `src/node.ts` (also enforced).
+- `node:` builtins and `@emulators/core` (Node-only: it imports Node builtins and reads files at
+  import time) are allowed only in `src/node.ts`, `src/fortnox.ts`, and `src/fortnox/**` (also
+  enforced). `src/fortnox.ts` imports the core lazily (`await import`) inside
+  `makeFortnoxEmulator`, so importing the subpath (for example the manifest, from the evidence
+  check) has no side effects.
 - `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain
   Web fetch handlers (no Effect runtime needed, no Node builtins); `email` is a plain structural
-  object (no HTTP, socket, TLS, MIME, or mail library); `node` is the only Node boundary.
+  object (no HTTP, socket, TLS, MIME, or mail library); `node` and `fortnox` are the Node subpaths.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
-- Does not use `@emulators/core` yet; stateful connector emulators may later.
+- `@emulators/core` is Apache-2.0 and a dependency (not vendored or bundled; `tsdown` never bundles
+  `@emulators/*`); the README carries the attribution. Upgrading it is a deliberate, reviewed bump
+  of the exact pin.
 
 ## Design rules
 
@@ -68,10 +78,13 @@ There is no root export or barrel.
   (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`,
   `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`,
   `anthropicSubscriptionUsageEmulatorRoutes`, `codexSubscriptionUsageEmulatorRoutes`,
-  `xAiGrokSubscriptionUsageEmulatorRoutes`). Each manifest route
-  needs its own handler: `bindRouteHandlers` (`src/route-evidence.ts`) pairs them at construction
-  and throws `EmulatorRouteUnmapped` for a manifest route without a handler or a handler without a
-  manifest route.
+  `xAiGrokSubscriptionUsageEmulatorRoutes`, `fortnoxEmulatorRoutes`). Each manifest route
+  needs its own handler: the fetch-handler emulators use `bindRouteHandlers`
+  (`src/route-evidence.ts`), which pairs them at construction and throws `EmulatorRouteUnmapped`
+  for a manifest route without a handler or a handler without a manifest route; Fortnox derives
+  both from one table in `src/fortnox/api.ts`. Fortnox routes without a fixture
+  (`GET /3/companyinformation`, `GET /3/customers`) cite no case ids and use minimal shapes named
+  after the connector's read fields; the check warns about them.
 - Fixture-only rule (lasting; every new emulator and route follows it): response behaviour comes
   only from the committed fixtures. A request matching a recorded request's shape, within the
   documented request-shape latitude, gets that fixture's response, copied as data (default content
@@ -87,7 +100,9 @@ There is no root export or barrel.
   Codex, Grok) today, on `src/fixture-route.ts`, and the `/email` port emulator (its own
   latitude, not-emulated answer, faults, and parity test, below; it does not use the kernel). The earlier model routes (`/gateway`, `/openai`,
   `/anthropic`, `/codex`, `/xai` Messages and Responses) predate the rule and keep their synthetic
-  behaviour and 404 fallback unchanged; do not copy that behaviour into new routes.
+  behaviour and 404 fallback unchanged; do not copy that behaviour into new routes. The stateful
+  `/fortnox` emulator is not fixture-only: it keeps entity state on `@emulators/core`, answers
+  unknown routes with a ledgered 404, and fails closed on anything not emulated (below).
 - Request-shape latitude (fixture-only HTTP routes, the only accepted deviations): any credential
   value (never checked or stored); extra request headers; JSON key order; any string value except the
   discriminators `model`, `role`, `type`, and `phase`; any positive integer where the recording has
@@ -103,7 +118,7 @@ There is no root export or barrel.
   `x-grok-client-version`, and `x-grok-client-mode: headless`). Fault and scripted-error statuses on
   fixture-only routes are 400-599 only.
 - Evidence policy: unknown emulated API routes fail closed and are written to the ledger (404 JSON
-  on the earlier model-route emulators, 400 not-emulated on fixture-only routes; control-plane
+  on the earlier model-route emulators and `/fortnox`, 400 not-emulated on fixture-only routes; control-plane
   requests are never recorded); unverified routes answer but carry
   `x-emulator-evidence: unverified` (the `/email` port emulator has no headers: its ledger entries
   carry `evidence`), are tagged in the ledger, and are listed by the evidence check; evidence older
@@ -115,10 +130,12 @@ There is no root export or barrel.
   warning, reported first). Never weaken the rule, extend an expiry silently, or add an entry
   without a reason; verify the route with an owner-approved live run and delete the entry (the
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
-  write routes are pending (tracking #115; expiry dates live only in that file).
+  write routes are pending (tracking #115), and so are the four Fortnox write routes; expiry dates
+  live only in that file.
 - Emulators never redirect and always send a body: fault and scripted-error statuses exclude 1xx,
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
-  turn is added. Build a response before consuming its fault; a response that cannot be built
+  turn is added. All emulators share these validators (`src/emulator-http.ts`, internal, no Node
+  builtins). Build a response before consuming its fault; a response that cannot be built
   answers an evidence-tagged 500 recorded in the ledger (`responseError`).
 - Every fetch-handler emulator is built on `src/emulator-kernel.ts` (the `/email` port emulator is
   not; see below): fault and scripted-turn state (strict
@@ -219,6 +236,22 @@ There is no root export or barrel.
   fixture is chosen. The bullet has four copies that change together with `test/email.test.ts`:
   this one, the `src/email.ts` header, `README.md` (Email emulator), and
   `apps/docs/content/docs/api-reference/emulators.mdx` (Email emulator).
+- Fortnox state lives in the core runtime (JSON state, replaced per `reset`/`seed` generation);
+  the ledger, faults, auth, and the `/_emulate/*` control plane live in the wrapper
+  (`src/fortnox.ts`), because the core reserves `/_emulate`. The bearer token is never forwarded
+  to the core, stored, or ledgered. Faults answer before the route runs, so they never write.
+- Fortnox observed quirks live in `src/fortnox/api.ts` and are listed in `fortnoxEmulatorQuirks`
+  with their case ids. The `quirks` option (`stickyRowDiscount`, `emptyStringClears`,
+  `paymentFiltersIncludeUnbooked`) is a disagreement-drill knob for tests only: defaults follow the
+  observed behavior. Fail closed on anything not emulated (unknown query parameters, filters,
+  fields, referenced articles/cost centers/projects, non-SEK currency, including a customer's
+  inherited currency) instead of ignoring it. Customer categorical values are the emulated subset
+  only (document it as such, never as Fortnox's full enum): `VATType` `SEVAT`, `Type`
+  `COMPANY`/`PRIVATE`, `TermsOfPayment` whole days `0`-`365`; invoice creation checks the
+  inherited `VATType` and `TermsOfPayment` (and the computed due date) before committing, with
+  no silent fallback. Query keys are allowlisted per route in the route
+  table (`queryKeys`, empty by default) and checked before the handler runs, so a rejected write
+  never writes. `lastmodified` is not emulated (the state tracks no modification times).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -267,8 +300,11 @@ Codex, and Grok usage routes: recorded bodies, not-emulated rejections, shape-ch
 default bodies, faults, control plane, and untouched model-route manifests),
 `test/subscription-usage-conformance.test.ts` (the four usage cases in-process and over a loopback
 socket, drills, and 401 / 429 / dropped / truncated faults through the real fetchers), `test/email.test.ts` (answers only from fixtures, the latitude,
-every fail-closed reason, state transitions, faults, reset, coverage, and seed validation), and
+every fail-closed reason, state transitions, faults, reset, coverage, and seed validation),
 `test/email-conformance.test.ts` (cross-check A: every email case against one shared in-process
 emulator and each case alone, ending as seeded plus the documented Sent copy; one drill fault per
-case failing exactly that case; a failed restore reported; fixture and manifest parity). Loopback
-sockets only; never call real services.
+case failing exactly that case; a failed restore reported; fixture and manifest parity),
+`test/fortnox.test.ts` (routes, quirks, auth, faults through the real connector, profiles, control
+plane), and `test/fortnox-conformance.test.ts` (all seven Fortnox cases in-process and over a
+loopback socket, the ledger showing the restores, the state-equals-seed proof for the reversible
+cases, and one drill per knob). Loopback sockets only; never call real services.

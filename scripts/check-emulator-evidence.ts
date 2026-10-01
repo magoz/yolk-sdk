@@ -77,6 +77,7 @@ import {
   codexSubscriptionUsageEmulatorRoutes
 } from '../packages/emulators/src/codex.ts'
 import { emailEmulatorRoutes } from '../packages/emulators/src/email.ts'
+import { fortnoxEmulatorRoutes } from '../packages/emulators/src/fortnox.ts'
 import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
 import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
 import { openCodeGoEmulatorRoutes } from '../packages/emulators/src/opencode.ts'
@@ -170,7 +171,8 @@ export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'codex-usage', routes: codexSubscriptionUsageEmulatorRoutes },
   { name: 'xai-usage', routes: xAiGrokSubscriptionUsageEmulatorRoutes },
   { name: 'opencode', routes: openCodeGoEmulatorRoutes },
-  { name: 'email', routes: emailEmulatorRoutes }
+  { name: 'email', routes: emailEmulatorRoutes },
+  { name: 'fortnox', routes: fortnoxEmulatorRoutes }
 ]
 
 /** The repo's pending-evidence allowlist. */

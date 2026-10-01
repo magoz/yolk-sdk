@@ -5,8 +5,9 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * verify the original value.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
- * `pnpm conformance:fortnox --live --account <label> --record` stages a replacement in a gitignored
- * directory; see the script header for the manual scrub-and-promote step.
+ * `pnpm conformance:fortnox --live --owner-approved --account <label> --record` stages a
+ * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
+ * step.
  */
 export const fortnoxCustomerEmptyStringFixture: WireFixture = {
   id: 'fortnox.customer.empty-string-keeps-value.synthetic',

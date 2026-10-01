@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, a fixture-driven fake EmailClient backend, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, a fixture-driven fake EmailClient backend, a stateful Fortnox emulator, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -61,6 +61,10 @@
     "./node": {
       "types": "./src/node.ts",
       "default": "./src/node.ts"
+    },
+    "./fortnox": {
+      "types": "./src/fortnox.ts",
+      "default": "./src/fortnox.ts"
     }
   },
   "files": [
@@ -119,6 +123,11 @@
         "types": "./dist/node.d.mts",
         "import": "./dist/node.mjs",
         "default": "./dist/node.mjs"
+      },
+      "./fortnox": {
+        "types": "./dist/fortnox.d.mts",
+        "import": "./dist/fortnox.mjs",
+        "default": "./dist/fortnox.mjs"
       }
     }
   },
@@ -129,6 +138,7 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@emulators/core": "0.12.0",
     "effect": "catalog:"
   },
   "devDependencies": {
