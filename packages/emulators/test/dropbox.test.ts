@@ -1148,6 +1148,18 @@ describe('Dropbox-API-Arg in the ledger', () => {
           path: `${work}/q.txt`,
           nested: { access_token: '<redacted>' }
         })
+
+        // A malformed JSON-looking value cannot be redacted field by field: it is recorded whole.
+        await expectNotEmulated(
+          await target.fetch(
+            new Request(
+              `${content}/2/files/upload?arg=${encodeURIComponent(`{"access_token":"${secret}",`)}`,
+              { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: 'x' }
+            )
+          )
+        )
+
+        expect(target.ledger.entries().at(-1)?.query.arg).toBe('<redacted>')
         expect(
           JSON.stringify([
             target.ledger.entries(),

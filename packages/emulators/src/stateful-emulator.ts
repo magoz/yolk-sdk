@@ -527,17 +527,26 @@ const withEvidence = (response: Response, evidence: EmulatorEvidence): Response 
 /**
  * The recorded query: credential-named keys redacted, and any value that parses as a JSON object or
  * array (Dropbox's browser-style `arg` parameter, for example) recorded with its credential-named
- * keys redacted at any depth, as a recorded JSON header is.
+ * keys redacted at any depth, and a JSON-looking value that does not parse recorded as `<redacted>`,
+ * as a recorded JSON header is.
  */
 const recordedQuery = (query: URLSearchParams): Readonly<Record<string, string>> =>
   Object.fromEntries(
     Object.entries(redactCredentialQuery(query)).map(([key, value]) => {
-      const parsed =
-        value.trimStart().startsWith('{') || value.trimStart().startsWith('[')
-          ? parseJsonText(value)
-          : undefined
+      if (!value.trimStart().startsWith('{') && !value.trimStart().startsWith('[')) {
+        return [key, value]
+      }
 
-      return [key, parsed === undefined ? value : JSON.stringify(redactCredentialFields(parsed))]
+      // A JSON-looking value that does not parse cannot be redacted field by field: record it
+      // whole as redacted, as a recorded JSON header is.
+      const parsed = parseJsonText(value)
+
+      return [
+        key,
+        parsed === undefined
+          ? redactedCredentialValue
+          : JSON.stringify(redactCredentialFields(parsed))
+      ]
     })
   )
 
