@@ -30,6 +30,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/github`                 | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                 |
 | `@yolk-sdk/connectors/github/conformance`     | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                              |
 | `@yolk-sdk/connectors/google`                 | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                            |
+| `@yolk-sdk/connectors/google/conformance`     | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures          |
 | `@yolk-sdk/connectors/linkedin-search`        | Exa people search and Enrich Layer profile/email actions                                                       |
 | `@yolk-sdk/connectors/microsoft`              | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments       |
 | `@yolk-sdk/connectors/microsoft/conformance`  | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                     |
@@ -1437,6 +1438,44 @@ owners running a practice repository by hand, `--allow-writes reversible` adds t
 label cases, and `--record` keeps the `link` response header, refuses any recording in which the
 token survives, and stages verified recordings all or nothing in
 `.conformance-recordings/github/<run>/` (gitignored) for manual scrubbing and promotion.
+
+### Google conformance cases (experimental)
+
+`@yolk-sdk/connectors/google/conformance` exports thirteen conformance cases for
+`@yolk-sdk/conformance/runner` (`googleConformanceCases`), synthetic replay fixtures
+(`googleConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
+(`googleConformanceFixtureSeeds`). Every case runs the real Gmail, Calendar, and Drive actions over
+`ConnectorHttpClient` and `CredentialResolver` plus `GoogleConformanceConfig`, which holds a
+practice mailbox address, practice messages and a label, a practice calendar and time range, and a
+practice Drive folder and file. They cover `gmail.list` paging through `nextPageToken`, base64url
+attachment data, the 404 error envelope, a label created, applied, and deleted, a draft composed,
+updated, and deleted, trash and untrash, a send to the practice address, Calendar range paging, an
+event lifecycle and its deleted state, Drive folder paging, the `get_file` field selection, and a
+folder trashed and deleted. Credentials bind through `googleConformanceIntegration` (`google.oauth`,
+credential ref `google.conformance`). The case table, seeds, and claims live in the
+[Google conformance guide](../../apps/docs/content/docs/connectors/google.mdx#conformance-cases).
+
+Every write names the invocation-unique `runId` (the fixtures replay with `run-synthetic`; the live
+runner generates a fresh random id every time) or touches only the seeded work message. The create,
+its decoding, and its registration are not interruptible, and neither is any later write. A
+definitive rejection (HTTP 4xx other than 408) undoes nothing; an ambiguous write fails with
+`GoogleConformanceActionFailed` (`writeOutcome: 'unknown'`) naming the exact item; an answer outside
+the run namespace is never adopted (`GoogleConformanceCleanupRefused`). The label, draft, trash,
+event, and folder cases are write-reversible: the cleanup undoes by id, verifies, and fails with
+`GoogleConformanceRestoreFailed` when that fails. Events never have attendees (no invitation is ever
+sent), drafts never have recipients, and the folder case trashes its folder and then deletes it
+permanently, so nothing stays in Drive Trash. **The send case is write-irreversible:** Gmail cannot
+unsend; it sends one message whose only recipient is the seeded practice address, and runs only
+when a person names its exact id (`--allow-irreversible google.gmail.send-practice-address`).
+Before any write case, and again after an interrupt-only exit, the runner warns read-only about run
+labels and drafts, the work message in Trash, run events, and run Drive items
+(`findGoogleConformanceLeftovers`). `pnpm conformance:google` in this repository dry-runs by
+default; `--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; needs
+`GOOGLE_ACCESS_TOKEN`, refused before any request unless it looks like `ya29.…`, and the seeds) is
+for owners running a practice account by hand, `--allow-writes reversible` adds the reversible
+cases, and `--record` refuses any recording in which the token survives and stages verified
+recordings all or nothing in `.conformance-recordings/google/<run>/` (gitignored) for manual
+scrubbing and promotion.
 
 ### R2 conformance cases (experimental)
 

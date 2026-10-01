@@ -1797,18 +1797,34 @@ export const gmailDraftDeleteAction = defineAction({
   inputSchema: GmailDraftIdInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
-    runGmailJsonAction(
-      integration,
-      token =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailComposeOAuthCredentialSlot
+      )
+
+      const http = yield* ConnectorHttpClient
+
+      const response = yield* http.request(
         gmailRequest({
           token,
           method: 'DELETE',
           path: `/users/me/drafts/${encodeURIComponent(input.draftId)}`
-        }),
-      'gmail_draft_delete_failed',
-      'Gmail draft delete failed',
-      GoogleGmailComposeOAuthCredentialSlot
-    )
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return yield* gmailProviderFailure(
+          'gmail_draft_delete_failed',
+          'Gmail draft delete failed',
+          response.status,
+          response.body
+        )
+      }
+
+      // Gmail answers draft deletes with 204 and an empty body: no JSON to decode.
+      return ActionResult.success({ id: input.draftId, deleted: true })
+    })
 })
 
 export const gmailDraftReplyAction = defineAction({

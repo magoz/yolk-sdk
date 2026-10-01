@@ -12,11 +12,13 @@ import {
 import {
   gmailCreateLabelAction,
   gmailDeleteLabelAction,
+  gmailDraftDeleteAction,
   gmailGetLabelAction,
   gmailListLabelsAction,
   gmailModifyLabelsAction,
   gmailUpdateLabelAction,
   GoogleConnector,
+  googleGmailComposeScopes,
   googleGmailModifyScope,
   googleGmailReadonlyScope,
   googleOAuthSlotId
@@ -346,6 +348,49 @@ describe('Gmail label actions', () => {
       expect(result._tag).toBe('Failure')
       expect(result).toMatchObject({
         error: { code: 'google_not_found', status: 404 }
+      })
+    })
+  )
+})
+
+describe('Gmail draft delete', () => {
+  it.effect('deletes a draft without decoding the empty 204 body', () =>
+    Effect.gen(function* () {
+      const host = makeHost('', 204)
+
+      const result = yield* gmailDraftDeleteAction
+        .execute({ integration, input: { draftId: 'r-123' } })
+        .pipe(Effect.provide(host.layer))
+
+      expect(result).toMatchObject({ _tag: 'Success', value: { id: 'r-123', deleted: true } })
+      expect(host.requests).toMatchObject([
+        {
+          method: 'DELETE',
+          url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-123'
+        }
+      ])
+      expect(host.scopes).toEqual([[...googleGmailComposeScopes]])
+    })
+  )
+
+  it.effect('still fails a 4xx draft delete as a provider failure', () =>
+    Effect.gen(function* () {
+      const host = makeHost(
+        '{"error":{"code":404,"message":"Requested entity was not found.","errors":[{"reason":"notFound"}]}}',
+        404
+      )
+
+      const result = yield* gmailDraftDeleteAction
+        .execute({ integration, input: { draftId: 'r-123' } })
+        .pipe(Effect.provide(host.layer))
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        error: {
+          code: 'google_not_found',
+          status: 404,
+          message: 'Gmail draft delete failed: Requested entity was not found.'
+        }
       })
     })
   )

@@ -50,6 +50,7 @@
     "conformance:dropbox": "tsx scripts/run-dropbox-conformance.ts",
     "conformance:fortnox": "tsx scripts/run-fortnox-conformance.ts",
     "conformance:github": "tsx scripts/run-github-conformance.ts",
+    "conformance:google": "tsx scripts/run-google-conformance.ts",
     "conformance:gateway": "tsx scripts/record-gateway-fixtures.ts",
     "conformance:grok": "tsx scripts/record-responses-fixtures.ts --family grok",
     "conformance:openai": "tsx scripts/record-openai-fixtures.ts",

@@ -11,6 +11,7 @@
     "todoist",
     "telegram",
     "github",
+    "google",
     "r2-storage"
   ]
 }

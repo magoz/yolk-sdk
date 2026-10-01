@@ -169,6 +169,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './github',
       './github/conformance',
       './google',
+      './google/conformance',
       './linkedin-search',
       './microsoft',
       './microsoft/conformance',

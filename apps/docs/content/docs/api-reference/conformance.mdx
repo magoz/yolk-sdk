@@ -448,6 +448,25 @@ stays in the repository, closed, and it runs only when a person names its exact 
 run comments on the work issue, and the seeded label on it. See [GitHub conformance
 cases](../connectors/github#conformance-cases).
 
+`@yolk-sdk/connectors/google/conformance` exports thirteen Gmail, Calendar, and Drive cases
+(`googleConformanceCases`), their synthetic fixtures (`googleConformanceFixtures`), and the seeds
+they replay with (`googleConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`,
+`CredentialResolver`, and `GoogleConformanceConfig` (a practice mailbox address, practice messages
+and a label, a practice calendar and time range, a practice Drive folder and file, and the run id).
+Every case runs the real connector actions; answers an action returns undecoded are decoded in the
+case, and error bodies are observed at the `ConnectorHttpClient` port. The label, draft, trash,
+event, and folder cases are write-reversible: each write names the invocation-unique `runId` or
+works only on the seeded work message, is not interruptible, and is undone by id and verified,
+failing with `GoogleConformanceRestoreFailed` when that fails. Events never have attendees, so no
+invitation is ever sent; the folder case trashes its folder and then deletes it permanently. A
+definitive rejection undoes nothing; an ambiguous write fails with `GoogleConformanceActionFailed`
+(`writeOutcome: 'unknown'`) naming the exact item; an answer outside the run namespace is never
+adopted (`GoogleConformanceCleanupRefused`). The send case is **write-irreversible**: Gmail cannot
+unsend, so it runs only when a person names its exact id, and it sends one message whose only
+recipient is the seeded practice address. `findGoogleConformanceLeftovers` lists, read-only and
+bounded, run labels and drafts, the work message in Trash, run events, and run Drive items. See
+[Google conformance cases](../connectors/google#conformance-cases).
+
 `@yolk-sdk/connectors/r2-storage/conformance` exports six port-level R2 cases
 (`r2ConformanceCases`), their synthetic `PortFixture`s (`r2ConformanceFixtures`), and the seeds they
 replay with (`r2ConformanceFixtureSeeds`). The connector never talks to R2 itself: the cases run
@@ -470,15 +489,15 @@ scans). Live verification needs a host implementation of both ports; no live R2 
 [R2 conformance cases](../connectors/r2-storage#conformance-cases).
 
 When a case is interrupted, the run no longer produces a report, and no further case starts. So
-Dropbox, Notion, Todoist, GitHub, and Microsoft write cases, the Fortnox row and customer mutation
-cases, the Telegram send, and the R2 puts also hand a cleanup problem raised during the interruption
+Dropbox, Notion, Todoist, GitHub, Google, and Microsoft write cases, the Fortnox row and customer
+mutation cases, the Telegram and Gmail sends, and the R2 puts also hand a cleanup problem raised during the interruption
 (a failed cleanup, or a create, send, or put whose outcome is unknown) to `ConformanceCleanupReporter`
 from `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
 `Effect.logWarning`. The Fortnox rejection case and the Fortnox email send do not report. With the
 Effect version this repository pins, such a run ends with that failure itself (no Interrupt in the
 cause), and a run whose cleanup succeeded ends as a plain interruption; drills in the connector
 tests pin both, so an Effect upgrade that changes this fails visibly. The Dropbox, Notion, Todoist,
-and Telegram live runners print reported problems to stderr as WARN lines. Their first
+Telegram, GitHub, and Google live runners print reported problems to stderr as WARN lines. Their first
 SIGINT/SIGTERM interrupts the run fiber so the cleanup is attempted; duplicates within a second (one
 Ctrl-C reaches every process of the foreground group, and the wrappers relay it) are ignored, and a
 later signal exits at once. Only after an interrupt-only exit (code 130) does the read-only leftover

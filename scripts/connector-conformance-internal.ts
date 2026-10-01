@@ -1,7 +1,8 @@
 /**
- * Shared pieces of the Dropbox, Notion, Todoist, Telegram, and GitHub connector conformance
+ * Shared pieces of the Dropbox, Notion, Todoist, Telegram, GitHub, and Google connector conformance
  * runners (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`, `run-todoist-conformance.ts`,
- * `run-telegram-conformance.ts`, `run-github-conformance.ts`; not a CLI). Each runner supplies a
+ * `run-telegram-conformance.ts`, `run-github-conformance.ts`, `run-google-conformance.ts`; not a
+ * CLI). Each runner supplies a
  * `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential, and ports)
  * and gets the same behaviour as the Microsoft runner, plus the owner-approval and CI gates:
  *
@@ -15,7 +16,7 @@
  *   always run; `--allow-writes reversible` adds the write-reversible cases. A write-irreversible
  *   case runs only when named by its exact id with `--allow-irreversible <case-id>` (repeatable),
  *   independent of `--allow-writes`; the flag exists only for runners that have such a case (today
- *   Telegram and GitHub), and is an unknown argument everywhere else.
+ *   Telegram, GitHub, and Google), and is an unknown argument everywhere else.
  * - A runner whose provider puts the credential in request URLs (Telegram's `/bot<token>/`)
  *   supplies `scrubRecording` and `replayAccessToken`: recorded exchanges have the live token
  *   replaced before the fixture is built, and replay verification resolves the replay token.

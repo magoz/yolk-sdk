@@ -82,6 +82,10 @@
       "types": "./src/google/index.ts",
       "default": "./src/google/index.ts"
     },
+    "./google/conformance": {
+      "types": "./src/google/conformance/index.ts",
+      "default": "./src/google/conformance/index.ts"
+    },
     "./linkedin-search": {
       "types": "./src/linkedin-search/index.ts",
       "default": "./src/linkedin-search/index.ts"
@@ -208,6 +212,11 @@
         "types": "./dist/google/index.d.mts",
         "import": "./dist/google/index.mjs",
         "default": "./dist/google/index.mjs"
+      },
+      "./google/conformance": {
+        "types": "./dist/google/conformance/index.d.mts",
+        "import": "./dist/google/conformance/index.mjs",
+        "default": "./dist/google/conformance/index.mjs"
       },
       "./linkedin-search": {
         "types": "./dist/linkedin-search/index.d.mts",
