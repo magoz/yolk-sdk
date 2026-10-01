@@ -7,6 +7,7 @@
  * reasons), the opt-in per-origin bearer digest (`bearerDigest`), and that an emulator without
  * `failClosed` keeps the earlier behaviour (the Dropbox and Notion suites cover it fully).
  */
+import { createHash } from 'node:crypto'
 import { Predicate, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import type * as Schema from 'effect/Schema'
@@ -339,23 +340,22 @@ const digestEcho = statefulRoute<State, undefined, string>(
   (_state, seen) => () => new Response(seen)
 )
 
-/** A synthetic digest: the origin and the bearer reversed (never the bearer as written). */
-const reversedDigest = (bearer: string, origin: string) =>
-  `${origin}|${[...bearer].reverse().join('')}`
+/** A real one-way digest: SHA-256 (hex) of the origin, a space, and the bearer. */
+const sha256Digest = (bearer: string, origin: string) =>
+  createHash('sha256').update(`${origin} ${bearer}`).digest('hex')
 
 describe('fail-closed mode: the opt-in per-origin bearer digest', () => {
   const secret = 'synthetic-wrapper-secret'
   const authorization = `Bearer ${secret}`
 
   it('refuses to build without fail-closed mode', async () => {
-    await expect(build([digestEcho], false, { bearerDigest: reversedDigest })).rejects.toThrow(
+    await expect(build([digestEcho], false, { bearerDigest: sha256Digest })).rejects.toThrow(
       'bearerDigest needs fail-closed mode'
     )
   })
 
   it('routes see the digest for the arrival origin, never the bearer', async () => {
-    const api = await build([digestEcho], true, { bearerDigest: reversedDigest })
-    const reversed = [...secret].reverse().join('')
+    const api = await build([digestEcho], true, { bearerDigest: sha256Digest })
 
     const direct = await api.fetch(get('/digest', { authorization }))
 
@@ -363,9 +363,31 @@ describe('fail-closed mode: the opt-in per-origin bearer digest', () => {
       get('/digest', { authorization })
     )
 
-    expect(await direct.text()).toBe(`https://api.example.test|${reversed}`)
-    expect(await rewritten.text()).toBe(`https://other.example.test|${reversed}`)
-    expect(JSON.stringify(api.ledger.entries())).not.toContain(secret)
+    const texts = [await direct.text(), await rewritten.text()]
+
+    // SHA-256 of `<origin> synthetic-wrapper-secret`, precomputed: one per origin.
+    expect(texts).toEqual([
+      '0bc47171540cb5c4125257df87cf22e75d70e3cf00d717e79d1931e0d4dc5396',
+      'ba9cbba97cefa1e9dded86fd3470f13e6a1f4f9fa4db10bc18746991601c1f9a'
+    ])
+
+    const controlReads = await Promise.all(
+      ['ledger', 'state', 'coverage', 'faults'].map(route =>
+        api
+          .fetch(new Request(`https://api.example.test/_emulate/${route}`))
+          .then(response => response.text())
+      )
+    )
+
+    const seen = [
+      ...texts,
+      JSON.stringify(api.ledger.entries()),
+      JSON.stringify(api.snapshot()),
+      ...controlReads
+    ].join('\n')
+
+    expect(seen).not.toContain(secret)
+    expect(seen).not.toContain('wrapper-secret')
   })
 
   it('without the option, routes see no digest (the earlier behaviour)', async () => {
@@ -382,6 +404,8 @@ describe('fail-closed mode: the opt-in per-origin bearer digest', () => {
       }
     ],
     ['a digest that repeats the bearer', (bearer: string) => `digest-of-${bearer}`],
+    // A host callback typed loosely (untyped JavaScript, say) may answer a non-string.
+    ['a digest that is no string', (): string => JSON.parse('42')],
     [
       'a digest that repeats the bearer JSON-escaped',
       (bearer: string) => `digest-of-${bearer.replace('s', '\\u0073')}`
@@ -1051,6 +1075,66 @@ describe('constant-text shape checks (exactBodyKeys, exactQuery)', () => {
     expect(reasonOf(exactQuery(request(''), ['a']))).toBe(
       'requests without query parameter a are not emulated on this route'
     )
+  })
+  it('exactQuery with rawNames compares every raw parameter name with its plain name', () => {
+    const raw = (query: string): EmulatedRequest => ({ ...request(query), rawQuery: query })
+    const plain = 'the_name=https%3A%2F%2Fx.example.test%2Fa'
+    const encoded = 'a query parameter name in any but its plain form is not emulated'
+
+    // Values may be encoded; only names are compared raw.
+    expect(exactQuery(raw(plain), ['the_name'], [], { rawNames: true })).toEqual({
+      the_name: 'https://x.example.test/a'
+    })
+    expect(exactQuery(raw(''), [], ['the_name'], { rawNames: true })).toEqual({})
+
+    for (const name of ['%74he_name', 'the%5Fname', 'the_nam%65', 'the_name%20', 'the+name']) {
+      const query = plain.replace('the_name', name)
+
+      // Without the option the decoded name is accepted (where it decodes to the route's name).
+      if (!name.includes('+') && !name.endsWith('%20')) {
+        expect(exactQuery(raw(query), ['the_name'])).toEqual({
+          the_name: 'https://x.example.test/a'
+        })
+      }
+
+      expect(reasonOf(exactQuery(raw(query), ['the_name'], [], { rawNames: true })), name).toMatch(
+        /not emulated/
+      )
+    }
+
+    expect(
+      reasonOf(
+        exactQuery(raw(plain.replace('the_name', '%74he_name')), ['the_name'], [], {
+          rawNames: true
+        })
+      )
+    ).toBe(encoded)
+    // A request built without its raw query cannot prove its names plain: refused.
+    expect(reasonOf(exactQuery(request(plain), ['the_name'], [], { rawNames: true }))).toBe(encoded)
+  })
+
+  it('the wrapper hands routes the raw query, never decoded', async () => {
+    const seen: Array<string | undefined> = []
+
+    const rawEcho = statefulRoute<State, undefined, string>(
+      { ...digestEcho, path: '/raw' },
+      'none',
+      routed => {
+        seen.push(routed.rawQuery)
+
+        return ''
+      },
+      () => () => new Response('ok')
+    )
+
+    const api = await build([rawEcho], true)
+
+    await api.fetch(
+      get('/raw?%74he_name=a%20b#fragment', { authorization: 'Bearer synthetic-wrapper-secret' })
+    )
+    await api.fetch(get('/raw', { authorization: 'Bearer synthetic-wrapper-secret' }))
+
+    expect(seen).toEqual(['%74he_name=a%20b', ''])
   })
 })
 

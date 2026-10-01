@@ -17,7 +17,7 @@
  * @experimental
  */
 import { createHash } from 'node:crypto'
-import { Result } from 'effect'
+import { Match, Predicate, Result, type SchemaIssue } from 'effect'
 import * as Schema from 'effect/Schema'
 import { isRecognisableBearerValue } from '../stateful-secrets.ts'
 
@@ -37,7 +37,7 @@ export const linkedInSearchKeyDigest = (key: string, origin: string): string =>
 /** A search query as the cases seed it: trimmed, non-empty, one line, at most 500 characters. */
 export const linkedInSearchQueryPattern = /^\S(?:.*\S)?$/
 
-/** A LinkedIn person profile URL as the actions take it: `https://<host>/in/<slug>`. */
+/** The profile URL form the emulator takes: `https://<host>/in/<slug>`. */
 export const linkedInSearchProfileUrlPattern = /^https:\/\/[A-Za-z0-9.-]+\/in\/[^\s?#]+$/
 
 /** The largest `numResults` the emulator takes. */
@@ -138,8 +138,83 @@ const decodeSeedInput = Schema.decodeUnknownResult(LinkedInSearchEmulatorSeed, s
 
 const decodeStateInput = Schema.decodeUnknownResult(LinkedInSearchEmulatorStateSchema, strict)
 
-const issueMessage = (issue: Schema.SchemaError['issue']): string =>
-  new Schema.SchemaError(issue).message
+/** Every field name the seed and state schemas define (the only names a seed error may print). */
+const knownFieldNames: ReadonlySet<string> = new Set([
+  ...Object.keys(LinkedInSearchEmulatorSeed.fields),
+  ...Object.keys(LinkedInSearchEmulatorStateSchema.fields),
+  ...Object.keys(LinkedInSearchEmulatorSearch.fields),
+  ...Object.keys(LinkedInSearchEmulatorResult.fields),
+  ...Object.keys(LinkedInSearchEmulatorProfile.fields)
+])
+
+/**
+ * A field path in constant text: array indices and the schemas' own field names as written, any
+ * other key (one a seed made up, which may be anything, a key included) as `<unexpected key>`.
+ */
+const fieldPath = (path: ReadonlyArray<PropertyKey>): string => {
+  const text = path
+    .map(segment =>
+      Predicate.isNumber(segment)
+        ? `[${segment}]`
+        : Predicate.isString(segment) && knownFieldNames.has(segment)
+          ? `.${segment}`
+          : '.<unexpected key>'
+    )
+    .join('')
+    .replace(/^\./, '')
+
+  return text === '' ? 'the seed root' : text
+}
+
+/** The category of a leaf issue, in constant text. */
+const issueCategory = (tag: SchemaIssue.Issue['_tag']): string => {
+  switch (tag) {
+    case 'MissingKey':
+      return 'missing key'
+    case 'UnexpectedKey':
+      return 'unexpected key'
+    case 'InvalidType':
+      return 'invalid type'
+    case 'AnyOf':
+    case 'OneOf':
+      return 'no matching member'
+    case 'Forbidden':
+      return 'forbidden value'
+    default:
+      return 'invalid value'
+  }
+}
+
+type Leaf = { readonly issue: SchemaIssue.Issue; readonly path: ReadonlyArray<PropertyKey> }
+
+/** The first leaf issue under `issue`, with its full path. */
+const firstLeaf = (issue: SchemaIssue.Issue, path: ReadonlyArray<PropertyKey>): Leaf =>
+  Match.value(issue).pipe(
+    Match.tag('Pointer', pointer => firstLeaf(pointer.issue, [...path, ...pointer.path])),
+    Match.tag('Filter', filter => firstLeaf(filter.issue, path)),
+    Match.tag('Encoding', encoding => firstLeaf(encoding.issue, path)),
+    Match.tag('Composite', composite => firstLeaf(composite.issues[0], path)),
+    Match.tag('AnyOf', anyOf => {
+      const [first] = anyOf.issues
+
+      return first === undefined ? { issue: anyOf, path } : firstLeaf(first, path)
+    }),
+    Match.orElse(leaf => ({ issue: leaf, path }))
+  )
+
+/**
+ * Why a seed does not decode, in constant text only: the category of the first issue and its
+ * field path, never the input (Effect's own messages quote input values, an unexpected key's value
+ * included, and a seed may carry keys). An unexpected key is reported at its parent's path.
+ */
+const issueReason = (root: SchemaIssue.Issue): string => {
+  const { issue, path } = firstLeaf(root, [])
+
+  // The unexpected key itself is input: report it at its parent.
+  const where = Predicate.isTagged(issue, 'UnexpectedKey') ? path.slice(0, -1) : path
+
+  return `${issueCategory(issue._tag)} at ${fieldPath(where)}`
+}
 
 // Default entities, copied from the fixtures.
 
@@ -196,9 +271,6 @@ export const linkedInSearchEmulatorDefaultRejectedKeys = {
   enrichLayer: ['yolk-conformance-invalid-enrich-layer-key']
 } as const
 
-const duplicate = <A>(values: ReadonlyArray<A>): A | undefined =>
-  values.find((value, index) => values.indexOf(value) !== index)
-
 type SeedParts = {
   readonly exaRejectedKeys: ReadonlyArray<string>
   readonly searches: ReadonlyArray<LinkedInSearchEmulatorSearch>
@@ -207,39 +279,53 @@ type SeedParts = {
   readonly absentProfileUrls: ReadonlyArray<string>
 }
 
-/** Integrity problems a decoded seed can still have. */
+/** The index of the first value equal to an earlier one, or `-1`. */
+const repeatIndex = <A>(values: ReadonlyArray<A>): number =>
+  values.findIndex((value, index) => values.indexOf(value) !== index)
+
+/**
+ * Integrity problems a decoded seed can still have, in constant text only (a category and a field
+ * path, never a seeded value: a seed may carry keys anywhere).
+ */
 const seedProblem = (parts: SeedParts): string | undefined => {
-  const searchKey = duplicate(
-    parts.searches.map(search => JSON.stringify([search.query, search.numResults]))
+  const search = repeatIndex(
+    parts.searches.map(entry => JSON.stringify([entry.query, entry.numResults]))
   )
 
-  if (searchKey !== undefined) return `duplicate search ${searchKey}`
+  if (search !== -1) return `duplicate search at searches[${search}]`
 
-  for (const search of parts.searches) {
-    // No fixture records an empty search, and Exa answers at most numResults results.
-    if (search.results.length === 0 || search.results.length > search.numResults) {
-      return 'every search answers 1 to numResults results'
-    }
+  // No fixture records an empty search, and Exa answers at most numResults results.
+  const results = parts.searches.findIndex(
+    entry => entry.results.length === 0 || entry.results.length > entry.numResults
+  )
+
+  if (results !== -1) return `not 1 to numResults results at searches[${results}].results`
+
+  const urls = [...parts.profiles.map(profile => profile.url), ...parts.absentProfileUrls]
+  const url = repeatIndex(urls)
+
+  if (url !== -1) {
+    return url < parts.profiles.length
+      ? `duplicate profile URL at profiles[${url}].url`
+      : `duplicate profile URL at absentProfileUrls[${url - parts.profiles.length}]`
   }
 
-  const url = duplicate([...parts.profiles.map(profile => profile.url), ...parts.absentProfileUrls])
-
-  if (url !== undefined) return `profile URL ${url} is seeded twice (as a profile or absent)`
-
-  for (const [label, keys] of [
-    ['Exa', parts.exaRejectedKeys],
-    ['Enrich Layer', parts.enrichLayerRejectedKeys]
+  for (const [field, keys] of [
+    ['exaRejectedKeys', parts.exaRejectedKeys],
+    ['enrichLayerRejectedKeys', parts.enrichLayerRejectedKeys]
   ] as const) {
-    if (!keys.every(isRecognisableBearerValue)) {
-      return `every ${label} rejected key must be a recognisable bearer value`
+    const unrecognisable = keys.findIndex(key => !isRecognisableBearerValue(key))
+
+    if (unrecognisable !== -1) {
+      return `not a recognisable bearer value at ${field}[${unrecognisable}]`
     }
+
+    const repeated = repeatIndex(keys)
+
+    if (repeated !== -1) return `duplicate key at ${field}[${repeated}]`
   }
 
-  if (duplicate(parts.exaRejectedKeys) !== undefined) return 'duplicate Exa rejected key'
-
-  return duplicate(parts.enrichLayerRejectedKeys) === undefined
-    ? undefined
-    : 'duplicate Enrich Layer rejected key'
+  return undefined
 }
 
 const stateFromSeed = (seed: LinkedInSearchEmulatorSeed): LinkedInSearchEmulatorState | string => {
@@ -267,23 +353,21 @@ const stateFromSeed = (seed: LinkedInSearchEmulatorSeed): LinkedInSearchEmulator
   )
 }
 
-/** Decode and build a seed; a string is the reason it is invalid (never a seeded key). */
+/**
+ * Decode and build a seed; a string is the reason it is invalid, in constant text only (a
+ * category and a field path; never an input value or a key the seed made up).
+ */
 export const buildSeedState = (input: unknown): LinkedInSearchEmulatorState | string => {
   const decoded = decodeSeedInput(input)
 
-  if (Result.isFailure(decoded)) {
-    // A schema message may quote the offending value, and a rejected key is a credential.
-    const message = issueMessage(decoded.failure.issue)
-
-    return /RejectedKeys/.test(message) ? 'rejected keys must be an array of strings' : message
-  }
-
-  return stateFromSeed(decoded.success)
+  return Result.isFailure(decoded)
+    ? issueReason(decoded.failure.issue)
+    : stateFromSeed(decoded.success)
 }
 
-/** Decode a full state (a restored snapshot); a string is the reason it is invalid. */
+/** Decode a full state (a restored snapshot); a string is the reason it is invalid (constant). */
 export const decodeState = (input: unknown): LinkedInSearchEmulatorState | string => {
   const decoded = decodeStateInput(input)
 
-  return Result.isFailure(decoded) ? issueMessage(decoded.failure.issue) : decoded.success
+  return Result.isFailure(decoded) ? issueReason(decoded.failure.issue) : decoded.success
 }

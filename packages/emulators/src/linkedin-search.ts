@@ -27,13 +27,16 @@
  * method or `<other>`, an empty query, no body, a constant reason). A recognised request that
  * repeats the bearer anywhere (its raw path, the raw query or any query key or value, the recorded
  * `content-type` header, or its body, through the wrapper's fixpoint closure of tolerant
- * percent-decoding and JSON-unescaping, capped, where a cap refuses) is ledgered with constant
- * text only; any other has the bearer scrubbed from every ledgered field and reason. The bearer is
- * never stored, forwarded, or ledgered: routes see only its per-origin digest (the wrapper's
- * opt-in `bearerDigest`; SHA-256 of the origin, a space, and the key), which a plan compares with
- * the digests of the seed's rejected keys for that origin; the state holds only those digests, so
- * even a rejected key never reaches the state or `/_emulate/*`. Refusals never echo a request's
- * own query or body keys (the wrapper's constant-reason `exactQuery` and `exactBodyKeys`).
+ * percent-decoding and JSON-unescaping, capped, where a cap refuses) is ledgered with constant text
+ * only; any other has the bearer scrubbed from every ledgered field and reason. The bearer is never
+ * stored, forwarded, or ledgered: routes see only its per-origin digest (the wrapper's opt-in
+ * `bearerDigest`; SHA-256 of the origin, a space, and the key), which a plan compares with the
+ * digests of the seed's rejected keys for that origin; the state holds only those digests, so a key
+ * a request carries as its bearer, a rejected one included, never reaches the state or
+ * `/_emulate/*` (a key sent as data elsewhere in a request is ledgered like any other text), and
+ * seed errors are constant text (a category and a field path) that never quote one. Refusals never
+ * echo a request's own query or body keys (the wrapper's constant-reason `exactQuery` and
+ * `exactBodyKeys`).
  *
  * Request-shape latitude (`/linkedin-search`, the only accepted deviations): any bearer value in
  * the RFC 6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with
@@ -50,9 +53,10 @@
  * `auto`, `contents` other than `{ "text": true }`, a search the state holds no answer for (another
  * query, or a `numResults` no seeded search of that query records), a profile URL the state holds
  * neither as a profile nor as absent, an email lookup of an absent profile, any query parameter on
- * the search, other, missing, or repeated query parameters on a lookup, empty query components such
- * as a bare `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere
- * in the request) is not emulated.
+ * the search, other, missing, or repeated query parameters on a lookup, a query parameter name in
+ * any but its plain form (such as `%6cinkedin_profile_url`), empty query components such as a bare
+ * `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere in the
+ * request) is not emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeLinkedInSearchEmulator` (importing this module has no side effects).

@@ -322,6 +322,11 @@ describe('cross-check B: emulated over loopback sockets', () => {
             expectedRequests.flatMap(([, expected]) => expected)
           )
           expect(emulator.snapshot()).toEqual(seed)
+          expect(emulator.ledger.entries().every(entry => entry.notEmulated === undefined)).toBe(
+            true
+          )
+
+          yield* Effect.promise(() => expectNoKeys(emulator))
         })
       ),
     60_000

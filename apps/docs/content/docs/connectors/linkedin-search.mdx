@@ -122,8 +122,9 @@ For offline tests, the experimental
 [LinkedIn search emulator](../api-reference/emulators#linkedin-search-emulator)
 (`@yolk-sdk/emulators/linkedin-search`) is a stateful, fixture-only stand-in for the Exa and Enrich
 Layer routes that passes these cases through the real connector actions over the connector ports.
-Each answer is a fixture's, byte for byte: the searches the fixtures record (`numResults` 10, 3,
-and 2 for the seeded query), the seeded profile and its email, the recorded 404 for the seeded
-absent profile, and the recorded 401 for a key its seed marks as rejected on that provider (by
-default the synthetic invalid keys the two unauthorized cases send). It never keeps or echoes an
-API key, rejected ones included (it holds only per-provider digests of the rejected keys).
+Each answer is a fixture's, byte for byte: the searches the fixtures record (`numResults` 10, 3, and
+2 for the seeded query), the seeded profile and its email, the recorded 404 for the seeded absent
+profile, and the recorded 401 for a key its seed marks as rejected on that provider (by default the
+synthetic invalid keys the two unauthorized cases send). It never keeps or echoes the API key a
+request carries as its bearer, a rejected one included (it holds only per-provider digests of the
+rejected keys).

@@ -1830,8 +1830,10 @@ of percent-encoding or JSON escaping, is ledgered as the constant credential-rep
 has it scrubbed from its ledgered fields and every not-emulated message. The bearer is never stored
 or ledgered: through the wrapper's opt-in per-origin `bearerDigest`, routes see only SHA-256 of the
 origin, a space, and the key, which a plan compares with the digests of the seed's rejected keys for
-that origin. The state holds only those digests, so even a rejected key never reaches the state, a
-snapshot, or `/_emulate/*`. Refusals never echo a request's own query or body keys.
+that origin. The state holds only those digests, so a key a request carries as its bearer, a
+rejected one included, never reaches the state, a snapshot, or `/_emulate/*` (a key sent as data
+elsewhere in a request is ledgered like any other text). Refusals never echo a request's own query
+or body keys.
 
 - **Request-shape latitude (`/linkedin-search`, the only accepted deviations).** Any bearer value in
   the RFC 6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
@@ -1848,9 +1850,10 @@ snapshot, or `/_emulate/*`. Refusals never echo a request's own query or body ke
   `auto`, `contents` other than `{ "text": true }`, a search the state holds no answer for (another
   query, or a `numResults` no seeded search of that query records), a profile URL the state holds
   neither as a profile nor as absent, an email lookup of an absent profile, any query parameter on
-  the search, other, missing, or repeated query parameters on a lookup, empty query components such
-  as a bare `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere
-  in the request) is not emulated.
+  the search, other, missing, or repeated query parameters on a lookup, a query parameter name in
+  any but its plain form (such as `%6cinkedin_profile_url`), empty query components such as a bare
+  `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere in the
+  request) is not emulated.
 
 Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
 `notEmulated` in the ledger) and uses up no fault. A closed emulator answers 503; a route that
@@ -1862,8 +1865,10 @@ fixtures' optional `title`, `url`, `author`, `publishedDate`, and `text`), `prof
 the rejected keys (`exaRejectedKeyDigests`, `enrichLayerRejectedKeyDigests`). Pass
 `seed: { searches?, profiles?, absentProfileUrls?, exaRejectedKeys?, enrichLayerRejectedKeys? }`:
 each given list replaces the default seed's (the fixture entities); rejected keys are given as keys
-(recognisable bearer values) and kept only as their digests, and no seed error quotes one.
-`reset()`, `seed(next)`, and `snapshot()` behave as in the Dropbox emulator.
+(recognisable bearer values) and kept only as their digests, and no seed error quotes one: every
+seed error is constant text, a category and a field path (`duplicate search at searches[1]`,
+`unexpected key at the seed root`). `reset()`, `seed(next)`, and `snapshot()` behave as in the
+Dropbox emulator.
 
 Faults and the control plane behave as in the Dropbox emulator (the ledger records only the
 `content-type` request header); the connector maps every non-2xx answer to its action's failure
@@ -1882,15 +1887,14 @@ exactly one LinkedIn search case, only to prove that case catches it.
 `emailEmulatorRoutes`, `r2EmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`,
 `dropboxEmulatorRoutes`, `notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`,
 `githubEmulatorRoutes`, `googleEmulatorRoutes`, and `linkedInSearchEmulatorRoutes` list every
-emulated route with `method`, `path`,
-`kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
-`observedAt`. Every response from an unverified route of a fetch-handler emulator carries
-`x-emulator-evidence: unverified`; the email and R2 emulators record evidence on each ledger entry
-instead, since their plain-JSON replies carry no header. The Gateway route is `verified`
-(`observedAt: '2026-09-30'`): its wire shapes are checked against the verified live recordings.
-Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, email, R2,
-Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and LinkedIn search) is
-unverified, like the synthetic fixtures it follows.
+emulated route with `method`, `path`, `kind`, `write`, the conformance `caseIds` it follows,
+`evidence` (`verified` or `unverified`), and `observedAt`. Every response from an unverified route
+of a fetch-handler emulator carries `x-emulator-evidence: unverified`; the email and R2 emulators
+record evidence on each ledger entry instead, since their plain-JSON replies carry no header. The
+Gateway route is `verified` (`observedAt: '2026-09-30'`): its wire shapes are checked against the
+verified live recordings. Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage
+routes, email, R2, Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and
+LinkedIn search) is unverified, like the synthetic fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes

@@ -33,23 +33,22 @@
  * query parameters have credential-named keys redacted.
  *
  * Fail-closed mode (opt-in, `failClosed`; used by `/github`, `/google`, and `/linkedin-search`):
- * every route parameter
- * has a raw pattern (matched in full), and a request is recognised only when its raw path is
- * exactly an emulated route shape under that route's method and any `Authorization` header is
- * exactly `Bearer <at least 8 non-space characters>` (a recognisable bearer, below). Every other
- * request is ledgered and answered with constant text only (`/<unrecognised>`, a standard method or
- * `<other>`, an empty query, no body, a constant reason). A recognised bearer must match the RFC
- * 6750 `b64token` syntax exactly (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8 characters), start with a
- * character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, and hold at least one character
- * outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google token form does: `ghp_…`,
- * `github_pat_…`, `gho_…`, `ya29.…`). So no number's text can contain it; it holds no escape
- * introducer (`%`, `\`, `"`), so no escape starts inside it; and its first character is no hex
- * digit and no JSON escape letter, so no stray `%`, `\`, or partial escape to its left can complete
- * with it, and its characters always decode in place. An `Authorization` header with any other
- * value is unrecognisable. A recognised request that repeats the bearer value in its raw path, any
- * path segment, the raw query or any query key or value, any recorded header, or its body is
- * refused and ledgered with constant text only: a standard method, the path `/<unrecognised>`, its
- * route template, an empty query, no headers or body, and a constant reason
+ * every route parameter has a raw pattern (matched in full), and a request is recognised only when
+ * its raw path is exactly an emulated route shape under that route's method and any `Authorization`
+ * header is exactly `Bearer <at least 8 non-space characters>` (a recognisable bearer, below).
+ * Every other request is ledgered and answered with constant text only (`/<unrecognised>`, a
+ * standard method or `<other>`, an empty query, no body, a constant reason). A recognised bearer
+ * must match the RFC 6750 `b64token` syntax exactly (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8
+ * characters), start with a character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, and hold
+ * at least one character outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google
+ * token form does: `ghp_…`, `github_pat_…`, `gho_…`, `ya29.…`). So no number's text can contain it;
+ * it holds no escape introducer (`%`, `\`, `"`), so no escape starts inside it; and its first
+ * character is no hex digit and no JSON escape letter, so no stray `%`, `\`, or partial escape to
+ * its left can complete with it, and its characters always decode in place. An `Authorization`
+ * header with any other value is unrecognisable. A recognised request that repeats the bearer value
+ * in its raw path, any path segment, the raw query or any query key or value, any recorded header,
+ * or its body is refused and ledgered with constant text only: a standard method, the path
+ * `/<unrecognised>`, its route template, an empty query, no headers or body, and a constant reason
  * (`the query repeats the credential`, for example). Each part is checked through the closure of
  * two total, lexical transforms that cannot fail: a tolerant percent-decode (every `%XX` below
  * `%80` becomes its ASCII character; any other `%` sequence is left as it is) and a tolerant
@@ -71,9 +70,12 @@
  * parsed with credential-named keys redacted at any depth, or as `<redacted>` when they do not
  * parse, whatever the header's declared format. Empty query components (a bare `?`, a stray `&`)
  * are refused. Routes check their own query and body keys with `exactQuery` and `exactBodyKeys`,
- * whose reasons never echo a request's own key. A template parameter written `{name+}` spans one or
- * more path segments (each decoded once, none may decode to a `/`). The credential helpers live in
- * `src/stateful-secrets.ts`. A route may also name decoded views of its raw body (`decodedViews`,
+ * whose reasons never echo a request's own key (`exactQuery`'s opt-in `rawNames`, used by
+ * `/linkedin-search`, also refuses a parameter name in any but its plain form, comparing the raw
+ * names the wrapper hands routes as `rawQuery`). A template parameter written `{name+}` spans one
+ * or more path segments (each decoded once, none may decode to a `/`). The credential helpers live
+ * in `src/stateful-secrets.ts`. A route may also name decoded views of its raw body
+ * (`decodedViews`,
  * opt-in; `/google` gives the base64url-decoded MIME of a Gmail draft's `message.raw`, which the
  * provider's own wire format wraps): in fail-closed mode each view goes through the same fixpoint
  * check as the raw body, before anything is recorded, a fault is decided, or anything is committed,
@@ -253,6 +255,11 @@ export type EmulatedRequest = {
   /** Path parameters, percent-decoded once. */
   readonly params: Readonly<Record<string, string>>
   readonly query: URLSearchParams
+  /**
+   * The raw query (after `?`, before `#`, never decoded; `''` without one), as the wrapper saw it.
+   * Absent on a request built elsewhere (then `exactQuery`'s `rawNames` refuses any parameter).
+   */
+  readonly rawQuery?: string | undefined
   /** A non-credential request header (credential headers always read as `undefined`). */
   readonly header: (name: string) => string | undefined
   /** Parsed JSON body (`json` routes). */
@@ -551,15 +558,31 @@ export const exactBodyKeys = (
     : notEmulated(`${label} without '${missing}' is not emulated`)
 }
 
+/** Options of `exactQuery`. */
+export type ExactQueryOptions = {
+  /**
+   * Opt-in: every raw parameter name (before `URLSearchParams` decodes it) must be written exactly
+   * as the route names it, so a percent-encoded or `+`-spaced spelling of an accepted name is not
+   * emulated. Omitted: names are compared decoded, as before.
+   */
+  readonly rawNames?: boolean
+}
+
+/** The raw parameter names of a raw query, in order (`[]` for an empty query). */
+const rawQueryNames = (raw: string): ReadonlyArray<string> =>
+  raw === '' ? [] : raw.split('&').map(component => component.split('=', 1)[0] ?? '')
+
 /**
  * Constant-text query check (for fail-closed emulators): exactly the `required` query keys plus
  * any of the `optional` ones, each once, as a record of their values; or not emulated. A reason
- * never echoes a request's own key; it names only a missing key from the route's own list.
+ * never echoes a request's own key; it names only a missing key from the route's own list. With
+ * `rawNames`, every raw parameter name must also be the plain name it decodes to.
  */
 export const exactQuery = (
   request: EmulatedRequest,
   required: ReadonlyArray<string>,
-  optional: ReadonlyArray<string> = []
+  optional: ReadonlyArray<string> = [],
+  options: ExactQueryOptions = {}
 ): Readonly<Record<string, string>> | NotEmulated => {
   const keys = [...request.query.keys()]
 
@@ -569,6 +592,14 @@ export const exactQuery = (
 
   if (keys.some(key => !required.includes(key) && !optional.includes(key))) {
     return notEmulated('a query parameter this route does not take is not emulated')
+  }
+
+  if (options.rawNames === true) {
+    const raw = rawQueryNames(request.rawQuery ?? '')
+
+    if (raw.length !== keys.length || raw.some((name, index) => name !== keys[index])) {
+      return notEmulated('a query parameter name in any but its plain form is not emulated')
+    }
   }
 
   const missing = required.find(key => !keys.includes(key))
@@ -1259,6 +1290,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
         path: url.pathname,
         params: matched.params,
         query: url.searchParams,
+        rawQuery: rawQuery(request.url) ?? '',
         header,
         json,
         bytes,

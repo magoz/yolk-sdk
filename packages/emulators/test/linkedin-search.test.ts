@@ -10,6 +10,7 @@
  */
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { Effect, Layer } from 'effect'
 import { afterEach, describe, expect, it } from '@effect/vitest'
 import * as Schema from 'effect/Schema'
@@ -44,6 +45,7 @@ import {
   type LinkedInSearchEmulator,
   type LinkedInSearchEmulatorOptions
 } from '../src/linkedin-search.ts'
+import { startFetchHandlerServer } from '../src/node.ts'
 import { EmulatorRoute, InProcessHttpClient } from '../src/router.ts'
 
 const exa = linkedInSearchEmulatorExaOrigin
@@ -407,7 +409,7 @@ describe('request-shape latitude', () => {
     expect(target.ledger.entries()[0]?.query).toEqual({ linkedin_profile_url: seeds.profileUrl })
   })
 
-  it('a rejected key answers the recorded 401 for any well-formed request on its origin', async () => {
+  it('a rejected key answers the recorded 401 for any well-formed request there', async () => {
     const target = await emulator()
     const exaKey = { authorization: `Bearer ${rejectedExaKey}` }
     const enrichKey = { authorization: `Bearer ${rejectedEnrichLayerKey}` }
@@ -577,6 +579,21 @@ describe('fail closed: 400 not-emulated, state unchanged, a matching fault left 
       'repeated query parameters'
     ],
     ['another query parameter', 'GET', `${profileUrl()}&extra=1`, 'a query parameter this route'],
+    // A parameter name is compared raw: a percent-encoded spelling of the name is not emulated.
+    ...[
+      ['the profile', profileUrl()],
+      ['the email', emailUrl()]
+    ].flatMap(([lookup = '', url = '']) =>
+      ['%6cinkedin_profile_url', '%6Cinkedin_profile_url', 'linkedin%5Fprofile_url'].map(
+        name =>
+          [
+            `${name} on ${lookup} lookup`,
+            'GET',
+            url.replace('linkedin_profile_url=', `${name}=`),
+            'a query parameter name in any but its plain form is not emulated'
+          ] as const
+      )
+    ),
     ['an empty query component', 'GET', `${profileUrl()}&`, 'empty query components'],
     ['a bare ?', 'POST', `${exa}/search?`, 'empty query components'],
     ['the search on the Enrich Layer origin', 'POST', `${enrichLayer}/search`, 'recorded on'],
@@ -613,9 +630,27 @@ describe('fail closed: 400 not-emulated, state unchanged, a matching fault left 
       'not valid JSON'
     ],
     [
-      'a lookup with a body',
+      // A POST is no route shape on the lookup path: the constant unrecognised entry.
+      'a POST to a lookup path',
       (target: LinkedInSearchEmulator) => call(target, 'POST', profileUrl(), { rawBody: '{}' }),
       'no emulated'
+    ],
+    [
+      // Fetch's Request refuses a GET body, so the request is built as a POST and read as a GET
+      // (the method the wrapper matches on): the route refuses its body.
+      'a GET lookup carrying a body',
+      (target: LinkedInSearchEmulator) => {
+        const withBody = new Request(profileUrl(), {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: '{}'
+        })
+
+        Object.defineProperty(withBody, 'method', { value: 'GET' })
+
+        return target.fetch(withBody)
+      },
+      'this route takes no request body'
     ],
     [
       'a missing Authorization header',
@@ -627,6 +662,66 @@ describe('fail closed: 400 not-emulated, state unchanged, a matching fault left 
     const target = await emulator()
 
     await expectRefusedWithoutFault(target, () => send(target), reason)
+  })
+})
+
+describe('a GET lookup with a body over loopback', () => {
+  /** A raw HTTP GET with a body (fetch cannot send one) to a loopback server. */
+  const rawGet = (url: string, body: string) =>
+    new Promise<{ readonly status: number; readonly text: string }>((resolve, reject) => {
+      const sent = httpRequest(
+        url,
+        {
+          method: 'GET',
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'application/json',
+            'content-length': String(Buffer.byteLength(body))
+          }
+        },
+        response => {
+          let text = ''
+
+          response.setEncoding('utf8')
+          response.on('data', (chunk: string) => {
+            text += chunk
+          })
+          response.on('end', () => resolve({ status: response.statusCode ?? 0, text }))
+        }
+      )
+
+      sent.on('error', reject)
+      sent.end(body)
+    })
+
+  it('the loopback server drops a GET body before the emulator sees it', async () => {
+    const target = await emulator()
+    const server = await startFetchHandlerServer(target.fetchOn(enrichLayer))
+
+    try {
+      const path = new URL(profileUrl())
+
+      const answered = await rawGet(
+        `${server.url}${path.pathname}${path.search}`,
+        `{"k":"${token}"}`
+      )
+
+      // The Node server builds the Request without a GET body (the Fetch API allows none), so
+      // the emulator answers the plain lookup and nothing of the body is kept.
+      expect(answered.status).toBe(200)
+      expect(target.ledger.entries()).toHaveLength(1)
+      expect(target.ledger.entries()[0]).not.toHaveProperty('body')
+      expect(target.ledger.entries()[0]).not.toHaveProperty('bodyBytes')
+      expect(
+        [
+          answered.text,
+          JSON.stringify(target.ledger.entries()),
+          ...(await controlReads(target))
+        ].join('\n')
+      ).not.toContain(token)
+    } finally {
+      await server.close()
+    }
   })
 })
 
@@ -1018,9 +1113,9 @@ describe('seeds', () => {
       readonly options: LinkedInSearchEmulatorOptions
     }> = JSON.parse(
       JSON.stringify([
-        { reason: 'extra', options: { seed: { extra: true } } },
+        { reason: 'unexpected key at the seed root', options: { seed: { extra: true } } },
         {
-          reason: 'duplicate search',
+          reason: 'duplicate search at searches[1]',
           options: {
             seed: {
               searches: [
@@ -1031,48 +1126,56 @@ describe('seeds', () => {
           }
         },
         {
-          reason: 'every search answers 1 to numResults results',
+          reason: 'not 1 to numResults results at searches[0].results',
           options: { seed: { searches: [{ query: 'q', numResults: 1, results: [] }] } }
         },
         {
-          reason: 'every search answers 1 to numResults results',
+          reason: 'not 1 to numResults results at searches[0].results',
           options: {
             seed: { searches: [{ query: 'q', numResults: 1, results: [result, result] }] }
           }
         },
         {
-          reason: 'Expected',
+          reason: 'invalid value at searches[0].numResults',
           options: { seed: { searches: [{ query: 'q', numResults: 101, results: [result] }] } }
         },
         {
-          reason: 'Expected',
+          reason: 'invalid value at searches[0].query',
           options: { seed: { searches: [{ query: ' q', numResults: 1, results: [result] }] } }
         },
         {
-          reason: 'Expected',
+          reason: 'missing key at searches[0].numResults',
+          options: { seed: { searches: [{ query: 'q', results: [result] }] } }
+        },
+        {
+          reason: 'invalid type at searches[0].results[0].url',
           options: { seed: { searches: [{ query: 'q', numResults: 1, results: [{ url: null }] }] } }
         },
-        { reason: 'Expected', options: { seed: { absentProfileUrls: ['https://x.example/a'] } } },
         {
-          reason: 'is seeded twice',
+          reason: 'invalid value at absentProfileUrls[0]',
+          options: { seed: { absentProfileUrls: ['https://x.example/a'] } }
+        },
+        {
+          reason: 'duplicate profile URL at absentProfileUrls[0]',
           options: { seed: { absentProfileUrls: [seeds.profileUrl] } }
         },
         {
-          reason: 'every Exa rejected key must be a recognisable bearer value',
+          reason: 'not a recognisable bearer value at exaRejectedKeys[0]',
           options: { seed: { exaRejectedKeys: ['0123456789abcdef'] } }
         },
         {
-          reason: 'every Enrich Layer rejected key must be a recognisable bearer value',
+          reason: 'not a recognisable bearer value at enrichLayerRejectedKeys[0]',
           options: { seed: { enrichLayerRejectedKeys: ['short'] } }
         },
         {
-          reason: 'duplicate Exa rejected key',
+          reason: 'duplicate key at exaRejectedKeys[1]',
           options: { seed: { exaRejectedKeys: ['synthetic-key-a', 'synthetic-key-a'] } }
         },
         {
-          reason: 'rejected keys must be an array of strings',
+          reason: 'invalid type at enrichLayerRejectedKeys',
           options: { seed: { enrichLayerRejectedKeys: 'synthetic-key-a' } }
         },
+        { reason: 'invalid type at the seed root', options: { seed: 'synthetic-key-a' } },
         { reason: 'unknown drill knob nope', options: { drills: { nope: true } } },
         { reason: 'must be a boolean', options: { drills: { numResultsIgnored: 'yes' } } }
       ])
@@ -1082,7 +1185,9 @@ describe('seeds', () => {
     const before = target.snapshot()
 
     for (const { reason, options } of cases) {
-      await expect(makeLinkedInSearchEmulator(options), reason).rejects.toThrow(reason)
+      await expect(makeLinkedInSearchEmulator(options), reason).rejects.toThrow(
+        options.seed === undefined ? reason : `Invalid LinkedIn search emulator seed: ${reason}`
+      )
 
       if (options.seed !== undefined) {
         await expect(target.seed(options.seed), reason).rejects.toBeInstanceOf(
@@ -1091,12 +1196,86 @@ describe('seeds', () => {
         expect(target.snapshot()).toEqual(before)
       }
     }
-
-    // An invalid rejected key is never quoted back.
-    const invalid = makeLinkedInSearchEmulator({ seed: { exaRejectedKeys: ['0123456789abcdef'] } })
-
-    await expect(invalid).rejects.not.toThrow('0123456789abcdef')
   })
+
+  // Seed errors are constant text (a category and a field path): no key or other seeded value,
+  // whichever field carries it (a misspelled field, a duplicate search, a bad value, a made-up
+  // key).
+  const secretKey = 'synthetic-secret-key-01'
+
+  const duplicateSearch = {
+    query: secretKey,
+    numResults: 1,
+    results: [{ url: 'https://linkedin.example.com/in/a' }]
+  }
+
+  const seedErrorRows = (field: 'exaRejectedKeys' | 'enrichLayerRejectedKeys') =>
+    [
+      [
+        'a duplicate search whose query is the key',
+        { [field]: [secretKey], searches: [duplicateSearch, duplicateSearch] },
+        'duplicate search at searches[1]'
+      ],
+      [
+        'the key under a misspelled field',
+        { [field.slice(0, -1)]: [secretKey] },
+        'unexpected key at the seed root'
+      ],
+      [
+        'the key under rejectedKeys',
+        { rejectedKeys: [secretKey] },
+        'unexpected key at the seed root'
+      ],
+      ['the key as a made-up field name', { [secretKey]: 1 }, 'unexpected key at the seed root'],
+      [
+        'the key as a made-up result field',
+        {
+          [field]: [secretKey],
+          searches: [{ ...duplicateSearch, results: [{ [secretKey]: 'x' }] }]
+        },
+        'unexpected key at searches[0].results[0]'
+      ],
+      ['a bad value beside the key', { [field]: [secretKey, 7] }, `invalid type at ${field}[1]`],
+      ['the key as a bare string', { [field]: secretKey }, `invalid type at ${field}`],
+      ['the key duplicated', { [field]: [secretKey, secretKey] }, `duplicate key at ${field}[1]`]
+    ] as const
+
+  for (const field of ['exaRejectedKeys', 'enrichLayerRejectedKeys'] as const) {
+    it.each(seedErrorRows(field))(`${field}: %s`, async (_label, seed, reason) => {
+      // Parsed from JSON, as a host passing untyped input would.
+      const options: LinkedInSearchEmulatorOptions = { seed: JSON.parse(JSON.stringify(seed)) }
+
+      const thrown = await makeLinkedInSearchEmulator(options).then(
+        () => undefined,
+        (error: unknown) => error
+      )
+
+      expect(thrown).toBeInstanceOf(LinkedInSearchEmulatorInputInvalid)
+      expect(String(thrown instanceof Error ? thrown.message : thrown)).toBe(
+        `Invalid LinkedIn search emulator seed: ${reason}`
+      )
+
+      const target = await emulator()
+      const before = target.snapshot()
+
+      const answered = await target.fetch(
+        new Request(`${exa}/_emulate/seed`, { method: 'POST', body: JSON.stringify(seed) })
+      )
+
+      const text = await answered.text()
+
+      expect(answered.status).toBe(400)
+      expect(JSON.parse(text)).toEqual({
+        error: { message: `invalid seed: ${reason}`, type: 'emulator_error' }
+      })
+      expect(target.snapshot()).toEqual(before)
+
+      const seen = [String(thrown), text, ...(await controlReads(target))].join('\n')
+
+      expect(seen).not.toContain(secretKey)
+      expect(seen).not.toContain('secret-key')
+    })
+  }
 })
 
 describe('control plane', () => {

@@ -183,7 +183,7 @@ const search: Route = statefulRoute(
   },
   'json',
   (request): SearchInput | NotEmulated => {
-    const query = exactQuery(request, [])
+    const query = exactQuery(request, [], [], { rawNames: true })
 
     if (isNotEmulated(query)) return query
 
@@ -263,7 +263,7 @@ type LookupInput = { readonly url: string; readonly bearerDigest: string | undef
 
 /** The one `linkedin_profile_url` query parameter: a profile URL (decoded once). */
 const lookupInput = (request: EmulatedRequest): LookupInput | NotEmulated => {
-  const query = exactQuery(request, ['linkedin_profile_url'])
+  const query = exactQuery(request, ['linkedin_profile_url'], [], { rawNames: true })
 
   if (isNotEmulated(query)) return query
 

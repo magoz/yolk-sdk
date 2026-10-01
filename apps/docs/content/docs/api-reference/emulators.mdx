@@ -1126,13 +1126,15 @@ fail-closed rule as the GitHub emulator above: a request is recognised only when
 exactly an emulated route path and any `Authorization` header is exactly `Bearer <key>` with a
 recognisable bearer (a UUID-form key starts with a hex digit and is unrecognisable, so use a
 synthetic key); every other request is ledgered with constant text only. A recognised request that
-repeats its bearer in its path, query, recorded `content-type` header, or body, through any depth
-of percent-encoding or JSON escaping, is ledgered as the constant credential-repeat entry, and any
+repeats its bearer in its path, query, recorded `content-type` header, or body, through any depth of
+percent-encoding or JSON escaping, is ledgered as the constant credential-repeat entry, and any
 other has it scrubbed from everything the ledger keeps. The bearer is never stored or ledgered:
-through the shared wrapper's opt-in per-origin bearer digest, routes see only SHA-256 of the
-origin, a space, and the key, which they compare with the digests of the seed's rejected keys for
-that origin. The state holds only those digests, so even a rejected key never reaches the state, a
-snapshot, or `/_emulate/*`, and no seed error quotes one.
+through the shared wrapper's opt-in per-origin bearer digest, routes see only SHA-256 of the origin,
+a space, and the key, which they compare with the digests of the seed's rejected keys for that
+origin. The state holds only those digests, so a key a request carries as its bearer, a rejected one
+included, never reaches the state, a snapshot, or `/_emulate/*` (a key sent as data elsewhere in a
+request is ledgered like any other text), and no seed error quotes one: seed errors are constant
+text, a category and a field path.
 
 - Request-shape latitude (`/linkedin-search`, the only accepted deviations): any bearer value in the
   RFC 6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
@@ -1149,9 +1151,10 @@ snapshot, or `/_emulate/*`, and no seed error quotes one.
   `auto`, `contents` other than `{ "text": true }`, a search the state holds no answer for (another
   query, or a `numResults` no seeded search of that query records), a profile URL the state holds
   neither as a profile nor as absent, an email lookup of an absent profile, any query parameter on
-  the search, other, missing, or repeated query parameters on a lookup, empty query components such
-  as a bare `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere
-  in the request) is not emulated.
+  the search, other, missing, or repeated query parameters on a lookup, a query parameter name in
+  any but its plain form (such as `%6cinkedin_profile_url`), empty query components such as a bare
+  `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere in the
+  request) is not emulated.
 
 Seed with `seed: { searches?, profiles?, absentProfileUrls?, exaRejectedKeys?,
 enrichLayerRejectedKeys? }` (each list replaces the default's). Faults, the ledger, recovery, and

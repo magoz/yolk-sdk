@@ -75,23 +75,21 @@ There is no root export or barrel.
   `src/linkedin-search/**` (also enforced).
   `src/fortnox.ts`, `src/microsoft.ts`, `src/dropbox.ts`, `src/notion.ts`, `src/todoist.ts`,
   `src/telegram.ts`, `src/github.ts`, `src/google.ts`, and `src/linkedin-search.ts` import the core
-  lazily (`await import`)
-  inside their `make*Emulator` (`makeFortnoxEmulator`, `makeMicrosoftEmulator`,
-  `makeDropboxEmulator`, `makeNotionEmulator`, `makeTodoistEmulator`, `makeTelegramEmulator`,
-  `makeGithubEmulator`, `makeGoogleEmulator`, `makeLinkedInSearchEmulator`), so importing the
-  subpath (for example the manifest,
-  from the evidence check) has no side effects. The shared wrappers `src/stateful-emulator.ts` and
-  `src/stateful-fixture.ts` never import the core: each subpath hands them the runtime. They are two
-  wrappers for the same job, kept apart only because the PRs landed in parallel; consolidating them
-  is tracked in issue #139. They already share one neutral module, `src/stateful-secrets.ts`
-  (credential guarding and the unrecognised-ledger constants); neither wrapper imports the other.
-  The `/r2` port emulator also imports it (`textClosureOutcome`, through `src/r2-guard.ts`), so
-  #139 must keep it importable without either wrapper.
-  Until #139, build a new fixture-only stateful emulator on `src/stateful-emulator.ts` (as
-  `/github`, `/google`, and `/linkedin-search` are), in its opt-in fail-closed mode; a guarantee
-  only `src/stateful-fixture.ts` has is added to `src/stateful-emulator.ts` backward compatibly
-  (shared helpers go to `src/stateful-secrets.ts`), with tests (`test/stateful-emulator.test.ts`),
-  never as a third wrapper.
+  lazily (`await import`) inside their `make*Emulator` (`makeFortnoxEmulator`,
+  `makeMicrosoftEmulator`, `makeDropboxEmulator`, `makeNotionEmulator`, `makeTodoistEmulator`,
+  `makeTelegramEmulator`, `makeGithubEmulator`, `makeGoogleEmulator`, `makeLinkedInSearchEmulator`),
+  so importing the subpath (for example the manifest, from the evidence check) has no side effects.
+  The shared wrappers `src/stateful-emulator.ts` and `src/stateful-fixture.ts` never import the
+  core: each subpath hands them the runtime. They are two wrappers for the same job, kept apart only
+  because the PRs landed in parallel; consolidating them is tracked in issue #139. They already
+  share one neutral module, `src/stateful-secrets.ts` (credential guarding and the
+  unrecognised-ledger constants); neither wrapper imports the other. The `/r2` port emulator also
+  imports it (`textClosureOutcome`, through `src/r2-guard.ts`), so #139 must keep it importable
+  without either wrapper. Until #139, build a new fixture-only stateful emulator on
+  `src/stateful-emulator.ts` (as `/github`, `/google`, and `/linkedin-search` are), in its opt-in
+  fail-closed mode; a guarantee only `src/stateful-fixture.ts` has is added to
+  `src/stateful-emulator.ts` backward compatibly (shared helpers go to `src/stateful-secrets.ts`),
+  with tests (`test/stateful-emulator.test.ts`), never as a third wrapper.
 - `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are
   plain Web fetch handlers (no Effect runtime needed, no Node builtins); `email` and `r2` are plain
   structural objects (no HTTP, socket, TLS, MIME, mail library, SigV4 signer, or S3 client); `node`,
@@ -132,17 +130,18 @@ There is no root export or barrel.
   `googleEmulatorRoutes`, `linkedInSearchEmulatorRoutes`). Each manifest route needs its own
   handler: the fetch-handler emulators use `bindRouteHandlers` (`src/route-evidence.ts`), which
   pairs them at construction and throws `EmulatorRouteUnmapped` for a manifest route without a
-  handler or a handler without a manifest route; Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and LinkedIn search
-  derive both from one table (`src/fortnox/api.ts`, `src/microsoft/api.ts`, `src/dropbox/api.ts`,
-  `src/notion/api.ts`, `src/todoist/api.ts`, `src/telegram/api.ts`, `src/github/api.ts`,
-  `src/google.ts` over `src/google/{gmail,calendar,drive}.ts`, and `src/linkedin-search/api.ts`).
-  Fortnox routes without a fixture (`GET /3/companyinformation`, `GET /3/customers`) cite no case
-  ids and use minimal shapes named after the connector's read fields; the check warns about them. The fixture-only `/todoist`,
-  `/telegram`, `/github`, and `/google` emulators never add a route without a fixture: every route
-  cites a case (the Todoist leftover lookup's `GET /api/v1/projects`, the GitHub one's
-  `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing, draft search,
-  free-text event query, and trashed-included Drive listing have no fixture, so they are not
-  emulated and the lookups fail closed until a fixture records them).
+  handler or a handler without a manifest route; Fortnox, Microsoft, Dropbox, Notion, Todoist,
+  Telegram, GitHub, Google, and LinkedIn search derive both from one table (`src/fortnox/api.ts`,
+  `src/microsoft/api.ts`, `src/dropbox/api.ts`, `src/notion/api.ts`, `src/todoist/api.ts`,
+  `src/telegram/api.ts`, `src/github/api.ts`, `src/google.ts` over
+  `src/google/{gmail,calendar,drive}.ts`, and `src/linkedin-search/api.ts`). Fortnox routes without
+  a fixture (`GET /3/companyinformation`, `GET /3/customers`) cite no case ids and use minimal
+  shapes named after the connector's read fields; the check warns about them. The fixture-only
+  `/todoist`, `/telegram`, `/github`, `/google`, and `/linkedin-search` emulators never add a route
+  without a fixture: every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`,
+  the GitHub one's `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing,
+  draft search, free-text event query, and trashed-included Drive listing have no fixture, so they
+  are not emulated and the lookups fail closed until a fixture records them).
 - Fixture-only rule (lasting; every new emulator and route follows it, without exceptions):
   response behaviour comes only from the committed fixtures. A request matching a recorded request's shape, within the
   documented request-shape latitude, gets that fixture's response, copied as data (default content
@@ -181,10 +180,9 @@ There is no root export or barrel.
   `x-grok-client-version`, and `x-grok-client-mode: headless`). Fault and scripted-error statuses on
   fixture-only routes are 400-599 only.
 - Evidence policy: unknown emulated API routes fail closed and are written to the ledger (404 JSON
-  on the earlier model-route emulators, `/fortnox`, and `/microsoft`, 400 not-emulated on fixture-only routes,
-  `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, and `/linkedin-search`;
-  control-plane
-  requests are never recorded); unverified routes answer but carry
+  on the earlier model-route emulators, `/fortnox`, and `/microsoft`, 400 not-emulated on
+  fixture-only routes, `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, and
+  `/linkedin-search`; control-plane requests are never recorded); unverified routes answer but carry
   `x-emulator-evidence: unverified` (the `/email` port emulator has no headers: its ledger entries
   carry `evidence`), are tagged in the ledger, and are listed by the evidence check; evidence older
   than 30 days warns; connector write routes need `verified` evidence with a readable, not-future
@@ -210,19 +208,17 @@ There is no root export or barrel.
   service's error envelope, recorded in the ledger (`responseError`); that recovery never depends
   on the injectable clock (a clock that throws falls back to a fixed synthetic date). The
   fixture-only `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, and
-  `/linkedin-search` answer
-  `{ error: { type: 'emulator_error' } }` instead and their recovery reads no clock at all (see
-  below).
+  `/linkedin-search` answer `{ error: { type: 'emulator_error' } }` instead and their recovery reads
+  no clock at all (see below).
 - Every model and fixture-route fetch-handler emulator is built on `src/emulator-kernel.ts` (the
   `/email` port emulator is not; the stateful `/fortnox` and `/microsoft` keep their own wrappers,
   `/dropbox`, `/notion`, `/github`, `/google`, and `/linkedin-search` share
-  `src/stateful-emulator.ts`, and `/todoist`
-  and `/telegram` share `src/stateful-fixture.ts`; see below): fault and scripted-turn state (strict
-  decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
-  status-fault and scripted-error responses, the `/_emulate/*` control plane, coverage, evidence
-  tagging, and route binding (`serve` throws `EmulatorRouteUnmapped`). Wire cores add only request
-  parsing, framing, their ledger fields, and wire-specific faults; do not re-implement kernel pieces
-  in a core.
+  `src/stateful-emulator.ts`, and `/todoist` and `/telegram` share `src/stateful-fixture.ts`; see
+  below): fault and scripted-turn state (strict decoding), the ledger, pull-driven bodies with
+  `error-after-chunks` / `truncate-after-chunks`, status-fault and scripted-error responses, the
+  `/_emulate/*` control plane, coverage, evidence tagging, and route binding (`serve` throws
+  `EmulatorRouteUnmapped`). Wire cores add only request parsing, framing, their ledger fields, and
+  wire-specific faults; do not re-implement kernel pieces in a core.
 - OpenAI-compatible Chat Completions emulators share `src/chat-completions.ts`: request parsing,
   SSE framing, JSON mode, and scripted completions on top of the kernel. Each subpath supplies only its path and manifest, model lists, error envelope
   and unknown-model status and error (or whole body), 401 error, completion-token field (recorded in the ledger as
@@ -699,26 +695,30 @@ There is no root export or barrel.
   or whose list changed) is not emulated. The bullet has four copies that change together with
   `test/google.test.ts`: this one, the `src/google.ts` header, `README.md` (Google emulator), and
   `apps/docs/content/docs/api-reference/emulators.mdx` (Google emulator).
-- LinkedIn search (`src/linkedin-search.ts` + `src/linkedin-search/{state,api}.ts`) is stateful
-  AND fixture-only, without exceptions, on `src/stateful-emulator.ts` in its opt-in fail-closed
-  mode, and follows the shared fail-closed rule stated for GitHub above, unchanged (no route has a
-  path parameter, so every raw path is matched exactly; the recorded `content-type` header and the
-  raw body are checked like every other part). It emulates only the three reads the seven LinkedIn
-  search cases send, each on its recorded origin: `POST /search` on `https://api.exa.ai`, and
+- LinkedIn search (`src/linkedin-search.ts` + `src/linkedin-search/{state,api}.ts`) is stateful AND
+  fixture-only, without exceptions, on `src/stateful-emulator.ts` in its opt-in fail-closed mode,
+  and follows the shared fail-closed rule stated for GitHub above, unchanged (no route has a path
+  parameter, so every raw path is matched exactly; the recorded `content-type` header and the raw
+  body are checked like every other part; the lookups' query uses `exactQuery`'s opt-in `rawNames`,
+  so a percent-encoded parameter name is refused). It emulates only the three reads the seven
+  LinkedIn search cases send, each on its recorded origin: `POST /search` on `https://api.exa.ai`,
+  and
   `GET /api/v2/profile` and `GET /api/v2/profile/email` on `https://enrichlayer.com`. Nothing is
   written, minted, or read from a clock: a search answers only the results the state holds for
   exactly its query and `numResults` (the default seed: the fixtures' three answers for the seeded
   query, `numResults` 10, 3, and 2, the limited one without `publishedDate`, as recorded); a profile
   lookup a held profile or, for a seeded absent profile, the recorded 404; an email lookup a held
   profile's recorded email; anything else (another query or `numResults`, the unauthorized probe
-  with an accepted key, any other profile URL, the email of an absent profile) is not emulated.
-  Each provider takes its own key, so a request's credential decides an answer per origin: the
-  wrapper's opt-in, general `bearerDigest` (fail-closed mode only, checked at build) hands routes
-  SHA-256 of the arrival origin, a space, and the bearer (`EmulatedRequest.bearerDigest`, never the
-  bearer; a digest that throws or repeats the bearer answers the 500 emulator error), and a plan
-  answers the origin's recorded 401 when it is one of the digests of the keys the seed marks as
-  rejected on that origin. The state holds only those digests, never a key, so even a rejected key
-  never reaches the state, a snapshot, or `/_emulate/*`; seed errors never quote a key. The default
+  with an accepted key, any other profile URL, the email of an absent profile) is not emulated. Each
+  provider takes its own key, so a request's credential decides an answer per origin: the wrapper's
+  opt-in, general `bearerDigest` (fail-closed mode only, checked at build) hands routes SHA-256 of
+  the arrival origin, a space, and the bearer (`EmulatedRequest.bearerDigest`, never the bearer; a
+  digest that throws or repeats the bearer answers the 500 emulator error), and a plan answers the
+  origin's recorded 401 when it is one of the digests of the keys the seed marks as rejected on that
+  origin. The state holds only those digests, never a key, so a key a request carries as its bearer,
+  a rejected one included, never reaches the state, a snapshot, or `/_emulate/*` (a key sent as data
+  elsewhere in a request is ledgered like any other text); seed errors are constant text (a category
+  and a field path, an unexpected key reported at its parent) and never quote a key. The default
   seed rejects the synthetic invalid keys the two unauthorized cases send. Error bodies are the
   fixtures' byte for byte (`linkedInSearchEmulatorErrorBodies`). `test/linkedin-search.test.ts`
   replays every fixture byte for byte (status, every header, body; nothing is substituted), each
@@ -739,9 +739,10 @@ There is no root export or barrel.
   `auto`, `contents` other than `{ "text": true }`, a search the state holds no answer for (another
   query, or a `numResults` no seeded search of that query records), a profile URL the state holds
   neither as a profile nor as absent, an email lookup of an absent profile, any query parameter on
-  the search, other, missing, or repeated query parameters on a lookup, empty query components such
-  as a bare `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere
-  in the request) is not emulated. The bullet has four copies that change together with
+  the search, other, missing, or repeated query parameters on a lookup, a query parameter name in
+  any but its plain form (such as `%6cinkedin_profile_url`), empty query components such as a bare
+  `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere in the
+  request) is not emulated. The bullet has four copies that change together with
   `test/linkedin-search.test.ts`: this one, the `src/linkedin-search.ts` header, `README.md`
   (LinkedIn search emulator), and `apps/docs/content/docs/api-reference/emulators.mdx` (LinkedIn
   search emulator).
@@ -884,28 +885,32 @@ throwing, non-finite, or out-of-range clock), seeds and minted ids, control plan
 sockets, one per origin, each emulator ending at its seed except the counters, the event cases'
 cancelled events, and the one sent message; all thirteen cases sequentially on one shared emulator;
 another 13-character run id; the leftover lookup failing closed before and after; and one drill per
-case failing exactly that case), `test/linkedin-search.test.ts` (manifest, the data copies and
-error bodies, the drift test replaying every fixture byte for byte with no substitution, alone and
-all in suite order twice on one emulator, the latitude, rejected keys per origin, every fail-closed
-refusal by shape and by state asserting a ledgered 400, an unchanged state, and an unused match-all
-fault that still answers the next valid request, constant-text unrecognised shapes and
-Authorization headers (UUID-form and all-number keys included), the bearer and the rejected keys
-never ledgered, stored, or echoed (query keys and values raw and percent-encoded, the path, the
-recorded `content-type` header, plain and JSON-escaped body values and keys, checked against the
-real response, the state, and every `/_emulate/*` read), origins, a 429 fault through the real
-connector, seeds whose errors never quote a key, control plane),
+case failing exactly that case), `test/linkedin-search.test.ts` (manifest, the data copies and error
+bodies, the drift test replaying every fixture byte for byte with no substitution, alone and all in
+suite order twice on one emulator, the latitude, rejected keys per origin, every fail-closed refusal
+by shape and by state asserting a ledgered 400, an unchanged state, and an unused match-all fault
+that still answers the next valid request, constant-text unrecognised shapes and Authorization
+headers (UUID-form and all-number keys included), the bearer and the rejected keys never ledgered,
+stored, or echoed (query keys and values raw and percent-encoded, the path, the recorded
+`content-type` header, plain and JSON-escaped body values and keys, checked against the real
+response, the state, and every `/_emulate/*` read), origins, a 429 fault through the real connector,
+seed errors in constant text only (a category and a field path, for both key lists: a duplicate
+search whose query is a key, a misspelled field, a made-up key, a bad value; the JS error and the
+real `POST /_emulate/seed` text), percent-encoded lookup parameter names refused, a GET lookup
+carrying a body refused in-process and dropped by the loopback server, control plane),
 `test/linkedin-search-conformance.test.ts` (cross-checks A and B: all seven cases in-process and
 over loopback sockets, one per origin, each emulator ending exactly at its seed with the expected
 ledger and no key anywhere; all cases twice in sequence on one emulator in-process, and once over
 the sockets; one drill per case failing exactly that case), and `test/stateful-emulator.test.ts`
-(the shared wrapper's
-`{name+}` parameters, raw parameter patterns matched in full (alternation and lazy quantifiers
-included), the opt-in fail-closed mode over a fake core (credential-repeating requests ledgered with
-constant text only, scrubbed plan-time reasons, a route's decoded body views checked like its raw
-body, a throwing view refused with a declared `DecodedViewRefusal` reason, else as uncheckable with
-its own constant reason, never echoing request text; `textClosureOutcome`, the predicate form of
-the secret closure, agreeing with it; the opt-in per-origin `bearerDigest`, refused at build without
-fail-closed mode, routes seeing only the digest for the arrival origin, and a digest that throws or
-repeats the bearer answering the 500 with no fault used), the constant-reason `exactBodyKeys` and
-`exactQuery`, and the unchanged behaviour without fail-closed mode). Loopback sockets only; never
-call real services.
+(the shared wrapper's `{name+}` parameters, raw parameter patterns matched in full (alternation and
+lazy quantifiers included), the opt-in fail-closed mode over a fake core (credential-repeating
+requests ledgered with constant text only, scrubbed plan-time reasons, a route's decoded body views
+checked like its raw body, a throwing view refused with a declared `DecodedViewRefusal` reason, else
+as uncheckable with its own constant reason, never echoing request text; `textClosureOutcome`, the
+predicate form of the secret closure, agreeing with it; the opt-in per-origin `bearerDigest`,
+refused at build without fail-closed mode, routes seeing only a real SHA-256 digest for the arrival
+origin (the expected per-origin hashes, the bearer absent from every response, the ledger, the
+snapshot, and every `/_emulate/*` read), and a digest that throws, repeats the bearer, or is no
+string answering the 500 with no fault used), the constant-reason `exactBodyKeys` and `exactQuery`
+(with `rawNames` comparing raw parameter names, and the raw query the wrapper hands routes), and the
+unchanged behaviour without fail-closed mode). Loopback sockets only; never call real services.
