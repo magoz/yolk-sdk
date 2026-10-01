@@ -50,6 +50,14 @@ Map changed code to docs that must be inspected or updated.
 | credential slot/config key | `integrations/connectors.mdx`, `connectors/index.mdx`, `troubleshooting.mdx`                                      |
 | agent adapter              | `integrations/connector-tool.mdx`, `api-reference/integrations.mdx`                                               |
 
+## Conformance and emulators packages
+
+| Change                                        | Docs                                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| conformance fixture/replay/case/runner        | `api-reference/conformance.mdx`, `guides/testing-with-emulators.mdx`                              |
+| emulator subpath, origin, seed, fault, ledger | `api-reference/emulators.mdx`, `guides/testing-with-emulators.mdx`                                |
+| connector conformance cases or runners        | `connectors/<provider>.mdx`, `api-reference/conformance.mdx`, `guides/testing-with-emulators.mdx` |
+
 ## Sandbox package
 
 | Change                        | Docs                                                                              |

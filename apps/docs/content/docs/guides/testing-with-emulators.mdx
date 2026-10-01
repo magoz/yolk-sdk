@@ -4,8 +4,8 @@ description: Run integrations and conformance cases offline against service emul
 ---
 
 > **Experimental.** `@yolk-sdk/conformance` and `@yolk-sdk/emulators` may change in any canary
-> release. Keep every `@yolk-sdk/*` package on the same version, and use emulators in tests and
-> local development only.
+> release. Both are new after `0.1.0-canary.95`; keep every `@yolk-sdk/*` package on the same
+> version, and use emulators in tests and local development only.
 
 Use emulators when your host app's tests should exercise the real connector, provider, or MCP
 client code without calling the outside service. This guide covers the host side: wiring an
@@ -28,12 +28,14 @@ respect. The [Emulator APIs](../api-reference/emulators) and
   Anthropic, Codex, Grok) generate synthetic output or scripted turns in the recorded wire shapes.
   Each emulator passes its service's conformance cases offline, so the cases prove that the
   emulator matches the claims your code relies on.
-- **Evidence** says how far to trust a claim. `unverified` routes and fixtures follow synthetic
-  placeholders, and responses from an unverified route carry `x-emulator-evidence: unverified`.
-  `verified` ones follow a live recording dated by `observedAt`. Unverified connector write routes
-  are **pending**: the Yolk repository holds them in a time-bounded allowlist until an
-  owner-approved live run verifies them. See [Evidence](../api-reference/emulators#evidence) for
-  the current state of each route.
+- **Evidence** says how far to trust a claim. An emulated route is `unverified` when it follows
+  synthetic placeholders and `verified` when it follows a live recording, dated by the route's
+  `observedAt`; fixtures make the same distinction with their own dates. Responses from an
+  unverified HTTP route carry `x-emulator-evidence: unverified`; the email and R2 port fakes record
+  the evidence on each ledger entry instead. Unverified connector write routes are **pending**:
+  the Yolk repository holds them in a time-bounded allowlist until an owner-approved live run
+  verifies them. See [Evidence](../api-reference/emulators#evidence) for the current state of each
+  route.
 
 A passing test against an emulator shows that your code agrees with the recorded claims. It does
 not show that the live provider still behaves that way.
@@ -43,7 +45,7 @@ not show that the live provider still behaves that way.
 This runnable example runs the real GitHub connector against the in-process GitHub emulator in a
 Vitest test. It lists labels, absorbs a rate limit, and shows a refused request.
 
-Install:
+Install (Node 22 or later):
 
 ```bash
 pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
@@ -206,17 +208,23 @@ await server.close()
 await github.close()
 ```
 
-Serve `fetchOn(origin)` rather than `fetch`: the rewrite loses the origin, and each route answers
-only on the origin its fixtures record. A service with two origins (Dropbox, Google, LinkedIn
-search) needs one server per origin. In Effect tests, `serveFetchHandler` is the scoped variant.
+The rewrite loses the origin. The Dropbox, Notion, GitHub, Google, LinkedIn search, and MCP
+emulators answer each route only on its recorded origin, so serve their `fetchOn(origin)` rather
+than `fetch`, with one server per origin for the services that have two (Dropbox, Google, LinkedIn
+search). The Fortnox, Microsoft Graph, Todoist, Telegram, and model-route emulators have no
+`fetchOn`: serve their `fetch`. Microsoft Graph serves both of its origins from one server. Each
+emulator's [reference section](../api-reference/emulators) names its origins. In Effect tests,
+`serveFetchHandler` is the scoped variant.
 
 ## Seeds and profiles
 
-Each stateful emulator starts from a typed seed. The default seed holds the fixtures' synthetic
-entities, so the fixture seeds of the conformance cases (for example
-`githubConformanceFixtureSeeds`) match it. Profiles such as `default` and `empty` select a starting
-point, and the other seed keys replace parts of it. An injectable `now` clock keeps minted
-timestamps deterministic.
+The connector, MCP, email, and R2 emulators start from a typed seed. The default seed holds the
+fixtures' synthetic entities, so the fixture seeds of the conformance cases (for example
+`githubConformanceFixtureSeeds`) match it. Most connector emulators take a `profile` (`default` or
+`empty`; Fortnox has its own profiles), and the other seed keys replace parts of it; LinkedIn
+search and MCP take no profile. The emulators that mint timestamps (Fortnox, Microsoft Graph,
+Dropbox, Notion, Todoist, Telegram, GitHub, Google) take an injectable `now` clock that keeps them
+deterministic. Each emulator's reference section lists its seed keys.
 
 Fragment:
 
@@ -230,16 +238,24 @@ await github.seed({ profile: 'default' }) // replace the state; reset() now rest
 await github.reset()
 ```
 
-An invalid seed rejects with the emulator's input-invalid error, such as
-`GithubEmulatorInputInvalid`. `snapshot()` returns a deep copy of the state.
+An invalid seed fails with the emulator's input-invalid error, such as
+`GithubEmulatorInputInvalid`. On the connector and MCP emulators, `snapshot()` returns a deep copy
+of the state.
 
 ## Faults and retries
 
-`faults.add` makes matching requests answer an error status instead of running the route, so
-nothing is written. On the connector emulators, `match` narrows a fault by `method` and `path` (a
-trailing `*` makes a prefix), and on most of them by `route` (a manifest route template); `count`
-limits how many requests it answers. The model-route and MCP emulators also take chunk faults such
-as `truncate-after-chunks`.
+On the HTTP connector emulators (Fortnox through LinkedIn search in the
+[table](#available-emulators)) and MCP, `faults.add` adds a status fault: matching requests answer
+an error status instead of running the route, so nothing is written. `match` narrows it by
+`method` and `path` (a trailing `*` makes a prefix) and, except on Fortnox and Microsoft Graph, by
+`route` (a manifest route template); `count` limits how many requests it answers. MCP also takes
+`truncate-after-chunks`, and the model-route emulators take their own status and chunk faults,
+matched by `path` and `model`.
+
+The email and R2 port fakes take `{ kind: 'failure', method, match?, count?, failure }` instead
+(R2 also names the `port`): a call to that method whose request contains `match` as a deep subset
+answers `failure`, and no state changes. See [Email](../api-reference/emulators#email-emulator) and
+[R2](../api-reference/emulators#r2-emulator).
 
 A 429 fault with `retry-after` reaches the GitHub connector as `github_rate_limited` with
 `retryAfterMs`; each emulator's reference section names the code its connector or provider maps it
@@ -247,26 +263,44 @@ to. Connector actions return that failure and do not retry by themselves, so ret
 host-owned. A fault with `count: 1` proves that your retry succeeds on the next attempt, as in the
 second test above.
 
-On the fixture-only HTTP emulators, a request the emulator refuses never uses up a fault, so a
-misplaced fault stays listed in `faults.list()` instead of passing silently.
+On Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and MCP, a fault is chosen
+only for a request the emulator would answer, so a refused request never uses one up and a
+misplaced fault stays listed in `faults.list()` instead of passing silently. Fortnox and Microsoft
+Graph check the route, credential, and JSON body, then answer a matching fault before the route
+runs, so a request their route would refuse can still use one up.
 
 ## Drills
 
-The `drills` option is a test-only knob. Each boolean makes the emulator disagree with exactly one
-conformance claim, so the matching case fails. Use drills to prove that a case can fail against
-your setup, not to model provider behaviour. See the conformance example below for a drill run.
+Drill knobs are test-only. The Microsoft Graph, Dropbox, Notion, Todoist, Telegram, GitHub, Google,
+LinkedIn search, and MCP emulators take a `drills` option, and Fortnox takes `quirks`. Each knob
+makes the emulator disagree with one conformance claim, so the matching case fails. Most knobs are
+booleans; Microsoft's `timestampPrecisionDigits` is a number. Use drills to prove that a case can
+fail against your setup, not to model provider behaviour. See the conformance example below for a
+drill run.
 
 ## Read the ledger and the control plane
 
-On the stateful connector and MCP emulators, `ledger.entries()` records every emulated request in
-arrival order: method, path, route template, query and body with credential-named keys redacted,
-the recorded non-credential headers, status, evidence, any `fault`, and, for a refusal, the
-`notEmulated` reason. `coverage()` lists each manifest route with its request count and case ids.
+On the fixture-only stateful emulators (Dropbox, Notion, Todoist, Telegram, GitHub, Google,
+LinkedIn search, and MCP), `ledger.entries()` records every request in arrival order: method,
+path, route template, query and body with credential-named keys redacted, status, evidence, any
+`fault`, and, for a refusal, the `notEmulated` reason. All of them except Todoist and Telegram also
+record the non-credential headers they check. Other ledgers differ:
 
-Their fetch handler also serves a control plane under `/_emulate/*`: `ledger` (`GET`, `DELETE`),
-`faults` (`GET`, `POST`, `DELETE`), `reset` (`POST`), `state` (`GET`), `seed` (`POST`), and
-`coverage` (`GET`). Use it when the test process does not hold the emulator object, for example
-when another process runs the code under test.
+- Fortnox ledgers queries and bodies as sent, without redaction.
+- Microsoft Graph redacts credential-named keys and records the `Prefer` header.
+- Neither Fortnox nor Microsoft Graph has a `notEmulated` field: their refusals appear as
+  provider-envelope statuses (404 or 400).
+- The model-route, email, and R2 ledgers have their own shapes.
+
+Each emulator's reference section describes its ledger. `coverage()` lists each manifest route
+with its request count and case ids.
+
+The HTTP emulators also serve a control plane under `/_emulate/*` from the same fetch handler. On
+the connector and MCP emulators it serves `ledger` (`GET`, `DELETE`), `faults` (`GET`, `POST`,
+`DELETE`), `reset` (`POST`), `state` (`GET`), `seed` (`POST`), and `coverage` (`GET`). The
+model-route emulators serve `script` instead of `seed`, and OpenCode Go serves each part under
+`/_emulate/<part>/*`. Use the control plane when the test process does not hold the emulator
+object, for example when another process runs the code under test.
 
 Fragment (with `server` from the loopback fragment):
 
@@ -285,9 +319,10 @@ await control('reset', { method: 'POST' })
 
 ## Reset between tests
 
-`reset()` restores the current seed and clears the ledger, faults, and runtime data such as
-cursors and sessions. Create one emulator per test, as in the example, or call `reset()` in
-`beforeEach`. Run write flows sequentially on one emulator: some emulators accept only the one
+On the connector and MCP emulators, `reset()` restores the current seed and clears the ledger,
+faults, and runtime data such as cursors and sessions. Create one emulator per test, as in the
+example, or call `reset()` in `beforeEach`. Run write flows sequentially on one emulator: some
+emulators, such as [Todoist](../api-reference/emulators#todoist-emulator), accept only the one
 created item a fixture records at a time, and refuse a second one until the first is gone or the
 emulator is reset.
 
@@ -296,11 +331,13 @@ emulator is reset.
 Emulators fail closed. On the fixture-only emulators, a request that no fixture records is
 answered with one ledgered **400 not-emulated** (`{ error: { type: 'not_emulated', message } }`)
 before anything is written and before any fault is chosen. That includes other routes, other query
-parameters or body keys, another origin, unknown ids, and cursors the emulator did not issue. The
-strictest emulators (GitHub, Google, LinkedIn search, MCP, Todoist, Telegram) ledger a request on
-no emulated route shape with constant text only (`/<unrecognised>`). Fortnox and Microsoft Graph
-refuse in the provider's error envelope (404 for an unknown route, 400 for an unsupported query
-or body), and the model-route emulators answer an unknown route with a 404.
+parameters or body keys, unknown ids, cursors the emulator did not issue, and, on the emulators
+that check the origin (Dropbox, Notion, GitHub, Google, LinkedIn search, MCP), another origin.
+GitHub, Google, LinkedIn search, MCP, Todoist, and Telegram ledger a request on no emulated route
+shape with constant text only (`/<unrecognised>`). Fortnox and Microsoft Graph refuse in the
+provider's error envelope (404 for an unknown route, 400 for an unsupported query or body), and
+the model-route emulators answer an unknown route with a 404. Each emulator's reference section
+lists exactly what it accepts.
 
 A connector may map that 400 to an ordinary validation code (`github_validation` for GitHub), so
 assert the ledger as well as the result:
@@ -317,7 +354,9 @@ instead of an HTTP 400.
 
 Run a service's cases with `runConformance`, giving each case fresh connector ports over a fresh
 emulator. The runner builds `layer(testCase)` once per case in its own scope, so a scoped layer
-opens and closes an emulator per case.
+that creates the emulator, as below, opens and closes one per case. An emulator created outside
+the `layer` factory, or captured in one shared `Layer.succeed` value, is not rebuilt: its state is
+shared across cases.
 
 Fragment (a Vitest test, with the imports of the runnable example plus these):
 
@@ -382,8 +421,8 @@ it('fails exactly the drilled case', async () => {
 ```
 
 Every case runs on `in-process` and `emulated` targets, write cases included, because nothing real
-happens there. Each result carries an `unverified-case` warning until a live run observes the
-claim. Use `{ kind: 'emulated' }` with the loopback layer for the socket path.
+happens there. A case that no live run has observed carries an `unverified-case` warning, as the
+GitHub cases do. Use `{ kind: 'emulated' }` with the loopback layer for the socket path.
 
 A failure against an emulator means that the SDK code, the case, and the emulator's copy of the
 fixtures no longer agree. Common causes are an SDK upgrade whose requests changed shape (look for
@@ -396,25 +435,37 @@ signal that the provider changed.
 - **No invented answers.** The fixture-only emulators refuse anything a fixture does not record,
   including empty pages, empty search results, and listings no fixture shows. They never guess a
   status or an error envelope.
-- **No leftover lookups.** The read-only `find*ConformanceLeftovers` helpers list items no fixture
-  records, so they fail not-emulated against an emulator. The repository runners report that as a
+- **Limited leftover lookups.** The read-only GitHub, Google, and Todoist
+  `find*ConformanceLeftovers` lookups send listings no fixture records, so they always fail
+  not-emulated against the emulator. The Dropbox and Notion lookups fail against the default seed
+  (no fixture records an empty listing or search), but report a leftover in a recorded shape that a
+  seed or an earlier case left behind. The repository runners report a failed lookup as a
   lookup-failed `WARN`, not as leftovers.
 - **No delivery.** Sends such as the Telegram message or the Gmail practice send are recorded in
   the emulator's state and never delivered anywhere.
-- **No production use.** The stateful emulators and the loopback server are Node only, and the
-  router refuses to build when `NODE_ENV` is `production`.
+- **No production use.** The Fortnox through MCP subpaths and the loopback server are Node only,
+  and the router layers refuse to build when `NODE_ENV` is `production`.
 
 ## Credentials
 
-- Use synthetic credentials only, never a real token. The GitHub, Google, LinkedIn search, and MCP
-  emulators recognise a bearer only in the RFC 6750 `b64token` form: at least 8 characters, a
-  first character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, or `u`, and at least one
-  character outside `[0-9.eE+-]`. `synthetic-github-test-token` qualifies; a UUID or an all-hex key
-  does not. Such a bearer also satisfies the other bearer emulators; Telegram takes a synthetic
-  `<digits>:<secret>` bot token instead.
-- Send the credential only where the provider expects it, such as `Authorization: Bearer <token>`.
-  The strict emulators refuse a request that repeats it in the path, query, headers, or body.
-  Emulators never store, ledger, or echo it.
+- Use synthetic credentials only, never a real token. Emulators are test stand-ins, not
+  secret-scrubbing boundaries.
+- Use a credential each emulator recognises. GitHub, Google, LinkedIn search, and MCP accept only
+  a synthetic bearer in the `b64token` form their sections define (see
+  [GitHub](../api-reference/emulators#github-emulator)). `synthetic-github-test-token` qualifies;
+  a UUID or an all-hex key does not. Such a bearer also suits the other bearer emulators.
+  Telegram takes a synthetic `<digits>:<secret>` bot token instead.
+- Send the credential only where the provider expects it, such as the `Authorization` bearer or
+  Telegram's bot token in the path. There it is never stored or ledgered.
+- Checks for a credential repeated elsewhere in a request differ by emulator:
+  - GitHub, Google, and LinkedIn search refuse a repeat in the path, query, recorded headers, or
+    body.
+  - MCP also checks every other header.
+  - Todoist and Telegram check the path, query, and body.
+  - Dropbox, Notion, Fortnox, Microsoft Graph, and the model routes do not check repeats, so a
+    credential sent elsewhere can reach the ledger (Fortnox ledgers queries and bodies unredacted).
+- MCP's guarantee has precise limits: some emulator constants and control-plane data are not
+  checked. See [MCP](../api-reference/emulators#mcp-emulator).
 - The `/_emulate/*` control plane is the host's own trusted surface. Seed and fault data you give
   it is stored and returned as given, so never put a secret in a seed, fault body, or header.
 
@@ -424,14 +475,16 @@ Emulators and replay cover everyday tests. Run the cases live only by hand, agai
 accounts you own, with the account owner's approval; never in CI.
 
 - In your host, run the same cases with your own `HttpClient` and
-  `target: { kind: 'live', account }`. Live targets skip write cases unless you pass
-  `allowWrites: 'reversible'`, and run a `write-irreversible` case only when its exact id is in
+  `target: { kind: 'live', account }`. Live targets always run `read` cases. They run a
+  `write-reversible` case only with `allowWrites: 'reversible'`, and a `write-irreversible` case
+  only when its exact id is in `allowIrreversible`. The two gates are independent: `allowWrites`
+  never starts an irreversible case, and leaving it out does not stop one listed in
   `allowIrreversible`. See the [runner safety policy](../api-reference/conformance#runner).
 - In the Yolk repository, the `pnpm conformance:<id>` runners (for example
   `pnpm conformance:github`) dry-run by default: they print the plan without a network call or a
   credential read. `--live --owner-approved --account <label>` is refused whenever `CI` is set.
-  `--record` stages recordings in a gitignored directory; promotion is a manual scrub that keeps
-  committed fixtures synthetic.
+  Recordings from a live run are promoted by hand and scrubbed, so committed fixtures stay
+  synthetic.
 
 Each service's runner flags, seeds, and cleanup rules are on its page under
 [Connectors](../connectors) and in [Conformance APIs](../api-reference/conformance).
