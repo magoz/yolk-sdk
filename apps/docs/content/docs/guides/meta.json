@@ -10,6 +10,7 @@
     "durable-compaction",
     "private-attachments",
     "hitl",
-    "testing"
+    "testing",
+    "testing-with-emulators"
   ]
 }

@@ -1,0 +1,464 @@
+---
+title: Test with emulators
+description: Run integrations and conformance cases offline against service emulators.
+---
+
+> **Experimental.** `@yolk-sdk/conformance` and `@yolk-sdk/emulators` may change in any canary
+> release. Keep every `@yolk-sdk/*` package on the same version, and use emulators in tests and
+> local development only.
+
+Use emulators when your host app's tests should exercise the real connector, provider, or MCP
+client code without calling the outside service. This guide covers the host side: wiring an
+emulator into your own tests, running the conformance cases against it, and the rules you must
+respect. The [Emulator APIs](../api-reference/emulators) and
+[Conformance APIs](../api-reference/conformance) pages hold the full per-service detail.
+
+## Cases, emulators, and evidence
+
+- A **conformance case** is a small Effect program that states one claim about how a provider
+  behaves on the wire (`docs` versus `wire`), with a `safety` of `read`, `write-reversible`, or
+  `write-irreversible`. The same case runs against replayed fixtures, an emulator, or a live
+  practice account; only the layers change.
+- A **fixture** is a committed recording of the exchanges a case relies on. Fixtures hold synthetic
+  or scrubbed data only.
+- An **emulator** is a stand-in that answers from those committed fixtures. The Dropbox, Notion,
+  Todoist, Telegram, GitHub, Google, LinkedIn search, MCP, email, R2, OpenCode Go, and
+  subscription-usage emulators are fixture-only: they never invent an answer. Fortnox and Microsoft
+  Graph add a few documented extrapolations, and the model-route emulators (Gateway, OpenAI,
+  Anthropic, Codex, Grok) generate synthetic output or scripted turns in the recorded wire shapes.
+  Each emulator passes its service's conformance cases offline, so the cases prove that the
+  emulator matches the claims your code relies on.
+- **Evidence** says how far to trust a claim. `unverified` routes and fixtures follow synthetic
+  placeholders, and responses from an unverified route carry `x-emulator-evidence: unverified`.
+  `verified` ones follow a live recording dated by `observedAt`. Unverified connector write routes
+  are **pending**: the Yolk repository holds them in a time-bounded allowlist until an
+  owner-approved live run verifies them. See [Evidence](../api-reference/emulators#evidence) for
+  the current state of each route.
+
+A passing test against an emulator shows that your code agrees with the recorded claims. It does
+not show that the live provider still behaves that way.
+
+## Test an integration in-process
+
+This runnable example runs the real GitHub connector against the in-process GitHub emulator in a
+Vitest test. It lists labels, absorbs a rate limit, and shows a refused request.
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
+pnpm add -D @yolk-sdk/emulators@canary @yolk-sdk/conformance@canary vitest
+```
+
+`test/github-emulator.test.ts`:
+
+```ts
+import { Effect, Layer } from 'effect'
+import { afterEach, beforeEach, expect, it } from 'vitest'
+import {
+  BearerTokenCredential,
+  makeCredentialBinding,
+  makeIntegration,
+  type ConnectorHttpClient,
+  type CredentialResolver
+} from '@yolk-sdk/connectors'
+import {
+  connectorHttpClientsFromEffectHttpClientLayer,
+  staticCredentialResolverLayer
+} from '@yolk-sdk/connectors/conformance'
+import {
+  githubConnectorId,
+  githubCreateIssueAction,
+  githubListLabelsAction,
+  githubTokenSlotId
+} from '@yolk-sdk/connectors/github'
+import {
+  githubEmulatorOrigin,
+  makeGithubEmulator,
+  type GithubEmulator
+} from '@yolk-sdk/emulators/github'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+// The practice repository the emulator's default seed holds.
+const integration = makeIntegration({
+  connectorId: githubConnectorId,
+  config: { owner: 'yolk-synthetic', repo: 'conformance-practice' },
+  credentialBindings: [
+    makeCredentialBinding({ slotId: githubTokenSlotId, credentialRef: 'test-github-token' })
+  ]
+})
+
+let github: GithubEmulator
+
+beforeEach(async () => {
+  github = await makeGithubEmulator()
+})
+
+afterEach(async () => {
+  await github.close()
+})
+
+// Run the real connector over an HttpClient that calls the emulator in-process.
+const run = <A, E>(effect: Effect.Effect<A, E, ConnectorHttpClient | CredentialResolver>) =>
+  Effect.runPromise(
+    effect.pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          connectorHttpClientsFromEffectHttpClientLayer.pipe(
+            Layer.provide(
+              InProcessHttpClient.layer([EmulatorRoute.handler(githubEmulatorOrigin, github.fetch)])
+            )
+          ),
+          staticCredentialResolverLayer(
+            BearerTokenCredential.make({ token: 'synthetic-github-test-token' })
+          )
+        )
+      )
+    )
+  )
+
+const listLabels = githubListLabelsAction.executeTyped({ integration, input: { perPage: 2 } })
+
+it('lists labels from the seeded repository', async () => {
+  expect(await run(listLabels)).toMatchObject({ _tag: 'Success', value: { hasNextPage: true } })
+  expect(
+    github.ledger.entries().map(entry => `${entry.method} ${entry.route} ${entry.status}`)
+  ).toEqual(['GET /repos/{owner}/{repo}/labels 200'])
+})
+
+it('surfaces a 429 with retry-after, then answers the retry', async () => {
+  github.faults.add({ kind: 'status', status: 429, headers: { 'retry-after': '7' }, count: 1 })
+
+  expect(await run(listLabels)).toMatchObject({
+    _tag: 'Failure',
+    error: { code: 'github_rate_limited', status: 429, retryAfterMs: 7000 }
+  })
+  expect(await run(listLabels)).toMatchObject({ _tag: 'Success' })
+  expect(github.ledger.entries().map(entry => [entry.status, entry.fault])).toEqual([
+    [429, 'status'],
+    [200, undefined]
+  ])
+})
+
+it('refuses an unrecorded request and writes nothing; reset restores the seed', async () => {
+  const seed = github.snapshot()
+
+  const createIssue = (extra: { readonly labels?: ReadonlyArray<string> }) =>
+    githubCreateIssueAction.executeTyped({
+      integration,
+      input: { title: 'yolk-test issue', body: 'Synthetic.', ...extra }
+    })
+
+  // No fixture records a create with labels: one ledgered 400 not-emulated.
+  expect(await run(createIssue({ labels: ['bug'] }))).toMatchObject({
+    _tag: 'Failure',
+    error: { status: 400 }
+  })
+  // Assert that it was refused, not the exact reason text, which may be reworded.
+  expect(github.ledger.entries()[0]?.notEmulated).toEqual(expect.any(String))
+  expect(github.snapshot()).toEqual(seed)
+
+  // The recorded create flow is emulated; reset() puts the seed back.
+  expect(await run(createIssue({}))).toMatchObject({ _tag: 'Success', value: { number: 42 } })
+  await github.reset()
+  expect(github.snapshot()).toEqual(seed)
+  expect(github.ledger.entries()).toEqual([])
+})
+```
+
+Run:
+
+```bash
+pnpm exec vitest run test/github-emulator.test.ts
+```
+
+Expected result: `3 passed`. No request leaves the process, and the token is never stored or
+written to the ledger.
+
+`InProcessHttpClient.layer` calls the emulator's `fetch` handler directly. Your code keeps calling
+the real origin (`https://api.github.com`), and a request to an origin without a route fails with
+an `HttpClientError` that names only the origin.
+
+## Serve an emulator on loopback
+
+Use `@yolk-sdk/emulators/node` when the code under test must go through a real socket, for
+example to check streaming or your own `FetchHttpClient` stack. `EmulatedHttpClient` rewrites the
+routed origin to the loopback server. The server binds only to `127.0.0.1`.
+
+Fragment (inside an async test):
+
+```ts
+import { Layer } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { githubEmulatorOrigin, makeGithubEmulator } from '@yolk-sdk/emulators/github'
+import { startFetchHandlerServer } from '@yolk-sdk/emulators/node'
+import { EmulatedHttpClient, EmulatorRoute } from '@yolk-sdk/emulators/router'
+
+const github = await makeGithubEmulator()
+const server = await startFetchHandlerServer(github.fetchOn(githubEmulatorOrigin))
+
+const httpLayer = EmulatedHttpClient.layer([
+  EmulatorRoute.url(githubEmulatorOrigin, server.url)
+]).pipe(Layer.provide(FetchHttpClient.layer))
+
+// ... run the code under test with httpLayer, then:
+await server.close()
+await github.close()
+```
+
+Serve `fetchOn(origin)` rather than `fetch`: the rewrite loses the origin, and each route answers
+only on the origin its fixtures record. A service with two origins (Dropbox, Google, LinkedIn
+search) needs one server per origin. In Effect tests, `serveFetchHandler` is the scoped variant.
+
+## Seeds and profiles
+
+Each stateful emulator starts from a typed seed. The default seed holds the fixtures' synthetic
+entities, so the fixture seeds of the conformance cases (for example
+`githubConformanceFixtureSeeds`) match it. Profiles such as `default` and `empty` select a starting
+point, and the other seed keys replace parts of it. An injectable `now` clock keeps minted
+timestamps deterministic.
+
+Fragment:
+
+```ts
+const github = await makeGithubEmulator({
+  seed: { profile: 'empty' },
+  now: () => Date.parse('2026-01-01T12:00:00Z')
+})
+
+await github.seed({ profile: 'default' }) // replace the state; reset() now restores this
+await github.reset()
+```
+
+An invalid seed rejects with the emulator's input-invalid error, such as
+`GithubEmulatorInputInvalid`. `snapshot()` returns a deep copy of the state.
+
+## Faults and retries
+
+`faults.add` makes matching requests answer an error status instead of running the route, so
+nothing is written. On the connector emulators, `match` narrows a fault by `method` and `path` (a
+trailing `*` makes a prefix), and on most of them by `route` (a manifest route template); `count`
+limits how many requests it answers. The model-route and MCP emulators also take chunk faults such
+as `truncate-after-chunks`.
+
+A 429 fault with `retry-after` reaches the GitHub connector as `github_rate_limited` with
+`retryAfterMs`; each emulator's reference section names the code its connector or provider maps it
+to. Connector actions return that failure and do not retry by themselves, so retry policy stays
+host-owned. A fault with `count: 1` proves that your retry succeeds on the next attempt, as in the
+second test above.
+
+On the fixture-only HTTP emulators, a request the emulator refuses never uses up a fault, so a
+misplaced fault stays listed in `faults.list()` instead of passing silently.
+
+## Drills
+
+The `drills` option is a test-only knob. Each boolean makes the emulator disagree with exactly one
+conformance claim, so the matching case fails. Use drills to prove that a case can fail against
+your setup, not to model provider behaviour. See the conformance example below for a drill run.
+
+## Read the ledger and the control plane
+
+On the stateful connector and MCP emulators, `ledger.entries()` records every emulated request in
+arrival order: method, path, route template, query and body with credential-named keys redacted,
+the recorded non-credential headers, status, evidence, any `fault`, and, for a refusal, the
+`notEmulated` reason. `coverage()` lists each manifest route with its request count and case ids.
+
+Their fetch handler also serves a control plane under `/_emulate/*`: `ledger` (`GET`, `DELETE`),
+`faults` (`GET`, `POST`, `DELETE`), `reset` (`POST`), `state` (`GET`), `seed` (`POST`), and
+`coverage` (`GET`). Use it when the test process does not hold the emulator object, for example
+when another process runs the code under test.
+
+Fragment (with `server` from the loopback fragment):
+
+```ts
+const control = (path: string, init?: RequestInit) =>
+  fetch(`${server.url}/_emulate/${path}`, init).then(response => response.json())
+
+await control('faults', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ kind: 'status', status: 503, match: { method: 'POST' }, count: 1 })
+})
+const { entries } = await control('ledger')
+await control('reset', { method: 'POST' })
+```
+
+## Reset between tests
+
+`reset()` restores the current seed and clears the ledger, faults, and runtime data such as
+cursors and sessions. Create one emulator per test, as in the example, or call `reset()` in
+`beforeEach`. Run write flows sequentially on one emulator: some emulators accept only the one
+created item a fixture records at a time, and refuse a second one until the first is gone or the
+emulator is reset.
+
+## Unexpected requests fail loudly
+
+Emulators fail closed. On the fixture-only emulators, a request that no fixture records is
+answered with one ledgered **400 not-emulated** (`{ error: { type: 'not_emulated', message } }`)
+before anything is written and before any fault is chosen. That includes other routes, other query
+parameters or body keys, another origin, unknown ids, and cursors the emulator did not issue. The
+strictest emulators (GitHub, Google, LinkedIn search, MCP, Todoist, Telegram) ledger a request on
+no emulated route shape with constant text only (`/<unrecognised>`). Fortnox and Microsoft Graph
+refuse in the provider's error envelope (404 for an unknown route, 400 for an unsupported query
+or body), and the model-route emulators answer an unknown route with a 404.
+
+A connector may map that 400 to an ordinary validation code (`github_validation` for GitHub), so
+assert the ledger as well as the result:
+
+```ts
+// Fragment: fails the test when the code under test sent anything no fixture records.
+expect(github.ledger.entries().filter(entry => entry.notEmulated !== undefined)).toEqual([])
+```
+
+The email and R2 emulators are port-level fakes: they answer `{ notEmulated: { reason } }`
+instead of an HTTP 400.
+
+## Run the conformance cases against an emulator
+
+Run a service's cases with `runConformance`, giving each case fresh connector ports over a fresh
+emulator. The runner builds `layer(testCase)` once per case in its own scope, so a scoped layer
+opens and closes an emulator per case.
+
+Fragment (a Vitest test, with the imports of the runnable example plus these):
+
+```ts
+import {
+  GithubConformanceConfig,
+  githubConformanceCases,
+  githubConformanceFixtureSeeds
+} from '@yolk-sdk/connectors/github/conformance'
+import {
+  conformanceReportFailed,
+  formatConformanceReport,
+  runConformance
+} from '@yolk-sdk/conformance/runner'
+import { type GithubEmulatorOptions } from '@yolk-sdk/emulators/github'
+
+const githubCasePorts = (options: GithubEmulatorOptions = {}) =>
+  Layer.unwrap(
+    Effect.acquireRelease(
+      Effect.promise(() => makeGithubEmulator(options)),
+      github => Effect.promise(() => github.close())
+    ).pipe(
+      Effect.map(github =>
+        Layer.mergeAll(
+          connectorHttpClientsFromEffectHttpClientLayer.pipe(
+            Layer.provide(
+              InProcessHttpClient.layer([EmulatorRoute.handler(githubEmulatorOrigin, github.fetch)])
+            )
+          ),
+          staticCredentialResolverLayer(
+            BearerTokenCredential.make({ token: 'synthetic-github-test-token' })
+          ),
+          Layer.succeed(GithubConformanceConfig, githubConformanceFixtureSeeds)
+        )
+      )
+    )
+  )
+
+it('passes every GitHub case against the emulator', async () => {
+  const report = await Effect.runPromise(
+    runConformance(githubConformanceCases, {
+      target: { kind: 'in-process' },
+      layer: () => githubCasePorts()
+    })
+  )
+
+  expect(conformanceReportFailed(report), formatConformanceReport(report)).toBe(false)
+})
+
+it('fails exactly the drilled case', async () => {
+  const report = await Effect.runPromise(
+    runConformance(githubConformanceCases, {
+      target: { kind: 'in-process' },
+      layer: () => githubCasePorts({ drills: { contentUnfolded: true } })
+    })
+  )
+
+  expect(report.results.filter(result => result.status === 'failed').map(r => r.id)).toEqual([
+    'github.contents.base64-file'
+  ])
+})
+```
+
+Every case runs on `in-process` and `emulated` targets, write cases included, because nothing real
+happens there. Each result carries an `unverified-case` warning until a live run observes the
+claim. Use `{ kind: 'emulated' }` with the loopback layer for the socket path.
+
+A failure against an emulator means that the SDK code, the case, and the emulator's copy of the
+fixtures no longer agree. Common causes are an SDK upgrade whose requests changed shape (look for
+`notEmulated` in the ledger), a seed that does not match the case's config, or an intended drill.
+It says nothing new about the live provider. A failure against a live practice account is the
+signal that the provider changed.
+
+## What emulators do not do
+
+- **No invented answers.** The fixture-only emulators refuse anything a fixture does not record,
+  including empty pages, empty search results, and listings no fixture shows. They never guess a
+  status or an error envelope.
+- **No leftover lookups.** The read-only `find*ConformanceLeftovers` helpers list items no fixture
+  records, so they fail not-emulated against an emulator. The repository runners report that as a
+  lookup-failed `WARN`, not as leftovers.
+- **No delivery.** Sends such as the Telegram message or the Gmail practice send are recorded in
+  the emulator's state and never delivered anywhere.
+- **No production use.** The stateful emulators and the loopback server are Node only, and the
+  router refuses to build when `NODE_ENV` is `production`.
+
+## Credentials
+
+- Use synthetic credentials only, never a real token. The GitHub, Google, LinkedIn search, and MCP
+  emulators recognise a bearer only in the RFC 6750 `b64token` form: at least 8 characters, a
+  first character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, or `u`, and at least one
+  character outside `[0-9.eE+-]`. `synthetic-github-test-token` qualifies; a UUID or an all-hex key
+  does not. Such a bearer also satisfies the other bearer emulators; Telegram takes a synthetic
+  `<digits>:<secret>` bot token instead.
+- Send the credential only where the provider expects it, such as `Authorization: Bearer <token>`.
+  The strict emulators refuse a request that repeats it in the path, query, headers, or body.
+  Emulators never store, ledger, or echo it.
+- The `/_emulate/*` control plane is the host's own trusted surface. Seed and fault data you give
+  it is stored and returned as given, so never put a secret in a seed, fault body, or header.
+
+## Live runs
+
+Emulators and replay cover everyday tests. Run the cases live only by hand, against practice
+accounts you own, with the account owner's approval; never in CI.
+
+- In your host, run the same cases with your own `HttpClient` and
+  `target: { kind: 'live', account }`. Live targets skip write cases unless you pass
+  `allowWrites: 'reversible'`, and run a `write-irreversible` case only when its exact id is in
+  `allowIrreversible`. See the [runner safety policy](../api-reference/conformance#runner).
+- In the Yolk repository, the `pnpm conformance:<id>` runners (for example
+  `pnpm conformance:github`) dry-run by default: they print the plan without a network call or a
+  credential read. `--live --owner-approved --account <label>` is refused whenever `CI` is set.
+  `--record` stages recordings in a gitignored directory; promotion is a manual scrub that keeps
+  committed fixtures synthetic.
+
+Each service's runner flags, seeds, and cleanup rules are on its page under
+[Connectors](../connectors) and in [Conformance APIs](../api-reference/conformance).
+
+## Available emulators
+
+Import an explicit subpath; there is no root export.
+
+| Subpath                               | Stands in for                                    | Used with                                              | Reference                                                              |
+| ------------------------------------- | ------------------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`          | Routing only                                     | Any Effect `HttpClient` code                           | [Router](../api-reference/emulators#router)                            |
+| `@yolk-sdk/emulators/node`            | Loopback server                                  | `EmulatedHttpClient`                                   | [Node server](../api-reference/emulators#node-server)                  |
+| `@yolk-sdk/emulators/gateway`         | Vercel AI Gateway chat completions               | `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | [Gateway](../api-reference/emulators#gateway-emulator)                 |
+| `@yolk-sdk/emulators/openai`          | OpenAI Chat Completions                          | `@yolk-sdk/agent/providers/openai/provider`            | [OpenAI](../api-reference/emulators#openai-emulator)                   |
+| `@yolk-sdk/emulators/anthropic`       | Anthropic Messages and Claude usage              | `@yolk-sdk/agent/providers/anthropic/claude-provider`  | [Anthropic](../api-reference/emulators#anthropic-emulator)             |
+| `@yolk-sdk/emulators/codex`           | ChatGPT Codex Responses and usage                | `@yolk-sdk/agent/providers/openai/codex-provider`      | [Responses](../api-reference/emulators#responses-emulators)            |
+| `@yolk-sdk/emulators/xai`             | xAI Grok CLI proxy Responses and billing         | `@yolk-sdk/agent/providers/xai/grok-provider`          | [Responses](../api-reference/emulators#responses-emulators)            |
+| `@yolk-sdk/emulators/opencode`        | OpenCode Go chat, Messages, Responses, and usage | `@yolk-sdk/agent/providers/opencode/go-provider`       | [OpenCode Go](../api-reference/emulators#opencode-go-emulator)         |
+| `@yolk-sdk/emulators/email`           | `EmailClient` port (fake backend)                | `@yolk-sdk/connectors/email`                           | [Email](../api-reference/emulators#email-emulator)                     |
+| `@yolk-sdk/emulators/r2`              | `R2Presigner` and `R2ObjectClient` ports         | `@yolk-sdk/connectors/r2-storage`                      | [R2](../api-reference/emulators#r2-emulator)                           |
+| `@yolk-sdk/emulators/fortnox`         | Fortnox `/3` API                                 | `@yolk-sdk/connectors/fortnox`                         | [Fortnox](../api-reference/emulators#fortnox-emulator)                 |
+| `@yolk-sdk/emulators/microsoft`       | Microsoft Graph (Outlook, OneDrive, calendar)    | `@yolk-sdk/connectors/microsoft`                       | [Microsoft](../api-reference/emulators#microsoft-graph-emulator)       |
+| `@yolk-sdk/emulators/dropbox`         | Dropbox `/2` RPC and upload                      | `@yolk-sdk/connectors/dropbox`                         | [Dropbox](../api-reference/emulators#dropbox-emulator)                 |
+| `@yolk-sdk/emulators/notion`          | Notion `/v1`                                     | `@yolk-sdk/connectors/notion`                          | [Notion](../api-reference/emulators#notion-emulator)                   |
+| `@yolk-sdk/emulators/todoist`         | Todoist API v1                                   | `@yolk-sdk/connectors/todoist`                         | [Todoist](../api-reference/emulators#todoist-emulator)                 |
+| `@yolk-sdk/emulators/telegram`        | Telegram Bot API                                 | `@yolk-sdk/connectors/telegram`                        | [Telegram](../api-reference/emulators#telegram-emulator)               |
+| `@yolk-sdk/emulators/github`          | GitHub REST                                      | `@yolk-sdk/connectors/github`                          | [GitHub](../api-reference/emulators#github-emulator)                   |
+| `@yolk-sdk/emulators/google`          | Gmail, Calendar, and Drive                       | `@yolk-sdk/connectors/google`                          | [Google](../api-reference/emulators#google-emulator)                   |
+| `@yolk-sdk/emulators/linkedin-search` | Exa and Enrich Layer                             | `@yolk-sdk/connectors/linkedin-search`                 | [LinkedIn search](../api-reference/emulators#linkedin-search-emulator) |
+| `@yolk-sdk/emulators/mcp`             | Two synthetic MCP servers                        | `@yolk-sdk/mcp/client`                                 | [MCP](../api-reference/emulators#mcp-emulator)                         |
