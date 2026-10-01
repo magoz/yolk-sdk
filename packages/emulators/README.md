@@ -17,11 +17,11 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim, the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
-conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, and Google emulators are
-stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion `/v1` routes, the
-Todoist API v1 routes, the Telegram Bot API routes, the GitHub REST routes, and the Gmail, Calendar,
-and Drive routes their conformance cases use: they answer only what the fixtures show and refuse
-everything else with a 400 not-emulated.
+conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, Google, and LinkedIn search
+emulators are stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion
+`/v1` routes, the Todoist API v1 routes, the Telegram Bot API routes, the GitHub REST routes, the
+Gmail, Calendar, and Drive routes, and the Exa and Enrich Layer routes their conformance cases use:
+they answer only what the fixtures show and refuse everything else with a 400 not-emulated.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -35,26 +35,27 @@ pnpm add -D @yolk-sdk/emulators@canary effect@4.0.0-rc.115
 
 There is no root export. Import an explicit subpath:
 
-| Subpath                         | Purpose                                                                                                     |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/emulators/router`    | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` (Effect; no Node builtins)         |
-| `@yolk-sdk/emulators/gateway`   | `makeGatewayEmulator`, `gatewayEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)       |
-| `@yolk-sdk/emulators/openai`    | `makeOpenAiEmulator`, `openAiEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)         |
-| `@yolk-sdk/emulators/anthropic` | `makeAnthropicEmulator`, `anthropicEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)   |
-| `@yolk-sdk/emulators/codex`     | `makeCodexEmulator`, `codexEmulatorRoutes`, fault and scripted-turn schemas (ChatGPT Codex Responses)       |
-| `@yolk-sdk/emulators/xai`       | `makeXAiGrokEmulator`, `xAiGrokEmulatorRoutes`, fault and scripted-turn schemas (Grok CLI proxy Responses)  |
-| `@yolk-sdk/emulators/opencode`  | `makeOpenCodeGoEmulator`, `openCodeGoEmulatorRoutes` (OpenCode Go chat, Messages, Responses, and usage)     |
-| `@yolk-sdk/emulators/email`     | `makeEmailEmulator`, `emailEmulatorRoutes`, seed and fault schemas (plain-JSON `EmailClient` backend)       |
-| `@yolk-sdk/emulators/r2`        | `makeR2Emulator`, `r2EmulatorRoutes`, seed and fault schemas (plain-JSON R2 port backend)                   |
-| `@yolk-sdk/emulators/node`      | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1` |
-| `@yolk-sdk/emulators/fortnox`   | `makeFortnoxEmulator`, `fortnoxEmulatorRoutes`, `fortnoxEmulatorQuirks`, seed and fault schemas (Node only) |
-| `@yolk-sdk/emulators/microsoft` | `makeMicrosoftEmulator`, `microsoftEmulatorRoutes`, seed and fault schemas (Node only)                      |
-| `@yolk-sdk/emulators/dropbox`   | `makeDropboxEmulator`, `dropboxEmulatorRoutes`, seed and fault schemas (Node only)                          |
-| `@yolk-sdk/emulators/notion`    | `makeNotionEmulator`, `notionEmulatorRoutes`, seed and fault schemas (Node only)                            |
-| `@yolk-sdk/emulators/todoist`   | `makeTodoistEmulator`, `todoistEmulatorRoutes`, seed and fault schemas (Node only)                          |
-| `@yolk-sdk/emulators/telegram`  | `makeTelegramEmulator`, `telegramEmulatorRoutes`, seed and fault schemas (Node only)                        |
-| `@yolk-sdk/emulators/github`    | `makeGithubEmulator`, `githubEmulatorRoutes`, seed and fault schemas (Node only)                            |
-| `@yolk-sdk/emulators/google`    | `makeGoogleEmulator`, `googleEmulatorRoutes`, seed and fault schemas (Gmail, Calendar, Drive; Node only)    |
+| Subpath                               | Purpose                                                                                                             |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`          | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` (Effect; no Node builtins)                 |
+| `@yolk-sdk/emulators/gateway`         | `makeGatewayEmulator`, `gatewayEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)               |
+| `@yolk-sdk/emulators/openai`          | `makeOpenAiEmulator`, `openAiEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)                 |
+| `@yolk-sdk/emulators/anthropic`       | `makeAnthropicEmulator`, `anthropicEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)           |
+| `@yolk-sdk/emulators/codex`           | `makeCodexEmulator`, `codexEmulatorRoutes`, fault and scripted-turn schemas (ChatGPT Codex Responses)               |
+| `@yolk-sdk/emulators/xai`             | `makeXAiGrokEmulator`, `xAiGrokEmulatorRoutes`, fault and scripted-turn schemas (Grok CLI proxy Responses)          |
+| `@yolk-sdk/emulators/opencode`        | `makeOpenCodeGoEmulator`, `openCodeGoEmulatorRoutes` (OpenCode Go chat, Messages, Responses, and usage)             |
+| `@yolk-sdk/emulators/email`           | `makeEmailEmulator`, `emailEmulatorRoutes`, seed and fault schemas (plain-JSON `EmailClient` backend)               |
+| `@yolk-sdk/emulators/r2`              | `makeR2Emulator`, `r2EmulatorRoutes`, seed and fault schemas (plain-JSON R2 port backend)                           |
+| `@yolk-sdk/emulators/node`            | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1`         |
+| `@yolk-sdk/emulators/fortnox`         | `makeFortnoxEmulator`, `fortnoxEmulatorRoutes`, `fortnoxEmulatorQuirks`, seed and fault schemas (Node only)         |
+| `@yolk-sdk/emulators/microsoft`       | `makeMicrosoftEmulator`, `microsoftEmulatorRoutes`, seed and fault schemas (Node only)                              |
+| `@yolk-sdk/emulators/dropbox`         | `makeDropboxEmulator`, `dropboxEmulatorRoutes`, seed and fault schemas (Node only)                                  |
+| `@yolk-sdk/emulators/notion`          | `makeNotionEmulator`, `notionEmulatorRoutes`, seed and fault schemas (Node only)                                    |
+| `@yolk-sdk/emulators/todoist`         | `makeTodoistEmulator`, `todoistEmulatorRoutes`, seed and fault schemas (Node only)                                  |
+| `@yolk-sdk/emulators/telegram`        | `makeTelegramEmulator`, `telegramEmulatorRoutes`, seed and fault schemas (Node only)                                |
+| `@yolk-sdk/emulators/github`          | `makeGithubEmulator`, `githubEmulatorRoutes`, seed and fault schemas (Node only)                                    |
+| `@yolk-sdk/emulators/google`          | `makeGoogleEmulator`, `googleEmulatorRoutes`, seed and fault schemas (Gmail, Calendar, Drive; Node only)            |
+| `@yolk-sdk/emulators/linkedin-search` | `makeLinkedInSearchEmulator`, `linkedInSearchEmulatorRoutes`, seed and fault schemas (Exa, Enrich Layer; Node only) |
 
 ## Routing
 
@@ -1750,21 +1751,152 @@ repeatedEventDeleteConflict, drivePageRepeats, getFileWithoutParents, listInclud
 (booleans) each make the emulator disagree with exactly one Google case, only to prove that case
 catches it.
 
+## LinkedIn search emulator
+
+> **Node only.** `@yolk-sdk/emulators/linkedin-search` runs on the same pinned `@emulators/core`
+> runtime, loaded lazily by `makeLinkedInSearchEmulator`, so importing the subpath has no side
+> effects.
+
+`await makeLinkedInSearchEmulator(options?)` returns
+`{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has its own
+state; `await close()` when done. It emulates only the Exa and Enrich Layer routes the seven
+LinkedIn search conformance cases send, so the LinkedIn search connector actions and the cases run
+unchanged against it. Each route answers only on the origin its fixtures record: the Exa people
+search on `https://api.exa.ai` (`linkedInSearchEmulatorExaOrigin`), the Enrich Layer profile and
+email lookups on `https://enrichlayer.com` (`linkedInSearchEmulatorEnrichLayerOrigin`, under the
+connector's `/api/v2` base). `fetch` takes the origin from the request URL (in-process routing keeps
+it); behind a loopback rewrite, which loses it, serve `fetchOn(origin)` for each origin on its own
+server:
+
+```ts
+import {
+  linkedInSearchEmulatorEnrichLayerOrigin,
+  linkedInSearchEmulatorExaOrigin,
+  makeLinkedInSearchEmulator
+} from '@yolk-sdk/emulators/linkedin-search'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const linkedIn = await makeLinkedInSearchEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler(linkedInSearchEmulatorExaOrigin, linkedIn.fetch),
+  EmulatorRoute.handler(linkedInSearchEmulatorEnrichLayerOrigin, linkedIn.fetch)
+])
+// With serveFetchHandler: one server per origin, serving linkedIn.fetchOn(origin).
+// ...run the code under test, then:
+await linkedIn.close()
+```
+
+Routes (every request needs `Authorization: Bearer <key>`, a recognisable bearer; each provider
+takes its own key, and both are reads):
+
+| Route                       | Behavior                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| `POST /search`              | `{ query, category: "people", numResults, type: "auto", contents: { text: true } }`: `{ results }` |
+| `GET /api/v2/profile`       | `linkedin_profile_url`: a held profile, or the recorded 404 for a seeded absent profile            |
+| `GET /api/v2/profile/email` | `linkedin_profile_url`: `{ email }` of a held profile                                              |
+
+Every answer comes from a fixture, byte for byte, through the seed; the emulator mints nothing (no
+ids, cursors, or clock reads), so nothing is ever written and every case ends exactly at its seed:
+
+- **Searches.** A search answers only the results the state holds for exactly its query and
+  `numResults`. The default seed holds the three answers the fixtures record for the seeded query:
+  `numResults` 10 (the people-results case), and 3 and 2 (the control and the limited search of the
+  num-results-limit case, which answers its second result without `publishedDate`, as recorded).
+  Another query or `numResults` (the unauthorized probe with an accepted key, for example) is not
+  emulated; no fixture records an empty search.
+- **Profiles.** A profile lookup answers a held profile in the profile fixture's fields
+  (`public_identifier`, `full_name`, `headline`), and an absent profile (the seeded
+  `absentProfileUrl`) the recorded 404 body; an email lookup answers a held profile's recorded
+  `{ email }`. Any other profile URL, and the email of an absent profile, is not emulated.
+- **Rejected keys, per origin.** A key the seed marks as rejected on an origin answers that
+  origin's recorded 401 body (Exa's `{ requestId, error }`, Enrich Layer's
+  `{ code, description, name }`), for any request of the emulated shape on that origin. The default
+  seed rejects the synthetic invalid keys the two unauthorized cases send
+  (`yolk-conformance-invalid-exa-key` on Exa, `yolk-conformance-invalid-enrich-layer-key` on Enrich
+  Layer); a key rejected on one origin is accepted on the other. The error bodies are
+  `linkedInSearchEmulatorErrorBodies`.
+
+**Fail closed: the shared rule, and keys kept only as digests.** LinkedIn search follows the shared
+fail-closed rule of the stateful wrapper, exactly as the GitHub emulator states it above: a request
+is recognised only when its raw path is exactly an emulated route path under that route's method and
+any `Authorization` header is exactly `Bearer <key>` with a recognisable bearer (an RFC 6750
+`b64token` of at least 8 characters, starting with a character in `[G-Zg-z\-._~+/]` other than `n`,
+`r`, `t`, `u`, with at least one outside `[0-9.eE+-]`; a UUID-form key, which starts with a hex
+digit, is unrecognisable, so hand the emulator a synthetic key). Every other request is ledgered and
+answered with constant text only. A recognised request that repeats its bearer in the raw path, the
+query or any query key or value, the recorded `content-type` header, or the body, through any depth
+of percent-encoding or JSON escaping, is ledgered as the constant credential-repeat entry; any other
+has it scrubbed from its ledgered fields and every not-emulated message. The bearer is never stored
+or ledgered: through the wrapper's opt-in per-origin `bearerDigest`, routes see only SHA-256 of the
+origin, a space, and the key, which a plan compares with the digests of the seed's rejected keys for
+that origin. The state holds only those digests, so a key a request carries as its bearer, a
+rejected one included, never reaches the state, a snapshot, or `/_emulate/*` (a key sent as data
+elsewhere in a request is ledgered like any other text). Refusals never echo a request's own query
+or body keys. This guarding covers the emulated provider API calls only: `/_emulate/*` is the
+host's trusted control plane, and the seed and fault data a host gives it is stored and returned as
+given.
+
+- **Request-shape latitude (`/linkedin-search`, the only accepted deviations).** Any bearer value in
+  the RFC 6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
+  character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside
+  `[0-9.eE+-]`, that occurs nowhere else in the request (never stored or ledgered; only its
+  per-origin digest is compared, with the digests of the keys the seed marks as rejected on that
+  origin); extra request headers; JSON key order; `content-type` media-type parameters on the
+  search; any percent-encoding of the `linkedin_profile_url` value that decodes once to the same
+  profile URL; and, with a key the seed marks as rejected on the request's origin, any search
+  `query` (one trimmed line of at most 500 characters) with any integer `numResults` from 1 to 100,
+  and any profile URL of the form `https://<host>/in/<slug>`, each answered the origin's
+  recorded 401. `Authorization` must be exactly `Bearer <token>` (that spelling, one space).
+  Everything else (other body keys or values, a `category` other than `people`, a `type` other than
+  `auto`, `contents` other than `{ "text": true }`, a search the state holds no answer for (another
+  query, or a `numResults` no seeded search of that query records), a profile URL the state holds
+  neither as a profile nor as absent, an email lookup of an absent profile, any query parameter on
+  the search, other, missing, or repeated query parameters on a lookup, a query parameter name in
+  any but its plain form (such as `%6cinkedin_profile_url`), empty query components such as a bare
+  `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere in the
+  request) is not emulated.
+
+Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
+`notEmulated` in the ledger) and uses up no fault. A closed emulator answers 503; a route that
+throws answers an evidence-tagged 500 with `responseError` in the ledger.
+
+State and seeds: `searches` (`{ query, numResults, results }`, 1 to `numResults` results with the
+fixtures' optional `title`, `url`, `author`, `publishedDate`, and `text`), `profiles`
+(`{ url, publicIdentifier, fullName, headline, email? }`), `absentProfileUrls`, and the digests of
+the rejected keys (`exaRejectedKeyDigests`, `enrichLayerRejectedKeyDigests`). Pass
+`seed: { searches?, profiles?, absentProfileUrls?, exaRejectedKeys?, enrichLayerRejectedKeys? }`:
+each given list replaces the default seed's (the fixture entities); rejected keys are given as keys
+(recognisable bearer values) and kept only as their digests, and no seed error quotes one: every
+seed error is constant text, a category and a field path (`duplicate search at searches[1]`,
+`unexpected key at the seed root`). `reset()`, `seed(next)`, and `snapshot()` behave as in the
+Dropbox emulator.
+
+Faults and the control plane behave as in the Dropbox emulator (the ledger records only the
+`content-type` request header); the connector maps every non-2xx answer to its action's failure
+code, so a 429 fault reaches it as `linkedin_search_failed` (or `linkedin_profile_failed`,
+`linkedin_email_failed`) with status 429 and no `retryAfterMs`.
+
+**Drill knobs (tests only).** `drills: { defaultSearchWithoutText, numResultsIgnored,
+profileAnswersEmptyObject, emailAnswerOmitsEmail, exaUnauthorizedAs5xx,
+enrichLayerUnauthorizedAs2xx, absentProfileAs2xx }` (booleans) each make the emulator disagree with
+exactly one LinkedIn search case, only to prove that case catches it.
+
 ## Evidence
 
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
 `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
 `emailEmulatorRoutes`, `r2EmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`,
 `dropboxEmulatorRoutes`, `notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`,
-`githubEmulatorRoutes`, and `googleEmulatorRoutes` list every emulated route with `method`, `path`,
-`kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
-`observedAt`. Every response from an unverified route of a fetch-handler emulator carries
-`x-emulator-evidence: unverified`; the email and R2 emulators record evidence on each ledger entry
-instead, since their plain-JSON replies carry no header. The Gateway route is `verified`
-(`observedAt: '2026-09-30'`): its wire shapes are checked against the verified live recordings.
-Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, email, R2,
-Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, and Google) is unverified, like the
-synthetic fixtures it follows.
+`githubEmulatorRoutes`, `googleEmulatorRoutes`, and `linkedInSearchEmulatorRoutes` list every
+emulated route with `method`, `path`, `kind`, `write`, the conformance `caseIds` it follows,
+`evidence` (`verified` or `unverified`), and `observedAt`. Every response from an unverified route
+of a fetch-handler emulator carries `x-emulator-evidence: unverified`; the email and R2 emulators
+record evidence on each ledger entry instead, since their plain-JSON replies carry no header. The
+Gateway route is `verified` (`observedAt: '2026-09-30'`): its wire shapes are checked against the
+verified live recordings. Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage
+routes, email, R2, Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and
+LinkedIn search) is unverified, like the synthetic fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes
@@ -1780,14 +1912,13 @@ R2 emulator's one write route, `PORT R2ObjectClient.put`, is held in the same li
 owner-approved live run against a practice bucket, through a host `R2ObjectClient`
 implementation, verifies it.
 
-All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, and Google routes are
-currently `unverified` (no live recording yet), including four Fortnox, eleven Microsoft, five
-Dropbox, two Notion, five Todoist, one Telegram, six GitHub, and fifteen Google connector write
-routes. Until an
+All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and LinkedIn search
+routes are currently `unverified` (no live recording yet), including four Fortnox, eleven Microsoft,
+five Dropbox, two Notion, five Todoist, one Telegram, six GitHub, and fifteen Google connector write
+routes (the three LinkedIn search routes are reads, so none of them needs an entry). Until an
 owner-approved live run verifies them, the repository lists them in a visible, time-bounded
-allowlist (`scripts/emulator-evidence-pending.json`, which holds each
-entry's expiry date): the check reports them as PENDING warnings until that date and fails again
-after it.
+allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry date): the
+check reports them as PENDING warnings until that date and fails again after it.
 
 ## Node server
 

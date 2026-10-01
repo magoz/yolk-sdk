@@ -1,7 +1,7 @@
 /**
  * Shared wrapper of the fixture-only stateful connector emulators (internal; used by `/dropbox`,
- * `/notion`, `/github`, and `/google`, not by the earlier `/fortnox` and `/microsoft` emulators,
- * which keep their own).
+ * `/notion`, `/github`, `/google`, and `/linkedin-search`, not by the earlier `/fortnox` and
+ * `/microsoft` emulators, which keep their own).
  *
  * The emulator state lives in an `@emulators/core` custom runtime that the Node-only subpath
  * creates and hands in (this module imports no Node builtin and never imports the core); the
@@ -32,23 +32,23 @@
  * carries `x-emulator-evidence: unverified` when the route is unverified. Ledgered bodies and
  * query parameters have credential-named keys redacted.
  *
- * Fail-closed mode (opt-in, `failClosed`; used by `/github` and `/google`): every route parameter
- * has a raw pattern (matched in full), and a request is recognised only when its raw path is
- * exactly an emulated route shape under that route's method and any `Authorization` header is
- * exactly `Bearer <at least 8 non-space characters>` (a recognisable bearer, below). Every other
- * request is ledgered and answered with constant text only (`/<unrecognised>`, a standard method or
- * `<other>`, an empty query, no body, a constant reason). A recognised bearer must match the RFC
- * 6750 `b64token` syntax exactly (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8 characters), start with a
- * character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, and hold at least one character
- * outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google token form does: `ghp_…`,
- * `github_pat_…`, `gho_…`, `ya29.…`). So no number's text can contain it; it holds no escape
- * introducer (`%`, `\`, `"`), so no escape starts inside it; and its first character is no hex
- * digit and no JSON escape letter, so no stray `%`, `\`, or partial escape to its left can complete
- * with it, and its characters always decode in place. An `Authorization` header with any other
- * value is unrecognisable. A recognised request that repeats the bearer value in its raw path, any
- * path segment, the raw query or any query key or value, any recorded header, or its body is
- * refused and ledgered with constant text only: a standard method, the path `/<unrecognised>`, its
- * route template, an empty query, no headers or body, and a constant reason
+ * Fail-closed mode (opt-in, `failClosed`; used by `/github`, `/google`, and `/linkedin-search`):
+ * every route parameter has a raw pattern (matched in full), and a request is recognised only when
+ * its raw path is exactly an emulated route shape under that route's method and any `Authorization`
+ * header is exactly `Bearer <at least 8 non-space characters>` (a recognisable bearer, below).
+ * Every other request is ledgered and answered with constant text only (`/<unrecognised>`, a
+ * standard method or `<other>`, an empty query, no body, a constant reason). A recognised bearer
+ * must match the RFC 6750 `b64token` syntax exactly (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8
+ * characters), start with a character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, and hold
+ * at least one character outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google
+ * token form does: `ghp_…`, `github_pat_…`, `gho_…`, `ya29.…`). So no number's text can contain it;
+ * it holds no escape introducer (`%`, `\`, `"`), so no escape starts inside it; and its first
+ * character is no hex digit and no JSON escape letter, so no stray `%`, `\`, or partial escape to
+ * its left can complete with it, and its characters always decode in place. An `Authorization`
+ * header with any other value is unrecognisable. A recognised request that repeats the bearer value
+ * in its raw path, any path segment, the raw query or any query key or value, any recorded header,
+ * or its body is refused and ledgered with constant text only: a standard method, the path
+ * `/<unrecognised>`, its route template, an empty query, no headers or body, and a constant reason
  * (`the query repeats the credential`, for example). Each part is checked through the closure of
  * two total, lexical transforms that cannot fail: a tolerant percent-decode (every `%XX` below
  * `%80` becomes its ASCII character; any other `%` sequence is left as it is) and a tolerant
@@ -70,18 +70,27 @@
  * parsed with credential-named keys redacted at any depth, or as `<redacted>` when they do not
  * parse, whatever the header's declared format. Empty query components (a bare `?`, a stray `&`)
  * are refused. Routes check their own query and body keys with `exactQuery` and `exactBodyKeys`,
- * whose reasons never echo a request's own key. A template parameter written `{name+}` spans one or
- * more path segments (each decoded once, none may decode to a `/`). The credential helpers live in
- * `src/stateful-secrets.ts`. A route may also name decoded views of its raw body (`decodedViews`,
- * opt-in; `/google` gives the base64url-decoded MIME of a Gmail draft's `message.raw`, which the
- * provider's own wire format wraps): in fail-closed mode each view goes through the same fixpoint
- * check as the raw body, before anything is recorded, a fault is decided, or anything is committed,
- * and a hit is the same constant credential-repeat entry. A view may throw to refuse a body it
- * cannot check completely: that request is ledgered as the same constant entry, as a repeat when
- * the `DecodedViewRefusal` it threw carries cleanly decoded text holding the bearer, else with the
- * refusal's reason when the route declares it in `viewRefusalReasons` (a constant the route owns,
- * scrubbed defensively), else with `the request body cannot be checked for the credential`. A route
- * without `decodedViews` is checked exactly as before.
+ * whose reasons never echo a request's own key (`exactQuery`'s opt-in `rawNames`, used by
+ * `/linkedin-search`, also refuses a parameter name in any but its plain form, comparing the raw
+ * names the wrapper hands routes as `rawQuery`). A template parameter written `{name+}` spans one
+ * or more path segments (each decoded once, none may decode to a `/`). The credential helpers live
+ * in `src/stateful-secrets.ts`. A route may also name decoded views of its raw body
+ * (`decodedViews`, opt-in; `/google` gives the base64url-decoded MIME of a Gmail draft's
+ * `message.raw`, which the provider's own wire format wraps): in fail-closed mode each view goes
+ * through the same fixpoint check as the raw body, before anything is recorded, a fault is decided,
+ * or anything is committed, and a hit is the same constant credential-repeat entry. A view may
+ * throw to refuse a body it cannot check completely: that request is ledgered as the same constant
+ * entry, as a repeat when the `DecodedViewRefusal` it threw carries cleanly decoded text holding
+ * the bearer, else with the refusal's reason when the route declares it in `viewRefusalReasons` (a
+ * constant the route owns, scrubbed defensively), else with
+ * `the request body cannot be checked for the credential`. A route without `decodedViews` is
+ * checked exactly as before. An emulator may also opt in to a per-origin bearer digest
+ * (`bearerDigest`, fail-closed mode only; `/linkedin-search` uses it): routes then see a one-way
+ * digest of the bearer for the origin the request arrived on (`EmulatedRequest.bearerDigest`),
+ * never the bearer, so a seed can mark a key as rejected on one origin by its digest, and the
+ * bearer still never reaches the state, the ledger, or `/_emulate/*`. A digest that throws or
+ * repeats the bearer answers the 500 emulator error (`responseError`). Without it, routes see no
+ * digest, as before.
  *
  * @experimental
  */
@@ -246,12 +255,22 @@ export type EmulatedRequest = {
   /** Path parameters, percent-decoded once. */
   readonly params: Readonly<Record<string, string>>
   readonly query: URLSearchParams
+  /**
+   * The raw query (after `?`, before `#`, never decoded; `''` without one), as the wrapper saw it.
+   * Absent on a request built elsewhere (then `exactQuery`'s `rawNames` refuses any parameter).
+   */
+  readonly rawQuery?: string | undefined
   /** A non-credential request header (credential headers always read as `undefined`). */
   readonly header: (name: string) => string | undefined
   /** Parsed JSON body (`json` routes). */
   readonly json: Schema.Json | undefined
   /** Raw body (`bytes` routes). */
   readonly bytes: Uint8Array | undefined
+  /**
+   * Fail-closed mode with `bearerDigest` only: the digest of the recognised bearer for the origin
+   * the request arrived on (never the bearer itself); `undefined` otherwise.
+   */
+  readonly bearerDigest?: string | undefined
 }
 
 export type RunContext<Env> = {
@@ -539,15 +558,31 @@ export const exactBodyKeys = (
     : notEmulated(`${label} without '${missing}' is not emulated`)
 }
 
+/** Options of `exactQuery`. */
+export type ExactQueryOptions = {
+  /**
+   * Opt-in: every raw parameter name (before `URLSearchParams` decodes it) must be written exactly
+   * as the route names it, so a percent-encoded or `+`-spaced spelling of an accepted name is not
+   * emulated. Omitted: names are compared decoded, as before.
+   */
+  readonly rawNames?: boolean
+}
+
+/** The raw parameter names of a raw query, in order (`[]` for an empty query). */
+const rawQueryNames = (raw: string): ReadonlyArray<string> =>
+  raw === '' ? [] : raw.split('&').map(component => component.split('=', 1)[0] ?? '')
+
 /**
  * Constant-text query check (for fail-closed emulators): exactly the `required` query keys plus
  * any of the `optional` ones, each once, as a record of their values; or not emulated. A reason
- * never echoes a request's own key; it names only a missing key from the route's own list.
+ * never echoes a request's own key; it names only a missing key from the route's own list. With
+ * `rawNames`, every raw parameter name must also be the plain name it decodes to.
  */
 export const exactQuery = (
   request: EmulatedRequest,
   required: ReadonlyArray<string>,
-  optional: ReadonlyArray<string> = []
+  optional: ReadonlyArray<string> = [],
+  options: ExactQueryOptions = {}
 ): Readonly<Record<string, string>> | NotEmulated => {
   const keys = [...request.query.keys()]
 
@@ -557,6 +592,14 @@ export const exactQuery = (
 
   if (keys.some(key => !required.includes(key) && !optional.includes(key))) {
     return notEmulated('a query parameter this route does not take is not emulated')
+  }
+
+  if (options.rawNames === true) {
+    const raw = rawQueryNames(request.rawQuery ?? '')
+
+    if (raw.length !== keys.length || raw.some((name, index) => name !== keys[index])) {
+      return notEmulated('a query parameter name in any but its plain form is not emulated')
+    }
   }
 
   const missing = required.find(key => !keys.includes(key))
@@ -628,6 +671,18 @@ export type StatefulEmulatorConfig<State, Env> = {
    * parameter must have a raw pattern (checked when the emulator is built).
    */
   readonly failClosed?: StatefulFailClosed
+  /**
+   * Opt-in, fail-closed mode only (checked when the emulator is built): a one-way digest of a
+   * recognised bearer for the origin the request arrived on, handed to routes as
+   * `EmulatedRequest.bearerDigest`, never the bearer itself. A route compares it with digests its
+   * state holds (for example of the keys a seed marks as rejected on one origin), so a credential
+   * can change an answer without the bearer reaching the state, the ledger, or `/_emulate/*`.
+   * Taking the origin makes the digest per origin: one key gives different digests on two origins.
+   * A digest that throws or repeats the bearer (through the closure) answers the 500 emulator
+   * error before the route's shape check (no fault used, nothing written). Omitted: routes see no
+   * digest, as before.
+   */
+  readonly bearerDigest?: (bearer: string, origin: string) => string
   /** Clear runtime data (cursors) on reset and seed. */
   readonly clearRuntime: () => void
   /** Extra `/_emulate/state` fields (runtime data). */
@@ -916,6 +971,10 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     throw new Error(`the ledger never records the credential header ${credentialHeader.name}`)
   }
 
+  if (config.bearerDigest !== undefined && config.failClosed === undefined) {
+    throw new Error('bearerDigest needs fail-closed mode (failClosed)')
+  }
+
   if (config.failClosed !== undefined) {
     for (const route of config.routes) {
       const missing = unpatternedParams(route)
@@ -1135,7 +1194,8 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     url: URL,
     entry: MutableLedgerEntry,
     matched: MatchedRoute<State, Env>,
-    secrets: ReadonlyArray<string>
+    secrets: ReadonlyArray<string>,
+    arrivedOn: string
   ): Promise<Response> => {
     const header = (name: string): string | undefined =>
       isCredentialHeaderName(name) ? undefined : (request.headers.get(name) ?? undefined)
@@ -1203,15 +1263,38 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       }
     }
 
+    // Fail-closed mode only (checked at build): the per-origin digest of the bearer, never the
+    // bearer. A digest that cannot be made, or that repeats the bearer, is a handler failure.
+    let bearerDigest: string | undefined
+    const [bearer] = secrets
+
+    if (config.bearerDigest !== undefined && bearer !== undefined) {
+      const digest = Result.try(() => config.bearerDigest?.(bearer, arrivedOn))
+
+      if (
+        Result.isFailure(digest) ||
+        !Predicate.isString(digest.success) ||
+        textRepeatsSecret(digest.success, secrets)
+      ) {
+        entry.responseError = 'the bearer digest failed'
+
+        return emulatorError(500, 'the emulator could not build the response')
+      }
+
+      bearerDigest = digest.success
+    }
+
     const admitted = matched.route.admit(
       {
         method: request.method.toUpperCase(),
         path: url.pathname,
         params: matched.params,
         query: url.searchParams,
+        rawQuery: rawQuery(request.url) ?? '',
         header,
         json,
-        bytes
+        bytes,
+        bearerDigest
       },
       config.env
     )
@@ -1380,7 +1463,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
     // Error recovery still answers through the route: the fallback 500 is evidence-tagged and
     // the ledger records the status actually sent.
-    const response = await routed(request, url, entry, matched, secrets).catch(() => {
+    const response = await routed(request, url, entry, matched, secrets, arrivedOn).catch(() => {
       entry.responseError = 'the emulator could not build or produce the response'
 
       return emulatorError(500, 'the emulator could not build the response')

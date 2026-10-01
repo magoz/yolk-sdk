@@ -4,9 +4,10 @@
  * no `g` or `y` flag), the fail-closed mode (constant-text ledger entries for unrecognised
  * requests and Authorization headers, every parameter patterned at build, the bearer guarded as a
  * secret in queries, recorded headers, bodies, a route's decoded body views, and plan-time
- * reasons), and that an emulator without `failClosed` keeps the earlier behaviour (the Dropbox and
- * Notion suites cover it fully).
+ * reasons), the opt-in per-origin bearer digest (`bearerDigest`), and that an emulator without
+ * `failClosed` keeps the earlier behaviour (the Dropbox and Notion suites cover it fully).
  */
+import { createHash } from 'node:crypto'
 import { Predicate, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import type * as Schema from 'effect/Schema'
@@ -92,8 +93,13 @@ const echoPlan = statefulRoute<State, undefined, string>(
   (_state, joined) => notEmulated(`the plan saw ${joined}`)
 )
 
-const build = (routes: ReadonlyArray<StatefulRoute<State, undefined>>, failClosed: boolean) => {
+const build = (
+  routes: ReadonlyArray<StatefulRoute<State, undefined>>,
+  failClosed: boolean,
+  extra: Partial<StatefulEmulatorConfig<State, undefined>> = {}
+) => {
   const base: StatefulEmulatorConfig<State, undefined> = {
+    ...extra,
     routes,
     env: undefined,
     initial: { writes: 0 },
@@ -316,6 +322,117 @@ describe('fail-closed mode', () => {
     const answered = await api.fetch(get('/files/a/b', { authorization }))
 
     expect(await answered.text()).toBe('a/b')
+  })
+})
+
+/** A route answering the digest it sees (or `none`), and whether the bearer reached it. */
+const digestEcho = statefulRoute<State, undefined, string>(
+  {
+    method: 'GET',
+    path: '/digest',
+    kind: 'connector',
+    write: false,
+    caseIds: ['synthetic.case'],
+    evidence: 'unverified'
+  },
+  'none',
+  request => request.bearerDigest ?? 'none',
+  (_state, seen) => () => new Response(seen)
+)
+
+/** A real one-way digest: SHA-256 (hex) of the origin, a space, and the bearer. */
+const sha256Digest = (bearer: string, origin: string) =>
+  createHash('sha256').update(`${origin} ${bearer}`).digest('hex')
+
+describe('fail-closed mode: the opt-in per-origin bearer digest', () => {
+  const secret = 'synthetic-wrapper-secret'
+  const authorization = `Bearer ${secret}`
+
+  it('refuses to build without fail-closed mode', async () => {
+    await expect(build([digestEcho], false, { bearerDigest: sha256Digest })).rejects.toThrow(
+      'bearerDigest needs fail-closed mode'
+    )
+  })
+
+  it('routes see the digest for the arrival origin, never the bearer', async () => {
+    const api = await build([digestEcho], true, { bearerDigest: sha256Digest })
+
+    const direct = await api.fetch(get('/digest', { authorization }))
+
+    const rewritten = await api.fetchOn('https://other.example.test')(
+      get('/digest', { authorization })
+    )
+
+    const texts = [await direct.text(), await rewritten.text()]
+
+    // SHA-256 of `<origin> synthetic-wrapper-secret`, precomputed: one per origin.
+    expect(texts).toEqual([
+      '0bc47171540cb5c4125257df87cf22e75d70e3cf00d717e79d1931e0d4dc5396',
+      'ba9cbba97cefa1e9dded86fd3470f13e6a1f4f9fa4db10bc18746991601c1f9a'
+    ])
+
+    const controlReads = await Promise.all(
+      ['ledger', 'state', 'coverage', 'faults'].map(route =>
+        api
+          .fetch(new Request(`https://api.example.test/_emulate/${route}`))
+          .then(response => response.text())
+      )
+    )
+
+    const seen = [
+      ...texts,
+      JSON.stringify(api.ledger.entries()),
+      JSON.stringify(api.snapshot()),
+      ...controlReads
+    ].join('\n')
+
+    expect(seen).not.toContain(secret)
+    expect(seen).not.toContain('wrapper-secret')
+  })
+
+  it('without the option, routes see no digest (the earlier behaviour)', async () => {
+    const api = await build([digestEcho], true)
+
+    expect(await (await api.fetch(get('/digest', { authorization }))).text()).toBe('none')
+  })
+
+  it.each([
+    [
+      'a digest that throws',
+      () => {
+        throw new Error(`synthetic digest failure ${secret}`)
+      }
+    ],
+    ['a digest that repeats the bearer', (bearer: string) => `digest-of-${bearer}`],
+    // A host callback typed loosely (untyped JavaScript, say) may answer a non-string.
+    ['a digest that is no string', (): string => JSON.parse('42')],
+    [
+      'a digest that repeats the bearer JSON-escaped',
+      (bearer: string) => `digest-of-${bearer.replace('s', '\\u0073')}`
+    ]
+  ] as const)('%s answers the 500 emulator error, no fault used', async (_label, bearerDigest) => {
+    const api = await build([digestEcho, write], true, { bearerDigest })
+
+    api.faults.add({ kind: 'status', status: 503, count: 1 })
+
+    const failed = await api.fetch(get('/digest', { authorization }))
+    const text = await failed.text()
+
+    expect(failed.status).toBe(500)
+    expect(JSON.parse(text)).toEqual({
+      error: { type: 'emulator_error', message: 'the emulator could not build the response' }
+    })
+    expect(api.ledger.entries().at(-1)).toMatchObject({
+      path: '/digest',
+      status: 500,
+      responseError: 'the bearer digest failed'
+    })
+    expect(api.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
+    expect(api.snapshot()).toEqual({ writes: 0 })
+    expect([text, JSON.stringify(api.ledger.entries())].join('\n')).not.toContain(secret)
+
+    // A request without a bearer never computes a digest: refused by the shape as before.
+    expect((await api.fetch(get('/digest'))).status).toBe(400)
   })
 })
 
@@ -958,6 +1075,66 @@ describe('constant-text shape checks (exactBodyKeys, exactQuery)', () => {
     expect(reasonOf(exactQuery(request(''), ['a']))).toBe(
       'requests without query parameter a are not emulated on this route'
     )
+  })
+  it('exactQuery with rawNames compares every raw parameter name with its plain name', () => {
+    const raw = (query: string): EmulatedRequest => ({ ...request(query), rawQuery: query })
+    const plain = 'the_name=https%3A%2F%2Fx.example.test%2Fa'
+    const encoded = 'a query parameter name in any but its plain form is not emulated'
+
+    // Values may be encoded; only names are compared raw.
+    expect(exactQuery(raw(plain), ['the_name'], [], { rawNames: true })).toEqual({
+      the_name: 'https://x.example.test/a'
+    })
+    expect(exactQuery(raw(''), [], ['the_name'], { rawNames: true })).toEqual({})
+
+    for (const name of ['%74he_name', 'the%5Fname', 'the_nam%65', 'the_name%20', 'the+name']) {
+      const query = plain.replace('the_name', name)
+
+      // Without the option the decoded name is accepted (where it decodes to the route's name).
+      if (!name.includes('+') && !name.endsWith('%20')) {
+        expect(exactQuery(raw(query), ['the_name'])).toEqual({
+          the_name: 'https://x.example.test/a'
+        })
+      }
+
+      expect(reasonOf(exactQuery(raw(query), ['the_name'], [], { rawNames: true })), name).toMatch(
+        /not emulated/
+      )
+    }
+
+    expect(
+      reasonOf(
+        exactQuery(raw(plain.replace('the_name', '%74he_name')), ['the_name'], [], {
+          rawNames: true
+        })
+      )
+    ).toBe(encoded)
+    // A request built without its raw query cannot prove its names plain: refused.
+    expect(reasonOf(exactQuery(request(plain), ['the_name'], [], { rawNames: true }))).toBe(encoded)
+  })
+
+  it('the wrapper hands routes the raw query, never decoded', async () => {
+    const seen: Array<string | undefined> = []
+
+    const rawEcho = statefulRoute<State, undefined, string>(
+      { ...digestEcho, path: '/raw' },
+      'none',
+      routed => {
+        seen.push(routed.rawQuery)
+
+        return ''
+      },
+      () => () => new Response('ok')
+    )
+
+    const api = await build([rawEcho], true)
+
+    await api.fetch(
+      get('/raw?%74he_name=a%20b#fragment', { authorization: 'Bearer synthetic-wrapper-secret' })
+    )
+    await api.fetch(get('/raw', { authorization: 'Bearer synthetic-wrapper-secret' }))
+
+    expect(seen).toEqual(['%74he_name=a%20b', ''])
   })
 })
 

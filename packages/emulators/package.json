@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, fixture-driven fake EmailClient and R2 (R2Presigner, R2ObjectClient) backends, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, Telegram, GitHub, and Google (Gmail, Calendar, Drive) emulators, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, fixture-driven fake EmailClient and R2 (R2Presigner, R2ObjectClient) backends, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, Telegram, GitHub, Google (Gmail, Calendar, Drive), and LinkedIn search (Exa, Enrich Layer) emulators, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -97,6 +97,10 @@
     "./google": {
       "types": "./src/google.ts",
       "default": "./src/google.ts"
+    },
+    "./linkedin-search": {
+      "types": "./src/linkedin-search.ts",
+      "default": "./src/linkedin-search.ts"
     }
   },
   "files": [
@@ -200,6 +204,11 @@
         "types": "./dist/google.d.mts",
         "import": "./dist/google.mjs",
         "default": "./dist/google.mjs"
+      },
+      "./linkedin-search": {
+        "types": "./dist/linkedin-search.d.mts",
+        "import": "./dist/linkedin-search.mjs",
+        "default": "./dist/linkedin-search.mjs"
       }
     }
   },

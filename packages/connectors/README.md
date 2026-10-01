@@ -1522,6 +1522,10 @@ reads, and a strict allowlist test (`test/linkedin-search-conformance.test.ts`, 
 exactly what it enforces) refuses anything in a 2xx body, request query, or seed that is not
 obviously synthetic. The case table, seeds, and claims live in the
 [LinkedIn search conformance guide](../../apps/docs/content/docs/connectors/linkedin-search.mdx#conformance-cases).
+For offline tests, the experimental LinkedIn search emulator
+(`@yolk-sdk/emulators/linkedin-search`) is a stateful, fixture-only stand-in for the Exa and Enrich
+Layer routes that passes these cases, answering each from a fixture byte for byte (the recorded 401
+for a key its seed marks as rejected on that provider), and never keeps or echoes an API key.
 
 `pnpm conformance:linkedin-search` in this repository dry-runs by default;
 `--live --owner-approved --account <label>` (refused whenever `CI` is non-empty) needs
