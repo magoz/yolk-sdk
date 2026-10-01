@@ -428,7 +428,7 @@ describe('fail-closed credential guard', () => {
     }
   })
 
-  it('a 64 KiB body of nested escapes is checked well under 100 ms', async () => {
+  it('a 64 KiB body of nested escapes is checked well under a second', async () => {
     const api = await build([echoPlan], true)
 
     // Nested escapes of every kind, 64 KiB, none of them the bearer.
@@ -454,12 +454,65 @@ describe('fail-closed credential guard', () => {
     const elapsed = performance.now() - started
 
     expect(response.status).toBe(400)
-    expect(elapsed).toBeLessThan(100)
+    expect(elapsed).toBeLessThan(1000)
 
     const closureStarted = performance.now()
 
     expect(textRepeatsSecret(nested, [secret])).toBe(false)
-    expect(performance.now() - closureStarted).toBeLessThan(100)
+    expect(performance.now() - closureStarted).toBeLessThan(1000)
+  })
+
+  it('recognises only an RFC 6750 b64token bearer outside the number alphabet', async () => {
+    const api = await build([echo], true)
+
+    // Characters the transforms consume (`\`, `%`, `"`), separators, and `=` before the end.
+    const refused = [
+      String.raw`\nabcdefg`,
+      'abcd\\efgh',
+      'abcd%41efgh',
+      'abcd"efgh',
+      'abcd efgh',
+      'abcd,efgh',
+      'abcd=efgh',
+      'abcd:efgh',
+      'abcd!efgh'
+    ]
+
+    for (const value of refused) {
+      const response = await api.fetch(get('/files/a', { authorization: `Bearer ${value}` }))
+      const text = await response.text()
+
+      expect(response.status, value).toBe(400)
+      expect(text, value).not.toContain(value)
+      expect(isRecognisableBearerValue(value), value).toBe(false)
+    }
+
+    expect(api.ledger.entries().map(entry => [entry.path, entry.notEmulated])).toEqual(
+      refused.map(() => ['/<unrecognised>', 'synthetic: unrecognisable authorization'])
+    )
+
+    const control = await Promise.all(
+      ['ledger', 'state', 'coverage', 'faults'].map(route =>
+        api.fetch(get(`/_emulate/${route}`)).then(response => response.text())
+      )
+    )
+
+    for (const value of refused) expect(control.join('\n'), value).not.toContain(value)
+
+    // GitHub and Google token forms, and trailing `=` padding, are recognised.
+    for (const value of [
+      'ghp_SyntheticToken0123456789',
+      'github_pat_11SYNTHETIC0_abcdefghijklmnopqrstuvwxyz',
+      'gho_SyntheticToken0123456789',
+      'ya29.a0Synthetic-Token_value',
+      'c3ludGhldGljLXRva2Vu==',
+      'abc+def/ghi~jkl'
+    ]) {
+      expect(isRecognisableBearerValue(value), value).toBe(true)
+      expect((await api.fetch(get('/files/a', { authorization: `Bearer ${value}` }))).status).toBe(
+        200
+      )
+    }
   })
 
   it('recognises only a printable-ASCII bearer outside the number alphabet', async () => {

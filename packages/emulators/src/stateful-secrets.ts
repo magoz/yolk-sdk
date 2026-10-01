@@ -10,8 +10,8 @@
  * percent-decoded, parsed JSON keys, strings, and numbers as JavaScript prints them) serve
  * `src/stateful-fixture.ts`, unchanged; the fail-closed mode of `src/stateful-emulator.ts` uses
  * `textRepeatsSecret`, a bounded closure of two total, lexical transforms that cannot fail
- * (`tolerantPercentDecode`, `tolerantJsonUnescape`), and recognises only printable-ASCII bearers
- * outside the JSON-number alphabet (`isRecognisableBearerValue`).
+ * (`tolerantPercentDecode`, `tolerantJsonUnescape`), and recognises only RFC 6750 `b64token`
+ * bearers outside the JSON-number alphabet (`isRecognisableBearerValue`).
  *
  * @experimental
  */
@@ -97,16 +97,23 @@ export const parseJsonText = (text: string): Schema.Json | undefined => {
  */
 const jsonNumberAlphabet = /^[0-9.eE+-]+$/
 
-/** Printable ASCII (`[\x21-\x7E]`): what every GitHub and Google token is made of. */
-const printableAscii = /^[\x21-\x7E]+$/
+/**
+ * The RFC 6750 `b64token` syntax (`1*( ALPHA / DIGIT / "-" / "." / "_" / "~" / "+" / "/" ) *"="`),
+ * at least 8 characters: what every GitHub (`ghp_…`, `github_pat_…`, `gho_…`) and Google (`ya29.…`)
+ * token is made of. Why exactly this: it holds none of the characters the closure's transforms
+ * consume (`\`, `%`, `"`, and every other escape-introducing character), so a neighbouring
+ * backslash or percent sign in the request can never pair with one of the bearer's own characters
+ * and shift an escape across it; every encoded form of the bearer decodes back to the bearer.
+ */
+const b64token = /^[A-Za-z0-9\-._~+/]+=*$/
 
 /**
- * True when a bearer value is printable ASCII (`[\x21-\x7E]`) and holds a character outside the
- * JSON-number alphabet `[0-9.eE+-]`. A printable-ASCII bearer is fully reached by the ASCII-only
- * transforms below; one outside the number alphabet is never the text of a number.
+ * True when a bearer value matches the RFC 6750 `b64token` syntax exactly (at least 8 characters)
+ * and holds a character outside the JSON-number alphabet `[0-9.eE+-]`, so it is never the text of a
+ * number and no escape can be shifted across its characters.
  */
 export const isRecognisableBearerValue = (value: string): boolean =>
-  printableAscii.test(value) && !jsonNumberAlphabet.test(value)
+  value.length >= 8 && b64token.test(value) && !jsonNumberAlphabet.test(value)
 
 /** How many rounds `textRepeatsSecret` applies (after checking the raw text). */
 export const secretClosureRounds = 4

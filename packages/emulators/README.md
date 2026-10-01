@@ -1372,46 +1372,48 @@ emulator mints (it never mints anything else):
   `<other>`, an empty query, no body, and a constant reason
   (`no emulated GitHub route for this method and path`,
   `an unrecognisable Authorization header is not emulated`).
-- **Credentials.** A recognised bearer must be printable ASCII (`[\x21-\x7E]`) and hold at least one
-  character outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google token form does:
-  `ghp_…`, `github_pat_…`, `gho_…`, `ya29.…`), so no number's text can contain it; an
-  `Authorization` header with any other value is unrecognisable. A recognised request that repeats
-  the bearer value in its raw path, any path segment, the raw query or any query key or value, any
-  recorded header, or its body is refused and ledgered with constant text only: a standard method,
-  the path `/<unrecognised>`, its route template, an empty query, no headers or body, and a constant
-  reason (`the query repeats the credential`, for example). Each part is checked through a bounded
-  closure of two total, lexical transforms that cannot fail: a tolerant percent-decode (every `%XX`
-  below `%80` becomes its ASCII character; any other `%` sequence is left as it is) and a tolerant
-  JSON-unescape (in any text, whether or not it parses as JSON, `\uXXXX` below `\u0080` and `\"`,
-  `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t` become their characters). Starting from each part's raw
-  text, up to 4 rounds apply either transform to every text of the previous round, deduplicated, and
-  every intermediate text is checked for the bearer as a substring. So every part gets the same
-  budget of 4 layers of percent-encoding or JSON escaping, in any order: the raw path and each raw
-  path segment, the raw query and each query key and value (already decoded once by
-  `URLSearchParams`, so one layer more), each recorded header, and the raw body (whose own JSON
-  escaping costs a round only where it escapes the bearer's text). Any other recognised request has
-  the bearer value scrubbed from its ledgered fields and every not-emulated reason (plan-time
-  reasons included); its recorded query is keyed by recorded key; a key recorded more than once
-  lists its values in order (as a JSON array); and recorded headers and query keys and values that
-  start like JSON (`{`, `[`, `"`) are recorded parsed with credential-named keys redacted at any
-  depth, or as `<redacted>` when they do not parse, whatever the header's declared format. Refusals
-  never echo a request's own query or body keys, and empty query components (a bare `?`, a stray
-  `&`) are refused.
-- **Request-shape latitude (`/github`, the only accepted deviations).** Any bearer value of at least
-  8 printable ASCII characters (`[\x21-\x7E]`), at least one outside `[0-9.eE+-]`, that occurs
-  nowhere else in the request (never compared against anything, stored, or ledgered); extra request
-  headers; JSON key order; `content-type` media-type parameters; the order of query parameters; any
-  non-empty issue title and comment body, and any issue body text; any comment listing `since` of
-  the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to 100, with no `page` or a
-  `page` from 2 to one past the last page; any issue search `q` that starts with the seeded
-  `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256 characters (answered
-  the recorded 422); any issue number the repository has not reached (answered the recorded 404);
-  and any issue, comment, repository label, or file the state holds where a fixture has one, under
-  the per-route state rules. `Authorization` must be exactly `Bearer <token>` (that spelling, one
-  space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version` `2026-03-10`.
-  Everything else (other keys and values, query parameters, empty query components such as a bare
-  `?` or a stray `&`, another origin or repository, a repeated query key, an explicit `page=1`, and
-  a comment listing `per_page` other than 100) is not emulated.
+- **Credentials.** A recognised bearer must match the RFC 6750 `b64token` syntax exactly
+  (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8 characters) and hold at least one character outside the
+  JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google token form does: `ghp_…`,
+  `github_pat_…`, `gho_…`, `ya29.…`). So no number's text can contain it, and it holds none of the
+  characters the transforms consume (`\`, `%`, `"`), so no neighbouring escape can shift across its
+  own characters; an `Authorization` header with any other value is unrecognisable. A recognised
+  request that repeats the bearer value in its raw path, any path segment, the raw query or any
+  query key or value, any recorded header, or its body is refused and ledgered with constant text
+  only: a standard method, the path `/<unrecognised>`, its route template, an empty query, no
+  headers or body, and a constant reason (`the query repeats the credential`, for example). Each
+  part is checked through a bounded closure of two total, lexical transforms that cannot fail: a
+  tolerant percent-decode (every `%XX` below `%80` becomes its ASCII character; any other `%`
+  sequence is left as it is) and a tolerant JSON-unescape (in any text, whether or not it parses as
+  JSON, `\uXXXX` below `\u0080` and `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t` become their
+  characters). Starting from each part's raw text, up to 4 rounds apply either transform to every
+  text of the previous round, deduplicated, and every intermediate text is checked for the bearer as
+  a substring. So each part's raw text gets 4 layers of percent-encoding or JSON escaping, in any
+  order: the raw path and each raw path segment, the raw query and each query key and value (already
+  decoded once by `URLSearchParams`, so one layer more), each recorded header, and the raw body
+  (whose own JSON escaping costs a round only where it escapes the bearer's text). Any other
+  recognised request has the bearer value scrubbed from its ledgered fields and every not-emulated
+  reason (plan-time reasons included); its recorded query is keyed by recorded key; a key recorded
+  more than once lists its values in order (as a JSON array); and recorded headers and query keys
+  and values that start like JSON (`{`, `[`, `"`) are recorded parsed with credential-named keys
+  redacted at any depth, or as `<redacted>` when they do not parse, whatever the header's declared
+  format. Refusals never echo a request's own query or body keys, and empty query components (a bare
+  `?`, a stray `&`) are refused.
+- **Request-shape latitude (`/github`, the only accepted deviations).** Any bearer value in the RFC
+  6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, at least one outside
+  `[0-9.eE+-]`, that occurs nowhere else in the request (never compared against anything, stored, or
+  ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the order
+  of query parameters; any non-empty issue title and comment body, and any issue body text; any
+  comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to
+  100, with no `page` or a `page` from 2 to one past the last page; any issue search `q` that starts
+  with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256
+  characters (answered the recorded 422); any issue number the repository has not reached (answered
+  the recorded 404); and any issue, comment, repository label, or file the state holds where a
+  fixture has one, under the per-route state rules. `Authorization` must be exactly `Bearer <token>`
+  (that spelling, one space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version`
+  `2026-03-10`. Everything else (other keys and values, query parameters, empty query components
+  such as a bare `?` or a stray `&`, another origin or repository, a repeated query key, an explicit
+  `page=1`, and a comment listing `per_page` other than 100) is not emulated.
 
 Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
 `notEmulated` in the ledger), writes nothing, and uses up no fault: other routes (issue and pull

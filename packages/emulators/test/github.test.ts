@@ -1502,6 +1502,18 @@ describe('the total, lexical transforms: malformed neighbours never hide the bea
       repeat('the request body repeats')
     ],
     [
+      // A bearer holding a backslash, beside a backslash that would shift which characters an
+      // unescape treats as an escape: no longer a recognisable bearer (RFC 6750 `b64token` only).
+      'a bearer holding a backslash, its escaped form beside another backslash',
+      'POST',
+      repo('/issues/1/comments'),
+      {
+        authorization: String.raw`Bearer \nabcdefg`,
+        rawBody: JSON.stringify({ body: String.raw`\\\n\u0061bcdefg` })
+      },
+      unrecognised('an unrecognisable Authorization header is not emulated')
+    ],
+    [
       'a non-ASCII bearer (unrecognisable)',
       'GET',
       repo('/labels?per_page=2'),
@@ -1538,7 +1550,7 @@ describe('the total, lexical transforms: malformed neighbours never hide the bea
     // The real response text, the ledger, and every `/_emulate/*` read (state included).
     const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
 
-    for (const form of [token, tail, 'ynth\u00e9tique']) {
+    for (const form of [token, tail, 'ynth\u00e9tique', 'abcdefg', 'u0061bcdefg']) {
       expect(seen.join('\n')).not.toContain(form)
     }
   })
