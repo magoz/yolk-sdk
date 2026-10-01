@@ -75,22 +75,22 @@
  * names the wrapper hands routes as `rawQuery`). A template parameter written `{name+}` spans one
  * or more path segments (each decoded once, none may decode to a `/`). The credential helpers live
  * in `src/stateful-secrets.ts`. A route may also name decoded views of its raw body
- * (`decodedViews`,
- * opt-in; `/google` gives the base64url-decoded MIME of a Gmail draft's `message.raw`, which the
- * provider's own wire format wraps): in fail-closed mode each view goes through the same fixpoint
- * check as the raw body, before anything is recorded, a fault is decided, or anything is committed,
- * and a hit is the same constant credential-repeat entry. A view may throw to refuse a body it
- * cannot check completely: that request is ledgered as the same constant entry, as a repeat when
- * the `DecodedViewRefusal` it threw carries cleanly decoded text holding the bearer, else with the
- * refusal's reason when the route declares it in `viewRefusalReasons` (a constant the route owns,
- * scrubbed defensively), else with `the request body cannot be checked for the credential`. A route
- * without `decodedViews` is checked exactly as before. An emulator may also opt in to a per-origin
- * bearer digest (`bearerDigest`, fail-closed mode only; `/linkedin-search` uses it): routes then
- * see a one-way digest of the bearer for the origin the request arrived on
- * (`EmulatedRequest.bearerDigest`), never the bearer, so a seed can mark a key as rejected on one
- * origin by its digest, and the bearer still never reaches the state, the ledger, or `/_emulate/*`.
- * A digest that throws or repeats the bearer answers the 500 emulator error (`responseError`).
- * Without it, routes see no digest, as before.
+ * (`decodedViews`, opt-in; `/google` gives the base64url-decoded MIME of a Gmail draft's
+ * `message.raw`, which the provider's own wire format wraps): in fail-closed mode each view goes
+ * through the same fixpoint check as the raw body, before anything is recorded, a fault is decided,
+ * or anything is committed, and a hit is the same constant credential-repeat entry. A view may
+ * throw to refuse a body it cannot check completely: that request is ledgered as the same constant
+ * entry, as a repeat when the `DecodedViewRefusal` it threw carries cleanly decoded text holding
+ * the bearer, else with the refusal's reason when the route declares it in `viewRefusalReasons` (a
+ * constant the route owns, scrubbed defensively), else with
+ * `the request body cannot be checked for the credential`. A route without `decodedViews` is
+ * checked exactly as before. An emulator may also opt in to a per-origin bearer digest
+ * (`bearerDigest`, fail-closed mode only; `/linkedin-search` uses it): routes then see a one-way
+ * digest of the bearer for the origin the request arrived on (`EmulatedRequest.bearerDigest`),
+ * never the bearer, so a seed can mark a key as rejected on one origin by its digest, and the
+ * bearer still never reaches the state, the ledger, or `/_emulate/*`. A digest that throws or
+ * repeats the bearer answers the 500 emulator error (`responseError`). Without it, routes see no
+ * digest, as before.
  *
  * @experimental
  */

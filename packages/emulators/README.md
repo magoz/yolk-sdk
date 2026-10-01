@@ -1833,7 +1833,9 @@ origin, a space, and the key, which a plan compares with the digests of the seed
 that origin. The state holds only those digests, so a key a request carries as its bearer, a
 rejected one included, never reaches the state, a snapshot, or `/_emulate/*` (a key sent as data
 elsewhere in a request is ledgered like any other text). Refusals never echo a request's own query
-or body keys.
+or body keys. This guarding covers the emulated provider API calls only: `/_emulate/*` is the
+host's trusted control plane, and the seed and fault data a host gives it is stored and returned as
+given.
 
 - **Request-shape latitude (`/linkedin-search`, the only accepted deviations).** Any bearer value in
   the RFC 6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a

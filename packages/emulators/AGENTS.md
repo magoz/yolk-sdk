@@ -699,11 +699,11 @@ There is no root export or barrel.
   fixture-only, without exceptions, on `src/stateful-emulator.ts` in its opt-in fail-closed mode,
   and follows the shared fail-closed rule stated for GitHub above, unchanged (no route has a path
   parameter, so every raw path is matched exactly; the recorded `content-type` header and the raw
-  body are checked like every other part; the lookups' query uses `exactQuery`'s opt-in `rawNames`,
-  so a percent-encoded parameter name is refused). It emulates only the three reads the seven
-  LinkedIn search cases send, each on its recorded origin: `POST /search` on `https://api.exa.ai`,
-  and
-  `GET /api/v2/profile` and `GET /api/v2/profile/email` on `https://enrichlayer.com`. Nothing is
+  body are checked like every other part; every route's query uses `exactQuery`'s opt-in
+  `rawNames`, so a percent-encoded parameter name is refused). It emulates only the three reads the
+  seven LinkedIn search cases send, each on its recorded origin: `POST /search` on
+  `https://api.exa.ai`, and `GET /api/v2/profile` and `GET /api/v2/profile/email` on
+  `https://enrichlayer.com`. Nothing is
   written, minted, or read from a clock: a search answers only the results the state holds for
   exactly its query and `numResults` (the default seed: the fixtures' three answers for the seeded
   query, `numResults` 10, 3, and 2, the limited one without `publishedDate`, as recorded); a profile
