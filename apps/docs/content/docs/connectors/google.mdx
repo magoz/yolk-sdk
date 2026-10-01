@@ -1,0 +1,204 @@
+---
+title: Google conformance
+description: Experimental Gmail, Calendar, and Drive conformance cases for tests and hand-run practice-account checks.
+---
+
+Google actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#google). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice Google account.
+
+`@yolk-sdk/connectors/google/conformance` exports conformance cases for
+`@yolk-sdk/conformance/runner`. Every case runs the real connector actions over the connector ports
+against the Gmail (`https://gmail.googleapis.com/gmail/v1`), Calendar
+(`https://www.googleapis.com/calendar/v3`), and Drive (`https://www.googleapis.com/drive/v3`) APIs,
+and checks one wire claim the connector relies on. Where an action returns the answer undecoded
+(`gmail.list`, drafts, `gmail.modify_labels`, trash), the case decodes the fields it needs with a
+local schema; where the connector reads only part of an error body, the case observes the body at
+the `ConnectorHttpClient` port the host provides. The cases send no request of their own. The claims
+are as currently understood; none is observed live yet.
+
+| Case id                                    | Safety               | Seeds                                            | Claim (as currently understood)                                                                                                                                                                                                                                                                  |
+| ------------------------------------------ | -------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `google.gmail.list-page-token`             | `read`               | `pagingLabelId`                                  | `gmail.list` pages of two chain through `nextPageToken`, repeat no message, and list exactly the messages of one large page                                                                                                                                                                      |
+| `google.gmail.attachment-base64url`        | `read`               | `attachmentMessageId`                            | An attachment `get_attachment` answers base64url `data` (no `+` or `/`) decoding to exactly `size` bytes                                                                                                                                                                                         |
+| `google.gmail.not-found-envelope`          | `read`               | none                                             | An unused message id answers 404 (unverified), mapped to `google_not_found`, with a JSON `error.message` the connector appends to its message                                                                                                                                                    |
+| `google.gmail.label-create-apply-delete`   | `write-reversible`   | `workMessageId`, `runId`                         | A run label is created, applied to the work message, listed on it, deleted by id (204, empty body), reads `google_not_found`, and is gone from the message                                                                                                                                       |
+| `google.gmail.draft-compose-update-delete` | `write-reversible`   | `runId`                                          | A draft without recipients, proven the run's own before adoption, round-trips its ASCII subject and non-ASCII body through `get_thread`, before and after an update, then deletes (204, empty body); its message then answers not found, and stays gone after a second delete (2xx or not found) |
+| `google.gmail.trash-untrash`               | `write-reversible`   | `workMessageId`                                  | Trash adds `TRASH`, and untrash removes it; the cleanup restores and verifies every earlier label                                                                                                                                                                                                |
+| `google.gmail.send-practice-address`       | `write-irreversible` | `practiceAddress`, `runId`                       | One 7-bit message to the practice address only (decoded again in the case as exactly one plain address), sent as one multipart upload, answers an id whose `To` and `Subject` read back                                                                                                          |
+| `google.calendar.list-range-paging`        | `read`               | `calendarId`, `eventRangeStart`, `eventRangeEnd` | A time-range listing returns only events overlapping the range, and pages of two chained through `nextPageToken` list exactly the events of one large page                                                                                                                                       |
+| `google.calendar.event-lifecycle`          | `write-reversible`   | `calendarId`, `runId`                            | An event without attendees is created with the requested times, read, renamed by PATCH (start kept), deleted, and reads gone (404, 410, or `cancelled`; unverified which)                                                                                                                        |
+| `google.calendar.deleted-event-gone`       | `write-reversible`   | `calendarId`, `runId`                            | A deleted event reads gone, and stays gone after a second delete (2xx, 404, or 410; unverified which)                                                                                                                                                                                            |
+| `google.drive.list-page-token`             | `read`               | `driveFolderId`                                  | A folder listing returns only untrashed children, and pages of two chained through `nextPageToken` list exactly the files of one large page                                                                                                                                                      |
+| `google.drive.get-file-fields`             | `read`               | `driveFileId`, `driveFolderId`                   | `get_file` accepts the connector's full `fields` selection and answers the same id, name, mime type, and parents as the listing                                                                                                                                                                  |
+| `google.drive.folder-trash-delete`         | `write-reversible`   | `driveFolderId`, `runId`                         | A run folder is created, trashed (`trashed: true`, left out of listings), deleted permanently by id (204, empty body), and reads `google_not_found`                                                                                                                                              |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- An unused 16-hex-digit message id answers 404 rather than 400 `Invalid id value`.
+- A metadata read of a fresh draft returns the `DRAFT` label and the subject exactly as sent (the
+  draft ownership check relies on it; if not, the case refuses its own draft and the leftover
+  lookup reports it).
+- Gmail keeps the 8-bit text/plain draft part as the connector wrote it, so `get_thread` decodes
+  exactly the UTF-8 the case sent; deleting a draft deletes its message; whether deleting a deleted
+  draft answers 2xx or 404 (the case and the cleanup accept either, then verify the message is
+  gone).
+- A deleted event reads back as 404, 410, or the event with `status: "cancelled"` (the case accepts
+  any of them, never a live event); whether deleting a deleted event answers 2xx, 404, or 410 (the
+  case and the cleanup accept any of them, then verify the event still reads gone).
+
+Claims are narrowed to what the connector reads. The error case checks the status the connector
+maps and that its message carries the body `error.message`; it does not pin `error.errors` reasons
+(the connector reads them only for 403) or the body `status`. The paging cases check
+`nextPageToken` and page contents only; the tokens stay opaque. The Drive fields case checks that
+the full `fields` selection is accepted (an unknown field name answers 400) and that the fields the
+other actions rely on agree, not every optional field. Some checks protect the case's own cleanup
+rather than claim connector behavior: whether untrash restores every earlier label is not claimed
+(the cleanup re-adds and verifies them), and the listed attachment part `size` is not compared with
+the `get_attachment` answer (the connector never relies on them matching).
+
+`GoogleConformanceConfig` holds the seeds: `practiceAddress` (a practice mailbox **the owner
+controls**: the only address the send case ever sends to; exactly one plain address
+`local@domain`, typed as the branded `GooglePracticeAddress`),
+`pagingLabelId` (a Gmail user label on 3 to 20 practice messages, none in Trash or Spam),
+`attachmentMessageId` (a practice message with a file attachment Gmail stores apart),
+`workMessageId` (a practice message, not in Trash, which the label and trash cases change and
+restore), `calendarId` (a practice calendar the account owns), `eventRangeStart` and
+`eventRangeEnd` (RFC 3339 instants around 3 to 20 events in it, away from the case events on
+2030-01-07), `driveFolderId` (a practice Drive folder with 3 to 20 untrashed items the token may
+write into; trashed items are not counted), `driveFileId` (a practice file directly inside it), and
+`runId` (the branded `GoogleConformanceRunId`). Cases never hard-code account data. `practiceAddress`
+and `runId` are branded schema types, so a host building the config by hand constructs them
+(`GooglePracticeAddress.make(...)`, `GoogleConformanceRunId.make(...)`) or decodes the whole config
+with `GoogleConformanceSeeds`; a plain string is a type error. Each case also decodes every seed it
+reads again, so a host that bypasses the types (JSON, a cast) is still refused: a missing or
+invalid seed fails the case with a `precondition:` mismatch before any request.
+Credentials bind through `googleConformanceIntegration` (`google.oauth`, credential ref
+`google.conformance`).
+
+### Write ownership and cleanup
+
+The `runId` seed is a per-invocation `run-<hex>` value: the fixtures replay with `run-synthetic`, and
+the live runner generates a fresh one every time and never takes it as a flag. Every label name,
+draft subject, sent subject, event summary, and folder name a case writes starts with
+`yolk-conformance <runId>`.
+
+- The create request (label, draft, trash, event, folder), its decoding, its classification, and
+  the registration of what it created run together without interruption, and so does every later
+  write (modify, update, untrash, delete). Neither the runner nor the bridges set a request timeout,
+  so a hanging request delays an interruption until it answers.
+- A definitive rejection (HTTP 4xx other than 408) changed nothing: the case fails and undoes
+  **nothing**.
+- An ambiguous outcome (a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) may have
+  written anyway, and the case never learned what: it fails with `GoogleConformanceActionFailed`
+  (`writeOutcome: 'unknown'`) naming the exact label name, draft subject, message, event summary, or
+  folder name to check by hand, and undoes nothing.
+- Before the case adopts what a create answered (inside the same uninterruptible step, before it
+  is registered for cleanup), it proves the item is this run's own: a label with the requested
+  name (not a system label), an event with the requested summary and no attendees, a Drive folder
+  with the requested name, type, and parent (not a seeded item), the work message itself, and for
+  a draft a `format: "metadata"` read of its message showing the `DRAFT` label, the run-scoped
+  subject, and no recipient header (a draft answer carries no subject). An answer that is foreign,
+  or cannot be verified (the read fails), is never adopted, updated, or deleted: the case fails with
+  `GoogleConformanceCleanupRefused` naming it, to check by hand.
+- After a successful create, the cleanup undoes the item **by id** (label id, draft id, event id,
+  folder id) or by the seeded work message, also after a failed claim or an interruption, and then
+  verifies it: the label, draft message, and folder read `google_not_found`, the event reads gone,
+  the work message is out of Trash with its earlier labels. A not-found (or, for events, gone)
+  answer to the undo counts as undone. A failed cleanup fails with
+  `GoogleConformanceRestoreFailed` naming the item and what to do by hand.
+- The trash case starts only when the work message is **not** in Trash (so it never untrashes a
+  message it did not trash), and its cleanup always runs: it untrashes the message if needed,
+  re-adds any earlier label the untrash lost, and verifies them all. It works
+  on the same seeded message as the label case, so **concurrent runs are not supported**.
+
+### What the reversible cases leave behind
+
+- **Gmail labels and drafts** are gone after the cleanup; the draft has no recipient, so nothing
+  can be sent from it. The work message gets its earlier labels back; its history id changes.
+- **Calendar events** never have attendees, so no invitation, update, or cancellation is ever sent
+  to anyone. A deleted event may stay readable through the API as `status: "cancelled"`; it no
+  longer shows in the calendar.
+- **Drive trash versus delete.** `drive.trash_file` only moves the folder to Trash (recoverable for
+  30 days); `drive.delete_file` deletes it permanently without going through Trash. The case does
+  both, and its cleanup always deletes permanently, so nothing stays in Trash. Only a failed cleanup
+  can leave the folder in Trash, and the leftover lookup reports it there.
+
+### The send is irreversible
+
+**Gmail cannot unsend.** `google.gmail.send-practice-address` is `write-irreversible`: it never runs
+under `allowWrites: 'reversible'`, and a runner starts it only when a person names its exact id
+(`allowIrreversible: ['google.gmail.send-practice-address']`; the live runner's
+`--allow-irreversible google.gmail.send-practice-address`). It sends exactly one 7-bit message whose
+**only** recipient header is `To: <practiceAddress>` (no Cc or Bcc). The case itself decodes
+`practiceAddress` again, before building the message or making any request, as exactly one plain
+address `local@domain`: no display name, no list (comma or semicolon), no angle brackets or quotes,
+no whitespace or control characters (a CR or LF could inject a header), a local part of at most 64
+and an address of at most 254 characters. Anything else fails with a `precondition:` mismatch and
+no request, whether the host went through the runner or built the config itself. The subject is
+`yolk-conformance <runId> send: ...` (the run id is decoded the same way). The message stays in Sent and at the practice address. A
+definitive rejection sends nothing. An ambiguous send (a transport failure, no status, HTTP 408,
+5xx, or any answer the connector reports as `gmail_send_message_unknown`) fails with
+`GoogleConformanceActionFailed` (`writeOutcome: 'unknown'`) naming the subject to look for; never
+resend automatically. When the send will run, the live runner prints the run id before any case.
+
+### Leftovers and interruptions
+
+Before any write case, and again after an interrupt-only exit, the live runner calls
+`findGoogleConformanceLeftovers` and prints a WARN line for each Gmail label named
+`yolk-conformance run-*` and each draft a `subject:yolk-conformance` search finds (one page of 100,
+search-based, so best effort; with any Gmail seed), the work message when it is in Trash, each
+event titled `yolk-conformance run-*` in `calendarId` (at most 4 pages of 250), and each item named
+`yolk-conformance run-*` in `driveFolderId`, trashed ones included (at most 4 pages of 100). The
+lookup is read-only and bounded; nothing is changed automatically. Messages the send case sent are
+its documented residue and are not listed.
+
+In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber; the running
+case's cleanup is attempted before the process exits, and no further case starts. A cleanup that
+fails, or a write whose outcome is unknown, while the case is being interrupted prints its full
+message as a WARN line (through the case's `ConformanceCleanupReporter`), and the run ends with that
+error (exit code 1); a plain interruption ends with exit code 130 after the leftover lookup runs
+again. Further signals within a second count as the same keypress; a later one exits at once and may
+skip the cleanup. Run live runs as `pnpm conformance:google …` or
+`./node_modules/.bin/tsx scripts/run-google-conformance.ts …`, not `pnpm exec tsx …`, which returns
+to the prompt at once on Ctrl-C.
+
+### Token safety and recording
+
+The OAuth access token travels only in the `Authorization: Bearer` header, which the conformance
+recorder never records (credential headers are always dropped); the replay ledger redacts it. The
+live runner refuses a `GOOGLE_ACCESS_TOKEN` that is not `ya29.` followed by 20 or more letters,
+digits, `.`, `_`, or `-` before any request, without printing it. `--record` still refuses to stage,
+or print a review checklist for, any recording in which the live token survives anywhere (an echo in
+a body, header, or URL; raw, percent-encoded, escaped, or base64-encoded) or that holds a body
+outside the guard's inspectable allowlist (strict UTF-8 text without NUL characters), and the
+fixture secret scan refuses credential query parameters. A provider can also echo the token into
+a field a case reports (a refused label's name, a leftover's title, a failure message), so the
+shared live runner prints every line (the report, cleanup WARN lines, leftover warnings, the run's
+own failure, the staging checklist) with every raw, percent-encoded, or base64 form of the live
+token replaced by `<redacted live token>`. It withholds a line that still holds an escaped form,
+or 16 or more consecutive characters of the token raw or base64-encoded (so a report the runner
+truncated in the middle of an echoed token is withheld too), and withholds the whole message when
+the token only appears once its lines are joined with whitespace removed (a token folded across
+lines).
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`, `example.test` addresses). In this
+repository, `pnpm conformance:google` dry-runs by default;
+`--live --owner-approved --account <label>` (refused whenever `CI` is non-empty) needs `GOOGLE_ACCESS_TOKEN` (a token for the practice
+account only, with the scopes of the cases that will run: `gmail.readonly`, `gmail.modify`,
+`gmail.compose`, `gmail.send`, `calendar.readonly`, `calendar.events`, `drive.metadata.readonly`,
+`drive.file`) and the seeds (`--practice-address`, `--paging-label`, `--attachment-message`,
+`--work-message`, `--calendar`, `--event-range-start`, `--event-range-end`, `--drive-folder`,
+`--drive-file`). With `drive.file` only, the token may write into `--drive-folder` only when the app
+created it or the user opened it with the app. `--allow-writes reversible` adds the write-reversible
+cases; `--allow-irreversible google.gmail.send-practice-address` adds the send. `--record` stages
+verified recordings only in the gitignored `.conformance-recordings/google/` for manual scrubbing
+(addresses, message, thread, draft, label, event, and file ids, subjects, snippets, bodies, names,
+page tokens, links) and promotion; staged recordings carry the Gmail API base URL as their
+`endpoint`, so set each Calendar and Drive fixture's `endpoint` to its own API base URL when
+promoting. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.

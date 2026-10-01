@@ -41,7 +41,7 @@
  * bridges set a request timeout, so a hanging request delays an interruption until it answers.
  * `findGithubConformanceLeftovers` lists (read-only) what earlier runs left behind.
  */
-import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
+import { Context, Data, Effect, Predicate, Ref, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ConformanceMismatch,
@@ -50,8 +50,11 @@ import {
   expectEqual,
   type ConformanceCase
 } from '@yolk-sdk/conformance/case'
-import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
-import { classifyWriteExit, failReporting } from '../../conformance/cleanup-reporter.ts'
+import {
+  withOwnedWrite as sharedWithOwnedWrite,
+  type OwnedWrite as SharedOwnedWrite,
+  type OwnedWriteErrors
+} from '../../conformance/owned-write.ts'
 import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import type { ConnectorError } from '../../error.ts'
 import { ConnectorHttpClient, type ConnectorHttpResponse } from '../../http.ts'
@@ -325,40 +328,6 @@ const outcomeOf = <A>(result: ActionResult<A>): string => {
 const isNotFound = <A>(result: ActionResult<A>): boolean =>
   failureOf(result)?.code === 'github_not_found'
 
-/** Longest failure summary embedded in a `GithubConformanceRestoreFailed` message. */
-const failureSummaryLength = 60
-
-const truncated = (text: string, length: number): string =>
-  text.length > length ? `${text.slice(0, length - 3).trimEnd()}...` : text
-
-/** Short, sanitized summary of a failure (credential patterns redacted). */
-const failureSummary = (cause: Cause.Cause<unknown>): string => {
-  if (Cause.hasInterruptsOnly(cause)) {
-    return 'interrupted'
-  }
-
-  const error = Cause.findErrorOption(cause)
-  const value = Option.isSome(error) ? error.value : Cause.squash(cause)
-
-  if (value instanceof GithubConformanceActionFailed) {
-    const status = value.status === undefined ? '' : ` ${value.status}`
-
-    return `${truncated(sanitizeConformanceMessage(`${value.actionId} ${value.code}`), failureSummaryLength - status.length)}${status}`
-  }
-
-  const tag = Predicate.hasProperty(value, '_tag') ? String(value._tag) : 'defect'
-  const message = Predicate.hasProperty(value, 'message') ? String(value.message) : ''
-
-  const raw =
-    message.length === 0
-      ? tag
-      : value instanceof ConformanceMismatch
-        ? message
-        : `${tag}: ${message}`
-
-  return truncated(sanitizeConformanceMessage(raw), failureSummaryLength)
-}
-
 /**
  * Run `effect` with the host's `ConnectorHttpClient` wrapped so every response is observed; the
  * requests and responses are the host's own, unchanged.
@@ -426,139 +395,41 @@ const removeLabel = (issueNumber: number, label: string) =>
     githubRemoveLabelAction.executeTyped({ integration, input: { issueNumber, label } })
   )
 
-// Owned writes: the create, its decoding, its classification, and the registration run
-// uninterruptibly together; the cleanup undoes by id and verifies.
+// Owned writes: the shared `withOwnedWrite` (`../../conformance/owned-write.ts`) runs the create,
+// its decoding, its classification, and the registration uninterruptibly together; the cleanup
+// undoes by id and verifies.
 
-/** `true` while the cleanup must still undo the created item; a case clears it once it proved it. */
-type Pending = Ref.Ref<boolean>
-
-/**
- * Classify a create (see `classifyWriteExit`): no status, a 408 or 5xx, or a transport or decoding
- * failure is ambiguous (the error carries `recovery` for manual checking); any other 4xx is
- * definitive.
- */
-const classifyCreate = <A>(
-  actionId: string,
-  recovery: string,
-  exit: Exit.Exit<ActionResult<A>, ConnectorError>
-):
-  | { readonly kind: 'success'; readonly value: A }
-  | { readonly kind: 'rejected'; readonly error: GithubConformanceActionFailed }
-  | { readonly kind: 'ambiguous'; readonly error: GithubConformanceActionFailed } => {
-  const outcome = classifyWriteExit(exit)
-
-  switch (outcome.kind) {
-    case 'success':
-      return outcome
-    case 'rejected':
-      return {
-        kind: 'rejected',
-        error: new GithubConformanceActionFailed({ actionId, ...outcome.failure })
-      }
-    case 'ambiguous':
-      return {
-        kind: 'ambiguous',
-        error: new GithubConformanceActionFailed({
-          actionId,
-          ...outcome.failure,
-          writeOutcome: 'unknown',
-          recovery
-        })
-      }
-  }
+const githubWriteErrors: OwnedWriteErrors<
+  GithubConformanceActionFailed,
+  GithubConformanceCleanupRefused,
+  GithubConformanceRestoreFailed
+> = {
+  actionFailed: fields => new GithubConformanceActionFailed(fields),
+  cleanupRefused: fields => new GithubConformanceCleanupRefused(fields),
+  restoreFailed: fields => new GithubConformanceRestoreFailed(fields),
+  isActionFailed: (value): value is GithubConformanceActionFailed =>
+    value instanceof GithubConformanceActionFailed
 }
 
-type OwnedWrite<T, A, E, R> = {
-  readonly caseId: string
-  readonly actionId: string
-  /** The create; masked together with its decoding, classification, and registration. */
-  readonly create: Effect.Effect<ActionResult<T>, ConnectorError, GithubConformanceRequirements>
-  /** What to check by hand when the create outcome is unknown. */
-  readonly unknownRecovery: string
+type OwnedWrite<T, A, E, R> = Omit<
+  SharedOwnedWrite<T, A, E, R, GithubConformanceRequirements, never, GithubConformanceRequirements>,
+  'refuse'
+> & {
   /** The item, when the answer lies outside the run namespace (never adopted), else `undefined`. */
   readonly refuse: (value: T) => string | undefined
-  /** What to do by hand when the cleanup fails. */
-  readonly recovery: (value: T) => string
-  /** Undo the created item (by id) and verify it is undone. */
-  readonly restore: (
-    value: T
-  ) => Effect.Effect<void, GithubConformanceError, GithubConformanceRequirements>
-  readonly use: (value: T, pending: Pending) => Effect.Effect<A, E, R>
 }
 
 /**
- * Create one owned item, run `use`, then ALWAYS undo it while `pending` (uninterruptibly, also
- * after a failed claim or an interruption). A definitive create rejection undoes nothing; an
- * ambiguous one is reported with `unknownRecovery`; an answer outside the run namespace is refused.
- * A failed restore fails the case with `GithubConformanceRestoreFailed`, which says whether the
- * claim itself held; otherwise the outcome of `use` is returned unchanged.
+ * Create one owned item, run `use`, then ALWAYS undo it while `pending` (see
+ * `../../conformance/owned-write.ts`). A definitive create rejection undoes nothing; an ambiguous
+ * one is reported with `unknownRecovery`; an answer outside the run namespace is refused. A failed
+ * restore fails the case with `GithubConformanceRestoreFailed`, which says whether the claim itself
+ * held; otherwise the outcome of `use` is returned unchanged.
  */
 const withOwnedWrite = <T, A, E, R>(spec: OwnedWrite<T, A, E, R>) =>
-  Effect.gen(function* () {
-    const pending: Pending = yield* Ref.make(false)
-
-    return yield* Effect.uninterruptibleMask(unmask =>
-      Effect.gen(function* () {
-        const created = classifyCreate(
-          spec.actionId,
-          spec.unknownRecovery,
-          yield* Effect.exit(spec.create)
-        )
-
-        switch (created.kind) {
-          case 'rejected':
-            return yield* created.error
-          case 'ambiguous':
-            return yield* failReporting(unmask, created.error)
-          case 'success':
-            break
-        }
-
-        const refused = spec.refuse(created.value)
-
-        if (refused !== undefined) {
-          return yield* failReporting(
-            unmask,
-            new GithubConformanceCleanupRefused({ caseId: spec.caseId, item: refused })
-          )
-        }
-
-        yield* Ref.set(pending, true)
-
-        const outcome = yield* Effect.exit(unmask(spec.use(created.value, pending)))
-
-        const restored = yield* Effect.exit(
-          Ref.get(pending).pipe(
-            Effect.flatMap(still => (still ? spec.restore(created.value) : Effect.void))
-          )
-        )
-
-        if (Exit.isFailure(restored)) {
-          const recovery = spec.recovery(created.value)
-
-          return yield* failReporting(
-            unmask,
-            Exit.isSuccess(outcome)
-              ? new GithubConformanceRestoreFailed({
-                  caseId: spec.caseId,
-                  recovery,
-                  reason: failureSummary(restored.cause),
-                  caseOutcome: 'claim held'
-                })
-              : new GithubConformanceRestoreFailed({
-                  caseId: spec.caseId,
-                  recovery,
-                  reason: failureSummary(restored.cause),
-                  caseOutcome: 'claim failed',
-                  claimFailure: failureSummary(outcome.cause)
-                }),
-            Exit.isFailure(outcome) && Cause.hasInterrupts(outcome.cause)
-          )
-        }
-
-        return yield* outcome
-      })
-    )
+  sharedWithOwnedWrite(githubWriteErrors, {
+    ...spec,
+    refuse: value => Effect.succeed(spec.refuse(value))
   })
 
 /** `<marker> <runId> <kind>: <text>`, the run-scoped text of a comment body or issue title. */
