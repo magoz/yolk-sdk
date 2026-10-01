@@ -25,7 +25,9 @@ import {
 import {
   isRecognisableBearerValue,
   secretClosureRounds,
-  textRepeatsSecret
+  textRepeatsSecret,
+  tolerantJsonUnescape,
+  tolerantPercentDecode
 } from '../src/stateful-secrets.ts'
 
 type State = { writes: number }
@@ -405,10 +407,71 @@ describe('fail-closed credential guard', () => {
     expect(textRepeatsSecret('anything', [])).toBe(false)
   })
 
-  it('recognises only a bearer with a character outside the JSON-number alphabet', async () => {
+  it('the two transforms are total: every malformed sequence is left as it is', () => {
+    expect(tolerantPercentDecode('100% %73x %E9 %zz %2 %7e%25')).toBe('100% sx %E9 %zz %2 ~%')
+    expect(tolerantPercentDecode('%')).toBe('%')
+    expect(
+      tolerantJsonUnescape('v=\\u0073 \\u00e9 \\" \\\\ \\/ \\b \\f \\n \\r \\t \\x \\u12 \\')
+    ).toBe('v=s \\u00e9 " \\ / \b \f \n \r \t \\x \\u12 \\')
+    // One left-to-right pass: an escaped backslash before `u0073` takes another round.
+    expect(tolerantJsonUnescape(String.raw`\\u0073`)).toBe(String.raw`\u0073`)
+
+    // So the closure sees an encoded bearer next to a stray `%` or a non-UTF-8 escape, and every
+    // string of a JSON text with duplicate keys.
+    for (const text of [
+      `${secret.replace('s', '%73')} (100% done)`,
+      `caf%E9 ${secret.replace('s', '%73')}`,
+      String.raw`{"x":"\u0073ynthetic-wrapper-secret","x":"safe"}`,
+      String.raw`v=\u0073ynthetic-wrapper-secret`
+    ]) {
+      expect(textRepeatsSecret(text, [secret]), text).toBe(true)
+    }
+  })
+
+  it('a 64 KiB body of nested escapes is checked well under 100 ms', async () => {
+    const api = await build([echoPlan], true)
+
+    // Nested escapes of every kind, 64 KiB, none of them the bearer.
+    const unit = String.raw`\\\\u0025%2525\"\\u005c%5C\/`
+    const nested = unit.repeat(Math.ceil((64 * 1024) / unit.length)).slice(0, 64 * 1024)
+    const body = JSON.stringify({ a: nested, b: '' })
+
+    expect(body.length).toBeGreaterThan(64 * 1024)
+
+    const send = () =>
+      api.fetch(
+        new Request('https://api.example.test/echo/1', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+          body
+        })
+      )
+
+    await send()
+
+    const started = performance.now()
+    const response = await send()
+    const elapsed = performance.now() - started
+
+    expect(response.status).toBe(400)
+    expect(elapsed).toBeLessThan(100)
+
+    const closureStarted = performance.now()
+
+    expect(textRepeatsSecret(nested, [secret])).toBe(false)
+    expect(performance.now() - closureStarted).toBeLessThan(100)
+  })
+
+  it('recognises only a printable-ASCII bearer outside the number alphabet', async () => {
     const api = await build([echo], true)
 
-    for (const value of ['12345678', '1.2345678e7', '-1.5E+10000', '12345678901234567890']) {
+    for (const value of [
+      '12345678',
+      '1.2345678e7',
+      '-1.5E+10000',
+      '12345678901234567890',
+      'synth\u00e9tique-token'
+    ]) {
       const response = await api.fetch(get('/files/a', { authorization: `Bearer ${value}` }))
 
       expect(response.status, value).toBe(400)
@@ -416,7 +479,7 @@ describe('fail-closed credential guard', () => {
     }
 
     expect(api.ledger.entries().map(entry => [entry.path, entry.notEmulated])).toEqual(
-      Array.from({ length: 4 }, () => [
+      Array.from({ length: 5 }, () => [
         '/<unrecognised>',
         'synthetic: unrecognisable authorization'
       ])
@@ -424,6 +487,8 @@ describe('fail-closed credential guard', () => {
     expect(isRecognisableBearerValue('ghp_1234567890')).toBe(true)
     expect(isRecognisableBearerValue('github_pat_11AAAA')).toBe(true)
     expect(isRecognisableBearerValue('gho_0000000000')).toBe(true)
+    expect(isRecognisableBearerValue('ya29.a0AfH6SMsynthetic')).toBe(true)
+    expect(isRecognisableBearerValue('synth\u00e9tique-token')).toBe(false)
 
     const answered = await api.fetch(get('/files/a', { authorization: 'Bearer 1234567x' }))
 

@@ -35,28 +35,36 @@
  * Fail-closed mode (opt-in, `failClosed`; used by `/github`): every route parameter has a raw
  * pattern (matched in full), and a request is recognised only when its raw path is exactly an
  * emulated route shape under that route's method and any `Authorization` header is exactly
- * `Bearer <at least 8 non-space characters>`, at least one outside `[0-9.eE+-]`. Every other
- * request is ledgered and answered with constant text only (`/<unrecognised>`, a standard method or
- * `<other>`, an empty query, no body, a constant reason). A recognised bearer must hold at least
- * one character outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub token form does:
- * `ghp_…`, `github_pat_…`, `gho_…`), so no number's text can contain it; an `Authorization` header
- * with any other value is unrecognisable. A recognised request that repeats the bearer value in its
- * raw path, any path segment, the raw query or any query key or value, any recorded header, or its
- * body is refused and ledgered with constant text only: a standard method, the path
- * `/<unrecognised>`, its route template, an empty query, no headers or body, and a constant reason
- * (`the query repeats the credential`, for example). Each part is checked through a bounded
- * decoding closure: starting from the raw text, up to 4 rounds, each applying percent-decoding and,
- * when a text parses as JSON, taking its string values and object keys (so `\u` escapes are
- * undone), with every intermediate text checked. Any other recognised request has the bearer value
- * scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons included); its
- * recorded query is keyed by recorded key; a key recorded more than once lists its values in order
- * (as a JSON array); and recorded headers and query keys and values that start like JSON (`{`, `[`,
- * `"`) are recorded parsed with credential-named keys redacted at any depth, or as `<redacted>`
- * when they do not parse, whatever the header's declared format. Empty query components (a bare
- * `?`, a stray `&`) are refused. Routes check their own query and body keys with `exactQuery` and
- * `exactBodyKeys`, whose reasons never echo a request's own key. A template parameter written
- * `{name+}` spans one or more path segments (each decoded once, none may decode to a `/`). The
- * credential helpers live in `src/stateful-secrets.ts`.
+ * `Bearer <at least 8 non-space characters>` (a recognisable bearer, below). Every other request is
+ * ledgered and answered with constant text only (`/<unrecognised>`, a standard method or `<other>`,
+ * an empty query, no body, a constant reason). A recognised bearer must be printable ASCII
+ * (`[\x21-\x7E]`) and hold at least one character outside the JSON-number alphabet `[0-9.eE+-]`
+ * (every GitHub and Google token form does: `ghp_…`, `github_pat_…`, `gho_…`, `ya29.…`), so no
+ * number's text can contain it; an `Authorization` header with any other value is unrecognisable. A
+ * recognised request that repeats the bearer value in its raw path, any path segment, the raw query
+ * or any query key or value, any recorded header, or its body is refused and ledgered with constant
+ * text only: a standard method, the path `/<unrecognised>`, its route template, an empty query, no
+ * headers or body, and a constant reason (`the query repeats the credential`, for example). Each
+ * part is checked through a bounded closure of two total, lexical transforms that cannot fail: a
+ * tolerant percent-decode (every `%XX` below `%80` becomes its ASCII character; any other `%`
+ * sequence is left as it is) and a tolerant JSON-unescape (in any text, whether or not it parses as
+ * JSON, `\uXXXX` below `\u0080` and `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t` become their
+ * characters). Starting from each part's raw text, up to 4 rounds apply either transform to every
+ * text of the previous round, deduplicated, and every intermediate text is checked for the bearer
+ * as a substring. So every part gets the same budget of 4 layers of percent-encoding or JSON
+ * escaping, in any order: the raw path and each raw path segment, the raw query and each query key
+ * and value (already decoded once by `URLSearchParams`, so one layer more), each recorded header,
+ * and the raw body (whose own JSON escaping costs a round only where it escapes the bearer's text).
+ * Any other recognised request has the bearer value scrubbed from its ledgered fields and every
+ * not-emulated reason (plan-time reasons included); its recorded query is keyed by recorded key; a
+ * key recorded more than once lists its values in order (as a JSON array); and recorded headers and
+ * query keys and values that start like JSON (`{`, `[`, `"`) are recorded parsed with
+ * credential-named keys redacted at any depth, or as `<redacted>` when they do not parse, whatever
+ * the header's declared format. Empty query components (a bare `?`, a stray `&`) are refused.
+ * Routes check their own query and body keys with `exactQuery` and `exactBodyKeys`, whose reasons
+ * never echo a request's own key. A template parameter written `{name+}` spans one or more path
+ * segments (each decoded once, none may decode to a `/`). The credential helpers live in
+ * `src/stateful-secrets.ts`.
  *
  * @experimental
  */
@@ -627,9 +635,10 @@ const bearerPattern = /^bearer\s+\S+/i
 
 /**
  * Fail-closed mode: exactly `Bearer `, one space, and one token of at least 8 non-space characters
- * (no other scheme spelling, no extra words, so combined duplicate headers never match), at least
- * one of them outside the JSON-number alphabet (`isRecognisableBearerValue`). The value is
- * guarded, never checked or stored.
+ * (no other scheme spelling, no extra words, so combined duplicate headers never match). The token
+ * must also be printable ASCII with a character outside the JSON-number alphabet
+ * (`isRecognisableBearerValue`). The value is guarded, never compared against anything, stored, or
+ * ledgered.
  */
 const recognisableBearerPattern = /^Bearer ([^\s]{8,})$/
 

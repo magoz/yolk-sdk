@@ -1130,7 +1130,7 @@ describe('the bearer value is never ledgered or echoed', () => {
       'a recorded request header repeats the credential'
     ],
     [
-      // Astra's counterexample: a query key holding the bearer as a JSON `\u` escape.
+      // A query key holding the bearer as a JSON `\u` escape.
       'JSON-escaped in a query key',
       'GET',
       repo(
@@ -1184,7 +1184,7 @@ describe('the bearer value is never ledgered or echoed', () => {
     ],
     ['an exponent query value', 'Bearer 12345678', 'GET', repo('/labels?q=1.2345678e7'), {}],
     ['an exponent query key', 'Bearer 12345678', 'GET', repo('/labels?1.2345678e7=1'), {}],
-    // Astra's round-3 case: a percent-encoded exponent in a recorded header.
+    // A percent-encoded exponent in a recorded header.
     [
       'a percent-encoded exponent header',
       'Bearer 12345678',
@@ -1200,7 +1200,7 @@ describe('the bearer value is never ledgered or echoed', () => {
       {}
     ],
     ['an exponent path segment', 'Bearer 12345678', 'GET', repo('/contents/1.2345678e7'), {}],
-    // Opus's round-3 case: a long bearer whose exponent form would lose float precision.
+    // A long bearer whose exponent form would lose float precision.
     [
       'a 20-digit bearer as a long exponent',
       'Bearer 12345678901234567890',
@@ -1404,6 +1404,143 @@ describe('the bearer is found through a bounded decoding closure (4 rounds)', ()
     const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
 
     for (const form of forms) expect(seen.join('\n')).not.toContain(form)
+  })
+})
+
+describe('the total, lexical transforms: malformed neighbours never hide the bearer', () => {
+  // `token` is `synthetic-github-unit-token`; `%73` is its `s` percent-encoded, `\u0073` its `s`
+  // as a JSON escape. A stray `%` (`100%`) or a non-UTF-8 escape (`%E9`) next to the encoded
+  // bearer would make a strict decoder fail on the whole text.
+  const once = token.replace('s', '%73')
+  const tail = 'ynthetic-github-unit-token'
+
+  const repeat = (reason: string) => ({ kind: 'repeat', reason }) as const
+
+  const unrecognised = (reason: string) => ({ kind: 'unrecognised', reason }) as const
+
+  it.each([
+    [
+      'a header, next to 100%',
+      'GET',
+      repo('/labels?per_page=2'),
+      { apiVersion: `${once} (100% complete)` },
+      repeat('a recorded request header repeats')
+    ],
+    [
+      'a header, next to %E9',
+      'GET',
+      repo('/labels?per_page=2'),
+      { apiVersion: `caf%E9 ${once}` },
+      repeat('a recorded request header repeats')
+    ],
+    [
+      'a header with a lone JSON escape (the text is no JSON)',
+      'GET',
+      repo('/labels?per_page=2'),
+      { apiVersion: `v=${token.replace('s', '\\u0073')}` },
+      repeat('a recorded request header repeats')
+    ],
+    [
+      'a query value, next to 100%',
+      'GET',
+      repo(`/labels?per_page=2&q=${encodeURIComponent(`${once} (100% complete)`)}`),
+      {},
+      repeat('the query repeats')
+    ],
+    [
+      'a query value, next to %E9',
+      'GET',
+      repo(`/labels?per_page=2&q=caf%E9%20${encodeURIComponent(once)}`),
+      {},
+      repeat('the query repeats')
+    ],
+    // A file path takes no `%`: such a path is no route shape (the constant unrecognised entry).
+    [
+      'a path, next to 100%',
+      'GET',
+      repo(`/contents/docs/100%25%20${once}`),
+      {},
+      unrecognised('no emulated GitHub route for this method and path')
+    ],
+    [
+      'a path, next to %E9',
+      'GET',
+      repo(`/contents/caf%E9/${once}`),
+      {},
+      unrecognised('no emulated GitHub route for this method and path')
+    ],
+    [
+      'a body string, next to 100%',
+      'POST',
+      repo('/issues/1/comments'),
+      { body: { body: `${once} (100% complete)` } },
+      repeat('the request body repeats')
+    ],
+    [
+      'a body string, next to %E9',
+      'POST',
+      repo('/issues/1/comments'),
+      { body: { body: `caf%E9 ${once}` } },
+      repeat('the request body repeats')
+    ],
+    [
+      // Valid JSON whose comment is another JSON text with a duplicate key: a parser keeps only
+      // the last `x`, the lexical unescape sees both.
+      'a body string holding JSON with a duplicate key',
+      'POST',
+      repo('/issues/1/comments'),
+      {
+        rawBody: String.raw`{"body":"{\"x\":\"\\u0073ynthetic-github-unit-token\",\"x\":\"safe\"}"}`
+      },
+      repeat('the request body repeats')
+    ],
+    [
+      'a body string percent-encoded four times',
+      'POST',
+      repo('/issues/1/comments'),
+      { body: { body: token.replace('s', '%25252573') } },
+      repeat('the request body repeats')
+    ],
+    [
+      'a non-ASCII bearer (unrecognisable)',
+      'GET',
+      repo('/labels?per_page=2'),
+      { authorization: 'Bearer synth\u00e9tique-token' },
+      unrecognised('an unrecognisable Authorization header is not emulated')
+    ]
+  ] as const)('%s', async (_label, method, path, options, expected) => {
+    const target = await emulator()
+    const seed = target.snapshot()
+
+    const text = await expectRefusedWithoutFault(
+      target,
+      () => call(target, method, path, options),
+      expected.reason
+    )
+
+    if (expected.kind === 'repeat') {
+      expectConstantEntry(target, method)
+    } else {
+      expect(target.ledger.entries().at(-2)).toEqual({
+        seq: 1,
+        method,
+        path: '/<unrecognised>',
+        query: {},
+        headers: {},
+        status: 400,
+        evidence: 'unknown-route',
+        notEmulated: expected.reason
+      })
+    }
+
+    expect(target.snapshot()).toEqual(seed)
+
+    // The real response text, the ledger, and every `/_emulate/*` read (state included).
+    const seen = [text, JSON.stringify(target.ledger.entries()), ...(await controlReads(target))]
+
+    for (const form of [token, tail, 'ynth\u00e9tique']) {
+      expect(seen.join('\n')).not.toContain(form)
+    }
   })
 })
 
