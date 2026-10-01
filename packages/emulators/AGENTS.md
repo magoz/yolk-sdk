@@ -766,11 +766,11 @@ byte-for-byte fixture replay; fixture, manifest, and seed parity), `test/fortnox
 quirks, auth, faults through the real connector, profiles, control plane),
 `test/fortnox-conformance.test.ts` (all seven Fortnox cases in-process and over a loopback socket,
 the ledger showing the restores, the state-equals-seed proof for the reversible cases, and one drill
-per knob), `test/microsoft.test.ts`
-(manifest, fail closed including nested body keys, query allowlist, auth, credential redaction,
-calendar overlap, immutable ids, the concurrent-write rule, attachments, `$batch`, folders, the copy
-monitor through the real connector, handler failures, every fixture's complete envelopes, faults
-including 429 `retry-after`, seeds, control plane), and `test/microsoft-conformance.test.ts` (all
+per knob), `test/microsoft.test.ts` (manifest, fail closed including nested body keys, query
+allowlist, auth, credential redaction, calendar overlap, immutable ids, the concurrent-write rule,
+attachments, `$batch`, folders, the copy monitor through the real connector, handler failures,
+every fixture's complete envelopes, faults including 429 `retry-after`, seeds, control plane), and
+`test/microsoft-conformance.test.ts` (all
 eleven Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
 proof, and the drills), `test/dropbox.test.ts` and `test/notion.test.ts` (manifest, every fixture's
 complete responses byte for byte, the data copies, every fail-closed refusal (by shape and by state)

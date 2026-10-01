@@ -1,9 +1,9 @@
 /**
  * Credential guarding and the fail-closed ledger constants shared by both stateful wrappers
  * (internal; imported by `src/stateful-fixture.ts` and `src/stateful-emulator.ts`, which issue #139
- * consolidates, and by the `src/r2.ts` port emulator, which uses `textRepeatsSecret` and the
- * predicate form of the same closure, `textClosureOutcome`). No Node builtin and no core import, so
- * both wrappers stay runtime-portable.
+ * consolidates, and by the `src/r2-guard.ts` port guard, which uses only the predicate form of
+ * the closure, `textClosureOutcome`, without the shared minimum length). No Node builtin and no
+ * core import, so both wrappers stay runtime-portable.
  *
  * A guarded secret (a request-carried credential value the wrapper extracted from a recognised
  * request shape) must never reach the ledger, a response, or `/_emulate/*`: `scrubSecrets` removes
