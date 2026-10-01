@@ -1396,14 +1396,15 @@ emulator mints (it never mints anything else):
   (already decoded once by `URLSearchParams`), each recorded header, and the raw body. The work is
   capped at 64 rounds, 1024 distinct texts, or 8 Mi characters read by the transforms, whichever
   comes first; a part whose closure hits a cap before its fixpoint counts as repeating the
-  credential and is refused with the same constant entry (uncertainty refuses, it never admits). Any
-  other recognised request has the bearer value scrubbed from its ledgered fields and every
-  not-emulated reason (plan-time reasons included); its recorded query is keyed by recorded key; a
-  key recorded more than once lists its values in order (as a JSON array); and recorded headers and
-  query keys and values that start like JSON (`{`, `[`, `"`) are recorded parsed with
-  credential-named keys redacted at any depth, or as `<redacted>` when they do not parse, whatever
-  the header's declared format. Refusals never echo a request's own query or body keys, and empty
-  query components (a bare `?`, a stray `&`) are refused.
+  credential and is refused with the same constant entry (uncertainty refuses, it never admits; so
+  any part over 4 Mi characters is always refused). Any other recognised request has the bearer
+  value scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons
+  included); its recorded query is keyed by recorded key; a key recorded more than once lists its
+  values in order (as a JSON array); and recorded headers and query keys and values that start like
+  JSON (`{`, `[`, `"`) are recorded parsed with credential-named keys redacted at any depth, or as
+  `<redacted>` when they do not parse, whatever the header's declared format. Refusals never echo a
+  request's own query or body keys, and empty query components (a bare `?`, a stray `&`) are
+  refused.
 - **Request-shape latitude (`/github`, the only accepted deviations).** Any bearer value in the RFC
   6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
   character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u` (so a legacy all-hex token is

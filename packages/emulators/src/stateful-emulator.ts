@@ -62,16 +62,17 @@
  * `URLSearchParams`), each recorded header, and the raw body. The work is capped at 64 rounds, 1024
  * distinct texts, or 8 Mi characters read by the transforms, whichever comes first; a part whose
  * closure hits a cap before its fixpoint counts as repeating the credential and is refused with the
- * same constant entry (uncertainty refuses, it never admits). Any other recognised request has the
- * bearer value scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons
- * included); its recorded query is keyed by recorded key; a key recorded more than once lists its
- * values in order (as a JSON array); and recorded headers and query keys and values that start like
- * JSON (`{`, `[`, `"`) are recorded parsed with credential-named keys redacted at any depth, or as
- * `<redacted>` when they do not parse, whatever the header's declared format. Empty query
- * components (a bare `?`, a stray `&`) are refused. Routes check their own query and body keys with
- * `exactQuery` and `exactBodyKeys`, whose reasons never echo a request's own key. A template
- * parameter written `{name+}` spans one or more path segments (each decoded once, none may decode
- * to a `/`). The credential helpers live in `src/stateful-secrets.ts`.
+ * same constant entry (uncertainty refuses, it never admits; so any part over 4 Mi characters is
+ * always refused). Any other recognised request has the bearer value scrubbed from its ledgered
+ * fields and every not-emulated reason (plan-time reasons included); its recorded query is keyed by
+ * recorded key; a key recorded more than once lists its values in order (as a JSON array); and
+ * recorded headers and query keys and values that start like JSON (`{`, `[`, `"`) are recorded
+ * parsed with credential-named keys redacted at any depth, or as `<redacted>` when they do not
+ * parse, whatever the header's declared format. Empty query components (a bare `?`, a stray `&`)
+ * are refused. Routes check their own query and body keys with `exactQuery` and `exactBodyKeys`,
+ * whose reasons never echo a request's own key. A template parameter written `{name+}` spans one or
+ * more path segments (each decoded once, none may decode to a `/`). The credential helpers live in
+ * `src/stateful-secrets.ts`.
  *
  * @experimental
  */

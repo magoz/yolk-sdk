@@ -147,10 +147,11 @@ export const isRecognisableBearerValue = (value: string): boolean =>
 /**
  * The work caps of `textRepeatsSecret`. The closure runs to a fixpoint; these only bound the work
  * of a pathological text, and hitting one counts as a credential repeat (uncertainty refuses, it
- * never admits). Every fixture and every realistic request converges within a handful of rounds,
- * texts, and kilobytes read, far below them. A 64 KiB body of densely nested escapes converges in
- * about 25 rounds, under 100 texts, and about 2.4 Mi characters read; a pathological 64 KiB body
- * hits a cap in about 100 ms.
+ * never admits). Measured margins: every fixture converges in a few rounds and texts; a 64 KiB
+ * body of densely nested escapes converges in about 25 rounds, under 100 texts, and about 2.4 Mi
+ * characters read; a pathological 64 KiB body hits a cap in about 100 ms. The character cap is
+ * spent on reading too, so any part over 4 Mi characters is always refused, escapes or not (far
+ * above GitHub's 65 536-character body limit).
  */
 export const secretClosureCaps = {
   /** Rounds of the breadth-first walk. */
