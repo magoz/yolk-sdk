@@ -868,6 +868,7 @@ not-found, single-item copy/move metadata, and the upload rev precondition. Cred
 `dropboxConformanceIntegration` (`dropbox.oauth`, credential ref `dropbox.conformance`). The case
 table, seeds, and claims live in the
 [Dropbox conformance guide](../../apps/docs/content/docs/connectors/dropbox.mdx#conformance-cases).
+The Dropbox emulator (`@yolk-sdk/emulators/dropbox`) passes every case offline.
 
 Every write case works only inside its own `yolk-conformance-<runId>-<case>` folder under the
 `workFolderPath` seed. The `runId` seed makes that namespace unique per invocation (the fixtures
@@ -1305,6 +1306,7 @@ observes that header at the `ConnectorHttpClient` port and sends no request of i
 `notionConformanceIntegration` (`notion.api_token`, credential ref `notion.conformance`). The case
 table, seeds, and claims live in the
 [Notion conformance guide](../../apps/docs/content/docs/connectors/notion.mdx#conformance-cases).
+The Notion emulator (`@yolk-sdk/emulators/notion`) passes every case offline.
 
 The write case creates its own page under the `parentPageId` seed and registers its id before any
 claim runs (the create and registration are not interruptible, and no request timeout is set, so a

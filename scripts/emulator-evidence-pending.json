@@ -161,6 +161,55 @@
       "path": "/v1.0/drives/{driveId}/items/{itemId}/copy",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.copy-accepted-monitor.",
       "expires": "2026-11-27"
+    },
+    {
+      "manifest": "dropbox",
+      "method": "POST",
+      "path": "/2/files/create_folder_v2",
+      "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.create-folder-conflict and the other Dropbox write cases, which create their case folders through it.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "dropbox",
+      "method": "POST",
+      "path": "/2/files/delete_v2",
+      "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.delete-then-not-found and the other Dropbox write cases, which delete their case folders through it.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "dropbox",
+      "method": "POST",
+      "path": "/2/files/copy_v2",
+      "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.copy-move-metadata.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "dropbox",
+      "method": "POST",
+      "path": "/2/files/move_v2",
+      "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.copy-move-metadata.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "dropbox",
+      "method": "POST",
+      "path": "/2/files/upload",
+      "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.upload-rev-precondition.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "notion",
+      "method": "POST",
+      "path": "/v1/pages",
+      "reason": "Notion emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of notion.pages.archive-in-trash.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "notion",
+      "method": "PATCH",
+      "path": "/v1/pages/{pageId}",
+      "reason": "Notion emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of notion.pages.archive-in-trash.",
+      "expires": "2026-11-29"
     }
   ]
 }

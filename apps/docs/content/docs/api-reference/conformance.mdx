@@ -381,7 +381,8 @@ case folder is never deleted (`DropboxConformanceCleanupRefused`). Every write i
 folder (the create, copy, move, upload, and delete) is not interruptible, and the runner has no
 request timeout. `findDropboxConformanceLeftovers` lists, read-only, the folders under
 `workFolderPath` whose names start with `dropboxConformanceRunFolderPrefix`
-(`yolk-conformance-run-`; every valid `runId` starts with `run-`). See
+(`yolk-conformance-run-`; every valid `runId` starts with `run-`). The Dropbox emulator
+(`@yolk-sdk/emulators/dropbox`) passes every case offline. See
 [Dropbox conformance cases](../connectors/dropbox#conformance-cases).
 
 `@yolk-sdk/connectors/notion/conformance` exports eight Notion cases (`notionConformanceCases`),
@@ -395,7 +396,7 @@ failing with `NotionConformanceRestoreFailed` when that fails; an ambiguous crea
 is not interruptible and the runner has no request timeout. `findNotionConformanceLeftovers`
 searches, read-only, bounded (at most 10 search pages), and best effort, for untrashed
 `yolk-conformance page` pages; `findDropboxConformanceLeftovers` likewise reads at most 50
-listing pages. See
+listing pages. The Notion emulator (`@yolk-sdk/emulators/notion`) passes every case offline. See
 [Notion conformance cases](../connectors/notion#conformance-cases).
 
 `@yolk-sdk/connectors/todoist/conformance` exports seven Todoist cases (`todoistConformanceCases`),

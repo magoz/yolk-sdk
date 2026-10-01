@@ -87,3 +87,8 @@ whenever `CI` is non-empty) needs `NOTION_API_TOKEN` and the seeds, `--allow-wri
 the write case, and `--record` stages verified recordings only in the gitignored
 `.conformance-recordings/notion/` for manual scrubbing and promotion. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental
+[Notion emulator](../api-reference/emulators#notion-emulator) (`@yolk-sdk/emulators/notion`) is a
+stateful, fixture-only stand-in at `Notion-Version: 2025-09-03` that passes these cases (and the
+leftover lookup) through the real connector actions over the connector ports.

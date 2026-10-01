@@ -18,6 +18,8 @@ Effect `HttpClient` routing that points code at them.
 | `@yolk-sdk/emulators/node`      | `src/node.ts`                            | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
 | `@yolk-sdk/emulators/fortnox`   | `src/fortnox.ts`                         | Stateful Fortnox emulator on `@emulators/core`: ledger, faults, control plane                                                            |
 | `@yolk-sdk/emulators/microsoft` | `src/microsoft.ts`                       | Stateful Microsoft Graph emulator on `@emulators/core` (Graph + copy monitor)                                                            |
+| `@yolk-sdk/emulators/dropbox`   | `src/dropbox.ts`                         | Stateful, fixture-only Dropbox emulator on `@emulators/core` (RPC + upload)                                                              |
+| `@yolk-sdk/emulators/notion`    | `src/notion.ts`                          | Stateful, fixture-only Notion emulator on `@emulators/core` (`/v1`, `Notion-Version: 2025-09-03`)                                        |
 | (internal)                      | `src/emulator-kernel.ts`                 | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
 | (internal)                      | `src/chat-completions.ts`                | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
 | (internal)                      | `src/messages.ts`                        | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
@@ -35,6 +37,9 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                      | `src/microsoft/api.ts`                   | Microsoft route table (evidence, query allowlist, auth flag), matching, registration                                                     |
 | (internal)                      | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                      |
 | (internal)                      | `src/microsoft/{calendar,mail,drive}.ts` | Calendar, Outlook (with `$batch`), and OneDrive (with copy monitor) handlers                                                             |
+| (internal)                      | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox` and `/notion`: route table, shape checks, 400 not-emulated, faults, ledger, control plane (no core import)  |
+| (internal)                      | `src/dropbox/{state,api}.ts`             | Dropbox state/seed schemas and default seed; route table, fixture error envelopes, metadata, cursors                                     |
+| (internal)                      | `src/notion/{state,api}.ts`              | Notion state/seed schemas and default seed; route table, error envelopes, object rendering, cursor paging                                |
 
 There is no root export or barrel.
 
@@ -47,14 +52,16 @@ There is no root export or barrel.
   import emulators.
 - `node:` builtins and `@emulators/core` (Node-only: it imports Node builtins and reads files at
   import time) are allowed only in `src/node.ts`, `src/fortnox.ts`, `src/fortnox/**`,
-  `src/microsoft.ts`, and `src/microsoft/**` (also enforced). `src/fortnox.ts` and
-  `src/microsoft.ts` import the core lazily (`await import`) inside `makeFortnoxEmulator` /
-  `makeMicrosoftEmulator`, so importing the subpath (for example the manifest, from the evidence
-  check) has no side effects.
+  `src/microsoft.ts`, `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`, `src/notion.ts`, and
+  `src/notion/**` (also enforced). `src/fortnox.ts`, `src/microsoft.ts`, `src/dropbox.ts`, and
+  `src/notion.ts` import the core lazily (`await import`) inside `makeFortnoxEmulator` /
+  `makeMicrosoftEmulator` / `makeDropboxEmulator` / `makeNotionEmulator`, so importing the subpath
+  (for example the manifest, from the evidence check) has no side effects. The shared wrapper
+  `src/stateful-emulator.ts` never imports the core: the subpath hands it the runtime.
 - `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain
   Web fetch handlers (no Effect runtime needed, no Node builtins); `email` is a plain structural
-  object (no HTTP, socket, TLS, MIME, or mail library); `node`, `fortnox`, and `microsoft` are the Node
-  subpaths.
+  object (no HTTP, socket, TLS, MIME, or mail library); `node`, `fortnox`, `microsoft`, `dropbox`,
+  and `notion` are the Node subpaths.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
 - `@emulators/core` is Apache-2.0 and a dependency (not vendored or bundled; `tsdown` never bundles
@@ -85,12 +92,14 @@ There is no root export or barrel.
   (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`,
   `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`,
   `anthropicSubscriptionUsageEmulatorRoutes`, `codexSubscriptionUsageEmulatorRoutes`,
-  `xAiGrokSubscriptionUsageEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`).
+  `xAiGrokSubscriptionUsageEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`,
+  `dropboxEmulatorRoutes`, `notionEmulatorRoutes`).
   Each manifest route
   needs its own handler: the fetch-handler emulators use `bindRouteHandlers`
   (`src/route-evidence.ts`), which pairs them at construction and throws `EmulatorRouteUnmapped`
-  for a manifest route without a handler or a handler without a manifest route; Fortnox and
-  Microsoft derive both from one table (`src/fortnox/api.ts`, `src/microsoft/api.ts`). Fortnox
+  for a manifest route without a handler or a handler without a manifest route; Fortnox,
+  Microsoft, Dropbox, and Notion derive both from one table (`src/fortnox/api.ts`,
+  `src/microsoft/api.ts`, `src/dropbox/api.ts`, `src/notion/api.ts`). Fortnox
   routes without a fixture
   (`GET /3/companyinformation`, `GET /3/customers`) cite no case ids and use minimal shapes named
   after the connector's read fields; the check warns about them.
@@ -106,11 +115,12 @@ There is no root export or barrel.
   must keep the recorded JSON shape. A recordings-parity test per fixture
   (`test/fixture-recordings.test.ts`) compares status, event kinds and order, field names, and
   content. Scope: the four `/opencode` routes and the three subscription-usage routes (Claude,
-  Codex, Grok) today, on `src/fixture-route.ts`, and the `/email` port emulator (its own
-  latitude, not-emulated answer, faults, and parity test, below; it does not use the kernel). The earlier model routes (`/gateway`, `/openai`,
+  Codex, Grok) today, on `src/fixture-route.ts`, the `/email` port emulator (its own
+  latitude, not-emulated answer, faults, and parity test, below; it does not use the kernel), and
+  the stateful `/dropbox` and `/notion` emulators (on `src/stateful-emulator.ts`, below). The earlier model routes (`/gateway`, `/openai`,
   `/anthropic`, `/codex`, `/xai` Messages and Responses) predate the rule and keep their synthetic
   behaviour and 404 fallback unchanged; do not copy that behaviour into new routes. The stateful
-  `/fortnox` and `/microsoft` emulators are not fixture-only: they keep entity state on
+  `/fortnox` and `/microsoft` emulators predate the rule and are not fixture-only: they keep entity state on
   `@emulators/core`, answer unknown routes with a ledgered 404 in the provider's error envelope, and
   fail closed on anything not emulated (below).
 - Request-shape latitude (fixture-only HTTP routes, the only accepted deviations): any credential
@@ -128,7 +138,8 @@ There is no root export or barrel.
   `x-grok-client-version`, and `x-grok-client-mode: headless`). Fault and scripted-error statuses on
   fixture-only routes are 400-599 only.
 - Evidence policy: unknown emulated API routes fail closed and are written to the ledger (404 JSON
-  on the earlier model-route emulators, `/fortnox`, and `/microsoft`, 400 not-emulated on fixture-only routes; control-plane
+  on the earlier model-route emulators, `/fortnox`, and `/microsoft`, 400 not-emulated on fixture-only routes,
+  `/dropbox`, and `/notion`; control-plane
   requests are never recorded); unverified routes answer but carry
   `x-emulator-evidence: unverified` (the `/email` port emulator has no headers: its ledger entries
   carry `evidence`), are tagged in the ledger, and are listed by the evidence check; evidence older
@@ -140,8 +151,9 @@ There is no root export or barrel.
   warning, reported first). Never weaken the rule, extend an expiry silently, or add an entry
   without a reason; verify the route with an owner-approved live run and delete the entry (the
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
-  write routes are pending (tracking #115), and so are the four Fortnox write routes and the eleven
-  Microsoft write routes; expiry dates live only in that file.
+  write routes are pending (tracking #115), and so are the four Fortnox write routes, the eleven
+  Microsoft write routes, the five Dropbox write routes, and the two Notion write routes; expiry
+  dates live only in that file.
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
   turn is added. Route statuses follow the fixtures instead (for example a bodiless 204, or a 202
   with a monitor `Location`). All emulators share these validators (`src/emulator-http.ts`,
@@ -278,6 +290,42 @@ There is no root export or barrel.
   `redactCredentialQuery`, which also covers the conformance scan's `credential_query_param`
   names such as `x-amz-signature`); `test/emulator-http.test.ts` keeps both name rules in step
   with `@yolk-sdk/conformance`'s.
+- Dropbox (`src/dropbox.ts` + `src/dropbox/*`) and Notion (`src/notion.ts` + `src/notion/*`) are
+  stateful AND fixture-only: entity state lives on `@emulators/core` (as for Microsoft), and the
+  shared wrapper `src/stateful-emulator.ts` answers everything the fixtures do not show with the
+  ledgered 400 not-emulated, never a guessed provider envelope or a 404. Each route is
+  `statefulRoute(evidence, body, admit, run)`: `admit` checks the request shape without reading
+  state (route, bearer, header rules such as `Notion-Version: 2025-09-03`, body kind, exact body
+  keys, values), so a refused shape uses up no fault; then the first status fault; then `run` in
+  the core, which may still refuse what the state cannot answer as a fixture does (and writes
+  nothing then). Fault statuses are 400-599 with an `emulator_fault` default body; recovery answers
+  (unknown routes 400, handler failure 500, closed 503) read no clock, so a throwing clock only
+  fails the routes that read it (Dropbox uploads, Notion page creates) with a ledgered 500 before
+  any write. Wire shapes and error envelopes come from the fixtures (Dropbox's 409 `error_summary`
+  bodies byte for byte in `dropboxEmulatorErrorBodies`); `test/dropbox.test.ts` and
+  `test/notion.test.ts` replay every fixture and compare each complete response (the drift test of
+  the data copies), learning only emulator-minted values (Dropbox ids, revs, and hashes from write
+  answers; Notion property cursors; request ids). Extrapolations the cases need are listed in the
+  README under each emulator's "Emulator extrapolations (no fixture)". Write cases end at the seed
+  except the advancing counters and what the provider keeps after a delete (Dropbox deleted-entry
+  records of the case's own folder, Notion the case's own trashed page); the cross-check tests
+  prove exactly that. Drill knobs (`drills`, booleans) each fail exactly one case.
+- Request-shape latitude (`/dropbox`, the only accepted deviations): any bearer value (never
+  checked or stored); extra request headers; JSON key order; `content-type` media-type parameters;
+  any path, query, and cursor string (looked up in the state); any `list_folder` `limit` from 1 to
+  2000 and any `search_v2` `options.max_results` from 1 to 1000; any upload body bytes; and which of
+  the two origins carried a request (one handler serves both; the paths never overlap). Everything
+  else (other keys, booleans, modes, query parameters, ids or revs where the fixtures send paths, and
+  the root folder) is not emulated. Copies change together: this bullet, the `src/dropbox.ts`
+  header, `README.md` (Dropbox emulator), and `apps/docs/content/docs/api-reference/emulators.mdx`.
+- Request-shape latitude (`/notion`, the only accepted deviations): any bearer value (never checked
+  or stored); extra request headers; JSON key order; `content-type` media-type parameters; the
+  order of query parameters; Notion ids with or without dashes, in any case; any search `query`,
+  title text, and cursor string (looked up in the state); and any `page_size` from 1 to 100.
+  `Notion-Version` must be `2025-09-03`. Everything else (other keys, filters, booleans, sorts,
+  query parameters, and repeated or missing `page_size`) is not emulated. Copies change together:
+  this bullet, the `src/notion.ts` header, `README.md` (Notion emulator), and
+  `apps/docs/content/docs/api-reference/emulators.mdx`.
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -340,4 +388,11 @@ concurrent-write rule, attachments, `$batch`, folders, the copy monitor through 
 connector, handler failures, every fixture's complete envelopes, faults including 429
 `retry-after`, seeds, control plane), and `test/microsoft-conformance.test.ts` (all eleven
 Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
-proof, and the drills). Loopback sockets only; never call real services.
+proof, and the drills), `test/dropbox.test.ts` and `test/notion.test.ts` (manifest, every
+fixture's complete responses, the data copies, every fail-closed refusal writing nothing and using
+no fault, the latitude, the clock-safe recovery, credential redaction, faults including 429
+`retry-after` through the real connector, seeds, control plane), and
+`test/dropbox-conformance.test.ts` and `test/notion-conformance.test.ts` (all eight cases of each
+in-process with one emulator per case and on one shared emulator, and over a loopback socket; the
+state-equals-seed proof; the leftover lookups; one drill per case failing exactly that case).
+Loopback sockets only; never call real services.

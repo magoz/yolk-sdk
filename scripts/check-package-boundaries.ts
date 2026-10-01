@@ -225,8 +225,10 @@ const rules: ReadonlyArray<BoundaryRule> = [
     forbiddenImports: emulatorsForbiddenImports
   },
   // Node builtins and the Node-only `@emulators/core` stay behind the Node subpaths: the loopback
-  // server (`src/node.ts`) and the stateful Fortnox and Microsoft emulators (`src/fortnox.ts`,
-  // `src/fortnox/**`, `src/microsoft.ts`, `src/microsoft/**`).
+  // server (`src/node.ts`) and the stateful Fortnox, Microsoft, Dropbox, and Notion emulators
+  // (`src/fortnox.ts`, `src/fortnox/**`, `src/microsoft.ts`, `src/microsoft/**`, `src/dropbox.ts`,
+  // `src/dropbox/**`, `src/notion.ts`, `src/notion/**`). Their shared wrapper
+  // (`src/stateful-emulator.ts`) stays runtime-portable and takes the core from them.
   {
     packageDir: 'packages/emulators/src',
     forbiddenImports: ['node:', '@emulators/core'],
@@ -235,7 +237,11 @@ const rules: ReadonlyArray<BoundaryRule> = [
       'packages/emulators/src/fortnox.ts',
       'packages/emulators/src/fortnox',
       'packages/emulators/src/microsoft.ts',
-      'packages/emulators/src/microsoft'
+      'packages/emulators/src/microsoft',
+      'packages/emulators/src/dropbox.ts',
+      'packages/emulators/src/dropbox',
+      'packages/emulators/src/notion.ts',
+      'packages/emulators/src/notion'
     ]
   }
 ]

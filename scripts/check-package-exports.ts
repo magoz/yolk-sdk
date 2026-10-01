@@ -233,7 +233,9 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './email',
       './node',
       './fortnox',
-      './microsoft'
+      './microsoft',
+      './dropbox',
+      './notion'
     ],
     root: 'none'
   }

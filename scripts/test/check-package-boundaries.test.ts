@@ -393,7 +393,7 @@ describe('emulators import rules', () => {
     }
   })
 
-  it('allows node: builtins and @emulators/core only in src/node.ts and the Fortnox and Microsoft emulators', () => {
+  it('allows node: builtins and @emulators/core only in src/node.ts and the Fortnox, Microsoft, Dropbox, and Notion emulators', () => {
     const root = fixtureDirectory()
 
     scaffoldEmulators(root)
@@ -407,7 +407,13 @@ describe('emulators import rules', () => {
       'packages/emulators/src/fortnox/nested/state.ts',
       'packages/emulators/src/microsoft.ts',
       'packages/emulators/src/microsoft/api.ts',
-      'packages/emulators/src/microsoft/nested/state.ts'
+      'packages/emulators/src/microsoft/nested/state.ts',
+      'packages/emulators/src/dropbox.ts',
+      'packages/emulators/src/dropbox/api.ts',
+      'packages/emulators/src/dropbox/nested/state.ts',
+      'packages/emulators/src/notion.ts',
+      'packages/emulators/src/notion/api.ts',
+      'packages/emulators/src/notion/nested/state.ts'
     ]
 
     const forbidden = [
@@ -417,7 +423,12 @@ describe('emulators import rules', () => {
       'packages/emulators/src/fortnox-helpers.ts',
       'packages/emulators/src/fortnoxish/api.ts',
       'packages/emulators/src/microsoft-helpers.ts',
-      'packages/emulators/src/microsoftish/api.ts'
+      'packages/emulators/src/microsoftish/api.ts',
+      'packages/emulators/src/stateful-emulator.ts',
+      'packages/emulators/src/dropbox-helpers.ts',
+      'packages/emulators/src/dropboxish/api.ts',
+      'packages/emulators/src/notion-helpers.ts',
+      'packages/emulators/src/notionish/api.ts'
     ]
 
     for (const rel of [...allowed, ...forbidden]) {
