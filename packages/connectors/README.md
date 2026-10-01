@@ -1263,7 +1263,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 host-supplied seed identities in a Microsoft 365 practice tenant. **The connector has no calendar
 actions yet:** the four calendar cases send raw Graph v1.0 requests through the same ports, token
 resolution, and Graph failure mapping, and pin expected Graph behaviour (unverified until a live
-run) for hosts and the upcoming emulator. Credentials bind through `microsoftConformanceIntegration` (`microsoft.oauth`, credential
+run) for hosts and the Microsoft Graph emulator (`@yolk-sdk/emulators/microsoft`). Credentials bind through `microsoftConformanceIntegration` (`microsoft.oauth`, credential
 ref `microsoft.conformance`). The case table, seeds, and claims live in the
 [Microsoft conformance guide](../../apps/docs/content/docs/connectors/microsoft.mdx#conformance-cases).
 
@@ -1284,7 +1284,8 @@ an ambiguous create's report starts with the case id. No case sends mail or invi
 `--live --owner-approved --account <label>` (refused whenever `CI` is non-empty; with
 `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by hand (a first
 Ctrl-C interrupts the run so a running write case still removes its item, and the reports above
-print on stderr as `WARN` lines), `--allow-writes reversible` adds the write cases, and `--record`
+print on stderr as `WARN` lines; every live-run line is printed with the live access token
+redacted, as in the shared runners), `--allow-writes reversible` adds the write cases, and `--record`
 stages verified recordings all or nothing in `.conformance-recordings/microsoft/<run>/` (gitignored)
 for manual scrubbing and promotion.
 

@@ -38,6 +38,7 @@ import {
   nodeRecordingWriter,
   ownerApprovalRequiredMessage,
   recordingContainsAccessToken,
+  redactedLiveTokenMarker,
   textContainsAccessToken,
   type CliIo,
   type CliSignal,
@@ -66,6 +67,7 @@ import {
   renderedTokenRefusal,
   runMicrosoftInterruptibly,
   runMicrosoftLive,
+  runMicrosoftLiveCli,
   stageRecordings,
   staleSharedSeeds,
   type LiveInputs
@@ -1135,6 +1137,141 @@ describe('run-microsoft-conformance live runs are interruptible', () => {
 
     expect(errors).toEqual(['synthetic live failure'])
     expect(exitCodes).toEqual([1])
+    expect(signals.registered()).toBe(0)
+  })
+})
+
+describe('run-microsoft-conformance live output is redacted of the live token', () => {
+  const liveToken = 'SyntheticMicrosoftGraphLiveToken000000000000001'
+  const firstCaseId = microsoftConformanceCases[0]?.id ?? expect.fail('no Microsoft case')
+
+  const liveOptions = {
+    ...defaultRunOptions,
+    live: true,
+    ownerApproved: true,
+    account: 'practice',
+    allowWrites: 'reversible' as const
+  }
+
+  for (const [label, echoed] of [
+    ['raw', liveToken],
+    ['base64-encoded', Buffer.from(`x${liveToken}`).toString('base64')]
+  ] as const) {
+    it(`prints no trace of a ${label} token echoed in a reported failure to stdout or stderr`, async () => {
+      const { client } = await Effect.runPromise(makeReplayHttpClient(microsoftConformanceFixtures))
+
+      let requests = 0
+
+      // The first case's first request fails with the token in its message, which the report
+      // prints as that case's failure.
+      const echoing = HttpClient.transform(client, response =>
+        ++requests === 1 ? Effect.die(new Error(`Graph answered ${echoed}`)) : response
+      )
+
+      const stdout: Array<string> = []
+      const stderr: Array<string> = []
+      const signals = fakeSignals()
+      const { io, errors, exitCodes } = fakeIo()
+      const exitCode = process.exitCode
+
+      try {
+        // The CLI's own entry: the run's lines and its CLI messages, each through the redaction.
+        await runMicrosoftLiveCli(
+          liveOptions,
+          { ...recordInputs, accessToken: liveToken },
+          signals.source,
+          io,
+          {
+            http: Layer.succeed(HttpClient.HttpClient, echoing),
+            out: line => stdout.push(line),
+            err: line => stderr.push(line)
+          }
+        )
+      } finally {
+        // A failed report sets the exit code of this process; keep the test run's own.
+        process.exitCode = exitCode
+      }
+
+      const printedOut = stdout.join('\n')
+      const printedErr = [...stderr, ...errors].join('\n')
+
+      expect(printedOut).toContain(`FAIL  ${firstCaseId}`)
+      expect(printedOut).toContain(redactedLiveTokenMarker)
+      expect(textContainsAccessToken(printedOut, liveToken)).toBe(false)
+      expect(textContainsAccessToken(printedErr, liveToken)).toBe(false)
+      expect(printedOut).not.toContain(echoed)
+      expect(printedErr).not.toContain(echoed)
+      expect(exitCodes).toEqual([])
+      expect(signals.registered()).toBe(0)
+    })
+  }
+
+  it('prints no trace of a token echoed in an interrupted removal failure (WARN and run failure on stderr)', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes, forcedExits } = fakeIo()
+    const stdout: Array<string> = []
+    const stderr: Array<string> = []
+    const sent = Effect.runSync(Deferred.make<void>())
+    const release = Effect.runSync(Deferred.make<void>())
+
+    const { client } = await Effect.runPromise(makeReplayHttpClient(microsoftConformanceFixtures))
+
+    // The create-event case: its claim's GET after the create is held until the interruption; its
+    // removal's DELETE then fails with the token in the failure message, which the case's
+    // RestoreFailed summarizes: printed as the WARN line (the run's err) and as the run's own
+    // failure (the CLI io), both on stderr.
+    let createSeen = false
+    let held = false
+
+    const echoing = HttpClient.transform(client, (response, request) => {
+      if (request.method === 'POST') {
+        createSeen = true
+      } else if (request.method === 'GET' && createSeen && !held) {
+        held = true
+
+        return response.pipe(
+          Effect.tap(() => Deferred.succeed(sent, undefined)),
+          Effect.tap(() => Deferred.await(release))
+        )
+      } else if (request.method === 'DELETE') {
+        return Effect.die(new Error(liveToken))
+      }
+
+      return response
+    })
+
+    const done = runMicrosoftLiveCli(
+      liveOptions,
+      { ...recordInputs, accessToken: liveToken },
+      signals.source,
+      io,
+      {
+        http: Layer.succeed(HttpClient.HttpClient, echoing),
+        out: line => stdout.push(line),
+        err: line => stderr.push(line)
+      },
+      { pid: 4242 }
+    )
+
+    await Effect.runPromise(Deferred.await(sent))
+    signals.emit('SIGINT')
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+    Effect.runSync(Deferred.succeed(release, undefined))
+    await done
+
+    const warns = stderr.filter(line => line.startsWith('WARN '))
+
+    expect(warns).toHaveLength(1)
+    expect(warns[0]).toContain('microsoft.calendar.create-returns-event-id: restore failed')
+    expect(warns[0]).toContain(redactedLiveTokenMarker)
+    expect(errors.at(-1)).toContain('microsoft.calendar.create-returns-event-id: restore failed')
+    expect(errors.at(-1)).toContain(redactedLiveTokenMarker)
+    expect(textContainsAccessToken([...stdout, ...stderr, ...errors].join('\n'), liveToken)).toBe(
+      false
+    )
+    expect(exitCodes).toEqual([1])
+    expect(forcedExits).toEqual([])
+    expect(stdout).toEqual([])
     expect(signals.registered()).toBe(0)
   })
 })
