@@ -282,7 +282,10 @@ What the write cases guarantee differs:
   with its full message, to `ConformanceCleanupReporter` from `@yolk-sdk/connectors/conformance`
   (default: `Effect.logWarning`), since the interruption may replace it. The repository runner
   (`pnpm conformance:fortnox`) turns a first Ctrl-C into an interruption and prints these reports
-  on stderr as `WARN` lines. The rejection case and the email send do not report.
+  on stderr as `WARN` lines. Like the shared runners, it prints every line of a live run (the
+  report, `WARN` lines, the run's own failure, staging output) with the live access token redacted,
+  since Fortnox can echo it into a field a case reports. The rejection case and the email send do
+  not report.
 - **The rejection case** does not restore anything. It first confirms that the customer is absent: a
   404, or another 4xx with a customer-not-found `ErrorInformation` code (`2000204`, `2000433`).
   401, 403, and every other failure abort before the write. If Fortnox unexpectedly accepted the

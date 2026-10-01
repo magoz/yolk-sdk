@@ -703,7 +703,8 @@ if it still differs). A failed restore raised while the case is being interrupte
 with its full message, to `ConformanceCleanupReporter` from `@yolk-sdk/connectors/conformance`
 (default: `Effect.logWarning`), since the interruption may replace it. The repository runner
 (`pnpm conformance:fortnox`) turns a first Ctrl-C into an interruption and prints these reports on
-stderr as `WARN` lines. The rejection case restores nothing: it only confirms the customer is absent
+stderr as `WARN` lines; like the shared runners, it prints every live-run line with the live access
+token redacted. The rejection case restores nothing: it only confirms the customer is absent
 before its write and names any invoice Fortnox unexpectedly creates for manual cancellation. The
 email case aborts unless the invoice's `EmailInformation.EmailAddressTo` equals the `emailRecipient`
 seed exactly; the runner never runs it live unless its exact id is allowed. Neither the rejection
@@ -1278,9 +1279,9 @@ failure, no status, HTTP 408, or HTTP 5xx) fails with `MicrosoftConformanceActio
 `yolk-conformance` item. Each of these (a failed removal, an id-less create, an ambiguous create)
 raised while the case is being interrupted is also handed, with its full message, to
 `ConformanceCleanupReporter` (default: `Effect.logWarning`), since the interruption may replace it;
-an ambiguous create's report starts with the case id. The repository runner on main does not turn
-Ctrl-C into an interruption, so the reporter applies to hosts that interrupt the run fiber (draft
-pull requests #114 and #122 add this to the runners). No case sends mail or invitations.
+an ambiguous create's report starts with the case id. The repository runner does not turn Ctrl-C
+into an interruption, so the reporter applies to hosts that interrupt the run fiber. No case sends
+mail or invitations.
 `pnpm conformance:microsoft` in this repository dry-runs by default; `--live --account <label>`
 (with `MICROSOFT_ACCESS_TOKEN` and the seeds) is for owners running a practice tenant by hand,
 `--allow-writes reversible` adds the write cases, and `--record` stages verified recordings all or

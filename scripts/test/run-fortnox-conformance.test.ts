@@ -30,7 +30,8 @@ import {
   fortnoxConformanceFixtures,
   fortnoxInvoiceListPopulatedFixture,
   fortnoxInvoicePreviewPdfFixture,
-  fortnoxInvoiceRowDiscountFixture
+  fortnoxInvoiceRowDiscountFixture,
+  fortnoxWriteRejectionFixture
 } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import { FortnoxDocumentNumber } from '../../packages/connectors/src/fortnox/index.ts'
 import {
@@ -38,6 +39,7 @@ import {
   nodeRecordingWriter,
   ownerApprovalRequiredMessage,
   recordingContainsAccessToken,
+  redactedLiveTokenMarker,
   textContainsAccessToken,
   type CliIo,
   type CliSignal,
@@ -65,6 +67,7 @@ import {
   renderedTokenRefusal,
   runFortnoxInterruptibly,
   runFortnoxLive,
+  runFortnoxLiveCli,
   stageRecordings,
   type LiveInputs
 } from '../run-fortnox-conformance.ts'
@@ -1254,6 +1257,162 @@ describe('run-fortnox-conformance live runs are interruptible', () => {
 
     expect(errors).toEqual(['synthetic live failure'])
     expect(exitCodes).toEqual([1])
+    expect(signals.registered()).toBe(0)
+  })
+})
+
+describe('run-fortnox-conformance live output is redacted of the live token', () => {
+  const liveToken = 'SyntheticFortnoxLiveAccessToken0000000000000001'
+  const rejectionId = 'fortnox.write.rejection-error-information'
+
+  // Fortnox wrongly accepts the rejected create and answers with an invoice whose DocumentNumber
+  // echoes the token: the rejection case reports that number in its failure, which the report
+  // prints.
+  const acceptedWith = (documentNumber: string): WireFixture => {
+    const rejected = exchangeAt(fortnoxWriteRejectionFixture, 1)
+
+    return {
+      ...fortnoxWriteRejectionFixture,
+      exchanges: [
+        exchangeAt(fortnoxWriteRejectionFixture, 0),
+        {
+          ...rejected,
+          response: {
+            status: 201,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              Invoice: { DocumentNumber: documentNumber, CustomerNumber: '99999' }
+            })
+          }
+        }
+      ]
+    }
+  }
+
+  for (const [label, echoed] of [
+    ['raw', liveToken],
+    ['base64-encoded', Buffer.from(`x${liveToken}`).toString('base64')]
+  ] as const) {
+    it(`prints no trace of a ${label} token echoed in a reported field to stdout or stderr`, async () => {
+      const { client } = await Effect.runPromise(
+        makeReplayHttpClient(
+          fortnoxConformanceFixtures.map(fixture =>
+            fixture.id === fortnoxWriteRejectionFixture.id ? acceptedWith(echoed) : fixture
+          )
+        )
+      )
+
+      const stdout: Array<string> = []
+      const stderr: Array<string> = []
+      const signals = fakeSignals()
+      const { io, errors, exitCodes } = fakeIo()
+      const exitCode = process.exitCode
+
+      try {
+        // The CLI's own entry: the run's lines and its CLI messages, each through the redaction.
+        await runFortnoxLiveCli(
+          {
+            ...defaultRunOptions,
+            live: true,
+            ownerApproved: true,
+            account: 'practice',
+            allowWrites: 'reversible'
+          },
+          { ...recordInputs, accessToken: liveToken },
+          signals.source,
+          io,
+          {
+            http: Layer.succeed(HttpClient.HttpClient, client),
+            out: line => stdout.push(line),
+            err: line => stderr.push(line)
+          }
+        )
+      } finally {
+        // A failed report sets the exit code of this process; keep the test run's own.
+        process.exitCode = exitCode
+      }
+
+      const printedOut = stdout.join('\n')
+      const printedErr = [...stderr, ...errors].join('\n')
+
+      expect(printedOut).toContain(`FAIL  ${rejectionId}`)
+      expect(printedOut).toContain('but Fortnox created invoice ')
+      expect(printedOut).toContain(redactedLiveTokenMarker)
+      expect(textContainsAccessToken(printedOut, liveToken)).toBe(false)
+      expect(textContainsAccessToken(printedErr, liveToken)).toBe(false)
+      expect(printedOut).not.toContain(echoed)
+      expect(printedErr).not.toContain(echoed)
+      expect(exitCodes).toEqual([])
+      expect(signals.registered()).toBe(0)
+    })
+  }
+
+  it('prints no trace of a token echoed in an interrupted restore failure (WARN and run failure on stderr)', async () => {
+    const signals = fakeSignals()
+    const { io, errors, exitCodes, forcedExits } = fakeIo()
+    const stdout: Array<string> = []
+    const stderr: Array<string> = []
+    const sent = Effect.runSync(Deferred.make<void>())
+    const release = Effect.runSync(Deferred.make<void>())
+
+    const { client } = await Effect.runPromise(makeReplayHttpClient(fortnoxConformanceFixtures))
+
+    let puts = 0
+
+    // The row case's first PUT is held until the interruption; its restore PUT then fails with the
+    // token in the failure message, which the case's RestoreFailed summarizes: printed as the WARN
+    // line (the run's err) and as the run's own failure (the CLI io), both on stderr.
+    const echoing = HttpClient.transform(client, (response, request) => {
+      if (request.method !== 'PUT') return response
+
+      puts += 1
+
+      return puts === 1
+        ? response.pipe(
+            Effect.tap(() => Deferred.succeed(sent, undefined)),
+            Effect.tap(() => Deferred.await(release))
+          )
+        : Effect.die(new Error(liveToken))
+    })
+
+    const done = runFortnoxLiveCli(
+      {
+        ...defaultRunOptions,
+        live: true,
+        ownerApproved: true,
+        account: 'practice',
+        allowWrites: 'reversible'
+      },
+      { ...recordInputs, accessToken: liveToken },
+      signals.source,
+      io,
+      {
+        http: Layer.succeed(HttpClient.HttpClient, echoing),
+        out: line => stdout.push(line),
+        err: line => stderr.push(line)
+      },
+      { pid: 4242 }
+    )
+
+    await Effect.runPromise(Deferred.await(sent))
+    signals.emit('SIGINT')
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+    Effect.runSync(Deferred.succeed(release, undefined))
+    await done
+
+    const warns = stderr.filter(line => line.startsWith('WARN '))
+
+    expect(warns).toHaveLength(1)
+    expect(warns[0]).toContain('fortnox.invoice.row-discount-sticky: restore failed')
+    expect(warns[0]).toContain(redactedLiveTokenMarker)
+    expect(errors.at(-1)).toContain('fortnox.invoice.row-discount-sticky: restore failed')
+    expect(errors.at(-1)).toContain(redactedLiveTokenMarker)
+    expect(textContainsAccessToken([...stdout, ...stderr, ...errors].join('\n'), liveToken)).toBe(
+      false
+    )
+    expect(exitCodes).toEqual([1])
+    expect(forcedExits).toEqual([])
+    expect(stdout).toEqual([])
     expect(signals.registered()).toBe(0)
   })
 })

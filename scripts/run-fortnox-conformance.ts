@@ -40,6 +40,11 @@
  * reaches every process of the foreground group) is ignored, and a later one force-exits. An
  * interrupt-only exit is 130.
  *
+ * Every line a live run prints (the report, cleanup WARN lines, staging output, the run's own
+ * failure, and the interruption messages) goes through the shared `redactAccessToken`
+ * (`redactingLiveRunIo`, `redactingCliIo`), as in the shared runners: Fortnox can echo the live
+ * token into a field a case reports before any staging guard runs.
+ *
  * Fortnox keeps its own runner rather than the shared `ConnectorConformanceRunner`: the preview
  * case records a PDF body, which the shared per-body access-token guard
  * (`inspectRecordingForAccessToken`) refuses as uninspectable, and the seeds module uses the
@@ -113,6 +118,8 @@ import {
   processLiveRunIo,
   processSignals,
   recordingContainsAccessToken,
+  redactingCliIo,
+  redactingLiveRunIo,
   runInterruptibly,
   stderrCleanupReporter,
   textContainsAccessToken,
@@ -1057,15 +1064,19 @@ export const stageRecordings = (
 /**
  * One live run over checked inputs: every case (with the stderr WARN cleanup reporter provided
  * around `runConformance`, so a row or customer restore that fails while the run is interrupted
- * prints a WARN line naming the case), the report, and the `--record` staging. `io` is injectable
- * so tests replay fixtures instead of calling Fortnox.
+ * prints a WARN line naming the case), the report, and the `--record` staging. Every printed line
+ * (report, WARN lines, staging output) goes through the shared `redactingLiveRunIo` with the live
+ * access token, as in the shared runners: Fortnox can echo it into a field a case reports (an
+ * invoice number in the rejection case's failure, for example). `liveIo` is injectable so tests
+ * replay fixtures instead of calling Fortnox.
  */
 export const runFortnoxLive = (
   options: RunOptions,
   inputs: LiveInputs,
-  io: LiveRunIo = processLiveRunIo
+  liveIo: LiveRunIo = processLiveRunIo
 ) =>
   Effect.gen(function* () {
+    const io = redactingLiveRunIo(liveIo, inputs.accessToken)
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
     const httpFor = (testCase: FortnoxConformanceCase): Layer.Layer<HttpClient.HttpClient> =>
@@ -1157,6 +1168,27 @@ export const runFortnoxInterruptibly = <E>(
 ): Promise<void> =>
   runInterruptibly(program, signals, io, { ...options, ...fortnoxInterruptOptions })
 
+/**
+ * What `pnpm conformance:fortnox --live` runs once its inputs are checked: `runFortnoxLive`, made
+ * interruptible, with the run's own failure and the interruption messages printed through the
+ * shared `redactingCliIo` (and the run's lines through `redactingLiveRunIo`) with the live access
+ * token. Signals and io are injectable so tests send no real signals and print nothing.
+ */
+export const runFortnoxLiveCli = (
+  options: RunOptions,
+  inputs: LiveInputs,
+  signals: SignalSource = processSignals,
+  cliIo: CliIo = processCliIo,
+  liveIo: LiveRunIo = processLiveRunIo,
+  interruptOptions: Omit<RunInterruptiblyOptions, 'recoveryAdvice' | 'hasCleanups'> = {}
+): Promise<void> =>
+  runFortnoxInterruptibly(
+    runFortnoxLive(options, inputs, liveIo),
+    signals,
+    redactingCliIo(cliIo, inputs.accessToken),
+    interruptOptions
+  )
+
 const runCli = (options: RunOptions): void => {
   if (options.help) {
     console.log(usage)
@@ -1172,7 +1204,7 @@ const runCli = (options: RunOptions): void => {
       return
     }
 
-    void runFortnoxInterruptibly(runFortnoxLive(options, checked.inputs))
+    void runFortnoxLiveCli(options, checked.inputs)
   }
 }
 
