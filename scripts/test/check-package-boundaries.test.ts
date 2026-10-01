@@ -393,7 +393,7 @@ describe('emulators import rules', () => {
     }
   })
 
-  // The stateful Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, and GitHub emulators.
+  // The stateful Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, and Google emulators.
   it('allows node: and @emulators/core only in src/node.ts and the stateful emulators', () => {
     const root = fixtureDirectory()
 
@@ -420,7 +420,9 @@ describe('emulators import rules', () => {
       'packages/emulators/src/telegram.ts',
       'packages/emulators/src/telegram/state.ts',
       'packages/emulators/src/github.ts',
-      'packages/emulators/src/github/api.ts'
+      'packages/emulators/src/github/api.ts',
+      'packages/emulators/src/google.ts',
+      'packages/emulators/src/google/gmail.ts'
     ]
 
     const forbidden = [
@@ -441,7 +443,9 @@ describe('emulators import rules', () => {
       'packages/emulators/src/todoist-helpers.ts',
       'packages/emulators/src/telegramish/api.ts',
       'packages/emulators/src/github-helpers.ts',
-      'packages/emulators/src/githubish/api.ts'
+      'packages/emulators/src/githubish/api.ts',
+      'packages/emulators/src/google-helpers.ts',
+      'packages/emulators/src/googleish/api.ts'
     ]
 
     for (const rel of [...allowed, ...forbidden]) {

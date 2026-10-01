@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { vercelAiGatewayConformanceFixtures } from '../../packages/agent/src/providers/vercel/conformance/index.ts'
 import { dropboxConformanceFixtures } from '../../packages/connectors/src/dropbox/conformance/index.ts'
 import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
+import { googleConformanceFixtures } from '../../packages/connectors/src/google/conformance/index.ts'
 import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
 import { microsoftConformanceFixtures } from '../../packages/connectors/src/microsoft/conformance/index.ts'
 import { notionConformanceFixtures } from '../../packages/connectors/src/notion/conformance/index.ts'
@@ -14,6 +15,7 @@ import { todoistConformanceFixtures } from '../../packages/connectors/src/todois
 import { dropboxEmulatorRoutes } from '../../packages/emulators/src/dropbox.ts'
 import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
 import { fortnoxEmulatorRoutes } from '../../packages/emulators/src/fortnox.ts'
+import { googleEmulatorRoutes } from '../../packages/emulators/src/google.ts'
 import { microsoftEmulatorRoutes } from '../../packages/emulators/src/microsoft.ts'
 import { notionEmulatorRoutes } from '../../packages/emulators/src/notion.ts'
 import { githubEmulatorRoutes } from '../../packages/emulators/src/github.ts'
@@ -215,7 +217,8 @@ describe('checkEmulatorEvidence', () => {
     ...notionConformanceFixtures,
     ...todoistConformanceFixtures,
     ...telegramConformanceFixtures,
-    ...githubConformanceFixtures
+    ...githubConformanceFixtures,
+    ...googleConformanceFixtures
   ]
 
   const hasVerifiedFixture = (caseId: string) =>
@@ -270,7 +273,8 @@ describe('checkEmulatorEvidence', () => {
     ['Notion', notionConformanceFixtures],
     ['Todoist', todoistConformanceFixtures],
     ['Telegram', telegramConformanceFixtures],
-    ['GitHub', githubConformanceFixtures]
+    ['GitHub', githubConformanceFixtures],
+    ['Google', googleConformanceFixtures]
   ])(
     'fails unbacked-verified for a verified route citing only still-unverified repo cases (%s)',
     (_name, fixtures) => {
@@ -525,6 +529,10 @@ describe('repo emulator manifests', () => {
     .filter(githubRoute => githubRoute.write)
     .map(githubRoute => `${githubRoute.method} ${githubRoute.path}`)
 
+  const googleWriteRoutes = googleEmulatorRoutes
+    .filter(googleRoute => googleRoute.write)
+    .map(googleRoute => `${googleRoute.method} ${googleRoute.path}`)
+
   const failedRoutes = (report: ReturnType<typeof repoCheck>, manifest: string) =>
     report.findings
       .filter(finding => finding.severity === 'fail' && finding.manifest === manifest)
@@ -565,6 +573,7 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('todoist.tasks.list-cursor-paging')).toBe(true)
     expect(knownConformanceCaseIds.has('telegram.messages.send-message')).toBe(true)
     expect(knownConformanceCaseIds.has('github.issues.lifecycle-close')).toBe(true)
+    expect(knownConformanceCaseIds.has('google.gmail.send-practice-address')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
       'openai',
@@ -582,7 +591,8 @@ describe('repo emulator manifests', () => {
       'notion',
       'todoist',
       'telegram',
-      'github'
+      'github',
+      'google'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -604,15 +614,16 @@ describe('repo emulator manifests', () => {
       'unverified'
     ])
 
-    // Every new route (usage, OpenCode Go, Dropbox, Notion) is unverified and backed by unverified
-    // fixtures.
+    // Every new route (usage, OpenCode Go, Dropbox, Notion, Google) is unverified and backed by
+    // unverified fixtures.
     for (const name of [
       'anthropic-usage',
       'codex-usage',
       'xai-usage',
       'opencode',
       'dropbox',
-      'notion'
+      'notion',
+      'google'
     ]) {
       const routes = emulatorManifests.find(manifest => manifest.name === name)?.routes ?? []
 
@@ -647,7 +658,8 @@ describe('repo emulator manifests', () => {
       ...notionWriteRoutes,
       ...todoistWriteRoutes,
       ...telegramWriteRoutes,
-      ...githubWriteRoutes
+      ...githubWriteRoutes,
+      ...googleWriteRoutes
     ])
     expect(fortnoxWriteRoutes).toEqual([
       'PUT /3/customers/{CustomerNumber}',
@@ -692,14 +704,33 @@ describe('repo emulator manifests', () => {
       'POST /repos/{owner}/{repo}/issues',
       'PATCH /repos/{owner}/{repo}/issues/{issueNumber}'
     ])
-    // Fixture-only: every Todoist, Telegram, and GitHub route cites a case (no uncited route).
+    expect(googleWriteRoutes).toEqual([
+      'POST /gmail/v1/users/me/messages/{messageId}/modify',
+      'POST /gmail/v1/users/me/messages/{messageId}/trash',
+      'POST /gmail/v1/users/me/messages/{messageId}/untrash',
+      'POST /gmail/v1/users/me/labels',
+      'DELETE /gmail/v1/users/me/labels/{labelId}',
+      'POST /gmail/v1/users/me/drafts',
+      'PUT /gmail/v1/users/me/drafts/{draftId}',
+      'DELETE /gmail/v1/users/me/drafts/{draftId}',
+      'POST /upload/gmail/v1/users/me/messages/send',
+      'POST /calendar/v3/calendars/{calendarId}/events',
+      'PATCH /calendar/v3/calendars/{calendarId}/events/{eventId}',
+      'DELETE /calendar/v3/calendars/{calendarId}/events/{eventId}',
+      'POST /drive/v3/files',
+      'PATCH /drive/v3/files/{fileId}',
+      'DELETE /drive/v3/files/{fileId}'
+    ])
+    // Fixture-only: every Todoist, Telegram, GitHub, and Google route cites a case (no uncited
+    // route).
     expect(
       report.findings
         .filter(
           finding =>
             (finding.manifest === 'todoist' ||
               finding.manifest === 'telegram' ||
-              finding.manifest === 'github') &&
+              finding.manifest === 'github' ||
+              finding.manifest === 'google') &&
             finding.kind === 'no-case-ids'
         )
         .map(finding => finding.route)
@@ -820,7 +851,8 @@ describe('repo emulator manifests', () => {
     ['notion', 'Notion', () => notionWriteRoutes],
     ['todoist', 'Todoist', () => todoistWriteRoutes],
     ['telegram', 'Telegram', () => telegramWriteRoutes],
-    ['github', 'GitHub', () => githubWriteRoutes]
+    ['github', 'GitHub', () => githubWriteRoutes],
+    ['google', 'Google', () => googleWriteRoutes]
   ] as const)(
     'ships one pending entry per %s write route, at most 60 days out, naming the live run',
     (manifest, _label, writeRoutes) => {
@@ -843,7 +875,8 @@ describe('repo emulator manifests', () => {
     ['notion', () => notionWriteRoutes],
     ['todoist', () => todoistWriteRoutes],
     ['telegram', () => telegramWriteRoutes],
-    ['github', () => githubWriteRoutes]
+    ['github', () => githubWriteRoutes],
+    ['google', () => googleWriteRoutes]
   ] as const)(
     'fails the unverified %s write routes without the pending file or after it expires',
     (manifest, writeRoutes) => {
@@ -961,6 +994,12 @@ describe('repo emulator manifests', () => {
     )
     expect(result.stdout).toContain(
       'WARN  github  GET /repos/{owner}/{repo}/labels  unverified evidence'
+    )
+    expect(result.stdout).toContain(
+      'WARN  google  POST /upload/gmail/v1/users/me/messages/send  PENDING until 2026-11-29'
+    )
+    expect(result.stdout).toContain(
+      'WARN  google  GET /drive/v3/files/{fileId}  unverified evidence (2 case(s))'
     )
 
     // The PENDING count comes from the pending file, not a hard-coded number.

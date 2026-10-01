@@ -16,10 +16,11 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim, the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
-conformance cases use. The Dropbox, Notion, Todoist, Telegram, and GitHub emulators are stateful,
-fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion `/v1` routes, the Todoist
-API v1 routes, the Telegram Bot API routes, and the GitHub REST routes their conformance cases use:
-they answer only what the fixtures show and refuse everything else with a 400 not-emulated.
+conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, and Google emulators are
+stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion `/v1` routes, the
+Todoist API v1 routes, the Telegram Bot API routes, the GitHub REST routes, and the Gmail, Calendar,
+and Drive routes their conformance cases use: they answer only what the fixtures show and refuse
+everything else with a 400 not-emulated.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -51,6 +52,7 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/todoist`   | `makeTodoistEmulator`, `todoistEmulatorRoutes`, seed and fault schemas (Node only)                          |
 | `@yolk-sdk/emulators/telegram`  | `makeTelegramEmulator`, `telegramEmulatorRoutes`, seed and fault schemas (Node only)                        |
 | `@yolk-sdk/emulators/github`    | `makeGithubEmulator`, `githubEmulatorRoutes`, seed and fault schemas (Node only)                            |
+| `@yolk-sdk/emulators/google`    | `makeGoogleEmulator`, `googleEmulatorRoutes`, seed and fault schemas (Gmail, Calendar, Drive; Node only)    |
 
 ## Routing
 
@@ -1457,21 +1459,221 @@ plane behave as in the Dropbox emulator; a 429 fault with `retry-after` reaches 
 `addAnswerOmitsLabel`, and `closeWithoutClosedAt` each make the emulator disagree with exactly one
 GitHub case, only to prove that case catches it.
 
+## Google emulator
+
+> **Node only.** `@yolk-sdk/emulators/google` runs on the same pinned `@emulators/core` runtime,
+> loaded lazily by `makeGoogleEmulator`, so importing the subpath has no side effects.
+
+`await makeGoogleEmulator(options?)` returns
+`{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has its own
+state; `await close()` when done. It emulates only the Gmail, Calendar, and Drive routes the
+thirteen Google conformance cases (with their cleanup) send, so the Google connector actions and the
+cases run unchanged against it, the irreversible practice send included. Each route answers only on
+the origin its fixtures record: Gmail (the API and the multipart send upload) on
+`https://gmail.googleapis.com` (`googleEmulatorGmailOrigin`), Calendar and Drive on
+`https://www.googleapis.com` (`googleEmulatorApisOrigin`). `fetch` takes the origin from the request
+URL (in-process routing keeps it); behind a loopback rewrite, which loses it, serve
+`fetchOn(origin)` for each origin on its own server:
+
+```ts
+import {
+  googleEmulatorApisOrigin,
+  googleEmulatorGmailOrigin,
+  makeGoogleEmulator
+} from '@yolk-sdk/emulators/google'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const google = await makeGoogleEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler(googleEmulatorGmailOrigin, google.fetch),
+  EmulatorRoute.handler(googleEmulatorApisOrigin, google.fetch)
+])
+// With serveFetchHandler: one server per origin, serving google.fetchOn(origin).
+// ...run the code under test, then:
+await google.close()
+```
+
+The read-only leftover lookup (`findGoogleConformanceLeftovers`) fails against it: its first read,
+the Gmail label listing, has no fixture (nor do its draft search, free-text event query, and
+trashed-included Drive listing), so it answers the ledgered 400 not-emulated (nothing is written)
+and the lookup fails with `GoogleConformanceActionFailed` (`gmail_list_labels_failed`, HTTP 400);
+the live runner turns that into its lookup-failed `WARN`.
+
+Routes (every request needs `Authorization: Bearer <token>`, a recognisable bearer; bodies are
+JSON unless noted; Drive requests also send `accept: application/json`, as recorded):
+
+| Route                                                            | Behavior                                                                                      |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `GET /gmail/v1/users/me/messages`                                | `labelIds`, `maxResults`, `pageToken`: `{ messages: [{ id, threadId }], nextPageToken? }`     |
+| `GET /gmail/v1/users/me/messages/{messageId}`                    | `format=minimal`, `metadata`, or `full`, as recorded for that message; the recorded 404       |
+| `GET /gmail/v1/users/me/messages/{messageId}/attachments/{id}`   | `{ size, data }` (base64url) of a seeded attachment                                           |
+| `POST /gmail/v1/users/me/messages/{messageId}/modify`            | `{ addLabelIds: [<created label>] }`: `{ id, threadId, labelIds }`                            |
+| `POST /gmail/v1/users/me/messages/{messageId}/trash`, `/untrash` | No body: adds or removes `TRASH`, answering `{ id, threadId, labelIds }`                      |
+| `POST /gmail/v1/users/me/labels`                                 | `{ name: "yolk-conformance <runId> label" }`: the created user label (`Label_9101` first)     |
+| `GET`, `DELETE /gmail/v1/users/me/labels/{labelId}`              | Delete a created label (204; it leaves every message); a read of an absent label answers 404  |
+| `POST /gmail/v1/users/me/drafts`, `PUT .../drafts/{draftId}`     | The recorded run draft without recipients: `{ id, message: { id, threadId, labelIds } }`      |
+| `DELETE /gmail/v1/users/me/drafts/{draftId}`                     | 204 (the draft and its message go); an absent draft answers the recorded 404                  |
+| `GET /gmail/v1/users/me/threads/{threadId}`                      | `format=full`: a draft thread created here                                                    |
+| `POST /upload/gmail/v1/users/me/messages/send`                   | `uploadType=multipart`, `multipart/related`: the practice message only (see below)            |
+| `GET`, `POST /calendar/v3/calendars/{calendarId}/events`         | Range listing (`singleEvents=true`, `orderBy=startTime`) with page tokens; the run event      |
+| `GET`, `PATCH`, `DELETE .../events/{eventId}`                    | Read (cancelled too), the recorded rename, delete to `cancelled` (204), then the recorded 410 |
+| `GET`, `POST /drive/v3/files`                                    | Folder listing (`'<folder>' in parents and trashed = false`) with page tokens; the run folder |
+| `GET`, `PATCH`, `DELETE /drive/v3/files/{fileId}`                | Read with the connector `fields` (absent: the recorded 404), `{ trashed: true }`, delete 204  |
+
+**The practice send is recorded, never delivered.** `google.gmail.send-practice-address` is
+irreversible on Gmail. The emulator accepts only the recorded 7-bit message whose sole recipient
+header is `To: <the seeded practiceAddress>` (no `Cc`, `Bcc`, other address, or list) with the
+run-scoped subject and `{}` metadata, records it in the state (a message with the `SENT` label whose
+`format=metadata` read answers the recorded headers, with the `Date` header from the `now` clock and
+a minted `Message-ID`), and delivers nothing anywhere; only `reset` or `seed` drops it. A seed may
+set another `practiceAddress`, but then every send answers 400 not-emulated (the reason names the
+recorded `practice@example.test`): the recorded `sizeEstimate` of the sent message covers its
+address, as it covers its subject, so draft and send subjects need a run id of the fixtures' length
+(13 characters; see the latitude below). The draft metadata `body.size` (64) and the sent message
+`body.size` (88) are the fixtures' recorded values, answered as recorded.
+
+**Fail closed: the shared rule.** Google follows the shared fail-closed rule of the stateful
+wrapper, exactly as the GitHub emulator states it above: every route parameter has a raw pattern
+matched in full (Gmail ids, a calendar id whose only encoding is `%40`, event ids, Drive ids), so a
+request is recognised only when its raw path is exactly an emulated route shape under that route's
+method and any `Authorization` header is exactly `Bearer <token>` with a recognisable bearer (an RFC
+6750 `b64token` of at least 8 characters, starting with a character in `[G-Zg-z\-._~+/]` other than
+`n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]`; Google's `ya29.…` tokens qualify). Every
+other request is ledgered and answered with constant text only: the path `/<unrecognised>`, a
+standard method or `<other>`, no query, no body, and a constant reason. The bearer value is never
+compared against anything, stored, forwarded, or ledgered. A recognised request that repeats it in
+its raw path, any path segment, the query or any query key or value, the recorded `content-type`
+header, or its raw body (the multipart send body included), or, on the draft compose and update
+routes, in the base64url-decoded MIME of `message.raw` (a decoded view the routes give the wrapper),
+through any depth of percent-encoding or JSON escaping, is ledgered as the constant
+credential-repeat entry; any other recognised request has it scrubbed from its ledgered fields and
+every not-emulated message. A `message.raw` the route would refuse (anything but canonical unpadded
+base64url of exactly the recorded draft MIME, the run id aside) makes the view throw a
+`DecodedViewRefusal` with one of the route's declared constant reasons (`viewRefusalReasons`: the
+canonical-base64url reason, the other-than-the-recorded-run-draft reason, the 13-character run-id
+reason, the extra-key reason), which the wrapper ledgers in the constant entry before anything is
+recorded (or `the request body repeats the credential` when the raw decodes cleanly to text holding
+the bearer), so a refused `message.raw` never reaches the ledger. Refusals never echo a request's
+own query or body keys.
+
+Every answer value comes from a fixture, through the seed or the request, except the values the
+emulator mints (it never mints anything else):
+
+- **Minted values.** Created label ids (`Label_9101`, ...) start above every seeded label number
+  (label ids are `Label_<1 to 999999999>`: a seeded `Label_<digits>` id outside that form is
+  rejected, and a create when no number is left is not emulated); draft ids
+  (`r-8000000000000000001`, ...), draft and sent message ids (`18f00000000000d1`,
+  `18f00000000000e1`, ...; a created draft is its own thread), event ids
+  (`syntheticconformance0001`, ...), and folder ids (`synthetic-conformance-folder-0001`, ...) use
+  forms no seeded id or thread id may use. All come from counters in the state that only advance.
+  Event `created` / `updated`, folder `createdTime` / `modifiedTime` / `trashedTime`, and the sent
+  `Date` header come from the injectable `now` clock. Page tokens are the fixtures' values
+  (`synthetic-gmail-page-2`, ...) in the generation that first issued them, and
+  `<token>.g<generation>` after a reset or seed (each starts a generation); a token is never
+  rebound: token values are globally unique, so another list or page size, or a changed list, gets a
+  distinct `<token>.v<k>`.
+- **Implied entities.** The paging label (`impliedLabelIds`), the five messages its listing names
+  (`impliedMessages`, rendered only as `{ id, threadId }` list entries), and the practice Drive
+  folder (`impliedFolderIds`) are only named by the fixtures: references resolve through them (a
+  label listing, a folder parent), but an answer that would render one is not emulated.
+- **Recorded renderings.** A Gmail message answers only the formats a fixture records for it (the
+  work message `minimal`, the attachment message `full`, a composed draft `metadata` and `full`, an
+  updated draft `full`, a sent message `metadata`); another format is not emulated.
+- **What writes leave.** A reversible case ends at the seed except the counters, plus each event
+  case's own event, which Calendar keeps readable as `cancelled` (the fixtures read it back); the
+  send leaves its sent message. Deleting a label removes it from every message.
+- **Page tokens.** A token is accepted only when this emulator issued it for the same list (label
+  and `maxResults`; calendar, range, and `maxResults`; folder and `pageSize`) since the last reset
+  or seed, and the list renders exactly as when it was issued.
+- **Request-shape latitude (`/google`, the only accepted deviations).** Any bearer value in the RFC
+  6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
+  character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside
+  `[0-9.eE+-]` (Google's `ya29.…` access tokens qualify), that occurs nowhere else in the request
+  (never compared against anything, stored, or ledgered); extra request headers (except
+  `X-Goog-Drive-Resource-Keys`, which no fixture sends); JSON key order; `content-type` media-type
+  parameters on JSON requests; query parameters in any order; any `run-` run id (at most 40
+  characters) in a run-scoped label name, event summary, or folder name; in a draft subject (compose
+  and update) and the sent subject, only a run id of exactly 13 characters, the length of the
+  fixtures' `run-synthetic`, because the recorded `sizeEstimate` of the draft and sent messages
+  (answered by their message reads and the draft thread) covers the subject; on the practice send, a
+  `content-type` of exactly `multipart/related; boundary=<b>` with any one unquoted boundary of 1 to
+  70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list` `maxResults` from 1 to 500, a
+  `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize` from 1 to
+  1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour 0 to 23,
+  minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the state
+  holds where a fixture has an id (writes: only items created here, plus label changes, trash, and
+  untrash of a stored non-draft message); and, for an id the state does not hold, only the recorded
+  not-found answers (a `format=minimal` read of a 16-hex-digit message id, a read of a
+  `Label_<1 to 999999999>` label, a delete of an `r-<digits>` draft, and a Drive file read). A seed
+  may set another `practiceAddress`, but then every send is refused, since the recorded
+  `sizeEstimate` of the sent message also covers the address: the send answers only while the seeded
+  address is the recorded `practice@example.test`. On the draft compose and update routes,
+  `message.raw` must be canonical unpadded base64url of exactly the recorded draft MIME of that
+  route, the run id aside; any other `message.raw` (line-wrapped, the standard alphabet, padded,
+  with a stray character, or with MIME-level encodings such as RFC 2047 encoded-words,
+  quoted-printable, or UTF-16) is refused before anything is recorded or a fault is decided, as a
+  constant entry with the route's own declared reason
+  (`message.raw must be canonical base64url UTF-8 MIME`,
+  `a draft compose other than the recorded run draft is not emulated` or its `update` form, the
+  13-character run-id reason, or `message has a key this route does not take`), or
+  `the request body repeats the credential` when that raw decodes cleanly to text holding the
+  bearer, so a refused `message.raw` never reaches the ledger and an admitted one is the recorded
+  text. `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
+  (other keys, values, formats, query parameters, empty query components such as a bare `?` or a
+  stray `&`, recorded headers such as Drive's `accept: application/json` missing, another origin,
+  repeated query parameters, any recipient but the seeded practice address, a draft or send run id
+  of another length, a bearer repeated anywhere in the request, including base64url-encoded inside a
+  draft's `message.raw`, and page tokens not issued for the same list since the last reset or seed,
+  or whose list changed) is not emulated.
+
+Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
+`notEmulated` in the ledger), writes nothing, and uses up no fault: among others the label listing,
+draft listing, and calendar listing, `q` on Gmail or Calendar listings, an empty listing (no fixture
+records one), a Gmail listing that would leave out messages in Trash or Spam, a Calendar range
+holding a cancelled event, a Drive listing including trashed items, reads of an existing label or
+of an implied entity, threads of seeded messages, label changes other than adding one label
+created here, writes to seeded events and files, and the page tokens above. A route that throws
+(for example when the injected clock throws while creating an event or a folder, or sending)
+answers an evidence-tagged 500 `{ error: { type: 'emulator_error', message } }` with
+`responseError` in the ledger and writes nothing; a closed emulator answers 503. No recovery answer
+reads the clock.
+
+State and seeds: `practiceAddress`, Gmail `messages` (with their recorded renderings),
+`impliedMessages`, `impliedLabelIds`, created `labels`, `attachments`, `drafts`, Calendar
+`calendars` and `events`, Drive `files` and `impliedFolderIds`, and the counters. The default seed
+is the synthetic fixture entities with the ids of `googleConformanceFixtureSeeds`. Pass
+`seed: { profile?, practiceAddress?, messages?, impliedMessages?, impliedLabelIds?, attachments?,
+calendars?, events?, files?, impliedFolderIds? }` (lists replace the profile's; labels and drafts
+are never seeded) with profiles `'default'` or `'empty'`. `reset()`, `seed(next)`, and
+`snapshot()` behave as in the Dropbox emulator; reset and seed also clear issued page tokens.
+
+Faults and the control plane behave as in the Dropbox emulator (the ledger records only the
+`content-type` request header); a 429 fault with `retry-after` reaches the connector as
+`google_rate_limited` with `retryAfterMs`.
+
+**Drill knobs (tests only).** `drills: { gmailPageRepeats, attachmentStandardBase64,
+notFoundWithoutMessage, labelDeleteKeepsOnMessages, draftUpdateKeepsContent,
+trashAnswerOmitsTrash, sentMessageWithoutTo, calendarPageRepeats, eventPatchKeepsSummary,
+repeatedEventDeleteConflict, drivePageRepeats, getFileWithoutParents, listIncludesTrashed }`
+(booleans) each make the emulator disagree with exactly one Google case, only to prove that case
+catches it.
+
 ## Evidence
 
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
 `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
 `emailEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`, `dropboxEmulatorRoutes`,
-`notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`, and
-`githubEmulatorRoutes` list every emulated route with `method`, `path`,
+`notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`,
+`githubEmulatorRoutes`, and `googleEmulatorRoutes` list every emulated route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route of a fetch-handler emulator carries
 `x-emulator-evidence: unverified`; the email emulator records evidence on each ledger entry
 instead, since its plain-JSON replies carry no header. The Gateway route is `verified`
 (`observedAt: '2026-09-30'`): its wire shapes are checked against the verified live recordings.
 Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, email, Fortnox,
-Microsoft, Dropbox, Notion, Todoist, Telegram, and GitHub) is unverified, like the synthetic
-fixtures it follows.
+Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, and Google) is unverified, like the
+synthetic fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes
@@ -1484,9 +1686,10 @@ live run against a practice mailbox verifies them, the repository lists them in 
 time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry
 date): the check reports them as PENDING warnings until that date and fails again after it.
 
-All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, and GitHub routes are currently
-`unverified` (no live recording yet), including four Fortnox, eleven Microsoft, five Dropbox, two
-Notion, five Todoist, one Telegram, and six GitHub connector write routes. Until an
+All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, and Google routes are
+currently `unverified` (no live recording yet), including four Fortnox, eleven Microsoft, five
+Dropbox, two Notion, five Todoist, one Telegram, six GitHub, and fifteen Google connector write
+routes. Until an
 owner-approved live run verifies them, the repository lists them in a visible, time-bounded
 allowlist (`scripts/emulator-evidence-pending.json`, which holds each
 entry's expiry date): the check reports them as PENDING warnings until that date and fails again
@@ -1511,6 +1714,6 @@ await server.close()
 
 ## License
 
-`@yolk-sdk/emulators` is MIT. The Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, and
-GitHub emulators depend on (does not vendor or bundle) the Apache-2.0
+`@yolk-sdk/emulators` is MIT. The Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub,
+and Google emulators depend on (does not vendor or bundle) the Apache-2.0
 [`@emulators/core`](https://github.com/vercel-labs/emulate) package, which ships no `NOTICE` file.

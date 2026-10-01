@@ -1,7 +1,7 @@
 /**
  * Shared wrapper of the fixture-only stateful connector emulators (internal; used by `/dropbox`,
- * `/notion`, and `/github`, not by the earlier `/fortnox` and `/microsoft` emulators, which keep
- * their own).
+ * `/notion`, `/github`, and `/google`, not by the earlier `/fortnox` and `/microsoft` emulators,
+ * which keep their own).
  *
  * The emulator state lives in an `@emulators/core` custom runtime that the Node-only subpath
  * creates and hands in (this module imports no Node builtin and never imports the core); the
@@ -32,13 +32,13 @@
  * carries `x-emulator-evidence: unverified` when the route is unverified. Ledgered bodies and
  * query parameters have credential-named keys redacted.
  *
- * Fail-closed mode (opt-in, `failClosed`; used by `/github`): every route parameter has a raw
- * pattern (matched in full), and a request is recognised only when its raw path is exactly an
- * emulated route shape under that route's method and any `Authorization` header is exactly
- * `Bearer <at least 8 non-space characters>` (a recognisable bearer, below). Every other request is
- * ledgered and answered with constant text only (`/<unrecognised>`, a standard method or `<other>`,
- * an empty query, no body, a constant reason). A recognised bearer must match the RFC 6750
- * `b64token` syntax exactly (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8 characters), start with a
+ * Fail-closed mode (opt-in, `failClosed`; used by `/github` and `/google`): every route parameter
+ * has a raw pattern (matched in full), and a request is recognised only when its raw path is
+ * exactly an emulated route shape under that route's method and any `Authorization` header is
+ * exactly `Bearer <at least 8 non-space characters>` (a recognisable bearer, below). Every other
+ * request is ledgered and answered with constant text only (`/<unrecognised>`, a standard method or
+ * `<other>`, an empty query, no body, a constant reason). A recognised bearer must match the RFC
+ * 6750 `b64token` syntax exactly (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8 characters), start with a
  * character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, and hold at least one character
  * outside the JSON-number alphabet `[0-9.eE+-]` (every GitHub and Google token form does: `ghp_…`,
  * `github_pat_…`, `gho_…`, `ya29.…`). So no number's text can contain it; it holds no escape
@@ -72,7 +72,16 @@
  * are refused. Routes check their own query and body keys with `exactQuery` and `exactBodyKeys`,
  * whose reasons never echo a request's own key. A template parameter written `{name+}` spans one or
  * more path segments (each decoded once, none may decode to a `/`). The credential helpers live in
- * `src/stateful-secrets.ts`.
+ * `src/stateful-secrets.ts`. A route may also name decoded views of its raw body (`decodedViews`,
+ * opt-in; `/google` gives the base64url-decoded MIME of a Gmail draft's `message.raw`, which the
+ * provider's own wire format wraps): in fail-closed mode each view goes through the same fixpoint
+ * check as the raw body, before anything is recorded, a fault is decided, or anything is committed,
+ * and a hit is the same constant credential-repeat entry. A view may throw to refuse a body it
+ * cannot check completely: that request is ledgered as the same constant entry, as a repeat when
+ * the `DecodedViewRefusal` it threw carries cleanly decoded text holding the bearer, else with the
+ * refusal's reason when the route declares it in `viewRefusalReasons` (a constant the route owns,
+ * scrubbed defensively), else with `the request body cannot be checked for the credential`. A route
+ * without `decodedViews` is checked exactly as before.
  *
  * @experimental
  */
@@ -105,6 +114,17 @@ import {
 
 /** A request the emulator does not emulate, with the reason (answered 400 not-emulated). */
 export class NotEmulated extends Data.TaggedClass('NotEmulated')<{ readonly reason: string }> {}
+
+/**
+ * What a route's decoded view throws to refuse a body with a reason of its own (fail-closed mode;
+ * see `StatefulRouteBinding.decodedViews`). `reason` must be one of the route's declared
+ * `viewRefusalReasons` (a constant the route owns, never derived from the request); `decoded` holds
+ * any text the view did decode cleanly, which is still checked for the bearer first.
+ */
+export class DecodedViewRefusal extends Data.TaggedError('DecodedViewRefusal')<{
+  readonly reason: string
+  readonly decoded: ReadonlyArray<string>
+}> {}
 
 export const notEmulated = (reason: string): NotEmulated => new NotEmulated({ reason })
 
@@ -259,6 +279,30 @@ export type StatefulRouteBinding = {
    * its pattern makes the path match no route. Fail-closed emulators give every parameter one.
    */
   readonly params?: Readonly<Record<string, RegExp>>
+  /**
+   * Fail-closed mode only: texts the route derives from its raw body that the provider's wire
+   * format encodes in a way the percent and JSON closure cannot see through (for example base64url
+   * content). Each view is checked for the bearer like the raw body. A body that holds no such
+   * content yields no view. A view may throw to refuse a body whose encoded content it cannot
+   * check completely (for example content the route would refuse anyway); the request is then
+   * ledgered as the constant credential-repeat entry shape, before anything is recorded, a fault is
+   * decided, or anything is committed, with this reason:
+   *
+   * - `the request body repeats the credential` when the throw is a `DecodedViewRefusal` whose
+   *   cleanly `decoded` texts hold the bearer (a repeat, not a refusal);
+   * - otherwise its `reason` when that is one of `viewRefusalReasons` (scrubbed of the bearer,
+   *   defensively);
+   * - otherwise (an undeclared reason, or any other throw)
+   *   `the request body cannot be checked for the credential`.
+   *
+   * Omitted: none.
+   */
+  readonly decodedViews?: (body: string) => ReadonlyArray<string>
+  /**
+   * The constant reasons a decoded view may refuse a body with (`DecodedViewRefusal`); any other
+   * reason is replaced by the uncheckable reason. Owned by the route, never derived from a request.
+   */
+  readonly viewRefusalReasons?: ReadonlyArray<string>
 }
 
 export type StatefulRoute<State, Env> = EmulatorRouteEvidence &
@@ -294,6 +338,8 @@ export const routeEvidence = <State, Env>({
   admit: _admit,
   origin: _origin,
   params: _params,
+  decodedViews: _decodedViews,
+  viewRefusalReasons: _viewRefusalReasons,
   ...evidence
 }: StatefulRoute<State, Env>): EmulatorRouteEvidence => evidence
 
@@ -725,6 +771,9 @@ const recordedQueryPairs = (
   )
 }
 
+/** The constant reason of a body a route's decoded view refuses to check (the view threw). */
+const uncheckableBodyReason = 'the request body cannot be checked for the credential'
+
 const missingBearerReason =
   'requests without Authorization: Bearer <token of at least 8 characters> are not emulated'
 
@@ -1025,7 +1074,8 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     request: Request,
     url: URL,
     body: string | undefined,
-    secrets: ReadonlyArray<string>
+    secrets: ReadonlyArray<string>,
+    binding: StatefulRouteBinding
   ): string | undefined => {
     if (
       textRepeatsSecret(url.pathname, secrets) ||
@@ -1051,9 +1101,32 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       return 'a recorded request header repeats the credential'
     }
 
-    return body !== undefined && textRepeatsSecret(body, secrets)
-      ? 'the request body repeats the credential'
-      : undefined
+    if (body === undefined) return undefined
+
+    const repeat = 'the request body repeats the credential'
+
+    if (textRepeatsSecret(body, secrets)) return repeat
+
+    // The route's decoded views of its body (base64url content, for example) are checked too. A
+    // view that throws refuses the body (uncertainty refuses, it never admits): a repeat when what
+    // it decoded cleanly holds the bearer, else its declared constant reason, else the uncheckable
+    // reason, so a request without the bearer is never told it repeats it.
+    const { decodedViews, viewRefusalReasons = [] } = binding
+    const views = Result.try(() => (decodedViews === undefined ? [] : decodedViews(body)))
+
+    if (Result.isFailure(views)) {
+      const refusal = views.failure
+
+      if (!(refusal instanceof DecodedViewRefusal)) return uncheckableBodyReason
+
+      if (refusal.decoded.some(view => textRepeatsSecret(view, secrets))) return repeat
+
+      return viewRefusalReasons.includes(refusal.reason)
+        ? scrubSecrets(refusal.reason, secrets)
+        : uncheckableBodyReason
+    }
+
+    return views.success.some(view => textRepeatsSecret(view, secrets)) ? repeat : undefined
   }
 
   /** Everything after the route match: credential, headers, body, shape, then the core. */
@@ -1226,7 +1299,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       if (secrets.length > 0) {
         // Read from a copy: the route reads the body again.
         const body = request.body === null ? undefined : await readText(request.clone())
-        const reason = credentialRepeat(request, url, body, secrets)
+        const reason = credentialRepeat(request, url, body, secrets, matched.route)
 
         // Nothing of a request that repeats the credential is kept, in any part: it is ledgered
         // and answered with constant text only (its route template is constant too).

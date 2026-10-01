@@ -144,7 +144,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './notion',
       './todoist',
       './telegram',
-      './github'
+      './github',
+      './google'
     ]
   }
 ]
@@ -410,7 +411,15 @@ const main = async () => {
           'if (githubLabels.status !== 200 || githubLabels.headers.get("x-emulator-evidence") !== "unverified" || (await githubLabels.json()).length !== 2 || !(githubLabels.headers.get("link") ?? "").includes(\'rel="next"\')) throw new Error("GitHub emulator smoke failed")',
           'const githubRefused = await githubEmulator.fetch(new Request("https://api.github.com/repos/yolk-synthetic/conformance-practice/issues?state=open&q=synthetic-smoke-token", { headers: githubHeaders }))',
           'if (githubRefused.status !== 400 || (await githubRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(githubEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("GitHub emulator must fail closed without echoing the token")',
-          'await githubEmulator.close()'
+          'await githubEmulator.close()',
+          'const googleEmulatorModule = await import("@yolk-sdk/emulators/google")',
+          'if (googleEmulatorModule.googleEmulatorRoutes.length !== 24 || !googleEmulatorModule.googleEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Google emulator manifest mismatch")',
+          'const googleEmulator = await googleEmulatorModule.makeGoogleEmulator()',
+          'const googleWork = await googleEmulator.fetch(new Request("https://gmail.googleapis.com/gmail/v1/users/me/messages/18f00000000000b1?format=minimal", { headers: { authorization: "Bearer synthetic-smoke-token" } }))',
+          'if (googleWork.status !== 200 || googleWork.headers.get("x-emulator-evidence") !== "unverified" || (await googleWork.json()).labelIds.join() !== "INBOX,IMPORTANT") throw new Error("Google emulator smoke failed")',
+          'const googleRefused = await googleEmulator.fetch(new Request("https://gmail.googleapis.com/gmail/v1/users/me/labels?q=synthetic-smoke-token", { headers: { authorization: "Bearer synthetic-smoke-token" } }))',
+          'if (googleRefused.status !== 400 || (await googleRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(googleEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("Google emulator must fail closed without echoing the token")',
+          'await googleEmulator.close()'
         ].join('\n')
     )
 

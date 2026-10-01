@@ -1494,6 +1494,10 @@ for owners running a practice account by hand, `--allow-writes reversible` adds 
 cases, and `--record` refuses any recording in which the token survives and stages verified
 recordings all or nothing in `.conformance-recordings/google/<run>/` (gitignored) for manual
 scrubbing and promotion.
+For offline tests, the experimental Google emulator (`@yolk-sdk/emulators/google`) is a stateful,
+fixture-only stand-in that passes these cases, records the practice send in its state (never
+delivering it), and never keeps or echoes the access token; no fixture records the leftover
+lookup's reads, so that lookup fails closed against it.
 
 ### R2 conformance cases (experimental)
 
