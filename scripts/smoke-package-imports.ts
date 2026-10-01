@@ -106,7 +106,16 @@ const packages: ReadonlyArray<PackageManifest> = [
   },
   {
     name: '@yolk-sdk/mcp',
-    exports: ['.', './client', './client/node', './core', './protocol', './server', './server/node']
+    exports: [
+      '.',
+      './client',
+      './client/node',
+      './conformance',
+      './core',
+      './protocol',
+      './server',
+      './server/node'
+    ]
   },
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
   { name: '@yolk-sdk/vercel-workflows', exports: ['.', './effect', './testing', './workflow'] },
@@ -201,6 +210,8 @@ const main = async () => {
         '@modelcontextprotocol/server': '2.0.0',
         '@vercel/sandbox': '2.2.1',
         effect: '4.0.0-rc.115',
+        // Dependency of @yolk-sdk/mcp (./conformance), with the MCP client's own range.
+        'eventsource-parser': '^3.0.0',
         'gpt-tokenizer': '^3.4.0',
         react: '>=19',
         workflow: '5.0.0-beta.42'
@@ -312,6 +323,9 @@ const main = async () => {
           'const googleConformance = await import("@yolk-sdk/connectors/google/conformance")',
           'if (googleConformance.googleConformanceCases.length !== 13 || googleConformance.googleConformanceFixtures.length !== 13 || typeof googleConformance.findGoogleConformanceLeftovers !== "object") throw new Error("Missing Google conformance cases/fixtures")',
           'if (googleConformance.googleConformanceCases.filter(testCase => testCase.safety === "read").length !== 6 || googleConformance.googleConformanceCases.filter(testCase => testCase.safety === "write-irreversible").map(testCase => testCase.id).join() !== "google.gmail.send-practice-address") throw new Error("Google conformance safety mismatch")',
+          'const mcpConformance = await import("@yolk-sdk/mcp/conformance")',
+          'if (mcpConformance.mcpConformanceCases.length !== 9 || mcpConformance.mcpConformanceFixtures.length !== 16 || mcpConformance.mcpConformanceCases.some(testCase => testCase.safety !== "read") || typeof mcpConformance.makeMcpObservingHttpClient !== "function") throw new Error("Missing MCP conformance cases/fixtures")',
+          'if (mcpConformance.selectMcpConformanceCases(mcpConformance.mcpConformanceCases, "modern").notApplicable.map(entry => entry.id).join() !== "mcp.legacy.session") throw new Error("MCP conformance era filter mismatch")',
           'const linkedInSearchConformance = await import("@yolk-sdk/connectors/linkedin-search/conformance")',
           'if (linkedInSearchConformance.linkedInSearchConformanceCases.length !== 7 || linkedInSearchConformance.linkedInSearchConformanceFixtures.length !== 7) throw new Error("Missing LinkedIn search conformance cases/fixtures")',
           'if (linkedInSearchConformance.linkedInSearchConformanceCases.some(testCase => testCase.safety !== "read")) throw new Error("LinkedIn search conformance safety mismatch")',

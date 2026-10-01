@@ -111,6 +111,12 @@ export default { fetch: handler.fetch }
 
 Use `makeMcpToolServer` from `@yolk-sdk/mcp/server` to expose a tool-only Yolk adapter. Its HTTP entrypoint accepts both modern and legacy requests. Use the official `McpServer` surface when you need other core capabilities.
 
+## Conformance cases
+
+`@yolk-sdk/mcp/conformance` (experimental) holds nine read-only conformance cases that check the
+wire claims the remote client relies on, against any MCP server you point them at. See
+[MCP conformance](../api-reference/conformance#mcp-conformance).
+
 ## Security defaults
 
 Remote MCP requires HTTPS by default. Localhost HTTP is an explicit dev policy. Local stdio receives explicit env only and does not inherit host process env by default.

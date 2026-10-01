@@ -211,6 +211,14 @@ const rules: ReadonlyArray<BoundaryRule> = [
     excludedPathPatterns: [/^packages\/connectors\/src\/(?:.+\/)?conformance\//]
   },
   {
+    // MCP conformance cases live in `src/conformance/`: client and server code never import the
+    // conformance package, nor the cases themselves (by subpath or by a relative path, which the
+    // resolved-owner check maps to `@yolk-sdk/mcp/conformance`).
+    packageDir: 'packages/mcp/src',
+    forbiddenImports: ['@yolk-sdk/conformance', '@yolk-sdk/mcp/conformance'],
+    excludedDirs: ['packages/mcp/src/conformance']
+  },
+  {
     packageDir: 'packages/connectors/src',
     forbiddenImports: ['@yolk-sdk/agent'],
     excludedDirs: ['packages/connectors/src/agent.ts']

@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/mcp",
   "version": "0.1.0-canary.95",
-  "description": "MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility.",
+  "description": "MCP v2 client/server/protocol APIs, Effect/Yolk adapters, legacy compatibility, and experimental conformance cases.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -41,6 +41,10 @@
     "./client/node": {
       "types": "./src/client/node.ts",
       "default": "./src/client/node.ts"
+    },
+    "./conformance": {
+      "types": "./src/conformance/index.ts",
+      "default": "./src/conformance/index.ts"
     },
     "./protocol": {
       "types": "./src/client/protocol.ts",
@@ -87,6 +91,11 @@
         "import": "./dist/client/node.mjs",
         "default": "./dist/client/node.mjs"
       },
+      "./conformance": {
+        "types": "./dist/conformance/index.d.mts",
+        "import": "./dist/conformance/index.mjs",
+        "default": "./dist/conformance/index.mjs"
+      },
       "./protocol": {
         "types": "./dist/client/protocol.d.mts",
         "import": "./dist/client/protocol.mjs",
@@ -116,6 +125,8 @@
     "@modelcontextprotocol/core": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@yolk-sdk/agent": "workspace:^",
-    "effect": "catalog:"
+    "@yolk-sdk/conformance": "workspace:^",
+    "effect": "catalog:",
+    "eventsource-parser": "^3.0.0"
   }
 }

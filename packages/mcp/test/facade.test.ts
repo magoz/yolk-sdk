@@ -6,20 +6,23 @@ import { McpServer, makeMcpToolServer } from '@yolk-sdk/mcp/server'
 
 describe('@yolk-sdk/mcp subpaths', () => {
   it('imports every public subpath', async () => {
-    const [root, client, nodeClient, core, protocol, server, nodeServer] = await Promise.all([
-      import('@yolk-sdk/mcp'),
-      import('@yolk-sdk/mcp/client'),
-      import('@yolk-sdk/mcp/client/node'),
-      import('@yolk-sdk/mcp/core'),
-      import('@yolk-sdk/mcp/protocol'),
-      import('@yolk-sdk/mcp/server'),
-      import('@yolk-sdk/mcp/server/node')
-    ])
+    const [root, client, nodeClient, conformance, core, protocol, server, nodeServer] =
+      await Promise.all([
+        import('@yolk-sdk/mcp'),
+        import('@yolk-sdk/mcp/client'),
+        import('@yolk-sdk/mcp/client/node'),
+        import('@yolk-sdk/mcp/conformance'),
+        import('@yolk-sdk/mcp/core'),
+        import('@yolk-sdk/mcp/protocol'),
+        import('@yolk-sdk/mcp/server'),
+        import('@yolk-sdk/mcp/server/node')
+      ])
 
     expect(root).toBeDefined()
     expect(client.defaultMcpClientInfo).toBeDefined()
     expect(nodeClient.StdioClientTransport).toBeDefined()
     expect(nodeClient.listMcpToolsNode).toBeDefined()
+    expect(conformance.mcpConformanceCases).toHaveLength(9)
     expect(core.DiscoverRequestSchema).toBeDefined()
     expect(protocol.makeJsonRpcRequest).toBeDefined()
     expect(server.McpServer).toBeDefined()
