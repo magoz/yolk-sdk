@@ -211,9 +211,9 @@ await github.close()
 The rewrite loses the origin. The Dropbox, Notion, GitHub, Google, LinkedIn search, and MCP
 emulators answer each route only on its recorded origin, so serve their `fetchOn(origin)` rather
 than `fetch`, with one server per origin for the services that have two (Dropbox, Google, LinkedIn
-search). The Fortnox, Microsoft Graph, Todoist, Telegram, and model-route emulators have no
-`fetchOn`: serve their `fetch`. Microsoft Graph serves both of its origins from one server. Each
-emulator's [reference section](../api-reference/emulators) names its origins. In Effect tests,
+search). The Fortnox, Microsoft Graph, Todoist, Telegram, model-route, and OpenCode Go emulators
+have no `fetchOn`: serve their `fetch`. Microsoft Graph serves both of its origins from one server.
+Each emulator's [reference section](../api-reference/emulators) names its origins. In Effect tests,
 `serveFetchHandler` is the scoped variant.
 
 ## Seeds and profiles
@@ -249,8 +249,8 @@ On the HTTP connector emulators (Fortnox through LinkedIn search in the
 an error status instead of running the route, so nothing is written. `match` narrows it by
 `method` and `path` (a trailing `*` makes a prefix) and, except on Fortnox and Microsoft Graph, by
 `route` (a manifest route template); `count` limits how many requests it answers. MCP also takes
-`truncate-after-chunks`, and the model-route emulators take their own status and chunk faults,
-matched by `path` and `model`.
+`truncate-after-chunks`, and the model-route and OpenCode Go emulators take their own status and
+chunk faults, matched by `path` and `model`.
 
 The email and R2 port fakes take `{ kind: 'failure', method, match?, count?, failure }` instead
 (R2 also names the `port`): a call to that method whose request contains `match` as a deep subset
@@ -289,7 +289,7 @@ record the non-credential headers they check. Other ledgers differ:
 - Fortnox ledgers queries and bodies as sent, without redaction.
 - Microsoft Graph redacts credential-named keys and records the `Prefer` header.
 - Neither Fortnox nor Microsoft Graph has a `notEmulated` field: their refusals appear as
-  provider-envelope statuses (404 or 400).
+  provider-envelope statuses (such as 401, 404, or 400).
 - The model-route, email, and R2 ledgers have their own shapes.
 
 Each emulator's reference section describes its ledger. `coverage()` lists each manifest route
@@ -298,7 +298,8 @@ with its request count and case ids.
 The HTTP emulators also serve a control plane under `/_emulate/*` from the same fetch handler. On
 the connector and MCP emulators it serves `ledger` (`GET`, `DELETE`), `faults` (`GET`, `POST`,
 `DELETE`), `reset` (`POST`), `state` (`GET`), `seed` (`POST`), and `coverage` (`GET`). The
-model-route emulators serve `script` instead of `seed`, and OpenCode Go serves each part under
+model-route emulators serve `script` instead of `seed`, and the emulators built from several parts
+(OpenCode Go, and the usage part of Anthropic, Codex, and xAI) serve each part under
 `/_emulate/<part>/*`. Use the control plane when the test process does not hold the emulator
 object, for example when another process runs the code under test.
 
@@ -433,7 +434,8 @@ signal that the provider changed.
 ## What emulators do not do
 
 - **No invented answers.** The fixture-only emulators refuse anything a fixture does not record,
-  including empty pages, empty search results, and listings no fixture shows. They never guess a
+  including empty pages or empty search results where no fixture records one, and listings no
+  fixture shows. They never guess a
   status or an error envelope.
 - **Limited leftover lookups.** The read-only GitHub, Google, and Todoist
   `find*ConformanceLeftovers` lookups send listings no fixture records, so they always fail
