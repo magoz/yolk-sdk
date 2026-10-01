@@ -64,8 +64,10 @@ There is no root export or barrel.
   `make*Emulator` (`makeFortnoxEmulator`, `makeMicrosoftEmulator`, `makeDropboxEmulator`,
   `makeNotionEmulator`, `makeTodoistEmulator`, `makeTelegramEmulator`), so importing the subpath
   (for example the manifest, from the evidence check) has no side effects. The shared wrappers
-  `src/stateful-emulator.ts` and `src/stateful-fixture.ts` never import the core: the subpath hands
-  it the runtime.
+  `src/stateful-emulator.ts` and `src/stateful-fixture.ts` never import the core: each subpath hands
+  them the runtime. They are two wrappers for the same job, kept apart only because the PRs landed
+  in parallel; consolidating them is tracked in issue #139. Until then, build a new
+  fixture-only stateful emulator on `src/stateful-emulator.ts`.
 - `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain
   Web fetch handlers (no Effect runtime needed, no Node builtins); `email` is a plain structural
   object (no HTTP, socket, TLS, MIME, or mail library); `node`, `fortnox`, `microsoft`, `dropbox`,
@@ -178,11 +180,13 @@ There is no root export or barrel.
   be built, or a stateful route handler that throws, answers an evidence-tagged 500 in the
   service's error envelope, recorded in the ledger (`responseError`); that recovery never depends
   on the injectable clock (a clock that throws falls back to a fixed synthetic date). The
-  fixture-only `/dropbox` and `/notion` answer `{ error: { type: 'emulator_error' } }` instead and
-  their recovery reads no clock at all (see below).
+  fixture-only `/dropbox`, `/notion`, `/todoist`, and `/telegram` answer
+  `{ error: { type: 'emulator_error' } }` instead and their recovery reads no clock at all (see
+  below).
 - Every model and fixture-route fetch-handler emulator is built on `src/emulator-kernel.ts` (the
   `/email` port emulator is not; the stateful `/fortnox` and `/microsoft` keep their own wrappers,
-  and `/dropbox` and `/notion` share `src/stateful-emulator.ts`; see below): fault and scripted-turn state (strict
+  `/dropbox` and `/notion` share `src/stateful-emulator.ts`, and `/todoist` and `/telegram` share
+  `src/stateful-fixture.ts`; see below): fault and scripted-turn state (strict
   decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
   status-fault and scripted-error responses, the `/_emulate/*` control plane, coverage, evidence
   tagging, and route binding (`serve` throws `EmulatorRouteUnmapped`). Wire cores add only request

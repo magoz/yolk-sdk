@@ -16,11 +16,10 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim, the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
-conformance cases use, and the Todoist and Telegram emulators are stateful, fixture-only stand-ins
-for the Todoist API v1 and Telegram Bot API routes their conformance cases use. The Dropbox and
-Notion emulators are stateful stand-ins for the Dropbox RPC and upload routes and the Notion `/v1`
-routes their conformance cases use; like the fixture-only routes, they answer only what the
-fixtures show and refuse everything else with a 400 not-emulated.
+conformance cases use. The Dropbox, Notion, Todoist, and Telegram emulators are stateful,
+fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion `/v1` routes, the Todoist
+API v1 routes, and the Telegram Bot API routes their conformance cases use: they answer only what
+the fixtures show and refuse everything else with a 400 not-emulated.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -1143,9 +1142,10 @@ concurrent write cases, or a case that failed before its cleanup, make later pro
 not-emulated (a definitive rejection: nothing is created). `test/todoist-conformance.test.ts` runs
 all seven cases one after another on one emulator, which ends at the seed except the counters.
 
-Emulator extrapolations (no fixture), each needed by a case or its cleanup:
+Every answer value comes from a fixture, through the seed or the request, except the values the
+emulator mints (it never mints anything else):
 
-- **Id counters.** Created project ids (`6XEmuProject0001`), task ids (`6XEmuTask0000001`), and
+- **Minted values.** Created project ids (`6XEmuProject0001`), task ids (`6XEmuTask0000001`), and
   404 `event_id`s (`00000000000000000000000000000001`) come from counters that only advance;
   created timestamps come from the injectable `now` clock (default `Date.now`). Minted ids use the
   reserved prefix `6XEmu`, which a seed may not use (it is rejected), so seeded and created ids
@@ -1227,7 +1227,9 @@ state (`sentMessages`: `message_id` from 101, `chat_id`, `text`, `date` from the
 seconds) and never delivers anything; only `reset` or `seed` drops them. The answer's `from` is the
 seeded bot (never derived from the token).
 
-Emulator extrapolations (no fixture): the `message_id` counter and the clock-derived `date`.
+Every answer value comes from a fixture, through the seed or the request, except the values the
+emulator mints (it never mints anything else): the `message_id` counter and the clock-derived
+`date`.
 
 **Request-shape latitude** (the only accepted deviations from the fixture requests): any credential
 value of at least 8 characters that occurs nowhere else in the request (its path, query, or body;
