@@ -2,7 +2,9 @@
  * Shared wrapper of the fixture-only stateful connector emulators (internal; used by
  * `src/todoist.ts` and `src/telegram.ts`): the request ledger, status faults, the ledgered 400
  * not-emulated answer, clock-free error recovery, coverage, and the `/_emulate/*` control plane
- * around a stateful `@emulators/core` runtime.
+ * around a stateful `@emulators/core` runtime. Its credential guarding and unrecognised-ledger
+ * constants live in `src/stateful-secrets.ts`, shared with `src/stateful-emulator.ts` (the two
+ * wrappers are consolidated in issue #139).
  *
  * It never imports the core itself (the subpaths load it lazily and hand over the runtime), so it
  * needs no Node builtins. Fixture-only rule: a route answers only what its conformance fixtures
@@ -46,6 +48,18 @@ import {
   type EmulatorEvidence,
   type EmulatorRouteEvidence
 } from './route-evidence.ts'
+import {
+  decodedOrRaw,
+  jsonRepeatsSecret,
+  parseJsonText,
+  repeatsSecret,
+  scrubSecrets,
+  unrecognisedLedgerPath,
+  unrecognisedMethod
+} from './stateful-secrets.ts'
+
+// Kept as an export of this wrapper (the Todoist and Telegram APIs import it from here).
+export { parseJsonText }
 
 /** Statuses a fault may answer on a fixture-only route: 400-599 (never a success). */
 export const StatefulFixtureFaultStatus = Schema.Int.check(
@@ -158,23 +172,6 @@ export type StatefulFixtureResolution =
       readonly coreHeaders: Readonly<Record<string, string>>
       readonly secrets: ReadonlyArray<string>
     }
-
-/** The ledgered path of every unrecognised request (constant: nothing from the request). */
-export const unrecognisedLedgerPath = '/<unrecognised>'
-
-const ledgerableMethods: ReadonlySet<string> = new Set([
-  'GET',
-  'HEAD',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE',
-  'OPTIONS'
-])
-
-/** The ledgered method of an unrecognised request: a standard method, or `<other>`. */
-const unrecognisedMethod = (method: string): string =>
-  ledgerableMethods.has(method) ? method : '<other>'
 
 /** The parts of an `@emulators/core` custom runtime the wrapper uses. */
 export type StatefulFixtureRuntime<S> = {
@@ -300,15 +297,6 @@ const decodeFaultList = Schema.decodeUnknownResult(
   strict
 )
 
-const decodeJsonText = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Json))
-
-/** Parsed JSON, or `undefined` for invalid JSON. */
-export const parseJsonText = (text: string): Schema.Json | undefined => {
-  const result = decodeJsonText(text)
-
-  return Result.isSuccess(result) ? result.success : undefined
-}
-
 const issueMessage = (issue: Schema.SchemaError['issue']): string =>
   new Schema.SchemaError(issue).message
 
@@ -323,67 +311,6 @@ const pathMatches = (pattern: string, path: string): boolean =>
 
 const isControlPath = (path: string): boolean =>
   path === '/_emulate' || path.startsWith('/_emulate/')
-
-const decodedOrRaw = (value: string): string => {
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return value
-  }
-}
-
-/** Secrets shorter than this are not scrubbed (they would redact ordinary text). */
-const minimumSecretLength = 4
-
-const meaningful = (secrets: ReadonlyArray<string>): ReadonlyArray<string> =>
-  secrets.filter(secret => secret.length >= minimumSecretLength)
-
-/** True when `text`, raw or percent-decoded, contains a secret. */
-const repeatsSecret = (text: string, secrets: ReadonlyArray<string>): boolean => {
-  const decoded = decodedOrRaw(text.replaceAll('+', ' '))
-
-  return meaningful(secrets).some(secret => text.includes(secret) || decoded.includes(secret))
-}
-
-const isJsonRecord = (value: Schema.Json): value is Schema.JsonObject =>
-  value !== null && Predicate.isObject(value) && !Array.isArray(value)
-
-/**
- * True when any object key, string value, or number of `value` (raw or percent-decoded) holds a
- * secret. Numbers are checked as JavaScript prints them (`1.2345678e7` parses to `12345678`).
- */
-const jsonRepeatsSecret = (value: Schema.Json, secrets: ReadonlyArray<string>): boolean => {
-  if (Predicate.isString(value)) return repeatsSecret(value, secrets)
-
-  if (Predicate.isNumber(value)) return repeatsSecret(String(value), secrets)
-
-  if (Array.isArray(value)) return value.some(item => jsonRepeatsSecret(item, secrets))
-
-  if (isJsonRecord(value)) {
-    return Object.entries(value).some(
-      ([key, item]) => repeatsSecret(key, secrets) || jsonRepeatsSecret(item, secrets)
-    )
-  }
-
-  return false
-}
-
-/**
- * `text` with every secret (raw and percent-encoded) replaced by `<redacted>`; when a secret still
- * shows after that (for example in another percent-encoding), the whole text is `<redacted>`.
- * Applied to everything the ledger keeps or a refusal answers.
- */
-export const scrubSecrets = (text: string, secrets: ReadonlyArray<string>): string => {
-  const variants = meaningful(secrets)
-    .flatMap(secret => [secret, encodeURIComponent(secret)])
-    .sort((left, right) => right.length - left.length)
-
-  let result = text
-
-  for (const variant of variants) result = result.replaceAll(variant, '<redacted>')
-
-  return repeatsSecret(result, secrets) ? '<redacted>' : result
-}
 
 type MutableLedgerEntry = {
   seq: number

@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, a fixture-driven fake EmailClient backend, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, and Telegram emulators, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, a fixture-driven fake EmailClient backend, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, Telegram, and GitHub emulators, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -85,6 +85,10 @@
     "./telegram": {
       "types": "./src/telegram.ts",
       "default": "./src/telegram.ts"
+    },
+    "./github": {
+      "types": "./src/github.ts",
+      "default": "./src/github.ts"
     }
   },
   "files": [
@@ -173,6 +177,11 @@
         "types": "./dist/telegram.d.mts",
         "import": "./dist/telegram.mjs",
         "default": "./dist/telegram.mjs"
+      },
+      "./github": {
+        "types": "./dist/github.d.mts",
+        "import": "./dist/github.mjs",
+        "default": "./dist/github.mjs"
       }
     }
   },

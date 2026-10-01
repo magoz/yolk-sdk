@@ -252,6 +252,48 @@
       "path": "/bot{token}/sendMessage",
       "reason": "Telegram emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of telegram.messages.send-message (write-irreversible: one message to the practice chat, started only by its exact case id).",
       "expires": "2026-11-29"
+    },
+    {
+      "manifest": "github",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/issues/{issueNumber}/comments",
+      "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.comments.create-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "github",
+      "method": "DELETE",
+      "path": "/repos/{owner}/{repo}/issues/comments/{commentId}",
+      "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.comments.create-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "github",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/issues/{issueNumber}/labels",
+      "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.labels.add-remove.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "github",
+      "method": "DELETE",
+      "path": "/repos/{owner}/{repo}/issues/{issueNumber}/labels/{name}",
+      "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.labels.add-remove.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "github",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/issues",
+      "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.issues.lifecycle-close (write-irreversible: the closed issue stays in the practice repository; started only by its exact case id).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "github",
+      "method": "PATCH",
+      "path": "/repos/{owner}/{repo}/issues/{issueNumber}",
+      "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.issues.lifecycle-close (write-irreversible: the closed issue stays in the practice repository; started only by its exact case id).",
+      "expires": "2026-11-29"
     }
   ]
 }

@@ -143,7 +143,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './dropbox',
       './notion',
       './todoist',
-      './telegram'
+      './telegram',
+      './github'
     ]
   }
 ]
@@ -400,7 +401,16 @@ const main = async () => {
           'if (telegramChat.status !== 200 || (await telegramChat.json()).ok !== true) throw new Error("Telegram emulator smoke failed")',
           'const telegramRefused = await telegramEmulator.fetch(new Request("https://api.telegram.org/bot1:synthetic-smoke-token/deleteMessage", { method: "POST" }))',
           'if (telegramRefused.status !== 400 || (await telegramRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(telegramEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("Telegram emulator must fail closed without echoing the token")',
-          'await telegramEmulator.close()'
+          'await telegramEmulator.close()',
+          'const githubEmulatorModule = await import("@yolk-sdk/emulators/github")',
+          'if (githubEmulatorModule.githubEmulatorRoutes.length !== 11 || !githubEmulatorModule.githubEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("GitHub emulator manifest mismatch")',
+          'const githubEmulator = await githubEmulatorModule.makeGithubEmulator()',
+          'const githubHeaders = { authorization: "Bearer synthetic-smoke-token", accept: "application/vnd.github+json", "x-github-api-version": "2026-03-10" }',
+          'const githubLabels = await githubEmulator.fetch(new Request("https://api.github.com/repos/yolk-synthetic/conformance-practice/labels?per_page=2", { headers: githubHeaders }))',
+          'if (githubLabels.status !== 200 || githubLabels.headers.get("x-emulator-evidence") !== "unverified" || (await githubLabels.json()).length !== 2 || !(githubLabels.headers.get("link") ?? "").includes(\'rel="next"\')) throw new Error("GitHub emulator smoke failed")',
+          'const githubRefused = await githubEmulator.fetch(new Request("https://api.github.com/repos/yolk-synthetic/conformance-practice/issues?state=open&q=synthetic-smoke-token", { headers: githubHeaders }))',
+          'if (githubRefused.status !== 400 || (await githubRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(githubEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("GitHub emulator must fail closed without echoing the token")',
+          'await githubEmulator.close()'
         ].join('\n')
     )
 

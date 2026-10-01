@@ -14,6 +14,10 @@ const bug = githubSyntheticLabel(700000001, 'bug', 'd73a4a')
 
 const documentation = githubSyntheticLabel(700000002, 'documentation', '0075ca')
 
+const enhancement = githubSyntheticLabel(700000003, 'enhancement', 'a2eeef')
+
+const question = githubSyntheticLabel(700000004, 'question', 'd876e3')
+
 const conformance = githubSyntheticLabel(700000005, 'synthetic-conformance', 'ededed')
 
 const workIssue = (labels: ReadonlyArray<ReturnType<typeof githubSyntheticLabel>>) =>
@@ -65,7 +69,7 @@ export const githubIssueLabelsFixture: WireFixture = {
         }),
         headers: githubRequestHeaders
       },
-      response: githubJson(200, [bug, documentation, conformance])
+      response: githubJson(200, [bug, documentation, enhancement, question, conformance])
     },
     {
       request: {

@@ -225,11 +225,12 @@ const rules: ReadonlyArray<BoundaryRule> = [
     forbiddenImports: emulatorsForbiddenImports
   },
   // Node builtins and the Node-only `@emulators/core` stay behind the Node subpaths: the loopback
-  // server (`src/node.ts`) and the stateful Fortnox, Microsoft, Dropbox, Notion, Todoist, and
-  // Telegram emulators (`src/fortnox.ts`, `src/fortnox/**`, `src/microsoft.ts`, `src/microsoft/**`,
-  // `src/dropbox.ts`, `src/dropbox/**`, `src/notion.ts`, `src/notion/**`, `src/todoist.ts`,
-  // `src/todoist/**`, `src/telegram.ts`, `src/telegram/**`). Their shared wrappers
-  // (`src/stateful-emulator.ts`, `src/stateful-fixture.ts`) stay runtime-portable and take the core
+  // server (`src/node.ts`) and the stateful Fortnox, Microsoft, Dropbox, Notion, Todoist,
+  // Telegram, and GitHub emulators (`src/fortnox.ts`, `src/fortnox/**`, `src/microsoft.ts`,
+  // `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`, `src/notion.ts`, `src/notion/**`,
+  // `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`, `src/telegram/**`, `src/github.ts`,
+  // `src/github/**`). Their shared wrappers (`src/stateful-emulator.ts`, `src/stateful-fixture.ts`)
+  // and the helpers both import (`src/stateful-secrets.ts`) stay runtime-portable and take the core
   // from them.
   {
     packageDir: 'packages/emulators/src',
@@ -247,7 +248,9 @@ const rules: ReadonlyArray<BoundaryRule> = [
       'packages/emulators/src/todoist.ts',
       'packages/emulators/src/todoist',
       'packages/emulators/src/telegram.ts',
-      'packages/emulators/src/telegram'
+      'packages/emulators/src/telegram',
+      'packages/emulators/src/github.ts',
+      'packages/emulators/src/github'
     ]
   }
 ]

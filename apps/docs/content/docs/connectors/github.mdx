@@ -164,3 +164,10 @@ verified recordings only in the gitignored `.conformance-recordings/github/` for
 (owner, repository, numeric repository ids in `Link` URLs, logins, ids, titles, bodies, label names,
 file contents) and promotion. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental [GitHub emulator](../api-reference/emulators#github-emulator)
+(`@yolk-sdk/emulators/github`) is a stateful, fixture-only stand-in that passes these cases through
+the real connector actions over the connector ports, including the lifecycle case (its closed issue
+stays in the emulator's state). No fixture records the leftover lookup's open-issue listing, so
+against the emulator that lookup fails (HTTP 400 not-emulated) and a runner prints its lookup-failed
+WARN instead of leftover warnings.

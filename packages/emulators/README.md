@@ -16,10 +16,10 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim, the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
-conformance cases use. The Dropbox, Notion, Todoist, and Telegram emulators are stateful,
+conformance cases use. The Dropbox, Notion, Todoist, Telegram, and GitHub emulators are stateful,
 fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion `/v1` routes, the Todoist
-API v1 routes, and the Telegram Bot API routes their conformance cases use: they answer only what
-the fixtures show and refuse everything else with a 400 not-emulated.
+API v1 routes, the Telegram Bot API routes, and the GitHub REST routes their conformance cases use:
+they answer only what the fixtures show and refuse everything else with a 400 not-emulated.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -50,6 +50,7 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/notion`    | `makeNotionEmulator`, `notionEmulatorRoutes`, seed and fault schemas (Node only)                            |
 | `@yolk-sdk/emulators/todoist`   | `makeTodoistEmulator`, `todoistEmulatorRoutes`, seed and fault schemas (Node only)                          |
 | `@yolk-sdk/emulators/telegram`  | `makeTelegramEmulator`, `telegramEmulatorRoutes`, seed and fault schemas (Node only)                        |
+| `@yolk-sdk/emulators/github`    | `makeGithubEmulator`, `githubEmulatorRoutes`, seed and fault schemas (Node only)                            |
 
 ## Routing
 
@@ -1273,21 +1274,204 @@ throws while creating a project or sending a message) answers an evidence-tagged
 nothing; not-emulated answers (400) and a closed emulator (503) need no clock. The control plane is
 `/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and `coverage`, as for Fortnox.
 
+## GitHub emulator
+
+> **Node only.** `@yolk-sdk/emulators/github` runs on the same pinned `@emulators/core` runtime,
+> loaded lazily by `makeGithubEmulator`, so importing the subpath has no side effects.
+
+`await makeGithubEmulator(options?)` returns
+`{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has its own
+state; `await close()` when done. It is a stateful, fixture-only stand-in for exactly the GitHub
+REST routes the seven GitHub conformance cases send, so the GitHub connector and the cases run
+unchanged against it. Every route answers only on the origin its fixtures record,
+`https://api.github.com` (`githubEmulatorOrigin`): `fetch` reads the origin from the request URL;
+behind a loopback rewrite, serve `fetchOn(githubEmulatorOrigin)`. Route `https://api.github.com` to
+it:
+
+```ts
+import { makeGithubEmulator } from '@yolk-sdk/emulators/github'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const github = await makeGithubEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://api.github.com', github.fetch)
+])
+// ...run the code under test, then:
+await github.close()
+```
+
+Routes (every request needs exactly `Authorization: Bearer <token>` with a recognisable bearer (see
+Credentials), whose value is never compared against anything, stored, forwarded, or ledgered,
+`Accept: application/vnd.github+json`, and `X-GitHub-Api-Version: 2026-03-10`, what every fixture
+sends; bodies are JSON; `{owner}/{repo}` is the seeded repository):
+
+| Route                                                             | Behavior                                                                              |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `GET /repos/{owner}/{repo}/labels`                                | `per_page`, `page`: repository labels with the paging fixture's `Link` header         |
+| `GET /repos/{owner}/{repo}/issues/{issueNumber}`                  | The issue; the recorded 404 for a number the repository has not reached               |
+| `GET /search/issues`                                              | `q`: the recorded 422 for a scoped query longer than 256 characters                   |
+| `GET /repos/{owner}/{repo}/contents/{path+}`                      | A seeded file: `type: "file"`, base64 `content` folded every 60 characters            |
+| `POST /repos/{owner}/{repo}/issues/{issueNumber}/comments`        | `{ body }`: 201 and the comment, on an open issue                                     |
+| `GET /repos/{owner}/{repo}/issues/{issueNumber}/comments`         | `per_page=100`, `since`: the issue's comments updated at or after `since` (0 or 1)    |
+| `DELETE /repos/{owner}/{repo}/issues/comments/{commentId}`        | 204; the recorded 404 when this emulator deleted it already                           |
+| `POST /repos/{owner}/{repo}/issues/{issueNumber}/labels`          | `{ labels: [name] }`: one repository label added; answers the issue labels            |
+| `DELETE /repos/{owner}/{repo}/issues/{issueNumber}/labels/{name}` | The remaining labels (never none); the recorded 404 for a label not on the issue      |
+| `POST /repos/{owner}/{repo}/issues`                               | `{ title, body }`: 201 and the open issue                                             |
+| `PATCH /repos/{owner}/{repo}/issues/{issueNumber}`                | `{ title }` or `{ state: "closed", state_reason: "completed" }` on an issue made here |
+
+Wire behavior, as the fixtures record it:
+
+- **Link paging.** Label pages carry the paging fixture's `Link` header, minted in its exact form:
+  `<https://api.github.com/repositories/{id}/labels?per_page=N&page=M>` relations in the order
+  `prev`, `next`, `last`, `first` (`next` and `last` while pages remain, `prev` and `first` after
+  the first page; the page after the last answers `[]` with `prev`, `last`, and `first`). A listing
+  that fits one page carries no `Link`, as the label fixture records. No other route mints `Link`.
+  Label pages are page numbers the client computes, as GitHub's are, not cursors: the label list
+  never changes within a seed (no route writes labels), so no page can drift. The `Link` URLs name
+  `/repositories/{id}/labels`, which is not emulated (the connector never follows them).
+- **Errors.** The not-found, comment, label, and validation bodies are the fixtures' byte for byte
+  (`githubEmulatorErrorBodies`), with `content-type: application/json; charset=utf-8`.
+- **Issues.** Issues render in the fixture key order with `comments: 0`, `locked: false`, no
+  assignees or milestone. A rename keeps `updated_at` (the lifecycle fixture records that);
+  closing sets `state_reason: "completed"` and `closed_at` and `updated_at` from the clock.
+- **Contents.** `content` is the UTF-8 file's base64, folded every 60 characters with a trailing
+  line break, and `size` its byte length.
+
+Every answer value comes from a fixture, through the seed or the request, except the values the
+emulator mints (it never mints anything else):
+
+- **Minted values.** Created issue numbers and comment ids come from counters that only advance; the
+  default seed starts them at the fixtures' created values (issue `42`, comment `9000000001`), and a
+  seed's counters must lie above every seeded number. They end at the last addressable issue number
+  (ten digits) and comment id (fifteen digits, what the delete route takes); past that, a create is
+  refused before any fault. A created issue's `id` (`3000000000 + number`) and `node_id`
+  (`I_kwSynthetic<number>`), and a comment's `node_id` (`IC_kwSynthetic<id>`), derive from the
+  minted value in the fixtures' form; no seeded node id (of an issue or a label; node ids are unique
+  across both) may use those forms at or above its counter. Timestamps come from the injectable
+  `now` clock, in whole seconds.
+- **Implied issues.** Issue numbers below `nextIssueNumber` that the state does not hold are
+  implied (the repository reached them, but no fixture shows them): any answer that would render
+  one is not emulated. Numbers at or above it answer the not-found fixture's 404.
+- **State rules.** Comments and label changes apply to issues the state holds and that are open;
+  only issues created here are renamed or closed; a label add takes one repository label not yet on
+  the issue that sorts after the issue's labels (the fixture's answer is both appended and in name
+  order); a label removal leaves at least one label (no fixture records an empty answer); a comment
+  listing shows at most one comment (the order of several is not recorded); an issue holding
+  comments is never rendered (every fixture answers `comments: 0`); a comment delete of an id this
+  emulator never held is not emulated.
+- **Kept after writes.** A deleted comment's id stays in `deletedComments` (the comment fixture's
+  second delete answers 404), and a closed issue stays in the repository (GitHub cannot delete
+  issues). A write case ends at the seed except those and the counters.
+- **Fail closed.** A request is recognised only when its raw path is exactly an emulated route shape
+  (every path parameter matches its raw pattern: owner and repository names, decimal issue numbers
+  and comment ids, plain label names, plain file paths) under that route's method, and any
+  `Authorization` header is exactly `Bearer <token>` (see Credentials). Every other request (an
+  unknown route or method, an encoded character, a malformed or duplicated `Authorization` header)
+  is ledgered and answered with constant text only: the path `/<unrecognised>`, a standard method or
+  `<other>`, an empty query, no body, and a constant reason
+  (`no emulated GitHub route for this method and path`,
+  `an unrecognisable Authorization header is not emulated`).
+- **Credentials.** A recognised bearer must match the RFC 6750 `b64token` syntax exactly
+  (`^[A-Za-z0-9\-._~+/]+=*$`, at least 8 characters), start with a character in `[G-Zg-z\-._~+/]`
+  other than `n`, `r`, `t`, `u`, and hold at least one character outside the JSON-number alphabet
+  `[0-9.eE+-]` (every GitHub and Google token form does: `ghp_…`, `github_pat_…`, `gho_…`,
+  `ya29.…`). So no number's text can contain it; it holds no escape introducer (`%`, `\`, `"`), so
+  no escape starts inside it; and its first character is no hex digit and no JSON escape letter, so
+  no stray `%`, `\`, or partial escape to its left can complete with it, and its characters always
+  decode in place. An `Authorization` header with any other value is unrecognisable. A recognised
+  request that repeats the bearer value in its raw path, any path segment, the raw query or any
+  query key or value, any recorded header, or its body is refused and ledgered with constant text
+  only: a standard method, the path `/<unrecognised>`, its route template, an empty query, no
+  headers or body, and a constant reason (`the query repeats the credential`, for example). Each
+  part is checked through the closure of two total, lexical transforms that cannot fail: a tolerant
+  percent-decode (every `%XX` below `%80` becomes its ASCII character; any other `%` sequence is
+  left as it is) and a tolerant JSON-unescape (in any text, whether or not it parses as JSON,
+  `\uXXXX` below `\u0080` and `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t` become their
+  characters). Starting from each part's raw text, either transform is applied to every text of the
+  previous step, deduplicated, until no new text appears (a fixpoint), and every text is checked for
+  the bearer as a substring; both transforms never lengthen a text and shorten it whenever they
+  change it. So any depth of percent-encoding or JSON escaping, in any order, is seen through in
+  every part: the raw path and each raw path segment, the raw query and each query key and value
+  (already decoded once by `URLSearchParams`), each recorded header, and the raw body. The work is
+  capped at 64 rounds, 1024 distinct texts, or 8 Mi characters read by the transforms, whichever
+  comes first; a part whose closure hits a cap before its fixpoint counts as repeating the
+  credential and is refused with the same constant entry (uncertainty refuses, it never admits; so
+  any part over 4 Mi characters is always refused). Any other recognised request has the bearer
+  value scrubbed from its ledgered fields and every not-emulated reason (plan-time reasons
+  included); its recorded query is keyed by recorded key; a key recorded more than once lists its
+  values in order (as a JSON array); and recorded headers and query keys and values that start like
+  JSON (`{`, `[`, `"`) are recorded parsed with credential-named keys redacted at any depth, or as
+  `<redacted>` when they do not parse, whatever the header's declared format. Refusals never echo a
+  request's own query or body keys, and empty query components (a bare `?`, a stray `&`) are
+  refused.
+- **Request-shape latitude (`/github`, the only accepted deviations).** Any bearer value in the RFC
+  6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
+  character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u` (so a legacy all-hex token is
+  refused), with at least one outside `[0-9.eE+-]`, that occurs nowhere else in the request (never
+  compared against anything, stored, or ledgered); extra request headers; JSON key order;
+  `content-type` media-type parameters; the order of query parameters; any non-empty issue title and
+  comment body, and any issue body text; any comment listing `since` of the form
+  `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to 100, with no `page` or a `page`
+  from 2 to one past the last page; any issue search `q` that starts with the seeded
+  `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256 characters (answered
+  the recorded 422); any issue number the repository has not reached (answered the recorded 404);
+  and any issue, comment, repository label, or file the state holds where a fixture has one, under
+  the per-route state rules. `Authorization` must be exactly `Bearer <token>` (that spelling, one
+  space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version` `2026-03-10`.
+  Everything else (other keys and values, query parameters, empty query components such as a bare
+  `?` or a stray `&`, another origin or repository, a repeated query key, an explicit `page=1`, and
+  a comment listing `per_page` other than 100) is not emulated.
+
+Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
+`notEmulated` in the ledger), writes nothing, and uses up no fault: other routes (issue and pull
+request listings, locks, assignees, reactions, timelines), a search of at most 256 characters
+(no fixture records results), `sort`, `order`, or paging on search, a contents `ref` or a missing
+file, issue creates with `labels`, `assignees`, `milestone`, or `type`, updates other than the two
+recorded ones (so the lifecycle case's failure-path restore, which closes as `not_planned`, is not
+emulated), adding a label the repository lacks (that would create it) or two labels at once, and
+writes to closed or implied issues. That includes the open-issue listing
+(`GET /repos/{owner}/{repo}/issues`) of the read-only leftover lookup
+`findGithubConformanceLeftovers`, which no fixture records: the lookup fails
+(`GithubConformanceActionFailed`, `github.list_issues`, `github_validation`, HTTP 400), and the
+repository runner prints its lookup-failed `WARN` instead of leftover warnings. A route that throws
+answers an evidence-tagged 500 emulator error with `responseError` in the ledger, and a closed
+emulator answers 503; neither reads the clock.
+
+State and seeds: the authenticated `viewer` (the author of everything created here), the
+`repository` (owner, name, the id the `Link` URLs name, default branch), labels, issues (labels by
+name; `createdHere` marks issues created here), comments, `deletedComments`, files (path, blob sha,
+UTF-8 text), and the counters. The default seed is the synthetic fixture entities with the values of
+`githubConformanceFixtureSeeds`: the five paging-fixture labels, open work issue 1 labelled `bug`,
+and `docs/synthetic-notes.txt`. Pass a `seed` with any of `profile`, `viewer`, `repository`,
+`labels`, `issues`, `files`, `nextIssueNumber`, and `nextCommentId` (lists replace the profile's)
+with profiles `'default'` or `'empty'`. `reset()`, `seed(next)`, and `snapshot()` behave as in the
+Dropbox emulator.
+
+Faults, the ledger (which records the `Accept` and `X-GitHub-Api-Version` headers), and the control
+plane behave as in the Dropbox emulator; a 429 fault with `retry-after` reaches the connector as
+`github_rate_limited`.
+
+**Drill knobs (tests only).** The `drills` booleans `linkOmitsNext`,
+`notFoundOmitsDocumentationUrl`, `validationWithoutErrors`, `contentUnfolded`, `sinceExcludesEqual`,
+`addAnswerOmitsLabel`, and `closeWithoutClosedAt` each make the emulator disagree with exactly one
+GitHub case, only to prove that case catches it.
+
 ## Evidence
 
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
 `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
 `emailEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`, `dropboxEmulatorRoutes`,
-`notionEmulatorRoutes`, `todoistEmulatorRoutes`, and `telegramEmulatorRoutes` list every emulated
-route with `method`, `path`,
+`notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`, and
+`githubEmulatorRoutes` list every emulated route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route of a fetch-handler emulator carries
 `x-emulator-evidence: unverified`; the email emulator records evidence on each ledger entry
 instead, since its plain-JSON replies carry no header. The Gateway route is `verified`
 (`observedAt: '2026-09-30'`): its wire shapes are checked against the verified live recordings.
 Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, email, Fortnox,
-Microsoft, Dropbox, Notion, Todoist, and Telegram) is unverified, like the synthetic fixtures it
-follows.
+Microsoft, Dropbox, Notion, Todoist, Telegram, and GitHub) is unverified, like the synthetic
+fixtures it follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes
@@ -1300,11 +1484,11 @@ live run against a practice mailbox verifies them, the repository lists them in 
 time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry
 date): the check reports them as PENDING warnings until that date and fails again after it.
 
-All Fortnox, Microsoft, Dropbox, Notion, Todoist, and Telegram routes are currently `unverified`
-(no live recording yet), including four Fortnox, eleven Microsoft, five Dropbox, two Notion, five
-Todoist, and one Telegram connector write routes. Until an owner-approved live run verifies them,
-the repository lists them in a
-visible, time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each
+All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, and GitHub routes are currently
+`unverified` (no live recording yet), including four Fortnox, eleven Microsoft, five Dropbox, two
+Notion, five Todoist, one Telegram, and six GitHub connector write routes. Until an
+owner-approved live run verifies them, the repository lists them in a visible, time-bounded
+allowlist (`scripts/emulator-evidence-pending.json`, which holds each
 entry's expiry date): the check reports them as PENDING warnings until that date and fails again
 after it.
 
@@ -1327,6 +1511,6 @@ await server.close()
 
 ## License
 
-`@yolk-sdk/emulators` is MIT. The Fortnox, Microsoft, Dropbox, Notion, Todoist, and Telegram
-emulators depend on (does not vendor or bundle) the Apache-2.0
+`@yolk-sdk/emulators` is MIT. The Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, and
+GitHub emulators depend on (does not vendor or bundle) the Apache-2.0
 [`@emulators/core`](https://github.com/vercel-labs/emulate) package, which ships no `NOTICE` file.
