@@ -1448,6 +1448,9 @@ owners running a practice repository by hand, `--allow-writes reversible` adds t
 label cases, and `--record` keeps the `link` response header, refuses any recording in which the
 token survives, and stages verified recordings all or nothing in
 `.conformance-recordings/github/<run>/` (gitignored) for manual scrubbing and promotion.
+For offline tests, the experimental GitHub emulator (`@yolk-sdk/emulators/github`) is a stateful,
+fixture-only stand-in that passes these cases; it does not emulate the leftover lookup's open-issue
+listing (no fixture records it), so that lookup fails closed against it.
 
 ### Google conformance cases (experimental)
 

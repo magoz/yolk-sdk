@@ -237,7 +237,8 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './dropbox',
       './notion',
       './todoist',
-      './telegram'
+      './telegram',
+      './github'
     ],
     root: 'none'
   }

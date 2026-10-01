@@ -1,6 +1,7 @@
 /**
- * Shared wrapper of the fixture-only stateful connector emulators (internal; used by `/dropbox`
- * and `/notion`, not by the earlier `/fortnox` and `/microsoft` emulators, which keep their own).
+ * Shared wrapper of the fixture-only stateful connector emulators (internal; used by `/dropbox`,
+ * `/notion`, and `/github`, not by the earlier `/fortnox` and `/microsoft` emulators, which keep
+ * their own).
  *
  * The emulator state lives in an `@emulators/core` custom runtime that the Node-only subpath
  * creates and hands in (this module imports no Node builtin and never imports the core); the
@@ -31,6 +32,17 @@
  * carries `x-emulator-evidence: unverified` when the route is unverified. Ledgered bodies and
  * query parameters have credential-named keys redacted.
  *
+ * Fail-closed mode (opt-in, `failClosed`; used by `/github`): every route parameter has a raw
+ * pattern, and a request is recognised only when its raw path is exactly an emulated route shape
+ * under that route's method and any `Authorization` header is one recognisable bearer
+ * (`Bearer <at least 8 non-space characters>`). Every other request is ledgered and answered with
+ * constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no body,
+ * a constant reason). For a recognised request the bearer value is a guarded secret: it is
+ * scrubbed from the ledgered method, path, query keys and values, recorded headers, and every
+ * not-emulated reason, and a path, query, or body that repeats it (raw, percent-decoded, or in any
+ * parsed JSON key, string, or number) is refused with constant text. A template parameter written
+ * `{name+}` spans one or more path segments (each decoded once, none may decode to a `/`).
+ *
  * @experimental
  */
 import { Data, Predicate, Result } from 'effect'
@@ -51,6 +63,13 @@ import {
   type EmulatorEvidence,
   type EmulatorRouteEvidence
 } from './route-evidence.ts'
+import {
+  jsonRepeatsSecret,
+  repeatsSecret,
+  scrubSecrets,
+  unrecognisedLedgerPath,
+  unrecognisedMethod
+} from './stateful-fixture.ts'
 
 /** A request the emulator does not emulate, with the reason (answered 400 not-emulated). */
 export class NotEmulated extends Data.TaggedClass('NotEmulated')<{ readonly reason: string }> {}
@@ -196,13 +215,23 @@ export type Admission<State, Env> = {
 
 export type RouteBody = 'none' | 'json' | 'bytes'
 
-export type StatefulRoute<State, Env> = EmulatorRouteEvidence & {
+/** Route parts that are not evidence: the recorded origin and the raw parameter patterns. */
+export type StatefulRouteBinding = {
   /** The origin a fixture records the route on; another origin is not emulated. Omitted: any. */
   readonly origin?: string
-  readonly body: RouteBody
-  /** The request-shape check (reads no state): an admission, or not emulated. */
-  readonly admit: (request: EmulatedRequest, env: Env) => Admission<State, Env> | NotEmulated
+  /**
+   * Raw (still percent-encoded) patterns of the path parameters; a parameter that does not match
+   * its pattern makes the path match no route. Fail-closed emulators give every parameter one.
+   */
+  readonly params?: Readonly<Record<string, RegExp>>
 }
+
+export type StatefulRoute<State, Env> = EmulatorRouteEvidence &
+  StatefulRouteBinding & {
+    readonly body: RouteBody
+    /** The request-shape check (reads no state): an admission, or not emulated. */
+    readonly admit: (request: EmulatedRequest, env: Env) => Admission<State, Env> | NotEmulated
+  }
 
 /**
  * A route of the table: its evidence (and recorded origin), the body it takes, its request-shape
@@ -210,7 +239,7 @@ export type StatefulRoute<State, Env> = EmulatorRouteEvidence & {
  * without writing and answers not emulated or the commit that writes.
  */
 export const statefulRoute = <State, Env, Input>(
-  evidence: EmulatorRouteEvidence & { readonly origin?: string },
+  evidence: EmulatorRouteEvidence & StatefulRouteBinding,
   body: RouteBody,
   admit: (request: EmulatedRequest, env: Env) => Input | NotEmulated,
   plan: (state: State, input: Input, context: RunContext<Env>) => Commit | NotEmulated
@@ -229,6 +258,7 @@ export const routeEvidence = <State, Env>({
   body: _body,
   admit: _admit,
   origin: _origin,
+  params: _params,
   ...evidence
 }: StatefulRoute<State, Env>): EmulatorRouteEvidence => evidence
 
@@ -241,18 +271,37 @@ export const decodeSegment = (segment: string): string | undefined => {
   }
 }
 
+// `{name}` is one path segment; `{name+}` is one or more segments.
 const templatePattern = (template: string): RegExp =>
   new RegExp(
     `^${template
-      .split(/(\{[A-Za-z]+\})/)
+      .split(/(\{[A-Za-z]+\+?\})/)
       .map(part =>
-        /^\{[A-Za-z]+\}$/.test(part) ? '([^/]+)' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        /^\{[A-Za-z]+\}$/.test(part)
+          ? '([^/]+)'
+          : /^\{[A-Za-z]+\+\}$/.test(part)
+            ? '(.+)'
+            : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       )
       .join('')}$`
   )
 
 const templateNames = (template: string): ReadonlyArray<string> =>
-  [...template.matchAll(/\{([A-Za-z]+)\}/g)].map(match => match[1] ?? '')
+  [...template.matchAll(/\{([A-Za-z]+)\+?\}/g)].map(match => match[1] ?? '')
+
+/**
+ * A multi-segment parameter decoded segment by segment (each once), or `undefined` for an empty
+ * segment, invalid percent-encoding, or a segment that decodes to a `/`.
+ */
+const decodeSegments = (raw: string): string | undefined => {
+  const segments = raw.split('/').map(segment => {
+    const decoded = segment === '' ? undefined : decodeSegment(segment)
+
+    return decoded === undefined || decoded.includes('/') ? undefined : decoded
+  })
+
+  return segments.some(segment => segment === undefined) ? undefined : segments.join('/')
+}
 
 export type MatchedRoute<State, Env> = {
   readonly route: StatefulRoute<State, Env>
@@ -274,7 +323,8 @@ export const routeMatcher = <State, Env>(routes: ReadonlyArray<StatefulRoute<Sta
   const compiled = routes.map(route => ({
     route,
     pattern: templatePattern(route.path),
-    names: templateNames(route.path)
+    names: templateNames(route.path),
+    multi: new Set([...route.path.matchAll(/\{([A-Za-z]+)\+\}/g)].map(match => match[1] ?? ''))
   }))
 
   return (method: string, path: string): MatchedRoute<State, Env> | undefined => {
@@ -285,10 +335,17 @@ export const routeMatcher = <State, Env>(routes: ReadonlyArray<StatefulRoute<Sta
 
       if (match === null) continue
 
+      const raws = candidate.names.map((name, index) => [name, match[index + 1] ?? ''] as const)
+
+      // A raw parameter outside its pattern is no shape of this route.
+      if (raws.some(([name, raw]) => candidate.route.params?.[name]?.test(raw) === false)) {
+        continue
+      }
+
       const params: Record<string, string> = {}
 
-      for (const [index, name] of candidate.names.entries()) {
-        const value = decodeSegment(match[index + 1] ?? '')
+      for (const [name, raw] of raws) {
+        const value = candidate.multi.has(name) ? decodeSegments(raw) : decodeSegment(raw)
 
         if (value === undefined) return undefined
 
@@ -301,6 +358,11 @@ export const routeMatcher = <State, Env>(routes: ReadonlyArray<StatefulRoute<Sta
     return undefined
   }
 }
+
+/** The template parameters of a route that have no raw pattern (fail-closed emulators need one). */
+export const unpatternedParams = <State, Env>(
+  route: StatefulRoute<State, Env>
+): ReadonlyArray<string> => templateNames(route.path).filter(name => !route.params?.[name])
 
 const decodeJsonText = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Json))
 
@@ -373,6 +435,16 @@ export type CoreDispatch<State> = (state: State, request: Request) => Response
 /** A request header the ledger records. */
 export type RecordedHeader = { readonly name: string; readonly json: boolean }
 
+/**
+ * Fail-closed mode: the constant reasons ledgered and answered for an unrecognised request (no
+ * emulated route shape) and for an unrecognisable `Authorization` header. Nothing the request
+ * carries is ledgered or answered for either.
+ */
+export type StatefulFailClosed = {
+  readonly unrecognised: string
+  readonly unrecognisedAuthorization: string
+}
+
 export type StatefulEmulatorConfig<State, Env> = {
   readonly routes: ReadonlyArray<StatefulRoute<State, Env>>
   readonly env: Env
@@ -387,6 +459,12 @@ export type StatefulEmulatorConfig<State, Env> = {
    * as `<redacted>`. A credential header name is refused when the emulator is built.
    */
   readonly recordHeaders: ReadonlyArray<RecordedHeader>
+  /**
+   * Opt-in fail-closed mode (see the module header): constant-text ledger entries for unrecognised
+   * requests and Authorization headers, and the bearer value guarded as a secret. Every route
+   * parameter must have a raw pattern (checked when the emulator is built).
+   */
+  readonly failClosed?: StatefulFailClosed
   /** Clear runtime data (cursors) on reset and seed. */
   readonly clearRuntime: () => void
   /** Extra `/_emulate/state` fields (runtime data). */
@@ -445,6 +523,15 @@ const issueMessage = (issue: Schema.SchemaError['issue']): string =>
 
 // A non-empty bearer credential. The value is never checked, stored, forwarded, or ledgered.
 const bearerPattern = /^bearer\s+\S+/i
+
+/**
+ * Fail-closed mode: exactly one bearer of at least 8 non-space characters (no extra words, so
+ * combined duplicate headers never match). The value is guarded, never checked or stored.
+ */
+const recognisableBearerPattern = /^bearer\s+(\S{8,})\s*$/i
+
+const missingBearerReason =
+  'requests without Authorization: Bearer <token of at least 8 characters> are not emulated'
 
 const pathMatches = (pattern: string, path: string): boolean =>
   pattern.endsWith('*') ? path.startsWith(pattern.slice(0, -1)) : pattern === path
@@ -507,6 +594,8 @@ type Job<State, Env> = {
   readonly seq: number
   /** Answers the first matching fault (consuming it), or `undefined` when none matches. */
   readonly decideFault: () => Response | undefined
+  /** Guarded credential values, scrubbed from a plan's not-emulated reason. */
+  readonly secrets: ReadonlyArray<string>
   notEmulated?: string
 }
 
@@ -583,6 +672,18 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     throw new Error(`the ledger never records the credential header ${credentialHeader.name}`)
   }
 
+  if (config.failClosed !== undefined) {
+    for (const route of config.routes) {
+      const missing = unpatternedParams(route)
+
+      if (missing.length > 0) {
+        throw new Error(
+          `fail-closed route ${route.method} ${route.path} needs raw patterns for ${missing.join(', ')}`
+        )
+      }
+    }
+  }
+
   const match = routeMatcher(config.routes)
   const manifest = config.routes.map(routeEvidence)
   const jobs = new Map<number, Job<State, Env>>()
@@ -598,9 +699,11 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       const planned = job.admission.plan(state, { env: config.env, seq: job.seq })
 
       if (isNotEmulated(planned)) {
-        job.notEmulated = planned.reason
+        const reason = scrubSecrets(planned.reason, job.secrets)
 
-        return notEmulatedResponse(planned.reason)
+        job.notEmulated = reason
+
+        return notEmulatedResponse(reason)
       }
 
       return job.decideFault() ?? planned()
@@ -704,10 +807,33 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     notEmulatedRequests: entries.filter(entry => entry.notEmulated !== undefined).length
   })
 
-  const refuse = (entry: MutableLedgerEntry, reason: string): Response => {
-    entry.notEmulated = reason
+  /** The ledgered 400; the reason is scrubbed of the request's guarded secrets first. */
+  const refuse = (
+    entry: MutableLedgerEntry,
+    reason: string,
+    secrets: ReadonlyArray<string> = []
+  ): Response => {
+    const safe = scrubSecrets(reason, secrets)
 
-    return notEmulatedResponse(reason)
+    entry.notEmulated = safe
+
+    return notEmulatedResponse(safe)
+  }
+
+  /** True when a body text, raw or parsed as JSON (keys, strings, numbers), repeats a secret. */
+  const bodyRepeatsSecret = (text: string, secrets: ReadonlyArray<string>): boolean => {
+    if (secrets.length === 0) return false
+
+    if (repeatsSecret(text, secrets)) return true
+
+    const parsed = text === '' ? undefined : parseJsonText(text)
+
+    // Normalised forms (`\u0051` escapes, `1.2345678e7` numbers) only show once parsed: every key,
+    // string value, and number is checked, and so is the value as it would be recorded.
+    return (
+      parsed !== undefined &&
+      (jsonRepeatsSecret(parsed, secrets) || repeatsSecret(JSON.stringify(parsed), secrets))
+    )
   }
 
   /** Everything after the route match: credential, headers, body, shape, then the core. */
@@ -715,18 +841,32 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     request: Request,
     url: URL,
     entry: MutableLedgerEntry,
-    matched: MatchedRoute<State, Env>
+    matched: MatchedRoute<State, Env>,
+    secrets: ReadonlyArray<string>
   ): Promise<Response> => {
     const header = (name: string): string | undefined =>
       isCredentialHeaderName(name) ? undefined : (request.headers.get(name) ?? undefined)
 
-    if (!bearerPattern.test(request.headers.get('authorization') ?? '')) {
-      return refuse(entry, 'a non-empty Authorization: Bearer credential is required')
+    const refused = (reason: string) => refuse(entry, reason, secrets)
+
+    if (config.failClosed === undefined) {
+      if (!bearerPattern.test(request.headers.get('authorization') ?? '')) {
+        return refused('a non-empty Authorization: Bearer credential is required')
+      }
+    } else {
+      // The header is absent here (an unrecognisable one never reaches a route).
+      if (secrets.length === 0) return refused(missingBearerReason)
+
+      if (repeatsSecret(url.search, secrets)) return refused('the query repeats the credential')
+
+      if (repeatsSecret(url.pathname, secrets)) {
+        return refused('the request path repeats the credential')
+      }
     }
 
     const problem = config.requestProblem?.(header)
 
-    if (problem !== undefined) return refuse(entry, problem)
+    if (problem !== undefined) return refused(problem)
 
     let json: Schema.Json | undefined
     let bytes: Uint8Array | undefined
@@ -735,22 +875,32 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       case 'none': {
         const text = await readText(request)
 
+        if (text !== undefined && bodyRepeatsSecret(text, secrets)) {
+          return refused('the request body repeats the credential')
+        }
+
         if (text === undefined || text !== '') {
-          return refuse(entry, 'this route takes no request body')
+          return refused('this route takes no request body')
         }
 
         break
       }
 
       case 'json': {
-        if (mediaType(header('content-type')) !== 'application/json') {
-          return refuse(entry, 'this route takes a content-type: application/json body')
+        const text = await readText(request)
+
+        // Checked first: a body that repeats a secret is never parsed into the ledger.
+        if (text !== undefined && bodyRepeatsSecret(text, secrets)) {
+          return refused('the request body repeats the credential')
         }
 
-        const text = await readText(request)
+        if (mediaType(header('content-type')) !== 'application/json') {
+          return refused('this route takes a content-type: application/json body')
+        }
+
         const parsed = text === undefined ? undefined : parseJsonText(text)
 
-        if (parsed === undefined) return refuse(entry, 'the request body is not valid JSON')
+        if (parsed === undefined) return refused('the request body is not valid JSON')
 
         // Redacted before it is stored: a refused request's body stays in the ledger too.
         entry.body = redactCredentialFields(parsed)
@@ -762,7 +912,11 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       case 'bytes': {
         bytes = await readBytes(request)
 
-        if (bytes === undefined) return refuse(entry, 'the request body is unreadable')
+        if (bytes === undefined) return refused('the request body is unreadable')
+
+        if (bodyRepeatsSecret(new TextDecoder().decode(bytes), secrets)) {
+          return refused('the request body repeats the credential')
+        }
 
         entry.bodyBytes = bytes.byteLength
 
@@ -783,7 +937,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       config.env
     )
 
-    if (isNotEmulated(admitted)) return refuse(entry, admitted.reason)
+    if (isNotEmulated(admitted)) return refused(admitted.reason)
 
     const method = request.method.toUpperCase()
     const jobId = nextJobId++
@@ -791,6 +945,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     const job: Job<State, Env> = {
       admission: admitted,
       seq: entry.seq,
+      secrets,
       decideFault: () => {
         const fault = takeFault(method, url.pathname)
 
@@ -828,14 +983,54 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     }
   }
 
+  /** Fail closed: an unrecognised request is ledgered and answered with constant text only. */
+  const unrecognised = (request: Request, reason: string): Response => {
+    entries.push({
+      seq: nextSeq++,
+      method: unrecognisedMethod(request.method.toUpperCase()),
+      path: unrecognisedLedgerPath,
+      query: {},
+      headers: {},
+      status: 400,
+      evidence: 'unknown-route',
+      notEmulated: reason
+    })
+
+    return notEmulatedResponse(reason)
+  }
+
   const emulatedApi = async (request: Request, url: URL, arrivedOn: string): Promise<Response> => {
     const matched = match(request.method, url.pathname)
+    const failClosed = config.failClosed
+    let secrets: ReadonlyArray<string> = []
+
+    if (failClosed !== undefined) {
+      const authorization = request.headers.get('authorization')
+      const bearer = recognisableBearerPattern.exec(authorization ?? '')?.[1]
+
+      // Its credential cannot be extracted and scrubbed: nothing of the request is kept.
+      if (authorization !== null && bearer === undefined) {
+        return unrecognised(request, failClosed.unrecognisedAuthorization)
+      }
+
+      if (matched === undefined) return unrecognised(request, failClosed.unrecognised)
+
+      secrets = bearer === undefined ? [] : [bearer]
+    }
+
+    const scrub = (text: string): string => scrubSecrets(text, secrets)
 
     const entry: MutableLedgerEntry = {
       seq: nextSeq++,
-      method: request.method,
-      path: url.pathname,
-      query: recordedQuery(url.searchParams),
+      method: scrub(request.method),
+      path: scrub(url.pathname),
+      // Query keys and values are scrubbed of the request's secrets before they are recorded.
+      query: Object.fromEntries(
+        Object.entries(recordedQuery(url.searchParams)).map(([key, value]) => [
+          scrub(key),
+          scrub(value)
+        ])
+      ),
       headers: {},
       status: 0,
       evidence: matched?.route.evidence ?? 'unknown-route'
@@ -844,7 +1039,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     for (const header of config.recordHeaders) {
       const value = request.headers.get(header.name)
 
-      if (value !== null) entry.headers[header.name] = recordedHeaderValue(header, value)
+      if (value !== null) entry.headers[header.name] = scrub(recordedHeaderValue(header, value))
     }
 
     entries.push(entry)
@@ -861,14 +1056,14 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       entry.status = 400
 
       return withEvidence(
-        refuse(entry, `this route is recorded on ${matched.route.origin} only`),
+        refuse(entry, `this route is recorded on ${matched.route.origin} only`, secrets),
         matched.route.evidence
       )
     }
 
     // Error recovery still answers through the route: the fallback 500 is evidence-tagged and
     // the ledger records the status actually sent.
-    const response = await routed(request, url, entry, matched).catch(() => {
+    const response = await routed(request, url, entry, matched, secrets).catch(() => {
       entry.responseError = 'the emulator could not build or produce the response'
 
       return emulatorError(500, 'the emulator could not build the response')

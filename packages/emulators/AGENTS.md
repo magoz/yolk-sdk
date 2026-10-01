@@ -5,46 +5,48 @@ Effect `HttpClient` routing that points code at them.
 
 ## Subpaths
 
-| Subpath                         | Source                                   | Role                                                                                                                                     |
-| ------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/emulators/router`    | `src/router.ts`                          | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                 |
-| `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`                         | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                 |
-| `@yolk-sdk/emulators/openai`    | `src/openai.ts`                          | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                          |
-| `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`                       | Anthropic Messages fetch-handler emulator and its manifest                                                                               |
-| `@yolk-sdk/emulators/codex`     | `src/codex.ts`                           | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                          |
-| `@yolk-sdk/emulators/xai`       | `src/xai.ts`                             | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                     |
-| `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`                        | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                              |
-| `@yolk-sdk/emulators/email`     | `src/email.ts`                           | Fixture-driven fake `EmailClient` backend (plain JSON `call`), its seed, faults, ledger, and manifest                                    |
-| `@yolk-sdk/emulators/node`      | `src/node.ts`                            | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                           |
-| `@yolk-sdk/emulators/fortnox`   | `src/fortnox.ts`                         | Stateful Fortnox emulator on `@emulators/core`: ledger, faults, control plane                                                            |
-| `@yolk-sdk/emulators/microsoft` | `src/microsoft.ts`                       | Stateful Microsoft Graph emulator on `@emulators/core` (Graph + copy monitor)                                                            |
-| `@yolk-sdk/emulators/dropbox`   | `src/dropbox.ts`                         | Stateful, fixture-only Dropbox emulator on `@emulators/core` (RPC + upload)                                                              |
-| `@yolk-sdk/emulators/notion`    | `src/notion.ts`                          | Stateful, fixture-only Notion emulator on `@emulators/core` (`/v1`, `Notion-Version: 2025-09-03`)                                        |
-| `@yolk-sdk/emulators/todoist`   | `src/todoist.ts`                         | Stateful, fixture-only Todoist API v1 emulator on `@emulators/core` (tasks, labels, projects; cursor paging)                             |
-| `@yolk-sdk/emulators/telegram`  | `src/telegram.ts`                        | Stateful, fixture-only Telegram Bot API emulator on `@emulators/core` (token in the path, never kept; sends recorded in state)           |
-| (internal)                      | `src/emulator-kernel.ts`                 | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`) |
-| (internal)                      | `src/chat-completions.ts`                | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                           |
-| (internal)                      | `src/messages.ts`                        | Anthropic Messages core (`makeMessagesEmulator`)                                                                                         |
-| (internal)                      | `src/responses.ts`                       | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai` (not `/opencode`, which is fixture-only)                   |
-| (internal)                      | `src/fixture-route.ts`                   | Fixture-only route core (`makeFixtureRouteEmulator`): recorded answers, 400 not-emulated otherwise; used by every Go and usage route     |
-| (internal)                      | `src/subscription-usage.ts`              | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go               |
-| (internal)                      | `src/*-recordings.ts`                    | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                             |
-| (internal)                      | `src/emulator-compose.ts`                | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                  |
-| (internal)                      | `src/emulator-http.ts`                   | Shared fault/scripted-error status and header validators (all emulators)                                                                 |
-| (internal)                      | `src/route-evidence.ts`                  | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                        |
-| (internal)                      | `src/email-fixtures.ts`                  | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                      |
-| (internal)                      | `src/fortnox/state.ts`                   | Fortnox state/seed schemas, default seed (fixture entities), profiles, totals                                                            |
-| (internal)                      | `src/fortnox/api.ts`                     | Fortnox route table (evidence + handlers), quirks, `ErrorInformation` codes                                                              |
-| (internal)                      | `src/microsoft/state.ts`                 | Microsoft state/seed schemas, default seed (fixture entities), profiles, instants                                                        |
-| (internal)                      | `src/microsoft/api.ts`                   | Microsoft route table (evidence, query allowlist, auth flag), matching, registration                                                     |
-| (internal)                      | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                      |
-| (internal)                      | `src/microsoft/{calendar,mail,drive}.ts` | Calendar, Outlook (with `$batch`), and OneDrive (with copy monitor) handlers                                                             |
-| (internal)                      | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox` and `/notion`: route table, shape checks, 400 not-emulated, faults, ledger, control plane (no core import)  |
-| (internal)                      | `src/dropbox/{state,api}.ts`             | Dropbox state/seed schemas and default seed; route table, fixture error envelopes, metadata, cursors                                     |
-| (internal)                      | `src/notion/{state,api}.ts`              | Notion state/seed schemas and default seed; route table, error envelopes, object rendering, cursor paging                                |
-| (internal)                      | `src/stateful-fixture.ts`                | Shared wrapper of the fixture-only stateful emulators (Todoist, Telegram): ledger, faults, 400 not-emulated, recovery, control plane     |
-| (internal)                      | `src/todoist/{state,api}.ts`             | Todoist state/seed schemas and default seed (fixture entities); route table, matching, handlers, drills                                  |
-| (internal)                      | `src/telegram/{state,api}.ts`            | Telegram state/seed schemas and default seed (fixture entities); route table, token-aware resolution, handlers, drills                   |
+| Subpath                         | Source                                   | Role                                                                                                                                                                         |
+| ------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`    | `src/router.ts`                          | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                                                     |
+| `@yolk-sdk/emulators/gateway`   | `src/gateway.ts`                         | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                                                     |
+| `@yolk-sdk/emulators/openai`    | `src/openai.ts`                          | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                                                              |
+| `@yolk-sdk/emulators/anthropic` | `src/anthropic.ts`                       | Anthropic Messages fetch-handler emulator and its manifest                                                                                                                   |
+| `@yolk-sdk/emulators/codex`     | `src/codex.ts`                           | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                                                              |
+| `@yolk-sdk/emulators/xai`       | `src/xai.ts`                             | xAI Grok CLI proxy Responses fetch-handler emulator and its manifest                                                                                                         |
+| `@yolk-sdk/emulators/opencode`  | `src/opencode.ts`                        | OpenCode Go emulator (chat, Messages, Responses, usage under `/zen/go/v1`) and its manifest                                                                                  |
+| `@yolk-sdk/emulators/email`     | `src/email.ts`                           | Fixture-driven fake `EmailClient` backend (plain JSON `call`), its seed, faults, ledger, and manifest                                                                        |
+| `@yolk-sdk/emulators/node`      | `src/node.ts`                            | `serveFetchHandler` / `startFetchHandlerServer` on `127.0.0.1`                                                                                                               |
+| `@yolk-sdk/emulators/fortnox`   | `src/fortnox.ts`                         | Stateful Fortnox emulator on `@emulators/core`: ledger, faults, control plane                                                                                                |
+| `@yolk-sdk/emulators/microsoft` | `src/microsoft.ts`                       | Stateful Microsoft Graph emulator on `@emulators/core` (Graph + copy monitor)                                                                                                |
+| `@yolk-sdk/emulators/dropbox`   | `src/dropbox.ts`                         | Stateful, fixture-only Dropbox emulator on `@emulators/core` (RPC + upload)                                                                                                  |
+| `@yolk-sdk/emulators/notion`    | `src/notion.ts`                          | Stateful, fixture-only Notion emulator on `@emulators/core` (`/v1`, `Notion-Version: 2025-09-03`)                                                                            |
+| `@yolk-sdk/emulators/todoist`   | `src/todoist.ts`                         | Stateful, fixture-only Todoist API v1 emulator on `@emulators/core` (tasks, labels, projects; cursor paging)                                                                 |
+| `@yolk-sdk/emulators/telegram`  | `src/telegram.ts`                        | Stateful, fixture-only Telegram Bot API emulator on `@emulators/core` (token in the path, never kept; sends recorded in state)                                               |
+| `@yolk-sdk/emulators/github`    | `src/github.ts`                          | Stateful, fixture-only GitHub REST emulator on `@emulators/core` (issues, comments, labels, contents; fail closed; minted `Link`)                                            |
+| (internal)                      | `src/emulator-kernel.ts`                 | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`)                                     |
+| (internal)                      | `src/chat-completions.ts`                | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                                                               |
+| (internal)                      | `src/messages.ts`                        | Anthropic Messages core (`makeMessagesEmulator`)                                                                                                                             |
+| (internal)                      | `src/responses.ts`                       | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai` (not `/opencode`, which is fixture-only)                                                       |
+| (internal)                      | `src/fixture-route.ts`                   | Fixture-only route core (`makeFixtureRouteEmulator`): recorded answers, 400 not-emulated otherwise; used by every Go and usage route                                         |
+| (internal)                      | `src/subscription-usage.ts`              | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go                                                   |
+| (internal)                      | `src/*-recordings.ts`                    | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                                                                 |
+| (internal)                      | `src/emulator-compose.ts`                | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                                                      |
+| (internal)                      | `src/emulator-http.ts`                   | Shared fault/scripted-error status and header validators (all emulators)                                                                                                     |
+| (internal)                      | `src/route-evidence.ts`                  | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                                                            |
+| (internal)                      | `src/email-fixtures.ts`                  | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                                                          |
+| (internal)                      | `src/fortnox/state.ts`                   | Fortnox state/seed schemas, default seed (fixture entities), profiles, totals                                                                                                |
+| (internal)                      | `src/fortnox/api.ts`                     | Fortnox route table (evidence + handlers), quirks, `ErrorInformation` codes                                                                                                  |
+| (internal)                      | `src/microsoft/state.ts`                 | Microsoft state/seed schemas, default seed (fixture entities), profiles, instants                                                                                            |
+| (internal)                      | `src/microsoft/api.ts`                   | Microsoft route table (evidence, query allowlist, auth flag), matching, registration                                                                                         |
+| (internal)                      | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                                                          |
+| (internal)                      | `src/microsoft/{calendar,mail,drive}.ts` | Calendar, Outlook (with `$batch`), and OneDrive (with copy monitor) handlers                                                                                                 |
+| (internal)                      | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox`, `/notion`, and `/github`: route table, shape checks, 400 not-emulated, faults, ledger, control plane, opt-in fail-closed mode (no core import) |
+| (internal)                      | `src/dropbox/{state,api}.ts`             | Dropbox state/seed schemas and default seed; route table, fixture error envelopes, metadata, cursors                                                                         |
+| (internal)                      | `src/notion/{state,api}.ts`              | Notion state/seed schemas and default seed; route table, error envelopes, object rendering, cursor paging                                                                    |
+| (internal)                      | `src/stateful-fixture.ts`                | Shared wrapper of the fixture-only stateful emulators (Todoist, Telegram): ledger, faults, 400 not-emulated, recovery, control plane                                         |
+| (internal)                      | `src/todoist/{state,api}.ts`             | Todoist state/seed schemas and default seed (fixture entities); route table, matching, handlers, drills                                                                      |
+| (internal)                      | `src/telegram/{state,api}.ts`            | Telegram state/seed schemas and default seed (fixture entities); route table, token-aware resolution, handlers, drills                                                       |
+| (internal)                      | `src/github/{state,api}.ts`              | GitHub state/seed schemas and default seed (fixture entities); route table with raw parameter patterns, error bodies, `Link` paging, drills                                  |
 
 There is no root export or barrel.
 
@@ -58,20 +60,24 @@ There is no root export or barrel.
 - `node:` builtins and `@emulators/core` (Node-only: it imports Node builtins and reads files at
   import time) are allowed only in `src/node.ts`, `src/fortnox.ts`, `src/fortnox/**`,
   `src/microsoft.ts`, `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`, `src/notion.ts`,
-  `src/notion/**`, `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`, and `src/telegram/**`
-  (also enforced). `src/fortnox.ts`, `src/microsoft.ts`, `src/dropbox.ts`, `src/notion.ts`,
-  `src/todoist.ts`, and `src/telegram.ts` import the core lazily (`await import`) inside their
-  `make*Emulator` (`makeFortnoxEmulator`, `makeMicrosoftEmulator`, `makeDropboxEmulator`,
-  `makeNotionEmulator`, `makeTodoistEmulator`, `makeTelegramEmulator`), so importing the subpath
+  `src/notion/**`, `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`, `src/telegram/**`,
+  `src/github.ts`, and `src/github/**` (also enforced). `src/fortnox.ts`, `src/microsoft.ts`,
+  `src/dropbox.ts`, `src/notion.ts`, `src/todoist.ts`, `src/telegram.ts`, and `src/github.ts`
+  import the core lazily (`await import`) inside their `make*Emulator` (`makeFortnoxEmulator`,
+  `makeMicrosoftEmulator`, `makeDropboxEmulator`, `makeNotionEmulator`, `makeTodoistEmulator`,
+  `makeTelegramEmulator`, `makeGithubEmulator`), so importing the subpath
   (for example the manifest, from the evidence check) has no side effects. The shared wrappers
   `src/stateful-emulator.ts` and `src/stateful-fixture.ts` never import the core: each subpath hands
   them the runtime. They are two wrappers for the same job, kept apart only because the PRs landed
   in parallel; consolidating them is tracked in issue #139. Until then, build a new
-  fixture-only stateful emulator on `src/stateful-emulator.ts`.
+  fixture-only stateful emulator on `src/stateful-emulator.ts` (as `/github` is), in its opt-in
+  fail-closed mode; a guarantee only `src/stateful-fixture.ts` has is added to
+  `src/stateful-emulator.ts` backward compatibly, with tests (`test/stateful-emulator.test.ts`),
+  never as a third wrapper.
 - `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are plain
   Web fetch handlers (no Effect runtime needed, no Node builtins); `email` is a plain structural
   object (no HTTP, socket, TLS, MIME, or mail library); `node`, `fortnox`, `microsoft`, `dropbox`,
-  `notion`, `todoist`, and `telegram` are the Node subpaths.
+  `notion`, `todoist`, `telegram`, and `github` are the Node subpaths.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
 - `@emulators/core` is Apache-2.0 and a dependency (not vendored or bundled; `tsdown` never bundles
@@ -104,20 +110,21 @@ There is no root export or barrel.
   `anthropicSubscriptionUsageEmulatorRoutes`, `codexSubscriptionUsageEmulatorRoutes`,
   `xAiGrokSubscriptionUsageEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`,
   `dropboxEmulatorRoutes`, `notionEmulatorRoutes`, `todoistEmulatorRoutes`,
-  `telegramEmulatorRoutes`).
+  `telegramEmulatorRoutes`, `githubEmulatorRoutes`).
   Each manifest route
   needs its own handler: the fetch-handler emulators use `bindRouteHandlers`
   (`src/route-evidence.ts`), which pairs them at construction and throws `EmulatorRouteUnmapped`
   for a manifest route without a handler or a handler without a manifest route; Fortnox,
-  Microsoft, Dropbox, Notion, Todoist, and Telegram derive both from one table
+  Microsoft, Dropbox, Notion, Todoist, Telegram, and GitHub derive both from one table
   (`src/fortnox/api.ts`, `src/microsoft/api.ts`, `src/dropbox/api.ts`, `src/notion/api.ts`,
-  `src/todoist/api.ts`, `src/telegram/api.ts`). Fortnox
+  `src/todoist/api.ts`, `src/telegram/api.ts`, `src/github/api.ts`). Fortnox
   routes without a fixture
   (`GET /3/companyinformation`, `GET /3/customers`) cite no case ids and use minimal shapes named
-  after the connector's read fields; the check warns about them. The fixture-only `/todoist` and
-  `/telegram` emulators never add a route without a fixture: every route cites a case (the Todoist
-  leftover lookup's `GET /api/v1/projects` has no fixture, so it is not emulated and the lookup
-  fails closed until a fixture records it).
+  after the connector's read fields; the check warns about them. The fixture-only `/todoist`,
+  `/telegram`, and `/github` emulators never add a route without a fixture: every route cites a
+  case (the Todoist leftover lookup's `GET /api/v1/projects` and the GitHub one's
+  `GET /repos/{owner}/{repo}/issues` have no fixture, so they are not emulated and the lookups fail
+  closed until a fixture records them).
 - Fixture-only rule (lasting; every new emulator and route follows it, without exceptions):
   response behaviour comes only from the committed fixtures. A request matching a recorded request's shape, within the
   documented request-shape latitude, gets that fixture's response, copied as data (default content
@@ -132,7 +139,8 @@ There is no root export or barrel.
   content. Scope: the four `/opencode` routes and the three subscription-usage routes (Claude,
   Codex, Grok) today, on `src/fixture-route.ts`, the `/email` port emulator (its own
   latitude, not-emulated answer, faults, and parity test, below; it does not use the kernel), and
-  the stateful `/dropbox` and `/notion` emulators (on `src/stateful-emulator.ts`, below) and
+  the stateful `/dropbox`, `/notion`, and `/github` emulators (on `src/stateful-emulator.ts`,
+  below) and
   `/todoist` and `/telegram` emulators (on `src/stateful-fixture.ts`; their own latitude and drift
   tests, below). The earlier model routes (`/gateway`, `/openai`,
   `/anthropic`, `/codex`, `/xai` Messages and Responses) predate the rule and keep their synthetic
@@ -156,7 +164,7 @@ There is no root export or barrel.
   fixture-only routes are 400-599 only.
 - Evidence policy: unknown emulated API routes fail closed and are written to the ledger (404 JSON
   on the earlier model-route emulators, `/fortnox`, and `/microsoft`, 400 not-emulated on fixture-only routes,
-  `/dropbox`, `/notion`, `/todoist`, and `/telegram`; control-plane
+  `/dropbox`, `/notion`, `/todoist`, `/telegram`, and `/github`; control-plane
   requests are never recorded); unverified routes answer but carry
   `x-emulator-evidence: unverified` (the `/email` port emulator has no headers: its ledger entries
   carry `evidence`), are tagged in the ledger, and are listed by the evidence check; evidence older
@@ -170,7 +178,8 @@ There is no root export or barrel.
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
   write routes are pending (tracking #115), and so are the four Fortnox write routes, the eleven
   Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
-  Todoist write routes, and the Telegram `sendMessage` route; expiry dates live only in that file.
+  Todoist write routes, the Telegram `sendMessage` route, and the six GitHub write routes; expiry
+  dates live only in that file.
   A new entry expires at most 60 days out and its reason cites tracking #115 and names the
   owner-approved live run (`live run of <case ids>`).
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
@@ -180,12 +189,13 @@ There is no root export or barrel.
   be built, or a stateful route handler that throws, answers an evidence-tagged 500 in the
   service's error envelope, recorded in the ledger (`responseError`); that recovery never depends
   on the injectable clock (a clock that throws falls back to a fixed synthetic date). The
-  fixture-only `/dropbox`, `/notion`, `/todoist`, and `/telegram` answer
+  fixture-only `/dropbox`, `/notion`, `/todoist`, `/telegram`, and `/github` answer
   `{ error: { type: 'emulator_error' } }` instead and their recovery reads no clock at all (see
   below).
 - Every model and fixture-route fetch-handler emulator is built on `src/emulator-kernel.ts` (the
   `/email` port emulator is not; the stateful `/fortnox` and `/microsoft` keep their own wrappers,
-  `/dropbox` and `/notion` share `src/stateful-emulator.ts`, and `/todoist` and `/telegram` share
+  `/dropbox`, `/notion`, and `/github` share `src/stateful-emulator.ts`, and `/todoist` and
+  `/telegram` share
   `src/stateful-fixture.ts`; see below): fault and scripted-turn state (strict
   decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
   status-fault and scripted-error responses, the `/_emulate/*` control plane, coverage, evidence
@@ -441,6 +451,54 @@ There is no root export or barrel.
   any non-empty message `text`. The bullet has four copies that change together with the unit tests:
   this one, the `src/todoist.ts` / `src/telegram.ts` headers, `README.md` (Todoist and Telegram
   emulators), and `apps/docs/content/docs/api-reference/emulators.mdx`.
+- GitHub (`src/github.ts` + `src/github/*`) is stateful AND fixture-only, without exceptions, on
+  `src/stateful-emulator.ts` in its opt-in fail-closed mode (`failClosed`): every route path
+  parameter has a raw pattern (`params`; owner and repository names, decimal issue numbers and
+  comment ids, plain label names, a multi-segment `{path+}` of plain file path segments), so a
+  request is recognised only when its raw path is exactly an emulated route shape under that
+  route's method and any `Authorization` header is one recognisable bearer
+  (`Bearer <at least 8 non-space characters>`); everything else is ledgered with constant text only
+  (`/<unrecognised>`, a standard method or `<other>`, an empty query, no body, a constant reason).
+  For a recognised request the bearer value is scrubbed from the ledgered method, path, query,
+  recorded headers, and every not-emulated reason, and a path, query, or body repeating it (raw,
+  percent-decoded, or in any parsed JSON key, string, or number) is refused with constant text.
+  Every answer value comes from a fixture (through the seed or the request) or is minted: created
+  issue numbers and comment ids from counters that only advance (the default seed starts them at
+  the fixtures' created values, issue 42 and comment 9000000001; a seed's counters lie above its
+  seeded numbers, and a seed may not use the minted `id`/`node_id` forms at or above them), the
+  issue `id`/`node_id` and comment `node_id` derived from them in the fixtures' form, and
+  timestamps from the injectable clock (whole seconds). Issue numbers below the counter that the
+  state does not hold are implied (never rendered); numbers at or above it answer the not-found
+  fixture's 404 byte for byte. Error bodies are the fixtures' byte for byte
+  (`githubEmulatorErrorBodies`). `Link` paging is minted only on the label listing, in the paging
+  fixture's exact form (relations `prev`, `next`, `last`, `first`; the page after the last answers
+  `[]`; a listing that fits one page carries none, as the label fixture records); label pages are
+  page numbers the client computes, not cursors, and the label list never changes, so there is no
+  cursor registry. Writes follow only the recorded flows (comment create/delete on an open held
+  issue; one repository label added that sorts after the issue's labels, or removed; issue create;
+  rename and close-as-completed of an issue created here); anything else, including the lifecycle
+  restore's close as `not_planned`, a comment listing of more than one comment, rendering an issue
+  that holds comments, and the leftover lookup's open-issue listing (so
+  `findGithubConformanceLeftovers` fails and runners print their lookup-failed WARN), is not
+  emulated. A write case ends at the seed except the counters, the deleted comment's id
+  (`deletedComments`, so a second delete answers the recorded 404), and the lifecycle case's closed
+  issue (GitHub cannot delete issues); the cross-checks prove exactly that. Drill knobs (`drills`,
+  booleans) each fail exactly one case.
+- Request-shape latitude (`/github`, the only accepted deviations): any bearer value of at least 8
+  non-space characters that occurs nowhere else in the request (never checked, stored, or
+  ledgered); extra request headers; JSON key order; `content-type` media-type parameters; the order
+  of query parameters; any non-empty issue title and comment body, and any issue body text; any
+  comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1
+  to 100, with no `page` or a `page` from 2 to one past the last page; any issue search `q` that
+  starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256
+  characters (answered the recorded 422); any issue number the repository has not reached (answered
+  the recorded 404); and any issue, comment, repository label, or file the state holds where a
+  fixture has one, under the per-route state rules. `Accept` must be `application/vnd.github+json`
+  and `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query
+  parameters, another origin or repository, a repeated query key, an explicit `page=1`, and a
+  comment listing `per_page` other than 100) is not emulated. Copies change together with
+  `test/github.test.ts`: this bullet, the `src/github.ts` header, `README.md` (GitHub emulator),
+  and `apps/docs/content/docs/api-reference/emulators.mdx` (GitHub emulator).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -527,4 +585,17 @@ loopback socket, each comparing every emulator's snapshot with its seed afterwar
 id counters (and the one recorded Telegram send); all seven Todoist cases run sequentially against
 one shared emulator, ending at the seed except counters; a `run-<hex>` run id; the leftover lookup
 failing closed (its project listing has no fixture); and one drill per case failing exactly that
-case). Loopback sockets only; never call real services.
+case), `test/github.test.ts` (manifest, the data copies, the drift test replaying every fixture
+byte for byte (status, every header, body) with minted values substituted only at exact field
+paths on a second run, the latitude, every fail-closed refusal (by shape and by state) asserting a
+ledgered 400, an unchanged state, and an unused match-all fault that still answers the next valid request,
+constant-text unrecognised shapes and Authorization headers, the bearer never ledgered or echoed
+(query keys and values raw and percent-encoded, path, recorded header, plain, JSON-escaped, and
+numeric body forms, checked against responses and every `/_emulate/*` read), origins, 429 faults
+through the real connector, clock-safe recovery, seeds, control plane),
+`test/github-conformance.test.ts` (all seven cases in-process and over a loopback socket, each
+ending at its seed except the counters, the deleted comment's id, and the closed lifecycle issue;
+all cases twice in sequence on one emulator; the leftover lookup failing closed; one drill per
+case failing exactly that case), and `test/stateful-emulator.test.ts` (the shared wrapper's
+`{name+}` parameters, raw parameter patterns, and opt-in fail-closed mode over a fake core, and the
+unchanged behaviour without it). Loopback sockets only; never call real services.

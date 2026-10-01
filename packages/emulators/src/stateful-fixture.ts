@@ -173,7 +173,7 @@ const ledgerableMethods: ReadonlySet<string> = new Set([
 ])
 
 /** The ledgered method of an unrecognised request: a standard method, or `<other>`. */
-const unrecognisedMethod = (method: string): string =>
+export const unrecognisedMethod = (method: string): string =>
   ledgerableMethods.has(method) ? method : '<other>'
 
 /** The parts of an `@emulators/core` custom runtime the wrapper uses. */
@@ -339,7 +339,7 @@ const meaningful = (secrets: ReadonlyArray<string>): ReadonlyArray<string> =>
   secrets.filter(secret => secret.length >= minimumSecretLength)
 
 /** True when `text`, raw or percent-decoded, contains a secret. */
-const repeatsSecret = (text: string, secrets: ReadonlyArray<string>): boolean => {
+export const repeatsSecret = (text: string, secrets: ReadonlyArray<string>): boolean => {
   const decoded = decodedOrRaw(text.replaceAll('+', ' '))
 
   return meaningful(secrets).some(secret => text.includes(secret) || decoded.includes(secret))
@@ -352,7 +352,7 @@ const isJsonRecord = (value: Schema.Json): value is Schema.JsonObject =>
  * True when any object key, string value, or number of `value` (raw or percent-decoded) holds a
  * secret. Numbers are checked as JavaScript prints them (`1.2345678e7` parses to `12345678`).
  */
-const jsonRepeatsSecret = (value: Schema.Json, secrets: ReadonlyArray<string>): boolean => {
+export const jsonRepeatsSecret = (value: Schema.Json, secrets: ReadonlyArray<string>): boolean => {
   if (Predicate.isString(value)) return repeatsSecret(value, secrets)
 
   if (Predicate.isNumber(value)) return repeatsSecret(String(value), secrets)
