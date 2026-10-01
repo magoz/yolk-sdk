@@ -393,7 +393,7 @@ describe('emulators import rules', () => {
     }
   })
 
-  it('allows node: builtins and @emulators/core only in src/node.ts and the Fortnox, Microsoft, Dropbox, and Notion emulators', () => {
+  it('allows node: builtins and @emulators/core only in src/node.ts and the Fortnox, Microsoft, Dropbox, Notion, Todoist, and Telegram emulators', () => {
     const root = fixtureDirectory()
 
     scaffoldEmulators(root)
@@ -413,7 +413,11 @@ describe('emulators import rules', () => {
       'packages/emulators/src/dropbox/nested/state.ts',
       'packages/emulators/src/notion.ts',
       'packages/emulators/src/notion/api.ts',
-      'packages/emulators/src/notion/nested/state.ts'
+      'packages/emulators/src/notion/nested/state.ts',
+      'packages/emulators/src/todoist.ts',
+      'packages/emulators/src/todoist/api.ts',
+      'packages/emulators/src/telegram.ts',
+      'packages/emulators/src/telegram/state.ts'
     ]
 
     const forbidden = [
@@ -428,7 +432,10 @@ describe('emulators import rules', () => {
       'packages/emulators/src/dropbox-helpers.ts',
       'packages/emulators/src/dropboxish/api.ts',
       'packages/emulators/src/notion-helpers.ts',
-      'packages/emulators/src/notionish/api.ts'
+      'packages/emulators/src/notionish/api.ts',
+      'packages/emulators/src/stateful-fixture.ts',
+      'packages/emulators/src/todoist-helpers.ts',
+      'packages/emulators/src/telegramish/api.ts'
     ]
 
     for (const rel of [...allowed, ...forbidden]) {

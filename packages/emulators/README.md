@@ -14,12 +14,13 @@ emulator is not HTTP at all: a fixture-driven fake backend for the generic `Emai
 Emulators never import other `@yolk-sdk/*` code: their wire shapes follow conformance fixtures
 (verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
-`/3` API that reproduces the observed quirks the Fortnox conformance cases claim, and the Microsoft
+`/3` API that reproduces the observed quirks the Fortnox conformance cases claim, the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
-conformance cases use. The Dropbox and Notion emulators are stateful stand-ins for the Dropbox RPC
-and upload routes and the Notion `/v1` routes their conformance cases use; like the fixture-only
-routes, they answer only what the fixtures show and refuse everything else with a 400
-not-emulated.
+conformance cases use, and the Todoist and Telegram emulators are stateful, fixture-only stand-ins
+for the Todoist API v1 and Telegram Bot API routes their conformance cases use. The Dropbox and
+Notion emulators are stateful stand-ins for the Dropbox RPC and upload routes and the Notion `/v1`
+routes their conformance cases use; like the fixture-only routes, they answer only what the
+fixtures show and refuse everything else with a 400 not-emulated.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -48,6 +49,8 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/microsoft` | `makeMicrosoftEmulator`, `microsoftEmulatorRoutes`, seed and fault schemas (Node only)                      |
 | `@yolk-sdk/emulators/dropbox`   | `makeDropboxEmulator`, `dropboxEmulatorRoutes`, seed and fault schemas (Node only)                          |
 | `@yolk-sdk/emulators/notion`    | `makeNotionEmulator`, `notionEmulatorRoutes`, seed and fault schemas (Node only)                            |
+| `@yolk-sdk/emulators/todoist`   | `makeTodoistEmulator`, `todoistEmulatorRoutes`, seed and fault schemas (Node only)                          |
+| `@yolk-sdk/emulators/telegram`  | `makeTelegramEmulator`, `telegramEmulatorRoutes`, seed and fault schemas (Node only)                        |
 
 ## Routing
 
@@ -1056,12 +1059,224 @@ envelopeStatusMismatch, omitTitlePlainText, blockCursorRepeats, rejectDoubleEnco
 rowParentAsDatabase, trashedPageNotFound }` (booleans) each make the emulator disagree with exactly
 one Notion case, only to prove that case catches it.
 
+## Todoist and Telegram emulators
+
+> **Node only.** `@yolk-sdk/emulators/todoist` and `@yolk-sdk/emulators/telegram` run on the same
+> pinned `@emulators/core` runtime as the Fortnox and Microsoft emulators, loaded lazily by
+> `makeTodoistEmulator` / `makeTelegramEmulator`, so importing either subpath has no side effects.
+
+Both are **fixture-only** and stateful: response behaviour comes only from their committed
+conformance fixtures (copied as data), the state decides which recorded answer applies (created
+ids, a deleted project, a sent message), and everything the fixtures do not record answers one
+ledgered 400 not-emulated, `{ error: { type: 'not_emulated', message: 'Not emulated: <reason>' } }`
+(`notEmulated` in the ledger), with no guessed provider status, envelope, or error code. That covers
+unknown routes and methods, missing or malformed credentials, query parameters, body fields, and
+values no fixture records. A refused request writes nothing and uses up no fault (eligibility is
+checked against the request and the state before any fault is chosen). They share one
+internal wrapper (ledger, faults, control plane, clock-free recovery); each returns
+`{ fetch, ledger, faults, reset, seed, snapshot, coverage, close }` (Todoist adds `cursors`). Each
+call has its own state; `await close()` when done (later requests answer 503).
+
+```ts
+import { makeTelegramEmulator } from '@yolk-sdk/emulators/telegram'
+import { makeTodoistEmulator } from '@yolk-sdk/emulators/todoist'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const todoist = await makeTodoistEmulator()
+const telegram = await makeTelegramEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler('https://api.todoist.com', todoist.fetch),
+  EmulatorRoute.handler('https://api.telegram.org', telegram.fetch)
+])
+// ...run the code under test, then:
+await Promise.all([todoist.close(), telegram.close()])
+```
+
+### Todoist emulator
+
+Routes (under `/api/v1`, JSON, `Authorization: Bearer <token>` with a token of at least 8
+characters, whose value is never checked against anything, stored, forwarded, or ledgered; without
+it a request is not emulated):
+
+| Route                                | Behavior                                                                                                                                                        |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /tasks?project_id&limit&cursor` | Active tasks by `child_order` of the paging project (`limit=2`) or a case project created here (no `limit`); REST v1 cursor paging (`{ results, next_cursor }`) |
+| `POST /tasks`                        | `{ content, project_id, due_date? }` in a case project created here: the new task (200)                                                                         |
+| `GET /tasks/{taskId}`                | An active task (labels as label names), or the fixtures' 404 `Task not found` body                                                                              |
+| `POST /tasks/{taskId}`               | `content` and/or `due_datetime` of an active task created here: the updated task                                                                                |
+| `POST /tasks/{taskId}/close`         | Closes an active task created here (204, no body); it leaves the active listing                                                                                 |
+| `GET /labels?limit`                  | Personal labels, one page (`next_cursor: null`)                                                                                                                 |
+| `POST /projects`                     | `{ name, parent_id }` for a case project `yolk-conformance-<runId>-<lifecycle\|due\|parent\|delete>`                                                            |
+| `GET /projects/{projectId}`          | A project created here, or the fixtures' 404 `Project not found` body                                                                                           |
+| `DELETE /projects/{projectId}`       | A project created here: 204; it and its task are removed, so later reads answer 404                                                                             |
+
+Wire claims, all from the fixtures: project and task bodies carry the fixtures' keys, order, and
+default values (including `child_order: 1`); 404 bodies are `{ error, error_code: 478, error_extra:
+{ event_id }, error_tag: 'NOT_FOUND', http_code: 404 }`; the first task page of a listing larger
+than `limit=2` answers `next_cursor` (`SyntheticTaskCursor0001`, ...), the cursor leads to the next
+page of the same project and `limit`, and the last page answers `next_cursor: null`;
+`due_date: '2030-01-15'` and `due_datetime: '2030-01-15T12:00:00Z'` answer the recorded due
+objects; an update keeps `updated_at`, as recorded.
+
+Nothing else is synthesised. Seeded projects (the work and paging projects, whose objects no
+fixture records; the fixtures name only their ids) are reference targets only: reading one answers
+not-emulated, and only projects and tasks created through the recorded create flow are updated,
+closed, or deleted. A case project takes one task and a seeded parent one sub-project, because the
+fixtures record `child_order: 1` only (a second one is not emulated). The labeled task is in the
+work project (the synthetic label fixture was corrected to match the paging listing, which never
+lists it).
+
+**Unrecognised requests.** The emulator fails closed: a request is recognised only when its raw path
+is exactly one of the routes above under its HTTP method, with raw id segments that are Todoist ids
+(percent-encoding is never recognised). Every other request is ledgered and answered with constant
+text only: the path `/<unrecognised>`, a standard method or `<other>`, no query, no body, and the
+reason `no emulated Todoist route for this method and path`. A request whose `Authorization` header
+is present but is not one recognisable bearer (a non-bearer scheme, a value under 8 characters,
+extra words, combined duplicate headers) is ledgered the same way, whatever its route, with the
+reason `an unrecognisable Authorization header is not emulated`: its credential cannot be extracted
+and scrubbed, so nothing from the request is recorded.
+
+**Sharing one emulator.** Run write cases sequentially on one emulator, or `reset()` between cases.
+A seeded parent takes one case project at a time (the fixtures record `child_order: 1` only), so
+concurrent write cases, or a case that failed before its cleanup, make later project creates answer
+not-emulated (a definitive rejection: nothing is created). `test/todoist-conformance.test.ts` runs
+all seven cases one after another on one emulator, which ends at the seed except the counters.
+
+Emulator extrapolations (no fixture), each needed by a case or its cleanup:
+
+- **Id counters.** Created project ids (`6XEmuProject0001`), task ids (`6XEmuTask0000001`), and
+  404 `event_id`s (`00000000000000000000000000000001`) come from counters that only advance;
+  created timestamps come from the injectable `now` clock (default `Date.now`). Minted ids use the
+  reserved prefix `6XEmu`, which a seed may not use (it is rejected), so seeded and created ids
+  never collide. Cursors are runtime data (`cursors()`, `/_emulate/state`), valid only as issued
+  since the last `reset` or `seed`.
+- **Removal.** A deleted project and its task are removed from the state, so a write case ends at
+  the seed except the counters.
+- **Request-shape latitude** (the only accepted deviations from the fixture requests): any
+  credential value of at least 8 characters that occurs nowhere else in the request (its path,
+  query, or body; never checked against anything, stored, or ledgered); extra request headers;
+  `content-type` parameters; query parameters in any order; any Todoist id (1-64 of `[A-Za-z0-9_-]`)
+  of an existing item where a fixture has an id (reads: seeded or created tasks and created
+  projects; task listings: the paging project with `limit=2` and case projects created here without
+  `limit`; writes: only items created through the recorded create flow; a new project's `parent_id`:
+  a seeded project); any `run-` run id (at most 40 characters) in a case project name; any non-empty
+  task `content`; a task update sending `content`, `due_datetime`, or both; a label listing `limit`
+  of 1 to 200 that covers every label.
+
+Not emulated (400), among others: other routes (`/tasks/filter`, sections, comments, REST v2, and
+the project listing `GET /projects`); task listings without `project_id`, of any project but the
+paging project with `limit=2` or a case project created here without `limit`, or with a cursor the
+emulator did not issue since its last reset or that is sent with another `project_id` or `limit`;
+label listings without `limit` or with more labels than `limit` (paging them is not emulated); body
+fields no fixture sends (`labels`, `priority`, `due_string`, `description`, ...); other due values;
+project names outside the run namespace; reading a seeded project; projects under a case project or
+an unknown parent, or a second sub-project; tasks outside a case project created here, or a second
+one in it; reading a closed task; updating or closing a seeded, unknown, or closed task; deleting a
+seeded or unknown project; a path, query, or body that repeats the bearer value; write bodies that
+are not `application/json` objects. Reading an absent task or project answers the fixtures' 404.
+
+**Leftover lookup.** No fixture records the project listing that `findTodoistConformanceLeftovers`
+sends (`GET /projects?limit=200`), so it answers the ledgered 400 not-emulated like any other
+unrecorded route: the lookup fails with `todoist_list_projects_failed` (HTTP 400), and the
+repository runners print their lookup-failed WARN (`WARN could not look for leftovers (lookup
+failed: todoist_list_projects_failed HTTP 400); check for yolk-conformance items by hand`) instead
+of leftover warnings. It never writes. Emulating the listing needs a committed fixture for it first.
+
+Seeds: `seed: { profile?, userId?, projects?, tasks?, labels? }` (entity lists replace the
+profile's) with profiles `'default'` (the fixture entities, with the ids of
+`todoistConformanceFixtureSeeds`) and `'empty'` (only the work project). Ids starting with `6XEmu`
+are rejected.
+
+**Drill knobs (tests only).** `drills: { cursorRestarts, notFoundWithoutError, taskLabelsAsIds,
+listIncludesClosed, ignoreDue, createOmitsParent, deleteKeepsTasks }` each make the emulator
+disagree with exactly one Todoist case (paging, not-found envelope, labels, lifecycle, due dates,
+parent id, delete), only to prove that case catches it.
+
+### Telegram emulator
+
+Routes (on `https://api.telegram.org`; the bot token is a path segment):
+
+| Route                              | Behavior                                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `POST /bot<token>/getChat`         | `{ chat_id }`: `{ ok: true, result }` for a member chat, else the recorded 400 `Bad Request: chat not found` |
+| `GET /bot<token>/getFile?file_id`  | `{ ok: true, result: { file_id, file_unique_id, file_size, file_path } }` for a seeded file                  |
+| `GET /file/bot<token>/<file_path>` | The file's bytes (`application/octet-stream`), exactly `file_size` of them                                   |
+| `POST /bot<token>/sendMessage`     | `{ chat_id, text, disable_web_page_preview: true }`: `{ ok: true, result }` with the sent message            |
+
+**The bot token is required but never stored, forwarded, ledgered, or echoed.** The emulator fails
+closed. A request is recognised only when its raw path is exactly an emulated route shape under that
+route's HTTP method: `/bot<token>/<method>` with an emulated method, or
+`/file/bot<token>/<file_path>` with plain `[A-Za-z0-9_.-]` segments, the token on the raw segment
+matching `<digits>:<secret>` (a secret of at least 8 of `[A-Za-z0-9_-]`), and no other path text.
+Every other request (an unknown method or route, extra segments, a missing, malformed, or
+percent-encoded token, an encoded separator such as `%2F` or `%252F`) is ledgered and answered with
+constant text only: the path `/<unrecognised>`, a standard method or `<other>`, no query, no body,
+and the reason `no emulated Bot API route for this method and path`. For a recognised request, the
+token is taken from that exact segment; the emulator scrubs it and its secret part from the ledgered
+method, path (`/bot<redacted>/getChat`), query keys and values, and every not-emulated message, and
+it refuses, with constant text, a query, a remaining path segment, or a body that repeats either:
+raw, percent-decoded, or in any parsed JSON key, string value, or number (so `\u`-escaped forms and
+numbers such as `1.2345678e7` are caught). Refusal messages never quote a request key or value. A
+token whose bot id is `0` names no bot: `getChat` answers the recorded 401 `Unauthorized` (`{ ok:
+false, error_code: 401, description }`); other methods with it are not emulated. Fault `match.path`
+uses the redacted path; `match.route` the manifest template (`/bot{token}/sendMessage`).
+
+`sendMessage` is irreversible on the real service: the emulator records each sent message in its
+state (`sentMessages`: `message_id` from 101, `chat_id`, `text`, `date` from the `now` clock in
+seconds) and never delivers anything; only `reset` or `seed` drops them. The answer's `from` is the
+seeded bot (never derived from the token).
+
+Emulator extrapolations (no fixture): the `message_id` counter and the clock-derived `date`.
+
+**Request-shape latitude** (the only accepted deviations from the fixture requests): any credential
+value of at least 8 characters that occurs nowhere else in the request (its path, query, or body;
+never checked against anything, stored, or ledgered); extra request headers; `content-type`
+parameters; a well-formed `<digits>:<secret>` bot token with a secret of at least 8 characters (the
+bot id `0` names no bot); any well-formed `chat_id` string (an integer or a public `@username`; one
+the bot is not in answers the recorded 400 on `getChat`); any non-empty message `text`.
+
+Not emulated (400), among others: other methods (`getMe`, `deleteMessage`, ...), `GET getChat`,
+query parameters or body fields no fixture sends (`parse_mode`, `link_preview_options`, ...),
+`disable_web_page_preview` other than `true`, numeric `chat_id`s, `sendMessage` to a chat the bot is
+not in, `getFile` of a file the bot did not receive, and file paths `getFile` did not answer.
+
+Seeds: `seed: { profile?, bot?, chats?, files?, nextMessageId? }` with profiles `'default'` (the
+fixture bot, chat, and 32-byte text file, with the ids of `telegramConformanceFixtureSeeds`) and
+`'empty'` (the bot only). A file's `file_size` must equal its UTF-8 content's byte length.
+
+**Drill knobs (tests only).** `drills: { getChatOkFalse, errorsAs200, fileSizeOffByOne,
+sendOkFalse }` each make the emulator disagree with exactly one Telegram case.
+
+### Faults, ledger, recovery, and control plane
+
+Faults are `{ kind: 'status', status, headers?, body?, match?: { method?, path?, route? }, count? }`
+with statuses 400-599 only (fixture-only routes never fake a success). A fault is chosen only after
+the request passed every check, including the route handler's eligibility check against the
+state (which writes nothing), and it answers before the commit (nothing is written); a refused
+request answers 400 not-emulated and leaves every fault unused. The default body is
+`{ error: { type: 'emulator_fault', message } }`. For example a 429 reaches the connectors as
+`todoist_rate_limited` / `telegram_rate_limited`. Header rules are the shared ones (valid names and
+values, no `location`, no framing headers); invalid faults throw `TodoistEmulatorInputInvalid` /
+`TelegramEmulatorInputInvalid`. The ledger records method and path, route template, query keys
+and values, parsed body, status, evidence, `notEmulated`, the applied fault, and `responseError`;
+credential-named keys are redacted, and guarded credential values are scrubbed from every one of
+them (a body that holds one is refused and never recorded). An unrecognised request (fail closed,
+above) is ledgered with constant fields only: `/<unrecognised>`, a standard method or `<other>`,
+an empty query, no body, and a constant `notEmulated` reason.
+
+Recovery never reads the clock: a route handler that throws (for example because the injected clock
+throws while creating a project or sending a message) answers an evidence-tagged 500
+`{ error: { type: 'emulator_error', message } }` with `responseError` in the ledger and writes
+nothing; not-emulated answers (400) and a closed emulator (503) need no clock. The control plane is
+`/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and `coverage`, as for Fortnox.
+
 ## Evidence
 
 `gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
 `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
 `emailEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`, `dropboxEmulatorRoutes`,
-and `notionEmulatorRoutes` list every emulated
+`notionEmulatorRoutes`, `todoistEmulatorRoutes`, and `telegramEmulatorRoutes` list every emulated
 route with `method`, `path`,
 `kind`, `write`, the conformance `caseIds` it follows, `evidence` (`verified` or `unverified`), and
 `observedAt`. Every response from an unverified route of a fetch-handler emulator carries
@@ -1069,7 +1284,8 @@ route with `method`, `path`,
 instead, since its plain-JSON replies carry no header. The Gateway route is `verified`
 (`observedAt: '2026-09-30'`): its wire shapes are checked against the verified live recordings.
 Every other route (OpenAI, Anthropic, Codex, Grok, OpenCode Go, the usage routes, email, Fortnox,
-Microsoft, Dropbox, and Notion) is unverified, like the synthetic fixtures it follows.
+Microsoft, Dropbox, Notion, Todoist, and Telegram) is unverified, like the synthetic fixtures it
+follows.
 Each manifest route maps to its own handler; an emulator whose manifest has a route without a
 handler throws when it is constructed. The Yolk repository checks these manifests: unknown case ids,
 duplicate routes, connector write routes without verified evidence, verified connector write routes
@@ -1082,8 +1298,10 @@ live run against a practice mailbox verifies them, the repository lists them in 
 time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each entry's expiry
 date): the check reports them as PENDING warnings until that date and fails again after it.
 
-All Fortnox, Microsoft, Dropbox, and Notion routes are currently `unverified` (no live recording
-yet), including four Fortnox, eleven Microsoft, five Dropbox, and two Notion connector write routes. Until an owner-approved live run verifies them, the repository lists them in a
+All Fortnox, Microsoft, Dropbox, Notion, Todoist, and Telegram routes are currently `unverified`
+(no live recording yet), including four Fortnox, eleven Microsoft, five Dropbox, two Notion, five
+Todoist, and one Telegram connector write routes. Until an owner-approved live run verifies them,
+the repository lists them in a
 visible, time-bounded allowlist (`scripts/emulator-evidence-pending.json`, which holds each
 entry's expiry date): the check reports them as PENDING warnings until that date and fails again
 after it.
@@ -1107,6 +1325,6 @@ await server.close()
 
 ## License
 
-`@yolk-sdk/emulators` is MIT. The Fortnox, Microsoft, Dropbox, and Notion emulators depend on (does not vendor or bundle) the
-Apache-2.0 [`@emulators/core`](https://github.com/vercel-labs/emulate) package, which ships no
-`NOTICE` file.
+`@yolk-sdk/emulators` is MIT. The Fortnox, Microsoft, Dropbox, Notion, Todoist, and Telegram
+emulators depend on (does not vendor or bundle) the Apache-2.0
+[`@emulators/core`](https://github.com/vercel-labs/emulate) package, which ships no `NOTICE` file.

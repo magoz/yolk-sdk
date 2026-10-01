@@ -17,7 +17,8 @@
  * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
  *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat,
  *   Codex Responses, Anthropic Messages, Grok Responses, OpenCode Go, subscription-usage (Claude,
- *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, and email port fixtures).
+ *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, and email port
+ *   fixtures).
  * - WARN: a route's evidence is `unverified` (fetch-handler emulators tag their responses
  *   `x-emulator-evidence: unverified`; the email port emulator tags its ledger entries).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
@@ -74,6 +75,10 @@ import { microsoftConformanceCases } from '../packages/connectors/src/microsoft/
 import { microsoftConformanceFixtures } from '../packages/connectors/src/microsoft/conformance/index.ts'
 import { notionConformanceCases } from '../packages/connectors/src/notion/conformance/cases.ts'
 import { notionConformanceFixtures } from '../packages/connectors/src/notion/conformance/index.ts'
+import { telegramConformanceCases } from '../packages/connectors/src/telegram/conformance/cases.ts'
+import { telegramConformanceFixtures } from '../packages/connectors/src/telegram/conformance/index.ts'
+import { todoistConformanceCases } from '../packages/connectors/src/todoist/conformance/cases.ts'
+import { todoistConformanceFixtures } from '../packages/connectors/src/todoist/conformance/index.ts'
 import {
   anthropicEmulatorRoutes,
   anthropicSubscriptionUsageEmulatorRoutes
@@ -90,6 +95,8 @@ import { microsoftEmulatorRoutes } from '../packages/emulators/src/microsoft.ts'
 import { notionEmulatorRoutes } from '../packages/emulators/src/notion.ts'
 import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
 import { openCodeGoEmulatorRoutes } from '../packages/emulators/src/opencode.ts'
+import { telegramEmulatorRoutes } from '../packages/emulators/src/telegram.ts'
+import { todoistEmulatorRoutes } from '../packages/emulators/src/todoist.ts'
 import {
   xAiGrokEmulatorRoutes,
   xAiGrokSubscriptionUsageEmulatorRoutes
@@ -184,7 +191,9 @@ export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'fortnox', routes: fortnoxEmulatorRoutes },
   { name: 'microsoft', routes: microsoftEmulatorRoutes },
   { name: 'dropbox', routes: dropboxEmulatorRoutes },
-  { name: 'notion', routes: notionEmulatorRoutes }
+  { name: 'notion', routes: notionEmulatorRoutes },
+  { name: 'todoist', routes: todoistEmulatorRoutes },
+  { name: 'telegram', routes: telegramEmulatorRoutes }
 ]
 
 /** The repo's pending-evidence allowlist. */
@@ -303,6 +312,8 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...microsoftConformanceCases.map(testCase => testCase.id),
   ...dropboxConformanceCases.map(testCase => testCase.id),
   ...notionConformanceCases.map(testCase => testCase.id),
+  ...todoistConformanceCases.map(testCase => testCase.id),
+  ...telegramConformanceCases.map(testCase => testCase.id),
   ...emailConformanceCases.map(testCase => testCase.id)
 ])
 
@@ -362,6 +373,8 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ...microsoftConformanceFixtures,
   ...dropboxConformanceFixtures,
   ...notionConformanceFixtures,
+  ...todoistConformanceFixtures,
+  ...telegramConformanceFixtures,
   ...portFixtureEvidence(emailConformanceCases, emailConformanceFixtures)
 ])
 

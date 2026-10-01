@@ -125,3 +125,9 @@ adds the write cases, and `--record` stages verified recordings only in the giti
 `.conformance-recordings/todoist/` for manual scrubbing and promotion. There are no
 write-irreversible Todoist cases. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental [Todoist emulator](../api-reference/emulators#todoist-emulator)
+(`@yolk-sdk/emulators/todoist`) is a stateful, fixture-only stand-in that passes these cases
+through the real connector actions over the connector ports. No fixture records the leftover
+lookup's project listing, so against the emulator that lookup fails (HTTP 400 not-emulated) and a
+runner prints its lookup-failed WARN instead of leftover warnings.

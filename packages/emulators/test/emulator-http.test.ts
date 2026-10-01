@@ -76,7 +76,12 @@ describe('credential names', () => {
       'startDateTime',
       '@microsoft.graph.conflictBehavior',
       'Dropbox-API-Arg',
-      'Notion-Version'
+      'Notion-Version',
+      'project_id',
+      'cursor',
+      'limit',
+      'file_id',
+      'chat_id'
     ]
 
     const disagreements = names.filter(
@@ -133,7 +138,13 @@ describe('credential names', () => {
       'arg',
       'page_size',
       'start_cursor',
-      'filter_properties'
+      'filter_properties',
+      // Todoist and Telegram query parameters (never credentials; the Telegram bot token is in
+      // the path and redacted there).
+      'project_id',
+      'cursor',
+      'limit',
+      'file_id'
     ]
 
     // The fixture scan agrees on both lists, so the check below is not vacuous.

@@ -1366,6 +1366,9 @@ about `yolk-conformance-run-*` projects earlier runs left behind
 for owners running a practice account by hand, `--allow-writes reversible` adds the write cases, and
 `--record` stages verified recordings all or nothing in `.conformance-recordings/todoist/<run>/`
 (gitignored) for manual scrubbing and promotion.
+For offline tests, the experimental Todoist emulator (`@yolk-sdk/emulators/todoist`) is a
+stateful, fixture-only stand-in that passes these cases; it does not emulate the leftover lookup's
+project listing (no fixture records it), so that lookup fails closed against it.
 
 ### Telegram conformance cases (experimental)
 
@@ -1405,6 +1408,9 @@ base64-encoded) or that holds a body outside the inspectable allowlist (strict U
 characters: binary, compressed, and UTF-16 bodies are refused, so the `fileId` seed must be a plain
 UTF-8 text file), and stages verified recordings all or nothing in
 `.conformance-recordings/telegram/<run>/` (gitignored) for manual scrubbing and promotion.
+For offline tests, the experimental Telegram emulator (`@yolk-sdk/emulators/telegram`) is a
+stateful, fixture-only stand-in that passes these cases, records the send in its state, and never
+keeps or echoes the bot token.
 
 ### GitHub conformance cases (experimental)
 
