@@ -1278,8 +1278,8 @@ const inspectText = (text: string, forms: ReadonlyArray<string>): TokenVerdict =
 /**
  * What to do with a body that is not strict UTF-8 plain text: `refuse` it as `uninspectable` (the
  * strict guard), or `search` its bytes as latin1 and lossy UTF-8 text and call it `clean` when no
- * form is found (for runners that must record binary bodies; a token inside compressed data is not
- * found that way).
+ * form is found (for runners that must record binary bodies; a token inside compressed, UTF-16, or
+ * hex-encoded data is not found that way).
  */
 type BinaryBodies = 'refuse' | 'search'
 
@@ -1407,7 +1407,8 @@ export const inspectRecordingForAccessToken = (
  * The same search as `inspectRecordingForAccessToken`, over the recorded exchanges before any
  * fixture is rendered, for runners that record binary bodies (the Fortnox preview PDF): a body that
  * is not strict UTF-8 text is searched as latin1 and lossy UTF-8 text instead of being refused, so
- * a token inside compressed data (a compressed PDF stream, for example) is NOT found; the final
+ * a token inside compressed, UTF-16, or hex-encoded data (a compressed PDF stream, for example) is
+ * NOT found; the final
  * check on the rendered text and the manual review remain. True when any form is found.
  */
 export const recordingContainsAccessToken = (

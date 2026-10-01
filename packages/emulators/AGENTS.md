@@ -130,8 +130,8 @@ There is no root export or barrel.
   warning, reported first). Never weaken the rule, extend an expiry silently, or add an entry
   without a reason; verify the route with an owner-approved live run and delete the entry (the
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
-  write routes are pending (tracking #115), and so are the four Fortnox write routes (the Fortnox
-  emulator PR stays a draft while they are); expiry dates live only in that file.
+  write routes are pending (tracking #115), and so are the four Fortnox write routes; expiry dates
+  live only in that file.
 - Emulators never redirect and always send a body: fault and scripted-error statuses exclude 1xx,
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
   turn is added. All emulators share these validators (`src/emulator-http.ts`, internal, no Node
