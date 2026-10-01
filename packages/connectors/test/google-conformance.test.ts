@@ -223,6 +223,7 @@ describe('Google conformance cases', () => {
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
+      'google.gmail.draft-compose-update-delete',
       'google.calendar.event-lifecycle',
       'google.calendar.deleted-event-gone',
       'google.calendar.deleted-event-gone'

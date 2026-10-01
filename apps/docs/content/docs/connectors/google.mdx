@@ -40,6 +40,9 @@ are as currently understood; none is observed live yet.
 Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
 
 - An unused 16-hex-digit message id answers 404 rather than 400 `Invalid id value`.
+- A metadata read of a fresh draft returns the `DRAFT` label and the subject exactly as sent (the
+  draft ownership check relies on it; if not, the case refuses its own draft and the leftover
+  lookup reports it).
 - Gmail keeps the 8-bit text/plain draft part as the connector wrote it, so `get_thread` decodes
   exactly the UTF-8 the case sent; deleting a draft deletes its message; whether deleting a deleted
   draft answers 2xx or 404 (the case and the cleanup accept either, then verify the message is
@@ -177,9 +180,11 @@ fixture secret scan refuses credential query parameters. A provider can also ech
 a field a case reports (a refused label's name, a leftover's title, a failure message), so the
 shared live runner prints every line (the report, cleanup WARN lines, leftover warnings, the run's
 own failure, the staging checklist) with every raw, percent-encoded, or base64 form of the live
-token replaced by `<redacted live token>`, and withholds a line that still holds an escaped or
-folded form, or 16 or more consecutive characters of the token (so a report the runner truncated in
-the middle of an echoed token is withheld too).
+token replaced by `<redacted live token>`. It withholds a line that still holds an escaped form,
+or 16 or more consecutive characters of the token raw or base64-encoded (so a report the runner
+truncated in the middle of an echoed token is withheld too), and withholds the whole message when
+the token only appears once its lines are joined with whitespace removed (a token folded across
+lines).
 
 The shipped fixtures are synthetic (`evidence: 'unverified'`, `example.test` addresses). In this
 repository, `pnpm conformance:google` dry-runs by default;

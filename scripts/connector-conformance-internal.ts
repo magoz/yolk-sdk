@@ -29,9 +29,10 @@
  * - Every line a live run prints (the report, cleanup WARN lines, leftover warnings, the run's own
  *   failure, staging output) goes through `redactAccessToken`: a provider can echo the live token
  *   into a field a case reports, before any staging guard runs. Raw, percent-encoded, and base64
- *   forms are replaced by `<redacted live token>`; a line still holding an escaped or folded form is
- *   withheld whole, and so is a line holding 16 or more consecutive token characters (a report
- *   truncated inside an echoed token).
+ *   forms are replaced by `<redacted live token>`; a line still holding an escaped form is withheld
+ *   whole, and so is a line holding 16 or more consecutive token characters, raw or base64 (a
+ *   report truncated inside an echoed token). The whole message is withheld when the token only
+ *   appears once its lines are joined with whitespace removed (a token folded across lines).
  * - `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After
  *   the run it builds `verified` fixtures for the cases that passed, re-runs each case on replay
  *   against its new fixture, and renders every fixture module plus the seeds module. Only if every
@@ -1140,14 +1141,15 @@ export const withheldTokenLine =
  * `text` with every form of the live access token that `textContainsAccessToken` looks for (see
  * `accessTokenForms`: raw, percent-encoded, base64) replaced by `redactedLiveTokenMarker`; a line
  * that still holds the token afterwards (escaped, folded, or double-encoded) is replaced whole by
- * `withheldTokenLine`. Live runs print every line through it: a provider can echo the token into a
+ * `withheldTokenLine`, and the whole message is withheld when the token (or 16 or more consecutive
+ * characters of it) only appears once the lines are joined with whitespace removed. Live runs print every line through it: a provider can echo the token into a
  * field a case reports (a refused item's name, a leftover's title, a failure message).
  */
 export const redactAccessToken = (text: string, accessToken: string): string => {
   const forms = accessTokenForms(accessToken)
   const longestFirst = [...forms].sort((left, right) => right.length - left.length)
 
-  return text
+  const redacted = text
     .split('\n')
     .map(line => {
       const replaced = longestFirst.reduce(
@@ -1160,6 +1162,15 @@ export const redactAccessToken = (text: string, accessToken: string): string => 
         : replaced
     })
     .join('\n')
+
+  // A token folded across lines (newlines every few characters) passes every single-line check,
+  // so the whole message is checked once more with all whitespace removed; a match that cannot be
+  // localized to one line withholds the whole message.
+  const joined = unfolded(redacted)
+
+  return textHasToken(joined, forms) || hasTokenFragment(joined, accessToken)
+    ? withheldTokenLine
+    : redacted
 }
 
 /** Shortest run of consecutive token characters treated as a leaked fragment. */
@@ -1170,14 +1181,23 @@ const tokenFragmentMinLength = 16
  * report or warning that a length cap cut in the middle of an echoed token still leaks a usable
  * part of it, so such a line is withheld whole.
  */
-const hasTokenFragment = (line: string, accessToken: string): boolean => {
-  if (accessToken.length < tokenFragmentMinLength) return false
+const hasTokenFragment = (line: string, accessToken: string): boolean =>
+  tokenFragmentForms(accessToken).some(form => line.includes(form))
 
-  for (let start = 0; start + tokenFragmentMinLength <= accessToken.length; start++) {
-    if (line.includes(accessToken.slice(start, start + tokenFragmentMinLength))) return true
-  }
+/**
+ * Every `tokenFragmentMinLength` window of the token, verbatim and base64-encoded (standard and
+ * URL-safe, every byte alignment), so a capped report that cut a raw or base64 echo short is
+ * still recognised.
+ */
+const tokenFragmentForms = (accessToken: string): ReadonlyArray<string> => {
+  if (accessToken.length < tokenFragmentMinLength) return []
 
-  return false
+  const windows = Array.from(
+    { length: accessToken.length - tokenFragmentMinLength + 1 },
+    (_, start) => accessToken.slice(start, start + tokenFragmentMinLength)
+  )
+
+  return [...new Set(windows.flatMap(window => [window, ...base64Cores(window)]))]
 }
 
 /** Every string (keys included) of a parsed JSON value. */
@@ -1797,7 +1817,6 @@ export const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
   liveIo: LiveRunIo = processLiveRunIo
 ) =>
   Effect.gen(function* () {
-    // Every printed line (report, cleanup WARNs, leftovers, staging output) is redacted first.
     const io = redactingLiveRunIo(liveIo, inputs.accessToken)
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 

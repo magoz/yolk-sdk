@@ -780,12 +780,34 @@ describe('run-google-conformance printed output redacts the live token', () => {
     )
   })
 
+  it('withholds a whole message whose token is folded across lines', () => {
+    const base64 = Buffer.from(liveToken).toString('base64')
+    const folded = (separator: string) => base64.match(/.{1,8}/g)?.join(separator) ?? ''
+
+    for (const separator of ['\n', '\r\n']) {
+      const message = `restore refused: name "${folded(separator)}" is not this run's`
+
+      expect(message.split('\n').some(line => textContainsAccessToken(line, liveToken))).toBe(false)
+      expect(redactAccessToken(message, liveToken)).toBe(withheldTokenLine)
+    }
+
+    const rawFolded = liveToken.match(/.{1,6}/g)?.join('\n') ?? ''
+
+    expect(redactAccessToken(`name\n${rawFolded}\nend`, liveToken)).toBe(withheldTokenLine)
+    // Ordinary multi-line text without the token is unchanged.
+    expect(redactAccessToken('first line\nsecond line', liveToken)).toBe('first line\nsecond line')
+  })
+
   it('withholds a line holding a cut fragment of the token (a capped report)', () => {
     const cut = `restore failed: name "${liveToken.slice(0, 20)}...`
 
     expect(redactAccessToken(`first\n${cut}\nlast`, liveToken)).toBe(
       `first\n${withheldTokenLine}\nlast`
     )
+    // A capped base64 echo: the start of the encoded token, cut short.
+    const base64Cut = Buffer.from(liveToken).toString('base64').slice(0, 28)
+
+    expect(redactAccessToken(`name "${base64Cut}...`, liveToken)).toBe(withheldTokenLine)
     // A short shared run (under 16 characters) is not a fragment: ordinary text stays.
     expect(redactAccessToken(`token prefix ${liveToken.slice(0, 5)} only`, liveToken)).toBe(
       `token prefix ${liveToken.slice(0, 5)} only`
@@ -820,69 +842,97 @@ describe('run-google-conformance printed output redacts the live token', () => {
     })
   }
 
-  it('prints no trace of the token when the refusal is raised during an interruption', async () => {
-    const runLines: Array<string> = []
-    const cliLines: Array<string> = []
+  for (const [label, echoed] of [
+    ['raw', liveToken],
+    [
+      'LF-folded base64',
+      (
+        Buffer.from(liveToken)
+          .toString('base64')
+          .match(/.{1,8}/g) ?? []
+      ).join('\n')
+    ],
+    [
+      'CRLF-folded base64',
+      (
+        Buffer.from(liveToken)
+          .toString('base64')
+          .match(/.{1,8}/g) ?? []
+      ).join('\r\n')
+    ]
+  ] as const) {
+    it(`prints no trace of a ${label} token when the refusal is raised during an interruption`, async () => {
+      const runLines: Array<string> = []
+      const cliLines: Array<string> = []
 
-    let handlers: Array<() => void> = []
+      let handlers: Array<() => void> = []
 
-    let release = () => {}
+      let release = () => {}
 
-    let markSent = () => {}
+      let markSent = () => {}
 
-    const hold = new Promise<void>(resolvePromise => {
-      release = resolvePromise
-    })
+      const hold = new Promise<void>(resolvePromise => {
+        release = resolvePromise
+      })
 
-    const sent = new Promise<void>(resolvePromise => {
-      markSent = resolvePromise
-    })
+      const sent = new Promise<void>(resolvePromise => {
+        markSent = resolvePromise
+      })
 
-    const signals: SignalSource = {
-      on: (_signal, handler) => {
-        handlers = [...handlers, handler]
-      },
-      off: () => {
-        handlers = []
-      }
-    }
-
-    const io: CliIo = {
-      error: message => {
-        cliLines.push(message)
-      },
-      setExitCode: () => undefined,
-      forceExit: () => undefined
-    }
-
-    const done = runInterruptibly(
-      runLive(labelOnly, live(['--allow-writes', 'reversible']), recordInputs, {
-        http: Layer.succeed(HttpClient.HttpClient, labelClient(liveToken, hold, markSent)),
-        out: line => {
-          runLines.push(line)
+      const signals: SignalSource = {
+        on: (_signal, handler) => {
+          handlers = [...handlers, handler]
         },
-        err: line => {
-          runLines.push(line)
+        off: () => {
+          handlers = []
         }
-      }),
-      signals,
-      redactingCliIo(io, liveToken),
-      { now: () => 0, pid: 4242, ...interruptOptionsFor(googleRunner) }
-    )
+      }
 
-    await sent
-    handlers[0]?.()
-    release()
-    await done
+      const io: CliIo = {
+        error: message => {
+          cliLines.push(message)
+        },
+        setExitCode: () => undefined,
+        forceExit: () => undefined
+      }
 
-    const printed = [...runLines, ...cliLines].join('\n')
+      const done = runInterruptibly(
+        runLive(labelOnly, live(['--allow-writes', 'reversible']), recordInputs, {
+          http: Layer.succeed(HttpClient.HttpClient, labelClient(echoed, hold, markSent)),
+          out: line => {
+            runLines.push(line)
+          },
+          err: line => {
+            runLines.push(line)
+          }
+        }),
+        signals,
+        redactingCliIo(io, liveToken),
+        { now: () => 0, pid: 4242, ...interruptOptionsFor(googleRunner) }
+      )
 
-    // The case reported its refusal as a WARN line, and the run ended with that refusal.
-    expect(runLines.some(line => line.startsWith(`WARN ${labelId}: cleanup refused`))).toBe(true)
-    expect(cliLines.at(-1)).toContain(`${labelId}: cleanup refused`)
-    expect(cliLines.at(-1)).toContain(redactedLiveTokenMarker)
-    expect(textContainsAccessToken(printed, liveToken)).toBe(false)
-  })
+      await sent
+      handlers[0]?.()
+      release()
+      await done
+
+      const printed = [...runLines, ...cliLines].join('\n')
+
+      // The case reported its refusal as a WARN line (withheld whole when the token is folded across
+      // lines), and the run ended with that refusal.
+      expect(
+        runLines.some(
+          line => line.startsWith(`WARN ${labelId}: cleanup refused`) || line === withheldTokenLine
+        )
+      ).toBe(true)
+      expect(textContainsAccessToken(printed, liveToken)).toBe(false)
+
+      if (label === 'raw') {
+        expect(cliLines.at(-1)).toContain(`${labelId}: cleanup refused`)
+        expect(cliLines.at(-1)).toContain(redactedLiveTokenMarker)
+      }
+    })
+  }
 })
 
 describe('run-google-conformance interruption advice', () => {
