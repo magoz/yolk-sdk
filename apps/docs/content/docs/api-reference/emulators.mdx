@@ -12,9 +12,9 @@ port-level fakes instead: plain-JSON backends for `EmailClient` and for `R2Presi
 `R2ObjectClient`. Emulators never import other `@yolk-sdk/*` code: their wire shapes follow the
 conformance fixtures (verified recordings for the Gateway, synthetic placeholders elsewhere), and
 each emulated route names the conformance cases it follows. The package depends on `effect`; the
-Node-only `fortnox`, `microsoft`, `dropbox`, `notion`, `todoist`, `telegram`, `github`, and `google`
-subpaths also depend on the upstream `@emulators/core` runtime (Apache-2.0, pinned to exactly
-`0.12.0`).
+Node-only `fortnox`, `microsoft`, `dropbox`, `notion`, `todoist`, `telegram`, `github`, `google`,
+and `linkedin-search` subpaths also depend on the upstream `@emulators/core` runtime (Apache-2.0,
+pinned to exactly `0.12.0`).
 
 There is no root export. Import an explicit subpath.
 
@@ -1070,6 +1070,96 @@ Faults, the ledger, clock-free recovery, and the control plane behave as in the 
 (thirteen booleans, one per Google case) is a test-only knob that makes exactly the matching
 conformance case fail.
 
+## LinkedIn search emulator
+
+`@yolk-sdk/emulators/linkedin-search`
+
+> **Experimental, Node only.** A stateful, fixture-only stand-in for the Exa and Enrich Layer
+> routes the LinkedIn search conformance cases use, built on the same `@emulators/core` runtime
+> (loaded lazily when you create an emulator).
+
+| Export                                                                       | Purpose                                                                                     |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `makeLinkedInSearchEmulator(options?)`                                       | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`   |
+| `linkedInSearchEmulatorRoutes`                                               | Route evidence manifest (3 routes, all `unverified` reads)                                  |
+| `LinkedInSearchEmulatorSeed`                                                 | Typed seed schema (searches, profiles, absent profile URLs, rejected keys per origin)       |
+| `LinkedInSearchFault`                                                        | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path? }, count? }` |
+| `LinkedInSearchEmulatorInputInvalid`                                         | Invalid seed, fault, or option passed to the JS API                                         |
+| `linkedInSearchEmulatorExaOrigin`, `linkedInSearchEmulatorEnrichLayerOrigin` | `https://api.exa.ai` and `https://enrichlayer.com`                                          |
+| `linkedInSearchEmulatorErrorBodies`                                          | The fixtures' 401 and 404 bodies, byte for byte                                             |
+
+```ts
+import {
+  linkedInSearchEmulatorEnrichLayerOrigin,
+  linkedInSearchEmulatorExaOrigin,
+  makeLinkedInSearchEmulator
+} from '@yolk-sdk/emulators/linkedin-search'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const linkedIn = await makeLinkedInSearchEmulator()
+
+const httpLayer = InProcessHttpClient.layer([
+  EmulatorRoute.handler(linkedInSearchEmulatorExaOrigin, linkedIn.fetch),
+  EmulatorRoute.handler(linkedInSearchEmulatorEnrichLayerOrigin, linkedIn.fetch)
+])
+```
+
+It serves three reads: the Exa people search (`POST /search` on `https://api.exa.ai`) and the
+Enrich Layer profile and email lookups (`GET /api/v2/profile` and `GET /api/v2/profile/email` on
+`https://enrichlayer.com`, with `linkedin_profile_url`). Every route needs
+`Authorization: Bearer <key>` (a recognisable bearer; each provider takes its own key) and answers
+only on its recorded origin: `fetch` reads the origin from the request URL; behind a loopback
+rewrite, serve `fetchOn(origin)` for each origin on its own server.
+
+Every answer comes from a fixture, byte for byte, through the seed, and nothing is written or
+minted: a search answers only the results the state holds for exactly its query and `numResults`
+(the default seed holds the fixtures' three answers for the seeded query, `numResults` 10, 3, and
+2); a profile lookup answers a held profile or, for a seeded absent profile, the recorded 404; an
+email lookup answers a held profile's recorded email. A key the seed marks as rejected on an origin
+answers that origin's recorded 401 (the default seed rejects the synthetic invalid keys the two
+unauthorized cases send; a key rejected on one origin is accepted on the other). Anything else
+answers one ledgered 400 not-emulated and uses up no fault, and every case ends exactly at its
+seed.
+
+**Fail closed: the shared rule, and keys kept only as digests.** LinkedIn search follows the same
+fail-closed rule as the GitHub emulator above: a request is recognised only when its raw path is
+exactly an emulated route path and any `Authorization` header is exactly `Bearer <key>` with a
+recognisable bearer (a UUID-form key starts with a hex digit and is unrecognisable, so use a
+synthetic key); every other request is ledgered with constant text only. A recognised request that
+repeats its bearer in its path, query, recorded `content-type` header, or body, through any depth
+of percent-encoding or JSON escaping, is ledgered as the constant credential-repeat entry, and any
+other has it scrubbed from everything the ledger keeps. The bearer is never stored or ledgered:
+through the shared wrapper's opt-in per-origin bearer digest, routes see only SHA-256 of the
+origin, a space, and the key, which they compare with the digests of the seed's rejected keys for
+that origin. The state holds only those digests, so even a rejected key never reaches the state, a
+snapshot, or `/_emulate/*`, and no seed error quotes one.
+
+- Request-shape latitude (`/linkedin-search`, the only accepted deviations): any bearer value in the
+  RFC 6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
+  character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside
+  `[0-9.eE+-]`, that occurs nowhere else in the request (never stored or ledgered; only its
+  per-origin digest is compared, with the digests of the keys the seed marks as rejected on that
+  origin); extra request headers; JSON key order; `content-type` media-type parameters on the
+  search; any percent-encoding of the `linkedin_profile_url` value that decodes once to the same
+  profile URL; and, with a key the seed marks as rejected on the request's origin, any search
+  `query` (one trimmed line of at most 500 characters) with any integer `numResults` from 1 to 100,
+  and any profile URL of the form `https://<host>/in/<slug>`, each answered the origin's
+  recorded 401. `Authorization` must be exactly `Bearer <token>` (that spelling, one space).
+  Everything else (other body keys or values, a `category` other than `people`, a `type` other than
+  `auto`, `contents` other than `{ "text": true }`, a search the state holds no answer for (another
+  query, or a `numResults` no seeded search of that query records), a profile URL the state holds
+  neither as a profile nor as absent, an email lookup of an absent profile, any query parameter on
+  the search, other, missing, or repeated query parameters on a lookup, empty query components such
+  as a bare `?` or a stray `&`, a body on a lookup, another origin, and a bearer repeated anywhere
+  in the request) is not emulated.
+
+Seed with `seed: { searches?, profiles?, absentProfileUrls?, exaRejectedKeys?,
+enrichLayerRejectedKeys? }` (each list replaces the default's). Faults, the ledger, recovery, and
+the control plane behave as in the Dropbox emulator; the connector maps every non-2xx answer to its
+action's failure code, so a 429 fault reaches it as `linkedin_search_failed` with status 429. The
+`drills` option (seven booleans, one per LinkedIn search case) is a test-only knob that makes
+exactly the matching conformance case fail.
+
 ## Node server
 
 `@yolk-sdk/emulators/node`
@@ -1092,11 +1182,12 @@ replies carry no header, so they record the evidence on each ledger entry instea
 is verified (`observedAt: '2026-09-30'`): the emulator follows the verified live Gateway recordings,
 and the Yolk repository checks its response shapes against each recording. The OpenAI, Anthropic,
 Codex, Grok, OpenCode Go, subscription-usage, email, R2, Fortnox, Microsoft, Dropbox, Notion,
-Todoist, Telegram, GitHub, and Google routes are unverified, like the synthetic fixtures they
-follow. The email write routes are connector writes: until an owner-approved live run against a
-practice mailbox, through a host `EmailClient` implementation, verifies them, the repository lists
-them in a time-bounded allowlist (`scripts/emulator-evidence-pending.json`), and the evidence check
-reports them as PENDING warnings until each entry's expiry date and fails again after it. The R2
+Todoist, Telegram, GitHub, Google, and LinkedIn search routes are unverified, like the synthetic
+fixtures they follow (the LinkedIn search routes are reads, so none is held in the pending list).
+The email write routes are connector writes: until an owner-approved live run against a practice
+mailbox, through a host `EmailClient` implementation, verifies them, the repository lists them in a
+time-bounded allowlist (`scripts/emulator-evidence-pending.json`), and the evidence check reports
+them as PENDING warnings until each entry's expiry date and fails again after it. The R2
 `R2ObjectClient.put` route is held in the same list until a live run against a practice bucket,
 through a host `R2ObjectClient` implementation, verifies it. The four Fortnox write routes, the
 eleven Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five

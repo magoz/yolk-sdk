@@ -117,3 +117,13 @@ the case reads, with obviously synthetic values (`Synthetic Person 01`,
 `https://linkedin.example.com/in/synthetic-person-01`, `example.com` addresses), and replace the
 seeded URLs and query in the requests and `seeds.ts` the same way. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental
+[LinkedIn search emulator](../api-reference/emulators#linkedin-search-emulator)
+(`@yolk-sdk/emulators/linkedin-search`) is a stateful, fixture-only stand-in for the Exa and Enrich
+Layer routes that passes these cases through the real connector actions over the connector ports.
+Each answer is a fixture's, byte for byte: the searches the fixtures record (`numResults` 10, 3,
+and 2 for the seeded query), the seeded profile and its email, the recorded 404 for the seeded
+absent profile, and the recorded 401 for a key its seed marks as rejected on that provider (by
+default the synthetic invalid keys the two unauthorized cases send). It never keeps or echoes an
+API key, rejected ones included (it holds only per-provider digests of the rejected keys).

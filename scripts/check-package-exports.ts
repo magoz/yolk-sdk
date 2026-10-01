@@ -241,7 +241,8 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './todoist',
       './telegram',
       './github',
-      './google'
+      './google',
+      './linkedin-search'
     ],
     root: 'none'
   }

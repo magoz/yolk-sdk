@@ -1,7 +1,7 @@
 /**
  * Shared wrapper of the fixture-only stateful connector emulators (internal; used by `/dropbox`,
- * `/notion`, `/github`, and `/google`, not by the earlier `/fortnox` and `/microsoft` emulators,
- * which keep their own).
+ * `/notion`, `/github`, `/google`, and `/linkedin-search`, not by the earlier `/fortnox` and
+ * `/microsoft` emulators, which keep their own).
  *
  * The emulator state lives in an `@emulators/core` custom runtime that the Node-only subpath
  * creates and hands in (this module imports no Node builtin and never imports the core); the
@@ -32,7 +32,8 @@
  * carries `x-emulator-evidence: unverified` when the route is unverified. Ledgered bodies and
  * query parameters have credential-named keys redacted.
  *
- * Fail-closed mode (opt-in, `failClosed`; used by `/github` and `/google`): every route parameter
+ * Fail-closed mode (opt-in, `failClosed`; used by `/github`, `/google`, and `/linkedin-search`):
+ * every route parameter
  * has a raw pattern (matched in full), and a request is recognised only when its raw path is
  * exactly an emulated route shape under that route's method and any `Authorization` header is
  * exactly `Bearer <at least 8 non-space characters>` (a recognisable bearer, below). Every other
@@ -81,7 +82,13 @@
  * the `DecodedViewRefusal` it threw carries cleanly decoded text holding the bearer, else with the
  * refusal's reason when the route declares it in `viewRefusalReasons` (a constant the route owns,
  * scrubbed defensively), else with `the request body cannot be checked for the credential`. A route
- * without `decodedViews` is checked exactly as before.
+ * without `decodedViews` is checked exactly as before. An emulator may also opt in to a per-origin
+ * bearer digest (`bearerDigest`, fail-closed mode only; `/linkedin-search` uses it): routes then
+ * see a one-way digest of the bearer for the origin the request arrived on
+ * (`EmulatedRequest.bearerDigest`), never the bearer, so a seed can mark a key as rejected on one
+ * origin by its digest, and the bearer still never reaches the state, the ledger, or `/_emulate/*`.
+ * A digest that throws or repeats the bearer answers the 500 emulator error (`responseError`).
+ * Without it, routes see no digest, as before.
  *
  * @experimental
  */
@@ -252,6 +259,11 @@ export type EmulatedRequest = {
   readonly json: Schema.Json | undefined
   /** Raw body (`bytes` routes). */
   readonly bytes: Uint8Array | undefined
+  /**
+   * Fail-closed mode with `bearerDigest` only: the digest of the recognised bearer for the origin
+   * the request arrived on (never the bearer itself); `undefined` otherwise.
+   */
+  readonly bearerDigest?: string | undefined
 }
 
 export type RunContext<Env> = {
@@ -628,6 +640,18 @@ export type StatefulEmulatorConfig<State, Env> = {
    * parameter must have a raw pattern (checked when the emulator is built).
    */
   readonly failClosed?: StatefulFailClosed
+  /**
+   * Opt-in, fail-closed mode only (checked when the emulator is built): a one-way digest of a
+   * recognised bearer for the origin the request arrived on, handed to routes as
+   * `EmulatedRequest.bearerDigest`, never the bearer itself. A route compares it with digests its
+   * state holds (for example of the keys a seed marks as rejected on one origin), so a credential
+   * can change an answer without the bearer reaching the state, the ledger, or `/_emulate/*`.
+   * Taking the origin makes the digest per origin: one key gives different digests on two origins.
+   * A digest that throws or repeats the bearer (through the closure) answers the 500 emulator
+   * error before the route's shape check (no fault used, nothing written). Omitted: routes see no
+   * digest, as before.
+   */
+  readonly bearerDigest?: (bearer: string, origin: string) => string
   /** Clear runtime data (cursors) on reset and seed. */
   readonly clearRuntime: () => void
   /** Extra `/_emulate/state` fields (runtime data). */
@@ -916,6 +940,10 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     throw new Error(`the ledger never records the credential header ${credentialHeader.name}`)
   }
 
+  if (config.bearerDigest !== undefined && config.failClosed === undefined) {
+    throw new Error('bearerDigest needs fail-closed mode (failClosed)')
+  }
+
   if (config.failClosed !== undefined) {
     for (const route of config.routes) {
       const missing = unpatternedParams(route)
@@ -1135,7 +1163,8 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
     url: URL,
     entry: MutableLedgerEntry,
     matched: MatchedRoute<State, Env>,
-    secrets: ReadonlyArray<string>
+    secrets: ReadonlyArray<string>,
+    arrivedOn: string
   ): Promise<Response> => {
     const header = (name: string): string | undefined =>
       isCredentialHeaderName(name) ? undefined : (request.headers.get(name) ?? undefined)
@@ -1203,6 +1232,27 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
       }
     }
 
+    // Fail-closed mode only (checked at build): the per-origin digest of the bearer, never the
+    // bearer. A digest that cannot be made, or that repeats the bearer, is a handler failure.
+    let bearerDigest: string | undefined
+    const [bearer] = secrets
+
+    if (config.bearerDigest !== undefined && bearer !== undefined) {
+      const digest = Result.try(() => config.bearerDigest?.(bearer, arrivedOn))
+
+      if (
+        Result.isFailure(digest) ||
+        !Predicate.isString(digest.success) ||
+        textRepeatsSecret(digest.success, secrets)
+      ) {
+        entry.responseError = 'the bearer digest failed'
+
+        return emulatorError(500, 'the emulator could not build the response')
+      }
+
+      bearerDigest = digest.success
+    }
+
     const admitted = matched.route.admit(
       {
         method: request.method.toUpperCase(),
@@ -1211,7 +1261,8 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
         query: url.searchParams,
         header,
         json,
-        bytes
+        bytes,
+        bearerDigest
       },
       config.env
     )
@@ -1380,7 +1431,7 @@ export const makeStatefulEmulator = async <State, Env, Seed>(
 
     // Error recovery still answers through the route: the fallback 500 is evidence-tagged and
     // the ledger records the status actually sent.
-    const response = await routed(request, url, entry, matched, secrets).catch(() => {
+    const response = await routed(request, url, entry, matched, secrets, arrivedOn).catch(() => {
       entry.responseError = 'the emulator could not build or produce the response'
 
       return emulatorError(500, 'the emulator could not build the response')

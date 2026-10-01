@@ -147,7 +147,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './todoist',
       './telegram',
       './github',
-      './google'
+      './google',
+      './linkedin-search'
     ]
   }
 ]
@@ -429,7 +430,18 @@ const main = async () => {
           'if (googleWork.status !== 200 || googleWork.headers.get("x-emulator-evidence") !== "unverified" || (await googleWork.json()).labelIds.join() !== "INBOX,IMPORTANT") throw new Error("Google emulator smoke failed")',
           'const googleRefused = await googleEmulator.fetch(new Request("https://gmail.googleapis.com/gmail/v1/users/me/labels?q=synthetic-smoke-token", { headers: { authorization: "Bearer synthetic-smoke-token" } }))',
           'if (googleRefused.status !== 400 || (await googleRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(googleEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("Google emulator must fail closed without echoing the token")',
-          'await googleEmulator.close()'
+          'await googleEmulator.close()',
+          'const linkedInEmulatorModule = await import("@yolk-sdk/emulators/linkedin-search")',
+          'if (linkedInEmulatorModule.linkedInSearchEmulatorRoutes.length !== 3 || !linkedInEmulatorModule.linkedInSearchEmulatorRoutes.every(route => route.evidence === "unverified" && !route.write)) throw new Error("LinkedIn search emulator manifest mismatch")',
+          'const linkedInEmulator = await linkedInEmulatorModule.makeLinkedInSearchEmulator()',
+          'const linkedInSearchBody = JSON.stringify({ query: "synthetic conformance engineer", category: "people", numResults: 2, type: "auto", contents: { text: true } })',
+          'const linkedInFound = await linkedInEmulator.fetch(new Request("https://api.exa.ai/search", { method: "POST", headers: { authorization: "Bearer synthetic-smoke-token", "content-type": "application/json" }, body: linkedInSearchBody }))',
+          'if (linkedInFound.status !== 200 || linkedInFound.headers.get("x-emulator-evidence") !== "unverified" || (await linkedInFound.json()).results.length !== 2) throw new Error("LinkedIn search emulator smoke failed")',
+          'const linkedInRejected = await linkedInEmulator.fetch(new Request("https://enrichlayer.com/api/v2/profile?linkedin_profile_url=https%3A%2F%2Flinkedin.example.com%2Fin%2Fsynthetic-person-01", { headers: { authorization: "Bearer yolk-conformance-invalid-enrich-layer-key" } }))',
+          'if (linkedInRejected.status !== 401 || JSON.stringify([linkedInEmulator.ledger.entries(), linkedInEmulator.snapshot()]).includes("yolk-conformance-invalid-enrich-layer-key")) throw new Error("LinkedIn search emulator must answer the recorded 401 without keeping the key")',
+          'const linkedInRefused = await linkedInEmulator.fetch(new Request("https://api.exa.ai/search?q=synthetic-smoke-token", { method: "POST", headers: { authorization: "Bearer synthetic-smoke-token", "content-type": "application/json" }, body: linkedInSearchBody }))',
+          'if (linkedInRefused.status !== 400 || (await linkedInRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(linkedInEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("LinkedIn search emulator must fail closed without echoing the key")',
+          'await linkedInEmulator.close()'
         ].join('\n')
     )
 

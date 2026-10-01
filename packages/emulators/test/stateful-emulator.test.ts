@@ -4,8 +4,8 @@
  * no `g` or `y` flag), the fail-closed mode (constant-text ledger entries for unrecognised
  * requests and Authorization headers, every parameter patterned at build, the bearer guarded as a
  * secret in queries, recorded headers, bodies, a route's decoded body views, and plan-time
- * reasons), and that an emulator without `failClosed` keeps the earlier behaviour (the Dropbox and
- * Notion suites cover it fully).
+ * reasons), the opt-in per-origin bearer digest (`bearerDigest`), and that an emulator without
+ * `failClosed` keeps the earlier behaviour (the Dropbox and Notion suites cover it fully).
  */
 import { Predicate, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
@@ -92,8 +92,13 @@ const echoPlan = statefulRoute<State, undefined, string>(
   (_state, joined) => notEmulated(`the plan saw ${joined}`)
 )
 
-const build = (routes: ReadonlyArray<StatefulRoute<State, undefined>>, failClosed: boolean) => {
+const build = (
+  routes: ReadonlyArray<StatefulRoute<State, undefined>>,
+  failClosed: boolean,
+  extra: Partial<StatefulEmulatorConfig<State, undefined>> = {}
+) => {
   const base: StatefulEmulatorConfig<State, undefined> = {
+    ...extra,
     routes,
     env: undefined,
     initial: { writes: 0 },
@@ -316,6 +321,94 @@ describe('fail-closed mode', () => {
     const answered = await api.fetch(get('/files/a/b', { authorization }))
 
     expect(await answered.text()).toBe('a/b')
+  })
+})
+
+/** A route answering the digest it sees (or `none`), and whether the bearer reached it. */
+const digestEcho = statefulRoute<State, undefined, string>(
+  {
+    method: 'GET',
+    path: '/digest',
+    kind: 'connector',
+    write: false,
+    caseIds: ['synthetic.case'],
+    evidence: 'unverified'
+  },
+  'none',
+  request => request.bearerDigest ?? 'none',
+  (_state, seen) => () => new Response(seen)
+)
+
+/** A synthetic digest: the origin and the bearer reversed (never the bearer as written). */
+const reversedDigest = (bearer: string, origin: string) =>
+  `${origin}|${[...bearer].reverse().join('')}`
+
+describe('fail-closed mode: the opt-in per-origin bearer digest', () => {
+  const secret = 'synthetic-wrapper-secret'
+  const authorization = `Bearer ${secret}`
+
+  it('refuses to build without fail-closed mode', async () => {
+    await expect(build([digestEcho], false, { bearerDigest: reversedDigest })).rejects.toThrow(
+      'bearerDigest needs fail-closed mode'
+    )
+  })
+
+  it('routes see the digest for the arrival origin, never the bearer', async () => {
+    const api = await build([digestEcho], true, { bearerDigest: reversedDigest })
+    const reversed = [...secret].reverse().join('')
+
+    const direct = await api.fetch(get('/digest', { authorization }))
+
+    const rewritten = await api.fetchOn('https://other.example.test')(
+      get('/digest', { authorization })
+    )
+
+    expect(await direct.text()).toBe(`https://api.example.test|${reversed}`)
+    expect(await rewritten.text()).toBe(`https://other.example.test|${reversed}`)
+    expect(JSON.stringify(api.ledger.entries())).not.toContain(secret)
+  })
+
+  it('without the option, routes see no digest (the earlier behaviour)', async () => {
+    const api = await build([digestEcho], true)
+
+    expect(await (await api.fetch(get('/digest', { authorization }))).text()).toBe('none')
+  })
+
+  it.each([
+    [
+      'a digest that throws',
+      () => {
+        throw new Error(`synthetic digest failure ${secret}`)
+      }
+    ],
+    ['a digest that repeats the bearer', (bearer: string) => `digest-of-${bearer}`],
+    [
+      'a digest that repeats the bearer JSON-escaped',
+      (bearer: string) => `digest-of-${bearer.replace('s', '\\u0073')}`
+    ]
+  ] as const)('%s answers the 500 emulator error, no fault used', async (_label, bearerDigest) => {
+    const api = await build([digestEcho, write], true, { bearerDigest })
+
+    api.faults.add({ kind: 'status', status: 503, count: 1 })
+
+    const failed = await api.fetch(get('/digest', { authorization }))
+    const text = await failed.text()
+
+    expect(failed.status).toBe(500)
+    expect(JSON.parse(text)).toEqual({
+      error: { type: 'emulator_error', message: 'the emulator could not build the response' }
+    })
+    expect(api.ledger.entries().at(-1)).toMatchObject({
+      path: '/digest',
+      status: 500,
+      responseError: 'the bearer digest failed'
+    })
+    expect(api.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
+    expect(api.snapshot()).toEqual({ writes: 0 })
+    expect([text, JSON.stringify(api.ledger.entries())].join('\n')).not.toContain(secret)
+
+    // A request without a bearer never computes a digest: refused by the shape as before.
+    expect((await api.fetch(get('/digest'))).status).toBe(400)
   })
 })
 
