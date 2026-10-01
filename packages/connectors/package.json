@@ -90,6 +90,10 @@
       "types": "./src/linkedin-search/index.ts",
       "default": "./src/linkedin-search/index.ts"
     },
+    "./linkedin-search/conformance": {
+      "types": "./src/linkedin-search/conformance/index.ts",
+      "default": "./src/linkedin-search/conformance/index.ts"
+    },
     "./microsoft": {
       "types": "./src/microsoft/index.ts",
       "default": "./src/microsoft/index.ts"
@@ -222,6 +226,11 @@
         "types": "./dist/linkedin-search/index.d.mts",
         "import": "./dist/linkedin-search/index.mjs",
         "default": "./dist/linkedin-search/index.mjs"
+      },
+      "./linkedin-search/conformance": {
+        "types": "./dist/linkedin-search/conformance/index.d.mts",
+        "import": "./dist/linkedin-search/conformance/index.mjs",
+        "default": "./dist/linkedin-search/conformance/index.mjs"
       },
       "./microsoft": {
         "types": "./dist/microsoft/index.d.mts",

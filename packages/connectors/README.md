@@ -14,34 +14,35 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                       | Purpose                                                                                                        |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                        | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types         |
-| `@yolk-sdk/connectors/agent`                  | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                              |
-| `@yolk-sdk/connectors/afloat`                 | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                    |
-| `@yolk-sdk/connectors/conformance`            | Experimental, conformance/testing only: Effect `HttpClient` bridges, a static resolver, and a cleanup reporter |
-| `@yolk-sdk/connectors/dropbox`                | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update      |
-| `@yolk-sdk/connectors/dropbox/conformance`    | Experimental Dropbox conformance cases, seed config, and synthetic replay fixtures                             |
-| `@yolk-sdk/connectors/email`                  | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port     |
-| `@yolk-sdk/connectors/email/conformance`      | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge  |
-| `@yolk-sdk/connectors/figma`                  | Figma remote MCP auth action and OAuth constants                                                               |
-| `@yolk-sdk/connectors/fortnox`                | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update  |
-| `@yolk-sdk/connectors/fortnox/conformance`    | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                             |
-| `@yolk-sdk/connectors/github`                 | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                 |
-| `@yolk-sdk/connectors/github/conformance`     | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                              |
-| `@yolk-sdk/connectors/google`                 | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                            |
-| `@yolk-sdk/connectors/google/conformance`     | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures          |
-| `@yolk-sdk/connectors/linkedin-search`        | Exa people search and Enrich Layer profile/email actions                                                       |
-| `@yolk-sdk/connectors/microsoft`              | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments       |
-| `@yolk-sdk/connectors/microsoft/conformance`  | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                     |
-| `@yolk-sdk/connectors/notion`                 | Notion search/page/block/database/data-source/comment/user actions and API token slot                          |
-| `@yolk-sdk/connectors/notion/conformance`     | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                              |
-| `@yolk-sdk/connectors/r2-storage`             | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                              |
-| `@yolk-sdk/connectors/r2-storage/conformance` | Experimental R2 port conformance cases, seed config, synthetic port fixtures, and a plain-JSON bridge          |
-| `@yolk-sdk/connectors/telegram`               | Telegram bot send/validate actions                                                                             |
-| `@yolk-sdk/connectors/telegram/conformance`   | Experimental Telegram conformance cases, seed config, and synthetic replay fixtures                            |
-| `@yolk-sdk/connectors/todoist`                | Todoist project/task/label/comment actions and API token slot constants                                        |
-| `@yolk-sdk/connectors/todoist/conformance`    | Experimental Todoist conformance cases, seed config, and synthetic replay fixtures                             |
+| Subpath                                            | Purpose                                                                                                        |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                             | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types         |
+| `@yolk-sdk/connectors/agent`                       | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                              |
+| `@yolk-sdk/connectors/afloat`                      | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                    |
+| `@yolk-sdk/connectors/conformance`                 | Experimental, conformance/testing only: Effect `HttpClient` bridges, a static resolver, and a cleanup reporter |
+| `@yolk-sdk/connectors/dropbox`                     | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update      |
+| `@yolk-sdk/connectors/dropbox/conformance`         | Experimental Dropbox conformance cases, seed config, and synthetic replay fixtures                             |
+| `@yolk-sdk/connectors/email`                       | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port     |
+| `@yolk-sdk/connectors/email/conformance`           | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge  |
+| `@yolk-sdk/connectors/figma`                       | Figma remote MCP auth action and OAuth constants                                                               |
+| `@yolk-sdk/connectors/fortnox`                     | Company, customer, invoice, supplier, and supplier-invoice actions with OAuth; customer/invoice create/update  |
+| `@yolk-sdk/connectors/fortnox/conformance`         | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                             |
+| `@yolk-sdk/connectors/github`                      | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                 |
+| `@yolk-sdk/connectors/github/conformance`          | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                              |
+| `@yolk-sdk/connectors/google`                      | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                            |
+| `@yolk-sdk/connectors/google/conformance`          | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures          |
+| `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                       |
+| `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures |
+| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments       |
+| `@yolk-sdk/connectors/microsoft/conformance`       | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                     |
+| `@yolk-sdk/connectors/notion`                      | Notion search/page/block/database/data-source/comment/user actions and API token slot                          |
+| `@yolk-sdk/connectors/notion/conformance`          | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                              |
+| `@yolk-sdk/connectors/r2-storage`                  | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                              |
+| `@yolk-sdk/connectors/r2-storage/conformance`      | Experimental R2 port conformance cases, seed config, synthetic port fixtures, and a plain-JSON bridge          |
+| `@yolk-sdk/connectors/telegram`                    | Telegram bot send/validate actions                                                                             |
+| `@yolk-sdk/connectors/telegram/conformance`        | Experimental Telegram conformance cases, seed config, and synthetic replay fixtures                            |
+| `@yolk-sdk/connectors/todoist`                     | Todoist project/task/label/comment actions and API token slot constants                                        |
+| `@yolk-sdk/connectors/todoist/conformance`         | Experimental Todoist conformance cases, seed config, and synthetic replay fixtures                             |
 
 ## Imports
 
@@ -1498,6 +1499,43 @@ For offline tests, the experimental Google emulator (`@yolk-sdk/emulators/google
 fixture-only stand-in that passes these cases, records the practice send in its state (never
 delivering it), and never keeps or echoes the access token; no fixture records the leftover
 lookup's reads, so that lookup fails closed against it.
+
+### LinkedIn search conformance cases (experimental)
+
+`@yolk-sdk/connectors/linkedin-search/conformance` exports seven conformance cases for
+`@yolk-sdk/conformance/runner` (`linkedInSearchConformanceCases`), synthetic replay fixtures
+(`linkedInSearchConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
+(`linkedInSearchConformanceFixtureSeeds`). Every case runs the real connector actions over
+`ConnectorHttpClient` and `CredentialResolver` plus `LinkedInSearchConformanceConfig` (an Exa people
+query, a profile URL, and a profile URL that names no profile), and every case is a read. They cover
+Exa people results (1 to 10, each with a `url`, no `null` field the connector decodes), the
+`numResults` limit (a control search with `numResults: 3` must answer more than 2 people first; no
+paging exists), the Enrich Layer profile answered as a non-empty object, the email lookup answering
+an `email` or a queued `email_queue_count` with the connector never reporting `status: "unknown"`,
+an unknown key at each provider answering a 4xx status, and a missing profile answering a 4xx status
+rather than an empty 2xx profile. Rate limiting is not a case: the connector maps a 429 like any
+other non-2xx answer and reads no `Retry-After`. Credentials bind through
+`linkedInSearchConformanceIntegration()` (both API key slots);
+`linkedInSearchConformanceCredentials` keys the two keys by slot id for
+`staticCredentialResolverLayer`. Every 2xx fixture body keeps only the keys and types its case
+reads, and a strict allowlist test (`test/linkedin-search-conformance.test.ts`, whose comment lists
+exactly what it enforces) refuses anything in a 2xx body, request query, or seed that is not
+obviously synthetic. The case table, seeds, and claims live in the
+[LinkedIn search conformance guide](../../apps/docs/content/docs/connectors/linkedin-search.mdx#conformance-cases).
+
+`pnpm conformance:linkedin-search` in this repository dry-runs by default;
+`--live --owner-approved --account <label>` (refused whenever `CI` is non-empty) needs
+`EXA_API_KEY` and `ENRICH_LAYER_API_KEY` from the environment only (each refused before any
+request unless it has 16 to 256 letters, digits, `_`, or `-`) and the seeds, with `linkedin.com`
+profile URLs. Neither provider has a sandbox: the keys are real, paid keys (use dedicated
+low-credit ones), and `--profile-url` should name a profile whose owner consented, for example the
+repository owner's own; a run needs the owner's approval although nothing is written. Every
+printed line is redacted of both keys, and `--record` refuses any recording, rendered file, or
+checklist line carrying either one (naming which) and stages verified recordings all or nothing in
+`.conformance-recordings/linkedin-search/<run>/` (gitignored), listing every string value they hold
+for review. **They hold real third parties' personal data, and this repository is public:** before
+promoting, replace each recorded 2xx body wholesale with a minimal synthetic body that keeps only
+the keys and types the case reads, never scrubbing field by field.
 
 ### R2 conformance cases (experimental)
 
