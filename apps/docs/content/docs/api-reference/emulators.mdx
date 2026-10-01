@@ -7,13 +7,14 @@ description: Experimental service emulators, HttpClient routing to them, and a l
 > `0.1.0-canary.95`; keep it on the same lockstep version as the other public packages.
 
 `@yolk-sdk/emulators` runs stand-ins for outside services in tests and local development, and routes
-an Effect `HttpClient` to them instead of the real service. The email emulator is a port-level fake
-instead: a plain-JSON `EmailClient` backend. Emulators never import other `@yolk-sdk/*` code: their
-wire shapes follow the conformance fixtures (verified recordings for the Gateway, synthetic
-placeholders elsewhere), and each emulated route names the conformance cases it follows. The package
-depends on `effect`; the Node-only `fortnox`, `microsoft`, `dropbox`, `notion`, `todoist`,
-`telegram`, `github`, and `google` subpaths also depend on the upstream `@emulators/core` runtime
-(Apache-2.0, pinned to exactly `0.12.0`).
+an Effect `HttpClient` to them instead of the real service. The email and R2 emulators are
+port-level fakes instead: plain-JSON backends for `EmailClient` and for `R2Presigner` and
+`R2ObjectClient`. Emulators never import other `@yolk-sdk/*` code: their wire shapes follow the
+conformance fixtures (verified recordings for the Gateway, synthetic placeholders elsewhere), and
+each emulated route names the conformance cases it follows. The package depends on `effect`; the
+Node-only `fortnox`, `microsoft`, `dropbox`, `notion`, `todoist`, `telegram`, `github`, and `google`
+subpaths also depend on the upstream `@emulators/core` runtime (Apache-2.0, pinned to exactly
+`0.12.0`).
 
 There is no root export. Import an explicit subpath.
 
@@ -326,6 +327,72 @@ Anything else fails closed with a ledgered `notEmulated` answer, the port analog
 `unknown-method`, `invalid-request`, `no-matching-fixture`, or `state-conflict`. Faults
 (`{ kind: 'failure', method, match?, count?, failure }`, `match` a deep subset of the request)
 change no state. `reset()` restores the seed and clears the ledger, faults, and fixture use.
+
+## R2 emulator
+
+`@yolk-sdk/emulators/r2`
+
+| Export                                                                              | Purpose                                                                                                    |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `makeR2Emulator({ seed? })`                                                         | `{ call, state, seed, ledger, reset, faults, coverage }`: a fixture-driven fake R2 port backend            |
+| `r2EmulatorRoutes`                                                                  | Route evidence manifest: one `PORT <Port>.<method>` route per emulated method, linked to R2 cases          |
+| `r2EmulatorPresignerPort`, `r2EmulatorObjectClientPort`, `r2EmulatorRouteMethod`    | Helpers: `R2Presigner`, `R2ObjectClient`, and `PORT`, the port names and pseudo method of the routes       |
+| `R2EmulatorObject`, `R2EmulatorBucket`, `r2EmulatorDefaultSeed`, `R2EmulatorSeed`   | Seed schemas and the synthetic practice bucket the fixtures describe (the object the get fixtures read)    |
+| `R2EmulatorFault`, `R2EmulatorLedgerEntry`, `R2EmulatorReply`, `R2EmulatorCoverage` | Fault schema, ledger entry, reply, and coverage types                                                      |
+| `r2EmulatorFixtures`                                                                | The R2 conformance `PortFixture`s, copied as data                                                          |
+| `r2EmulatorRedacted`, `r2EmulatorUnrecognised`                                      | The constant request (`<redacted>`) and port and method (`<unrecognised>`) of refusals that record nothing |
+| `R2EmulatorInputInvalid`                                                            | Thrown for an invalid seed or fault                                                                        |
+
+The R2 connector never talks to R2 itself, and neither does this emulator: no SigV4 signer, S3
+client, socket, Node builtin, or SDK import. `call(port, method, request)` takes one `R2Presigner`
+or `R2ObjectClient` call as plain JSON (without credential fields; bytes as base64) and answers
+`{ response }`, `{ failure }`, or `{ notEmulated: { reason } }`. `r2PortsLayerFromBackend(emulator)`
+from `@yolk-sdk/connectors/r2-storage/conformance` turns it into both port layers.
+
+Responses come only from the R2 conformance fixtures. The in-memory bucket only selects the first
+matching fixture consistent with it (preferring fixtures unused since the last reset) and records
+what that fixture says happened (an object created absent-only or replaced under its current etag,
+with the etag the fixture names); it never invents an etag, a byte, or a failure, and presigning
+writes nothing. The connector cannot delete R2 objects, so objects the write cases create stay, and
+running the write cases again on the same emulator fails them without writing.
+
+Credentials never reach the ledger or any other output. Every credential field (`credential(s)`,
+`accessKeyId`, `secretAccessKey`, `sessionToken`, `token`, and the other names the shared port scan
+classifies as credentials) is dropped at any depth before anything is compared or recorded. Every
+refusal is ledgered with constant text only (request `<redacted>`), uses no fault, and changes no
+state; only a request equal to a fixture request is recorded, with every `bodyBase64` as
+`<redacted>` plus its decoded length (`bodyBytes`). Every `bodyBase64` (put bytes) must be canonical
+standard base64 of UTF-8 text (else `uncheckable-body`), and its decoded text is checked like the
+rest of the request. A request is refused as `credential-in-request` when any key, string value,
+number (as printed or as its digit string), or decoded body repeats a value found under a credential
+field (any non-empty key, string, or number, with no minimum length), or holds, outside the exact
+canonical synthetic placeholders, `X-Amz-Credential`, `X-Amz-Signature`, `X-Amz-Security-Token`, a
+credential query parameter, or a token the shared scan flags (a bearer token, a common API-key
+prefix, a JSON Web Token, a PEM private key). Each text is checked raw, within three rounds of
+percent-decoding and three of escape-decoding (`\uXXXX`, `\xXX`, and numeric HTML references, as the
+R2 conformance guard decodes), and through any depth of percent-encoding and JSON escaping, failing
+closed past a work cap. A request with an own `__proto__` key at any depth is refused as
+`invalid-request`, and one the checks cannot walk (cyclic, or nested too deeply) as
+`uncheckable-request`: `call` never throws. The copied key, parameter, and token lists have one test
+sample each, counted against the list and checked against the shared scan.
+
+- Request-shape latitude: credential fields are never compared or recorded, and JSON key order is
+  not compared. Everything else (the endpoint, bucket, key, content type, `maxBytes`,
+  `expectedEtag`, the put `condition`, `bodyBase64`, and `maxUploadBytes`) must equal a fixture
+  request exactly, so only the fixtures' `run-synthetic` run id is emulated. A `bodyBase64` must be
+  canonical standard base64 of UTF-8 text (else `uncheckable-body`); it is compared as sent but
+  recorded only as its decoded length. No object may have an own `__proto__` key (else
+  `invalid-request`), and no key or value, the decoded body included, may carry a credential or
+  repeat a dropped credential value of any length (else `credential-in-request`). Every refusal is
+  ledgered with constant text only (request `<redacted>`).
+
+Anything else fails closed with a ledgered `notEmulated` answer, the port analogue of HTTP 400, with
+constant text only (request `<redacted>`): `unknown-method` and `uncheckable-request` (ledgered as
+`<unrecognised>`), `invalid-request`, `uncheckable-body`, `credential-in-request`,
+`no-matching-fixture`, or `state-conflict`; none uses a fault or changes the bucket. Faults
+(`{ kind: 'failure', port, method, match?, count?, failure }`, `match` a deep subset of the request)
+apply only to a call a fixture would answer and change no state. `reset()` restores the seed and
+clears the ledger, faults, and fixture use.
 
 ## Fortnox emulator
 
@@ -1020,19 +1087,21 @@ delivery survives the socket; a body stream error drops the connection.
 
 Emulated routes carry evidence: `verified` routes follow a live observation dated by `observedAt`;
 `unverified` routes follow synthetic placeholders. Fetch-handler emulators tag every response from
-an unverified route with `x-emulator-evidence: unverified`; the email emulator's plain-JSON replies
-carry no header, so it records the evidence on each ledger entry instead. The Gateway route is
-verified (`observedAt: '2026-09-30'`): the emulator follows the verified live Gateway recordings,
+an unverified route with `x-emulator-evidence: unverified`; the email and R2 emulators' plain-JSON
+replies carry no header, so they record the evidence on each ledger entry instead. The Gateway route
+is verified (`observedAt: '2026-09-30'`): the emulator follows the verified live Gateway recordings,
 and the Yolk repository checks its response shapes against each recording. The OpenAI, Anthropic,
-Codex, Grok, OpenCode Go, subscription-usage, email, Fortnox, Microsoft, Dropbox, Notion, Todoist,
-Telegram, GitHub, and Google routes are unverified, like the synthetic fixtures they follow. The
-email write routes are connector writes: until an owner-approved live run against a practice
-mailbox, through a host `EmailClient` implementation, verifies them, the repository lists them in a
-time-bounded allowlist (`scripts/emulator-evidence-pending.json`), and the evidence check reports
-them as PENDING warnings until each entry's expiry date and fails again after it. The four Fortnox
-write routes, the eleven Microsoft write routes, the five Dropbox write routes, the two Notion write
-routes, the five Todoist write routes, the Telegram `sendMessage` route, the six GitHub write
-routes, and the fifteen Google write routes are held in the same pending list until a live run
-against a Fortnox test company, a Microsoft practice tenant, a Dropbox practice account, a Notion
-practice workspace, a Todoist practice account, a practice bot, a GitHub practice repository, or a
-practice Google account verifies them.
+Codex, Grok, OpenCode Go, subscription-usage, email, R2, Fortnox, Microsoft, Dropbox, Notion,
+Todoist, Telegram, GitHub, and Google routes are unverified, like the synthetic fixtures they
+follow. The email write routes are connector writes: until an owner-approved live run against a
+practice mailbox, through a host `EmailClient` implementation, verifies them, the repository lists
+them in a time-bounded allowlist (`scripts/emulator-evidence-pending.json`), and the evidence check
+reports them as PENDING warnings until each entry's expiry date and fails again after it. The R2
+`R2ObjectClient.put` route is held in the same list until a live run against a practice bucket,
+through a host `R2ObjectClient` implementation, verifies it. The four Fortnox write routes, the
+eleven Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
+Todoist write routes, the Telegram `sendMessage` route, the six GitHub write routes, and the fifteen
+Google write routes are held in the same pending list until a live run against a Fortnox test
+company, a Microsoft practice tenant, a Dropbox practice account, a Notion practice workspace, a
+Todoist practice account, a practice bot, a GitHub practice repository, or a practice Google account
+verifies them.

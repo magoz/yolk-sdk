@@ -7,6 +7,7 @@ import { dropboxConformanceFixtures } from '../../packages/connectors/src/dropbo
 import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import { googleConformanceFixtures } from '../../packages/connectors/src/google/conformance/index.ts'
 import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
+import { r2ConformanceCases } from '../../packages/connectors/src/r2-storage/conformance/cases.ts'
 import { microsoftConformanceFixtures } from '../../packages/connectors/src/microsoft/conformance/index.ts'
 import { notionConformanceFixtures } from '../../packages/connectors/src/notion/conformance/index.ts'
 import { githubConformanceFixtures } from '../../packages/connectors/src/github/conformance/index.ts'
@@ -14,6 +15,7 @@ import { telegramConformanceFixtures } from '../../packages/connectors/src/teleg
 import { todoistConformanceFixtures } from '../../packages/connectors/src/todoist/conformance/index.ts'
 import { dropboxEmulatorRoutes } from '../../packages/emulators/src/dropbox.ts'
 import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
+import { r2EmulatorRoutes } from '../../packages/emulators/src/r2.ts'
 import { fortnoxEmulatorRoutes } from '../../packages/emulators/src/fortnox.ts'
 import { googleEmulatorRoutes } from '../../packages/emulators/src/google.ts'
 import { microsoftEmulatorRoutes } from '../../packages/emulators/src/microsoft.ts'
@@ -501,6 +503,10 @@ describe('repo emulator manifests', () => {
     .filter(emailRoute => emailRoute.write)
     .map(emailRoute => `${emailRoute.method} ${emailRoute.path}`)
 
+  const r2WriteRoutes = r2EmulatorRoutes
+    .filter(r2Route => r2Route.write)
+    .map(r2Route => `${r2Route.method} ${r2Route.path}`)
+
   const fortnoxWriteRoutes = fortnoxEmulatorRoutes
     .filter(fortnoxRoute => fortnoxRoute.write)
     .map(fortnoxRoute => `${fortnoxRoute.method} ${fortnoxRoute.path}`)
@@ -585,6 +591,7 @@ describe('repo emulator manifests', () => {
       'xai-usage',
       'opencode',
       'email',
+      'r2',
       'fortnox',
       'microsoft',
       'dropbox',
@@ -638,7 +645,11 @@ describe('repo emulator manifests', () => {
       }
     }
 
-    for (const testCase of emailConformanceCases) {
+    for (const route of r2EmulatorRoutes) {
+      expect(route.evidence, route.path).toBe('unverified')
+    }
+
+    for (const testCase of [...emailConformanceCases, ...r2ConformanceCases]) {
       expect(knownConformanceCaseIds.has(testCase.id)).toBe(true)
       // Synthetic port fixtures: unverified, derived through the cases that cite them.
       expect(repoFixtureEvidenceByCase.get(testCase.id)).toEqual(
@@ -652,6 +663,7 @@ describe('repo emulator manifests', () => {
         .map(finding => finding.route)
     ).toEqual([
       ...emailWriteRoutes,
+      ...r2WriteRoutes,
       ...fortnoxWriteRoutes,
       ...microsoftWriteRoutes,
       ...dropboxWriteRoutes,
@@ -661,6 +673,7 @@ describe('repo emulator manifests', () => {
       ...githubWriteRoutes,
       ...googleWriteRoutes
     ])
+    expect(r2WriteRoutes).toEqual(['PORT R2ObjectClient.put'])
     expect(fortnoxWriteRoutes).toEqual([
       'PUT /3/customers/{CustomerNumber}',
       'POST /3/invoices',
@@ -756,6 +769,40 @@ describe('repo emulator manifests', () => {
     for (const report of [repoCheck(now, []), repoCheck(new Date('2026-11-30T00:00:00.000Z'))]) {
       expect(evidenceReportFailed(report)).toBe(true)
       expect(failedRoutes(report, 'email')).toEqual(emailWriteRoutes)
+    }
+  })
+
+  it('ships one pending entry per R2 write route, at most 60 days out, naming the live run', () => {
+    const r2Entries = repoPending.entries.filter(entry => entry.manifest === 'r2')
+
+    expect(r2Entries.map(entry => `${entry.method} ${entry.path}`)).toEqual(r2WriteRoutes)
+
+    for (const entry of r2Entries) {
+      // At most 60 days from 2026-09-30.
+      expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+      expect(entry.reason).toContain(
+        'owner-approved live run of r2.objects.create-if-absent and r2.objects.update-if-match'
+      )
+      expect(entry.reason).toContain('against a practice bucket')
+
+      // The named ids are exactly the R2 write cases the route cites.
+      const writeCaseIds = r2EmulatorRoutes.find(route => route.write)?.caseIds ?? []
+
+      expect(writeCaseIds).toEqual(['r2.objects.create-if-absent', 'r2.objects.update-if-match'])
+
+      for (const caseId of writeCaseIds) {
+        expect(entry.reason, caseId).toContain(caseId)
+        expect(knownConformanceCaseIds.has(caseId), caseId).toBe(true)
+      }
+
+      expect(entry.reason).toContain('tracking #115')
+    }
+  })
+
+  it('fails the unverified R2 write route without the pending file or after it expires', () => {
+    for (const report of [repoCheck(now, []), repoCheck(new Date('2026-11-30T00:00:00.000Z'))]) {
+      expect(evidenceReportFailed(report)).toBe(true)
+      expect(failedRoutes(report, 'r2')).toEqual(r2WriteRoutes)
     }
   })
 
@@ -973,6 +1020,8 @@ describe('repo emulator manifests', () => {
       'WARN  email  PORT EmailClient.createDraft  PENDING until 2026-11-29'
     )
     expect(result.stdout).toContain('WARN  email  PORT EmailClient.getMessage  unverified evidence')
+    expect(result.stdout).toContain('WARN  r2  PORT R2ObjectClient.put  PENDING until 2026-11-29')
+    expect(result.stdout).toContain('WARN  r2  PORT R2ObjectClient.get  unverified evidence')
     expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-10-31')
     expect(result.stdout).toContain('WARN  microsoft  POST /v1.0/$batch  PENDING until 2026-11-27')
     expect(result.stdout).toContain('WARN  dropbox  POST /2/files/upload  PENDING until 2026-11-29')

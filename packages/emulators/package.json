@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/emulators",
   "version": "0.1.0-canary.95",
-  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, a fixture-driven fake EmailClient backend, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, Telegram, GitHub, and Google (Gmail, Calendar, Drive) emulators, and a loopback Node server.",
+  "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, fixture-driven fake EmailClient and R2 (R2Presigner, R2ObjectClient) backends, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, Telegram, GitHub, and Google (Gmail, Calendar, Drive) emulators, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -57,6 +57,10 @@
     "./email": {
       "types": "./src/email.ts",
       "default": "./src/email.ts"
+    },
+    "./r2": {
+      "types": "./src/r2.ts",
+      "default": "./src/r2.ts"
     },
     "./node": {
       "types": "./src/node.ts",
@@ -146,6 +150,11 @@
         "types": "./dist/email.d.mts",
         "import": "./dist/email.mjs",
         "default": "./dist/email.mjs"
+      },
+      "./r2": {
+        "types": "./dist/r2.d.mts",
+        "import": "./dist/r2.mjs",
+        "default": "./dist/r2.mjs"
       },
       "./node": {
         "types": "./dist/node.d.mts",

@@ -17,10 +17,10 @@
  * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
  *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat,
  *   Codex Responses, Anthropic Messages, Grok Responses, OpenCode Go, subscription-usage (Claude,
- *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and email port
- *   fixtures).
+ *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, email
+ *   port, and R2 port fixtures).
  * - WARN: a route's evidence is `unverified` (fetch-handler emulators tag their responses
- *   `x-emulator-evidence: unverified`; the email port emulator tags its ledger entries).
+ *   `x-emulator-evidence: unverified`; the email and R2 port emulators tag their ledger entries).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
  *   the future, or missing on verified evidence.
  * - WARN: any other route cites no case ids.
@@ -79,6 +79,8 @@ import { microsoftConformanceCases } from '../packages/connectors/src/microsoft/
 import { microsoftConformanceFixtures } from '../packages/connectors/src/microsoft/conformance/index.ts'
 import { notionConformanceCases } from '../packages/connectors/src/notion/conformance/cases.ts'
 import { notionConformanceFixtures } from '../packages/connectors/src/notion/conformance/index.ts'
+import { r2ConformanceCases } from '../packages/connectors/src/r2-storage/conformance/cases.ts'
+import { r2ConformanceFixtures } from '../packages/connectors/src/r2-storage/conformance/index.ts'
 import { telegramConformanceCases } from '../packages/connectors/src/telegram/conformance/cases.ts'
 import { telegramConformanceFixtures } from '../packages/connectors/src/telegram/conformance/index.ts'
 import { todoistConformanceCases } from '../packages/connectors/src/todoist/conformance/cases.ts'
@@ -101,6 +103,7 @@ import { microsoftEmulatorRoutes } from '../packages/emulators/src/microsoft.ts'
 import { notionEmulatorRoutes } from '../packages/emulators/src/notion.ts'
 import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
 import { openCodeGoEmulatorRoutes } from '../packages/emulators/src/opencode.ts'
+import { r2EmulatorRoutes } from '../packages/emulators/src/r2.ts'
 import { telegramEmulatorRoutes } from '../packages/emulators/src/telegram.ts'
 import { todoistEmulatorRoutes } from '../packages/emulators/src/todoist.ts'
 import {
@@ -194,6 +197,7 @@ export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'xai-usage', routes: xAiGrokSubscriptionUsageEmulatorRoutes },
   { name: 'opencode', routes: openCodeGoEmulatorRoutes },
   { name: 'email', routes: emailEmulatorRoutes },
+  { name: 'r2', routes: r2EmulatorRoutes },
   { name: 'fortnox', routes: fortnoxEmulatorRoutes },
   { name: 'microsoft', routes: microsoftEmulatorRoutes },
   { name: 'dropbox', routes: dropboxEmulatorRoutes },
@@ -324,7 +328,8 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...telegramConformanceCases.map(testCase => testCase.id),
   ...githubConformanceCases.map(testCase => testCase.id),
   ...googleConformanceCases.map(testCase => testCase.id),
-  ...emailConformanceCases.map(testCase => testCase.id)
+  ...emailConformanceCases.map(testCase => testCase.id),
+  ...r2ConformanceCases.map(testCase => testCase.id)
 ])
 
 /** Group fixture evidence by the case id each fixture backs. */
@@ -364,7 +369,7 @@ export const portFixtureEvidence = (
 /**
  * Evidence of every committed Gateway, OpenAI chat, Codex Responses, Anthropic Messages, Grok
  * Responses, OpenCode Go, subscription-usage (Claude, Codex, Grok), Fortnox, Microsoft, Dropbox,
- * Notion, and email port fixture, by case id.
+ * Notion, email port, and R2 port fixture, by case id.
  */
 export const repoFixtureEvidenceByCase: ReadonlyMap<
   string,
@@ -387,7 +392,8 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ...telegramConformanceFixtures,
   ...githubConformanceFixtures,
   ...googleConformanceFixtures,
-  ...portFixtureEvidence(emailConformanceCases, emailConformanceFixtures)
+  ...portFixtureEvidence(emailConformanceCases, emailConformanceFixtures),
+  ...portFixtureEvidence(r2ConformanceCases, r2ConformanceFixtures)
 ])
 
 const dayMs = 24 * 60 * 60 * 1000
