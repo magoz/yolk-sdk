@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
+import { decodeToolArguments } from './arguments.ts'
 import {
   EmptyToolParams,
   toolJsonSchemaFromSchema,
@@ -147,10 +148,12 @@ export const makeInputTool = <Context, ResponseSchema extends SyncSchema>(
   const formatContent: InputContentFormatter =
     options.formatContent ?? (input => defaultInputContent(input))
 
+  // Model-produced call params decode through the advertised JSON codec; user payloads below
+  // keep the original type-side schema.
+  const decodeCall = decodeToolArguments(callSchema, { onExcessProperty: 'error' })
+
   const validateCall: InputToolHandler['validateCall'] = params =>
-    Schema.decodeUnknownEffect(callSchema, { onExcessProperty: 'error' })(params).pipe(
-      Effect.asVoid
-    )
+    decodeCall(params).pipe(Effect.asVoid)
 
   const validateResponse: InputToolHandler['validateResponse'] = data =>
     Schema.decodeUnknownEffect(options.response, { onExcessProperty: 'error' })(data).pipe(

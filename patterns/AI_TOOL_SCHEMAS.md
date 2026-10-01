@@ -45,13 +45,22 @@ to typed validation errors. Background envelopes preserve boolean schemas as the
 - Do not send `anyOf`, `oneOf`, `allOf`, or tuple-only `prefixItems`; Anthropic rejects schemas containing these constructs on Claude subscription OAuth requests.
 - Flatten root and nested combinators into object/property schemas with merged `properties`, `required`, and `$defs`.
 - Merge repeated `allOf` object fields structurally. Preserve combined `properties`, `required`, and `$defs`; keep other keywords valid with right-biased replacement instead of manufacturing object-valued combinators for scalar keywords.
-- Provider-facing normalization may widen constraints that cannot be represented without combinators. Tool execution still validates calls against the original Effect Schema.
+- Provider-facing normalization may widen constraints that cannot be represented without combinators. Tool execution still validates calls against the original Effect Schema, decoded through its JSON codec (see Tool arguments).
+
+## Tool arguments
+
+- `ToolDef.parameters` from `makeTool`/`toolJsonSchemaFromSchema` describes the schema's canonical JSON codec (`Schema.toJsonSchemaDocument`), which encodes `undefined` as `null`: every `Schema.optional(X)` is advertised as `X | null`. Models, especially strict-mode providers, send that `null` for unused optional fields.
+- Model-produced call arguments therefore decode with `Schema.toCodecJson(parameters)`, never the type-side schema: `makeTool` `validate`/`execute`, `makeInteractionTool`/`makeInputTool` call params, and the loop-owned `question` decode. `null` on `Schema.optional(X)` means absent (and `withDecodingDefault` applies); `Schema.optional(Schema.NullOr(X))` keeps a meaningful `null`; required non-nullable fields still reject `null`.
+- The JSON codec also decodes `"NaN"`/`"Infinity"`/`"-Infinity"` for bare `Schema.Number`. JSON arguments never carried non-finite numbers, so any non-finite number in the decoded arguments is a validation error.
+- Properties advertised as optional without `null` (`Schema.optionalKey(X)`, raw/MCP JSON Schemas) get one registry-level step: `resolveTools` drops a `null` there before any registration validates, executes, or forwards the call (`omitNullOptionalToolArguments`), guided by the advertised `def.parameters` (local `$ref`/`$defs`, `allOf`, discriminated `anyOf`/`oneOf`, arrays). Ambiguous unions, required properties, and properties whose schema admits `null` are untouched. Hosts dispatching registrations outside `resolveTools` call the exported helper themselves.
+- Only argument boundaries use this: user-submitted input/interaction responses, tool results, and persisted data keep their own decoders.
+- Prefer `Schema.optional(X)` for optional tool params; use `Schema.optional(Schema.NullOr(X))` only when `null` means something different from omission.
 
 ## Tests
 
 - Add regression coverage at the tool registry boundary, not each provider adapter.
 - Assert provider-facing `ToolDef.parameters` for object tools match `{ type: "object" }` at the root.
 - Add property coverage for schema families used by tools: empty params, empty structs, required/optional fields, nested structs, arrays, literals, records, unions, and optional nested fields.
-- Property invariants: root is always object, root `$ref` is never provider-facing, empty structs never leak `anyOf`, valid params decode before execution, and invalid params return model-visible errors before execution.
+- Property invariants: root is always object, root `$ref` is never provider-facing, empty structs never leak `anyOf`, valid params decode before execution, invalid params return model-visible errors before execution, and `null` for every absent optional (and optional nested) field decodes exactly like omission per root union branch.
 - Provider request-body tests should pass registry-derived `ToolDef`s through each adapter and assert the final provider field stays safe (`function.parameters`, Codex `parameters`, Anthropic `input_schema`).
 - When nested schemas emit local `$ref`s, provider-facing payloads must preserve matching `$defs`.

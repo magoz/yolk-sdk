@@ -16,6 +16,8 @@ export {
   toolJsonSchemaFromSchema
 } from './registry.ts'
 
+export { omitNullOptionalToolArguments } from './arguments.ts'
+
 export { makeInputTool, makeInputToolDef, makeInputToolModule } from './input.ts'
 
 export type { MakeInputToolOptions, InputToolModule } from './input.ts'

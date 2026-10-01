@@ -718,15 +718,18 @@ const invalidQuestionToolResult = (call: ToolCall) =>
     structuredContent: { type: 'question_invalid' }
   })
 
+// Model-produced question args decode through the JSON codec that the question ToolDef
+// advertises, so `null` on optional prompt fields means absent. No numeric fields, so the
+// non-finite guard of `decodeToolArguments` (tools) is not needed here.
+const decodeQuestionToolParams = Schema.decodeUnknownEffect(Schema.toCodecJson(QuestionToolParams))
+
 const prepareQuestionCall = (
   call: ToolCall,
   index: number,
   responses: ReadonlyArray<HitlResponse>
 ): Effect.Effect<PreparedToolCall> =>
   Effect.gen(function* () {
-    const decoded = yield* Schema.decodeUnknownEffect(QuestionToolParams)(call.params).pipe(
-      Effect.result
-    )
+    const decoded = yield* decodeQuestionToolParams(call.params).pipe(Effect.result)
 
     if (Predicate.isTagged(decoded, 'Failure')) {
       return PreparedToolCall.Result({

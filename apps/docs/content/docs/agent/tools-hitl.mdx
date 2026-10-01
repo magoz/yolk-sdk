@@ -32,12 +32,30 @@ export const echoTool = makeTool({
 ```
 
 Optional `invalidParamsMessage: (error: Schema.SchemaError) => string` customizes the
-model-visible validation text. Only `Schema.decodeUnknownEffect` on `parameters` invokes it, and
+model-visible validation text. Only decoding `parameters` (through its JSON codec) invokes it, and
 the decode error is passed through unwrapped. Default:
 `Invalid ${name} arguments: ${String(error)}`. In Effect 4, `SchemaError` extends native
 `Error`, but do not default to `.message`: that drops the `SchemaError(...)` wrapper required by
 this tool-message contract. Existing
 `(error: unknown) => string` callbacks remain assignable.
+
+### Optional arguments and `null`
+
+The advertised `ToolDef.parameters` describe the schema's JSON codec, so `Schema.optional(X)`
+reaches the model as `X | null`, and models often send `null` for fields they do not use. Tool
+arguments decode through `Schema.toCodecJson(parameters)`:
+
+- `null` on `Schema.optional(X)` is treated as omitted, and `Schema.withDecodingDefault` still
+  applies.
+- `Schema.optional(Schema.NullOr(X))` keeps `null`; use it only when `null` means something
+  different from omission, such as clearing a value.
+- Required non-nullable fields still reject `null` with a model-visible validation error.
+- Non-finite numbers (`"NaN"`, `"Infinity"`, `"-Infinity"`) are rejected.
+
+`resolveTools` also drops `null` on properties advertised as optional without `null`, such as
+`Schema.optionalKey(X)` fields or raw MCP schemas, before any tool sees the call. If you dispatch
+registrations without `resolveTools`, apply `omitNullOptionalToolArguments(def.parameters, params)`
+from `@yolk-sdk/agent/tools` yourself.
 
 ## Resolve tools for a request
 

@@ -63,6 +63,20 @@ version. Tooling such as `@effect/language-service` is versioned independently.
   advertised as `minLength: ceil(n / 2)` code points. Tool execution still validates against the
   original Effect Schema.
 
+### Next canary: tool arguments accept `null` for optional fields
+
+`makeTool`, `makeInputTool`/`makeInteractionTool` call params, and the `question` tool now decode
+model arguments with `Schema.toCodecJson(parameters)`, the codec that `ToolDef.parameters` already
+advertised. `null` on `Schema.optional(X)` now decodes as omitted instead of failing validation;
+`Schema.optional(Schema.NullOr(X))` still keeps `null`, and required fields still reject it.
+`resolveTools` also drops `null` on properties advertised as optional without `null`
+(`Schema.optionalKey(X)`, the subagent `model`/`reasoning_effort`, raw MCP schemas) before any
+registration sees the call. Advertised schemas are unchanged. Non-finite numbers stay rejected.
+If you worked around this with `Schema.optional(Schema.NullOr(X))` plus `null`-to-`undefined`
+mapping, `Schema.optional(X)` is now enough; app wrappers that re-decoded with the JSON codec can
+use `makeTool` directly. `omitNullOptionalToolArguments` is new on `@yolk-sdk/agent/tools` for
+hosts that dispatch registrations without `resolveTools`.
+
 ### Canary.96: code mode, classifier models, conformance, and emulators
 
 New packages: `@yolk-sdk/codemode` ([Add code mode](./integrations/code-mode)) and the
