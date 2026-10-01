@@ -17,7 +17,7 @@
  * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
  *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat,
  *   Codex Responses, Anthropic Messages, Grok Responses, OpenCode Go, subscription-usage (Claude,
- *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, and email port
+ *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, and email port
  *   fixtures).
  * - WARN: a route's evidence is `unverified` (fetch-handler emulators tag their responses
  *   `x-emulator-evidence: unverified`; the email port emulator tags its ledger entries).
@@ -73,6 +73,8 @@ import { fortnoxConformanceCases } from '../packages/connectors/src/fortnox/conf
 import { fortnoxConformanceFixtures } from '../packages/connectors/src/fortnox/conformance/index.ts'
 import { githubConformanceCases } from '../packages/connectors/src/github/conformance/cases.ts'
 import { githubConformanceFixtures } from '../packages/connectors/src/github/conformance/index.ts'
+import { googleConformanceCases } from '../packages/connectors/src/google/conformance/cases.ts'
+import { googleConformanceFixtures } from '../packages/connectors/src/google/conformance/index.ts'
 import { microsoftConformanceCases } from '../packages/connectors/src/microsoft/conformance/cases.ts'
 import { microsoftConformanceFixtures } from '../packages/connectors/src/microsoft/conformance/index.ts'
 import { notionConformanceCases } from '../packages/connectors/src/notion/conformance/cases.ts'
@@ -94,6 +96,7 @@ import { emailEmulatorRoutes } from '../packages/emulators/src/email.ts'
 import { fortnoxEmulatorRoutes } from '../packages/emulators/src/fortnox.ts'
 import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
 import { githubEmulatorRoutes } from '../packages/emulators/src/github.ts'
+import { googleEmulatorRoutes } from '../packages/emulators/src/google.ts'
 import { microsoftEmulatorRoutes } from '../packages/emulators/src/microsoft.ts'
 import { notionEmulatorRoutes } from '../packages/emulators/src/notion.ts'
 import { openAiEmulatorRoutes } from '../packages/emulators/src/openai.ts'
@@ -197,7 +200,8 @@ export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'notion', routes: notionEmulatorRoutes },
   { name: 'todoist', routes: todoistEmulatorRoutes },
   { name: 'telegram', routes: telegramEmulatorRoutes },
-  { name: 'github', routes: githubEmulatorRoutes }
+  { name: 'github', routes: githubEmulatorRoutes },
+  { name: 'google', routes: googleEmulatorRoutes }
 ]
 
 /** The repo's pending-evidence allowlist. */
@@ -319,6 +323,7 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...todoistConformanceCases.map(testCase => testCase.id),
   ...telegramConformanceCases.map(testCase => testCase.id),
   ...githubConformanceCases.map(testCase => testCase.id),
+  ...googleConformanceCases.map(testCase => testCase.id),
   ...emailConformanceCases.map(testCase => testCase.id)
 ])
 
@@ -381,6 +386,7 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ...todoistConformanceFixtures,
   ...telegramConformanceFixtures,
   ...githubConformanceFixtures,
+  ...googleConformanceFixtures,
   ...portFixtureEvidence(emailConformanceCases, emailConformanceFixtures)
 ])
 

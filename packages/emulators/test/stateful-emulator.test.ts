@@ -3,13 +3,15 @@
  * `@emulators/core`): multi-segment `{name+}` parameters, raw parameter patterns (matched in full,
  * no `g` or `y` flag), the fail-closed mode (constant-text ledger entries for unrecognised
  * requests and Authorization headers, every parameter patterned at build, the bearer guarded as a
- * secret in queries, recorded headers, bodies, and plan-time reasons), and that an emulator
- * without `failClosed` keeps the earlier behaviour (the Dropbox and Notion suites cover it fully).
+ * secret in queries, recorded headers, bodies, a route's decoded body views, and plan-time
+ * reasons), and that an emulator without `failClosed` keeps the earlier behaviour (the Dropbox and
+ * Notion suites cover it fully).
  */
-import { Predicate } from 'effect'
+import { Predicate, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import type * as Schema from 'effect/Schema'
 import {
+  DecodedViewRefusal,
   exactBodyKeys,
   exactObject,
   exactQuery,
@@ -313,6 +315,283 @@ describe('fail-closed mode', () => {
     const answered = await api.fetch(get('/files/a/b', { authorization }))
 
     expect(await answered.text()).toBe('a/b')
+  })
+})
+
+/** Base64url of UTF-8 text, as a provider wire format may wrap request content. */
+const base64Url = (text: string): string =>
+  btoa(String.fromCharCode(...new TextEncoder().encode(text)))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '')
+
+/** A tolerant view: the base64url-decoded `raw` of a JSON body, or none. */
+const rawView = (body: string): ReadonlyArray<string> => {
+  const raw = Result.try(() => {
+    const parsed: unknown = JSON.parse(body)
+
+    return Predicate.isObject(parsed) && Predicate.isString(parsed.raw) ? parsed.raw : undefined
+  })
+
+  const text = Result.isFailure(raw) ? undefined : raw.success
+
+  if (text === undefined) return []
+
+  const decoded = Result.try(() => atob(text.replaceAll('-', '+').replaceAll('_', '/')))
+
+  return Result.isFailure(decoded) ? [] : [decoded.success]
+}
+
+/** A write route whose body carries base64url content (`{ raw }`), with a decoded view. */
+const encodedWrite = (
+  binding: {
+    readonly decodedViews?: (body: string) => ReadonlyArray<string>
+    readonly viewRefusalReasons?: ReadonlyArray<string>
+  } = {}
+) =>
+  statefulRoute<State, undefined, string>(
+    {
+      method: 'POST',
+      path: '/encoded/{id}',
+      kind: 'connector',
+      write: true,
+      caseIds: ['synthetic.case'],
+      evidence: 'unverified',
+      params: { id: /^[0-9]+$/ },
+      ...binding
+    },
+    'json',
+    () => 'ok',
+    state => () => {
+      state.writes += 1
+
+      return new Response('written')
+    }
+  )
+
+describe('fail-closed mode: decoded views of a route body', () => {
+  const secret = 'synthetic-wrapper-secret'
+
+  const post = (api: Awaited<ReturnType<typeof build>>, raw: string) =>
+    api.fetch(
+      new Request('https://api.example.test/encoded/1', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ raw })
+      })
+    )
+
+  it('checks each decoded view like the raw body, before any fault or write', async () => {
+    const api = await build([encodedWrite({ decodedViews: rawView })], true)
+
+    api.faults.add({ kind: 'status', status: 503, count: 1 })
+
+    // The bearer only inside base64url content, also JSON-escaped and percent-encoded there.
+    const forms = [
+      `Subject: ${secret}`,
+      `Subject: ${secret.replace('s', '\\u0073')}`,
+      `Subject: ${secret.replace('s', '%73')} (100% done)`
+    ]
+
+    for (const form of forms) {
+      const response = await post(api, base64Url(form))
+      const text = await response.text()
+
+      expect(response.status, form).toBe(400)
+      expect(text, form).not.toContain(secret)
+    }
+
+    for (const entry of api.ledger.entries()) {
+      expect(entry).toEqual({
+        seq: expect.any(Number),
+        method: 'POST',
+        path: '/<unrecognised>',
+        route: '/encoded/{id}',
+        query: {},
+        headers: {},
+        status: 400,
+        evidence: 'unverified',
+        notEmulated: 'the request body repeats the credential'
+      })
+    }
+
+    expect(api.snapshot()).toEqual({ writes: 0 })
+    expect(api.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
+
+    // A view without the bearer, and a body the view cannot decode, reach the route (and the
+    // fault, which answers the first of them).
+    expect((await post(api, base64Url('Subject: safe'))).status).toBe(503)
+    expect((await post(api, '***not base64***')).status).toBe(200)
+    expect(api.snapshot()).toEqual({ writes: 1 })
+  })
+
+  it('a view that throws refuses the body as uncheckable: a constant entry, no fault, no write', async () => {
+    const api = await build(
+      [
+        encodedWrite({
+          decodedViews: () => {
+            throw new Error('synthetic view failure')
+          }
+        })
+      ],
+      true
+    )
+
+    api.faults.add({ kind: 'status', status: 503, count: 1 })
+
+    // With the bearer in the encoded content, and without it: the same constant entry, which never
+    // says the body repeats the credential.
+    const responses = [
+      await post(api, base64Url(`Subject: ${secret}`)),
+      await post(api, base64Url('Subject: safe'))
+    ]
+
+    const texts = await Promise.all(responses.map(response => response.text()))
+
+    expect(responses.map(response => response.status)).toEqual([400, 400])
+    expect(texts).toEqual(
+      texts.map(() =>
+        JSON.stringify({
+          error: {
+            type: 'not_emulated',
+            message: 'Not emulated: the request body cannot be checked for the credential'
+          }
+        })
+      )
+    )
+
+    for (const entry of api.ledger.entries()) {
+      expect(entry).toEqual({
+        seq: expect.any(Number),
+        method: 'POST',
+        path: '/<unrecognised>',
+        route: '/encoded/{id}',
+        query: {},
+        headers: {},
+        status: 400,
+        evidence: 'unverified',
+        notEmulated: 'the request body cannot be checked for the credential'
+      })
+    }
+
+    expect(JSON.stringify(api.ledger.entries())).not.toContain(base64Url('Subject: safe'))
+    expect(api.snapshot()).toEqual({ writes: 0 })
+    expect(api.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
+  })
+
+  describe('declared view-refusal reasons', () => {
+    const declared = 'synthetic: the encoded note is not the recorded one'
+
+    /** A view that decodes `{ raw }` and refuses it with `reason`, passing what it decoded. */
+    const refusing = (reason: string) => (body: string) => {
+      throw new DecodedViewRefusal({ reason, decoded: rawView(body) })
+    }
+
+    const entryOf = (reason: string) => ({
+      seq: expect.any(Number),
+      method: 'POST',
+      path: '/<unrecognised>',
+      route: '/encoded/{id}',
+      query: {},
+      headers: {},
+      status: 400,
+      evidence: 'unverified',
+      notEmulated: reason
+    })
+
+    const refusedWith = async (
+      binding: Parameters<typeof encodedWrite>[0],
+      raw: string,
+      reason: string
+    ) => {
+      const api = await build([encodedWrite(binding)], true)
+
+      api.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const response = await post(api, raw)
+      const text = await response.text()
+
+      expect(response.status).toBe(400)
+      expect(JSON.parse(text)).toEqual({
+        error: { type: 'not_emulated', message: `Not emulated: ${reason}` }
+      })
+      expect(api.ledger.entries()).toEqual([entryOf(reason)])
+      expect(api.snapshot()).toEqual({ writes: 0 })
+      expect(api.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
+
+      // Nothing the request carried is echoed or recorded.
+      expect([text, JSON.stringify(api.ledger.entries())].join('\n')).not.toContain(raw)
+
+      return text
+    }
+
+    it('a declared reason is ledgered in the constant entry', async () => {
+      await refusedWith(
+        { decodedViews: refusing(declared), viewRefusalReasons: [declared] },
+        base64Url('Subject: safe'),
+        declared
+      )
+    })
+
+    it('an undeclared reason falls back to the uncheckable reason (never request text)', async () => {
+      const raw = base64Url('Subject: safe')
+
+      // The view tries to answer with text derived from the request.
+      const text = await refusedWith(
+        {
+          decodedViews: body => {
+            throw new DecodedViewRefusal({ reason: `echo ${body}`, decoded: [] })
+          },
+          viewRefusalReasons: [declared]
+        },
+        raw,
+        'the request body cannot be checked for the credential'
+      )
+
+      expect(text).not.toContain('echo')
+    })
+
+    it('a plain throw falls back to the uncheckable reason, even with declared reasons', async () => {
+      await refusedWith(
+        {
+          decodedViews: () => {
+            throw new Error(declared)
+          },
+          viewRefusalReasons: [declared]
+        },
+        base64Url('Subject: safe'),
+        'the request body cannot be checked for the credential'
+      )
+    })
+
+    it('a refusal whose cleanly decoded text holds the bearer is a credential repeat', async () => {
+      const text = await refusedWith(
+        { decodedViews: refusing(declared), viewRefusalReasons: [declared] },
+        base64Url(`Subject: ${secret}`),
+        'the request body repeats the credential'
+      )
+
+      expect(text).not.toContain(secret)
+    })
+
+    it('a declared reason that names the bearer is scrubbed (defensively)', async () => {
+      const naming = `synthetic: refused near ${secret}`
+
+      const text = await refusedWith(
+        { decodedViews: refusing(naming), viewRefusalReasons: [naming] },
+        base64Url('Subject: safe'),
+        'synthetic: refused near <redacted>'
+      )
+
+      expect(text).not.toContain(secret)
+    })
+  })
+
+  it('a route without decoded views is checked exactly as before (the encoded bearer passes)', async () => {
+    const api = await build([encodedWrite()], true)
+
+    expect((await post(api, base64Url(`Subject: ${secret}`))).status).toBe(200)
+    expect(api.snapshot()).toEqual({ writes: 1 })
   })
 })
 

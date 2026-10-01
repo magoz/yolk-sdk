@@ -294,6 +294,111 @@
       "path": "/repos/{owner}/{repo}/issues/{issueNumber}",
       "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.issues.lifecycle-close (write-irreversible: the closed issue stays in the practice repository; started only by its exact case id).",
       "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "POST",
+      "path": "/gmail/v1/users/me/messages/{messageId}/modify",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.label-create-apply-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "POST",
+      "path": "/gmail/v1/users/me/messages/{messageId}/trash",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.trash-untrash.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "POST",
+      "path": "/gmail/v1/users/me/messages/{messageId}/untrash",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.trash-untrash.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "POST",
+      "path": "/gmail/v1/users/me/labels",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.label-create-apply-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "DELETE",
+      "path": "/gmail/v1/users/me/labels/{labelId}",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.label-create-apply-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "POST",
+      "path": "/gmail/v1/users/me/drafts",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.draft-compose-update-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "PUT",
+      "path": "/gmail/v1/users/me/drafts/{draftId}",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.draft-compose-update-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "DELETE",
+      "path": "/gmail/v1/users/me/drafts/{draftId}",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.draft-compose-update-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "POST",
+      "path": "/upload/gmail/v1/users/me/messages/send",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.send-practice-address (write-irreversible: one message to the seeded practice address, started only by its exact case id).",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "POST",
+      "path": "/calendar/v3/calendars/{calendarId}/events",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.calendar.event-lifecycle and google.calendar.deleted-event-gone.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "PATCH",
+      "path": "/calendar/v3/calendars/{calendarId}/events/{eventId}",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.calendar.event-lifecycle.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "DELETE",
+      "path": "/calendar/v3/calendars/{calendarId}/events/{eventId}",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.calendar.event-lifecycle and google.calendar.deleted-event-gone.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "POST",
+      "path": "/drive/v3/files",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.drive.folder-trash-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "PATCH",
+      "path": "/drive/v3/files/{fileId}",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.drive.folder-trash-delete.",
+      "expires": "2026-11-29"
+    },
+    {
+      "manifest": "google",
+      "method": "DELETE",
+      "path": "/drive/v3/files/{fileId}",
+      "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.drive.folder-trash-delete.",
+      "expires": "2026-11-29"
     }
   ]
 }

@@ -202,3 +202,11 @@ page tokens, links) and promotion; staged recordings carry the Gmail API base UR
 `endpoint`, so set each Calendar and Drive fixture's `endpoint` to its own API base URL when
 promoting. See
 [Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental [Google emulator](../api-reference/emulators#google-emulator)
+(`@yolk-sdk/emulators/google`) is a stateful, fixture-only stand-in that passes these cases through
+the real connector actions over the connector ports, including the send (recorded in its state,
+never delivered, and accepted only for the seeded practice address), without ever keeping or
+echoing the access token. No fixture records the leftover lookup's reads (its Gmail label listing
+comes first), so against the emulator that lookup fails (HTTP 400 not-emulated) and a runner prints
+its lookup-failed WARN instead of leftover warnings.

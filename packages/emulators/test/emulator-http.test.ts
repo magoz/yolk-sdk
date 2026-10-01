@@ -144,7 +144,24 @@ describe('credential names', () => {
       'project_id',
       'cursor',
       'limit',
-      'file_id'
+      'file_id',
+      // Google (Gmail, Calendar, Drive) query parameters (never credentials).
+      'labelIds',
+      'maxResults',
+      'pageToken',
+      'format',
+      'uploadType',
+      'timeMin',
+      'timeMax',
+      'singleEvents',
+      'orderBy',
+      'pageSize',
+      'q',
+      'spaces',
+      'supportsAllDrives',
+      'includeItemsFromAllDrives',
+      'corpora',
+      'fields'
     ]
 
     // The fixture scan agrees on both lists, so the check below is not vacuous.
