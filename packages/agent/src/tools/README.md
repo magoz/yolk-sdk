@@ -11,6 +11,8 @@ Generic host tool registration and resolution.
 - Package-owned `subagent` and `question` tool contracts.
 - Helpers for subagent result metadata and non-recursive subagent tool exposure.
 - `ModelVisibleToolError` helpers for recoverable, model-visible tool failures.
+- Model-argument decoding through the advertised JSON codec (`null` on `Schema.optional` means
+  absent) and `omitNullOptionalToolArguments`, which `resolveTools` applies to every call.
 
 ## Use it when
 
