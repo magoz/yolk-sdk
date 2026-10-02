@@ -1,4 +1,4 @@
-import { Clock, ConfigProvider, Effect, Exit, Fiber, Layer, Redacted } from 'effect'
+import { Clock, ConfigProvider, Effect, Exit, Fiber, Layer, Random, Redacted } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientError, HttpClientResponse } from 'effect/unstable/http'
 import type { HttpClientRequest } from 'effect/unstable/http'
@@ -658,13 +658,24 @@ describe('Vercel AI Gateway classifier retries', () => {
     Effect.gen(function* () {
       const sent = { count: 0 }
 
+      // Pin full jitter at its upper bound (249 ms, then 499 ms) so the timeline is deterministic;
+      // with free jitter both retries can land inside the first 250 ms.
       const fiber = yield* Effect.forkChild(
-        classifyScripted([unavailable, unavailable, { body: okBody }], sent)
+        classifyScripted([unavailable, unavailable, { body: okBody }], sent).pipe(
+          Effect.provideService(Random.Random, {
+            nextDoubleUnsafe: () => 0.999,
+            nextIntUnsafe: () => 0
+          })
+        )
       )
 
-      yield* TestClock.adjust('250 millis')
+      yield* TestClock.adjust('248 millis')
+      expect(sent.count).toBe(1)
+      yield* TestClock.adjust('2 millis')
       expect(sent.count).toBe(2)
-      yield* TestClock.adjust('500 millis')
+      yield* TestClock.adjust('497 millis')
+      expect(sent.count).toBe(2)
+      yield* TestClock.adjust('3 millis')
 
       const result = yield* Fiber.join(fiber)
 
