@@ -95,7 +95,9 @@ const allSeedFlags = [
   '--drive-file=synthetic-practice-file-0001'
 ]
 
-const liveToken = 'ya29.SyntheticLiveGoogleAccessToken0000000000000001'
+// No long run of one character: the staging guard refuses any 16-character window of the token,
+// and a run such as `0000000000000001` also occurs in the synthetic Gmail draft id.
+const liveToken = 'ya29.SyntheticLiveGoogleAccessTokenQ7xLm2Pz9Rt4Vw1Ab'
 
 const env = { GOOGLE_ACCESS_TOKEN: liveToken }
 
@@ -123,9 +125,9 @@ describe('run-google-conformance arguments', () => {
       )
     }
 
-    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument: --run-id')
-    expect(() => parse(['--token', liveToken])).toThrow('Unknown argument: --token')
-    expect(() => parse(['--to', 'someone@example.test'])).toThrow('Unknown argument: --to')
+    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument (not shown)')
+    expect(() => parse(['--token', liveToken])).toThrow('Unknown argument (not shown)')
+    expect(() => parse(['--to', 'someone@example.test'])).toThrow('Unknown argument (not shown)')
   })
 
   it('reads seeds from flags over env', () => {

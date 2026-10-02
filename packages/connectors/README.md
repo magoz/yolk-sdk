@@ -21,6 +21,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors`                             | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types         |
 | `@yolk-sdk/connectors/agent`                       | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                              |
 | `@yolk-sdk/connectors/afloat`                      | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                    |
+| `@yolk-sdk/connectors/afloat/conformance`          | Experimental Afloat target, seeds, and derived fixtures for the `@yolk-sdk/mcp/conformance` cases              |
 | `@yolk-sdk/connectors/conformance`                 | Experimental, conformance/testing only: Effect `HttpClient` bridges, a static resolver, and a cleanup reporter |
 | `@yolk-sdk/connectors/dropbox`                     | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update      |
 | `@yolk-sdk/connectors/dropbox/conformance`         | Experimental Dropbox conformance cases, seed config, and synthetic replay fixtures                             |
@@ -1723,10 +1724,12 @@ state rather than dropping conditions or silently changing modes.
 
 ### MCP reuse and host enforcement
 
-Afloat's canonical `https://useafloat.com/mcp` metadata discovery confirms invoice/quote PDF and
+Afloat's canonical `https://useafloat.com/mcp` exposes invoice/quote PDF and
 receipt/logo/tax-return download grants (one hour), plus receipt/logo upload-intent completion
-operations. Receipt completion attaches or replaces atomically; inspected upload inputs allow
-JPEG/PNG/WebP/GIF/PDF, 1–2,147,483,647 bytes, optional SHA-256. Figma discovery confirms
+operations (`get-invoice-pdf`, `create-receipt-upload`, ...; the published schemas are in
+`@yolk-sdk/connectors/afloat/conformance`, see "Afloat MCP conformance" below). Receipt completion
+attaches or replaces atomically; receipt upload inputs allow JPEG/PNG/WebP/GIF/PDF,
+1–2,147,483,647 bytes, optional SHA-256. Figma discovery confirms
 `download_assets`, `upload_assets` (including SVG, 10 MB/asset), `use_figma` and `create_new_file`.
 Use dynamic MCP contracts and structured/multipart results, not duplicated SDK wrappers. Deployed
 Figma node-selection parameters can differ from docs. No whole `.fig` download claim. Keep grants
@@ -1803,6 +1806,26 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 Afloat MCP auth reads an `afloat_` API key from the host runtime credential and returns the
 canonical MCP endpoint and required `2026-07-28` protocol version. Keep the API key server-side;
 never expose the auth action through a model-callable connector module.
+
+### Afloat MCP conformance (experimental)
+
+`@yolk-sdk/connectors/afloat/conformance` holds no case code and never imports `@yolk-sdk/mcp`: the
+cases are the generic `@yolk-sdk/mcp/conformance` cases, and this subpath supplies Afloat's target
+and seeds. `makeAfloatMcpConformanceTarget()` runs the real `afloat.mcp_auth` over the host's
+`CredentialResolver` and answers the target value (`https://useafloat.com/mcp`, modern
+`2026-07-28`, `Authorization: Bearer <afloat_ key>`, and the public reserved invalid key
+`afloat_yolkconformanceinvalid0000` for the auth case). `afloatMcpConformanceLiveSeeds` name the
+published nine-tool subset (`afloatMcpConformanceTools`, in the provider's listing order: the
+source's names, titles, schemas, and annotations; the descriptions and server instructions are
+rewritten generically) and the two receipt-upload tools that write, and no `readTool`;
+`afloatMcpConformanceFixtureSeeds` add the synthetic `list-invoices` call. The eight fixtures
+(`afloatMcpConformanceFixtures`, every case but `mcp.legacy.session`, which does not apply to a
+modern server) are derived from the provider's source (owner-supplied), not a live recording: the
+pinned official MCP server SDK run in-process with the provider's handler options, over synthetic
+data, `evidence: 'unverified'`. `pnpm conformance:mcp --target afloat` previews the run (a dry run:
+no network, no credential read); `--live --owner-approved --account <label>` runs the cases by hand
+against a practice account (a tool is called only when named with the `--read-tool` flag, never
+from the environment), and `@yolk-sdk/emulators/mcp` serves the fixtures as profile `afloat`.
 
 Figma MCP auth reads `accessToken` plus optional `refreshToken`, `clientId`, and `clientSecret`
 from the runtime `OAuthCredential`. Keep these values in the host credential store.

@@ -6,6 +6,7 @@ import { vercelAiGatewayConformanceFixtures } from '../../packages/agent/src/pro
 import { dropboxConformanceFixtures } from '../../packages/connectors/src/dropbox/conformance/index.ts'
 import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import { googleConformanceFixtures } from '../../packages/connectors/src/google/conformance/index.ts'
+import { afloatMcpConformanceFixtures } from '../../packages/connectors/src/afloat/conformance/index.ts'
 import { linkedInSearchConformanceFixtures } from '../../packages/connectors/src/linkedin-search/conformance/index.ts'
 import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
 import { r2ConformanceCases } from '../../packages/connectors/src/r2-storage/conformance/cases.ts'
@@ -226,7 +227,8 @@ describe('checkEmulatorEvidence', () => {
     ...githubConformanceFixtures,
     ...googleConformanceFixtures,
     ...linkedInSearchConformanceFixtures,
-    ...mcpConformanceFixtures
+    ...mcpConformanceFixtures,
+    ...afloatMcpConformanceFixtures
   ]
 
   const hasVerifiedFixture = (caseId: string) =>
@@ -284,7 +286,8 @@ describe('checkEmulatorEvidence', () => {
     ['GitHub', githubConformanceFixtures],
     ['Google', googleConformanceFixtures],
     ['LinkedIn search', linkedInSearchConformanceFixtures],
-    ['MCP', mcpConformanceFixtures]
+    ['MCP', mcpConformanceFixtures],
+    ['Afloat MCP', afloatMcpConformanceFixtures]
   ])(
     'fails unbacked-verified for a verified route citing only still-unverified repo cases (%s)',
     (_name, fixtures) => {
@@ -689,7 +692,7 @@ describe('repo emulator manifests', () => {
       }
     }
 
-    // Each MCP case has a modern and a legacy fixture, both unverified.
+    // Each MCP case has a modern and a legacy fixture, plus a derived Afloat one, all unverified.
     expect(mcpEmulatorRoutes.length).toBeGreaterThan(0)
 
     for (const route of mcpEmulatorRoutes) {
@@ -697,9 +700,9 @@ describe('repo emulator manifests', () => {
 
       for (const caseId of route.caseIds) {
         expect(repoFixtureEvidenceByCase.get(caseId), `${route.path} ${caseId}`).toEqual(
-          mcpConformanceFixtures
-            .filter(fixture => fixture.caseId === caseId)
-            .map(() => 'unverified')
+          [...mcpConformanceFixtures, ...afloatMcpConformanceFixtures].flatMap(fixture =>
+            fixture.caseId === caseId ? ['unverified'] : []
+          )
         )
       }
     }

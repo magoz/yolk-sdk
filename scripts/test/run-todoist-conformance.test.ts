@@ -87,9 +87,9 @@ describe('run-todoist-conformance arguments', () => {
 
   it('rejects an irreversible flag and a run id flag: Todoist has neither', () => {
     expect(() => parse(['--allow-irreversible', 'todoist.tasks.lifecycle-close'])).toThrow(
-      'Unknown argument: --allow-irreversible'
+      'Unknown argument (not shown)'
     )
-    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument: --run-id')
+    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument (not shown)')
     expect(todoistConformanceCases.some(testCase => testCase.safety === 'write-irreversible')).toBe(
       false
     )

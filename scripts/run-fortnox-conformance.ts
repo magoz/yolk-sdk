@@ -22,7 +22,7 @@
  * re-runs each case on replay against its new fixture, and renders every fixture module plus the
  * seeds module. Only if every recorded case verified and passed the secret scan, no recorded
  * exchange carries the live access token (the shared `recordingContainsAccessToken`, before
- * rendering), and no rendered file or review-checklist line does either (`textContainsAccessToken`),
+ * rendering), and no rendered file or review-checklist line does either (`textCarriesSecret`),
  * does it write them, all or nothing, to a NEW run directory under the GITIGNORED root
  * `.conformance-recordings/fortnox/<YYYY-MM-DD>T<HHMMSS>Z-<random>/`: it writes the whole batch into
  * a sibling temp directory and publishes it with one rename, refuses an existing destination, and
@@ -122,7 +122,8 @@ import {
   redactingLiveRunIo,
   runInterruptibly,
   stderrCleanupReporter,
-  textContainsAccessToken,
+  textCarriesSecret,
+  unknownArgumentMessage,
   type CliIo,
   type LiveRunIo,
   type RecordingWriter,
@@ -420,7 +421,7 @@ export const parseRunArgs = (
       }
 
       default:
-        throw new Error(`Unknown argument: ${argument}`)
+        throw new Error(unknownArgumentMessage)
     }
   }
 
@@ -895,7 +896,7 @@ export const recordingReviewChecklist = (
  * The `--record` gate. Verifies every passed case's recording on replay (and the secret scan),
  * refuses the recordings if any exchange carries the live access token
  * (`recordingContainsAccessToken`), then renders every fixture module, the seeds module, and the
- * review checklist, refuses them if any carries the token (`textContainsAccessToken`), writes the
+ * review checklist, refuses them if any carries the token (`textCarriesSecret`), writes the
  * files into a sibling temp directory (`<root>/.tmp-<run>`), and publishes it to
  * `options.stagingDir` with one rename. All or nothing: any failure (verification, either token
  * check, a write, or the rename) leaves no staging directory, and the temp directory is removed
@@ -1009,7 +1010,7 @@ export const stageRecordings = (
     // that rendering escaped again (`\\u0037`) is decoded too.
     if (
       [...files.map(file => file.contents), ...checklist].some(text =>
-        textContainsAccessToken(text, inputs.accessToken)
+        textCarriesSecret(text, inputs.accessToken)
       )
     ) {
       return yield* new FortnoxRunFailed({ message: renderedTokenRefusal })

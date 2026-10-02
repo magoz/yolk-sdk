@@ -1,10 +1,11 @@
 /**
  * Cross-checks: the MCP emulator must satisfy the same `@yolk-sdk/mcp/conformance` cases the
- * replayed synthetic fixtures satisfy, through the REAL `@yolk-sdk/mcp/client` (the cases run its
- * operations behind their observing client and fail-closed call gate), per profile, both
- * in-process and over a loopback socket, each case alone and all of them in sequence on one
- * emulator; every case is a read, so each emulator ends at its seed except the legacy sessions
- * the handshakes minted; each drill knob makes exactly its case fail; and an SSE answer truncated
+ * replayed synthetic fixtures (and the derived Afloat fixtures) satisfy, through the REAL
+ * `@yolk-sdk/mcp/client` (the cases run its operations behind their observing client and
+ * fail-closed call gate; the Afloat target comes from the real `afloat.mcp_auth`), per profile,
+ * both in-process and over a loopback socket, each case alone and all of them in sequence on one
+ * emulator; every case is a read, so each emulator ends at its seed except the legacy sessions the
+ * handshakes minted; each drill knob makes exactly its case fail; and an SSE answer truncated
  * before its response fails the operation as an `McpError` at the client's timeout, never a hang.
  * Tests may import SDK packages; the emulator source never does.
  */
@@ -32,8 +33,17 @@ import {
   type McpConformanceEra,
   type McpConformanceTargetSettings
 } from '@yolk-sdk/mcp/conformance'
+import { ApiKeyCredential } from '@yolk-sdk/connectors'
+import {
+  afloatMcpConformanceFixtureSeeds,
+  afloatMcpConformanceFixtures,
+  afloatMcpConformanceInvalidCredential,
+  makeAfloatMcpConformanceTarget
+} from '@yolk-sdk/connectors/afloat/conformance'
+import { staticCredentialResolverLayer } from '@yolk-sdk/connectors/conformance'
 import {
   makeMcpEmulator,
+  mcpEmulatorAfloatOrigin,
   mcpEmulatorOrigin,
   type McpEmulator,
   type McpEmulatorDrills,
@@ -485,6 +495,210 @@ describe('an SSE answer truncated before its response', () => {
           })
         ),
       30_000
+    )
+  }
+})
+
+// The Afloat profile: the derived Afloat fixtures on `https://useafloat.com/mcp`, the target built
+// by running the real `afloat.mcp_auth` action, and the Afloat seeds.
+
+/** A synthetic Afloat key the emulator accepts (`afloat_` and a recognisable remainder). */
+const afloatToken = 'afloat_synthetic-mcp-emulator-key-0001'
+
+const afloatServices = Layer.mergeAll(
+  Layer.effect(
+    McpConformanceTarget,
+    makeAfloatMcpConformanceTarget().pipe(
+      Effect.provide(staticCredentialResolverLayer(ApiKeyCredential.make({ key: afloatToken })))
+    )
+  ),
+  Layer.succeed(McpConformanceConfig, afloatMcpConformanceFixtureSeeds)
+)
+
+const afloatInProcessLayer = (emulator: McpEmulator) =>
+  InProcessHttpClient.layer([EmulatorRoute.handler(mcpEmulatorAfloatOrigin, emulator.fetch)])
+
+const afloatEmulatedLayer = (emulator: McpEmulator) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const server = yield* serveFetchHandler(emulator.fetchOn(mcpEmulatorAfloatOrigin))
+
+      return EmulatedHttpClient.layer([
+        EmulatorRoute.url(mcpEmulatorAfloatOrigin, server.url)
+      ]).pipe(Layer.provide(FetchHttpClient.layer))
+    })
+  )
+
+const afloatTransports: ReadonlyArray<readonly [ConformanceTarget, Transport]> = [
+  [{ kind: 'in-process' }, afloatInProcessLayer],
+  [{ kind: 'emulated' }, afloatEmulatedLayer]
+]
+
+/** The requests each case sends to the Afloat profile on a fresh emulator. */
+const afloatExpectedRequests = (id: string): ReadonlyArray<string> => {
+  const row = (method: string) => `${mcpEmulatorAfloatOrigin}/mcp#${method}`
+  const listing = [`POST ${row('server/discover')} 200`, `POST ${row('tools/list')} 200`]
+  const call = [...listing, `POST ${row('tools/call')} 200`]
+
+  switch (id) {
+    case 'mcp.modern.stateless':
+    case 'mcp.errors.unknown-tool':
+    case 'mcp.tools.call-read':
+    case 'mcp.tools.call-tool-error':
+      return [...listing, ...call]
+    case 'mcp.auth.rejected':
+      return [`POST ${row('server/discover')} 401`]
+    default:
+      return listing
+  }
+}
+
+const afloatCases = applicable('modern')
+
+const runAfloat = (
+  cases: ReadonlyArray<McpConformanceCase>,
+  options: McpEmulatorOptions,
+  target: ConformanceTarget,
+  transport: Transport,
+  check: (id: string, emulator: McpEmulator) => void = () => undefined
+) =>
+  Effect.gen(function* () {
+    const emulators = new Map<string, McpEmulator>()
+
+    const report = yield* runConformance(cases, {
+      target,
+      now,
+      layer: testCase =>
+        Layer.unwrap(
+          Effect.promise(async () => {
+            const emulator = await makeMcpEmulator(options)
+
+            emulators.set(testCase.id, emulator)
+
+            return Layer.mergeAll(transport(emulator), afloatServices)
+          })
+        )
+    })
+
+    for (const [id, emulator] of emulators) {
+      check(id, emulator)
+      yield* Effect.promise(() => emulator.close())
+    }
+
+    return report
+  })
+
+describe('the Afloat profile is the provider endpoint', () => {
+  it('the derived fixtures cover every case of the modern era', () => {
+    expect(afloatMcpConformanceFixtures.map(fixture => fixture.caseId)).toEqual(
+      afloatCases.map(testCase => testCase.id)
+    )
+    expect(new Set(afloatMcpConformanceFixtures.map(fixture => fixture.endpoint))).toEqual(
+      new Set([`${mcpEmulatorAfloatOrigin}/mcp`])
+    )
+  })
+})
+
+for (const [target, transport] of afloatTransports) {
+  describe(`Afloat profile, ${target.kind}`, () => {
+    it.effect(
+      'passes every applicable case, each on a fresh emulator, statelessly',
+      () =>
+        Effect.gen(function* () {
+          const report = yield* runAfloat(afloatCases, {}, target, transport, (id, emulator) => {
+            const entries = emulator.ledger.entries()
+
+            expect(requests(entries), id).toEqual(afloatExpectedRequests(id))
+            expect(
+              entries.every(
+                entry => entry.notEmulated === undefined && entry.evidence === 'unverified'
+              ),
+              id
+            ).toBe(true)
+            expect(emulator.snapshot()).toEqual({ modernListing: 'one-page', sessions: [] })
+          })
+
+          expectAllPassed(report, afloatCases.length)
+        }),
+      60_000
+    )
+
+    it.effect(
+      'passes every applicable case twice in sequence on ONE emulator; no key is kept',
+      () =>
+        withEmulator({}, emulator =>
+          Effect.gen(function* () {
+            const runOnce = runConformance(afloatCases, {
+              target,
+              now,
+              layer: () => Layer.mergeAll(transport(emulator), afloatServices)
+            })
+
+            expectAllPassed(yield* runOnce, afloatCases.length)
+            expectAllPassed(yield* runOnce, afloatCases.length)
+
+            const once = afloatCases.flatMap(testCase => afloatExpectedRequests(testCase.id))
+
+            expect(requests(emulator.ledger.entries())).toEqual([...once, ...once])
+
+            const reads = yield* Effect.promise(() =>
+              Promise.all(
+                ['ledger', 'state', 'coverage', 'faults'].map(route =>
+                  emulator
+                    .fetch(new Request(`${mcpEmulatorAfloatOrigin}/_emulate/${route}`))
+                    .then(response => response.text())
+                )
+              )
+            )
+
+            const recorded = [
+              JSON.stringify(emulator.ledger.entries()),
+              JSON.stringify(emulator.snapshot()),
+              ...reads
+            ].join('\n')
+
+            expect(recorded).not.toContain(afloatToken.slice('afloat_'.length))
+            expect(recorded).not.toContain(afloatMcpConformanceInvalidCredential.slice(7))
+            expect(recorded.toLowerCase()).not.toContain('bearer')
+          })
+        ),
+      60_000
+    )
+  })
+}
+
+const afloatDrills = drills.filter(drill => drill.eras.includes('modern'))
+
+describe('Afloat profile disagreement drills: each fails exactly its case', () => {
+  it('has one drill per applicable case', () => {
+    expect(afloatDrills.map(drill => drill.id)).toEqual(afloatCases.map(testCase => testCase.id))
+  })
+
+  for (const drill of afloatDrills) {
+    it.effect(
+      `${Object.keys(drill.knobs).join(', ')} fails only ${drill.id} (afloat)`,
+      () =>
+        Effect.gen(function* () {
+          const report = yield* runAfloat(
+            afloatCases,
+            { drills: drill.knobs },
+            { kind: 'in-process' },
+            afloatInProcessLayer
+          )
+
+          expect(report.summary, formatConformanceReport(report)).toEqual({
+            passed: afloatCases.length - 1,
+            failed: 1,
+            skipped: 0
+          })
+
+          const failed = report.results.filter(result => result.status === 'failed')
+
+          expect(failed.map(result => result.id)).toEqual([drill.id])
+          expect(failed[0]?.failure?.tag).toBe('ConformanceMismatch')
+          expect(failed[0]?.failure?.message).toContain(drill.message)
+        }),
+      60_000
     )
   }
 })

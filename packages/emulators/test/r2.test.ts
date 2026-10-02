@@ -76,6 +76,7 @@ const tokenSamples: ReadonlyArray<readonly [string, string]> = [
   ['AWS access key id', `AKIA${'SYNTHETIC'}0000000`],
   ['Google API key', `AIza${'SyntheticGoogleKey'}_${'0'.repeat(16)}`],
   ['Slack token', `xoxb-${'synthetic'}-0000`],
+  ['Afloat API key', `afloat_${'SYNTHETIC'}0000000000`],
   ['JSON Web Token', `eyJ${'SYNTHETIC'}.eyJ${'SYNTHETIC'}.${'SYNTHETIC'}sig`],
   ['private key', `-----BEGIN ${'SYNTHETIC'} PRIVATE KEY-----`]
 ]

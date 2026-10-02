@@ -26,7 +26,7 @@ Effect `HttpClient` routing that points code at them.
 | `@yolk-sdk/emulators/github`          | `src/github.ts`                          | Stateful, fixture-only GitHub REST emulator on `@emulators/core` (issues, comments, labels, contents; fail closed; minted `Link`)                                                                                                                                                                                  |
 | `@yolk-sdk/emulators/google`          | `src/google.ts`                          | Stateful, fixture-only Gmail, Calendar, and Drive emulator on `@emulators/core` (two origins; fail closed; the practice send recorded in state)                                                                                                                                                                    |
 | `@yolk-sdk/emulators/linkedin-search` | `src/linkedin-search.ts`                 | Stateful, fixture-only Exa and Enrich Layer emulator on `@emulators/core` (two origins; fail closed; reads only; rejected keys kept as per-origin digests)                                                                                                                                                         |
-| `@yolk-sdk/emulators/mcp`             | `src/mcp.ts`                             | Stateful, fixture-only synthetic MCP servers on `@emulators/core` (modern and legacy profiles; JSON-RPC rows; fail closed, constant refusals; minted sessions)                                                                                                                                                     |
+| `@yolk-sdk/emulators/mcp`             | `src/mcp.ts`                             | Stateful, fixture-only MCP servers on `@emulators/core` (synthetic modern and legacy profiles, the derived Afloat profile; JSON-RPC rows; fail closed, constant refusals; minted sessions)                                                                                                                         |
 | (internal)                            | `src/emulator-kernel.ts`                 | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`)                                                                                                                                                                           |
 | (internal)                            | `src/chat-completions.ts`                | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                                                                                                                                                                                                     |
 | (internal)                            | `src/messages.ts`                        | Anthropic Messages core (`makeMessagesEmulator`)                                                                                                                                                                                                                                                                   |
@@ -46,7 +46,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/microsoft/api.ts`                   | Microsoft route table (evidence, query allowlist, auth flag), matching, registration                                                                                                                                                                                                                               |
 | (internal)                            | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                                                                                                                                                                                                |
 | (internal)                            | `src/microsoft/{calendar,mail,drive}.ts` | Calendar, Outlook (with `$batch`), and OneDrive (with copy monitor) handlers                                                                                                                                                                                                                                       |
-| (internal)                            | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`: routes, shape checks, 400 not-emulated, faults, ledger, control plane; opt-ins (fail-closed, resolved mode, digest, variants, truncation; no core import)                                      |
+| (internal)                            | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`: routes, shape checks, 400 not-emulated, faults, ledger, control plane; opt-ins (fail-closed, resolved mode, digest, bearer prefixes, variants, truncation; no core import)                     |
 | (internal)                            | `src/stateful-core.ts`                   | The `@emulators/core` adapter every subpath on the stateful wrapper passes as `createCore` (`statefulCoreRuntime`; Node-only, loads the core lazily)                                                                                                                                                               |
 | (internal)                            | `src/dropbox/{state,api}.ts`             | Dropbox state/seed schemas and default seed; route table, fixture error envelopes, metadata, cursors                                                                                                                                                                                                               |
 | (internal)                            | `src/notion/{state,api}.ts`              | Notion state/seed schemas and default seed; route table, error envelopes, object rendering, cursor paging                                                                                                                                                                                                          |
@@ -58,7 +58,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/google/shared.ts`                   | Google origins, env, drills, response and error-envelope helpers, run-scoped text, page tokens                                                                                                                                                                                                                     |
 | (internal)                            | `src/google/{gmail,calendar,drive}.ts`   | Gmail, Calendar, and Drive route tables with raw parameter patterns (evidence, request shapes, plans, commits)                                                                                                                                                                                                     |
 | (internal)                            | `src/linkedin-search/{state,api}.ts`     | LinkedIn search state/seed schemas, default seed (fixture entities), per-origin key digests; Exa and Enrich Layer route table, error bodies, drills                                                                                                                                                                |
-| (internal)                            | `src/mcp/{state,api,recordings}.ts`      | MCP state/seed schemas, profiles, minted forms, digest; JSON-RPC route table (rows, matching, id/session/cursor substitution, drills); the 16 fixtures as data                                                                                                                                                     |
+| (internal)                            | `src/mcp/{state,api,*recordings}.ts`     | MCP state/seed schemas, profiles, minted forms, digest; JSON-RPC route table (rows, matching, id/session/cursor substitution, drills); the 16 synthetic and 8 Afloat fixtures as data                                                                                                                              |
 
 There is no root export or barrel.
 
@@ -200,7 +200,7 @@ There is no root export or barrel.
   write routes are pending (tracking #115), and so are the four Fortnox write routes, the eleven
   Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
   Todoist write routes, the Telegram `sendMessage` route, the six GitHub write routes, and the
-  fifteen Google write routes (the three `/linkedin-search` routes and the nine `/mcp` rows are
+  fifteen Google write routes (the three `/linkedin-search` routes and the twelve `/mcp` rows are
   reads and need none); expiry dates live only in that file.
   A new entry expires at most 60 days out and its reason cites tracking #115 and names the
   owner-approved live run (`live run of <case ids>`).
@@ -792,83 +792,103 @@ There is no root export or barrel.
   two synthetic servers of the sixteen `@yolk-sdk/mcp/conformance` fixtures (copied as data in
   `src/mcp/recordings.ts`; `test/mcp.test.ts` fails on drift): profile `synthetic-modern` on
   `https://mcp.example.test/modern/mcp` and profile `synthetic-legacy` on
-  `https://mcp.example.test/legacy/mcp`. Three wire routes (`POST /modern/mcp`, `POST /legacy/mcp`,
-  `GET /legacy/mcp`) answer the manifest as route variants: one `RPC <origin><path>#<method>` row
-  per recorded JSON-RPC method of each profile, plus the `GET` row, nine rows, none a write (no
-  pending entry). A JSON-RPC POST is admitted only when it equals a recorded request within the
-  latitude below (methods, `mcp-method`, and `mcp-protocol-version` as recorded; params as recorded
-  except JSON key order and the `_meta` client info's name and version); its answer is the recorded
-  one with only the request id substituted at exactly the recorded place (the top-level `id` of a
-  JSON answer, or the `id` of the SSE response event's payload; notification events and SSE `id:`
-  lines stay byte for byte; an answer without the recorded request id, such as the legacy era
-  probe's `id: null` error or the 401, is unchanged), the session id in the recorded
-  `mcp-session-id` header, and the cursor of the current generation. `initialize` mints
-  `yolk-emu-session-<n>` from a counter that never resets (runtime data; reset, seed, and a ledger
-  clear never rewind it), a form no seed can hold (seeds hold no sessions, only `modernListing`);
-  `notifications/initialized` makes the session ready; `tools/list`, `tools/call`, and the standing
-  `GET` (the recorded 405) answer only on a ready session; at most 256 sessions are held and another
-  `initialize` is refused before any fault; `reset` and `seed` clear the sessions (the
-  state-equals-seed proof excludes only them). The seed's `modernListing` picks the recorded modern
-  listing (`one-page`, the default, or `two-pages`); the two-page listing's cursor is the fixture's
-  value in the generation that first issues it and `<cursor>.g<generation>` afterwards (every reset
-  and seed starts a generation), accepted only as issued in the current generation. The bearer is
-  never stored, ledgered, or echoed: routes see only its `bearerDigest` (SHA-256 of the origin, a
-  space, and the bearer), compared only with the digest of the public reserved invalid credential
-  `yolk-conformance-invalid-credential-0000` (a recognisable bearer, checked at build), which
-  answers the recorded 401 byte for byte on the era probe and is refused anywhere else. Scope: the
-  bearer is never copied from the request into a response, the state, or `/_emulate/*`; the output
-  guard also refuses a prepared fixture answer, minted session id, or cursor that happens to contain
-  it, but the emulator's other constants (state values such as `initializing`, wrapper headers such
-  as `x-emulator-evidence`) and host-configured control-plane data (a fault body) may coincidentally
-  equal a bearer and are not checked. Every refusal, by shape or by state, is ledgered with constant
-  text only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no headers or body,
-  a constant reason, and the route template or row), writes nothing, and uses up no fault. Every
-  plan prepares its answer (`StreamedCommit`); its commit (minting or readying a session, issuing a
-  cursor) runs only when no fault answers. Status and `truncate-after-chunks` faults apply only
-  after admission and plan, and a faulted request writes nothing: a truncation sends the prepared
-  answer cut short and never commits (a truncated `initialize` holds no session and moves neither
-  the counter nor the cap; a truncated first page issues no cursor, so its continuation is refused).
-  `match.route` selects one row (a value naming no row is rejected when the fault is added) and
-  `match.method` is the HTTP method; a truncation of a bodiless answer cannot apply (500, unused).
-  `makeMcpEmulator` throws when a copied recording is not canonical JSON (every JSON body and SSE
-  `data:` payload equal to `JSON.stringify(JSON.parse(text))`), which id substitution relies on, so
-  provider recordings in another form fail loudly. Not emulated: `DELETE`, `ping`, `resources/*`,
-  `prompts/*`, `logging/*`, `completion/*`, `tasks/*`, batches, client-sent responses, a JSON body
-  repeating a key, `mcp-*` headers no recording carries (such as `mcp-param-*`; routes see header
-  names through `EmulatedRequest.headerNames`), cursors the emulator did not issue, other tools or
-  arguments, and a missing `Authorization`. `test/mcp.test.ts` replays every fixture byte for byte,
-  alone (with the recorded ids, and again with other ids substituted only at the recorded place) and
-  all one-page fixtures in suite order on one emulator, substituting only the minted session id in
-  the `mcp-session-id` header. Drill knobs (`drills`, booleans) each fail exactly one case, on every
-  era whose answers they change.
+  `https://mcp.example.test/legacy/mcp`; and profile `afloat` on `https://useafloat.com/mcp`, from
+  the eight `@yolk-sdk/connectors/afloat/conformance` fixtures (derived from the provider's source,
+  not recorded live; copied as data in `src/mcp/afloat-recordings.ts`; `test/mcp.test.ts` fails on
+  drift), stateless `2026-07-28` with JSON answers, no session, and no paging. Its credential rule
+  is the wrapper's opt-in `bearerPrefixes` (the Telegram precedent): a bearer there is recognised
+  only as `afloat_<remainder>` with a recognisable remainder (an Afloat key starts with the hex
+  digit `a`), and the remainder is the guarded secret and the digest input; a bearer without the
+  prefix there, or with it on the synthetic origin, is an unrecognisable `Authorization` header.
+  Four wire routes (`POST /modern/mcp`, `POST /legacy/mcp`, `GET /legacy/mcp`, and `POST /mcp` on
+  the Afloat origin) answer the manifest as route variants: one `RPC <origin><path>#<method>` row
+  per recorded JSON-RPC method of each profile, plus the `GET` row, twelve rows, none a write (no
+  pending entry). Answering the two derived Afloat `tools/call` fixtures (not only recorded calls)
+  is in scope by the owner's decision; they stay unverified until a live call is recorded. Promoting
+  a live Afloat recording updates the connectors fixtures, the connectors and runner tests, and
+  `src/mcp/afloat-recordings.ts` in one change. A JSON-RPC POST is admitted only when it equals a
+  recorded request within the latitude below (methods, `mcp-method`, and `mcp-protocol-version` as
+  recorded; params as recorded except JSON key order and the `_meta` client info's name and
+  version); its answer is the recorded one with only the request id substituted at exactly the
+  recorded place (the top-level `id` of a JSON answer, or the `id` of the SSE response event's
+  payload; notification events and SSE `id:` lines stay byte for byte; an answer without the
+  recorded request id, such as the legacy era probe's `id: null` error or the 401, is unchanged),
+  the session id in the recorded `mcp-session-id` header, and the cursor of the current generation.
+  `initialize` mints `yolk-emu-session-<n>` from a counter that never resets (runtime data; reset,
+  seed, and a ledger clear never rewind it), a form no seed can hold (seeds hold no sessions, only
+  `modernListing`); `notifications/initialized` makes the session ready; `tools/list`, `tools/call`,
+  and the standing `GET` (the recorded 405) answer only on a ready session; at most 256 sessions are
+  held and another `initialize` is refused before any fault; `reset` and `seed` clear the sessions
+  (the state-equals-seed proof excludes only them). The seed's `modernListing` picks the recorded
+  modern listing (`one-page`, the default, or `two-pages`); the two-page listing's cursor is the
+  fixture's value in the generation that first issues it and `<cursor>.g<generation>` afterwards
+  (every reset and seed starts a generation), accepted only as issued in the current generation. The
+  bearer is never stored, ledgered, or echoed: routes see only its `bearerDigest` (SHA-256 of the
+  origin, a space, and the bearer), compared only with the digest of the public reserved invalid
+  credential `yolk-conformance-invalid-credential-0000` (a recognisable bearer, checked at build),
+  or on the Afloat profile of the remainder of `afloat_yolkconformanceinvalid0000` (recognisable,
+  checked at build), which answers the recorded 401 byte for byte on its profile's era probe and is
+  refused anywhere else. Scope: the bearer is never copied from the request into a response, the
+  state, or `/_emulate/*`; the output guard also refuses a prepared fixture answer, minted session
+  id, or cursor that happens to contain it, but the emulator's other constants (state values such as
+  `initializing`, wrapper headers such as `x-emulator-evidence`) and host-configured control-plane
+  data (a fault body) may coincidentally equal a bearer and are not checked. Every refusal, by shape
+  or by state, is ledgered with constant text only (`/<unrecognised>`, a standard method or
+  `<other>`, an empty query, no headers or body, a constant reason, and the route template or row),
+  writes nothing, and uses up no fault. Every plan prepares its answer (`StreamedCommit`); its
+  commit (minting or readying a session, issuing a cursor) runs only when no fault answers. Status
+  and `truncate-after-chunks` faults apply only after admission and plan, and a faulted request
+  writes nothing: a truncation sends the prepared answer cut short and never commits (a truncated
+  `initialize` holds no session and moves neither the counter nor the cap; a truncated first page
+  issues no cursor, so its continuation is refused). `match.route` selects one row (a value naming
+  no row is rejected when the fault is added) and `match.method` is the HTTP method; a truncation of
+  a bodiless answer cannot apply (500, unused). `makeMcpEmulator` throws when a copied recording is
+  not canonical JSON (every JSON body and SSE `data:` payload equal to
+  `JSON.stringify(JSON.parse(text))`), which id substitution relies on, so provider recordings in
+  another form fail loudly. Not emulated: `DELETE`, `ping`, `resources/*`, `prompts/*`, `logging/*`,
+  `completion/*`, `tasks/*`, batches, client-sent responses, a JSON body repeating a key, `mcp-*`
+  headers no recording carries (such as `mcp-param-*`; routes see header names through
+  `EmulatedRequest.headerNames`), cursors the emulator did not issue, other tools or arguments, and
+  a missing `Authorization`. `test/mcp.test.ts` replays every fixture byte for byte, alone (with the
+  recorded ids, and again with other ids substituted only at the recorded place) and all one-page
+  fixtures in suite order on one emulator, substituting only the minted session id in the
+  `mcp-session-id` header (the Afloat answers carry the request id last, in the server SDK's member
+  order). Drill knobs (`drills`, booleans) each fail exactly one case, on every era and profile
+  whose answers they change; `test/mcp-conformance.test.ts` runs every applicable case per profile
+  (the Afloat target built by the real `afloat.mcp_auth`) in-process and over loopback.
 - Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
-  `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]`, that
-  occurs nowhere else in the request (any header name or value included) and in no answer or value
-  the request would store (never stored or ledgered; only its digest is compared, with the digest of
-  the public reserved invalid credential `yolk-conformance-invalid-credential-0000`, which answers
-  the recorded 401 on the era probe); extra request headers, except `mcp-*` headers other than
-  `mcp-method`, `mcp-name`, `mcp-protocol-version`, and `mcp-session-id`; a recorded header value
-  sent as several headers that the HTTP layer joins into the recorded value; JSON key order; any
-  JSON-RPC request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters
-  where the recording has an id; any non-empty `name` and `version` (and no other key) in the
-  `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this
-  emulator minted since the last reset or seed where the recording sends `mcp-session-id`
-  (initializing for `notifications/initialized`, ready otherwise); and, with the seed's `two-pages`
-  listing, the cursor this emulator issued in the current generation on the second page.
-  `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
-  (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET` on the modern
-  profile, JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
-  `prompts/*`, batches and client-sent responses, other members, a JSON body repeating a key
-  (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
-  arguments, protocol versions, or capabilities, extra client-info keys, and a legacy `initialize`
+  `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]` (on the
+  Afloat profile, `afloat_` followed by such a value: an Afloat key starts with the hex digit `a`,
+  so its remainder after `afloat_` is the value checked, guarded, and digested), that occurs nowhere
+  else in the request (any header name or value included) and in no answer or value the request
+  would store (never stored or ledgered; only its digest is compared, with the digest of the public
+  reserved invalid credential `yolk-conformance-invalid-credential-0000`, or on the Afloat profile
+  of the remainder of `afloat_yolkconformanceinvalid0000`, each answering the recorded 401 on its
+  profile's era probe); extra request headers, except `mcp-*` headers other than `mcp-method`,
+  `mcp-name`, `mcp-protocol-version`, and `mcp-session-id`; a recorded header value sent as several
+  headers that the HTTP layer joins into the recorded value; JSON key order; any JSON-RPC request id
+  that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters where the recording
+  has an id; any non-empty `name` and `version` (and no other key) in the `_meta` client info
+  (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted
+  since the last reset or seed where the recording sends `mcp-session-id` (initializing for
+  `notifications/initialized`, ready otherwise); and, with the seed's `two-pages` listing, the
+  cursor this emulator issued in the current generation on the second page. `Authorization` must be
+  exactly `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any
+  query, other HTTP methods such as `DELETE` or a `GET` on the modern or Afloat profile, a bearer
+  without `afloat_` on the Afloat profile or with it on the synthetic profiles, an Afloat key whose
+  remainder fails the rule above (such as one starting with a hex digit), JSON-RPC methods no
+  fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches and
+  client-sent responses, other members, a JSON body repeating a key (compared after unescaping), a
+  `null`, negative, or fractional id, other params (other tools, arguments, protocol versions, or
+  capabilities, extra client-info keys, a cursor on the Afloat listing, and a legacy `initialize`
   client info other than the recorded one), the MCP headers `accept`, `content-type`, `mcp-method`,
   `mcp-protocol-version`, `mcp-name`, and `last-event-id` other than the recorded values or present
   where none is recorded, any other `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing
   where recorded or present where not, an unknown session or one in the wrong phase, a cursor not
-  issued in the current generation, the reserved invalid credential on anything but the era probe, a
-  bearer repeated anywhere in the request, and a bearer an answer or a minted session id or cursor
-  would repeat) is not emulated. The bullet has four copies that change together with
+  issued in the current generation, a reserved invalid credential on anything but its profile's era
+  probe, a bearer repeated anywhere in the request, and a bearer an answer or a minted session id or
+  cursor would repeat) is not emulated. The bullet has four copies that change together with
   `test/mcp.test.ts`: this one, the `src/mcp.ts` header, `README.md` (MCP emulator), and
   `apps/docs/content/docs/api-reference/emulators.mdx` (MCP emulator).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly

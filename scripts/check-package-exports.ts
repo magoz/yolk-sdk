@@ -161,6 +161,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       '.',
       './agent',
       './afloat',
+      './afloat/conformance',
       './conformance',
       './dropbox',
       './dropbox/conformance',

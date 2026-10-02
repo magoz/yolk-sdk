@@ -116,7 +116,7 @@ describe('run-linkedin-search-conformance arguments', () => {
     })
 
     for (const flag of ['--exa-api-key', '--enrich-layer-api-key', '--api-key', '--token']) {
-      expect(() => parse([flag, liveExaKey])).toThrow(`Unknown argument: ${flag}`)
+      expect(() => parse([flag, liveExaKey])).toThrow('Unknown argument (not shown)')
     }
   })
 

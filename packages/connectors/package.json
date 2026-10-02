@@ -42,6 +42,10 @@
       "types": "./src/afloat/index.ts",
       "default": "./src/afloat/index.ts"
     },
+    "./afloat/conformance": {
+      "types": "./src/afloat/conformance/index.ts",
+      "default": "./src/afloat/conformance/index.ts"
+    },
     "./dropbox": {
       "types": "./src/dropbox/index.ts",
       "default": "./src/dropbox/index.ts"
@@ -166,6 +170,11 @@
         "types": "./dist/afloat/index.d.mts",
         "import": "./dist/afloat/index.mjs",
         "default": "./dist/afloat/index.mjs"
+      },
+      "./afloat/conformance": {
+        "types": "./dist/afloat/conformance/index.d.mts",
+        "import": "./dist/afloat/conformance/index.mjs",
+        "default": "./dist/afloat/conformance/index.mjs"
       },
       "./dropbox": {
         "types": "./dist/dropbox/index.d.mts",
@@ -294,5 +303,8 @@
     "@yolk-sdk/agent": "workspace:^",
     "@yolk-sdk/conformance": "workspace:^",
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@yolk-sdk/mcp": "workspace:^"
   }
 }

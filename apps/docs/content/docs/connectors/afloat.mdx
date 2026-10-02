@@ -1,0 +1,133 @@
+---
+title: Afloat MCP conformance
+description: Experimental Afloat MCP target, seeds, and fixtures for the MCP conformance cases, and the Afloat emulator profile.
+---
+
+Afloat's connector action (`afloat.mcp_auth`) is documented in the
+[connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#afloat). This page lists the experimental
+conformance target and the emulator profile only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice Afloat account.
+
+`@yolk-sdk/connectors/afloat/conformance` holds no case code. The cases are the generic MCP cases of
+[`@yolk-sdk/mcp/conformance`](../api-reference/conformance#mcp-conformance), run through the real
+`@yolk-sdk/mcp/client`; this subpath supplies what Afloat claims, as target and seed data. It never
+imports `@yolk-sdk/mcp`.
+
+- **Target.** `makeAfloatMcpConformanceTarget()` runs the real `afloat.mcp_auth` action over the
+  host's `CredentialResolver` (for example `staticCredentialResolverLayer` of
+  `@yolk-sdk/connectors/conformance`) and builds the `McpConformanceTarget` value from its output:
+  server `afloat`, `https://useafloat.com/mcp`, era `modern`, protocol version `2026-07-28`, and the
+  key as `Authorization: Bearer <afloat_ key>`. The auth case sends the public reserved invalid key
+  `afloat_yolkconformanceinvalid0000` in the same header instead.
+- **Seeds.** `afloatMcpConformanceLiveSeeds` name the published tools (`expectedTools`) and the two
+  that write (`notReadOnly`), and no `readTool`: a live run calls a tool only when a person names
+  it. `afloatMcpConformanceFixtureSeeds` add the synthetic read call the fixtures replay with:
+  `list-invoices` with `{ "size": 10 }`, and `{ "size": "ten" }` as the invalid arguments.
+- **Published tools.** Nine of the tools Afloat lists, in Afloat's listing order, with the source's
+  names, titles, input and output schemas, and annotations (`afloatMcpConformanceTools`):
+  `list-invoices`, `get-invoice`, `get-tax-return-download`, `get-logo-download`,
+  `create-receipt-upload`, `complete-receipt-upload`, `get-receipt-download`, `get-invoice-pdf`, and
+  `get-quote-pdf`. The tool descriptions and the server instructions are rewritten generically. The
+  five download tools mint a one-hour grant on every call but are marked `readOnlyHint: true`; the
+  two receipt-upload tools are marked `readOnlyHint: false`. Annotation keys keep the source's order
+  (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`); JSON key order inside the
+  input and output schemas follows the source's sorted schema snapshot, so a live listing may order
+  those keys differently.
+
+| Case id                           | Applies | Afloat claim (as currently understood)                                                                         |
+| --------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `mcp.negotiation.era`             | yes     | `server/discover` answers `supportedVersions: ["2026-07-28"]` with `capabilities.tools`: the modern era        |
+| `mcp.modern.stateless`            | yes     | No answer carries `mcp-session-id`; every result carries `resultType: "complete"`                              |
+| `mcp.legacy.session`              | no      | Afloat is modern; its `2025-11-25` fallback is stateless (no session), and the client never selects it         |
+| `mcp.transport.response-encoding` | yes     | Every answer is one `application/json` body holding the response                                               |
+| `mcp.tools.list`                  | yes     | One listing page holds every published tool; the receipt-upload tools are never marked read-only               |
+| `mcp.tools.call-read`             | yes     | `list-invoices` answers a tool result whose `structuredContent` passes its output schema                       |
+| `mcp.tools.call-tool-error`       | yes     | Invalid arguments answer `isError: true` with a `VALIDATION_ERROR` text, not a JSON-RPC error                  |
+| `mcp.errors.unknown-tool`         | yes     | An absent tool answers JSON-RPC `-32602` with the request id, at HTTP 200                                      |
+| `mcp.auth.rejected`               | yes     | The reserved invalid key answers 401 with `WWW-Authenticate: Bearer` and a JSON error body; no listing follows |
+
+`afloatMcpConformanceNotApplicable` lists the case that does not apply and why;
+`selectMcpConformanceCases(cases, 'modern')` gives the same split.
+
+**Fixtures.** `afloatMcpConformanceFixtures` holds one fixture per applicable case, on the real
+endpoint, `evidence: 'unverified'`, account `synthetic`. They are **derived from the provider's
+source (owner-supplied), not a live recording**: no live Afloat service was contacted. The answers
+are what the pinned official MCP server SDK (2.0.0, the version Afloat pins) produces when it runs
+in-process with Afloat's handler options (the stateless legacy fallback and JSON responses), server
+info, and tool capability, over the published tool subset; the tool results and the 401 follow
+Afloat's output builders over synthetic data (cuid-shaped `yolksynthetic…` ids, a synthetic request
+id). The requests are the ones the client sends, in its order; `authorization` is never recorded,
+and Afloat's `x-request-id` response header is not kept. Every `tools/call` answer is a minimal
+synthetic body, checked by an allowlist test. The shared credential scan flags Afloat-shaped keys
+(`afloat_` followed by 16 or more letters and digits).
+
+Claims no live run has settled yet: all of them (no case is observed live), in particular the real
+listing's size (it holds more than the nine published tools), whether a live 401 carries more than
+`Bearer`, and whether a call of an absent tool still answers HTTP 200.
+
+### Live runs
+
+`pnpm conformance:mcp --target afloat` dry-runs by default (no network, no credential read) and
+lists `mcp.legacy.session` as not applicable. `--live --owner-approved --account <label>` runs the
+cases against a practice account, never in CI; `AFLOAT_API_KEY` is read from the environment only
+and must be `afloat_` followed by 16 to 256 letters and digits; every printed line is redacted of
+the key and of its secret remainder after `afloat_`, and argument errors never repeat a value. A
+tool is called only when a person names it on the command line:
+`--read-tool <name> --read-args <json>` adds `mcp.tools.call-read`, and
+`--read-tool <name> --invalid-args <json>` adds `mcp.tools.call-tool-error` (flags only: no
+environment variable switches a call on; the listing must mark the tool read-only, and a download
+tool mints a grant, so prefer `list-invoices`). `--record` stages recordings under the gitignored
+`.conformance-recordings/mcp/afloat/` (refusing any recording that carries the key or its remainder
+alone, in any encoding) for wholesale synthetic replacement: every `tools/call` answer body is
+replaced by a minimal synthetic one before promotion, never scrubbed field by field.
+`--target figma` is refused until an owner-approved practice seat exists.
+
+## Emulator profile
+
+`@yolk-sdk/emulators/mcp` serves profile `afloat` on `https://useafloat.com/mcp` from a data copy of
+these fixtures (`mcpEmulatorAfloatFixtures`; a drift test fails when they differ): stateless
+`2026-07-28`, JSON answers, no session, one listing page, the `list-invoices` call and its tool
+error, the absent tool, and the 401. The two `tools/call` answers are derived, not recorded calls:
+answering them is in scope by the owner's decision, and they stay `unverified` until an
+owner-approved live run records a call. The credential rule: on `https://useafloat.com` a bearer is
+recognised only as `afloat_<remainder>` with a remainder that passes the emulators' recognisable
+bearer rule (an Afloat key starts with the hex digit `a`, which fails it), and the remainder is the
+guarded secret, never stored, ledgered, or echoed. Use a synthetic key such as
+`afloat_synthetic-key-0001`.
+
+```ts
+import { Effect, Layer } from 'effect'
+import { ApiKeyCredential } from '@yolk-sdk/connectors'
+import {
+  afloatMcpConformanceFixtureSeeds,
+  makeAfloatMcpConformanceTarget
+} from '@yolk-sdk/connectors/afloat/conformance'
+import { staticCredentialResolverLayer } from '@yolk-sdk/connectors/conformance'
+import { makeMcpEmulator, mcpEmulatorAfloatOrigin } from '@yolk-sdk/emulators/mcp'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+import { McpConformanceConfig, McpConformanceTarget } from '@yolk-sdk/mcp/conformance'
+
+const emulator = await makeMcpEmulator()
+
+const layer = Layer.mergeAll(
+  InProcessHttpClient.layer([EmulatorRoute.handler(mcpEmulatorAfloatOrigin, emulator.fetch)]),
+  Layer.effect(
+    McpConformanceTarget,
+    makeAfloatMcpConformanceTarget().pipe(
+      Effect.provide(
+        staticCredentialResolverLayer(ApiKeyCredential.make({ key: 'afloat_synthetic-key-0001' }))
+      )
+    )
+  ),
+  Layer.succeed(McpConformanceConfig, afloatMcpConformanceFixtureSeeds)
+)
+// ...run the applicable cases with `layer`, then:
+await emulator.close()
+```
+
+See the [MCP emulator reference](../api-reference/emulators#mcp-emulator) for faults, refusals, and
+the request-shape latitude.

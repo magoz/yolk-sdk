@@ -249,14 +249,15 @@ followed; no authorization is reapplied, even on same-origin redirects. Unknown 
 
 ## Reuse MCP file capabilities
 
-Authorized metadata-only discovery confirmed Afloat at `https://useafloat.com/mcp` exposes
-`get_invoice_pdf`, `get_quote_pdf`, `get_receipt_download`, `get_logo_download` and
-`get_tax_return_download`. These return one-hour same-origin opaque URL grants; inspected
-invoice/receipt results use `structuredContent: { url, expiresAt }`. `create_receipt_upload`
-returns an upload intent, URL, expiry and required headers; `complete_receipt_upload` attaches or
-replaces the receipt atomically. Corresponding logo operations exist. Inspected receipt inputs
-allow JPEG/PNG/WebP/GIF/PDF, length 1–2,147,483,647 and optional SHA-256 checksum. Use discovered
-schemas and enforce smaller host budgets; do not duplicate these operations as static SDK wrappers.
+Afloat at `https://useafloat.com/mcp` exposes `get-invoice-pdf`, `get-quote-pdf`,
+`get-receipt-download`, `get-logo-download` and `get-tax-return-download`. These return one-hour
+same-origin opaque URL grants, as `structuredContent: { url, expiresAt }`. `create-receipt-upload`
+returns an upload intent, URL, expiry and required headers; `complete-receipt-upload` attaches or
+replaces the receipt atomically. Corresponding logo operations exist. Receipt upload inputs allow
+JPEG/PNG/WebP/GIF/PDF, length 1–2,147,483,647 and an optional SHA-256 checksum. The published
+schemas of these tools, and their provenance, are on the
+[Afloat MCP conformance](./afloat#conformance-cases) page. Use discovered schemas and enforce
+smaller host budgets; do not duplicate these operations as static SDK wrappers.
 
 Figma discovery confirmed `download_assets` for node renders/source images/SVG temporary URLs,
 `upload_assets` (including SVG, 10 MB per asset), `use_figma` for edits and `create_new_file` for
