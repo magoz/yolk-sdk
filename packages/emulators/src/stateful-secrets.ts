@@ -1,16 +1,15 @@
 /**
- * Credential guarding and the fail-closed ledger constants shared by both stateful wrappers
- * (internal; imported by `src/stateful-fixture.ts` and `src/stateful-emulator.ts`, which issue #139
- * consolidates, and by the `src/r2-guard.ts` port guard, which uses only the predicate form of
- * the closure, `textClosureOutcome`, without the shared minimum length). No Node builtin and no
- * core import, so both wrappers stay runtime-portable.
+ * Credential guarding and the fail-closed ledger constants (internal; imported by the stateful
+ * wrapper, `src/stateful-emulator.ts`, and by the `src/r2-guard.ts` port guard, which uses only the
+ * predicate form of the closure, `textClosureOutcome`, without the shared minimum length). No Node
+ * builtin, no core import, and no wrapper import, so the R2 guard imports it without the wrapper.
  *
  * A guarded secret (a request-carried credential value the wrapper extracted from a recognised
  * request shape) must never reach the ledger, a response, or `/_emulate/*`: `scrubSecrets` removes
  * it from everything recorded or answered, and the `*RepeatsSecret` checks find it in request text
  * so a request repeating it can be refused. `repeatsSecret` and `jsonRepeatsSecret` (raw, once
- * percent-decoded, parsed JSON keys, strings, and numbers as JavaScript prints them) serve
- * `src/stateful-fixture.ts`, unchanged; the fail-closed mode of `src/stateful-emulator.ts` uses
+ * percent-decoded, parsed JSON keys, strings, and numbers as JavaScript prints them) serve the
+ * wrapper's resolved mode (Todoist, Telegram), unchanged; its fail-closed mode uses
  * `textRepeatsSecret`, the fixpoint closure of two total, lexical transforms that cannot fail
  * (`tolerantPercentDecode`, `tolerantJsonUnescape`), failing closed when its work cap is hit, and
  * recognises only RFC 6750 `b64token` bearers whose first character completes no escape and that
@@ -18,8 +17,8 @@
  *
  * @experimental
  */
-import { Predicate, Result } from 'effect'
-import * as Schema from 'effect/Schema'
+import { Predicate } from 'effect'
+import type * as Schema from 'effect/Schema'
 
 /** The ledgered path of every unrecognised request (constant: nothing from the request). */
 export const unrecognisedLedgerPath = '/<unrecognised>'
@@ -66,7 +65,7 @@ const isJsonRecord = (value: Schema.Json): value is Schema.JsonObject =>
 /**
  * True when any object key, string value, or number of `value` (raw or percent-decoded) holds a
  * secret. Numbers are checked as JavaScript prints them (`1.2345678e7` parses to `12345678`). Used
- * by `src/stateful-fixture.ts` (Todoist, Telegram), unchanged.
+ * by the wrapper's resolved mode (Todoist, Telegram), unchanged.
  */
 export const jsonRepeatsSecret = (value: Schema.Json, secrets: ReadonlyArray<string>): boolean => {
   if (Predicate.isString(value)) return repeatsSecret(value, secrets)
@@ -82,15 +81,6 @@ export const jsonRepeatsSecret = (value: Schema.Json, secrets: ReadonlyArray<str
   }
 
   return false
-}
-
-const decodeJsonText = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Json))
-
-/** Parsed JSON, or `undefined` for invalid JSON. */
-export const parseJsonText = (text: string): Schema.Json | undefined => {
-  const result = decodeJsonText(text)
-
-  return Result.isSuccess(result) ? result.success : undefined
 }
 
 /**

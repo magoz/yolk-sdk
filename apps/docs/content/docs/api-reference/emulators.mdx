@@ -815,7 +815,9 @@ the recorded 400 on `getChat`); any non-empty message `text`. The `drills` optio
 
 Both emulators share faults (status only, 400-599, chosen only after the request passed every check,
 including the route's eligibility check against the state, and answered before the commit, so a
-refused request never uses one and nothing is written; a 429 reaches the connector as
+refused request never uses one and nothing is written; the check, the fault decision, and the commit
+run together, so concurrent requests never interleave; a `match.route` naming no manifest route is
+rejected when the fault is added; a 429 reaches the connector as
 `todoist_rate_limited` / `telegram_rate_limited`), the ledger (credential-named query and body keys
 redacted, guarded credential values scrubbed), clock-free recovery (a handler that throws answers an
 evidence-tagged 500 `emulator_error` recorded with `responseError`; a closed emulator answers 503),

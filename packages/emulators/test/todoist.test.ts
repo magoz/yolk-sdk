@@ -1249,3 +1249,28 @@ describe('control plane', () => {
     expect(target.ledger.entries()).toEqual([])
   })
 })
+
+describe('fault match.route', () => {
+  it('rejects one naming no manifest row, at faults.add and over the control plane', async () => {
+    const target = await emulator()
+    const fault = { kind: 'status', status: 503, match: { route: '/api/v1/sections' } } as const
+
+    expect(() => target.faults.add(fault)).toThrow(TodoistEmulatorInputInvalid)
+    expect(() => target.faults.add(fault)).toThrow(
+      'match.route must name a manifest row of this emulator'
+    )
+
+    const posted = await target.fetch(
+      new Request(`${origin}/_emulate/faults`, { method: 'POST', body: JSON.stringify(fault) })
+    )
+
+    expect(posted.status).toBe(400)
+    expect(await posted.json()).toEqual({
+      error: {
+        type: 'emulator_error',
+        message: 'invalid fault: match.route must name a manifest row of this emulator'
+      }
+    })
+    expect(target.faults.list()).toEqual([])
+  })
+})

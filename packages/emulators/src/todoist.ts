@@ -42,19 +42,21 @@
  * @experimental
  */
 import { Data, Predicate } from 'effect'
-import type * as Schema from 'effect/Schema'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
+import { statefulCoreRuntime } from './stateful-core.ts'
 import {
-  makeStatefulFixtureEmulator,
-  type StatefulFixtureCoverage,
-  type StatefulFixtureFault,
-  type StatefulFixtureFaultState,
-  type StatefulFixtureLedgerEntry,
-  type StatefulFixtureResolution
-} from './stateful-fixture.ts'
+  makeHeaderlessStatefulEmulator,
+  routeEvidence,
+  type StatefulCoverage,
+  type StatefulFault,
+  type StatefulFaultState,
+  type StatefulHeaderlessLedgerEntry,
+  type StatefulErrorTexts,
+  type StatefulInputKind,
+  type StatefulResolution
+} from './stateful-emulator.ts'
 import {
   matchTodoistRoute,
-  registerTodoistApi,
   todoistApiRoutes,
   todoistQueryProblem,
   type TodoistApiEnv,
@@ -73,9 +75,9 @@ export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.t
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export {
-  StatefulFixtureFault as TodoistFault,
-  StatefulFixtureFaultMatch as TodoistFaultMatch
-} from './stateful-fixture.ts'
+  StatefulFault as TodoistFault,
+  StatefulFaultMatch as TodoistFaultMatch
+} from './stateful-emulator.ts'
 
 export { todoistEmulatorBasePath, type TodoistEmulatorDrills } from './todoist/api.ts'
 
@@ -101,14 +103,14 @@ export const todoistEmulatorDefaultOrigin = 'https://api.todoist.com'
  * by construction (both come from one route table). Every route cites at least one case.
  */
 export const todoistEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = todoistApiRoutes.map(
-  ({ handler: _handler, queryKeys: _queryKeys, ...evidence }) => evidence
+  ({ route }) => routeEvidence(route)
 )
 
-export type TodoistFaultState = StatefulFixtureFaultState
+export type TodoistFaultState = StatefulFaultState
 
-export type TodoistLedgerEntry = StatefulFixtureLedgerEntry
+export type TodoistLedgerEntry = StatefulHeaderlessLedgerEntry
 
-export type TodoistCoverage = StatefulFixtureCoverage
+export type TodoistCoverage = StatefulCoverage
 
 /** Invalid emulator input from the JS API: a seed or a fault. A programmer error. */
 export class TodoistEmulatorInputInvalid extends Data.TaggedError('TodoistEmulatorInputInvalid')<{
@@ -138,7 +140,7 @@ export type TodoistEmulator = {
   }
   readonly faults: {
     /** Add a fault; throws `TodoistEmulatorInputInvalid` for an invalid fault. */
-    readonly add: (fault: StatefulFixtureFault) => TodoistFaultState
+    readonly add: (fault: StatefulFault) => TodoistFaultState
     readonly list: () => ReadonlyArray<TodoistFaultState>
     readonly clear: () => void
   }
@@ -163,7 +165,10 @@ export type TodoistEmulator = {
 // that repeats it is refused, and it is scrubbed from everything ledgered or answered.
 const bearerPattern = /^bearer\s+(\S{8,})\s*$/i
 
-const resolve = (request: Request, url: URL): StatefulFixtureResolution => {
+const resolve = (
+  request: Request,
+  url: URL
+): StatefulResolution<TodoistEmulatorState, TodoistApiEnv> => {
   const ledgerPath = url.pathname
   const authorization = request.headers.get('authorization')
   const bearer = bearerPattern.exec(authorization ?? '')?.[1]
@@ -187,11 +192,11 @@ const resolve = (request: Request, url: URL): StatefulFixtureResolution => {
     return { kind: 'unrecognised', reason: 'no emulated Todoist route for this method and path' }
   }
 
-  const refuse = (reason: string): StatefulFixtureResolution => ({
-    kind: 'not-emulated',
+  const refuse = (reason: string): StatefulResolution<TodoistEmulatorState, TodoistApiEnv> => ({
+    kind: 'refused',
     ledgerPath,
     reason,
-    route: matched.route,
+    route: matched.route.route,
     secrets
   })
 
@@ -208,12 +213,24 @@ const resolve = (request: Request, url: URL): StatefulFixtureResolution => {
   return {
     kind: 'route',
     ledgerPath,
-    route: matched.route,
-    corePath: `${url.pathname}${url.search}`,
-    coreHeaders: {},
+    route: matched.route.route,
+    params: matched.params,
+    // The path and query the request must not repeat the bearer in.
+    guardedPath: `${url.pathname}${url.search}`,
     secrets
   }
 }
+
+/** The texts of Todoist's recovery answers (500 failed, 503 closed, 500 unhandled). */
+const errorTexts: StatefulErrorTexts = {
+  failed: 'Synthetic: the emulator could not build the response.',
+  closed: 'Synthetic: the emulator is closed.',
+  unhandled: 'emulator failed to handle the request'
+}
+
+/** The wrapper reports invalid seeds and faults only (Todoist takes no other option input). */
+const inputInvalid = (input: StatefulInputKind, reason: string) =>
+  new TodoistEmulatorInputInvalid({ input: input === 'seed' ? 'seed' : 'fault', reason })
 
 /**
  * Create a stateful Todoist emulator on the `@emulators/core` custom runtime. Each call has its
@@ -251,78 +268,47 @@ export const makeTodoistEmulator = async (
     cursorCounter: { next: 1 }
   }
 
-  // Loaded lazily: the core imports Node builtins and reads files at import time.
-  const core = await import('@emulators/core')
-
-  const definition = core.defineEmulator<TodoistEmulatorState>({
-    name: 'todoist',
-    cors: false,
-    state: () => initial,
-    validateSeed: value => {
-      const decoded = decodeTodoistState(value)
-
-      if (Predicate.isString(decoded)) {
-        throw new TodoistEmulatorInputInvalid({ input: 'seed', reason: decoded })
-      }
-
-      return decoded
-    },
-    setup: ({ app, state }) => registerTodoistApi(app, state, env)
-  })
-
-  const runtime = await core.createCustomRuntime(definition, { seed: initial })
-
   const cursorList = (): ReadonlyArray<TodoistCursor> => [...env.cursors.values()]
 
-  const emulator = makeStatefulFixtureEmulator<TodoistEmulatorState, TodoistEmulatorSeed>({
-    routes: todoistEmulatorRoutes,
-    initial,
-    runtime: {
-      baseUrl: runtime.baseUrl,
-      fetch: request => runtime.fetch(request),
-      snapshot: () => runtime.snapshot().state,
-      restore: state => runtime.restore({ ...runtime.snapshot(), state }),
-      close: () => runtime.close()
+  const emulator = await makeHeaderlessStatefulEmulator<
+    TodoistEmulatorState,
+    TodoistApiEnv,
+    TodoistEmulatorSeed
+  >(
+    {
+      routes: todoistApiRoutes.map(({ route }) => route),
+      env,
+      initial,
+      buildSeed: buildTodoistSeedState,
+      resolveRequest: resolve,
+      errorTexts,
+      clearRuntime: () => {
+        env.cursors.clear()
+        env.cursorCounter.next = 1
+      },
+      runtimeState: () => ({ runtime: { cursors: cursorList().map(cursor => ({ ...cursor })) } }),
+      seedSummary: state => ({
+        projects: state.projects.length,
+        tasks: state.tasks.length,
+        labels: state.labels.length
+      }),
+      inputInvalid
     },
-    resolve,
-    buildSeed: buildTodoistSeedState,
-    clearRuntime: () => {
-      env.cursors.clear()
-      env.cursorCounter.next = 1
-    },
-    runtimeState: (): Schema.Json => ({ cursors: cursorList().map(cursor => ({ ...cursor })) }),
-    seedSummary: state => ({
-      projects: state.projects.length,
-      tasks: state.tasks.length,
-      labels: state.labels.length
+    statefulCoreRuntime({
+      name: 'todoist',
+      initial,
+      decodeState: decodeTodoistState,
+      inputInvalid
     })
-  })
+  )
 
   return {
     fetch: emulator.fetch,
     ledger: emulator.ledger,
-    faults: {
-      add: fault => {
-        const added = emulator.faults.add(fault)
-
-        if (Predicate.isString(added)) {
-          throw new TodoistEmulatorInputInvalid({ input: 'fault', reason: added })
-        }
-
-        return added
-      },
-      list: emulator.faults.list,
-      clear: emulator.faults.clear
-    },
+    faults: emulator.faults,
     cursors: cursorList,
     reset: emulator.reset,
-    seed: async input => {
-      const problem = await emulator.seed(input)
-
-      if (problem !== undefined) {
-        throw new TodoistEmulatorInputInvalid({ input: 'seed', reason: problem })
-      }
-    },
+    seed: emulator.seed,
     snapshot: emulator.snapshot,
     coverage: emulator.coverage,
     close: emulator.close

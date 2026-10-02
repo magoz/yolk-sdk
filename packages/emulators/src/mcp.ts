@@ -102,7 +102,6 @@
  *
  * @experimental
  */
-import type { EmulatorSnapshot } from '@emulators/core'
 import { Data, Predicate } from 'effect'
 import {
   mcpApiRoutes,
@@ -135,6 +134,7 @@ import {
   type StatefulInputKind,
   type StatefulLedgerEntry
 } from './stateful-emulator.ts'
+import { statefulCoreRuntime } from './stateful-core.ts'
 import { isRecognisableBearerValue } from './stateful-secrets.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
@@ -278,9 +278,6 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
     runtime
   }
 
-  // Loaded lazily: the core imports Node builtins and reads files at import time.
-  const core = await import('@emulators/core')
-
   return makeChunkedStatefulEmulator<McpEmulatorState, McpApiEnv, McpEmulatorSeed>(
     {
       routes: mcpApiRoutes,
@@ -317,39 +314,6 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
       seedSummary: state => ({ modernListing: state.modernListing }),
       inputInvalid
     },
-    async dispatch => {
-      const definition = core.defineEmulator<McpEmulatorState>({
-        name: 'mcp',
-        cors: false,
-        state: () => initial,
-        validateSeed: value => {
-          const decoded = decodeState(value)
-
-          if (Predicate.isString(decoded)) {
-            throw inputInvalid('seed', decoded)
-          }
-
-          return decoded
-        },
-        // The wrapper matched the route already and forwards every admitted request as a POST.
-        setup: ({ app, state }) => {
-          app.post('*', context => dispatch(state, context.req.raw))
-        }
-      })
-
-      const runtimeCore = await core.createCustomRuntime(definition, { seed: initial })
-
-      return {
-        fetch: request => runtimeCore.fetch(request),
-        baseUrl: runtimeCore.baseUrl,
-        snapshot: () => runtimeCore.snapshot().state,
-        restore: state => {
-          const current: EmulatorSnapshot<McpEmulatorState> = runtimeCore.snapshot()
-
-          return runtimeCore.restore({ ...current, state })
-        },
-        close: () => runtimeCore.close()
-      }
-    }
+    statefulCoreRuntime({ name: 'mcp', initial, decodeState, inputInvalid })
   )
 }

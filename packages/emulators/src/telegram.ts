@@ -39,15 +39,18 @@
  */
 import { Data, Predicate } from 'effect'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
+import { statefulCoreRuntime } from './stateful-core.ts'
 import {
-  makeStatefulFixtureEmulator,
-  type StatefulFixtureCoverage,
-  type StatefulFixtureFault,
-  type StatefulFixtureFaultState,
-  type StatefulFixtureLedgerEntry
-} from './stateful-fixture.ts'
+  makeHeaderlessStatefulEmulator,
+  routeEvidence,
+  type StatefulCoverage,
+  type StatefulErrorTexts,
+  type StatefulFault,
+  type StatefulFaultState,
+  type StatefulHeaderlessLedgerEntry,
+  type StatefulInputKind
+} from './stateful-emulator.ts'
 import {
-  registerTelegramApi,
   resolveTelegramRequest,
   telegramApiRoutes,
   type TelegramApiEnv,
@@ -65,9 +68,9 @@ export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.t
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export {
-  StatefulFixtureFault as TelegramFault,
-  StatefulFixtureFaultMatch as TelegramFaultMatch
-} from './stateful-fixture.ts'
+  StatefulFault as TelegramFault,
+  StatefulFaultMatch as TelegramFaultMatch
+} from './stateful-emulator.ts'
 
 export type { TelegramEmulatorDrills } from './telegram/api.ts'
 
@@ -91,14 +94,14 @@ export const telegramEmulatorDefaultOrigin = 'https://api.telegram.org'
  * token path segment, which is never recorded.
  */
 export const telegramEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = telegramApiRoutes.map(
-  ({ handler: _handler, queryKeys: _queryKeys, corePath: _corePath, ...evidence }) => evidence
+  ({ route }) => routeEvidence(route)
 )
 
-export type TelegramFaultState = StatefulFixtureFaultState
+export type TelegramFaultState = StatefulFaultState
 
-export type TelegramLedgerEntry = StatefulFixtureLedgerEntry
+export type TelegramLedgerEntry = StatefulHeaderlessLedgerEntry
 
-export type TelegramCoverage = StatefulFixtureCoverage
+export type TelegramCoverage = StatefulCoverage
 
 /** Invalid emulator input from the JS API: a seed or a fault. A programmer error. */
 export class TelegramEmulatorInputInvalid extends Data.TaggedError('TelegramEmulatorInputInvalid')<{
@@ -128,7 +131,7 @@ export type TelegramEmulator = {
   }
   readonly faults: {
     /** Add a fault; throws `TelegramEmulatorInputInvalid` for an invalid fault. */
-    readonly add: (fault: StatefulFixtureFault) => TelegramFaultState
+    readonly add: (fault: StatefulFault) => TelegramFaultState
     readonly list: () => ReadonlyArray<TelegramFaultState>
     readonly clear: () => void
   }
@@ -145,6 +148,17 @@ export type TelegramEmulator = {
   /** Close the core runtime. Later requests answer 503. Idempotent. */
   readonly close: () => Promise<void>
 }
+
+/** The texts of Telegram's recovery answers (500 failed, 503 closed, 500 unhandled). */
+const errorTexts: StatefulErrorTexts = {
+  failed: 'Synthetic: the emulator could not build the response.',
+  closed: 'Synthetic: the emulator is closed.',
+  unhandled: 'emulator failed to handle the request'
+}
+
+/** The wrapper reports invalid seeds and faults only (Telegram takes no other option input). */
+const inputInvalid = (input: StatefulInputKind, reason: string) =>
+  new TelegramEmulatorInputInvalid({ input: input === 'seed' ? 'seed' : 'fault', reason })
 
 /**
  * Create a stateful Telegram Bot API emulator on the `@emulators/core` custom runtime. Each call
@@ -172,71 +186,40 @@ export const makeTelegramEmulator = async (
     }
   }
 
-  // Loaded lazily: the core imports Node builtins and reads files at import time.
-  const core = await import('@emulators/core')
-
-  const definition = core.defineEmulator<TelegramEmulatorState>({
-    name: 'telegram',
-    cors: false,
-    state: () => initial,
-    validateSeed: value => {
-      const decoded = decodeTelegramState(value)
-
-      if (Predicate.isString(decoded)) {
-        throw new TelegramEmulatorInputInvalid({ input: 'seed', reason: decoded })
-      }
-
-      return decoded
+  const emulator = await makeHeaderlessStatefulEmulator<
+    TelegramEmulatorState,
+    TelegramApiEnv,
+    TelegramEmulatorSeed
+  >(
+    {
+      routes: telegramApiRoutes.map(({ route }) => route),
+      env,
+      initial,
+      buildSeed: buildTelegramSeedState,
+      resolveRequest: resolveTelegramRequest,
+      errorTexts,
+      clearRuntime: () => undefined,
+      runtimeState: () => ({ runtime: {} }),
+      seedSummary: state => ({
+        chats: state.chats.length,
+        files: state.files.length
+      }),
+      inputInvalid
     },
-    setup: ({ app, state }) => registerTelegramApi(app, state, env)
-  })
-
-  const runtime = await core.createCustomRuntime(definition, { seed: initial })
-
-  const emulator = makeStatefulFixtureEmulator<TelegramEmulatorState, TelegramEmulatorSeed>({
-    routes: telegramEmulatorRoutes,
-    initial,
-    runtime: {
-      baseUrl: runtime.baseUrl,
-      fetch: request => runtime.fetch(request),
-      snapshot: () => runtime.snapshot().state,
-      restore: state => runtime.restore({ ...runtime.snapshot(), state }),
-      close: () => runtime.close()
-    },
-    resolve: resolveTelegramRequest,
-    buildSeed: buildTelegramSeedState,
-    clearRuntime: () => undefined,
-    runtimeState: () => ({}),
-    seedSummary: state => ({
-      chats: state.chats.length,
-      files: state.files.length
+    statefulCoreRuntime({
+      name: 'telegram',
+      initial,
+      decodeState: decodeTelegramState,
+      inputInvalid
     })
-  })
+  )
 
   return {
     fetch: emulator.fetch,
     ledger: emulator.ledger,
-    faults: {
-      add: fault => {
-        const added = emulator.faults.add(fault)
-
-        if (Predicate.isString(added)) {
-          throw new TelegramEmulatorInputInvalid({ input: 'fault', reason: added })
-        }
-
-        return added
-      },
-      list: emulator.faults.list,
-      clear: emulator.faults.clear
-    },
+    faults: emulator.faults,
     reset: emulator.reset,
-    seed: async input => {
-      const problem = await emulator.seed(input)
-
-      if (problem !== undefined) {
-        throw new TelegramEmulatorInputInvalid({ input: 'seed', reason: problem })
-      }
-    },
+    seed: emulator.seed,
     snapshot: emulator.snapshot,
     coverage: emulator.coverage,
     close: emulator.close

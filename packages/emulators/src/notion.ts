@@ -28,7 +28,6 @@
  *
  * @experimental
  */
-import type { EmulatorSnapshot } from '@emulators/core'
 import { Data, Predicate } from 'effect'
 import {
   notionApiRoutes,
@@ -56,6 +55,7 @@ import {
   type StatefulInputKind,
   type StatefulLedgerEntry
 } from './stateful-emulator.ts'
+import { statefulCoreRuntime } from './stateful-core.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
@@ -178,9 +178,6 @@ export const makeNotionEmulator = async (
     firstIssued: new Map()
   }
 
-  // Loaded lazily: the core imports Node builtins and reads files at import time.
-  const core = await import('@emulators/core')
-
   const api = await makeStatefulEmulator<NotionEmulatorState, NotionApiEnv, NotionEmulatorSeed>(
     {
       routes: notionApiRoutes,
@@ -206,40 +203,7 @@ export const makeNotionEmulator = async (
       }),
       inputInvalid
     },
-    async dispatch => {
-      const definition = core.defineEmulator<NotionEmulatorState>({
-        name: 'notion',
-        cors: false,
-        state: () => initial,
-        validateSeed: value => {
-          const decoded = decodeState(value)
-
-          if (Predicate.isString(decoded)) {
-            throw inputInvalid('seed', decoded)
-          }
-
-          return decoded
-        },
-        // The wrapper matched the route already and forwards every admitted request as a POST.
-        setup: ({ app, state }) => {
-          app.post('*', context => dispatch(state, context.req.raw))
-        }
-      })
-
-      const runtime = await core.createCustomRuntime(definition, { seed: initial })
-
-      return {
-        fetch: request => runtime.fetch(request),
-        baseUrl: runtime.baseUrl,
-        snapshot: () => runtime.snapshot().state,
-        restore: state => {
-          const current: EmulatorSnapshot<NotionEmulatorState> = runtime.snapshot()
-
-          return runtime.restore({ ...current, state })
-        },
-        close: () => runtime.close()
-      }
-    }
+    statefulCoreRuntime({ name: 'notion', initial, decodeState, inputInvalid })
   )
 
   return api

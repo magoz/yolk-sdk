@@ -92,7 +92,6 @@
  *
  * @experimental
  */
-import type { EmulatorSnapshot } from '@emulators/core'
 import { Data, Predicate } from 'effect'
 import { calendarRoutes } from './google/calendar.ts'
 import { driveRoutes } from './google/drive.ts'
@@ -122,6 +121,7 @@ import {
   type StatefulInputKind,
   type StatefulLedgerEntry
 } from './stateful-emulator.ts'
+import { statefulCoreRuntime } from './stateful-core.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
 
@@ -264,9 +264,6 @@ export const makeGoogleEmulator = async (
     firstIssued: new Map()
   }
 
-  // Loaded lazily: the core imports Node builtins and reads files at import time.
-  const core = await import('@emulators/core')
-
   return makeStatefulEmulator<GoogleEmulatorState, GoogleApiEnv, GoogleEmulatorSeed>(
     {
       routes: googleApiRoutes,
@@ -296,39 +293,6 @@ export const makeGoogleEmulator = async (
         unrecognisedAuthorization: googleUnrecognisedAuthorizationReason
       }
     },
-    async dispatch => {
-      const definition = core.defineEmulator<GoogleEmulatorState>({
-        name: 'google',
-        cors: false,
-        state: () => initial,
-        validateSeed: value => {
-          const decoded = decodeState(value)
-
-          if (Predicate.isString(decoded)) {
-            throw inputInvalid('seed', decoded)
-          }
-
-          return decoded
-        },
-        // The wrapper matched the route already and forwards every admitted request as a POST.
-        setup: ({ app, state }) => {
-          app.post('*', context => dispatch(state, context.req.raw))
-        }
-      })
-
-      const runtime = await core.createCustomRuntime(definition, { seed: initial })
-
-      return {
-        fetch: request => runtime.fetch(request),
-        baseUrl: runtime.baseUrl,
-        snapshot: () => runtime.snapshot().state,
-        restore: state => {
-          const current: EmulatorSnapshot<GoogleEmulatorState> = runtime.snapshot()
-
-          return runtime.restore({ ...current, state })
-        },
-        close: () => runtime.close()
-      }
-    }
+    statefulCoreRuntime({ name: 'google', initial, decodeState, inputInvalid })
   )
 }

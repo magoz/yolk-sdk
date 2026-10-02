@@ -1,7 +1,7 @@
 /**
- * Todoist emulator API: the route table (evidence, query allowlist, handler), route matching, and
- * the registration of the stateful handlers on the `@emulators/core` app (internal; re-exported
- * by `src/todoist.ts`).
+ * Todoist emulator API: the route table (evidence, query allowlist, handler) and route matching
+ * (internal; re-exported by `src/todoist.ts`, which runs the table on the shared stateful wrapper,
+ * `src/stateful-emulator.ts`, in its resolved mode).
  *
  * Only the routes the seven Todoist conformance cases (and their cleanup) need are emulated, with
  * wire shapes copied from the synthetic fixtures; everything else answers the wrapper's ledgered
@@ -11,21 +11,17 @@
  *
  * @experimental
  */
-import type { Hono } from '@emulators/core'
 import { Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
-import { handlerFailedResponse } from '../emulator-http.ts'
-import type { EmulatorRouteEvidence } from '../route-evidence.ts'
 import {
-  commit,
-  coreResponse,
-  isRefusal,
-  notEmulatedCoreResponse,
-  parseJsonText,
-  refuse,
-  type CoreOutcome,
-  type CoreRefusal
-} from '../stateful-fixture.ts'
+  isNotEmulated,
+  notEmulated,
+  statefulRoute,
+  type Commit,
+  type EmulatedRequest,
+  type NotEmulated,
+  type StatefulRoute
+} from '../stateful-emulator.ts'
 import {
   isTodoistMintedId,
   makeTodoistProject,
@@ -90,19 +86,19 @@ type RouteRequest = {
 }
 
 /**
- * A route handler: it validates the request and the state without writing (a refusal), then
- * returns a commit whose `run` performs every write (see `CoreOutcome`).
+ * A route handler (the wrapper's plan): it validates the request and the state without writing
+ * (not emulated), then returns the commit that performs every write.
  */
 type RouteHandler = (
   state: TodoistEmulatorState,
   request: RouteRequest,
   env: TodoistApiEnv
-) => CoreOutcome
+) => Commit | NotEmulated
 
-type TodoistApiRoute = EmulatorRouteEvidence & {
+type TodoistApiRoute = {
+  readonly route: StatefulRoute<TodoistEmulatorState, TodoistApiEnv>
   /** Query parameters the route emulates; any other (or a repeated) key is not emulated. */
   readonly queryKeys: ReadonlyArray<string>
-  readonly handler: RouteHandler
 }
 
 const pagingCase = 'todoist.tasks.list-cursor-paging'
@@ -245,38 +241,38 @@ const bodyObject = (
   request: RouteRequest,
   allowed: ReadonlyArray<string>,
   required: ReadonlyArray<string>
-): Schema.JsonObject | CoreRefusal => {
+): Schema.JsonObject | NotEmulated => {
   if (mediaType(request.contentType) !== 'application/json') {
-    return refuse('write bodies other than application/json are not emulated')
+    return notEmulated('write bodies other than application/json are not emulated')
   }
 
   if (!isJsonObject(request.body)) {
-    return refuse('a request body that is not a JSON object is not emulated')
+    return notEmulated('a request body that is not a JSON object is not emulated')
   }
 
   const keys = Object.keys(request.body)
   const unknown = keys.find(key => !allowed.includes(key))
 
   if (unknown !== undefined) {
-    return refuse(`the body field ${unknown} is not emulated on this route`)
+    return notEmulated(`the body field ${unknown} is not emulated on this route`)
   }
 
   const missing = required.find(key => !keys.includes(key))
 
   return missing === undefined
     ? request.body
-    : refuse(`requests without the body field ${missing} are not emulated on this route`)
+    : notEmulated(`requests without the body field ${missing} are not emulated on this route`)
 }
 
-const noBody = (request: RouteRequest): CoreRefusal | undefined =>
-  request.hasBody ? refuse('a request body is not emulated on this route') : undefined
+const noBody = (request: RouteRequest): NotEmulated | undefined =>
+  request.hasBody ? notEmulated('a request body is not emulated on this route') : undefined
 
 /** A positive integer query value: `undefined` when absent, a refusal when not in `allowed`. */
 const limitOf = (
   request: RouteRequest,
   allowed: (value: number) => boolean,
   what: string
-): number | undefined | CoreRefusal => {
+): number | undefined | NotEmulated => {
   const raw = request.query.get('limit')
 
   if (raw === null) return undefined
@@ -285,7 +281,7 @@ const limitOf = (
 
   return /^[1-9][0-9]{0,3}$/.test(raw) && allowed(value)
     ? value
-    : refuse(`limit must be ${what} (as the fixtures send it)`)
+    : notEmulated(`limit must be ${what} (as the fixtures send it)`)
 }
 
 /** A task created through the recorded create flow (never a seeded one), still active. */
@@ -303,20 +299,20 @@ const createdProject = (state: TodoistEmulatorState, id: string) =>
 const byOrder = (left: TodoistEmulatorTask, right: TodoistEmulatorTask): number =>
   left.child_order - right.child_order || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
 
-// Handlers: validate (refuse) first, then `commit` the writes.
+// Handlers: validate (not emulated) first, then return the commit that writes.
 
 const listTasks: RouteHandler = (state, request, env) => {
   const projectId = request.query.get('project_id')
 
-  if (projectId === null) return refuse('task listings without project_id are not emulated')
+  if (projectId === null) return notEmulated('task listings without project_id are not emulated')
 
   if (!state.projects.some(project => project.id === projectId)) {
-    return refuse('a task listing of an unknown project is not emulated')
+    return notEmulated('a task listing of an unknown project is not emulated')
   }
 
   const limit = limitOf(request, value => value === taskLimit, String(taskLimit))
 
-  if (isRefusal(limit)) return limit
+  if (isNotEmulated(limit)) return limit
 
   // The fixtures record two listings only: the paging project with `limit=2`, and a case project
   // created here without `limit`.
@@ -326,7 +322,7 @@ const listTasks: RouteHandler = (state, request, env) => {
       : projectId === todoistPagingProjectId
 
   if (!recorded) {
-    return refuse(
+    return notEmulated(
       'task listings other than the paging project with limit=2 or a case project created here ' +
         'without limit are not emulated'
     )
@@ -343,27 +339,26 @@ const listTasks: RouteHandler = (state, request, env) => {
 
   // Cursors are valid only as issued by this emulator since its last reset or seed.
   if (rawCursor !== null && cursor === undefined) {
-    return refuse('a cursor this emulator did not issue is not emulated')
+    return notEmulated('a cursor this emulator did not issue is not emulated')
   }
 
   if (
     cursor !== undefined &&
     (cursor.projectId !== projectId || cursor.limit !== request.query.get('limit'))
   ) {
-    return refuse('a cursor sent with another project_id or limit is not emulated')
+    return notEmulated('a cursor sent with another project_id or limit is not emulated')
   }
 
   // A case project holds at most one task, so its unlimited listing is always one page.
   if (limit === undefined) {
-    return commit(() =>
+    return () =>
       json(200, { results: tasks.map(task => taskWire(state, env, task)), next_cursor: null })
-    )
   }
 
   const offset = cursor === undefined || env.drills.cursorRestarts ? 0 : cursor.offset
   const end = offset + limit
 
-  return commit(() => {
+  return () => {
     let next: string | null = null
 
     if (end < tasks.length) {
@@ -375,45 +370,47 @@ const listTasks: RouteHandler = (state, request, env) => {
       results: tasks.slice(offset, end).map(task => taskWire(state, env, task)),
       next_cursor: next
     })
-  })
+  }
 }
 
 const getTask: RouteHandler = (state, request, env) => {
   const id = request.params.taskId ?? ''
   const task = state.tasks.find(candidate => candidate.id === id)
 
-  if (task === undefined) return commit(() => notFound(state, env, 'Task not found'))
+  if (task === undefined) return () => notFound(state, env, 'Task not found')
 
   return task.checked
-    ? refuse('reading a closed task is not emulated')
-    : commit(() => json(200, taskWire(state, env, task)))
+    ? notEmulated('reading a closed task is not emulated')
+    : () => json(200, taskWire(state, env, task))
 }
 
 const createTask: RouteHandler = (state, request, env) => {
   const body = bodyObject(request, ['content', 'project_id', 'due_date'], ['content', 'project_id'])
 
-  if (isRefusal(body)) return body
+  if (isNotEmulated(body)) return body
 
   const { content, project_id: projectId, due_date: dueDate } = body
 
   if (!Predicate.isString(content) || content === '') {
-    return refuse('content must be a non-empty string')
+    return notEmulated('content must be a non-empty string')
   }
 
   if (!Predicate.isString(projectId) || createdProject(state, projectId) === undefined) {
-    return refuse('a task outside a case project created here is not emulated')
+    return notEmulated('a task outside a case project created here is not emulated')
   }
 
   // The fixtures record one task per case project (`child_order: 1`).
   if (state.tasks.some(item => item.project_id === projectId)) {
-    return refuse('a second task in one case project is not emulated')
+    return notEmulated('a second task in one case project is not emulated')
   }
 
   if (dueDate !== undefined && dueDate !== recordedDueDate) {
-    return refuse(`due_date other than ${recordedDueDate} (the recorded value) is not emulated`)
+    return notEmulated(
+      `due_date other than ${recordedDueDate} (the recorded value) is not emulated`
+    )
   }
 
-  return commit(() => {
+  return () => {
     const now = timestamp(env)
     const number = state.counters.nextTaskNumber
 
@@ -433,32 +430,32 @@ const createTask: RouteHandler = (state, request, env) => {
     state.tasks = [...state.tasks, task]
 
     return json(200, taskWire(state, env, task))
-  })
+  }
 }
 
 const updateTask: RouteHandler = (state, request, env) => {
   const task = createdActiveTask(state, request.params.taskId ?? '')
 
   if (task === undefined) {
-    return refuse('updating a seeded, unknown, or closed task is not emulated')
+    return notEmulated('updating a seeded, unknown, or closed task is not emulated')
   }
 
   const body = bodyObject(request, ['content', 'due_datetime'], [])
 
-  if (isRefusal(body)) return body
+  if (isNotEmulated(body)) return body
 
   const { content, due_datetime: dueDatetime } = body
 
   if (content === undefined && dueDatetime === undefined) {
-    return refuse('an update without content or due_datetime is not emulated')
+    return notEmulated('an update without content or due_datetime is not emulated')
   }
 
   if (content !== undefined && (!Predicate.isString(content) || content === '')) {
-    return refuse('content must be a non-empty string')
+    return notEmulated('content must be a non-empty string')
   }
 
   if (dueDatetime !== undefined && dueDatetime !== recordedDueDatetime) {
-    return refuse(
+    return notEmulated(
       `due_datetime other than ${recordedDueDatetime} (the recorded value) is not emulated`
     )
   }
@@ -470,11 +467,11 @@ const updateTask: RouteHandler = (state, request, env) => {
     due: dueDatetime === undefined || env.drills.ignoreDue ? task.due : dueOfDatetime
   }
 
-  return commit(() => {
+  return () => {
     state.tasks = state.tasks.map(item => (item.id === task.id ? updated : item))
 
     return json(200, taskWire(state, env, updated))
-  })
+  }
 }
 
 const closeTask: RouteHandler = (state, request, env) => {
@@ -485,41 +482,41 @@ const closeTask: RouteHandler = (state, request, env) => {
   const task = createdActiveTask(state, request.params.taskId ?? '')
 
   if (task === undefined) {
-    return refuse('closing a seeded, unknown, or closed task is not emulated')
+    return notEmulated('closing a seeded, unknown, or closed task is not emulated')
   }
 
-  return commit(() => {
+  return () => {
     const closed: TodoistEmulatorTask = { ...task, checked: true, completed_at: timestamp(env) }
 
     state.tasks = state.tasks.map(item => (item.id === task.id ? closed : item))
 
     return noContent()
-  })
+  }
 }
 
 /** The label listing, one page (its fixture never pages): `limit` required; every label in it. */
 const listLabels: RouteHandler = (state, request) => {
   const limit = limitOf(request, value => value <= maxListLimit, `from 1 to ${maxListLimit}`)
 
-  if (isRefusal(limit)) return limit
+  if (isNotEmulated(limit)) return limit
 
-  if (limit === undefined) return refuse('label listings without limit are not emulated')
+  if (limit === undefined) return notEmulated('label listings without limit are not emulated')
 
   return state.labels.length > limit
-    ? refuse(`more labels than limit (${limit}): paging labels is not emulated`)
-    : commit(() => json(200, { results: state.labels, next_cursor: null }))
+    ? notEmulated(`more labels than limit (${limit}): paging labels is not emulated`)
+    : () => json(200, { results: state.labels, next_cursor: null })
 }
 
 const createProject: RouteHandler = (state, request, env) => {
   const body = bodyObject(request, ['name', 'parent_id'], ['name', 'parent_id'])
 
-  if (isRefusal(body)) return body
+  if (isNotEmulated(body)) return body
 
   const { name, parent_id: parentId } = body
   const runId = Predicate.isString(name) ? caseProjectNamePattern.exec(name)?.[1] : undefined
 
   if (!Predicate.isString(name) || runId === undefined || runId.length > 40) {
-    return refuse(
+    return notEmulated(
       'project names other than yolk-conformance-<runId>-<lifecycle|due|parent|delete> ' +
         'are not emulated'
     )
@@ -531,15 +528,15 @@ const createProject: RouteHandler = (state, request, env) => {
     isTodoistMintedId(parentId, todoistMintedProjectPrefix) ||
     !state.projects.some(item => item.id === parentId)
   ) {
-    return refuse('a project under anything but an existing seeded project is not emulated')
+    return notEmulated('a project under anything but an existing seeded project is not emulated')
   }
 
   // The fixtures record a first sub-project (`child_order: 1`) only.
   if (state.projects.some(item => item.parent_id === parentId)) {
-    return refuse('a second sub-project under one parent is not emulated')
+    return notEmulated('a second sub-project under one parent is not emulated')
   }
 
-  return commit(() => {
+  return () => {
     const now = timestamp(env)
     const number = state.counters.nextProjectNumber
 
@@ -561,22 +558,22 @@ const createProject: RouteHandler = (state, request, env) => {
         ? { ...projectWire(project), parent_id: null }
         : projectWire(project)
     )
-  })
+  }
 }
 
 const getProject: RouteHandler = (state, request, env) => {
   const id = request.params.projectId ?? ''
 
   if (!state.projects.some(item => item.id === id)) {
-    return commit(() => notFound(state, env, 'Project not found'))
+    return () => notFound(state, env, 'Project not found')
   }
 
   // Only projects created here answer: no fixture records a seeded project's object.
   const project = createdProject(state, id)
 
   return project === undefined
-    ? refuse('reading a seeded project is not emulated (no fixture records its answer)')
-    : commit(() => json(200, projectWire(project)))
+    ? notEmulated('reading a seeded project is not emulated (no fixture records its answer)')
+    : () => json(200, projectWire(project))
 }
 
 const deleteProject: RouteHandler = (state, request, env) => {
@@ -588,10 +585,10 @@ const deleteProject: RouteHandler = (state, request, env) => {
 
   // A created project never has sub-projects: projects are created under seeded parents only.
   if (project === undefined) {
-    return refuse('deleting a seeded or unknown project is not emulated')
+    return notEmulated('deleting a seeded or unknown project is not emulated')
   }
 
-  return commit(() => {
+  return () => {
     state.projects = state.projects.filter(item => item.id !== project.id)
 
     if (!env.drills.deleteKeepsTasks) {
@@ -599,8 +596,18 @@ const deleteProject: RouteHandler = (state, request, env) => {
     }
 
     return noContent()
-  })
+  }
 }
+
+/** The route's request, as the handlers see it (the wrapper checked and parsed the body). */
+const routeRequest = (request: EmulatedRequest): RouteRequest => ({
+  params: request.params,
+  query: request.query,
+  body: request.json,
+  // A non-empty body is valid JSON by now (`json-or-empty`), so it always parses.
+  hasBody: request.json !== undefined,
+  contentType: request.header('content-type') ?? null
+})
 
 const route = (
   method: string,
@@ -610,14 +617,20 @@ const route = (
   handler: RouteHandler,
   queryKeys: ReadonlyArray<string> = []
 ): TodoistApiRoute => ({
-  method,
-  path: `${todoistEmulatorBasePath}${path}`,
-  kind: 'connector',
-  write,
-  caseIds,
-  evidence: 'unverified',
-  queryKeys,
-  handler
+  route: statefulRoute(
+    {
+      method,
+      path: `${todoistEmulatorBasePath}${path}`,
+      kind: 'connector',
+      write,
+      caseIds,
+      evidence: 'unverified'
+    },
+    'json-or-empty',
+    routeRequest,
+    (state, request, context) => handler(state, request, context.env)
+  ),
+  queryKeys
 })
 
 /** The route table: evidence plus handler. `todoistEmulatorRoutes` is its evidence part. */
@@ -645,8 +658,8 @@ export const todoistApiRoutes: ReadonlyArray<TodoistApiRoute> = [
 
 const compiledRoutes = todoistApiRoutes.map(candidate => ({
   route: candidate,
-  pattern: new RegExp(`^${candidate.path.replace(/\{[A-Za-z]+\}/g, '([^/]+)')}$`),
-  names: [...candidate.path.matchAll(/\{([A-Za-z]+)\}/g)].map(match => match[1] ?? '')
+  pattern: new RegExp(`^${candidate.route.path.replace(/\{[A-Za-z]+\}/g, '([^/]+)')}$`),
+  names: [...candidate.route.path.matchAll(/\{([A-Za-z]+)\}/g)].map(match => match[1] ?? '')
 }))
 
 export type TodoistMatchedRoute = {
@@ -677,7 +690,7 @@ export const matchTodoistRoute = (
   path: string
 ): TodoistMatchedRoute | undefined => {
   for (const candidate of compiledRoutes) {
-    if (candidate.route.method !== method.toUpperCase()) continue
+    if (candidate.route.route.method !== method.toUpperCase()) continue
 
     const match = candidate.pattern.exec(path)
 
@@ -720,57 +733,4 @@ export const todoistQueryProblem = (
   return repeated === undefined
     ? undefined
     : `the repeated query parameter ${repeated} is not emulated`
-}
-
-const handle = async (
-  raw: Request,
-  state: TodoistEmulatorState,
-  env: TodoistApiEnv
-): Promise<Response> => {
-  const url = new URL(raw.url)
-  const matched = matchTodoistRoute(raw.method, url.pathname)
-
-  if (matched === undefined) return notEmulatedCoreResponse('no emulated Todoist route')
-
-  const text = await raw.text()
-  const body = text === '' ? undefined : parseJsonText(text)
-
-  const outcome = matched.route.handler(
-    state,
-    {
-      params: matched.params,
-      query: url.searchParams,
-      body,
-      hasBody: text !== '',
-      contentType: raw.headers.get('content-type')
-    },
-    env
-  )
-
-  return coreResponse(outcome, raw)
-}
-
-/** `{Name}` path templates become `:Name` core route parameters. */
-const corePath = (template: string): string => template.replace(/\{([A-Za-z]+)\}/g, ':$1')
-
-/**
- * Register every route of the table on the core app, over the generation's state. Each handler
- * re-matches the raw request path against the same table the wrapper ledgers and runs the
- * handler. A handler that throws answers `handlerFailedResponse()`,
- * which the wrapper turns into its 500 with `responseError` in the ledger.
- */
-export const registerTodoistApi = (
-  app: Hono,
-  state: TodoistEmulatorState,
-  env: TodoistApiEnv
-): void => {
-  for (const apiRoute of todoistApiRoutes) {
-    app.on(apiRoute.method, corePath(apiRoute.path), async context => {
-      try {
-        return await handle(context.req.raw, state, env)
-      } catch {
-        return handlerFailedResponse()
-      }
-    })
-  }
 }
