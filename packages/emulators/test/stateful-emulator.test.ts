@@ -1772,7 +1772,8 @@ const resolvePathToken = (request: Request, url: URL): StatefulResolution<State,
 
 /**
  * A resolved-mode, headerless emulator over a fake core that records the paths it is sent and,
- * like the real core, errors every body it answered once it is reset or closed.
+ * like the real core, errors every body it answered once it is reset or closed, and answers its own
+ * 503 without dispatching once it is closed.
  */
 const buildResolved = async (
   extra: Partial<Omit<StatefulEmulatorConfig<State, undefined>, 'recordHeaders'>> = {}
@@ -1819,10 +1820,13 @@ const buildResolved = async (
     },
     async dispatch => {
       let state = { writes: 0 }
+      let closed = false
 
       return {
         fetch: request => {
           corePaths.push(request.url)
+
+          if (closed) return Promise.resolve(Response.json({ error: 'closed' }, { status: 503 }))
 
           return Promise.resolve(tracked(dispatch(state, request)))
         },
@@ -1835,6 +1839,7 @@ const buildResolved = async (
           return Promise.resolve()
         },
         close: () => {
+          closed = true
           abortAll()
 
           return Promise.resolve()
@@ -1949,6 +1954,66 @@ describe('opt-in resolved mode (resolveRequest)', () => {
       await expect(committed.text()).rejects.toThrow('synthetic: the core aborted the body')
     }
   )
+
+  it('reads the body once: a body repeat consumes it, a query repeat does not', async () => {
+    const { api } = await buildResolved()
+    const repeating = postNote(`/t/${pathToken}/notes/1`, `{"a":"${pathSecret}"}`)
+
+    expect((await api.fetch(repeating)).status).toBe(400)
+    expect(repeating.bodyUsed).toBe(true)
+    expect((await api.fetch(repeating)).status).toBe(400)
+
+    const queried = postNote(`/t/${pathToken}/notes/1?q=${pathSecret}`, '{}')
+
+    expect((await api.fetch(queried)).status).toBe(400)
+    expect(queried.bodyUsed).toBe(false)
+    expect(api.ledger.entries().map(entry => entry.notEmulated)).toEqual([
+      'the request body repeats the credential',
+      'the request body is unreadable',
+      'the query repeats the credential'
+    ])
+  })
+
+  it('a core that answers without dispatching (closed meanwhile) gives the 500', async () => {
+    const { api } = await buildResolved()
+    const pending = api.fetch(postNote(`/t/${pathToken}/notes/1`, '{}'))
+
+    await api.close()
+
+    const failed = await pending
+
+    expect(failed.status).toBe(500)
+    expect(failed.headers.get('x-emulator-evidence')).toBe('unverified')
+    expect(await failed.json()).toEqual({
+      error: { message: 'the emulator could not build the response', type: 'emulator_error' }
+    })
+    expect(api.ledger.entries()[0]).toMatchObject({
+      status: 500,
+      responseError: 'the route handler answered no eligibility verdict'
+    })
+    expect(api.snapshot()).toEqual({ writes: 0 })
+  })
+
+  it('routes and header rules read the content type only', async () => {
+    const seen: Array<ReadonlyArray<string | undefined>> = []
+
+    const { api } = await buildResolved({
+      requestProblem: header => {
+        seen.push([header('content-type'), header('x-note'), header('authorization')])
+
+        return undefined
+      }
+    })
+
+    const request = new Request(`https://api.example.test/t/${pathToken}/notes/1`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-note': pathSecret, authorization: 'x' },
+      body: '{}'
+    })
+
+    expect((await api.fetch(request)).status).toBe(200)
+    expect(seen).toEqual([['application/json', undefined, undefined]])
+  })
 
   it('a plan reason that cannot be percent-encoded answers the handler-failure 500', async () => {
     const { api } = await buildResolved()

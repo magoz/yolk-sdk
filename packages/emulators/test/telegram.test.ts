@@ -1058,4 +1058,88 @@ describe('request lifecycle', () => {
       })
     }
   )
+
+  it('a body-repeat refusal reads the request body; a query refusal leaves it unread', async () => {
+    const target = await emulator()
+
+    const repeating = new Request(`${origin}/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...sendBody, text: `hi ${secretPart}` })
+    })
+
+    const first = await expectNotEmulated(
+      await target.fetch(repeating),
+      'the request body repeats the credential'
+    )
+
+    expect(repeating.bodyUsed).toBe(true)
+
+    const second = await expectNotEmulated(
+      await target.fetch(repeating),
+      'the request body is unreadable'
+    )
+
+    const queried = new Request(`${origin}/bot${token}/sendMessage?x=1`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(sendBody)
+    })
+
+    await expectNotEmulated(
+      await target.fetch(queried),
+      'a query parameter this method does not take'
+    )
+    expect(queried.bodyUsed).toBe(false)
+
+    expect(target.ledger.entries().map(entry => [entry.seq, entry.notEmulated])).toEqual([
+      [1, 'the request body repeats the credential'],
+      [2, 'the request body is unreadable'],
+      [3, 'a query parameter this method does not take is not emulated']
+    ])
+    expect(target.snapshot().sentMessages).toEqual([])
+    await expectNoToken(target, first, second)
+  })
+
+  const inFlight: ReadonlyArray<
+    readonly [string, (target: TelegramEmulator) => Promise<Response>]
+  > = [
+    [
+      'a read',
+      target =>
+        call(
+          target,
+          'GET',
+          `/bot${token}/getFile?file_id=BQACAgIAAxkDAAIC-yolk_synthetic_file_0001`
+        )
+    ],
+    ['a send', target => target.fetch(sendRequest())]
+  ]
+
+  it.each(inFlight)(
+    'a close while %s is in flight answers the 500, sending nothing',
+    async (_label, send) => {
+      const target = await emulator()
+      const pending = send(target)
+
+      await target.close()
+
+      const failed = await pending
+
+      expect(failed.status).toBe(500)
+      expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(await failed.json()).toEqual({
+        error: {
+          type: 'emulator_error',
+          message: 'Synthetic: the emulator could not build the response.'
+        }
+      })
+      expect(target.ledger.entries()[0]).toMatchObject({
+        status: 500,
+        responseError: 'the route handler answered no eligibility verdict'
+      })
+      expect(target.snapshot().sentMessages).toEqual([])
+      await expectNoToken(target)
+    }
+  )
 })

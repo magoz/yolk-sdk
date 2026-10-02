@@ -127,11 +127,15 @@
  * number) is refused with a constant reason before anything else is checked. The ledger records
  * the resolution's path and the query as sent (credential-named keys redacted), faults'
  * `match.path` compares that path, and routes and the core see it too (routes see no header
- * names), so the credential never reaches a route or the core. A body that is already consumed or
+ * names and read no header but `content-type`), so the credential never reaches a route or the
+ * core. The request body is read once, after the query and path checks (so a query or path refusal
+ * leaves it unread, and any later refusal finds it read); a body that is already consumed or
  * locked is refused as unreadable; a refusal reason that cannot be percent-encoded (an unpaired
  * surrogate) is a handler failure (500). Fault answers and refusals are decided in the core with
  * the commit, but returned by the wrapper itself, so a reset or a close before they are read never
- * cancels them (only a commit's answer is the core's own). Resolved mode records no request
+ * cancels them (only a commit's answer is the core's own); a core that answers without running
+ * the dispatch (closed meanwhile) gives the 500 handler failure (`responseError`
+ * `the route handler answered no eligibility verdict`). Resolved mode records no request
  * header (`recordHeaders` must be empty). More opt-ins, off by default: a `json-or-empty` route
  * body (JSON of any media type, or none), `makeHeaderlessStatefulEmulator` (ledger entries without
  * a `headers` field), and `errorTexts` (the texts of the recovery answers).
@@ -357,7 +361,10 @@ export type EmulatedRequest = {
    * Absent on a request built elsewhere (then `exactQuery`'s `rawNames` refuses any parameter).
    */
   readonly rawQuery?: string | undefined
-  /** A non-credential request header (credential headers always read as `undefined`). */
+  /**
+   * A non-credential request header (credential headers always read as `undefined`; in resolved
+   * mode, every header but `content-type` does).
+   */
   readonly header: (name: string) => string | undefined
   /**
    * The lower-case names of every request header, credential headers included (names only, never
@@ -1238,6 +1245,8 @@ type Job<State, Env> = {
   credentialRepeat?: boolean
   /** Resolved mode: the fault's answer, decided in the core but returned outside it. */
   faultAnswer?: Response
+  /** Set when the core ran the dispatch for this job (it may answer without it, when closed). */
+  dispatched?: boolean
 }
 
 /**
@@ -1339,30 +1348,30 @@ const snapshotHeaderlessEntry = ({
 }
 
 /**
- * Resolved mode: the constant reason when a recognised request repeats a guarded secret, or
- * `undefined`. Checked in order with `repeatsSecret` (raw, and percent-decoded once): the raw
- * query, the resolution's `guardedPath`, and the body; a body that parses as JSON also with
- * `jsonRepeatsSecret` (every key, string, and number) and as it would be recorded. A body that
- * cannot be read or parsed is left to the route's body check.
+ * Resolved mode: the constant reason when the raw query or the resolution's `guardedPath` repeats a
+ * guarded secret (`repeatsSecret`: raw, and percent-decoded once), or `undefined`. Checked before
+ * the body is read, so such a refusal leaves the request body unread.
  */
-const lexicalCredentialRepeat = async (
-  request: Request,
+const partsCredentialRepeat = (
   url: URL,
   guardedPath: string,
   secrets: ReadonlyArray<string>
-): Promise<string | undefined> => {
+): string | undefined => {
   if (repeatsSecret(url.search, secrets)) return 'the query repeats the credential'
 
-  if (repeatsSecret(guardedPath, secrets)) return 'the request path repeats the credential'
+  return repeatsSecret(guardedPath, secrets) ? 'the request path repeats the credential' : undefined
+}
 
-  // Read from a copy: the route reads the body again. A body that is already consumed or locked
-  // cannot be copied or read: the route's body check refuses it as unreadable.
-  const copy = request.body === null ? undefined : Result.try(() => request.clone())
-
-  if (copy !== undefined && Result.isFailure(copy)) return undefined
-
-  const text = copy === undefined ? '' : await readText(copy.success)
-
+/**
+ * Resolved mode: the constant reason when the body text repeats a guarded secret, or `undefined`:
+ * `repeatsSecret` on the raw text, and for a body that parses as JSON also `jsonRepeatsSecret`
+ * (every key, string, and number) and as it would be recorded. A body that cannot be read or parsed
+ * is left to the route's body check.
+ */
+const bodyCredentialRepeat = (
+  text: string | undefined,
+  secrets: ReadonlyArray<string>
+): string | undefined => {
   if (text === undefined || text === '') return undefined
 
   const repeat = 'the request body repeats the credential'
@@ -1377,6 +1386,9 @@ const lexicalCredentialRepeat = async (
     ? repeat
     : undefined
 }
+
+/** The body as `Request.text()` reads it: UTF-8, a leading byte order mark dropped. */
+const bodyText = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
 const snapshotFault = (state: MutableFaultState): StatefulFaultState<StatefulStreamFault> => ({
   ...state
@@ -1526,6 +1538,8 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
     const job = jobs.get(Number(request.headers.get(jobIdHeader) ?? 'NaN'))
 
     if (job === undefined) return handlerFailedResponse()
+
+    job.dispatched = true
 
     try {
       const planned = job.admission.plan(state, { env: config.env, seq: job.seq })
@@ -1808,16 +1822,33 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
     /** Resolved mode: the request text besides the query that must not repeat a secret. */
     guardedPath: string | undefined
   ): Promise<Response> => {
+    // Resolved mode: routes read the content type only, never a header that may carry a secret.
     const header = (name: string): string | undefined =>
-      isCredentialHeaderName(name) ? undefined : (request.headers.get(name) ?? undefined)
+      isCredentialHeaderName(name) ||
+      (guardedPath !== undefined && name.toLowerCase() !== 'content-type')
+        ? undefined
+        : (request.headers.get(name) ?? undefined)
 
     const refused = (reason: string) => refuse(entry, reason, secrets)
 
+    // Resolved mode reads the request body once, after the query and path checks, and every later
+    // step reuses that read (`undefined`: the body is unreadable, consumed or locked included).
+    let resolvedBody: { readonly bytes: Uint8Array | undefined } | undefined
+
     if (guardedPath !== undefined) {
       // Resolved mode: the emulator resolved the credential; nothing may repeat it.
-      const repeat = await lexicalCredentialRepeat(request, url, guardedPath, secrets)
+      const partsRepeat = partsCredentialRepeat(url, guardedPath, secrets)
 
-      if (repeat !== undefined) return refused(repeat)
+      if (partsRepeat !== undefined) return refused(partsRepeat)
+
+      resolvedBody = { bytes: await readBytes(request) }
+
+      const bodyRepeat = bodyCredentialRepeat(
+        resolvedBody.bytes === undefined ? undefined : bodyText(resolvedBody.bytes),
+        secrets
+      )
+
+      if (bodyRepeat !== undefined) return refused(bodyRepeat)
     } else if (config.failClosed === undefined) {
       if (!bearerPattern.test(request.headers.get('authorization') ?? '')) {
         return refused('a non-empty Authorization: Bearer credential is required')
@@ -1836,12 +1867,19 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
     if (problem !== undefined) return refused(problem)
 
+    // The body text: read now, or (resolved mode) the one read already.
+    const readRouteText = async (): Promise<string | undefined> => {
+      if (resolvedBody === undefined) return readText(request)
+
+      return resolvedBody.bytes === undefined ? undefined : bodyText(resolvedBody.bytes)
+    }
+
     let json: Schema.Json | undefined
     let bytes: Uint8Array | undefined
 
     switch (matched.route.body) {
       case 'none': {
-        const text = await readText(request)
+        const text = await readRouteText()
 
         if (text === undefined || text !== '') {
           return refused('this route takes no request body')
@@ -1851,7 +1889,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
       }
 
       case 'json': {
-        const text = await readText(request)
+        const text = await readRouteText()
 
         if (mediaType(header('content-type')) !== 'application/json') {
           return refused('this route takes a content-type: application/json body')
@@ -1877,7 +1915,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
       }
 
       case 'json-or-empty': {
-        const text = await readText(request)
+        const text = await readRouteText()
 
         if (text === undefined) return refused('the request body is unreadable')
 
@@ -1901,7 +1939,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
       }
 
       case 'bytes': {
-        bytes = await readBytes(request)
+        bytes = resolvedBody === undefined ? await readBytes(request) : resolvedBody.bytes
 
         if (bytes === undefined) return refused('the request body is unreadable')
 
@@ -2033,6 +2071,14 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
       if (response.headers.has(handlerFailedHeader)) {
         entry.responseError = 'the route handler failed'
+
+        return emulatorError(500, errorTexts.failed)
+      }
+
+      // Resolved mode: a core that answered without running the dispatch (closed meanwhile)
+      // decided nothing about the request.
+      if (guardedPath !== undefined && job.dispatched !== true) {
+        entry.responseError = 'the route handler answered no eligibility verdict'
 
         return emulatorError(500, errorTexts.failed)
       }

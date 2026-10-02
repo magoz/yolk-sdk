@@ -474,13 +474,16 @@ There is no root export or barrel.
   eligibility check against the request and the state that writes nothing (handlers answer not
   emulated or the commit); only then the fault decision; then the commit. The plan, the fault
   decision, and the commit run synchronously in one core call, so concurrent requests never
-  interleave (before #139 they ran in separate steps, the commit validating again); fault answers
-  and refusals are still returned outside the core, so they stay readable after a reset or a close.
-  A consumed or locked request body answers the ledgered 400 `the request body is unreadable`, and
-  a refusal reason that cannot be percent-encoded (an unpaired surrogate) the handler-failure 500.
-  Routes see the ledgered path and no header names. A `match.route` naming no manifest row is
-  rejected when the fault is added. So a refused request answers the
-  ledgered 400 not-emulated, writes nothing, and never uses a fault; faults are `status` only, 400-599. Only
+  interleave; fault answers and refusals are still returned outside the core, so they stay
+  readable after a reset or a close, and a close while a request is in flight answers the
+  handler-failure 500 (`the route handler answered no eligibility verdict`). The request body is
+  read once, after the query and path checks: a query or path refusal leaves it unread, and a body
+  repeat or any later refusal finds it read. A consumed or locked request body answers the
+  ledgered 400 `the request body is unreadable`, and a refusal reason that cannot be
+  percent-encoded (an unpaired surrogate) the handler-failure 500. Routes see the ledgered path, no
+  header names, and no header but `content-type`. A `match.route` naming no manifest row is
+  rejected when the fault is added. So a refused request answers the ledgered 400 not-emulated,
+  writes nothing, and never uses a fault; faults are `status` only, 400-599. Only
   items created through the recorded create flow are written or (for projects) read: seeded projects
   answer not-emulated on reads (no fixture records their objects), seeded projects and tasks are
   never updated, closed, or deleted, a case project takes one task and a seeded parent one
@@ -953,7 +956,9 @@ percent-encoded, JSON-escaped, and numeric body forms, checked against responses
 JSON-escaped, and numeric body keys and values); seeded-project reads and seeded-item writes
 refused; seed ids in the minted namespace rejected; a `match.route` naming no manifest row
 rejected at `faults.add` and `POST /_emulate/faults`; consumed and locked bodies refused as
-unreadable; fault answers and refusals readable after a reset or a close; Todoist's unencodable
+unreadable; one request sent twice (a body repeat reads the body, so the second send is
+unreadable; a query refusal leaves it unread); a close while a request is in flight answering the
+500; fault answers and refusals readable after a reset or a close; Todoist's unencodable
 refusal reason answering the 500; 429 faults through the real connectors;
 clock-safe recovery; seeds; control plane), and `test/todoist-conformance.test.ts` /
 `test/telegram-conformance.test.ts` (cross-checks A and B: every case in-process and over a loopback
@@ -1059,8 +1064,10 @@ matching, and the core seeing, only the ledgered path; the query recorded as sen
 bodies, `makeHeaderlessStatefulEmulator` (no `headers` field), `errorTexts`, and the unchanged
 behaviour without these options and without fail-closed mode; resolved mode also: routes seeing
 the ledgered path and no header names, `recordHeaders` and a throwing resolution, consumed and
-locked bodies, fault answers and refusals readable after a reset or a close over a core that
-cancels its own bodies, and an unencodable plan reason answering the 500), and
+locked bodies, the body read once (a body repeat consumes it, a query repeat does not), a core
+answering without dispatching when closed meanwhile, header rules reading `content-type` only,
+fault answers and refusals readable after a reset or a close over a core that cancels its own
+bodies, and an unencodable plan reason answering the 500), and
 `test/stateful-public-types.test.ts` (compile coverage of the public Todoist and Telegram fault,
 fault-match, fault-state, ledger-entry, and coverage types: old-shaped values, status-only ledger
 faults, no `headers` field). Loopback sockets only; never call real services.
