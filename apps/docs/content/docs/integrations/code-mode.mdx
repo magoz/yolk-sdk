@@ -188,7 +188,9 @@ The result starts with `Script completed` or `Script failed`, then the wall time
 order, and the JSON return value. A failed script keeps its partial output, the error, and the
 tool calls already made, which are not undone. `ToolResult.nestedCalls` records every nested call
 (id, name, compact arguments, status, duration, truncated error, usage) for your audit log; the
-model never sees it.
+model never sees it. `toolResultMessageFromResult` drops `nestedCalls` and `usage`, and the loop
+does not add `ToolResult.usage` (nested and classifier token spend) to run usage; read both from
+the `ToolResult` or tool events.
 
 ## Keep state between scripts
 

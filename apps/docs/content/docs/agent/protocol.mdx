@@ -143,6 +143,10 @@ Use `toolResultMessageFromResult(result, envelope?)` to copy `toolCallId`, `cont
 `structuredContent`, and background `acceptance` into a `ToolResultMessage`. It invents no timestamp,
 author, or annotations; pass those optional message-envelope fields explicitly.
 
+It intentionally drops `ToolResult.nestedCalls` and `ToolResult.usage`, which are never
+model-visible. Capture them from the `ToolResult` or tool events if you keep audit or billing
+records. The loop does not add `ToolResult.usage` to run usage.
+
 An accepted call is settled, not completed. Client and React projections preserve its original call
 and receipt across active-event replays (even without event IDs), turn cleanup, and transcript
 hydration. Persisted acceptance takes precedence over stale active client runs.

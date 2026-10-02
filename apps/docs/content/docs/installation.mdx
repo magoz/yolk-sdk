@@ -17,15 +17,26 @@ Add sibling packages as needed:
 ```bash
 pnpm add @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary
 pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary workflow@^5.0.0-beta.42
+pnpm add @yolk-sdk/harness@canary @yolk-sdk/codemode@canary
 ```
 
-`@yolk-sdk/harness` is introduced after `0.1.0-canary.76`. It is unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available, and keep it on the same lockstep version as the other public packages.
+For tests, add the experimental conformance and emulator packages as dev dependencies:
+
+```bash
+pnpm add -D @yolk-sdk/conformance@canary @yolk-sdk/emulators@canary
+```
+
+`@yolk-sdk/harness` is available from `0.1.0-canary.77`. `@yolk-sdk/codemode`,
+`@yolk-sdk/conformance`, and `@yolk-sdk/emulators` are available from `0.1.0-canary.96`; they are
+unavailable in `0.1.0-canary.95` and earlier. `@yolk-sdk/conformance` and `@yolk-sdk/emulators`
+are experimental and meant for tests only; see [Test with emulators](./guides/testing-with-emulators).
+Keep every package on the same lockstep version as the other public packages.
 
 ## Runtime expectations
 
 | Requirement   | Notes                                                                                                                                                       |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node          | Packages declare `>=22`                                                                                                                                     |
+| Node          | Packages declare `>=22`; `@yolk-sdk/codemode` requires `>=22.19.0`                                                                                          |
 | Module format | ESM only                                                                                                                                                    |
 | Effect        | Runtime dependency during canary                                                                                                                            |
 | React         | Optional peer only for `@yolk-sdk/agent/react`                                                                                                              |

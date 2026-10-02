@@ -16,26 +16,30 @@ exotic prototypes, hidden/symbol keys, nonfinite values and cycles, and permits 
 null-prototype objects and DAG aliases. This is representation admission, not meta-schema validation;
 provider compatibility and tool execution validation are separate. Params/results/HITL remain opaque.
 
-| Export                                                                                                                            | Purpose                                                         |
-| --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `UserMessage`, `AssistantAgentMessage`, `ToolResultMessage`                                                                       | transcript messages                                             |
-| `AgentEvent`                                                                                                                      | stream event union                                              |
-| `UserMessageEvent`, `AssistantMessageEvent`                                                                                       | replay-safe transcript events                                   |
-| `ToolDef`, `ToolCall`, `ToolResult`                                                                                               | tool protocol                                                   |
-| `BackgroundToolAccepted`, `BackgroundToolInput`, `decodeBackgroundToolInput`, `makeBackgroundToolAcceptedResult`                  | background tool acceptance                                      |
-| `ToolExecutionAccepted`                                                                                                           | background admission event                                      |
-| `ToolApprovalRequest`, `ToolApprovalResponse`                                                                                     | approval HITL                                                   |
-| `QuestionRequest`, `QuestionResponse`                                                                                             | question HITL                                                   |
-| `plainHitlResponse`, `hitlResponseEvent`, `questionResponseStructuredContent`                                                     | durable/client HITL helpers                                     |
-| `isTerminalAgentEvent`                                                                                                            | terminal event guard                                            |
-| `assistantContent`, `contentText`, `contentParts`                                                                                 | content helpers                                                 |
-| `ImagePart`, `DocumentPart`, `AudioPart`, `TextPart`                                                                              | multimodal content parts                                        |
-| `urlAttachmentSource`, `inlineBase64AttachmentSource`, `refAttachmentSource`                                                      | attachment source helpers                                       |
-| `AgentModelCapabilities`, `textOnlyModelCapabilities`, `textImageModelCapabilities`, `textImageDocumentModelCapabilities`         | model input capability helpers                                  |
-| `ProviderErrorInfo`, `ProviderFailureKind`, `ProviderStreamDiagnostics`, `ProviderStreamProtocol`, `ProviderStreamResponseFormat` | safe provider error metadata, incl. optional stream diagnostics |
-| `AgentUsage`, `addAgentUsage`, `zeroAgentUsage`                                                                                   | usage accounting helpers                                        |
-| `CompactionStart`, `CompactionEnd`                                                                                                | compaction lifecycle events                                     |
-| `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls`                                         | transcript invariant helpers                                    |
+| Export                                                                                                                                                 | Purpose                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `UserMessage`, `AssistantAgentMessage`, `ToolResultMessage`                                                                                            | transcript messages                                                                           |
+| `AgentEvent`                                                                                                                                           | stream event union                                                                            |
+| `UserMessageEvent`, `AssistantMessageEvent`                                                                                                            | replay-safe transcript events                                                                 |
+| `ToolDef`, `ToolCall`, `ToolResult`                                                                                                                    | tool protocol                                                                                 |
+| `BackgroundToolAccepted`, `BackgroundToolInput`, `decodeBackgroundToolInput`, `makeBackgroundToolAcceptedResult`                                       | background tool acceptance                                                                    |
+| `ToolCallableBy`, `ToolDiscovery`, `ToolExposure`, `toolDiscovery`, `isCodeModeCallable`, `isCodeModeFailClosed`                                       | code mode tool exposure ([code mode](../integrations/code-mode#choose-what-scripts-can-call)) |
+| `providerToolDefs`, `isProviderToolDef`                                                                                                                | filter out codemode-only defs before sending tools to a provider                              |
+| `NestedToolCalls`, `NestedToolCallRecord`, `NestedToolCallStatus`, `recordNestedToolCall`, `nestedToolCallResultFields`, `emptyNestedToolCallRecorder` | bounded, non-model-visible nested call record for `ToolResult.nestedCalls`                    |
+| `nestedToolCallMaxCalls`, `nestedToolCallMaxArgsBytes`, `nestedToolCallMaxTotalArgsBytes`, `nestedToolCallMaxErrorChars`                               | nested call record bounds                                                                     |
+| `ToolExecutionAccepted`                                                                                                                                | background admission event                                                                    |
+| `ToolApprovalRequest`, `ToolApprovalResponse`                                                                                                          | approval HITL                                                                                 |
+| `QuestionRequest`, `QuestionResponse`                                                                                                                  | question HITL                                                                                 |
+| `plainHitlResponse`, `hitlResponseEvent`, `questionResponseStructuredContent`                                                                          | durable/client HITL helpers                                                                   |
+| `isTerminalAgentEvent`                                                                                                                                 | terminal event guard                                                                          |
+| `assistantContent`, `contentText`, `contentParts`                                                                                                      | content helpers                                                                               |
+| `ImagePart`, `DocumentPart`, `AudioPart`, `TextPart`                                                                                                   | multimodal content parts                                                                      |
+| `urlAttachmentSource`, `inlineBase64AttachmentSource`, `refAttachmentSource`                                                                           | attachment source helpers                                                                     |
+| `AgentModelCapabilities`, `textOnlyModelCapabilities`, `textImageModelCapabilities`, `textImageDocumentModelCapabilities`                              | model input capability helpers                                                                |
+| `ProviderErrorInfo`, `ProviderFailureKind`, `ProviderStreamDiagnostics`, `ProviderStreamProtocol`, `ProviderStreamResponseFormat`                      | safe provider error metadata, incl. optional stream diagnostics                               |
+| `AgentUsage`, `addAgentUsage`, `zeroAgentUsage`                                                                                                        | usage accounting helpers                                                                      |
+| `CompactionStart`, `CompactionEnd`                                                                                                                     | compaction lifecycle events                                                                   |
+| `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls`                                                              | transcript invariant helpers                                                                  |
 
 Attachment resolution helpers from `@yolk-sdk/agent/protocol`:
 
@@ -186,20 +190,27 @@ Its variants are `Transcript`, `AppendInput`, and `AppendHitlResponse`.
 
 `@yolk-sdk/agent/tools`
 
-| Export                               | Purpose                                                   |
-| ------------------------------------ | --------------------------------------------------------- |
-| `makeTool`                           | schema-backed tool registration                           |
-| `resolveTools`                       | filter/merge modules into model-visible defs and executor |
-| `BackgroundToolHost`                 | host seam that admits model-chosen background calls       |
-| `makeToolExecutorLayer`              | provide resolved executor as `ToolExecutor`               |
-| `EmptyToolParams`                    | no-arg tool schema                                        |
-| `ToolAccess`                         | `read`, `write`, `destructive`                            |
-| `makeQuestionToolModule`             | built-in question HITL tool                               |
-| `makeNonRecursiveSubagentToolModule` | subagent tool without recursive delegation                |
-| `SubagentRuntimeSelectionOptions`    | host-advertised subagent model and reasoning choices      |
-| `SubagentModelDefinition`            | model id and model-visible selection guidance             |
-| `SubagentReasoningEffortDefinition`  | reasoning effort and model-visible selection guidance     |
-| `modelVisibleToolError`              | recoverable error visible to model                        |
+| Export                                                    | Purpose                                                   |
+| --------------------------------------------------------- | --------------------------------------------------------- |
+| `makeTool`                                                | schema-backed tool registration                           |
+| `resolveTools`                                            | filter/merge modules into model-visible defs and executor |
+| `BackgroundToolHost`                                      | host seam that admits model-chosen background calls       |
+| `makeToolExecutorLayer`                                   | provide resolved executor as `ToolExecutor`               |
+| `EmptyToolParams`                                         | no-arg tool schema                                        |
+| `ToolAccess`                                              | `read`, `write`, `destructive`                            |
+| `makeQuestionToolModule`                                  | built-in question HITL tool                               |
+| `makeNonRecursiveSubagentToolModule`                      | subagent tool without recursive delegation                |
+| `SubagentRuntimeSelectionOptions`                         | host-advertised subagent model and reasoning choices      |
+| `SubagentModelDefinition`                                 | model id and model-visible selection guidance             |
+| `SubagentReasoningEffortDefinition`                       | reasoning effort and model-visible selection guidance     |
+| `modelVisibleToolError`                                   | recoverable error visible to model                        |
+| `NestedTool`, `NestedToolExecutor`, `NestedToolDescriber` | nested tool access for code mode registrations            |
+
+`makeTool` also accepts `output` (declaration-only `ToolDef.outputSchema`), `callableBy`, `discovery`,
+`nestedToolAccess`, and `describe`. `ToolResult.nestedCalls` and `ToolResult.usage` never reach the
+model: `toolResultMessageFromResult` drops them and the loop does not add `ToolResult.usage` to run
+usage. `ToolRegistryError` causes include `codemode_unsupported_tool` and `invalid_tool_exposure`.
+See [Add code mode](../integrations/code-mode#choose-what-scripts-can-call).
 
 Typed-input helpers: `makeInputTool` keeps original call/response validators server-side;
 `makeInputToolModule` packages the registration as a module. `makeInputToolDef` creates only a

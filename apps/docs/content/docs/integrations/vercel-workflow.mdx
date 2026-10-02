@@ -34,6 +34,13 @@ child Workflow starts. Keep provider calls, tool IO, storage, and Effect work in
 wrap a whole child loop in one parent step. See
 [Independent child orchestration](../vercel-workflows/step-contracts#independent-child-orchestration).
 
+## Code mode
+
+Run [code mode](./code-mode#vercel-workflow) calls inside your tool-batch step, never in the
+`'use workflow'` function. Executor decorators applied outside `ResolvedToolSet.execute`, such as a
+Workflow stop or run-admission check, do not see nested calls; pass the same check to
+`makeCodeModeTool` as `beforeNestedCall`.
+
 ## Durable stream rule
 
 Use distinct finalization paths:
