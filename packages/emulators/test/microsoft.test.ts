@@ -1565,6 +1565,8 @@ describe('handler failures', () => {
         }
       })
 
+      const before = target.snapshot()
+
       armed = true
 
       // The core's own error handler (which logs and answers a non-Graph body) is never reached.
@@ -1603,6 +1605,9 @@ describe('handler failures', () => {
           responseError: 'the route handler failed'
         })
       ])
+      // Draft creation advances its message counter before it reads the clock: neither the
+      // counter nor anything else reached the state.
+      expect(target.snapshot()).toEqual(before)
       expect(
         (
           await call(target, 'POST', `${user}/messages`, {
@@ -1625,6 +1630,7 @@ describe('handler failures', () => {
         }
       })
 
+      const before = target.snapshot()
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
       const failed = await call(target, 'POST', `${user}/messages`, {
@@ -1658,6 +1664,8 @@ describe('handler failures', () => {
       ])
       // Nothing was written: the draft never reached the state.
       expect(target.snapshot().messages.some(message => message.isDraft)).toBe(false)
+      // Nor did the message counter, which the handler advances before it reads the clock.
+      expect(target.snapshot()).toEqual(before)
     })
   )
 
@@ -1978,9 +1986,9 @@ describe('faults', () => {
 
       vi.stubGlobal('Response', UnbuildableResponse)
 
-      const failed = await call(target, 'GET', `${user}/mailFolders/inbox/messages`).finally(() =>
-        vi.unstubAllGlobals()
-      )
+      const failed = await call(target, 'GET', `${pagingFolder}?$top=2`, {
+        headers: immutable
+      }).finally(() => vi.unstubAllGlobals())
 
       expect(failed.status).toBe(500)
       expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
@@ -1992,8 +2000,14 @@ describe('faults', () => {
           responseError: expect.any(String)
         })
       ])
+      // The fault's answer, not the route, failed.
+      expect(target.ledger.entries()[0]?.responseError).toBe(
+        'the emulator could not build or produce the response'
+      )
       expect(target.faults.list()[0]).toMatchObject({ remaining: 1, applied: 0 })
-      expect((await call(target, 'GET', `${user}/mailFolders/inbox/messages`)).status).toBe(503)
+      expect(
+        (await call(target, 'GET', `${pagingFolder}?$top=2`, { headers: immutable })).status
+      ).toBe(503)
     })
   )
 
@@ -2011,7 +2025,11 @@ describe('faults', () => {
       const result = yield* outlookListMessagesAction
         .executeTyped({
           integration: microsoftConformanceIntegration,
-          input: OutlookListMessagesInput.make({ mailbox: 'ada@example.test', folderId: 'inbox' })
+          input: OutlookListMessagesInput.make({
+            mailbox: 'ada@example.test',
+            folderId: seeds.pagingFolderId,
+            top: 2
+          })
         })
         .pipe(Effect.provide(connectorLayer(target)))
 
@@ -2024,6 +2042,265 @@ describe('faults', () => {
           retryAfterMs: 2000
         })
       }
+    })
+  )
+
+  it.effect(
+    'a request the route refuses uses up no fault; the next valid one gets it and writes nothing',
+    () =>
+      Effect.gen(function* () {
+        const target = yield* Effect.promise(() => emulator())
+        const layer = connectorLayer(target)
+        const before = target.snapshot()
+
+        // Matches every request.
+        target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+        const copy = (itemId: string) =>
+          oneDriveCopyItemAction
+            .executeTyped({
+              integration: microsoftConformanceIntegration,
+              input: OneDriveCopyItemInput.make({
+                itemId,
+                driveId: seeds.driveId,
+                destinationDriveId: seeds.driveId ?? '',
+                destinationParentItemId: seeds.driveParentItemId ?? '',
+                conflictBehavior: 'fail'
+              })
+            })
+            .pipe(Effect.provide(layer))
+
+        // An unknown id: Graph's 404 itemNotFound.
+        const notFound = yield* copy('01SYNTHETICMISSINGITEM0000000001')
+
+        // A request the route does not emulate: a folder listed by well-known name (400).
+        const notEmulated = yield* outlookListMessagesAction
+          .executeTyped({
+            integration: microsoftConformanceIntegration,
+            input: OutlookListMessagesInput.make({ mailbox: 'ada@example.test', folderId: 'inbox' })
+          })
+          .pipe(Effect.provide(layer))
+
+        expect(notFound).toMatchObject({
+          _tag: 'Failure',
+          error: { code: 'microsoft_not_found', status: 404 }
+        })
+        expect(notEmulated).toMatchObject({ _tag: 'Failure', error: { status: 400 } })
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 1, applied: 0 })
+        ])
+        expect(target.snapshot()).toEqual(before)
+        expect(target.monitors()).toEqual([])
+
+        // The next valid request gets the fault: no copy monitor is created and the monitor
+        // counter does not advance.
+        expect(yield* copy(seeds.copySourceItemId ?? '')).toMatchObject({
+          _tag: 'Failure',
+          error: { status: 503 }
+        })
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 0, applied: 1 })
+        ])
+        expect(target.snapshot()).toEqual(before)
+        expect(target.monitors()).toEqual([])
+
+        // The fault is used up: the copy is accepted under the first monitor id.
+        expect(yield* copy(seeds.copySourceItemId ?? '')).toMatchObject({ _tag: 'Success' })
+        expect(target.monitors().map(monitor => monitor.id)).toEqual([
+          '00000000-0000-4000-8000-000000000001'
+        ])
+
+        const copyRoute = '/v1.0/drives/{driveId}/items/{itemId}/copy'
+
+        expect(
+          target.ledger.entries().map(({ method, route, status, evidence, fault }) => ({
+            method,
+            route,
+            status,
+            evidence,
+            fault
+          }))
+        ).toEqual([
+          {
+            method: 'POST',
+            route: copyRoute,
+            status: 404,
+            evidence: 'unverified',
+            fault: undefined
+          },
+          {
+            method: 'GET',
+            route: '/v1.0/users/{userId}/mailFolders/{folderId}/messages',
+            status: 400,
+            evidence: 'unverified',
+            fault: undefined
+          },
+          {
+            method: 'POST',
+            route: copyRoute,
+            status: 503,
+            evidence: 'unverified',
+            fault: 'status'
+          },
+          {
+            method: 'POST',
+            route: copyRoute,
+            status: 202,
+            evidence: 'unverified',
+            fault: undefined
+          }
+        ])
+      })
+  )
+
+  it.effect('a 409 conflict uses up no fault; a faulted message write holds no message', () =>
+    Effect.promise(async () => {
+      const conflictWindowMs = 300
+      const target = await emulator({ conflictWindowMs })
+      const id = await createDraft(target, 'Original')
+      const path = `${user}/messages/${encodeURIComponent(id)}`
+
+      const patch = (subject: string) =>
+        call(target, 'PATCH', path, { body: { subject }, headers: immutable })
+
+      const subject = () => target.snapshot().messages.find(message => message.id === id)?.subject
+
+      // A real turn of the event loop (`setImmediate` is not faked), bounded by a deadline.
+      const deadline = Date.now() + 5000
+
+      const turn = async (what: string) => {
+        expect(Date.now(), what).toBeLessThan(deadline)
+
+        await new Promise(resolve => {
+          setImmediate(resolve)
+        })
+      }
+
+      // Fake only the conflict window's timer: a held message stays held until the test releases
+      // it, however slow the runner is.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+      try {
+        // The first write commits, then holds the message for the conflict window.
+        const first = patch('First')
+
+        while (subject() !== 'First') await turn('the first write commits')
+
+        target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+        const held = target.snapshot()
+
+        // An overlapping write: Graph's 409, answered by the route; the fault stays unused.
+        const conflict = await patch('Second')
+
+        expect(conflict.status).toBe(409)
+        expect(await errorCode(conflict)).toBe(microsoftEmulatorErrorCodes.conflict)
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 1, applied: 0 })
+        ])
+        expect(target.snapshot()).toEqual(held)
+
+        // Release the first write's hold.
+        await vi.advanceTimersByTimeAsync(conflictWindowMs)
+        expect((await first).status).toBe(200)
+
+        // Two overlapping writes: one gets the fault and writes and holds nothing, so the other
+        // applies (no 409).
+        let settled = false
+
+        const pair = Promise.all([patch('Third'), patch('Fourth')]).finally(() => {
+          settled = true
+        })
+
+        while (!settled) {
+          await vi.advanceTimersByTimeAsync(conflictWindowMs)
+          await turn('the overlapping writes answer')
+        }
+
+        const responses = await pair
+        const statuses = responses.map(response => response.status)
+
+        expect([...statuses].sort()).toEqual([200, 503])
+
+        const applied = responses.find(response => response.status === 200)
+
+        expect(field(await applied?.json(), 'subject')).toBe(subject())
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 0, applied: 1 })
+        ])
+        // Only the applied write committed: one change key, and no other change.
+        expect(target.snapshot().counters.nextChangeKeyNumber).toBe(
+          held.counters.nextChangeKeyNumber + 1
+        )
+        expect(
+          target.ledger.entries().map(({ method, status, fault }) => ({ method, status, fault }))
+        ).toEqual([
+          { method: 'POST', status: 201, fault: undefined },
+          { method: 'PATCH', status: 200, fault: undefined },
+          { method: 'PATCH', status: 409, fault: undefined },
+          ...statuses.map(status =>
+            status === 503
+              ? { method: 'PATCH', status: 503, fault: 'status' }
+              : { method: 'PATCH', status: 200, fault: undefined }
+          )
+        ])
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  )
+
+  it.effect('a faulted copy monitor poll changes no monitor and copies nothing', () =>
+    Effect.promise(async () => {
+      const source = `${drive}/items/${seeds.copySourceItemId ?? ''}`
+
+      const copy = (target: MicrosoftEmulator) =>
+        call(target, 'POST', `${source}/copy?@microsoft.graph.conflictBehavior=fail`, {
+          body: { parentReference: copyDestination }
+        }).then(response => response.headers.get('location') ?? '')
+
+      const answer = async (response: Response) => ({
+        status: response.status,
+        body: await jsonOf(response)
+      })
+
+      // The same copy, polled without faults: one in-progress answer, then the completing one.
+      const reference = await emulator({ copyInProgressPolls: 1 })
+      const referenceLocation = await copy(reference)
+      const unfaulted = []
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        unfaulted.push(await answer(await reference.fetch(new Request(referenceLocation))))
+      }
+
+      expect(unfaulted.map(({ status }) => status)).toEqual([202, 200])
+
+      const target = await emulator({ copyInProgressPolls: 1 })
+      const location = await copy(target)
+
+      expect(location).toBe(referenceLocation)
+
+      // A fault on the in-progress poll, then one on the completing poll: each faulted poll
+      // leaves the monitor (pollsLeft, resourceId) and the state as they were, and the next poll
+      // answers what it would have answered without the fault.
+      for (const expected of unfaulted) {
+        const monitors = target.monitors()
+        const state = target.snapshot()
+
+        target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+        expect((await target.fetch(new Request(location))).status).toBe(503)
+        expect(target.monitors()).toEqual(monitors)
+        expect(target.snapshot()).toEqual(state)
+        expect(await answer(await target.fetch(new Request(location)))).toEqual(expected)
+      }
+
+      expect(target.faults.list()).toEqual([
+        expect.objectContaining({ remaining: 0, applied: 1 }),
+        expect.objectContaining({ remaining: 0, applied: 1 })
+      ])
+      expect(target.monitors()).toEqual(reference.monitors())
+      expect(target.snapshot()).toEqual(reference.snapshot())
     })
   )
 })
@@ -2137,7 +2414,9 @@ describe('seeds and the control plane', () => {
         (await control('POST', 'faults', { faults: [{ kind: 'status', status: 429, count: 1 }] }))
           .status
       ).toBe(201)
-      expect((await call(target, 'GET', `${user}/mailFolders/inbox/messages`)).status).toBe(429)
+      expect(
+        (await call(target, 'GET', `${pagingFolder}?$top=2`, { headers: immutable })).status
+      ).toBe(429)
       expect(field(await jsonOf(await control('GET', 'ledger')), 'entries')).toEqual([
         expect.objectContaining({ method: 'GET', status: 429, fault: 'status' })
       ])

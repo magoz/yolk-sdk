@@ -229,11 +229,26 @@ export type MicrosoftApiEnv = {
   readonly monitorCounter: { next: number }
 }
 
+/**
+ * A message write's answer and the message it holds once committed: the write holds it for
+ * `conflictWindowMs` before answering, so an overlapping write to it gets 409.
+ */
+export type HeldAnswer = {
+  readonly response: Response
+  /** Immutable id of the message held. */
+  readonly holds: string
+}
+
+/**
+ * A route handler. It runs on a draft of the state and of the copy monitors (see
+ * `registerMicrosoftApi`) and decides the whole answer synchronously; it replaces whole state lists
+ * and counters, never editing them in place. Any answer that is not 2xx is a refusal.
+ */
 export type RouteHandler = (
   state: MicrosoftEmulatorState,
   request: RouteRequest,
   env: MicrosoftApiEnv
-) => Response | Promise<Response>
+) => Response | HeldAnswer
 
 export const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
   value !== undefined && value !== null && Predicate.isObject(value) && !Array.isArray(value)

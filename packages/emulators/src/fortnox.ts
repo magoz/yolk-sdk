@@ -19,6 +19,7 @@ import * as Schema from 'effect/Schema'
 import {
   EmulatorHeaderRecord,
   EmulatorResponseStatus,
+  emulatorJobHeader,
   handlerFailedHeader
 } from './emulator-http.ts'
 import {
@@ -94,7 +95,8 @@ export type FortnoxFaultMatch = typeof FortnoxFaultMatch.Type
 
 /**
  * A wire fault: answer matching requests with this status, headers, and body (for example 429
- * with `retry-after`) before the route runs, so nothing is written. The body defaults to a
+ * with `retry-after`) instead of the route's successful answer, so nothing is written. A request
+ * the route refuses is answered by the route and uses up no fault. The body defaults to a
  * Fortnox `ErrorInformation`. `count` limits how many requests it answers (omitted: all).
  *
  * The Gateway emulator's rules apply: statuses that cannot carry a body (1xx, 204, 205) and
@@ -283,6 +285,9 @@ type MutableLedgerEntry = {
   responseError?: string
 }
 
+/** One core request's fault outcome: the fault's answer, set when a fault answered it. */
+type FaultJob = { faultAnswer?: Response }
+
 type MutableFaultState = {
   readonly id: number
   readonly fault: FortnoxFault
@@ -329,8 +334,10 @@ const isControlPath = (path: string): boolean =>
  * Requests to `/3/*` need `Authorization: Bearer <non-empty>` (missing: 401 `ErrorInformation`);
  * the token is never checked, stored, forwarded to the core, or ledgered. Precedence per request:
  * route match (unknown routes fail closed with a 404 `ErrorInformation`), authorization, JSON
- * body parsing, then the first matching fault (answered before the route runs, so nothing is
- * written), then the stateful route. Every response from an unverified route carries
+ * body parsing, then the stateful route's plan (its query allowlist, then its handler on a draft
+ * of the state), then the first matching fault, then the commit. A request the route refuses (any
+ * answer that is not 2xx, such as a 404 for an unknown id or a 400 for an invalid state) uses up
+ * no fault; a faulted request writes nothing. Every response from an unverified route carries
  * `x-emulator-evidence: unverified`.
  */
 export const makeFortnoxEmulator = async (
@@ -360,6 +367,13 @@ export const makeFortnoxEmulator = async (
   // Loaded lazily: the core imports Node builtins and reads files at import time.
   const core = await import('@emulators/core')
 
+  /**
+   * Fault decisions of the core requests in flight, by job id (asked by the route once it would
+   * answer successfully). Job ids never reset, so a ledger clear never makes two jobs share one.
+   */
+  const jobs = new Map<string, () => boolean>()
+  let nextJobId = 1
+
   const definition = core.defineEmulator<FortnoxEmulatorState>({
     name: 'fortnox',
     cors: false,
@@ -373,7 +387,10 @@ export const makeFortnoxEmulator = async (
 
       return decoded
     },
-    setup: ({ app, state }) => registerFortnoxApi(app, state, env)
+    setup: ({ app, state }) =>
+      registerFortnoxApi(app, state, env, jobId =>
+        jobId === undefined ? false : (jobs.get(jobId)?.() ?? false)
+      )
   })
 
   const runtime = await core.createCustomRuntime(definition, { seed: initial })
@@ -483,7 +500,10 @@ export const makeFortnoxEmulator = async (
     unknownRouteRequests: entries.filter(entry => entry.evidence === 'unknown-route').length
   })
 
-  /** Authorization, body parsing, faults, then the core route (without the credential). */
+  /**
+   * Authorization, body parsing, then the core route (without the credential), which asks for the
+   * fault only once it would answer successfully.
+   */
   const routed = async (
     request: Request,
     url: URL,
@@ -518,35 +538,51 @@ export const makeFortnoxEmulator = async (
     }
 
     const method = request.method.toUpperCase()
-    const fault = takeFault(method, url.pathname)
-
-    if (fault !== undefined) {
-      const response = applyFault(fault)
-
-      entry.fault = 'status'
-
-      return response
-    }
-
     const hasBody = text !== '' && method !== 'GET' && method !== 'HEAD'
+    const jobId = String(nextJobId++)
 
-    const init: RequestInit = {
-      method,
-      headers: hasBody
-        ? { accept: 'application/json', 'content-type': 'application/json' }
-        : { accept: 'application/json' }
-    }
+    const headers = new Headers({ accept: 'application/json', [emulatorJobHeader]: jobId })
+
+    if (hasBody) headers.set('content-type', 'application/json')
+
+    const init: RequestInit = { method, headers }
 
     if (hasBody) {
       init.body = text
     }
 
-    const response = await runtime.fetch(
-      new Request(new URL(`${url.pathname}${url.search}`, runtime.baseUrl), init)
-    )
+    const job: FaultJob = {}
+
+    // Asked by the route only for an answer it would send successfully, before it commits.
+    jobs.set(jobId, () => {
+      const fault = takeFault(method, url.pathname)
+
+      if (fault === undefined) return false
+
+      try {
+        job.faultAnswer = applyFault(fault)
+      } catch (error) {
+        // The fault's answer could not be built (the route did not fail): the core answers its
+        // handler failure, and the fault is not used up.
+        entry.responseError = 'the emulator could not build or produce the response'
+
+        throw error
+      }
+
+      entry.fault = 'status'
+
+      return true
+    })
+
+    const response = await runtime
+      .fetch(new Request(new URL(`${url.pathname}${url.search}`, runtime.baseUrl), init))
+      .finally(() => jobs.delete(jobId))
+
+    // The fault's answer is sent from here, never through the core.
+    if (job.faultAnswer !== undefined) return job.faultAnswer
 
     if (response.headers.has(handlerFailedHeader)) {
-      entry.responseError = 'the route handler failed'
+      entry.responseError ??= 'the route handler failed'
 
       return responseFailed()
     }

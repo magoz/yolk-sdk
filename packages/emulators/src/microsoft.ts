@@ -19,6 +19,7 @@ import * as Schema from 'effect/Schema'
 import {
   EmulatorHeaderRecord,
   EmulatorResponseStatus,
+  emulatorJobHeader,
   handlerFailedHeader,
   redactCredentialFields,
   redactCredentialQuery
@@ -110,7 +111,8 @@ export type MicrosoftFaultMatch = typeof MicrosoftFaultMatch.Type
 
 /**
  * A wire fault: answer matching requests with this status, headers, and body (for example 429
- * with `retry-after`) before the route runs, so nothing is written. The body defaults to a Graph
+ * with `retry-after`) instead of the route's successful answer, so nothing is written. A request
+ * the route refuses is answered by the route and uses up no fault. The body defaults to a Graph
  * error envelope. `count` limits how many requests it answers (omitted: all). `match.path` is
  * the raw request path (`/v1.0/users/ada%40example.test/...`).
  *
@@ -215,9 +217,10 @@ export type MicrosoftEmulatorOptions = {
    */
   readonly copyInProgressPolls?: number
   /**
-   * How long (ms, integer 0-10000, default 25) the first message write to reach the handler holds
-   * its message; an overlapping write to that message gets 409. Non-overlapping writes both apply
-   * (an emulator extrapolation). `0` only rejects writes that overlap the handler itself.
+   * How long (ms, integer 0-10000, default 25) the first committed message write holds its
+   * message (a refused or faulted write holds nothing); an overlapping write to that message gets
+   * 409. Non-overlapping writes both apply (an emulator extrapolation). `0` only rejects writes
+   * that overlap the handler itself.
    */
   readonly conflictWindowMs?: number
   /** Drill knobs (tests only): make the emulator disagree with one conformance claim. */
@@ -358,6 +361,9 @@ type MutableLedgerEntry = {
   responseError?: string
 }
 
+/** One core request's fault outcome: the fault's answer, set when a fault answered it. */
+type FaultJob = { faultAnswer?: Response }
+
 type MutableFaultState = {
   readonly id: number
   readonly fault: MicrosoftFault
@@ -408,9 +414,11 @@ const monitorState = (monitor: CopyMonitor): MicrosoftCopyMonitorState => {
  * Graph routes need `Authorization: Bearer <non-empty>` (missing: 401 Graph error envelope); the
  * token is never checked, stored, forwarded to the core, or ledgered. The copy monitor needs no
  * credential. Precedence per request: route match (unknown routes fail closed with a 404 Graph
- * error envelope), authorization, JSON body parsing, then the first matching fault (answered
- * before the route runs, so nothing is written), then the stateful route (whose query allowlist
- * and `If-Match` refusal are checked before its handler). A handler that throws answers a 500
+ * error envelope), authorization, JSON body parsing, then the stateful route's plan (its query
+ * allowlist and `If-Match` refusal, then its handler on drafts of the state and copy monitors),
+ * then the first matching fault, then the commit. A request the route refuses (any answer that is
+ * not 2xx, such as a 404 for an unknown id, a 400 not emulated, or a 409 conflict) uses up no
+ * fault; a faulted request writes nothing and holds no message. A handler that throws answers a 500
  * Graph error envelope with `responseError` in the ledger, even when the clock throws; unknown
  * routes (404) and a closed emulator (503) keep their status when the clock throws too. Every
  * response from an unverified route carries `x-emulator-evidence: unverified`. Ledgered bodies and
@@ -466,6 +474,13 @@ export const makeMicrosoftEmulator = async (
   // Loaded lazily: the core imports Node builtins and reads files at import time.
   const core = await import('@emulators/core')
 
+  /**
+   * Fault decisions of the core requests in flight, by job id (asked by the route once it would
+   * answer successfully). Job ids never reset, so a ledger clear never makes two jobs share one.
+   */
+  const jobs = new Map<string, () => boolean>()
+  let nextJobId = 1
+
   const definition = core.defineEmulator<MicrosoftEmulatorState>({
     name: 'microsoft',
     cors: false,
@@ -479,7 +494,10 @@ export const makeMicrosoftEmulator = async (
 
       return decoded
     },
-    setup: ({ app, state }) => registerMicrosoftApi(app, state, env)
+    setup: ({ app, state }) =>
+      registerMicrosoftApi(app, state, env, jobId =>
+        jobId === null ? false : (jobs.get(jobId)?.() ?? false)
+      )
   })
 
   const runtime = await core.createCustomRuntime(definition, { seed: initial })
@@ -625,7 +643,10 @@ export const makeMicrosoftEmulator = async (
       'Synthetic: the emulator could not build the response.'
     )
 
-  /** Authorization, body parsing, faults, then the core route (without the credential). */
+  /**
+   * Authorization, body parsing, then the core route (without the credential), which asks for the
+   * fault only once it would answer successfully.
+   */
   const routed = async (
     request: Request,
     url: URL,
@@ -667,21 +688,13 @@ export const makeMicrosoftEmulator = async (
     }
 
     const method = request.method.toUpperCase()
-    const fault = takeFault(method, url.pathname)
-
-    if (fault !== undefined) {
-      const response = applyFault(fault, context())
-
-      entry.fault = 'status'
-
-      return response
-    }
-
     const hasBody = text !== '' && method !== 'GET' && method !== 'HEAD'
+    const jobId = String(nextJobId++)
 
     const headers = new Headers({
       accept: 'application/json',
-      [requestSeqHeader]: String(entry.seq)
+      [requestSeqHeader]: String(entry.seq),
+      [emulatorJobHeader]: jobId
     })
 
     // Only non-credential headers the routes read are forwarded.
@@ -699,12 +712,38 @@ export const makeMicrosoftEmulator = async (
       init.body = text
     }
 
-    const response = await runtime.fetch(
-      new Request(new URL(`${url.pathname}${url.search}`, runtime.baseUrl), init)
-    )
+    const job: FaultJob = {}
+
+    // Asked by the route only for an answer it would send successfully, before it commits.
+    jobs.set(jobId, () => {
+      const fault = takeFault(method, url.pathname)
+
+      if (fault === undefined) return false
+
+      try {
+        job.faultAnswer = applyFault(fault, context())
+      } catch (error) {
+        // The fault's answer could not be built (the route did not fail): the core answers its
+        // handler failure, and the fault is not used up.
+        entry.responseError = 'the emulator could not build or produce the response'
+
+        throw error
+      }
+
+      entry.fault = 'status'
+
+      return true
+    })
+
+    const response = await runtime
+      .fetch(new Request(new URL(`${url.pathname}${url.search}`, runtime.baseUrl), init))
+      .finally(() => jobs.delete(jobId))
+
+    // The fault's answer is sent from here, never through the core.
+    if (job.faultAnswer !== undefined) return job.faultAnswer
 
     if (response.headers.has(handlerFailedHeader)) {
-      entry.responseError = 'the route handler failed'
+      entry.responseError ??= 'the route handler failed'
 
       return responseFailed(request, entry.seq)
     }
