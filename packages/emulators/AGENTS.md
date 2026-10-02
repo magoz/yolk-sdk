@@ -475,11 +475,11 @@ There is no root export or barrel.
   emulated or the commit); only then the fault decision; then the commit. The plan, the fault
   decision, and the commit run synchronously in one core call, so concurrent requests never
   interleave; fault answers and refusals are still returned outside the core, so they stay
-  readable after a reset or a close, and a close while a request is in flight answers the
-  handler-failure 500 (`the route handler answered no eligibility verdict`). The request body is
-  read once, after the query and path checks: a query or path refusal leaves it unread, and a body
-  repeat or any later refusal finds it read. A consumed or locked request body answers the
-  ledgered 400 `the request body is unreadable`, and a refusal reason that cannot be
+  readable after a reset or a close, and a close before the core runs an in-flight request
+  answers the handler-failure 500 (`the route handler answered no eligibility verdict`). The
+  request body is read once, after the query and path checks: a query or path refusal leaves it
+  unread, and a body repeat or any later refusal finds it read. A consumed or locked request body
+  answers the ledgered 400 `the request body is unreadable`, and a refusal reason that cannot be
   percent-encoded (an unpaired surrogate) the handler-failure 500. Routes see the ledgered path, no
   header names, and no header but `content-type`. A `match.route` naming no manifest row is
   rejected when the fault is added. So a refused request answers the ledgered 400 not-emulated,
@@ -957,9 +957,9 @@ JSON-escaped, and numeric body keys and values); seeded-project reads and seeded
 refused; seed ids in the minted namespace rejected; a `match.route` naming no manifest row
 rejected at `faults.add` and `POST /_emulate/faults`; consumed and locked bodies refused as
 unreadable; one request sent twice (a body repeat reads the body, so the second send is
-unreadable; a query refusal leaves it unread); a close while a request is in flight answering the
-500; fault answers and refusals readable after a reset or a close; Todoist's unencodable
-refusal reason answering the 500; 429 faults through the real connectors;
+unreadable; a query refusal leaves it unread); a close before the core runs an in-flight request
+answering the 500; fault answers and refusals readable after a reset or a close; Todoist's
+unencodable refusal reason answering the 500; 429 faults through the real connectors;
 clock-safe recovery; seeds; control plane), and `test/todoist-conformance.test.ts` /
 `test/telegram-conformance.test.ts` (cross-checks A and B: every case in-process and over a loopback
 socket, each comparing every emulator's snapshot with its seed afterwards: equal except the id

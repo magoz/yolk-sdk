@@ -1867,19 +1867,17 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
     if (problem !== undefined) return refused(problem)
 
-    // The body text: read now, or (resolved mode) the one read already.
-    const readRouteText = async (): Promise<string | undefined> => {
-      if (resolvedBody === undefined) return readText(request)
-
-      return resolvedBody.bytes === undefined ? undefined : bodyText(resolvedBody.bytes)
-    }
+    // Resolved mode reuses the one body read it already made. Every other emulator awaits
+    // `readText(request)` directly, so its request scheduling is exactly what it was.
+    const resolvedText = (): string | undefined =>
+      resolvedBody?.bytes === undefined ? undefined : bodyText(resolvedBody.bytes)
 
     let json: Schema.Json | undefined
     let bytes: Uint8Array | undefined
 
     switch (matched.route.body) {
       case 'none': {
-        const text = await readRouteText()
+        const text = resolvedBody === undefined ? await readText(request) : resolvedText()
 
         if (text === undefined || text !== '') {
           return refused('this route takes no request body')
@@ -1889,7 +1887,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
       }
 
       case 'json': {
-        const text = await readRouteText()
+        const text = resolvedBody === undefined ? await readText(request) : resolvedText()
 
         if (mediaType(header('content-type')) !== 'application/json') {
           return refused('this route takes a content-type: application/json body')
@@ -1915,7 +1913,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
       }
 
       case 'json-or-empty': {
-        const text = await readRouteText()
+        const text = resolvedBody === undefined ? await readText(request) : resolvedText()
 
         if (text === undefined) return refused('the request body is unreadable')
 
