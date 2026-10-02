@@ -34,30 +34,51 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 
 - Nested calls go only through `nested.execute` (the resolved execute path). Never call tool
   executors directly; never bypass input decoding or registration wrappers.
+- Host decorators around the `ToolExecutor` (outside `ResolvedToolSet.execute`) never see nested
+  calls. Per-call run-authority checks belong in `beforeNestedCall` (a failure rejects the call in
+  the script and records it as `error` without executing) or registration-level wrappers.
+- A nested fiber that ends with interrupts only rejects with `was cancelled`; any other failure
+  (a defect) rejects with `failed unexpectedly` and records `error`.
+- `executor.execute` has an Effect backstop at `timeoutMs` + 5 s (`timeout` failure, signal
+  aborted); waits for nested fibers to stop after interruption are bounded by 5 s each.
 - Nested call ids are `<toolCallId>/<seq>` (1-based) so hosts can derive idempotency keys. Calls
   rejected by `maxNestedCalls` get no id and are not recorded.
 - Record every executed nested call with `recordNestedToolCall`; calls still running when the script
   ends are interrupted (`FiberSet.clear`) and recorded `cancelled`. Never store nested results.
-- Description: intro, globals one line each, nested tools by namespace. `codemode` + `listed` tools
-  are declared with pi's renderer within `inlineBudget` (four characters per estimated token),
-  chosen fairly (each round every namespace places its cheapest remaining tool; a namespace whose
-  next tool does not fit drops out). `all` tools get one line and count against the budget.
-  `search` tools never appear; namespace notes carry no counts so the text stays stable when search
-  tools change.
+- Description: intro, globals one line each, nested tools by namespace (with the module
+  `description` under the heading), then one fixed line pointing to `searchTools`/`describeTool`/
+  `describeNamespace`. `codemode` + `listed` tools are declared with pi's renderer within
+  `inlineBudget` (four characters per estimated token), chosen fairly (each round every namespace
+  places its cheapest remaining tool; a namespace whose next tool does not fit drops out). `all`
+  tools get one line each outside the budget. `search` tools never contribute anything (no
+  headings, hints, or counts), so adding or removing them, even whole namespaces, leaves the text
+  byte-identical.
 - Globals (`searchTools`, `describeTool`, `describeNamespace`) cover every nested tool and are not
   recorded as calls.
 - Store writes are reported only for successful scripts and only in `structuredContent.codemode`.
+  `codeModeStoreFromToolResults` takes `{ toolName, result }` entries and applies only results of
+  the configured code mode tool name; it keeps pi's bounds (256 Ki characters of JSON per value,
+  1 Mi in total with keys) by dropping offending writes, keeping the previous value.
+- Results keep at most `maxImages` (8) images and `maxImageBytes` (4 MiB of base64); later images
+  are dropped with a note. pi buffers output on the host thread without a limit while a script
+  runs; only the timeout bounds it.
 - The Node executor strips TypeScript with `node:module` `stripTypeScriptTypes` inside an async
   function wrapper (positions preserved) and maps failures to `script` errors; one sandbox (worker +
   VM) per execution, closed in `finally`; the per-executor concurrency cap counts queue time against
   the timeout.
 - Code mode access is `write`; nested calls keep their own access metadata.
 - `makeClassifierTool` takes the classifier `classify` function or service; provider options stay
-  host-owned. `costUsd` has no `AgentUsage` field, so it stays in the result's `usage`.
+  host-owned. The concurrency cap is per script: semaphores are keyed by the parent tool call id
+  of `<parentToolCallId>/<seq>` (else the call id) and removed when idle. `costUsd` has no
+  `AgentUsage` field: nested-call records carry token usage only, and cost stays in the result's
+  `structuredContent.usage`.
 
 ## Tests
 
 - `test/pi-executor.test.ts`: real pi executor end-to-end through `resolveTools`.
 - `test/catalog.test.ts`: listing, fairness, stability, description hook, search.
-- `test/tool.test.ts`: limits and plumbing with a fake executor, bounding, store rebuild.
-- `test/classifier-tool.test.ts`: classifier tool through scripts, concurrency cap, errors.
+- `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,
+  backstops), bounding, store rebuild and bounds.
+- `test/pi-executor.test.ts` also covers store and image limits, cancellation, and the executor
+  concurrency cap.
+- `test/classifier-tool.test.ts`: classifier tool through scripts, per-script cap, errors.

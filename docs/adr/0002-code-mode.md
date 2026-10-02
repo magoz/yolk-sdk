@@ -77,6 +77,9 @@ Accept these pi limitations:
   nondeterministic values through a host `step()` global instead.
 - Schemas only shape declarations; pi does not validate values. Yolk validates through the
   resolved tool set.
+- pi buffers script output (text and images) on the host thread without a limit while the script
+  runs. The timeout mitigates it, and Yolk bounds the result afterwards (characters, image count,
+  and image bytes). Ask upstream for an output budget hook.
 
 The Yolk executor interface hides the engine. Vendoring the MIT runtime is the fallback if Yolk
 needs warm worker pools, worker options, or replay hooks that `globals` cannot express. A Workers
@@ -174,7 +177,9 @@ interface NestedToolExecutor {
 Nested call IDs are `<parentToolCallId>/<seq>`, so hosts can derive idempotency keys from
 `call.id`. `ToolModule.id` is the namespace used for grouping and search. Host wrappers apply to
 nested calls only when they wrap registrations or the resolved tool set; executor decorators
-outside `ResolvedToolSet.execute` do not see nested calls.
+outside `ResolvedToolSet.execute` do not see nested calls. `makeCodeModeTool` therefore takes an
+optional `beforeNestedCall({ call, context })` hook for per-call run-authority checks: a failure
+rejects that nested call in the script and records it as an error without executing it.
 
 ### Nested-call record
 
@@ -183,24 +188,32 @@ Add an optional bounded `nestedCalls` record and summed usage to `ToolResult`. L
 yet; they are a follow-up, and phase 1 exposes nested calls through the final result. Bounds follow pi: 256 calls, 8 KiB of
 arguments per call, 32 KiB in total; the record is marked incomplete when truncated. Each entry
 holds the tool name, compact arguments, status (`ok` / `error` / `cancelled`), duration, a
-truncated error, and usage or cost when reported. Nested results are not stored.
+truncated error, and token usage when reported (`AgentUsage` has no cost field, so a tool's cost
+stays in its own result, for example the classifier result's `structuredContent`). Nested results
+are not stored.
 
 ## Code mode tool contract
 
-`makeCodeModeTool({ toolSet, executor, mode, inlineBudget, limits })` returns a tool registration.
+`makeCodeModeTool({ executor, name, inlineBudget, limits, deadline, loadStore, beforeNestedCall })`
+returns a tool registration; the nested tools come from the `resolveTools` resolution it is part
+of. There is no `mode` option in v1: the only behavior is the former `mode: 'on'`.
 
 - **Input**: `{ code: string }`. A leading `// @options:` line is not supported in v1; limits are
   host-owned.
 - **Callable tools**: every tool in the same resolved tool set with `callableBy` `all` or
   `codemode`, except the fail-closed set. Nested calls run through `ResolvedToolSet.execute` with
-  the run's host context, so input decoding, access metadata, host wrappers (for example external
-  action claims), and run-authority checks apply as for direct calls.
+  the run's host context, so input decoding, access metadata, and registration-level host wrappers
+  (for example external action claims) apply as for direct calls. Run-authority checks that live
+  in executor decorators must move to `beforeNestedCall` or registration wrappers.
 - **Description**: the script globals in one line each, then tool declarations grouped by
   namespace. `codemode`/`listed` tools are listed within an inline token budget (default 3,000
   estimated tokens) filled fairly across namespaces, one tool per namespace per round.
-  `codemode`/`search` tools are never listed, so the description stays stable as connectors change
-  and the prompt cache survives. In `mode: 'on'` (default) `all` tools keep their normal
-  declarations and gain one line saying how scripts call them and what they resolve to.
+  `codemode`/`search` tools contribute nothing (no headings, hints, or counts), so the description
+  stays byte-identical as connectors change and the prompt cache survives; one fixed line points
+  scripts to `searchTools()`, `describeTool()`, and `describeNamespace()`. `all` tools keep their
+  normal declarations in their own description; the code mode description gives each one line,
+  outside the budget, saying how scripts call it and what it resolves to. An optional
+  `ToolModule.description` shows under the namespace heading.
 - **Globals**: `tools.<name>(args)`, `searchTools(query, { limit?, namespace? })` (BM25 over names,
   descriptions, and namespace descriptions), `describeTool(name)`, `describeNamespace(name)`,
   `text()`, `image()`, `console.*`, `return`, `exit()`, `store()`/`load()`.
@@ -212,10 +225,12 @@ truncated error, and usage or cost when reported. Nested results are not stored.
   Unknown tool names produce close-match suggestions.
 - **Store**: `store()` writes from a successful script are persisted in the code mode result's
   `structuredContent` and rebuilt from the transcript for later scripts, which works for stateless
-  Next, Workflow, and the Cloudflare Durable Object alike. Small values only: 256 KiB per value,
-  1 MiB in total.
-- **Limits**: timeout (clamped as above), VM heap, maximum nested calls per script, and output
-  size. All are host-configurable with safe defaults.
+  Next, Workflow, and the Cloudflare Durable Object alike. The rebuild applies only results of the
+  code mode tool (by tool name). Small values only: 256 KiB per value, 1 MiB in total; the rebuild
+  drops writes beyond them.
+- **Limits**: timeout (clamped as above, with an Effect backstop 5 s after it), VM heap, maximum
+  nested calls per script, output size, and image count and bytes. All are host-configurable with
+  safe defaults.
 - **Surfaces**: hosts decide where to advertise the tool. Voice sessions do not get it in v1.
 
 ### Known gap: polling

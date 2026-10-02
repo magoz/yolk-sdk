@@ -1,8 +1,13 @@
-import { Deferred, Effect, Option } from 'effect'
+import { Deferred, Effect, Fiber, Option, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { providerToolDefs, ToolApprovalPolicy, ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeQuestionToolRegistration, makeTool, resolveTools } from '@yolk-sdk/agent/tools'
-import { codeModeStoreFromToolResults, makeCodeModeTool } from '../src/index.ts'
+import {
+  codeModeStoreFromToolResults,
+  makeCodeModeTool,
+  type CodeModeExecuteOptions,
+  type CodeModeExecutorTool
+} from '../src/index.ts'
 import { makePiCodeModeExecutor } from '../src/node.ts'
 import {
   context,
@@ -255,6 +260,63 @@ describe('code mode with the pi executor', () => {
     })
   )
 
+  const neverTool = (interrupted: Deferred.Deferred<void>) =>
+    makeTool<TestContext, typeof QueryParams>({
+      name: 'slow',
+      description: 'Never finishes',
+      parameters: QueryParams,
+      access: 'read',
+      execute: () =>
+        Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)))
+    })
+
+  it.live('cancels an awaited in-flight nested call at the timeout and records it', () =>
+    Effect.gen(function* () {
+      const interrupted = yield* Deferred.make<void>()
+
+      const result = yield* runCode(
+        [
+          moduleOf('host', [codemode({ limits: { timeoutMs: 1_000 } })]),
+          moduleOf('docs', [neverTool(interrupted)])
+        ],
+        `await tools.slow({ query: 'x' }); return 'unreachable'`
+      )
+
+      yield* Deferred.await(interrupted).pipe(Effect.timeout('2 seconds'))
+
+      expect(text(result.content)).toContain('Script error: timeout:')
+      expect(result.nestedCalls?.calls).toMatchObject([{ id: 'call_1/1', status: 'cancelled' }])
+    })
+  )
+
+  it.live('interrupts an awaited in-flight nested call when the tool call is aborted', () =>
+    Effect.gen(function* () {
+      const interrupted = yield* Deferred.make<void>()
+      const started = yield* Deferred.make<void>()
+
+      const tool = makeTool<TestContext, typeof QueryParams>({
+        name: 'slow',
+        description: 'Never finishes',
+        parameters: QueryParams,
+        access: 'read',
+        execute: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
+          )
+      })
+
+      const fiber = yield* runCode(
+        [moduleOf('host', [codemode()]), moduleOf('docs', [tool])],
+        `await tools.slow({ query: 'x' }); return 'unreachable'`
+      ).pipe(Effect.forkChild)
+
+      yield* Deferred.await(started).pipe(Effect.timeout('5 seconds'))
+      yield* Fiber.interrupt(fiber)
+      yield* Deferred.await(interrupted).pipe(Effect.timeout('2 seconds'))
+    })
+  )
+
   it.live('ends runaway scripts at the timeout without blocking the host', () =>
     Effect.gen(function* () {
       let ticks = 0
@@ -341,7 +403,7 @@ describe('code mode with the pi executor', () => {
 
   it.live('persists store writes only for successful scripts and rebuilds the store', () =>
     Effect.gen(function* () {
-      const history: Array<ToolResult> = []
+      const history: Array<{ readonly toolName: string; readonly result: ToolResult }> = []
 
       const tool = codemode({
         loadStore: () => Effect.sync(() => codeModeStoreFromToolResults(history))
@@ -351,7 +413,7 @@ describe('code mode with the pi executor', () => {
 
       const run = (code: string, callId: string) =>
         runCode(modules, code, { callId }).pipe(
-          Effect.tap(result => Effect.sync(() => history.push(result)))
+          Effect.tap(result => Effect.sync(() => history.push({ toolName: 'codemode', result })))
         )
 
       const first = yield* run(
@@ -378,6 +440,73 @@ describe('code mode with the pi executor', () => {
       const description = (yield* resolveTools(modules, context)).tools[0]?.description
 
       expect(description).toContain('store(key, value)')
+    })
+  )
+
+  it.live(
+    'rejects store writes beyond 256 KiB per value and 1 MiB in total inside the script',
+    () =>
+      Effect.gen(function* () {
+        const result = yield* runCode(
+          [moduleOf('host', [codemode()])],
+          `const errors = []
+         try { store('big', 'x'.repeat(256 * 1024)) } catch (error) { errors.push(error.message) }
+         for (let i = 0; i < 5; i++) {
+           try { store('k' + i, 'y'.repeat(250 * 1024)) } catch (error) { errors.push(error.message) }
+         }
+         return errors`
+        )
+
+        const body = text(result.content)
+
+        expect(body).toContain('more than the limit of 262144')
+        expect(body).toContain('store is full')
+        expect(result.structuredContent).toMatchObject({
+          codemode: {
+            ok: true,
+            storeWrites: {
+              set: {
+                k0: expect.any(String),
+                k1: expect.any(String),
+                k2: expect.any(String),
+                k3: expect.any(String)
+              },
+              delete: []
+            }
+          }
+        })
+        expect(JSON.stringify(result.structuredContent)).not.toContain('"k4"')
+        expect(JSON.stringify(result.structuredContent)).not.toContain('"big"')
+      })
+  )
+
+  it.live('drops images beyond the image limits with a note', () =>
+    Effect.gen(function* () {
+      const png =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+      const result = yield* runCode(
+        [moduleOf('host', [codemode({ limits: { maxImages: 3 } })])],
+        `for (let i = 0; i < 20; i++) image('data:image/png;base64,${png}')
+         return 'done'`
+      )
+
+      const content = Array.isArray(result.content) ? result.content : []
+
+      expect(content.filter(Predicate.isTagged('Image'))).toHaveLength(3)
+      expect(text(result.content)).toContain(
+        '[… 17 images omitted: a result keeps at most 3 images'
+      )
+
+      const bytes = yield* runCode(
+        [moduleOf('host', [codemode({ limits: { maxImageBytes: png.length * 2 } })])],
+        `for (let i = 0; i < 5; i++) image('data:image/png;base64,${png}')`
+      )
+
+      const byteContent = Array.isArray(bytes.content) ? bytes.content : []
+
+      expect(byteContent.filter(Predicate.isTagged('Image'))).toHaveLength(2)
+      expect(text(bytes.content)).toContain('[… 3 images omitted')
     })
   )
 
@@ -482,3 +611,126 @@ const returnValue = (result: ToolResult): unknown => {
 
   return JSON.parse(body.slice(body.indexOf(marker) + marker.length))
 }
+
+describe('pi executor concurrency', () => {
+  const until = async (condition: () => boolean) => {
+    while (!condition()) await new Promise(resolve => setTimeout(resolve, 10))
+  }
+
+  const gate = () => {
+    const started: Array<string> = []
+    const releases = new Map<string, () => void>()
+
+    const tool: CodeModeExecutorTool = {
+      name: 'gate',
+      execute: args => {
+        const id = Predicate.isObject(args) && 'id' in args ? String(args.id) : ''
+
+        started.push(id)
+
+        return new Promise(resolve => releases.set(id, () => resolve(id)))
+      }
+    }
+
+    return { started, releases, tool }
+  }
+
+  const options = (
+    tool: CodeModeExecutorTool,
+    signal: AbortSignal,
+    timeoutMs = 10_000
+  ): CodeModeExecuteOptions => ({
+    tools: [tool],
+    globals: [],
+    timeoutMs,
+    memoryLimitBytes: 64 * 1024 * 1024,
+    store: {},
+    signal
+  })
+
+  const script = (id: string) => `return await tools.gate({ id: '${id}' })`
+
+  it.live('queues executions beyond the cap and hands the slot to the next waiter', () =>
+    Effect.promise(async () => {
+      const single = makePiCodeModeExecutor({ maxConcurrentExecutions: 1 })
+      const { started, releases, tool } = gate()
+      const signal = new AbortController().signal
+
+      const first = single.execute(script('a'), options(tool, signal))
+
+      await until(() => started.includes('a'))
+
+      const second = single.execute(script('b'), options(tool, signal))
+
+      await new Promise(resolve => setTimeout(resolve, 200))
+      expect(started).toEqual(['a'])
+
+      releases.get('a')?.()
+      expect(await first).toMatchObject({ ok: true, value: 'a' })
+
+      await until(() => started.includes('b'))
+      releases.get('b')?.()
+      expect(await second).toMatchObject({ ok: true, value: 'b' })
+    })
+  )
+
+  it.live('ends waiting executions on abort and on timeout without taking the slot', () =>
+    Effect.promise(async () => {
+      const single = makePiCodeModeExecutor({ maxConcurrentExecutions: 1 })
+      const { started, releases, tool } = gate()
+
+      const first = single.execute(script('a'), options(tool, new AbortController().signal))
+
+      await until(() => started.includes('a'))
+
+      const controller = new AbortController()
+
+      const aborted = single.execute(script('aborted'), options(tool, controller.signal))
+
+      const timedOut = single.execute(
+        script('timed_out'),
+        options(tool, new AbortController().signal, 200)
+      )
+
+      controller.abort()
+
+      expect(await aborted).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+      expect(await timedOut).toMatchObject({
+        ok: false,
+        error: {
+          kind: 'timeout',
+          message: 'Execution timed out after 200 ms while waiting for a free execution slot'
+        }
+      })
+
+      releases.get('a')?.()
+      expect(await first).toMatchObject({ ok: true, value: 'a' })
+
+      // The slot is free again: a new execution starts at once.
+      const next = single.execute(script('c'), options(tool, new AbortController().signal))
+
+      await until(() => started.includes('c'))
+      releases.get('c')?.()
+      expect(await next).toMatchObject({ ok: true, value: 'c' })
+      expect(started).toEqual(['a', 'c'])
+    })
+  )
+
+  it.live('releases the slot when the tool call is interrupted', () =>
+    Effect.gen(function* () {
+      const single = makePiCodeModeExecutor({ maxConcurrentExecutions: 1 })
+      const modules = [moduleOf('host', [makeCodeModeTool<TestContext>({ executor: single })])]
+
+      const fiber = yield* runCode(modules, `while (true) {}`).pipe(Effect.forkChild)
+
+      yield* Effect.sleep('200 millis')
+      yield* Fiber.interrupt(fiber)
+
+      const startedAt = Date.now()
+      const next = yield* runCode(modules, `return 'next'`).pipe(Effect.timeout('3 seconds'))
+
+      expect(text(next.content)).toContain('Return value:\n"next"')
+      expect(Date.now() - startedAt).toBeLessThan(3_000)
+    })
+  )
+})

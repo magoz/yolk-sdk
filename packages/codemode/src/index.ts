@@ -38,14 +38,20 @@ export {
   boundCodeModeSegments,
   codeModeResultSegments,
   codeModeSegmentsContent,
+  defaultCodeModeMaxImageBytes,
+  defaultCodeModeMaxImages,
   summarizeCodeModeCalls
 } from './output.ts'
 
 export type { CodeModeCallSummary, CodeModeResultSegment } from './output.ts'
 
-export { codeModeStoreFromToolResults } from './store.ts'
+export {
+  codeModeStoreFromToolResults,
+  maxCodeModeStoreTotalChars,
+  maxCodeModeStoreValueChars
+} from './store.ts'
 
-export type { CodeModeStructuredContent } from './store.ts'
+export type { CodeModeStructuredContent, CodeModeToolResultEntry } from './store.ts'
 
 export {
   codeModeDeadlineMarginMs,

@@ -23,6 +23,7 @@ const nestedTool = (
     readonly exposure?: 'all' | 'listed' | 'search'
     readonly description?: string
     readonly outputSchema?: ToolDef['outputSchema']
+    readonly moduleDescription?: string
   } = {}
 ): NestedTool => {
   const exposure = options.exposure ?? 'listed'
@@ -40,7 +41,9 @@ const nestedTool = (
     discovery: exposure === 'all' ? undefined : exposure
   })
 
-  return { moduleId, def }
+  return options.moduleDescription === undefined
+    ? { moduleId, def }
+    : { moduleId, def, moduleDescription: options.moduleDescription }
 }
 
 const listedNames = (tools: ReadonlyArray<NestedTool>, budget: number) =>
@@ -88,10 +91,12 @@ describe('code mode catalog', () => {
     expect(description).not.toContain('crm_secret')
     expect(description).not.toContain('Hidden tool')
     expect(description).not.toContain('mail_send')
+    // No per-namespace hints: a namespace of only search tools gets no heading.
+    expect(description).not.toContain('### mail')
+    expect(description).not.toContain('More tools: `await searchTools(query, { namespace')
     expect(description).toContain(
-      '### mail\n- More tools: `await searchTools(query, { namespace: "mail" })`.'
+      'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })`'
     )
-    expect(description).toContain('- More tools: `await searchTools(query, { namespace: "crm" })`.')
     expect(description).not.toContain('store(key, value)')
   })
 
@@ -137,11 +142,40 @@ describe('code mode catalog', () => {
     expect(listing.unlistedNamespaces).toEqual(['a'])
   })
 
-  it('counts direct tools against the budget', () => {
-    const tools = [nestedTool('a', 'a_direct', { exposure: 'all' }), nestedTool('a', 'a_listed')]
+  it('lists direct tools outside the budget; the budget applies only to listed tools', () => {
+    const tools = [
+      nestedTool('a', 'a_direct', { exposure: 'all' }),
+      nestedTool('a', 'a_listed'),
+      nestedTool('b', 'b_direct', { exposure: 'all', description: 'y'.repeat(4_000) })
+    ]
 
-    expect(listedNames(tools, 0)).toEqual([])
-    expect(listedNames(tools, toolCost(tools[0] ?? nestedTool('a', 'x')))).toEqual(['a.a_direct'])
+    expect(listedNames(tools, 0)).toEqual(['a.a_direct', 'b.b_direct'])
+    expect(listedNames(tools, toolCost(nestedTool('a', 'a_listed')))).toEqual([
+      'a.a_direct',
+      'a.a_listed',
+      'b.b_direct'
+    ])
+
+    const description = renderCodeModeDescription({ tools, inlineBudget: 0 })
+
+    expect(description).toContain('`tools.a_direct(args)`')
+    expect(description).toContain('`tools.b_direct(args)`')
+    expect(description).not.toContain('a_listed')
+  })
+
+  it('shows module descriptions under the namespace heading', () => {
+    const description = renderCodeModeDescription({
+      tools: [
+        nestedTool('crm', 'crm_list', { moduleDescription: 'Customer relationship records.' }),
+        nestedTool('vault', 'vault_find', {
+          exposure: 'search',
+          moduleDescription: 'Secret vault.'
+        })
+      ]
+    })
+
+    expect(description).toContain('### crm\nCustomer relationship records.\n```ts')
+    expect(description).not.toContain('Secret vault.')
   })
 
   it('keeps the description stable when search tools change', () => {
@@ -162,6 +196,29 @@ describe('code mode catalog', () => {
     expect(renderCodeModeDescription({ tools: changed })).toBe(
       renderCodeModeDescription({ tools: base })
     )
+  })
+
+  it('keeps the description byte-identical when a namespace of only search tools comes or goes', () => {
+    const base = [
+      nestedTool('crm', 'crm_list'),
+      nestedTool('docs', 'docs_search', { exposure: 'all' })
+    ]
+
+    const withSearchNamespace = [
+      nestedTool('vault', 'vault_find', { exposure: 'search', moduleDescription: 'Vault.' }),
+      ...base,
+      nestedTool('vault', 'vault_read', { exposure: 'search' })
+    ]
+
+    for (const inlineBudget of [0, 3_000]) {
+      expect(renderCodeModeDescription({ tools: withSearchNamespace, inlineBudget })).toBe(
+        renderCodeModeDescription({ tools: base, inlineBudget })
+      )
+    }
+
+    expect(
+      renderCodeModeDescription({ tools: [nestedTool('vault', 'v', { exposure: 'search' })] })
+    ).toBe(renderCodeModeDescription({ tools: [] }))
   })
 })
 
@@ -195,7 +252,7 @@ describe('code mode description through resolveTools', () => {
 
       const def = toolSet.tools.find(entry => entry.name === 'codemode')
 
-      expect(tool.def.description).toContain('Nested tools: none are callable from scripts here.')
+      expect(tool.def.description).toContain('Nested tools: none are listed here.')
       expect(def?.description).toContain('lookup(args: { query: string; }): Promise<{ hits: Array<')
       expect(def?.description).toContain('`tools.search_docs(args)`')
       expect(def?.description).not.toContain('hidden')
@@ -222,7 +279,12 @@ describe('searchTools', () => {
     }),
     nestedTool('crm', 'crmListDeals', { description: 'List open deals' }),
     nestedTool('mail', 'mail_send', { description: 'Send an email message', exposure: 'all' }),
-    nestedTool('mail', 'mail_search', { description: 'Search mailbox messages' })
+    nestedTool('mail', 'mail_search', { description: 'Search mailbox messages' }),
+    nestedTool('billing', 'ledger_read', {
+      description: 'Read entries',
+      exposure: 'search',
+      moduleDescription: 'Invoices and payments'
+    })
   ])
 
   it('ranks by BM25 over identifiers, names, descriptions, and namespaces', () => {
@@ -251,5 +313,9 @@ describe('searchTools', () => {
       'crmListDeals'
     ])
     expect(searchCodeModeTools(catalog, 'unrelated')).toEqual([])
+  })
+
+  it('indexes namespace descriptions', () => {
+    expect(searchCodeModeTools(catalog, 'invoices').map(hit => hit.name)).toEqual(['ledger_read'])
   })
 })

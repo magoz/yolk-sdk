@@ -102,10 +102,13 @@ interface ClassifierModel {
 
 ### Code mode integration
 
-`@yolk-sdk/codemode` provides `makeClassifierTool({ model, maxConcurrency })`: an ordinary Yolk
+`@yolk-sdk/codemode` provides `makeClassifierTool({ classify, maxConcurrency })`, where
+`classify` is the `ClassifierModel` `classify` function or the service value: an ordinary Yolk
 tool registered with `callableBy: 'codemode'` and `discovery: 'listed'` (see
-[Code mode](0002-code-mode.md)). Its calls receive input decoding, the nested-call record, and
-usage and cost like any other tool. It caps concurrent classifications per script (default 4) so
+[Code mode](0002-code-mode.md)). Its calls receive input decoding and the nested-call record like
+any other tool; the record carries token usage only, and the cost stays in the classifier result's
+`structuredContent` (`usage.costUsd`). It caps concurrent classifications per script (default 4,
+keyed by the parent tool call id of the nested call id `<parentToolCallId>/<seq>`) so
 `Promise.all` over many items queues instead of flooding the provider. Scripts classify one item
 per call.
 

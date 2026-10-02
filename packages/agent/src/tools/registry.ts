@@ -147,6 +147,8 @@ export const modelVisibleToolErrorResult = (call: ToolCall, error: ModelVisibleT
 export type NestedTool = {
   readonly def: ToolDef
   readonly moduleId: string
+  /** The module's `ToolModule.description`, when set. */
+  readonly moduleDescription?: string
 }
 
 /** Nested tool access for registrations with `nestedToolAccess: true` (for example a code mode
@@ -283,6 +285,10 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
 
 export type ToolModule<Context> = {
   readonly id: string
+  /** What the module's tools are for; nested-access registrations (for example code mode) show it
+   * with the namespace and index it for tool search.
+   */
+  readonly description?: string
   readonly tools: ReadonlyArray<ToolRegistration<Context>>
 }
 
@@ -294,6 +300,7 @@ export type ToolMetadata = {
 
 type ResolvedRegistration<Context> = {
   readonly moduleId: string
+  readonly moduleDescription: string | undefined
   readonly tool: ToolRegistration<Context>
 }
 
@@ -323,7 +330,13 @@ const resolveModuleTools = <Context>(toolModule: ToolModule<Context>, context: C
   Effect.forEach(toolModule.tools, tool =>
     enabled(tool, context).pipe(
       Effect.map(isToolEnabled =>
-        isToolEnabled ? Option.some({ moduleId: toolModule.id, tool }) : Option.none()
+        isToolEnabled
+          ? Option.some({
+              moduleId: toolModule.id,
+              moduleDescription: toolModule.description,
+              tool
+            })
+          : Option.none()
       )
     )
   ).pipe(Effect.map(Arr.getSomes))
@@ -1101,10 +1114,11 @@ export const resolveTools = <Context>(
         isCodeModeCallable(item.tool.def)
     )
 
-    const nestedTools: ReadonlyArray<NestedTool> = nestedRegistrations.map(item => ({
-      def: item.tool.def,
-      moduleId: item.moduleId
-    }))
+    const nestedTools: ReadonlyArray<NestedTool> = nestedRegistrations.map(item =>
+      item.moduleDescription === undefined
+        ? { def: item.tool.def, moduleId: item.moduleId }
+        : { def: item.tool.def, moduleId: item.moduleId, moduleDescription: item.moduleDescription }
+    )
 
     const describedDef = (tool: ToolRegistration<Context>): ToolDef =>
       tool.nestedToolAccess === true && tool.describe !== undefined

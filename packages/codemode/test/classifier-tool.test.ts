@@ -36,7 +36,7 @@ describe('makeClassifierTool', () => {
     expect(tool.def.parameters).toMatchObject({ type: 'object', required: ['state', 'questions'] })
     expect(JSON.stringify(tool.def.parameters)).not.toContain('providerOptions')
     expect(tool.def.outputSchema).toMatchObject({ type: 'object', required: ['model', 'answers'] })
-    expect(tool.def.description).toContain('at most 4 classifications run at once')
+    expect(tool.def.description).toContain('at most 4 classifications of one script run at once')
   })
 
   it.live('classifies from scripts with compact answers, the full result, and usage', () =>
@@ -73,19 +73,27 @@ describe('makeClassifierTool', () => {
     })
   )
 
-  it.live('caps concurrent classifications per registration, across scripts', () =>
+  it.live('caps concurrent classifications per script; each script gets its own cap', () =>
     Effect.gen(function* () {
-      let active = 0
-      let peak = 0
+      const active = new Map<string, number>()
+      const peaks = new Map<string, number>()
+      let total = 0
+      let totalPeak = 0
 
       const tool = makeClassifierTool<TestContext>({
         maxConcurrency: 2,
         classify: request =>
           Effect.gen(function* () {
-            active++
-            peak = Math.max(peak, active)
-            yield* Effect.sleep('30 millis')
-            active--
+            const script = String(request.state).split(' ')[0] ?? ''
+            const now = (active.get(script) ?? 0) + 1
+
+            active.set(script, now)
+            peaks.set(script, Math.max(peaks.get(script) ?? 0, now))
+            total++
+            totalPeak = Math.max(totalPeak, total)
+            yield* Effect.sleep('100 millis')
+            active.set(script, (active.get(script) ?? 1) - 1)
+            total--
 
             return answer(request)
           })
@@ -96,14 +104,16 @@ describe('makeClassifierTool', () => {
         moduleOf('ai', [tool])
       ]
 
-      const script = `const items = Array.from({ length: 6 }, (_, index) => 'item ' + index)
+      const script = (
+        name: string
+      ) => `const items = Array.from({ length: 6 }, (_, index) => '${name} item ' + index)
         const results = await Promise.all(items.map(state => tools.classify({ state, questions: ${JSON.stringify(question)} })))
         return results.length`
 
       const results = yield* Effect.all(
         [
-          runCode(modules, script, { callId: 'call_a' }),
-          runCode(modules, script, { callId: 'call_b' })
+          runCode(modules, script('a'), { callId: 'call_a' }),
+          runCode(modules, script('b'), { callId: 'call_b' })
         ],
         { concurrency: 'unbounded' }
       )
@@ -112,7 +122,18 @@ describe('makeClassifierTool', () => {
         expect.stringContaining('Return value:\n6'),
         expect.stringContaining('Return value:\n6')
       ])
-      expect(peak).toBe(2)
+      expect(peaks).toEqual(
+        new Map([
+          ['a', 2],
+          ['b', 2]
+        ])
+      )
+      expect(totalPeak).toBe(4)
+
+      // Entries are cleaned up: a later script with the same call id starts with a fresh cap.
+      const again = yield* runCode(modules, script('a'), { callId: 'call_a' })
+
+      expect(text(again.content)).toContain('Return value:\n6')
     })
   )
 

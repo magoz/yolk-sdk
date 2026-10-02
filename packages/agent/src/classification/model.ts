@@ -5,7 +5,7 @@ import {
   ClassificationResponseInvalid,
   type ClassificationAnswerIssueReason,
   type ClassificationError
-} from './error.ts'
+} from './errors.ts'
 import {
   ClassificationRequest,
   type BooleanClassifierAnswer,

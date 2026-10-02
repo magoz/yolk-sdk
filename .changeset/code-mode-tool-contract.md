@@ -26,7 +26,10 @@ Add the code mode tool contract (ADR 0002, step 1) without adding code mode itse
   code-mode-callable tools (excluding nested-access registrations) with their module ids; its
   `execute` runs through the resolved execute path and returns model-visible error results for
   unknown, disabled, or non-callable tools and tool failures. Nested call ids follow
-  `<parentToolCallId>/<seq>`.
+  `<parentToolCallId>/<seq>`. Decorators outside `ResolvedToolSet.execute` (for example a wrapped
+  `ToolExecutor`) do not see nested calls.
+- Module descriptions: `ToolModule` accepts an optional `description`, carried on `NestedTool` as
+  `moduleDescription` for code mode listing and search.
 - Nested-call record: optional `ToolResult.nestedCalls` (`NestedToolCalls`) and summed
   `ToolResult.usage`, built with `recordNestedToolCall` / `nestedToolCallResultFields` within
   exported bounds (256 calls, 8 KiB arguments per call, 32 KiB in total, 500-character errors).

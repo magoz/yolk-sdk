@@ -1,4 +1,16 @@
-import { Cause, Clock, Data, Effect, Exit, FiberSet, Option, Predicate } from 'effect'
+import {
+  Cause,
+  Clock,
+  Data,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  FiberSet,
+  Option,
+  Predicate,
+  Scope
+} from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
@@ -34,7 +46,12 @@ import type {
   CodeModeExecutorTool,
   CodeModeStore
 } from './executor.ts'
-import { codeModeResultSegments, codeModeSegmentsContent } from './output.ts'
+import {
+  codeModeResultSegments,
+  codeModeSegmentsContent,
+  defaultCodeModeMaxImageBytes,
+  defaultCodeModeMaxImages
+} from './output.ts'
 import { searchCodeModeTools } from './search.ts'
 import type { CodeModeStructuredContent } from './store.ts'
 
@@ -51,13 +68,21 @@ export type CodeModeLimits = {
   readonly maxNestedCalls?: number
   /** Model-visible result characters, cut head and tail with an omission marker. Default 40000. */
   readonly maxOutputChars?: number
+  /** Images kept in the result, in order; later images are dropped with a note. Default 8. */
+  readonly maxImages?: number
+  /** Base64 characters of images kept in the result in total; an image that would exceed it is
+   * dropped with a note. Default 4 MiB.
+   */
+  readonly maxImageBytes?: number
 }
 
 export const defaultCodeModeLimits = {
   timeoutMs: 120_000,
   memoryLimitBytes: 64 * 1024 * 1024,
   maxNestedCalls: 256,
-  maxOutputChars: 40_000
+  maxOutputChars: 40_000,
+  maxImages: defaultCodeModeMaxImages,
+  maxImageBytes: defaultCodeModeMaxImageBytes
 } as const satisfies Required<CodeModeLimits>
 
 /** Kept between a host deadline and the script deadline, for result handling. */
@@ -83,6 +108,17 @@ export type MakeCodeModeToolOptions<Context> = {
    * `codeModeStoreFromToolResults`. Without it every script starts with an empty store.
    */
   readonly loadStore?: (context: Context) => Effect.Effect<CodeModeStore, ToolError>
+  /**
+   * Runs before each nested call executes, with the nested call (id `<toolCallId>/<seq>`) and the
+   * host context. A failure rejects that call in the script with the message and records it as an
+   * `error` without executing it. Host decorators around the `ToolExecutor` (outside
+   * `ResolvedToolSet.execute`) never see nested calls: put per-call run-authority checks here or in
+   * registration-level wrappers.
+   */
+  readonly beforeNestedCall?: (input: {
+    readonly call: ToolCall
+    readonly context: Context
+  }) => Effect.Effect<void, string>
 }
 
 const CodeModeParams = Schema.Struct({
@@ -163,6 +199,13 @@ const recordedOutcome = (exit: Exit.Exit<ToolResult>, durationMs: number): CallO
   return outcome
 }
 
+/** What `describeNamespace(name)` resolves to. */
+type CodeModeNamespaceDescription = {
+  readonly name: string
+  description?: string
+  readonly tools: ReadonlyArray<{ readonly name: string; readonly description: string }>
+}
+
 const SearchOptions = Schema.Struct({
   limit: Schema.optionalKey(Schema.Finite),
   namespace: Schema.optionalKey(Schema.String)
@@ -202,14 +245,20 @@ const discoveryGlobals = (
     execute: name => {
       const tools = catalog.filter(tool => tool.namespace === name)
 
-      return Promise.resolve(
-        !Predicate.isString(name) || tools.length === 0
-          ? undefined
-          : {
-              name,
-              tools: tools.map(tool => ({ name: tool.identifier, description: tool.description }))
-            }
-      )
+      if (!Predicate.isString(name) || tools.length === 0) return Promise.resolve(undefined)
+
+      const description = tools.find(
+        tool => tool.namespaceDescription !== undefined
+      )?.namespaceDescription
+
+      const namespace: CodeModeNamespaceDescription = {
+        name,
+        tools: tools.map(tool => ({ name: tool.identifier, description: tool.description }))
+      }
+
+      if (description !== undefined) namespace.description = description
+
+      return Promise.resolve(namespace)
     }
   }
 ]
@@ -222,6 +271,21 @@ const timeoutFor = (limit: number, deadline: number | undefined, now: number) =>
   deadline === undefined
     ? limit
     : Math.max(codeModeMinimumTimeoutMs, Math.min(limit, deadline - now - codeModeDeadlineMarginMs))
+
+/**
+ * Waits at most `codeModeDeadlineMarginMs` for an effect (interrupting nested fibers) to finish; it
+ * keeps running detached when a nested call does not respond to interruption in time.
+ */
+const boundedWait = (effect: Effect.Effect<void>) =>
+  Effect.forkDetach(effect).pipe(
+    Effect.flatMap(fiber =>
+      Fiber.await(fiber).pipe(
+        Effect.timeoutOption(Duration.millis(codeModeDeadlineMarginMs)),
+        Effect.interruptible
+      )
+    ),
+    Effect.asVoid
+  )
 
 type RunInput<Context> = {
   readonly options: MakeCodeModeToolOptions<Context>
@@ -240,161 +304,201 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
     const timeoutMs = timeoutFor(limits.timeoutMs, options.deadline?.(input.context), startedAt)
     const catalog = codeModeCatalog(nested.tools)
 
-    return yield* Effect.scoped(
-      Effect.gen(function* () {
-        // Nested calls run as fibers of this tool call (same services, interrupted with it).
-        const fibers = yield* FiberSet.make<ToolResult>()
-        const runFork = yield* FiberSet.runtime(fibers)<never>()
-        const records: Array<CallRecord> = []
+    return yield* Effect.acquireUseRelease(
+      Scope.make(),
+      scope =>
+        Effect.gen(function* () {
+          // Nested calls run as fibers of this tool call (same services, interrupted with it).
+          const fibers = yield* FiberSet.make<ToolResult>().pipe(Scope.provide(scope))
+          const runFork = yield* FiberSet.runtime(fibers)<never>()
+          const records: Array<CallRecord> = []
 
-        const callTool =
-          (tool: CodeModeCatalogTool): CodeModeExecutorTool['execute'] =>
-          (args, { signal }) => {
-            if (signal.aborted) {
-              return Promise.reject(new Error(`tools.${tool.identifier} was cancelled.`))
-            }
+          const callTool =
+            (tool: CodeModeCatalogTool): CodeModeExecutorTool['execute'] =>
+            (args, { signal }) => {
+              if (signal.aborted) {
+                return Promise.reject(new Error(`tools.${tool.identifier} was cancelled.`))
+              }
 
-            if (records.length >= limits.maxNestedCalls) {
-              return Promise.reject(
-                new Error(
-                  `Nested call limit reached: a script may make at most ${limits.maxNestedCalls} tool calls. Batch the work or return partial results.`
+              if (records.length >= limits.maxNestedCalls) {
+                return Promise.reject(
+                  new Error(
+                    `Nested call limit reached: a script may make at most ${limits.maxNestedCalls} tool calls. Batch the work or return partial results.`
+                  )
                 )
-              )
-            }
+              }
 
-            const params = args === undefined ? {} : args
+              const params = args === undefined ? {} : args
 
-            const record: CallRecord = {
-              id: `${call.id}/${records.length + 1}`,
-              name: tool.name,
-              args: params
-            }
+              const record: CallRecord = {
+                id: `${call.id}/${records.length + 1}`,
+                name: tool.name,
+                args: params
+              }
 
-            records.push(record)
+              records.push(record)
 
-            const execution = Effect.gen(function* () {
-              const started = yield* Clock.currentTimeMillis
+              const nestedCall = ToolCall.make({ id: record.id, name: tool.name, params })
 
-              return yield* nested
-                .execute(ToolCall.make({ id: record.id, name: tool.name, params }))
-                .pipe(
+              const admitted =
+                options.beforeNestedCall === undefined
+                  ? nested.execute(nestedCall)
+                  : options.beforeNestedCall({ call: nestedCall, context: input.context }).pipe(
+                      Effect.matchEffect({
+                        onFailure: message =>
+                          Effect.succeed(
+                            ToolResult.make({
+                              toolCallId: nestedCall.id,
+                              content: message,
+                              isError: true
+                            })
+                          ),
+                        onSuccess: () => nested.execute(nestedCall)
+                      })
+                    )
+
+              const execution = Effect.gen(function* () {
+                const started = yield* Clock.currentTimeMillis
+
+                return yield* admitted.pipe(
                   Effect.onExit(exit =>
                     Effect.map(Clock.currentTimeMillis, finished => {
                       record.outcome = recordedOutcome(exit, finished - started)
                     })
                   )
                 )
-            })
-
-            return new Promise((resolve, reject) => {
-              runFork(execution, { signal }).addObserver(exit => {
-                if (Exit.isFailure(exit)) {
-                  reject(new Error(`tools.${tool.identifier} was cancelled.`))
-
-                  return
-                }
-
-                const resolution = resolveNestedResult(tool, exit.value)
-
-                if (resolution.ok) {
-                  resolve(resolution.value)
-                } else {
-                  reject(new Error(resolution.message))
-                }
               })
-            })
-          }
 
-        const tools: ReadonlyArray<CodeModeExecutorTool> = catalog.map(tool => ({
-          name: tool.name,
-          description: tool.description,
-          inputSchema: tool.inputSchema,
-          outputSchema: tool.outputSchema,
-          execute: callTool(tool)
-        }))
+              return new Promise((resolve, reject) => {
+                runFork(execution, { signal }).addObserver(exit => {
+                  if (Exit.isFailure(exit)) {
+                    reject(
+                      new Error(
+                        Cause.hasInterruptsOnly(exit.cause)
+                          ? `tools.${tool.identifier} was cancelled.`
+                          : `tools.${tool.identifier} failed unexpectedly.`
+                      )
+                    )
 
-        const result = yield* Effect.tryPromise({
-          try: signal =>
-            options.executor.execute(input.code, {
-              tools,
-              globals: discoveryGlobals(catalog),
-              timeoutMs,
-              memoryLimitBytes: limits.memoryLimitBytes,
-              store,
-              signal
-            }),
-          catch: error => new CodeModeExecutorRejected({ message: errorMessage(error) })
-        }).pipe(
-          Effect.catch(error =>
-            Effect.succeed<CodeModeExecutionResult>({
-              ok: false,
-              error: {
-                kind: 'sandbox',
-                message: `The code mode executor failed: ${error.message}`
-              },
-              output: []
+                    return
+                  }
+
+                  const resolution = resolveNestedResult(tool, exit.value)
+
+                  if (resolution.ok) {
+                    resolve(resolution.value)
+                  } else {
+                    reject(new Error(resolution.message))
+                  }
+                })
+              })
+            }
+
+          const tools: ReadonlyArray<CodeModeExecutorTool> = catalog.map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            outputSchema: tool.outputSchema,
+            execute: callTool(tool)
+          }))
+
+          const result = yield* Effect.tryPromise({
+            try: signal =>
+              options.executor.execute(input.code, {
+                tools,
+                globals: discoveryGlobals(catalog),
+                timeoutMs,
+                memoryLimitBytes: limits.memoryLimitBytes,
+                store,
+                signal
+              }),
+            catch: error => new CodeModeExecutorRejected({ message: errorMessage(error) })
+          }).pipe(
+            Effect.catch(error =>
+              Effect.succeed<CodeModeExecutionResult>({
+                ok: false,
+                error: {
+                  kind: 'sandbox',
+                  message: `The code mode executor failed: ${error.message}`
+                },
+                output: []
+              })
+            ),
+            // Backstop for executors that miss their own deadline: interrupting aborts the signal.
+            Effect.timeoutOption(Duration.millis(timeoutMs + codeModeDeadlineMarginMs)),
+            Effect.map(
+              Option.getOrElse((): CodeModeExecutionResult => ({
+                ok: false,
+                error: {
+                  kind: 'timeout',
+                  message: `Execution timed out after ${timeoutMs} ms (the executor did not stop in time)`
+                },
+                output: []
+              }))
+            )
+          )
+
+          // Calls still running when the script ended are cancelled and recorded as such.
+          yield* boundedWait(FiberSet.clear(fibers))
+
+          const finishedAt = yield* Clock.currentTimeMillis
+
+          const recorded = records.map((record): NestedToolCallInput => ({
+            id: record.id,
+            name: record.name,
+            args: record.args,
+            // A call interrupted before it started has no outcome.
+            ...(record.outcome ?? { status: 'cancelled' })
+          }))
+
+          const recorder = recorded.reduce(recordNestedToolCall, emptyNestedToolCallRecorder)
+          const { nestedCalls, usage } = nestedToolCallResultFields(recorder)
+
+          const content = codeModeSegmentsContent(
+            codeModeResultSegments({
+              result,
+              wallTimeMs: finishedAt - startedAt,
+              calls: recorded,
+              maxChars: limits.maxOutputChars,
+              maxImages: limits.maxImages,
+              maxImageBytes: limits.maxImageBytes
             })
           )
-        )
 
-        // Calls still running when the script ended are cancelled and recorded as such.
-        yield* FiberSet.clear(fibers)
+          const structuredContent: CodeModeStructuredContent = {
+            codemode:
+              result.ok && result.storeWrites !== undefined && hasStoreWrites(result)
+                ? { ok: true, storeWrites: result.storeWrites }
+                : { ok: result.ok }
+          }
 
-        const finishedAt = yield* Clock.currentTimeMillis
+          type ResultFields = {
+            toolCallId: string
+            content: Content
+            isError?: boolean
+            structuredContent: CodeModeStructuredContent
+            nestedCalls: typeof nestedCalls
+            usage?: AgentUsage
+          }
 
-        const recorded = records.map((record): NestedToolCallInput => ({
-          id: record.id,
-          name: record.name,
-          args: record.args,
-          // A call interrupted before it started has no outcome.
-          ...(record.outcome ?? { status: 'cancelled' })
-        }))
+          const fields: ResultFields = {
+            toolCallId: call.id,
+            content,
+            structuredContent,
+            nestedCalls
+          }
 
-        const recorder = recorded.reduce(recordNestedToolCall, emptyNestedToolCallRecorder)
-        const { nestedCalls, usage } = nestedToolCallResultFields(recorder)
+          if (!result.ok) {
+            fields.isError = true
+          }
 
-        const content = codeModeSegmentsContent(
-          codeModeResultSegments({
-            result,
-            wallTimeMs: finishedAt - startedAt,
-            calls: recorded,
-            maxChars: limits.maxOutputChars
-          })
-        )
+          if (usage !== undefined) {
+            fields.usage = usage
+          }
 
-        const structuredContent: CodeModeStructuredContent = {
-          codemode:
-            result.ok && result.storeWrites !== undefined && hasStoreWrites(result)
-              ? { ok: true, storeWrites: result.storeWrites }
-              : { ok: result.ok }
-        }
-
-        type ResultFields = {
-          toolCallId: string
-          content: Content
-          isError?: boolean
-          structuredContent: CodeModeStructuredContent
-          nestedCalls: typeof nestedCalls
-          usage?: AgentUsage
-        }
-
-        const fields: ResultFields = {
-          toolCallId: call.id,
-          content,
-          structuredContent,
-          nestedCalls
-        }
-
-        if (!result.ok) {
-          fields.isError = true
-        }
-
-        if (usage !== undefined) {
-          fields.usage = usage
-        }
-
-        return ToolResult.make(fields)
-      })
+          return ToolResult.make(fields)
+        }),
+      (scope, exit) => boundedWait(Scope.close(scope, exit))
     )
   })
 

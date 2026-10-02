@@ -197,18 +197,34 @@ const encodeValue = (value: unknown): string => {
   }
 }
 
+/** Default cap of images kept in one result. */
+export const defaultCodeModeMaxImages = 8
+
+/** Default cap of base64 image data kept in one result, in characters (4 MiB). */
+export const defaultCodeModeMaxImageBytes = 4 * 1024 * 1024
+
+const imageOmissionNote = (dropped: number, maxImages: number, maxImageBytes: number) =>
+  `\n\n[… ${dropped} image${dropped === 1 ? '' : 's'} omitted: a result keeps at most ${maxImages} images and ${maxImageBytes} characters of base64 image data …]`
+
 /**
  * Model-visible segments of one execution: a `Script completed` / `Script failed` header with the
  * wall time, the output in order, the JSON return value (omitted when undefined), and for failures
- * the error and the tool calls already made. Bounded by `maxChars` with a head-and-tail cut.
+ * the error and the tool calls already made. Images are kept in order while they fit `maxImages`
+ * (default 8) and `maxImageBytes` of base64 in total (default 4 MiB); an image that would exceed
+ * either is dropped and counted in an omission note after the output. The result is then bounded
+ * by `maxChars` with a head-and-tail cut, which also drops images in the omitted middle.
  */
 export const codeModeResultSegments = (input: {
   readonly result: CodeModeExecutionResult
   readonly wallTimeMs: number
   readonly calls: ReadonlyArray<CodeModeCallSummary>
   readonly maxChars: number
+  readonly maxImages?: number
+  readonly maxImageBytes?: number
 }): ReadonlyArray<CodeModeResultSegment> => {
   const { result } = input
+  const maxImages = Math.max(0, Math.floor(input.maxImages ?? defaultCodeModeMaxImages))
+  const maxImageBytes = Math.max(0, Math.floor(input.maxImageBytes ?? defaultCodeModeMaxImageBytes))
   const ms = Math.round(input.wallTimeMs)
   const segments: Array<CodeModeResultSegment> = []
 
@@ -221,15 +237,25 @@ export const codeModeResultSegments = (input: {
   if (result.output.length > 0) {
     text('\n\nOutput:\n')
 
+    let keptImages = 0
+    let keptImageBytes = 0
+    let droppedImages = 0
+
     result.output.forEach((item, index) => {
       const previous = result.output[index - 1]
 
       if (item.type === 'text') {
         text(previous?.type === 'text' ? `\n${item.text}` : item.text)
-      } else {
+      } else if (keptImages < maxImages && keptImageBytes + item.data.length <= maxImageBytes) {
+        keptImages++
+        keptImageBytes += item.data.length
         segments.push(item)
+      } else {
+        droppedImages++
       }
     })
+
+    if (droppedImages > 0) text(imageOmissionNote(droppedImages, maxImages, maxImageBytes))
   }
 
   if (result.ok && result.value !== undefined) {

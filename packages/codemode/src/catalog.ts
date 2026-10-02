@@ -22,6 +22,8 @@ export type CodeModeCatalogTool = {
   readonly identifier: string
   /** The tool's `ToolModule.id`. */
   readonly namespace: string
+  /** The module's `ToolModule.description`, when set. */
+  readonly namespaceDescription?: string
   readonly description: string
   readonly inputSchema: CodeModeJsonSchema
   /** The declared output schema, or `{ type: 'string' }` for text results. */
@@ -37,16 +39,22 @@ const textOutputSchema: CodeModeJsonSchema = { type: 'string' }
 export const codeModeCatalog = (
   tools: ReadonlyArray<NestedTool>
 ): ReadonlyArray<CodeModeCatalogTool> =>
-  tools.map(({ def, moduleId }) => ({
-    name: def.name,
-    identifier: toCodemodeIdentifier(def.name),
-    namespace: moduleId,
-    description: def.description,
-    inputSchema: def.parameters,
-    outputSchema: def.outputSchema ?? textOutputSchema,
-    structured: def.outputSchema !== undefined,
-    exposure: toolDiscovery(def) ?? 'all'
-  }))
+  tools.map(({ def, moduleId, moduleDescription }) => {
+    const tool: CodeModeCatalogTool = {
+      name: def.name,
+      identifier: toCodemodeIdentifier(def.name),
+      namespace: moduleId,
+      description: def.description,
+      inputSchema: def.parameters,
+      outputSchema: def.outputSchema ?? textOutputSchema,
+      structured: def.outputSchema !== undefined,
+      exposure: toolDiscovery(def) ?? 'all'
+    }
+
+    return moduleDescription === undefined
+      ? tool
+      : { ...tool, namespaceDescription: moduleDescription }
+  })
 
 /** Default inline budget of the nested tool listing, in estimated tokens. */
 export const defaultCodeModeInlineBudget = 3000
@@ -92,9 +100,7 @@ type Candidate = {
 }
 
 const candidateCost = (tool: CodeModeCatalogTool) =>
-  estimateCodeModeTokens(
-    tool.exposure === 'all' ? directToolLine(tool) : declarationMembers([tool])
-  )
+  estimateCodeModeTokens(declarationMembers([tool]))
 
 const groupByNamespace = <A extends { readonly tool: CodeModeCatalogTool }>(
   items: ReadonlyArray<A>
@@ -115,23 +121,26 @@ const groupByNamespace = <A extends { readonly tool: CodeModeCatalogTool }>(
 }
 
 export type CodeModeListing = {
-  /** Tools placed in the description, in catalog order. */
+  /** Tools placed in the description, in catalog order: every `all` tool, and the `listed` tools
+   * that fit the budget.
+   */
   readonly listed: ReadonlyArray<CodeModeCatalogTool>
   /** Namespaces (catalog order) with callable tools the description does not list. */
   readonly unlistedNamespaces: ReadonlyArray<string>
 }
 
 /**
- * Chooses the tools the description lists within `budget` estimated tokens, fairly across
- * namespaces: each round, every namespace still in play places its cheapest remaining tool; a
- * namespace whose next tool does not fit drops out. `search` tools are never candidates.
+ * Chooses the tools the description lists. `all` tools are always placed, outside the budget
+ * (the model already has their declarations). `listed` tools fill `budget` estimated tokens fairly
+ * across namespaces: each round, every namespace still in play places its cheapest remaining tool;
+ * a namespace whose next tool does not fit drops out. `search` tools are never candidates.
  */
 export const selectCodeModeListing = (
   catalog: ReadonlyArray<CodeModeCatalogTool>,
   budget: number
 ): CodeModeListing => {
   const candidates = catalog.flatMap((tool, index): ReadonlyArray<Candidate> =>
-    tool.exposure === 'search' ? [] : [{ tool, index, cost: candidateCost(tool) }]
+    tool.exposure === 'listed' ? [{ tool, index, cost: candidateCost(tool) }] : []
   )
 
   const queues = new Map(
@@ -141,7 +150,8 @@ export const selectCodeModeListing = (
     ])
   )
 
-  const placed = new Set<number>()
+  const placed = new Set(catalog.flatMap((tool, index) => (tool.exposure === 'all' ? [index] : [])))
+
   const inPlay = new Set(queues.keys())
   let remaining = budget
 
@@ -187,7 +197,7 @@ const globalLines = (store: boolean) => [
   '- `ALL_TOOLS`: `{ name, description }` of every callable tool.',
   '- `await searchTools(query, { limit?, namespace? })`: find tools by topic; resolves to `Array<{ name: string; description: string }>` (default limit 8).',
   '- `await describeTool(name)`: the description and TypeScript declaration of a tool, or `undefined`.',
-  '- `await describeNamespace(name)`: `{ name, tools: Array<{ name, description }> }` for a namespace, or `undefined`.',
+  '- `await describeNamespace(name)`: `{ name, description?, tools: Array<{ name, description }> }` for a namespace, or `undefined`.',
   ...(store
     ? [
         '- `store(key, value)` and `load(key)`: keep small JSON values for later scripts; writes are saved only when the script succeeds.'
@@ -195,23 +205,25 @@ const globalLines = (store: boolean) => [
     : [])
 ]
 
-const namespaceSection = (
-  namespace: string,
-  tools: ReadonlyArray<CodeModeCatalogTool>,
-  unlisted: boolean
-) => {
+const namespaceSection = (namespace: string, tools: ReadonlyArray<CodeModeCatalogTool>) => {
   const declared = tools.filter(tool => tool.exposure !== 'all')
   const direct = tools.filter(tool => tool.exposure === 'all')
 
+  const description = tools.find(
+    tool => tool.namespaceDescription !== undefined
+  )?.namespaceDescription
+
   return [
     `### ${namespace}`,
+    ...(description === undefined ? [] : [description]),
     ...(declared.length > 0 ? ['```ts', declarationMembers(declared), '```'] : []),
-    ...direct.map(directToolLine),
-    ...(unlisted
-      ? [`- More tools: \`await searchTools(query, { namespace: ${JSON.stringify(namespace)} })\`.`]
-      : [])
+    ...direct.map(directToolLine)
   ].join('\n')
 }
+
+// Fixed text: never derived from `search` tools or from which tools did not fit the budget.
+const unlistedToolsLine =
+  'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })` and read one with `await describeTool(name)` or `await describeNamespace(name)` before calling it.'
 
 export type CodeModeDescriptionInput = {
   readonly tools: ReadonlyArray<NestedTool>
@@ -222,32 +234,31 @@ export type CodeModeDescriptionInput = {
 
 /**
  * The code mode tool description: intro, globals one per line, then nested tools grouped by
- * namespace within the inline budget. `codemode` + `search` tools never appear, so the text only
- * changes when listed or direct tools change, or a namespace gains or loses unlisted tools.
+ * namespace, then one fixed line pointing to `searchTools`/`describeTool`/`describeNamespace`.
+ * `all` tools get one line each outside the budget; `listed` tools are declared within the inline
+ * budget; `search` tools never contribute, so adding or removing them (even whole namespaces of
+ * them) leaves the text byte-identical.
  */
 export const renderCodeModeDescription = (input: CodeModeDescriptionInput): string => {
   const catalog = codeModeCatalog(input.tools)
 
   const listing = selectCodeModeListing(catalog, input.inlineBudget ?? defaultCodeModeInlineBudget)
 
-  const unlisted = new Set(listing.unlistedNamespaces)
-  const listedByNamespace = groupByNamespace(listing.listed.map(tool => ({ tool })))
-  const namespaces = [...new Set(catalog.map(tool => tool.namespace))]
-
-  const sections = namespaces.flatMap(namespace => {
-    const tools = (listedByNamespace.get(namespace) ?? []).map(item => item.tool)
-
-    return tools.length === 0 && !unlisted.has(namespace)
-      ? []
-      : [namespaceSection(namespace, tools, unlisted.has(namespace))]
-  })
+  const sections = [...groupByNamespace(listing.listed.map(tool => ({ tool })))].map(
+    ([namespace, items]) =>
+      namespaceSection(
+        namespace,
+        items.map(item => item.tool)
+      )
+  )
 
   return [
     intro,
     ['Globals:', ...globalLines(input.store === true)].join('\n'),
     sections.length === 0
-      ? 'Nested tools: none are callable from scripts here.'
-      : ['## Nested tools by namespace', ...sections].join('\n\n')
+      ? 'Nested tools: none are listed here.'
+      : ['## Nested tools by namespace', ...sections].join('\n\n'),
+    unlistedToolsLine
   ].join('\n\n')
 }
 

@@ -348,6 +348,32 @@ describe('nested tool executor', () => {
     })
   )
 
+  it.effect('carries module descriptions on nested tools', () =>
+    Effect.gen(function* () {
+      const captured: Captured = {}
+
+      const { nested } = yield* nestedFrom(
+        [
+          moduleOf('core', [scriptHost(captured), echoTool('shared')]),
+          {
+            id: 'docs',
+            description: 'Product documentation',
+            tools: [scriptOnlyTool('docs_search', 'search')]
+          }
+        ],
+        captured
+      )
+
+      expect(
+        nested.tools.map(tool => [tool.moduleId, tool.def.name, tool.moduleDescription])
+      ).toEqual([
+        ['core', 'shared', undefined],
+        ['docs', 'docs_search', 'Product documentation']
+      ])
+      expect('moduleDescription' in (nested.tools[0] ?? {})).toBe(false)
+    })
+  )
+
   it.effect('executes through the resolved path with the same host context', () =>
     Effect.gen(function* () {
       const captured: Captured = {}

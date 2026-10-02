@@ -27,7 +27,7 @@ import {
 /** Default name of the classifier tool. */
 export const classifierToolName = 'classify'
 
-/** Default cap of concurrent classifications per classifier tool registration. */
+/** Default cap of concurrent classifications per script. */
 export const defaultClassifierToolMaxConcurrency = 4
 
 type ClassifierModelService = (typeof ClassifierModel)['Service']
@@ -39,7 +39,9 @@ export type MakeClassifierToolOptions = {
   readonly classify: Classify | ClassifierModelService
   /** Default `classify`. */
   readonly name?: string
-  /** Concurrent classifications of this registration (shared by every script); default 4. */
+  /** Concurrent classifications per script (keyed by the parent tool call id of the nested call
+   * id `<parentToolCallId>/<seq>`, or the call id itself); default 4.
+   */
   readonly maxConcurrency?: number
   readonly description?: string
 }
@@ -56,11 +58,11 @@ const defaultDescription = (maxConcurrency: number) =>
   [
     'Classify one item with a classifier model: answer named typed questions about one `state` (a string, JSON object, or JSON array) with probabilities.',
     'Question types: `boolean` (`probability` of true), `choice` (one of the `criteria` keys, with `probabilities`), and `score` (an ordinal level from the `criteria` list, lowest first).',
-    `Call it once per item; at most ${maxConcurrency} classifications run at once and further calls queue.`
+    `Call it once per item; at most ${maxConcurrency} classifications of one script run at once and further calls queue.`
   ].join(' ')
 
 /** Token usage of a classification as agent usage. `costUsd` has no agent usage field; it stays
- * in the result's `usage`.
+ * in the result's `structuredContent.usage`, so nested-call records carry token usage only.
  */
 const agentUsage = (usage: ClassificationUsage): AgentUsage =>
   AgentUsage.make({
@@ -73,6 +75,13 @@ const errorReason = (error: ClassificationError): ModelVisibleToolErrorReason =>
 
 const billedUsage = (error: ClassificationError) =>
   Predicate.isTagged(error, 'ClassificationResponseInvalid') ? error.usage : undefined
+
+/** The parent tool call id of a nested call id `<parentToolCallId>/<seq>`, else the id itself. */
+const scriptKey = (call: ToolCall) => {
+  const separator = call.id.lastIndexOf('/')
+
+  return separator > 0 ? call.id.slice(0, separator) : call.id
+}
 
 type ResultFields = {
   toolCallId: string
@@ -130,8 +139,32 @@ export const makeClassifierTool = <Context>(
     ? options.classify
     : options.classify.classify
 
-  // One semaphore per registration: every script using it shares the cap.
-  const semaphore = Semaphore.makeUnsafe(maxConcurrency)
+  // One semaphore per script (parent tool call), removed when its last classification ends.
+  const scripts = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>()
+
+  const withScriptPermit = <A, E>(call: ToolCall, effect: Effect.Effect<A, E>) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const key = scriptKey(call)
+
+        const entry = scripts.get(key) ?? {
+          semaphore: Semaphore.makeUnsafe(maxConcurrency),
+          users: 0
+        }
+
+        entry.users++
+        scripts.set(key, entry)
+
+        return { key, entry }
+      }),
+      ({ entry }) => entry.semaphore.withPermits(1)(effect),
+      ({ key, entry }) =>
+        Effect.sync(() => {
+          entry.users--
+
+          if (entry.users === 0 && scripts.get(key) === entry) scripts.delete(key)
+        })
+    )
 
   return makeTool<Context, typeof ClassifierToolParams>({
     name,
@@ -144,12 +177,10 @@ export const makeClassifierTool = <Context>(
     execute: ({ call, params }) => {
       const request: ClassificationRequest = { state: params.state, questions: params.questions }
 
-      return semaphore
-        .withPermits(1)(classify(request))
-        .pipe(
-          Effect.map(result => successResult(call, result)),
-          Effect.catch(error => Effect.succeed(errorResult(call, name, error)))
-        )
+      return withScriptPermit(call, classify(request)).pipe(
+        Effect.map(result => successResult(call, result)),
+        Effect.catch(error => Effect.succeed(errorResult(call, name, error)))
+      )
     }
   })
 }

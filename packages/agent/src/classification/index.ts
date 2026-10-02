@@ -29,9 +29,9 @@ export {
   ClassificationRequestInvalid,
   ClassificationResponseInvalid,
   ClassificationResponseIssue
-} from './error.ts'
+} from './errors.ts'
 
-export type { ClassificationError } from './error.ts'
+export type { ClassificationError } from './errors.ts'
 
 export {
   ClassifierModel,

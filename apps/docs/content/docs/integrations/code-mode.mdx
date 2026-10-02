@@ -94,12 +94,12 @@ const codemode = makeCodeModeTool<HostContext>({
 
 Exposure is set on each tool with `callableBy` and, for code-mode-only tools, `discovery`:
 
-| Setting                                         | Model calls it | Scripts call it | In the `codemode` description                         |
-| ----------------------------------------------- | -------------- | --------------- | ----------------------------------------------------- |
-| `callableBy: 'all'` (default)                   | yes            | yes             | one line: how scripts call it and what it resolves to |
-| `callableBy: 'model'`                           | yes            | no              | no                                                    |
-| `callableBy: 'codemode'`, `discovery: 'listed'` | no             | yes             | TypeScript declaration, within the inline budget      |
-| `callableBy: 'codemode'`, `discovery: 'search'` | no             | yes             | never; scripts find it with `searchTools()`           |
+| Setting                                         | Model calls it | Scripts call it | In the `codemode` description                                              |
+| ----------------------------------------------- | -------------- | --------------- | -------------------------------------------------------------------------- |
+| `callableBy: 'all'` (default)                   | yes            | yes             | one line: how scripts call it and what it resolves to (outside the budget) |
+| `callableBy: 'model'`                           | yes            | no              | no                                                                         |
+| `callableBy: 'codemode'`, `discovery: 'listed'` | no             | yes             | TypeScript declaration, within the inline budget                           |
+| `callableBy: 'codemode'`, `discovery: 'search'` | no             | yes             | never; scripts find it with `searchTools()`                                |
 
 ```ts
 import { makeTool } from '@yolk-sdk/agent/tools'
@@ -121,8 +121,14 @@ const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
   resolution.
 - `codemode`-only tools are never sent to model providers.
 - Listed tools fill an inline budget (default 3,000 estimated tokens) fairly across tool modules:
-  each round every module places its cheapest remaining tool. `search` tools never appear, so the
-  description, and the prompt cache, stay stable when they change.
+  each round every module places its cheapest remaining tool. `all` tools are already declared to
+  the model, so their lines sit outside the budget.
+- `search` tools contribute nothing to the description: no namespace heading, hint, or count.
+  Adding or removing them, even a whole module of them, leaves the description byte-identical and
+  the prompt cache intact. One fixed line always tells scripts to use `searchTools()`,
+  `describeTool()`, and `describeNamespace()` for unlisted tools.
+- Give a module a `description` (`{ id, description, tools }`) to show it under the module's
+  heading, return it from `describeNamespace()`, and make it searchable.
 - Tools that poll (no timers in scripts) should stay `callableBy: 'model'` until they offer a wait
   parameter.
 
@@ -135,6 +141,8 @@ const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
   `structuredContent` for tools with an output schema and to the text content otherwise, and
   rejects with an `Error` when the tool returns an error result. Unknown names suggest close
   matches. Calls still running when the script ends are cancelled.
+- A nested call that is interrupted rejects with `tools.<id> was cancelled.`; one whose tool
+  fails with a defect rejects with `tools.<id> failed unexpectedly.` and is recorded as `error`.
 - Globals: `text()`, `console.log()`, `image()`, `exit()`, `ALL_TOOLS`,
   `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`,
   and `store(key, value)` / `load(key)`.
@@ -158,18 +166,25 @@ import { codeModeStoreFromToolResults, makeCodeModeTool } from '@yolk-sdk/codemo
 
 const codemode = makeCodeModeTool<HostContext>({
   executor,
-  // Prior code mode ToolResults or ToolResultMessages, oldest first (host-owned lookup).
-  loadStore: context => Effect.succeed(codeModeStoreFromToolResults(context.codeModeResults))
+  // `{ toolName, result }` for prior tool results, oldest first (host-owned lookup).
+  loadStore: context => Effect.succeed(codeModeStoreFromToolResults(context.priorToolResults))
 })
 ```
 
-Values are small JSON only: 256 KiB per value and 1 MiB in total.
+`codeModeStoreFromToolResults` applies only results whose `toolName` is the code mode tool's name
+(default `codemode`; pass `{ toolName }` if you renamed it), so another tool cannot inject store
+writes by returning code-mode-shaped `structuredContent`. Transcript `ToolResultMessage`s carry no
+tool name: pair each with the name of the assistant tool call it answers.
+
+Values are small JSON only: 256 KiB per value and 1 MiB in total (characters of JSON, as the engine
+counts them). Scripts get an error beyond them, and the rebuilt store drops offending writes and
+keeps the previous value.
 
 ## Classify items from scripts
 
 `makeClassifierTool` exposes a [classifier model](../agent/classifier-models) as a `codemode` +
 `listed` read tool named `classify`. Scripts classify one item per call; calls beyond
-`maxConcurrency` (default 4, shared by every script using the registration) queue.
+`maxConcurrency` (default 4 per script, keyed by the parent tool call id) queue.
 
 ```ts
 import { Effect } from 'effect'
@@ -198,8 +213,9 @@ const results = await Promise.all(
 return messages.filter((_, index) => results[index].answers.urgent.probability > 0.7).map(m => m.id)
 ```
 
-Each call reports token usage on the nested-call record. Classifier errors reject the call with a
-safe message.
+Each call reports token usage on the nested-call record; the cost (`costUsd`) stays in the
+classifier result's `structuredContent.usage`. Classifier errors reject the call with a safe
+message.
 
 ## Limits
 
@@ -209,9 +225,13 @@ safe message.
 | `memoryLimitBytes` | 64 MiB  | VM heap cap; allocations beyond it fail inside the script             |
 | `maxNestedCalls`   | 256     | later calls reject with an `Error` and do not run                     |
 | `maxOutputChars`   | 40000   | the result keeps the head and tail with an omission marker in between |
+| `maxImages`        | 8       | later images are dropped with an omission note                        |
+| `maxImageBytes`    | 4 MiB   | base64 image data in total; an image beyond it is dropped with a note |
 
 Set them with `makeCodeModeTool({ limits: { ... } })`. The executor's `maxConcurrentExecutions`
 (default 4) caps concurrent scripts per executor; Fluid compute shares instances between requests.
+If an executor does not stop at `timeoutMs`, the tool returns a `timeout` failure 5 seconds later
+and aborts the executor's signal.
 
 ## Security notes
 
@@ -221,6 +241,21 @@ Set them with `makeCodeModeTool({ limits: { ... } })`. The executor's `maxConcur
 - Nested calls are ordinary tool calls with your host context. Code mode adds no permissions:
   the tools you expose to scripts are the authority you grant, and the `codemode` tool itself is
   `write` access.
+- Decorators you wrap around the `ToolExecutor` (outside `ResolvedToolSet.execute`), such as a
+  per-call run-admission or stop check, see only the `codemode` call, never the nested calls of its
+  script. Put per-call checks in `beforeNestedCall` or in registration-level wrappers:
+
+  ```ts
+  const codemode = makeCodeModeTool<HostContext>({
+    executor,
+    // Fails with a message to reject the nested call; it is recorded as an error and never runs.
+    beforeNestedCall: ({ call, context }) => assertRunActive(context, call) // host-owned
+  })
+  ```
+
+- The pi engine buffers script output (text and images) on the host thread without a limit while
+  the script runs; only the timeout bounds it. The result is bounded afterwards
+  (`maxOutputChars`, `maxImages`, `maxImageBytes`).
 - The worker inherits a copy of the host's `process.env`. Scripts cannot read it (the VM has no
   `process`), but keep that in mind for engine-level vulnerabilities.
 - The VM's clock and `Math.random` come from the engine's WASI shim.

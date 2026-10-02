@@ -23,7 +23,13 @@ type IndexedTool = {
 
 const indexTool = (tool: CodeModeCatalogTool): IndexedTool => {
   const tokens = codeModeSearchTokens(
-    [tool.identifier, tool.name, tool.description, tool.namespace].join(' ')
+    [
+      tool.identifier,
+      tool.name,
+      tool.description,
+      tool.namespace,
+      tool.namespaceDescription ?? ''
+    ].join(' ')
   )
 
   const frequencies = new Map<string, number>()
@@ -47,7 +53,7 @@ export type CodeModeSearchHit = {
 }
 
 /**
- * BM25 over each tool's identifier, raw name, description, and namespace. Ties keep catalog order.
+ * BM25 over each tool's identifier, raw name, description, namespace, and namespace description. Ties keep catalog order.
  * A query without words lists the (namespace-filtered) tools in catalog order.
  */
 export const searchCodeModeTools = (
