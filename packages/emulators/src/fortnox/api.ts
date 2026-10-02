@@ -1291,15 +1291,37 @@ export const parseJsonText = (text: string): Schema.Json | undefined => {
 /** `{Name}` path templates become `:Name` core route parameters. */
 const corePath = (template: string): string => template.replace(/\{([A-Za-z]+)\}/g, ':$1')
 
+/** Header the wrapper sets on core requests: the job whose fault decision the route asks for. */
+export const fortnoxJobHeader = 'x-emulator-job-id'
+
 /**
- * Register every route of the table on the core app, over the generation's state. A handler that
- * throws answers `handlerFailedResponse()`, which the wrapper turns into its `ErrorInformation`
+ * The wrapper's fault decision for the core request of job `jobId`, asked only once the route
+ * would answer successfully: `true` when a fault answers instead (it is used up, and the wrapper
+ * sends its answer), `false` when none applies.
+ */
+export type FortnoxFaultDecision = (jobId: string | undefined) => boolean
+
+/**
+ * The core's answer when a fault answered: the wrapper sends the fault's answer itself, outside
+ * the core, so a reset or a close before it is read never cancels it.
+ */
+const answeredOutsideCore = (): Response => new Response(null, { status: 204 })
+
+/**
+ * Register every route of the table on the core app, over the generation's state. Each request is
+ * planned, then faulted, then committed: the handler runs on a draft of the state (handlers replace
+ * whole lists and counters, never edit them in place, so a shallow copy keeps every write off the
+ * state); a refusal (any answer that is not 2xx) is sent as is and uses up no fault; a successful
+ * answer asks `decideFault`, and only an unfaulted one commits the draft. The three steps run
+ * synchronously together, so no other request interleaves. A handler that throws answers
+ * `handlerFailedResponse()` (nothing written), which the wrapper turns into its `ErrorInformation`
  * 500 with `responseError` in the ledger.
  */
 export const registerFortnoxApi = (
   app: Hono,
   state: FortnoxEmulatorState,
-  env: FortnoxApiEnv
+  env: FortnoxApiEnv,
+  decideFault: FortnoxFaultDecision
 ): void => {
   for (const route of fortnoxApiRoutes) {
     app.on(route.method, corePath(route.path), async context => {
@@ -1312,9 +1334,10 @@ export const registerFortnoxApi = (
         if (unsupported !== undefined) return unsupported
 
         const text = await context.req.text()
+        const draft: FortnoxEmulatorState = { ...state }
 
-        return await route.handler(
-          state,
+        const response = route.handler(
+          draft,
           {
             params: context.req.param(),
             query,
@@ -1322,6 +1345,14 @@ export const registerFortnoxApi = (
           },
           env
         )
+
+        if (!response.ok) return response
+
+        if (decideFault(context.req.header(fortnoxJobHeader))) return answeredOutsideCore()
+
+        Object.assign(state, draft)
+
+        return response
       } catch {
         return handlerFailedResponse()
       }

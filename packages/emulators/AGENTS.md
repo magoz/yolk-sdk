@@ -374,7 +374,14 @@ There is no root export or barrel.
 - Fortnox state lives in the core runtime (JSON state, replaced per `reset`/`seed` generation);
   the ledger, faults, auth, and the `/_emulate/*` control plane live in the wrapper
   (`src/fortnox.ts`), because the core reserves `/_emulate`. The bearer token is never forwarded
-  to the core, stored, or ledgered. Faults answer before the route runs, so they never write.
+  to the core, stored, or ledgered. Eligibility comes before faults (plan → fault → commit), as on
+  the later stateful emulators but without moving onto `src/stateful-emulator.ts`: the core route
+  checks its query allowlist, then runs the handler on a shallow draft of the state (handlers
+  replace whole lists and counters, never edit them in place); any answer that is not 2xx is a
+  refusal, sent in the provider envelope with no fault used up; only a 2xx answer asks the
+  wrapper's fault decision (by the `x-emulator-job-id` header), and only an unfaulted one commits
+  the draft. The three steps run synchronously in one core call, and the fault's answer is
+  returned by the wrapper, outside the core. So a faulted request never writes.
 - Fortnox observed quirks live in `src/fortnox/api.ts` and are listed in `fortnoxEmulatorQuirks`
   with their case ids. The `quirks` option (`stickyRowDiscount`, `emptyStringClears`,
   `paymentFiltersIncludeUnbooked`) is a disagreement-drill knob for tests only: defaults follow the
@@ -397,7 +404,12 @@ There is no root export or barrel.
   proof excludes only the counters. The first message write to reach the
   handler holds the message for `conflictWindowMs`; an overlapping write gets 409, while
   non-overlapping writes both apply. Copy monitors are runtime data (not in the state; cleared by
-  reset/seed). Ledgered bodies and queries redact credential-named keys (`redactCredentialFields`,
+  reset/seed). Faults follow the Fortnox plan → fault → commit order (`src/microsoft/api.ts`,
+  `handle`): handlers decide their whole answer synchronously on drafts of the state and of the
+  copy monitors and their counter; a refusal (404, 400 not emulated, 409 conflict) uses up no
+  fault; a message write returns a `HeldAnswer`, and the message is held only once the write is
+  committed, so a faulted write writes nothing, creates no monitor, and holds no message.
+  Ledgered bodies and queries redact credential-named keys (`redactCredentialFields`,
   `redactCredentialQuery`, which also covers the conformance scan's `credential_query_param`
   names such as `x-amz-signature`); `test/emulator-http.test.ts` keeps both name rules in step
   with `@yolk-sdk/conformance`'s.

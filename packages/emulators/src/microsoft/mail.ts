@@ -16,9 +16,9 @@
  * message with attachments (no fixture creates a draft with attachments).
  *
  * Concurrent writes: the first write (update or move) to reach the handler holds its message for
- * `conflictWindowMs` before answering; an overlapping write to that message gets 409
- * `ErrorIrresolvableConflict` and changes nothing. Non-overlapping writes both apply (an emulator
- * extrapolation).
+ * `conflictWindowMs` before answering (a faulted write commits nothing and holds nothing); an
+ * overlapping write to that message gets 409 `ErrorIrresolvableConflict` and changes nothing.
+ * Non-overlapping writes both apply (an emulator extrapolation).
  *
  * @experimental
  */
@@ -48,6 +48,7 @@ import {
   selectSuffix,
   selectedFields,
   textBody,
+  type HeldAnswer,
   type MicrosoftApiEnv,
   type RouteHandler,
   type RouteRequest
@@ -464,36 +465,19 @@ export const createDraft: RouteHandler = (state, request, env) => {
   return jsonResponse(201, entity(messageEntityContext(env, request), renderMessage(message)))
 }
 
-const delay = (ms: number): Promise<void> =>
-  new Promise(resolve => {
-    setTimeout(resolve, ms)
-  })
-
 /**
  * Run a message write under its message's lock: a write that finds the lock held loses with 409
- * (nothing changes); the first write to reach the handler commits, then holds the lock for
- * `conflictWindowMs` before answering.
+ * (nothing changes); otherwise the write runs and its answer holds the message (the route
+ * registration takes the lock once the write is committed, then holds it for `conflictWindowMs`
+ * before answering).
  */
-const withMessageLock = async (
+const withMessageLock = (
   env: MicrosoftApiEnv,
   request: RouteRequest,
   message: MicrosoftEmulatorMessage,
   commit: () => Response
-): Promise<Response> => {
-  if (env.messageLocks.has(message.id)) return conflict(request)
-
-  env.messageLocks.add(message.id)
-
-  try {
-    const response = commit()
-
-    if (env.conflictWindowMs > 0) await delay(env.conflictWindowMs)
-
-    return response
-  } finally {
-    env.messageLocks.delete(message.id)
-  }
-}
+): Response | HeldAnswer =>
+  env.messageLocks.has(message.id) ? conflict(request) : { response: commit(), holds: message.id }
 
 /**
  * `PATCH /users/{userId}/messages/{messageId}`: update a draft's `subject` or `isRead`; 200 with

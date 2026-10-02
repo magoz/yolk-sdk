@@ -246,7 +246,7 @@ of the state.
 
 On the HTTP connector emulators (Fortnox through LinkedIn search in the
 [table](#available-emulators)) and MCP, `faults.add` adds a status fault: matching requests answer
-an error status instead of running the route, so nothing is written. `match` narrows it by
+an error status instead of the route's answer, so nothing is written. `match` narrows it by
 `method` and `path` (a trailing `*` makes a prefix) and, except on Fortnox and Microsoft Graph, by
 `route` (a manifest route template); `count` limits how many requests it answers. MCP also takes
 `truncate-after-chunks`, and the model-route and OpenCode Go emulators take their own status and
@@ -263,11 +263,11 @@ to. Connector actions return that failure and do not retry by themselves, so ret
 host-owned. A fault with `count: 1` proves that your retry succeeds on the next attempt, as in the
 second test above.
 
-On Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and MCP, a fault is chosen
-only for a request the emulator would answer, so a refused request never uses one up and a
-misplaced fault stays listed in `faults.list()` instead of passing silently. Fortnox and Microsoft
-Graph check the route, credential, and JSON body, then answer a matching fault before the route
-runs, so a request their route would refuse can still use one up.
+On every HTTP connector emulator and MCP, a fault is chosen only for a request the emulator would
+answer, so a refused request never uses one up and a misplaced fault stays listed in
+`faults.list()` instead of passing silently. On Fortnox and Microsoft Graph, a refusal is the
+provider's error envelope (a 404 for an unknown id, or a 400 or 409 for a state or value the route
+refuses) rather than a not-emulated 400, and it uses up no fault either.
 
 ## Drills
 

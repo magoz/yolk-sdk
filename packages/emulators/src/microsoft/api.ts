@@ -281,6 +281,27 @@ export const matchMicrosoftRoute = (method: string, path: string): MatchedRoute 
 /** Header the wrapper sets on core requests: the ledger sequence number (for error ids). */
 export const requestSeqHeader = 'x-emulator-request-seq'
 
+/** Header the wrapper sets on core requests: the job whose fault decision the route asks for. */
+export const microsoftJobHeader = 'x-emulator-job-id'
+
+/**
+ * The wrapper's fault decision for the core request of job `jobId`, asked only once the route
+ * would answer successfully: `true` when a fault answers instead (it is used up, and the wrapper
+ * sends its answer), `false` when none applies.
+ */
+export type MicrosoftFaultDecision = (jobId: string | null) => boolean
+
+/**
+ * The core's answer when a fault answered: the wrapper sends the fault's answer itself, outside
+ * the core, so a reset or a close before it is read never cancels it.
+ */
+const answeredOutsideCore = (): Response => new Response(null, { status: 204 })
+
+const delay = (ms: number): Promise<void> =>
+  new Promise(resolve => {
+    setTimeout(resolve, ms)
+  })
+
 /** The first query key the route does not emulate, or `undefined`. */
 const unsupportedQueryKey = (
   query: URLSearchParams,
@@ -290,11 +311,20 @@ const unsupportedQueryKey = (
 /** `{Name}` path templates become `:Name` core route parameters. */
 const corePath = (template: string): string => template.replace(/\{([A-Za-z]+)\}/g, ':$1')
 
-/** One core request: re-match, check the query allowlist and `If-Match`, then run the handler. */
+/**
+ * One core request: re-match, check the query allowlist and `If-Match`, then plan, fault, and
+ * commit. The handler runs on drafts: a shallow copy of the state (handlers replace whole lists
+ * and counters, never edit them in place) and copies of the copy monitors and their counter. A
+ * refusal (any answer that is not 2xx) is sent as is and uses up no fault; a successful answer asks
+ * `decideFault`, and only an unfaulted one commits the drafts (and then holds a written message
+ * for `conflictWindowMs`). Plan, fault decision, and commit run synchronously together, so no
+ * other request interleaves.
+ */
 const handle = async (
   raw: Request,
   state: MicrosoftEmulatorState,
-  env: MicrosoftApiEnv
+  env: MicrosoftApiEnv,
+  decideFault: MicrosoftFaultDecision
 ): Promise<Response> => {
   const url = new URL(raw.url)
   const headers = raw.headers
@@ -348,26 +378,55 @@ const handle = async (
     error
   }
 
-  return matched.route.handler(state, request, env)
+  const draft: MicrosoftEmulatorState = { ...state }
+  const monitors = new Map([...env.monitors].map(([id, monitor]) => [id, { ...monitor }]))
+  const monitorCounter = { next: env.monitorCounter.next }
+  const answer = matched.route.handler(draft, request, { ...env, monitors, monitorCounter })
+  const response = answer instanceof Response ? answer : answer.response
+
+  if (!response.ok) return response
+
+  if (decideFault(headers.get(microsoftJobHeader))) return answeredOutsideCore()
+
+  Object.assign(state, draft)
+  env.monitors.clear()
+
+  for (const [id, monitor] of monitors) env.monitors.set(id, monitor)
+
+  env.monitorCounter.next = monitorCounter.next
+
+  if (answer instanceof Response) return answer
+
+  env.messageLocks.add(answer.holds)
+
+  try {
+    if (env.conflictWindowMs > 0) await delay(env.conflictWindowMs)
+
+    return answer.response
+  } finally {
+    env.messageLocks.delete(answer.holds)
+  }
 }
 
 /**
  * Register every route of the table on the core app, over the generation's state. Each handler
  * re-matches the raw request path against the same table the wrapper ledgers (so parameters are
  * decoded once, failing closed on invalid percent-encoding), checks the route's query allowlist
- * and refuses `If-Match` (no fixture sends one) before the handler can write, and runs the
- * handler. A handler that throws answers `handlerFailedResponse()`, which the wrapper turns into
- * its Graph error envelope 500 with `responseError` in the ledger.
+ * and refuses `If-Match` (no fixture sends one) before the handler runs, then plans, faults, and
+ * commits (see `handle`). A handler that throws answers `handlerFailedResponse()` (nothing
+ * written), which the wrapper turns into its Graph error envelope 500 with `responseError` in the
+ * ledger.
  */
 export const registerMicrosoftApi = (
   app: Hono,
   state: MicrosoftEmulatorState,
-  env: MicrosoftApiEnv
+  env: MicrosoftApiEnv,
+  decideFault: MicrosoftFaultDecision
 ): void => {
   for (const apiRoute of microsoftApiRoutes) {
     app.on(apiRoute.method, corePath(apiRoute.path), async context => {
       try {
-        return await handle(context.req.raw, state, env)
+        return await handle(context.req.raw, state, env, decideFault)
       } catch {
         return handlerFailedResponse()
       }

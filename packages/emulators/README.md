@@ -701,10 +701,13 @@ current seed and clears the ledger and faults; `seed(next)` replaces the state a
 `reset()` restores; `snapshot()` returns a deep copy of the state.
 
 Faults (`faults.add` or `POST /_emulate/faults`): `{ kind: 'status', status, headers?, body?,
-match?: { method?, path? }, count? }` answers matching requests before the route runs (nothing is
-written). As in the Gateway emulator, statuses without a body (1xx, 204, 205), redirects (3xx),
-invalid header names or values, `location`, and framing headers are rejected when the fault is
-added; a fault is used up only once its response is built, and a response that cannot be built
+match?: { method?, path? }, count? }` answers matching requests the route would answer
+successfully, instead of that answer. The route plans first: it reads the state without writing,
+so a request it refuses (a 404 for an unknown id, a 400 for an invalid state or a query key, field,
+or value it does not emulate) is answered by the route and uses up no fault, and a faulted request
+writes nothing. As in the Gateway emulator, statuses without a body (1xx, 204, 205), redirects
+(3xx), invalid header names or values, `location`, and framing headers are rejected when the fault
+is added; a fault is used up only once its response is built, and a response that cannot be built
 answers an evidence-tagged 500 `ErrorInformation` with `responseError` in the ledger, as does a
 route handler that throws. For example a 429 with `retry-after: 2` reaches the connector as `fortnox_rate_limited`
 with `retryAfterMs: 2000`. The ledger records method, path, route template, query, parsed body,
@@ -867,15 +870,17 @@ profiles `'default'` or `'empty'`. `reset()` restores the current seed and clear
 faults, and monitors; `seed(next)` replaces the state; `snapshot()` returns a deep copy.
 
 Faults, the ledger, and the control plane mirror the Fortnox emulator: `status` faults (`match`
-by method and raw path, `count`) answer before the route runs and follow the shared status and
-header rules; the default body is a Graph error envelope (`TooManyRequests` for 429, so a 429 with
-`retry-after: 2` reaches the connector as `microsoft_rate_limited` with `retryAfterMs: 2000`). The
-ledger records method, raw path, route template, query (credential-named keys such as
-`access_token`, and the conformance scan's credential query parameters such as `X-Amz-Signature`
-and `X-Amz-Credential`, are redacted), parsed body (credential-named keys at any depth, such as a
-`$batch` subrequest's `Authorization`, are redacted), the `Prefer` header, status, evidence, the
-applied fault, and any `responseError`. Control plane: `/_emulate/ledger`, `faults`,
-`reset`, `state`, `seed`, and `coverage`.
+by method and raw path, `count`) answer only a request the route would answer successfully (a
+refusal such as a 404 for an unknown id, a 400 not emulated, or a 409 conflict uses up none), a
+faulted request writes nothing, creates no copy monitor, and holds no message, and they follow the
+shared status and header rules; the default body is a Graph error envelope (`TooManyRequests` for
+429, so a 429 with `retry-after: 2` reaches the connector as `microsoft_rate_limited` with
+`retryAfterMs: 2000`). The ledger records method, raw path, route template, query
+(credential-named keys such as `access_token`, and the conformance scan's credential query
+parameters such as `X-Amz-Signature` and `X-Amz-Credential`, are redacted), parsed body
+(credential-named keys at any depth, such as a `$batch` subrequest's `Authorization`, are
+redacted), the `Prefer` header, status, evidence, the applied fault, and any `responseError`.
+Control plane: `/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and `coverage`.
 
 **Drill knobs (tests only).** `drills: { calendarRangeEmpty: true }` (empty calendar views),
 `{ createOmitsId: true }` (event create answers without `id`), `{ timestampPrecisionDigits: 3 }`,

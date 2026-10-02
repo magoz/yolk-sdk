@@ -9,8 +9,13 @@ import {
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
 import {
+  FortnoxCreateInvoiceInput,
+  FortnoxCustomerNumber,
+  FortnoxGetCustomerInput,
   FortnoxListInvoicesInput,
   fortnoxApiBaseUrl,
+  fortnoxCreateInvoiceAction,
+  fortnoxGetCustomerAction,
   fortnoxListInvoicesAction
 } from '@yolk-sdk/connectors/fortnox'
 import {
@@ -93,6 +98,25 @@ const documentNumbers = async (response: Response): Promise<unknown> => {
 
 const errorCode = async (response: Response): Promise<unknown> =>
   field(field(await jsonOf(response), 'ErrorInformation'), 'code')
+
+/** The real Fortnox connector, routed in process to `target`. */
+const connectorLayer = (target: FortnoxEmulator) =>
+  Layer.mergeAll(
+    connectorHttpClientsFromEffectHttpClientLayer.pipe(
+      Layer.provide(
+        InProcessHttpClient.layer([
+          EmulatorRoute.handler(new URL(fortnoxApiBaseUrl).origin, target.fetch)
+        ])
+      )
+    ),
+    staticCredentialResolverLayer(
+      OAuthCredential.make({
+        provider: 'fortnox',
+        accessToken: token,
+        expiresAt: 4_000_000_000_000
+      })
+    )
+  )
 
 describe('route evidence manifest', () => {
   it('lists every route as an unverified connector route linked to Fortnox cases', () => {
@@ -942,6 +966,168 @@ describe('faults', () => {
           })
         }
       })
+  )
+
+  it.effect(
+    'a request the route refuses uses up no fault; the next valid one gets it and writes nothing',
+    () =>
+      Effect.gen(function* () {
+        const target = yield* Effect.promise(() => emulator())
+        const seeds = fortnoxConformanceFixtureSeeds
+        const missing = seeds.missingCustomerNumber ?? FortnoxCustomerNumber.make('99999')
+        const customerNumber = seeds.customerNumber ?? FortnoxCustomerNumber.make('1001')
+        const layer = connectorLayer(target)
+        const before = target.snapshot()
+
+        // Matches every request.
+        target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+        // An unknown id: the provider's 404 ErrorInformation.
+        const notFound = yield* fortnoxGetCustomerAction
+          .executeTyped({
+            integration: fortnoxConformanceIntegration,
+            input: FortnoxGetCustomerInput.make({ customerNumber: missing })
+          })
+          .pipe(Effect.provide(layer))
+
+        // A write the state refuses: an invoice for an unknown customer (the rejection fixture's
+        // 400 ErrorInformation).
+        const rejected = yield* fortnoxCreateInvoiceAction
+          .executeTyped({
+            integration: fortnoxConformanceIntegration,
+            input: FortnoxCreateInvoiceInput.make({ CustomerNumber: missing })
+          })
+          .pipe(Effect.provide(layer))
+
+        expect(notFound).toMatchObject({
+          _tag: 'Failure',
+          error: {
+            code: 'fortnox_not_found',
+            status: 404,
+            underlying: { providerCode: fortnoxEmulatorErrorCodes.customerNotFound }
+          }
+        })
+        expect(rejected).toMatchObject({
+          _tag: 'Failure',
+          error: {
+            status: 400,
+            underlying: { providerCode: fortnoxEmulatorErrorCodes.invoiceCustomerNotFound }
+          }
+        })
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 1, applied: 0 })
+        ])
+        expect(target.snapshot()).toEqual(before)
+
+        // The next valid request gets the fault, and its write (a new invoice, which would also
+        // advance the document and row counters) is not committed.
+        const create = fortnoxCreateInvoiceAction
+          .executeTyped({
+            integration: fortnoxConformanceIntegration,
+            input: FortnoxCreateInvoiceInput.make({ CustomerNumber: customerNumber })
+          })
+          .pipe(Effect.provide(layer))
+
+        const faulted = yield* create
+
+        expect(faulted).toMatchObject({ _tag: 'Failure', error: { status: 503 } })
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 0, applied: 1 })
+        ])
+        expect(target.snapshot()).toEqual(before)
+
+        // The fault is used up: the same write now commits, under the unchanged counters.
+        expect(yield* create).toMatchObject({ _tag: 'Success' })
+        expect(target.snapshot().invoices).toHaveLength(before.invoices.length + 1)
+        expect(target.snapshot().invoices.map(invoice => invoice.DocumentNumber)).toContain(
+          String(before.counters.nextDocumentNumber)
+        )
+
+        expect(
+          target.ledger.entries().map(({ method, path, route, status, evidence, fault }) => ({
+            method,
+            path,
+            route,
+            status,
+            evidence,
+            fault
+          }))
+        ).toEqual([
+          {
+            method: 'GET',
+            path: `/3/customers/${missing}`,
+            route: '/3/customers/{CustomerNumber}',
+            status: 404,
+            evidence: 'unverified',
+            fault: undefined
+          },
+          {
+            method: 'POST',
+            path: '/3/invoices',
+            route: '/3/invoices',
+            status: 400,
+            evidence: 'unverified',
+            fault: undefined
+          },
+          {
+            method: 'POST',
+            path: '/3/invoices',
+            route: '/3/invoices',
+            status: 503,
+            evidence: 'unverified',
+            fault: 'status'
+          },
+          {
+            method: 'POST',
+            path: '/3/invoices',
+            route: '/3/invoices',
+            status: 201,
+            evidence: 'unverified',
+            fault: undefined
+          }
+        ])
+      })
+  )
+
+  it.effect('a refusal before or inside the route never uses up a fault (direct requests)', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const before = target.snapshot()
+
+      target.faults.add({ kind: 'status', status: 503 })
+
+      const refusals: ReadonlyArray<readonly [string, string, CallOptions, number]> = [
+        // Unknown ids: the provider's 404.
+        ['GET', '/3/invoices/999', {}, 404],
+        ['PUT', '/3/customers/99999', { body: { Customer: { Comments: 'x' } } }, 404],
+        ['GET', '/3/invoices/999/email', {}, 404],
+        // Invalid state: a booked invoice cannot be updated.
+        ['PUT', '/3/invoices/101', { body: { Invoice: { Comments: 'x' } } }, 400],
+        // A value the route does not emulate, and a query parameter it does not emulate.
+        ['PUT', '/3/customers/1001', { body: { Customer: { Currency: 'EUR' } } }, 400],
+        ['GET', '/3/invoices?lastmodified=2026-01-01', {}, 400]
+      ]
+
+      for (const [method, path, options, status] of refusals) {
+        expect((await call(target, method, path, options)).status, `${method} ${path}`).toBe(status)
+      }
+
+      expect(target.faults.list()).toEqual([expect.objectContaining({ applied: 0 })])
+      expect(target.snapshot()).toEqual(before)
+      expect(target.ledger.entries().map(entry => entry.fault)).toEqual(
+        refusals.map(() => undefined)
+      )
+
+      // An unlimited fault answers every valid request after them, and none of them writes.
+      expect((await call(target, 'GET', '/3/invoices')).status).toBe(503)
+      expect(
+        (await call(target, 'PUT', '/3/customers/1001', { body: { Customer: { Comments: 'x' } } }))
+          .status
+      ).toBe(503)
+      expect((await call(target, 'GET', '/3/invoices/104/email')).status).toBe(503)
+      expect(target.faults.list()).toEqual([expect.objectContaining({ applied: 3 })])
+      expect(target.snapshot()).toEqual(before)
+    })
   )
 })
 

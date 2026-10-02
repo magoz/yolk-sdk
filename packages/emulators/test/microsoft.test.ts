@@ -1978,9 +1978,9 @@ describe('faults', () => {
 
       vi.stubGlobal('Response', UnbuildableResponse)
 
-      const failed = await call(target, 'GET', `${user}/mailFolders/inbox/messages`).finally(() =>
-        vi.unstubAllGlobals()
-      )
+      const failed = await call(target, 'GET', `${pagingFolder}?$top=2`, {
+        headers: immutable
+      }).finally(() => vi.unstubAllGlobals())
 
       expect(failed.status).toBe(500)
       expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
@@ -1993,7 +1993,9 @@ describe('faults', () => {
         })
       ])
       expect(target.faults.list()[0]).toMatchObject({ remaining: 1, applied: 0 })
-      expect((await call(target, 'GET', `${user}/mailFolders/inbox/messages`)).status).toBe(503)
+      expect(
+        (await call(target, 'GET', `${pagingFolder}?$top=2`, { headers: immutable })).status
+      ).toBe(503)
     })
   )
 
@@ -2011,7 +2013,11 @@ describe('faults', () => {
       const result = yield* outlookListMessagesAction
         .executeTyped({
           integration: microsoftConformanceIntegration,
-          input: OutlookListMessagesInput.make({ mailbox: 'ada@example.test', folderId: 'inbox' })
+          input: OutlookListMessagesInput.make({
+            mailbox: 'ada@example.test',
+            folderId: seeds.pagingFolderId,
+            top: 2
+          })
         })
         .pipe(Effect.provide(connectorLayer(target)))
 
@@ -2024,6 +2030,175 @@ describe('faults', () => {
           retryAfterMs: 2000
         })
       }
+    })
+  )
+
+  it.effect(
+    'a request the route refuses uses up no fault; the next valid one gets it and writes nothing',
+    () =>
+      Effect.gen(function* () {
+        const target = yield* Effect.promise(() => emulator())
+        const layer = connectorLayer(target)
+        const before = target.snapshot()
+
+        // Matches every request.
+        target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+        const copy = (itemId: string) =>
+          oneDriveCopyItemAction
+            .executeTyped({
+              integration: microsoftConformanceIntegration,
+              input: OneDriveCopyItemInput.make({
+                itemId,
+                driveId: seeds.driveId,
+                destinationDriveId: seeds.driveId ?? '',
+                destinationParentItemId: seeds.driveParentItemId ?? '',
+                conflictBehavior: 'fail'
+              })
+            })
+            .pipe(Effect.provide(layer))
+
+        // An unknown id: Graph's 404 itemNotFound.
+        const notFound = yield* copy('01SYNTHETICMISSINGITEM0000000001')
+
+        // A request the route does not emulate: a folder listed by well-known name (400).
+        const notEmulated = yield* outlookListMessagesAction
+          .executeTyped({
+            integration: microsoftConformanceIntegration,
+            input: OutlookListMessagesInput.make({ mailbox: 'ada@example.test', folderId: 'inbox' })
+          })
+          .pipe(Effect.provide(layer))
+
+        expect(notFound).toMatchObject({
+          _tag: 'Failure',
+          error: { code: 'microsoft_not_found', status: 404 }
+        })
+        expect(notEmulated).toMatchObject({ _tag: 'Failure', error: { status: 400 } })
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 1, applied: 0 })
+        ])
+        expect(target.snapshot()).toEqual(before)
+        expect(target.monitors()).toEqual([])
+
+        // The next valid request gets the fault: no copy monitor is created and the monitor
+        // counter does not advance.
+        expect(yield* copy(seeds.copySourceItemId ?? '')).toMatchObject({
+          _tag: 'Failure',
+          error: { status: 503 }
+        })
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 0, applied: 1 })
+        ])
+        expect(target.snapshot()).toEqual(before)
+        expect(target.monitors()).toEqual([])
+
+        // The fault is used up: the copy is accepted under the first monitor id.
+        expect(yield* copy(seeds.copySourceItemId ?? '')).toMatchObject({ _tag: 'Success' })
+        expect(target.monitors().map(monitor => monitor.id)).toEqual([
+          '00000000-0000-4000-8000-000000000001'
+        ])
+
+        const copyRoute = '/v1.0/drives/{driveId}/items/{itemId}/copy'
+
+        expect(
+          target.ledger.entries().map(({ method, route, status, evidence, fault }) => ({
+            method,
+            route,
+            status,
+            evidence,
+            fault
+          }))
+        ).toEqual([
+          {
+            method: 'POST',
+            route: copyRoute,
+            status: 404,
+            evidence: 'unverified',
+            fault: undefined
+          },
+          {
+            method: 'GET',
+            route: '/v1.0/users/{userId}/mailFolders/{folderId}/messages',
+            status: 400,
+            evidence: 'unverified',
+            fault: undefined
+          },
+          {
+            method: 'POST',
+            route: copyRoute,
+            status: 503,
+            evidence: 'unverified',
+            fault: 'status'
+          },
+          {
+            method: 'POST',
+            route: copyRoute,
+            status: 202,
+            evidence: 'unverified',
+            fault: undefined
+          }
+        ])
+      })
+  )
+
+  it.effect('a 409 conflict uses up no fault; a faulted message write holds no message', () =>
+    Effect.promise(async () => {
+      const target = await emulator({ conflictWindowMs: 300 })
+      const id = await createDraft(target, 'Original')
+      const path = `${user}/messages/${encodeURIComponent(id)}`
+
+      const patch = (subject: string) =>
+        call(target, 'PATCH', path, { body: { subject }, headers: immutable })
+
+      const subject = () => target.snapshot().messages.find(message => message.id === id)?.subject
+
+      // The first write commits, then holds the message for the conflict window.
+      const first = patch('First')
+
+      while (subject() !== 'First') {
+        await new Promise(resolve => {
+          setTimeout(resolve, 1)
+        })
+      }
+
+      target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const held = target.snapshot()
+
+      // An overlapping write: Graph's 409, answered by the route; the fault stays unused.
+      const conflict = await patch('Second')
+
+      expect(conflict.status).toBe(409)
+      expect(await errorCode(conflict)).toBe(microsoftEmulatorErrorCodes.conflict)
+      expect((await first).status).toBe(200)
+      expect(target.faults.list()).toEqual([expect.objectContaining({ remaining: 1, applied: 0 })])
+      expect(target.snapshot()).toEqual(held)
+
+      // Two overlapping writes: one gets the fault and writes and holds nothing, so the other
+      // applies (no 409).
+      const statuses = await Promise.all([patch('Third'), patch('Third')]).then(responses =>
+        responses.map(response => response.status).sort()
+      )
+
+      expect(statuses).toEqual([200, 503])
+      expect(target.faults.list()).toEqual([expect.objectContaining({ remaining: 0, applied: 1 })])
+      expect(subject()).toBe('Third')
+      expect(
+        target.ledger.entries().map(({ method, status, fault }) => ({ method, status, fault }))
+      ).toEqual([
+        { method: 'POST', status: 201, fault: undefined },
+        { method: 'PATCH', status: 200, fault: undefined },
+        { method: 'PATCH', status: 409, fault: undefined },
+        ...(target.ledger.entries()[3]?.status === 503
+          ? [
+              { method: 'PATCH', status: 503, fault: 'status' },
+              { method: 'PATCH', status: 200, fault: undefined }
+            ]
+          : [
+              { method: 'PATCH', status: 200, fault: undefined },
+              { method: 'PATCH', status: 503, fault: 'status' }
+            ])
+      ])
     })
   )
 })
@@ -2137,7 +2312,9 @@ describe('seeds and the control plane', () => {
         (await control('POST', 'faults', { faults: [{ kind: 'status', status: 429, count: 1 }] }))
           .status
       ).toBe(201)
-      expect((await call(target, 'GET', `${user}/mailFolders/inbox/messages`)).status).toBe(429)
+      expect(
+        (await call(target, 'GET', `${pagingFolder}?$top=2`, { headers: immutable })).status
+      ).toBe(429)
       expect(field(await jsonOf(await control('GET', 'ledger')), 'entries')).toEqual([
         expect.objectContaining({ method: 'GET', status: 429, fault: 'status' })
       ])

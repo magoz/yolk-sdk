@@ -435,15 +435,18 @@ The `quirks` option (`stickyRowDiscount: false`, `emptyStringClears: true`,
 the matching conformance case fails.
 
 Fortnox faults are `status` faults only
-(`{ kind: 'status', status, headers?, body?, match?: { method?, path? }, count? }`), answered
-before the route runs, so nothing is written. They follow
-the Gateway emulator's rules: statuses without a body (1xx, 204, 205) and redirects (3xx) are
-rejected, as are invalid header names or values, a `location` header, and framing headers, both in
-`faults.add` and in `POST /_emulate/faults`. A fault is used up only after its response is built;
-a response that cannot be built answers an evidence-tagged 500 `ErrorInformation` recorded in the
-ledger with `responseError`. The control plane serves `/_emulate/ledger`, `faults`, `reset`,
-`state`, `seed`, and `coverage`; unlike the Gateway, it has no scripted turns and no chunk
-faults, and `reset`/`seed` also restore or replace the Fortnox state.
+(`{ kind: 'status', status, headers?, body?, match?: { method?, path? }, count? }`). A fault
+answers only a request the route would answer successfully, and nothing is written: the route
+checks the request against the state first, so a request it refuses (a 404 for an unknown id, or
+a 400 for an invalid state or a query key, field, or value it does not emulate) uses up no fault.
+They follow the Gateway emulator's rules: statuses without a body (1xx, 204, 205) and redirects
+(3xx) are rejected, as are invalid header names or values, a `location` header, and framing
+headers, both in `faults.add` and in `POST /_emulate/faults`. A fault is used up only after its
+response is built; a response that cannot be built answers an evidence-tagged 500
+`ErrorInformation` recorded in the ledger with `responseError`. The control plane serves
+`/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and `coverage`; unlike the Gateway, it has
+no scripted turns and no chunk faults, and `reset`/`seed` also restore or replace the Fortnox
+state.
 
 ```ts
 import { makeFortnoxEmulator } from '@yolk-sdk/emulators/fortnox'
@@ -533,7 +536,9 @@ For concurrent writes, the first write to reach the handler holds the message fo
 non-overlapping writes both apply (an emulator extrapolation). The default seed is the synthetic
 fixture entities with the same ids as `microsoftConformanceFixtureSeeds`; profiles `default` and
 `empty`. Faults, the ledger (which also records the `Prefer` header), and the `/_emulate/*` control
-plane behave as in the Fortnox emulator; `reset` and `seed` also clear copy monitors. The `drills`
+plane behave as in the Fortnox emulator: a refusal (a 404 for an unknown id, a 400 not emulated,
+or a 409 conflict) uses up no fault, and a faulted request writes nothing, creates no copy
+monitor, and holds no message. `reset` and `seed` also clear copy monitors. The `drills`
 option (`calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`, `omitNextLink`) is a
 test-only drill knob that makes the matching conformance case fail.
 
