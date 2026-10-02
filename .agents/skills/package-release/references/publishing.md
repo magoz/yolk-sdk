@@ -160,7 +160,7 @@ Configure each npm package trusted publisher:
 Current workflow policy:
 
 - Manual `workflow_dispatch` only.
-- Uses `contents: write` for git tags and `id-token: write`; provenance currently disabled with `NPM_CONFIG_PROVENANCE=false`.
+- Uses `contents: write` for git tags and `id-token: write`; publishes with `--provenance` (npm attestation linking each version to its commit and workflow run).
 - Installs/builds/tests with `pnpm`.
 - Fails before publish if the requested dist-tag does not match the version channel (`canary` for prereleases, `latest` for stable versions).
 - Fails before publish if `v<version>` already exists.
@@ -170,7 +170,7 @@ Current workflow policy:
 - Tags the published commit as `v<version>` after successful publish.
 
 Do not run local publish in normal flow. Emergency local publish requires explicit user approval,
-packed tarballs, npm CLI, and `--provenance=false` while repository source is private. Follow
+packed tarballs, npm CLI, and `--provenance=false` (local runs cannot produce an attestation). Follow
 `patterns/PACKAGE_DISTRIBUTION.md`; do not use `pnpm publish` for registry operations.
 
 ## Exceptions/failures

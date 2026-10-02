@@ -50,7 +50,7 @@ See `packages/AGENTS.md` and `patterns/PACKAGE_ARCHITECTURE.md` for package boun
 
 No users, teams, orgs, projects, billing, or product permissions below app.
 
-Release note: GitHub Actions publishes through npm trusted publishing. Provenance is disabled while this repo is private because npm only supports GitHub Actions provenance for public source repositories. If the repo becomes public, remove `NPM_CONFIG_PROVENANCE: false` and `--provenance=false` from `.github/workflows/publish.yml` to re-enable provenance attestations.
+Release note: GitHub Actions publishes through npm trusted publishing with provenance attestations (`npm publish --provenance`), which link each published version to its source commit and workflow run. npm only supports GitHub Actions provenance for public source repositories, and every package `repository.url` must stay `https://github.com/magoz/yolk-sdk`. Approved local first or emergency publishes use `--provenance=false` because they cannot produce an attestation.
 
 ## Setup
 

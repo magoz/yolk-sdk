@@ -73,7 +73,8 @@ Check:
 - package availability: `npm view @yolk-sdk/agent`
 - CI OIDC permissions: `id-token: write`
 - npm trusted publisher settings for `magoz/yolk-sdk`, workflow `publish.yml`
-- current workflow sets `NPM_CONFIG_PROVENANCE=false`; do not flip without updating npm/package support
+- provenance needs a public repo and GitHub-hosted runner; E422 "repository.url ... expected to match" means a manifest `repository.url` no longer matches `https://github.com/magoz/yolk-sdk`
+- local first/emergency publishes must pass `--provenance=false`; manifests set `publishConfig.provenance: true`
 
 ## New package publish returns npm 404
 

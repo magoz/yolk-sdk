@@ -129,8 +129,6 @@ jobs:
           pnpm -r --filter './packages/*' pack --pack-destination "$PWD/.release"
 
       - name: Publish tarballs
-        env:
-          NPM_CONFIG_PROVENANCE: false
         run: |
           for tarball in .release/*.tgz; do
             package_spec="$(tar -xOf "$tarball" package/package.json | node -e "const fs = require('node:fs'); const pkg = JSON.parse(fs.readFileSync(0, 'utf8')); if (typeof pkg.name !== 'string' || typeof pkg.version !== 'string') throw new Error('tarball package.json missing name/version'); process.stdout.write(pkg.name + '@' + pkg.version)")"
@@ -138,7 +136,7 @@ jobs:
               echo "Skipping already-published $package_spec"
               continue
             fi
-            npm publish "$tarball" --tag "${{ inputs.tag }}" --access public --provenance=false
+            npm publish "$tarball" --tag "${{ inputs.tag }}" --access public --provenance
           done
 
       - name: Tag published version

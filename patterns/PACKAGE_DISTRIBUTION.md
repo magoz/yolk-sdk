@@ -167,7 +167,7 @@ Rationale: lockstep versions are simpler when every public `packages/*` package 
 - Node engine: `>=22` (`@yolk-sdk/codemode`: `>=22.19.0`).
 - Prerelease npm tag: `canary`.
 - Include source in npm tarballs: yes.
-- Package manifests keep provenance-ready metadata; workflow disables provenance while the repo is private.
+- Provenance: the publish Action publishes with `--provenance` (public repo, GitHub-hosted runner, `id-token: write`). Every manifest's `repository.url` must stay `git+https://github.com/magoz/yolk-sdk.git`; npm rejects provenance whose source repo does not match. Local publishes cannot produce an attestation and use `--provenance=false`.
 
 ## Actual npm Release Prep
 
@@ -212,8 +212,8 @@ done
 ```
 
 Use npm for the registry operation. Emergency local publishes are intentionally unprovenanced; a
-local run cannot produce the GitHub Actions attestation. Package manifests remain
-provenance-ready for the normal Action once repository source becomes public. After publishing,
+local run cannot produce the GitHub Actions attestation, and the manifests' `provenance: true`
+would otherwise make the local publish fail. After publishing,
 rerun `.github/workflows/publish.yml` as an all-published/missing-tag repair so it validates the
 release commit and creates `v<version>`.
 
@@ -265,7 +265,7 @@ Requirements before dispatch:
 - normal publishes have at least one unpublished public package; all-published runs are only for missing-tag repair
 - validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`, and `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`
 
-The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. Provenance is disabled while the repo is private; re-enable it when source is public.
+The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. It publishes with `--provenance`, so each Action-published version carries an npm provenance attestation; versions published locally (first publish or emergency) have none.
 
 ## New Package First Publish
 
@@ -341,7 +341,7 @@ Rerun `.github/workflows/publish.yml` from `main`. The workflow skips already-pu
    - clean fixture install from packed tarballs
 7. Publish canary via GitHub Actions.
    - Public `packages/*` are publishable; private apps stay private.
-   - Keep provenance disabled while repo source is private.
+   - The Action publishes with provenance; keep `repository.url` matching `magoz/yolk-sdk`.
    - Treat canary as feedback, not stability.
 
 ## Open Questions
