@@ -2096,3 +2096,15 @@ describe('control plane', () => {
     expect(target.ledger.entries()).toEqual([])
   })
 })
+
+describe('fault status range', () => {
+  it('names the accepted range (400-599) when it refuses a fault status', async () => {
+    const target = await emulator()
+
+    for (const status of [200, 302, 399, 600]) {
+      expect(() => target.faults.add({ kind: 'status', status }), String(status)).toThrow(
+        /between 400 and 599/
+      )
+    }
+  })
+})

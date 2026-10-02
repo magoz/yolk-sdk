@@ -15,7 +15,7 @@
  *   `error-after-chunks`, `truncate-after-chunks`) and scripted error turns; a route with a
  *   replaceable JSON body (the usage routes) also takes a scripted `{ usage }` body (or a default
  *   override) whose JSON shape (object keys and value kinds) equals the recording's. Fault and
- *   scripted-error statuses must be 400 or above, so no control can produce a success status or
+ *   scripted-error statuses must be 400-599, so no control can produce a success status or
  *   a body other than the recorded one (or a prefix of it cut by the truncation faults).
  *
  * Request-shape latitude (accepted, harmless): any credential value (never checked or stored);
@@ -75,14 +75,9 @@ export type FixtureRecording = {
 }
 
 // Fault and scripted-error statuses on fixture-only routes: errors only (400-599), so no control
-// answers a success that no fixture records.
-const FixtureRouteErrorStatus = EmulatorStatusFault.fields.status.check(
-  Schema.makeFilter(status =>
-    status >= 400
-      ? true
-      : 'fixture-only routes take fault and scripted-error statuses of 400 or above'
-  )
-)
+// answers a success that no fixture records. One range check, so a rejection names the range
+// actually accepted (400-599 holds no 204, 205, or 3xx, which the shared schema excludes).
+const FixtureRouteErrorStatus = Schema.Int.check(Schema.isBetween({ minimum: 400, maximum: 599 }))
 
 const FixtureRouteStatusFault = Schema.Struct({
   ...EmulatorStatusFault.fields,

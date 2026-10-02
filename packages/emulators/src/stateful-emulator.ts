@@ -146,7 +146,6 @@ import { Data, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   EmulatorHeaderRecord,
-  EmulatorResponseStatus,
   handlerFailedHeader,
   handlerFailedResponse,
   isCredentialHeaderName,
@@ -211,11 +210,9 @@ const emulatorError = (status: number, message: string, headers: HeadersInit = {
   jsonResponse(status, { error: { message, type: 'emulator_error' } }, headers)
 
 // Fault statuses are errors only (400-599), so no control answers a success no fixture records.
-const FaultStatus = EmulatorResponseStatus.check(
-  Schema.makeFilter(status =>
-    status >= 400 ? true : 'fixture-only emulators take fault statuses of 400 or above'
-  )
-)
+// One range check, so a rejection names the range actually accepted (400-599 holds no 204, 205,
+// or 3xx, which the shared response-status schema otherwise excludes).
+const FaultStatus = Schema.Int.check(Schema.isBetween({ minimum: 400, maximum: 599 }))
 
 const FaultCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
