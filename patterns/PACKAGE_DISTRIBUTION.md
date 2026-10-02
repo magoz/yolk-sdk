@@ -45,7 +45,8 @@ Current Changesets config:
       "@yolk-sdk/vercel-workflows",
       "@yolk-sdk/harness",
       "@yolk-sdk/conformance",
-      "@yolk-sdk/emulators"
+      "@yolk-sdk/emulators",
+      "@yolk-sdk/codemode"
     ]
   ],
   "updateInternalDependencies": "patch",
@@ -154,6 +155,7 @@ Publish all public packages together:
 - `@yolk-sdk/harness`
 - `@yolk-sdk/conformance` (experimental)
 - `@yolk-sdk/emulators` (experimental)
+- `@yolk-sdk/codemode`
 
 Rationale: lockstep versions are simpler when every public `packages/*` package is published together. Private app workspaces stay private; unstable public packages document instability in README.
 
@@ -227,7 +229,8 @@ for package in \
   @yolk-sdk/vercel-workflows \
   @yolk-sdk/harness \
   @yolk-sdk/conformance \
-  @yolk-sdk/emulators; do
+  @yolk-sdk/emulators \
+  @yolk-sdk/codemode; do
   npm view "$package" dist-tags --json
 done
 git fetch --tags
@@ -268,7 +271,7 @@ The Action publishes canaries with npm tag `canary` and stable versions with `la
 
 Trusted publishing can only be configured after a package exists on npm. For a renamed/new `@yolk-sdk/*` package, the first publish is the only approved local publish exception.
 
-Pending first publish: `@yolk-sdk/conformance` and `@yolk-sdk/emulators` still need the local first publish and trusted-publisher setup below, done by the owner.
+Pending first publish: `@yolk-sdk/conformance`, `@yolk-sdk/emulators`, and `@yolk-sdk/codemode` still need the local first publish and trusted-publisher setup below, done by the owner.
 
 Preconditions:
 

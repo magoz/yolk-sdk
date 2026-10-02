@@ -75,6 +75,9 @@ These are the code mode contract (`docs/adr/0002-code-mode.md`); this package do
   code-mode-callable tools of the same resolution and host context. Nested calls run through the
   resolved execute path and fail closed with model-visible error results. Assign nested call ids as
   `<parentToolCallId>/<seq>`.
+- `describe: ({ tools }) => string` on a nested-access registration computes its resolved
+  description from those nested tools (for example a code mode catalog); `def.description` stays
+  the static fallback.
 - Report nested calls on the result with protocol `recordNestedToolCall` and
   `nestedToolCallResultFields`; the bounded record and summed usage never reach the model.
 

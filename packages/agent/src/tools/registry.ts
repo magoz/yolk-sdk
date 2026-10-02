@@ -167,6 +167,12 @@ export type NestedToolExecutor = {
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult>
 }
 
+/** Computes a nested-access registration's resolved description from the tools its scripts can
+ * call (for example a code mode catalog). Honored by `resolveTools` only for registrations with
+ * `nestedToolAccess: true`; the static `def.description` stays the fallback elsewhere.
+ */
+export type NestedToolDescriber = (input: { readonly tools: ReadonlyArray<NestedTool> }) => string
+
 export type ToolExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
@@ -187,6 +193,10 @@ export type ToolRegistration<Context> = {
   readonly background?: boolean
   /** Receive a `nested` executor over the other code-mode-callable tools of the resolution. */
   readonly nestedToolAccess?: boolean
+  /** With `nestedToolAccess: true`, the resolved definition's description is computed from the
+   * nested tools of the resolution instead of `def.description`.
+   */
+  readonly describe?: NestedToolDescriber
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
   /** Present only on schema-backed input registrations; owns user-payload validation. */
@@ -262,6 +272,8 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly background?: boolean
   /** Receive a `nested` executor over the other code-mode-callable tools of the resolution. */
   readonly nestedToolAccess?: boolean
+  /** With `nestedToolAccess: true`, compute the resolved description from the nested tools. */
+  readonly describe?: NestedToolDescriber
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
   readonly execute: (
@@ -527,6 +539,7 @@ type MakeToolRegistrationFields = {
   def: ToolDef
   background?: boolean
   nestedToolAccess?: boolean
+  describe?: NestedToolDescriber
 }
 
 type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
@@ -582,6 +595,10 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     registration.nestedToolAccess = options.nestedToolAccess
   }
 
+  if (options.describe !== undefined) {
+    registration.describe = options.describe
+  }
+
   const tails: Pick<
     ToolRegistration<Context>,
     'validate' | 'access' | 'approval' | 'isEnabled' | 'execute'
@@ -633,6 +650,47 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   }
 
   return Object.assign(registration, tails)
+}
+
+type ToolDefFields = {
+  name: ToolDef['name']
+  description: ToolDef['description']
+  parameters: ToolDef['parameters']
+  outputSchema?: ToolDef['outputSchema']
+  callableBy?: ToolDef['callableBy']
+  discovery?: ToolDef['discovery']
+  approval?: ToolDef['approval']
+  background?: ToolDef['background']
+  execution?: ToolDef['execution']
+  input?: ToolDef['input']
+  interaction?: ToolDef['interaction']
+}
+
+// Explicit field selection: `ToolDef.make` would retain excess own keys of a spread instance.
+const withToolDescription = (def: ToolDef, description: string): ToolDef => {
+  const fields: ToolDefFields = {
+    name: def.name,
+    description,
+    parameters: def.parameters
+  }
+
+  if (def.outputSchema !== undefined) fields.outputSchema = def.outputSchema
+
+  if (def.callableBy !== undefined) fields.callableBy = def.callableBy
+
+  if (def.discovery !== undefined) fields.discovery = def.discovery
+
+  if (def.approval !== undefined) fields.approval = def.approval
+
+  if (def.background !== undefined) fields.background = def.background
+
+  if (def.execution !== undefined) fields.execution = def.execution
+
+  if (def.input !== undefined) fields.input = def.input
+
+  if (def.interaction !== undefined) fields.interaction = def.interaction
+
+  return ToolDef.make(fields)
 }
 
 const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistration<Context>>) => {
@@ -1032,9 +1090,32 @@ export const resolveTools = <Context>(
       }
     }
 
-    const tools = Arr.map(resolved, item =>
-      activated(item.tool) ? backgroundToolDef(item.tool.def) : item.tool.def
+    // Script-callable registrations: never fail-closed tools, never nested-access registrations.
+    const nestedRegistrations = resolved.filter(
+      item =>
+        item.tool.nestedToolAccess !== true &&
+        item.tool.approval === undefined &&
+        item.tool.input === undefined &&
+        item.tool.interaction === undefined &&
+        !activated(item.tool) &&
+        isCodeModeCallable(item.tool.def)
     )
+
+    const nestedTools: ReadonlyArray<NestedTool> = nestedRegistrations.map(item => ({
+      def: item.tool.def,
+      moduleId: item.moduleId
+    }))
+
+    const describedDef = (tool: ToolRegistration<Context>): ToolDef =>
+      tool.nestedToolAccess === true && tool.describe !== undefined
+        ? withToolDescription(tool.def, tool.describe({ tools: nestedTools }))
+        : tool.def
+
+    const tools = Arr.map(resolved, item => {
+      const def = describedDef(item.tool)
+
+      return activated(item.tool) ? backgroundToolDef(def) : def
+    })
 
     const metadata = Arr.map(resolved, item => ({
       moduleId: item.moduleId,
@@ -1077,17 +1158,6 @@ export const resolveTools = <Context>(
             ]
           : []
       )
-    )
-
-    // Script-callable registrations: never fail-closed tools, never nested-access registrations.
-    const nestedRegistrations = resolved.filter(
-      item =>
-        item.tool.nestedToolAccess !== true &&
-        item.tool.approval === undefined &&
-        item.tool.input === undefined &&
-        item.tool.interaction === undefined &&
-        !activated(item.tool) &&
-        isCodeModeCallable(item.tool.def)
     )
 
     const codeModeOnlyNames = resolved.flatMap(item =>
@@ -1187,7 +1257,7 @@ export const resolveTools = <Context>(
           )
 
     const nested: NestedToolExecutor = {
-      tools: nestedRegistrations.map(item => ({ def: item.tool.def, moduleId: item.moduleId })),
+      tools: nestedTools,
       execute: call =>
         Option.match(
           Arr.findFirst(nestedRegistrations, item => item.tool.def.name === call.name),

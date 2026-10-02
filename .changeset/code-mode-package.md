@@ -1,0 +1,15 @@
+---
+'@yolk-sdk/codemode': minor
+'@yolk-sdk/agent': minor
+---
+
+Add `@yolk-sdk/codemode` (ADR 0002, step 2): a code mode tool whose input is a short JavaScript program (an async function body) that calls the host's resolved tools, filters and aggregates their results, and returns only what matters.
+
+- `makeCodeModeTool({ executor, name?, inlineBudget?, limits?, deadline?, loadStore? })` returns a `write` registration (default name `codemode`, input `{ code }`) with nested tool access. Nested calls run through the resolution's execute path with the same host context, get ids `<toolCallId>/<seq>`, are capped by `maxNestedCalls` (default 256), resolve to `structuredContent` for tools with an output schema and to text otherwise, reject with an `Error` on error results, and are recorded on `ToolResult.nestedCalls` with summed usage. Calls still running when a script ends are cancelled and recorded as such.
+- The resolved description lists the script globals and the nested tools by namespace: `codemode` + `listed` tools with TypeScript declarations within an inline budget (default 3,000 estimated tokens) filled fairly across namespaces, `callableBy: 'all'` tools with one line each, and never `codemode` + `search` tools, which scripts find with `searchTools(query, { limit?, namespace? })` (BM25), `describeTool(name)`, and `describeNamespace(name)`.
+- Results start with `Script completed` or `Script failed`, include the wall time, the output (images as image parts), and the JSON return value, and are cut head and tail at `maxOutputChars` (default 40,000). Failures add the error and the tool calls already made. Limits: timeout (default 120 s, clamped to `deadline` minus 5 s, at least 1 s) and VM heap (default 64 MiB).
+- Store writes of successful scripts are returned in `structuredContent.codemode.storeWrites`; `codeModeStoreFromToolResults` rebuilds the store from a transcript for `loadStore`.
+- `makeClassifierTool({ classify, name?, maxConcurrency?, description? })` exposes a `ClassifierModel` as a `codemode` + `listed` read tool with a per-registration concurrency cap (default 4), compact JSON answers, the full result as `structuredContent`, token usage on `ToolResult.usage`, and model-visible error results.
+- `@yolk-sdk/codemode/node` adds `makePiCodeModeExecutor({ wasm?, workerUrl?, maxConcurrentExecutions? })` on `@earendil-works/pi-codemode` 1.0.0: one QuickJS (WebAssembly) VM in a fresh worker thread per script, TypeScript annotations stripped with Node's `stripTypeScriptTypes`, and a concurrency cap per executor (default 4). Requires Node.js 22.19+; Next.js hosts add `serverExternalPackages: ['@yolk-sdk/codemode', '@earendil-works/pi-codemode', 'quickjs-wasi']`.
+
+`@yolk-sdk/agent/tools`: registrations (and `makeTool`) accept an optional `describe({ tools })` hook. For registrations with `nestedToolAccess: true`, `resolveTools` computes the resolved definition's description from the nested tools of the resolution; `def.description` stays the static fallback. New type `NestedToolDescriber`.

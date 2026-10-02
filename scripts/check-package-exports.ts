@@ -195,6 +195,12 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
     root: 'full'
   },
   {
+    packageDir: 'packages/codemode',
+    packageName: '@yolk-sdk/codemode',
+    expectedExports: ['./package.json', '.', './node'],
+    root: 'full'
+  },
+  {
     packageDir: 'packages/vercel-workflows',
     packageName: '@yolk-sdk/vercel-workflows',
     expectedExports: ['./package.json', '.', './effect', './testing', './workflow'],

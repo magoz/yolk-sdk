@@ -120,6 +120,7 @@ const packages: ReadonlyArray<PackageManifest> = [
     ]
   },
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
+  { name: '@yolk-sdk/codemode', exports: ['.', './node'] },
   { name: '@yolk-sdk/vercel-workflows', exports: ['.', './effect', './testing', './workflow'] },
   {
     name: '@yolk-sdk/harness',
@@ -205,6 +206,8 @@ const main = async () => {
       type: 'module',
       private: true,
       dependencies: {
+        // Dependency of @yolk-sdk/codemode; tarballs are extracted, not installed.
+        '@earendil-works/pi-codemode': '1.0.0',
         '@effect/platform-node': '4.0.0-rc.115',
         // Dependency of @yolk-sdk/emulators (./fortnox); tarballs are extracted, not installed.
         '@emulators/core': '0.12.0',
@@ -387,6 +390,11 @@ const main = async () => {
           'const r2Refused = r2Emulator.call("R2ObjectClient", "get", { bucket: "yolk-synthetic-bucket", key: "k", maxBytes: 1 })',
           'if (JSON.stringify(r2Reply) !== JSON.stringify({ response: r2Fixture.response }) || !("notEmulated" in r2Refused) || r2Emulator.ledger.entries().length !== 2 || r2Emulator.coverage().notEmulatedCalls !== 1 || typeof r2Conformance.r2PortsLayerFromBackend(r2Emulator) !== "object") throw new Error("R2 emulator smoke failed")',
           'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")',
+          'const codemode = await import("@yolk-sdk/codemode")',
+          'for (const symbol of ["makeCodeModeTool", "makeClassifierTool", "codeModeStoreFromToolResults", "renderCodeModeDescription", "searchCodeModeTools"]) { if (typeof codemode[symbol] !== "function") throw new Error(`Missing code mode export: ${symbol}`) }',
+          'const codemodeNode = await import("@yolk-sdk/codemode/node")',
+          'const codemodeResult = await codemodeNode.makePiCodeModeExecutor().execute("const n: number = 2; return n * 21", { tools: [], globals: [], timeoutMs: 10000, memoryLimitBytes: 64 * 1024 * 1024, store: {}, signal: new AbortController().signal })',
+          'if (!codemodeResult.ok || codemodeResult.value !== 42) throw new Error(`Code mode executor smoke failed: ${JSON.stringify(codemodeResult)}`)',
           'const fortnoxEmulatorModule = await import("@yolk-sdk/emulators/fortnox")',
           'if (fortnoxEmulatorModule.fortnoxEmulatorRoutes.length !== 10 || !fortnoxEmulatorModule.fortnoxEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Fortnox emulator manifest mismatch")',
           'const fortnoxEmulator = await fortnoxEmulatorModule.makeFortnoxEmulator()',

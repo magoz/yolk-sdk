@@ -113,6 +113,12 @@ provider's body or your credential.
   `providerMetadata.typesafe.confidence[questionId]`. Which one the live Gateway uses is not yet
   verified.
 
+## Classify from code mode scripts
+
+`makeClassifierTool` from `@yolk-sdk/codemode` exposes a `ClassifierModel` as a code-mode-only
+`classify` tool, so one script can classify many items with a concurrency cap. See
+[Add code mode](../integrations/code-mode#classify-items-from-scripts).
+
 ## Policy stays in your host
 
 Classification is a read with no side effects. A classifier can say a command looks destructive,

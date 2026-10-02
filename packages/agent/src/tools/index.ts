@@ -63,6 +63,7 @@ export type {
   ModelVisibleToolErrorInput,
   ModelVisibleToolErrorStructuredContent,
   NestedTool,
+  NestedToolDescriber,
   NestedToolExecutor,
   ToolExecutionInput,
   ToolMetadata,

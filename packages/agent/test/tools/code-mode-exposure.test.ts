@@ -527,3 +527,66 @@ describe('nested tool executor', () => {
     })
   )
 })
+
+describe('nested tool description hook', () => {
+  const describedHost = (seen: Array<ReadonlyArray<string>>) =>
+    makeTool<TestContext, typeof EmptyToolParams>({
+      name: 'script_host',
+      description: 'Static fallback',
+      parameters: EmptyToolParams,
+      access: 'write',
+      nestedToolAccess: true,
+      describe: ({ tools }) => {
+        const names = tools.map(tool => `${tool.moduleId}.${tool.def.name}`)
+
+        seen.push(names)
+
+        return `Callable: ${names.join(', ')}`
+      },
+      execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+    })
+
+  it.effect('computes the resolved description from the nested tools of the resolution', () =>
+    Effect.gen(function* () {
+      const seen: Array<ReadonlyArray<string>> = []
+      const host = describedHost(seen)
+
+      const toolSet = yield* resolveTools(
+        [
+          moduleOf('host', [host]),
+          moduleOf('docs', [
+            echoTool('search_docs'),
+            echoTool('model_only', { callableBy: 'model' }),
+            scriptOnlyTool('lookup', 'search')
+          ])
+        ],
+        context
+      )
+
+      const def = toolSet.tools.find(tool => tool.name === 'script_host')
+
+      expect(def?.description).toBe('Callable: docs.search_docs, docs.lookup')
+      expect(def?.parameters).toEqual(host.def.parameters)
+      expect(def).toBeInstanceOf(ToolDef)
+      expect(seen).toEqual([['docs.search_docs', 'docs.lookup']])
+      // The registration keeps its static description outside resolution.
+      expect(host.def.description).toBe('Static fallback')
+      expect(toolSet.tools.find(tool => tool.name === 'search_docs')?.description).toBe(
+        'search_docs tool'
+      )
+    })
+  )
+
+  it.effect('ignores describe on registrations without nested tool access', () =>
+    Effect.gen(function* () {
+      const plain: ToolRegistration<TestContext> = {
+        ...echoTool('plain'),
+        describe: () => 'should not apply'
+      }
+
+      const toolSet = yield* resolveTools([moduleOf('test', [plain])], context)
+
+      expect(toolSet.tools[0]?.description).toBe('plain tool')
+    })
+  )
+})
