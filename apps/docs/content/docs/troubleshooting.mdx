@@ -19,7 +19,8 @@ Yolk packages release in lockstep. Do not mix canary versions.
 
 ### Node or ESM errors
 
-Yolk packages are ESM-first and require Node 22 or newer.
+Yolk packages are ESM-first and require Node 22 or newer. `@yolk-sdk/codemode` requires Node
+22.19 or newer.
 
 Use explicit public subpaths:
 
@@ -43,6 +44,7 @@ Most runtime failures that mention a missing service mean an Effect layer was no
 | `LoopConfig`         | `LoopConfig.defaultLayer` or custom loop config         |
 | `ContextTransformer` | `ContextTransformer.identity` or compaction layer       |
 | `HttpClient`         | `FetchHttpClient.layer` or host HTTP layer              |
+| `ClassifierModel`    | `VercelAiGatewayClassifierLayer` or a host classifier   |
 
 Build one app-level layer and provide it at the route/runtime boundary.
 
@@ -60,6 +62,10 @@ The output limit must parse as an integer. If you do not want env config, use
 requires integer `AI_GATEWAY_MAX_COMPLETION_TOKENS`. If you configure the layer explicitly, pass the
 selected credential as `apiKey` to `makeVercelAiGatewayProviderLayer`; model ids must use Gateway's
 opaque `provider/model` form.
+
+`VercelAiGatewayClassifierLayer` reads only the credential (`AI_GATEWAY_API_KEY`, falling back to
+`VERCEL_OIDC_TOKEN`); it does not need `AI_GATEWAY_MAX_COMPLETION_TOKENS`. A missing credential
+fails with `ClassificationProviderError` (kind `auth`).
 
 ### Diagnose provider failures with providerCode
 
@@ -180,6 +186,27 @@ and background activation do not support these tools.
 An `unknown` outcome means the action may have happened. Reconcile using the authoritative receipt
 and provider state; never automatically retry the action or overwrite its settled receipt.
 See [Authorize one action](./agent/tools-hitl#authorize-one-action).
+
+### Code mode tool resolution fails
+
+`resolveTools` fails with `ToolRegistryError` before any tool runs when the exposure is invalid:
+
+- `invalid_tool_exposure`: a tool sets `discovery` without `callableBy: 'codemode'`.
+- `codemode_unsupported_tool`: a tool marked `callableBy: 'codemode'` needs approval, input, an
+  interaction, or background activation, is `question` or `subagent`, or has `nestedToolAccess`.
+  These tools never run from code mode; use `callableBy: 'all'` or `'model'`.
+
+A logged warning, `Code-mode-only tools are unreachable without a nested tool access registration`,
+means you marked tools `callableBy: 'codemode'` but did not register the code mode tool (or another
+`nestedToolAccess` registration) in the same resolution. See
+[Choose what scripts can call](./integrations/code-mode#choose-what-scripts-can-call).
+
+### Code mode worker or `quickjs.wasm` not found
+
+The Node executor loads a worker file and `quickjs.wasm` from disk. When a bundler inlines the
+engine, those files are missing at runtime. In Next.js, add `@yolk-sdk/codemode`,
+`@earendil-works/pi-codemode`, and `quickjs-wasi` to `serverExternalPackages`, or pass `wasm` and
+`workerUrl` to `makePiCodeModeExecutor`. See [Add code mode](./integrations/code-mode).
 
 ### Approval pauses forever
 

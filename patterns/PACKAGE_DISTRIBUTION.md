@@ -164,7 +164,7 @@ Rationale: lockstep versions are simpler when every public `packages/*` package 
 - License: `MIT`.
 - npm scope: `@yolk-sdk/*`.
 - npm org access: confirmed; `magoz` is owner.
-- Node engine: `>=22`.
+- Node engine: `>=22` (`@yolk-sdk/codemode`: `>=22.19.0`).
 - Prerelease npm tag: `canary`.
 - Include source in npm tarballs: yes.
 - Package manifests keep provenance-ready metadata; workflow disables provenance while the repo is private.

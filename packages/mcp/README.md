@@ -18,6 +18,8 @@ Tool arguments/results remain opaque until their execution/provider boundary.
 pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
+Running the experimental `@yolk-sdk/mcp/conformance` cases? Also add `@yolk-sdk/conformance@canary` (usually as a dev dependency); the examples import `@yolk-sdk/conformance/*` subpaths directly.
+
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
 Published package metadata requires Node.js 22+; `client/node` and `server/node` are Node-only.

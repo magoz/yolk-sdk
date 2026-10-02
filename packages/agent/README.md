@@ -1,6 +1,6 @@
 # @yolk-sdk/agent
 
-Domain-free agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice primitives.
+Domain-free agent protocol, loop, runtime, Effect-native client, compaction, classifier models, tools, React, providers, OAuth, skillset, and voice primitives.
 
 Root export is intentionally empty. Import feature APIs from explicit subpaths.
 
@@ -11,6 +11,8 @@ pnpm add @yolk-sdk/agent@canary effect@4.0.0-rc.115
 ```
 
 Add `react` if you use `@yolk-sdk/agent/react` or `@yolk-sdk/agent/voice/react`.
+
+Running the experimental `@yolk-sdk/agent/providers/*/conformance` cases? Also add `@yolk-sdk/conformance@canary` (usually as a dev dependency); the cases run through `@yolk-sdk/conformance/runner`.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
@@ -887,6 +889,28 @@ Without a host, definitions, approval ids, and inline behavior are unchanged.
 - Hosts own authorization, status/wait tools, cancellation, terminal storage, usage, and delivery.
   Never append a second result for the original call.
 
+## Code mode tool contract
+
+These options are the tool contract that [`@yolk-sdk/codemode`](../codemode/README.md) builds on.
+This package declares them; it does not run scripts.
+
+- `makeTool({ output })` adds declaration-only `ToolDef.outputSchema`, lowered like `parameters`.
+- `callableBy: 'all' | 'model' | 'codemode'` (default `all`) decides who may call a tool. For
+  `codemode` only, `discovery: 'listed' | 'search'` (default `listed`) decides how scripts find it.
+  Codemode-only tools never reach providers. Approval, input, interaction, activated background,
+  `question`, `subagent`, and nested-access tools never run from code mode; `resolveTools` rejects
+  `callableBy: 'codemode'` on them.
+- `nestedToolAccess: true` gives a registration's `execute` a `nested` executor over the other
+  code-mode-callable tools of the same resolution and host context. Nested calls run through the
+  resolved execute path and fail closed with model-visible error results. Assign nested call ids as
+  `<parentToolCallId>/<seq>`.
+- `describe: ({ tools }) => string` on a nested-access registration computes its resolved
+  description from those nested tools; `def.description` stays the static fallback.
+- Report nested calls with protocol `recordNestedToolCall` and `nestedToolCallResultFields`. The
+  bounded `ToolResult.nestedCalls` record and summed `ToolResult.usage` never reach the model:
+  `toolResultMessageFromResult` drops both, and the loop does not add `ToolResult.usage` to run
+  usage. Capture them from the `ToolResult` or tool events when you need audit or billing records.
+
 ## Tool failures
 
 Use `modelVisibleToolError(...)` for expected tool-domain failures the model can recover
@@ -916,6 +940,9 @@ aborts, and implementation bugs outside typed tool execution.
 - Persist/return one `ToolResultMessage` for every host tool call, including `isError` failures.
 - Persist terminal provider failures and clear active run ids where applicable.
 - Provide tools, approval policy, auth, storage, and observability.
+- If you send `ToolDef`s to providers yourself (outside `run`/`runModelTurn`), filter them with
+  protocol `providerToolDefs`; codemode-only tools must never reach providers. Executor decorators
+  outside `ResolvedToolSet.execute` do not see nested code mode calls.
 - Compact context and decide memory/search policy.
 
 ## Boundaries

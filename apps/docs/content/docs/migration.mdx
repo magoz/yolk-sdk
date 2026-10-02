@@ -10,10 +10,13 @@ Yolk packages are canary-stage. APIs can change between canary releases.
 Keep every public package on the same canary version:
 
 ```bash
-pnpm add @yolk-sdk/agent@canary @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary
+pnpm add @yolk-sdk/agent@canary @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary @yolk-sdk/harness@canary @yolk-sdk/codemode@canary
+pnpm add -D @yolk-sdk/conformance@canary @yolk-sdk/emulators@canary
 ```
 
-`@yolk-sdk/harness` is introduced after `0.1.0-canary.76`. It is unavailable in `0.1.0-canary.76` and earlier. Choose a newer matching canary once available, and keep it on the same lockstep version as the other public packages.
+Add only the packages you use. `@yolk-sdk/harness` is available from `0.1.0-canary.77`.
+`@yolk-sdk/codemode`, `@yolk-sdk/conformance`, and `@yolk-sdk/emulators` are available from
+`0.1.0-canary.96`. Keep each of them on the same lockstep version as the other public packages.
 
 Check installed versions:
 
@@ -24,6 +27,32 @@ pnpm list '@yolk-sdk/*'
 Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
+
+### Canary.96: code mode, classifier models, conformance, and emulators
+
+New packages: `@yolk-sdk/codemode` ([Add code mode](./integrations/code-mode)) and the
+experimental, test-only `@yolk-sdk/conformance` and `@yolk-sdk/emulators`
+([Test with emulators](./guides/testing-with-emulators)). `@yolk-sdk/agent`, `@yolk-sdk/connectors`,
+and `@yolk-sdk/mcp` now depend on `@yolk-sdk/conformance` for their conformance subpaths; add it
+yourself only if you import its runner or replay client.
+
+The agent tool contract gains optional fields. Existing tools keep working unchanged:
+
+- `ToolDef.outputSchema` (`makeTool({ output })`), `callableBy` (default `all`), and `discovery`.
+- `nestedToolAccess` and `describe` on registrations, and `ToolResult.nestedCalls` and
+  `ToolResult.usage`. Neither reaches the model; `toolResultMessageFromResult` drops both and the
+  loop does not add `ToolResult.usage` to run usage.
+- `ToolRegistryError` gains the `codemode_unsupported_tool` and `invalid_tool_exposure` causes. If
+  you match its `cause` exhaustively, add both.
+- If you send `ToolDef`s to providers yourself (outside `run`/`runModelTurn`), filter them with
+  protocol `providerToolDefs` so codemode-only tools never reach providers.
+
+`@yolk-sdk/agent/classification` and `@yolk-sdk/agent/providers/vercel/ai-gateway-classifier` add
+classifier models over AI Gateway `POST /v1/evaluate`; see
+[Classifier models](./agent/classifier-models). Connector and MCP tool adapters accept an
+`exposure` option for code mode.
+
+`gmail.draft_delete` now succeeds on Gmail's empty `204` response instead of failing to decode it.
 
 ### Canary.95: Gmail multipart send and Outlook draft attachments
 
