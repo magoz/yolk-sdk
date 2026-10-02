@@ -1,5 +1,24 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.96
+
+### Patch Changes
+
+- 23c322c: Advance unchanged public packages in lockstep with the new `@yolk-sdk/codemode` package, the new experimental `@yolk-sdk/conformance` and `@yolk-sdk/emulators` packages, classifier models and the code mode tool contract in `@yolk-sdk/agent`, and the new conformance subpaths in `@yolk-sdk/agent`, `@yolk-sdk/connectors`, and `@yolk-sdk/mcp`. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [367aceb]
+- Updated dependencies [367aceb]
+- Updated dependencies [367aceb]
+- Updated dependencies [0ce9c3e]
+- Updated dependencies [00904fd]
+- Updated dependencies [425c172]
+- Updated dependencies [9f7aba3]
+- Updated dependencies [ccc64a3]
+- Updated dependencies [6d3b497]
+- Updated dependencies [9ff96b8]
+- Updated dependencies [0c58a89]
+- Updated dependencies [92f016f]
+  - @yolk-sdk/agent@0.1.0-canary.96
+
 ## 0.1.0-canary.95
 
 ### Patch Changes

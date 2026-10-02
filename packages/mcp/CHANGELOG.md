@@ -1,5 +1,66 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.96
+
+### Patch Changes
+
+- 367aceb: Add the code mode tool contract (ADR 0002, step 1) without adding code mode itself.
+
+  - Output schemas: `makeTool({ output })` lowers an Effect Schema into declaration-only
+    `ToolDef.outputSchema` the same way as `parameters`. Connector tool registrations pass the action
+    `outputSchema` through, and `mcpToolToToolDef` passes a plain-object MCP `outputSchema` through.
+    Output schemas are never sent to providers and never validate results.
+  - Exposure: `ToolDef.callableBy` (`all` default, `model`, `codemode`) and, for `codemode` only,
+    `discovery` (`listed` default, `search`), typed on `makeTool` options as the `ToolExposure`
+    union. Protocol helpers `isCodeModeCallable`, `isCodeModeFailClosed`, `providerToolDefs`,
+    `isProviderToolDef`, and `toolDiscovery` implement the rules. Approval, input, interaction,
+    activated background, `question`, and `subagent` tools never run from code mode; `resolveTools`
+    fails `codemode_unsupported_tool` when they are marked `codemode` and `invalid_tool_exposure` for
+    `discovery` without `codemode`, and warns when codemode-only tools have no nested-access tool.
+  - Exposure for generated tools: `makeConnectorToolRegistration` and `makeConnectorToolModule`
+    accept `exposure`, a `ToolExposure` value or a resolver `(actionId, action) => ToolExposure`
+    (`ConnectorToolExposureResolver`; `action` is the declared `id`/`description`/`access`, or
+    `undefined` for an undeclared action id). `mcpToolToToolDef` and the MCP listing functions
+    (`McpClientOptions.exposure`) accept the same option as `McpToolExposureResolver`, a value or
+    `(tool, serverName) => ToolExposure`. Without it neither adapter sets `callableBy`/`discovery`;
+    the fail-closed rules above still apply at resolution.
+  - Codemode-only tools never reach providers: `run`, `runModelTurn`, capability checks, and the
+    OpenAI Realtime session builders omit them. Provider-issued calls to them fail closed as unknown
+    tools (`prepareToolBatch` synthetic error result, `ResolvedToolSet.execute` `not_found`, voice
+    denial) without dispatch.
+  - Nested tool access: registrations with `nestedToolAccess: true` receive a `nested`
+    `NestedToolExecutor` scoped to the same resolution and host context. Its `tools` list the
+    code-mode-callable tools (excluding nested-access registrations) with their module ids; its
+    `execute` runs through the resolved execute path and returns model-visible error results for
+    unknown, disabled, or non-callable tools and tool failures. Nested call ids follow
+    `<parentToolCallId>/<seq>`. Decorators outside `ResolvedToolSet.execute` (for example a wrapped
+    `ToolExecutor`) do not see nested calls.
+  - Module descriptions: `ToolModule` accepts an optional `description`, carried on `NestedTool` as
+    `moduleDescription` for code mode listing and search.
+  - Nested-call record: optional `ToolResult.nestedCalls` (`NestedToolCalls`) and summed
+    `ToolResult.usage`, built with `recordNestedToolCall` / `nestedToolCallResultFields` within
+    exported bounds (256 calls, 8 KiB arguments per call, 32 KiB in total, 500-character errors).
+    They round-trip as plain JSON and are dropped by `toolResultMessageFromResult`, so transcripts
+    and providers never see them.
+
+- adaf663: Add the experimental `@yolk-sdk/mcp/conformance` subpath: nine `read` conformance cases for MCP servers, run through the real `@yolk-sdk/mcp/client`. They cover era negotiation (`mcp.negotiation.era`), modern stateless headers (`mcp.modern.stateless`), the legacy session handshake (`mcp.legacy.session`), JSON and SSE answer encoding (`mcp.transport.response-encoding`), the tool listing with capabilities, cursors and unchanged metadata (`mcp.tools.list`), a read call (`mcp.tools.call-read`), a tool error for invalid arguments (`mcp.tools.call-tool-error`), an unknown tool (`mcp.errors.unknown-tool`), and a rejected credential (`mcp.auth.rejected`). The subpath also exports the `McpConformanceTarget` and `McpConformanceConfig` services, an observing `HttpClient` that never sends a request of its own and forwards a case's `tools/call` only through a fail-closed gate (only when the call operation's own complete, fully understood listing proves the call safe: the absent tool not listed, or the read tool marked `readOnlyHint: true`; anything else refuses; event streams are read with the same `eventsource-parser` the client resolves, now a direct dependency with the client's `^3.0.0` range (verified in-repo by a parity test; a consumer install that does not dedupe could resolve two copies)), never keeps a credential-named header, the URL query or a raw `mcp-session-id` value (only an equality class), and keeps request and response bodies exactly as received (sensitive: in memory only, never logged or persisted), the era filter `selectMcpConformanceCases`, and sixteen synthetic replay fixtures on `https://mcp.example.test/{modern,legacy}/mcp`. No case is observed live yet. `@yolk-sdk/mcp` now depends on `@yolk-sdk/conformance`, which only `src/conformance/` may import.
+- Updated dependencies [367aceb]
+- Updated dependencies [367aceb]
+- Updated dependencies [367aceb]
+- Updated dependencies [0ce9c3e]
+- Updated dependencies [575a282]
+- Updated dependencies [a4ba6db]
+- Updated dependencies [00904fd]
+- Updated dependencies [425c172]
+- Updated dependencies [9f7aba3]
+- Updated dependencies [ccc64a3]
+- Updated dependencies [6d3b497]
+- Updated dependencies [9ff96b8]
+- Updated dependencies [0c58a89]
+- Updated dependencies [92f016f]
+  - @yolk-sdk/agent@0.1.0-canary.96
+  - @yolk-sdk/conformance@0.1.0-canary.96
+
 ## 0.1.0-canary.95
 
 ### Patch Changes
