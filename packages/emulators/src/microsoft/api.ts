@@ -10,7 +10,7 @@
  * @experimental
  */
 import type { Hono } from '@emulators/core'
-import { handlerFailedResponse } from '../emulator-http.ts'
+import { answeredOutsideCore, emulatorJobHeader, handlerFailedResponse } from '../emulator-http.ts'
 import type { EmulatorRouteEvidence } from '../route-evidence.ts'
 import {
   calendarView,
@@ -281,21 +281,12 @@ export const matchMicrosoftRoute = (method: string, path: string): MatchedRoute 
 /** Header the wrapper sets on core requests: the ledger sequence number (for error ids). */
 export const requestSeqHeader = 'x-emulator-request-seq'
 
-/** Header the wrapper sets on core requests: the job whose fault decision the route asks for. */
-export const microsoftJobHeader = 'x-emulator-job-id'
-
 /**
- * The wrapper's fault decision for the core request of job `jobId`, asked only once the route
- * would answer successfully: `true` when a fault answers instead (it is used up, and the wrapper
- * sends its answer), `false` when none applies.
+ * The wrapper's fault decision for the core request of job `jobId` (its `emulatorJobHeader`),
+ * asked only once the route would answer successfully: `true` when a fault answers instead (it is
+ * used up, and the wrapper sends its answer), `false` when none applies.
  */
 export type MicrosoftFaultDecision = (jobId: string | null) => boolean
-
-/**
- * The core's answer when a fault answered: the wrapper sends the fault's answer itself, outside
- * the core, so a reset or a close before it is read never cancels it.
- */
-const answeredOutsideCore = (): Response => new Response(null, { status: 204 })
 
 const delay = (ms: number): Promise<void> =>
   new Promise(resolve => {
@@ -386,7 +377,7 @@ const handle = async (
 
   if (!response.ok) return response
 
-  if (decideFault(headers.get(microsoftJobHeader))) return answeredOutsideCore()
+  if (decideFault(headers.get(emulatorJobHeader))) return answeredOutsideCore()
 
   Object.assign(state, draft)
   env.monitors.clear()

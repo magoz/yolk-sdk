@@ -15,10 +15,10 @@
  * to a message that is not a draft are not emulated (400), and neither is permanently deleting a
  * message with attachments (no fixture creates a draft with attachments).
  *
- * Concurrent writes: the first write (update or move) to reach the handler holds its message for
- * `conflictWindowMs` before answering (a faulted write commits nothing and holds nothing); an
- * overlapping write to that message gets 409 `ErrorIrresolvableConflict` and changes nothing.
- * Non-overlapping writes both apply (an emulator extrapolation).
+ * Concurrent writes: the first committed write (update or move) holds its message for
+ * `conflictWindowMs` before answering (a refused or faulted write commits nothing and holds
+ * nothing); an overlapping write to that message gets 409 `ErrorIrresolvableConflict` and changes
+ * nothing. Non-overlapping writes both apply (an emulator extrapolation).
  *
  * @experimental
  */
@@ -466,12 +466,12 @@ export const createDraft: RouteHandler = (state, request, env) => {
 }
 
 /**
- * Run a message write under its message's lock: a write that finds the lock held loses with 409
- * (nothing changes); otherwise the write runs and its answer holds the message (the route
- * registration takes the lock once the write is committed, then holds it for `conflictWindowMs`
- * before answering).
+ * A message write that will hold its message: 409 (nothing changes) when the message is held by
+ * another write; otherwise the write runs (on the draft) and its answer names the message to hold.
+ * The route registration takes the hold only once the write is committed, then keeps it for
+ * `conflictWindowMs` before answering, so a refused or faulted write holds nothing.
  */
-const withMessageLock = (
+const heldWrite = (
   env: MicrosoftApiEnv,
   request: RouteRequest,
   message: MicrosoftEmulatorMessage,
@@ -508,7 +508,7 @@ export const updateMessage: RouteHandler = (state, request, env) => {
 
   if (write instanceof Response) return write
 
-  return withMessageLock(env, request, message, () => {
+  return heldWrite(env, request, message, () => {
     const updated: MicrosoftEmulatorMessage = {
       ...message,
       ...write,
@@ -565,7 +565,7 @@ export const moveMessage: RouteHandler = (state, request, env) => {
 
   if (destination === undefined) return notFound(request)
 
-  return withMessageLock(env, request, message, () => {
+  return heldWrite(env, request, message, () => {
     const moved: MicrosoftEmulatorMessage = {
       ...message,
       parentFolderId: destination.id,

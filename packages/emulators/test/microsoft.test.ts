@@ -1565,6 +1565,8 @@ describe('handler failures', () => {
         }
       })
 
+      const before = target.snapshot()
+
       armed = true
 
       // The core's own error handler (which logs and answers a non-Graph body) is never reached.
@@ -1603,6 +1605,9 @@ describe('handler failures', () => {
           responseError: 'the route handler failed'
         })
       ])
+      // Draft creation advances its message counter before it reads the clock: neither the
+      // counter nor anything else reached the state.
+      expect(target.snapshot()).toEqual(before)
       expect(
         (
           await call(target, 'POST', `${user}/messages`, {
@@ -1625,6 +1630,7 @@ describe('handler failures', () => {
         }
       })
 
+      const before = target.snapshot()
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
       const failed = await call(target, 'POST', `${user}/messages`, {
@@ -1658,6 +1664,8 @@ describe('handler failures', () => {
       ])
       // Nothing was written: the draft never reached the state.
       expect(target.snapshot().messages.some(message => message.isDraft)).toBe(false)
+      // Nor did the message counter, which the handler advances before it reads the clock.
+      expect(target.snapshot()).toEqual(before)
     })
   )
 
@@ -1992,6 +2000,10 @@ describe('faults', () => {
           responseError: expect.any(String)
         })
       ])
+      // The fault's answer, not the route, failed.
+      expect(target.ledger.entries()[0]?.responseError).toBe(
+        'the emulator could not build or produce the response'
+      )
       expect(target.faults.list()[0]).toMatchObject({ remaining: 1, applied: 0 })
       expect(
         (await call(target, 'GET', `${pagingFolder}?$top=2`, { headers: immutable })).status
@@ -2143,7 +2155,8 @@ describe('faults', () => {
 
   it.effect('a 409 conflict uses up no fault; a faulted message write holds no message', () =>
     Effect.promise(async () => {
-      const target = await emulator({ conflictWindowMs: 300 })
+      const conflictWindowMs = 300
+      const target = await emulator({ conflictWindowMs })
       const id = await createDraft(target, 'Original')
       const path = `${user}/messages/${encodeURIComponent(id)}`
 
@@ -2152,53 +2165,142 @@ describe('faults', () => {
 
       const subject = () => target.snapshot().messages.find(message => message.id === id)?.subject
 
-      // The first write commits, then holds the message for the conflict window.
-      const first = patch('First')
+      // A real turn of the event loop (`setImmediate` is not faked), bounded by a deadline.
+      const deadline = Date.now() + 5000
 
-      while (subject() !== 'First') {
+      const turn = async (what: string) => {
+        expect(Date.now(), what).toBeLessThan(deadline)
+
         await new Promise(resolve => {
-          setTimeout(resolve, 1)
+          setImmediate(resolve)
         })
       }
 
-      target.faults.add({ kind: 'status', status: 503, count: 1 })
+      // Fake only the conflict window's timer: a held message stays held until the test releases
+      // it, however slow the runner is.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
-      const held = target.snapshot()
+      try {
+        // The first write commits, then holds the message for the conflict window.
+        const first = patch('First')
 
-      // An overlapping write: Graph's 409, answered by the route; the fault stays unused.
-      const conflict = await patch('Second')
+        while (subject() !== 'First') await turn('the first write commits')
 
-      expect(conflict.status).toBe(409)
-      expect(await errorCode(conflict)).toBe(microsoftEmulatorErrorCodes.conflict)
-      expect((await first).status).toBe(200)
-      expect(target.faults.list()).toEqual([expect.objectContaining({ remaining: 1, applied: 0 })])
-      expect(target.snapshot()).toEqual(held)
+        target.faults.add({ kind: 'status', status: 503, count: 1 })
 
-      // Two overlapping writes: one gets the fault and writes and holds nothing, so the other
-      // applies (no 409).
-      const statuses = await Promise.all([patch('Third'), patch('Third')]).then(responses =>
-        responses.map(response => response.status).sort()
-      )
+        const held = target.snapshot()
 
-      expect(statuses).toEqual([200, 503])
-      expect(target.faults.list()).toEqual([expect.objectContaining({ remaining: 0, applied: 1 })])
-      expect(subject()).toBe('Third')
-      expect(
-        target.ledger.entries().map(({ method, status, fault }) => ({ method, status, fault }))
-      ).toEqual([
-        { method: 'POST', status: 201, fault: undefined },
-        { method: 'PATCH', status: 200, fault: undefined },
-        { method: 'PATCH', status: 409, fault: undefined },
-        ...(target.ledger.entries()[3]?.status === 503
-          ? [
-              { method: 'PATCH', status: 503, fault: 'status' },
-              { method: 'PATCH', status: 200, fault: undefined }
-            ]
-          : [
-              { method: 'PATCH', status: 200, fault: undefined },
-              { method: 'PATCH', status: 503, fault: 'status' }
-            ])
+        // An overlapping write: Graph's 409, answered by the route; the fault stays unused.
+        const conflict = await patch('Second')
+
+        expect(conflict.status).toBe(409)
+        expect(await errorCode(conflict)).toBe(microsoftEmulatorErrorCodes.conflict)
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 1, applied: 0 })
+        ])
+        expect(target.snapshot()).toEqual(held)
+
+        // Release the first write's hold.
+        await vi.advanceTimersByTimeAsync(conflictWindowMs)
+        expect((await first).status).toBe(200)
+
+        // Two overlapping writes: one gets the fault and writes and holds nothing, so the other
+        // applies (no 409).
+        let settled = false
+
+        const pair = Promise.all([patch('Third'), patch('Fourth')]).finally(() => {
+          settled = true
+        })
+
+        while (!settled) {
+          await vi.advanceTimersByTimeAsync(conflictWindowMs)
+          await turn('the overlapping writes answer')
+        }
+
+        const responses = await pair
+        const statuses = responses.map(response => response.status)
+
+        expect([...statuses].sort()).toEqual([200, 503])
+
+        const applied = responses.find(response => response.status === 200)
+
+        expect(field(await applied?.json(), 'subject')).toBe(subject())
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ remaining: 0, applied: 1 })
+        ])
+        // Only the applied write committed: one change key, and no other change.
+        expect(target.snapshot().counters.nextChangeKeyNumber).toBe(
+          held.counters.nextChangeKeyNumber + 1
+        )
+        expect(
+          target.ledger.entries().map(({ method, status, fault }) => ({ method, status, fault }))
+        ).toEqual([
+          { method: 'POST', status: 201, fault: undefined },
+          { method: 'PATCH', status: 200, fault: undefined },
+          { method: 'PATCH', status: 409, fault: undefined },
+          ...statuses.map(status =>
+            status === 503
+              ? { method: 'PATCH', status: 503, fault: 'status' }
+              : { method: 'PATCH', status: 200, fault: undefined }
+          )
+        ])
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  )
+
+  it.effect('a faulted copy monitor poll changes no monitor and copies nothing', () =>
+    Effect.promise(async () => {
+      const source = `${drive}/items/${seeds.copySourceItemId ?? ''}`
+
+      const copy = (target: MicrosoftEmulator) =>
+        call(target, 'POST', `${source}/copy?@microsoft.graph.conflictBehavior=fail`, {
+          body: { parentReference: copyDestination }
+        }).then(response => response.headers.get('location') ?? '')
+
+      const answer = async (response: Response) => ({
+        status: response.status,
+        body: await jsonOf(response)
+      })
+
+      // The same copy, polled without faults: one in-progress answer, then the completing one.
+      const reference = await emulator({ copyInProgressPolls: 1 })
+      const referenceLocation = await copy(reference)
+      const unfaulted = []
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        unfaulted.push(await answer(await reference.fetch(new Request(referenceLocation))))
+      }
+
+      expect(unfaulted.map(({ status }) => status)).toEqual([202, 200])
+
+      const target = await emulator({ copyInProgressPolls: 1 })
+      const location = await copy(target)
+
+      expect(location).toBe(referenceLocation)
+
+      // A fault on the in-progress poll, then one on the completing poll: each faulted poll
+      // leaves the monitor (pollsLeft, resourceId) and the state as they were, and the next poll
+      // answers what it would have answered without the fault.
+      for (const expected of unfaulted) {
+        const monitors = target.monitors()
+        const state = target.snapshot()
+
+        target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+        expect((await target.fetch(new Request(location))).status).toBe(503)
+        expect(target.monitors()).toEqual(monitors)
+        expect(target.snapshot()).toEqual(state)
+        expect(await answer(await target.fetch(new Request(location)))).toEqual(expected)
+      }
+
+      expect(target.faults.list()).toEqual([
+        expect.objectContaining({ remaining: 0, applied: 1 }),
+        expect.objectContaining({ remaining: 0, applied: 1 })
       ])
+      expect(target.monitors()).toEqual(reference.monitors())
+      expect(target.snapshot()).toEqual(reference.snapshot())
     })
   )
 })

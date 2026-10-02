@@ -530,17 +530,17 @@ polls are listed in the package README under "Emulator extrapolations (no fixtur
   `SyntheticValueNotEmulated`, `SyntheticInvalidRequest`, `SyntheticInvalidBody`,
   `SyntheticUpstreamError`.
 
-Messages keep their immutable id across moves. Event times are UTC with seven fractional digits.
-For concurrent writes, the first write to reach the handler holds the message for
-`conflictWindowMs` (default 25); an overlapping write gets 409 `ErrorIrresolvableConflict`;
+Messages keep their immutable id across moves. Event times are UTC with seven fractional digits. For
+concurrent writes, the first committed write holds the message for `conflictWindowMs` (default 25; a
+refused or faulted write holds nothing); an overlapping write gets 409 `ErrorIrresolvableConflict`;
 non-overlapping writes both apply (an emulator extrapolation). The default seed is the synthetic
 fixture entities with the same ids as `microsoftConformanceFixtureSeeds`; profiles `default` and
 `empty`. Faults, the ledger (which also records the `Prefer` header), and the `/_emulate/*` control
-plane behave as in the Fortnox emulator: a refusal (a 404 for an unknown id, a 400 not emulated,
-or a 409 conflict) uses up no fault, and a faulted request writes nothing, creates no copy
-monitor, and holds no message. `reset` and `seed` also clear copy monitors. The `drills`
-option (`calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`, `omitNextLink`) is a
-test-only drill knob that makes the matching conformance case fail.
+plane behave as in the Fortnox emulator: a refusal (a 404 for an unknown id, a 400 not emulated, or
+a 409 conflict) uses up no fault, and a faulted request writes nothing, creates no copy monitor, and
+holds no message. `reset` and `seed` also clear copy monitors. The `drills` option
+(`calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`, `omitNextLink`) is a test-only
+drill knob that makes the matching conformance case fail.
 
 ## Dropbox emulator
 

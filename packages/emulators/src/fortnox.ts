@@ -19,13 +19,13 @@ import * as Schema from 'effect/Schema'
 import {
   EmulatorHeaderRecord,
   EmulatorResponseStatus,
+  emulatorJobHeader,
   handlerFailedHeader
 } from './emulator-http.ts'
 import {
   errorInformation,
   fortnoxApiRoutes,
   fortnoxEmulatorErrorCodes,
-  fortnoxJobHeader,
   matchFortnoxRoute,
   parseJsonText,
   registerFortnoxApi,
@@ -541,7 +541,7 @@ export const makeFortnoxEmulator = async (
     const hasBody = text !== '' && method !== 'GET' && method !== 'HEAD'
     const jobId = String(nextJobId++)
 
-    const headers = new Headers({ accept: 'application/json', [fortnoxJobHeader]: jobId })
+    const headers = new Headers({ accept: 'application/json', [emulatorJobHeader]: jobId })
 
     if (hasBody) headers.set('content-type', 'application/json')
 
@@ -559,7 +559,16 @@ export const makeFortnoxEmulator = async (
 
       if (fault === undefined) return false
 
-      job.faultAnswer = applyFault(fault)
+      try {
+        job.faultAnswer = applyFault(fault)
+      } catch (error) {
+        // The fault's answer could not be built (the route did not fail): the core answers its
+        // handler failure, and the fault is not used up.
+        entry.responseError = 'the emulator could not build or produce the response'
+
+        throw error
+      }
+
       entry.fault = 'status'
 
       return true
@@ -573,7 +582,7 @@ export const makeFortnoxEmulator = async (
     if (job.faultAnswer !== undefined) return job.faultAnswer
 
     if (response.headers.has(handlerFailedHeader)) {
-      entry.responseError = 'the route handler failed'
+      entry.responseError ??= 'the route handler failed'
 
       return responseFailed()
     }

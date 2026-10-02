@@ -10,7 +10,7 @@
 import type { Hono } from '@emulators/core'
 import { Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
-import { handlerFailedResponse } from '../emulator-http.ts'
+import { answeredOutsideCore, emulatorJobHeader, handlerFailedResponse } from '../emulator-http.ts'
 import type { EmulatorRouteEvidence } from '../route-evidence.ts'
 import {
   buildRow,
@@ -1291,21 +1291,12 @@ export const parseJsonText = (text: string): Schema.Json | undefined => {
 /** `{Name}` path templates become `:Name` core route parameters. */
 const corePath = (template: string): string => template.replace(/\{([A-Za-z]+)\}/g, ':$1')
 
-/** Header the wrapper sets on core requests: the job whose fault decision the route asks for. */
-export const fortnoxJobHeader = 'x-emulator-job-id'
-
 /**
- * The wrapper's fault decision for the core request of job `jobId`, asked only once the route
- * would answer successfully: `true` when a fault answers instead (it is used up, and the wrapper
- * sends its answer), `false` when none applies.
+ * The wrapper's fault decision for the core request of job `jobId` (its `emulatorJobHeader`),
+ * asked only once the route would answer successfully: `true` when a fault answers instead (it is
+ * used up, and the wrapper sends its answer), `false` when none applies.
  */
 export type FortnoxFaultDecision = (jobId: string | undefined) => boolean
-
-/**
- * The core's answer when a fault answered: the wrapper sends the fault's answer itself, outside
- * the core, so a reset or a close before it is read never cancels it.
- */
-const answeredOutsideCore = (): Response => new Response(null, { status: 204 })
 
 /**
  * Register every route of the table on the core app, over the generation's state. Each request is
@@ -1348,7 +1339,7 @@ export const registerFortnoxApi = (
 
         if (!response.ok) return response
 
-        if (decideFault(context.req.header(fortnoxJobHeader))) return answeredOutsideCore()
+        if (decideFault(context.req.header(emulatorJobHeader))) return answeredOutsideCore()
 
         Object.assign(state, draft)
 

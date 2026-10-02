@@ -146,6 +146,8 @@ import { Data, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   EmulatorHeaderRecord,
+  answeredOutsideCore,
+  emulatorJobHeader,
   handlerFailedHeader,
   handlerFailedResponse,
   isCredentialHeaderName,
@@ -1191,12 +1193,6 @@ const readBytes = (request: Request): Promise<Uint8Array | undefined> =>
 const isControlPath = (path: string): boolean =>
   path === '/_emulate' || path.startsWith('/_emulate/')
 
-/**
- * Header the wrapper sets on core requests: the id of the forwarded job, from a counter that
- * never resets (the ledger sequence does), so a ledger clear never makes two jobs share an id.
- */
-const jobIdHeader = 'x-emulator-job-id'
-
 type MutableLedgerEntry = {
   seq: number
   method: string
@@ -1245,12 +1241,6 @@ type Job<State, Env> = {
   /** Set when the core ran the dispatch for this job (it may answer without it, when closed). */
   dispatched?: boolean
 }
-
-/**
- * Resolved mode: what the core answers when the wrapper returns the real answer itself (a fault or
- * a refusal), so that answer never depends on the core runtime's lifecycle.
- */
-const answeredOutsideCore = (): Response => new Response(null, { status: 204 })
 
 const withEvidence = (response: Response, evidence: EmulatorEvidence): Response => {
   const headers = new Headers(response.headers)
@@ -1532,7 +1522,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
   // Plan, fault decision, and commit run synchronously together: no request interleaves.
   const dispatch: CoreDispatch<State> = (state, request) => {
-    const job = jobs.get(Number(request.headers.get(jobIdHeader) ?? 'NaN'))
+    const job = jobs.get(Number(request.headers.get(emulatorJobHeader) ?? 'NaN'))
 
     if (job === undefined) return handlerFailedResponse()
 
@@ -2060,7 +2050,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
       const response = await core.fetch(
         new Request(new URL(requestPath, core.baseUrl), {
           method: 'POST',
-          headers: { [jobIdHeader]: String(jobId) }
+          headers: { [emulatorJobHeader]: String(jobId) }
         })
       )
 

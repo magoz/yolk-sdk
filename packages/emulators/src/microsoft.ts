@@ -19,6 +19,7 @@ import * as Schema from 'effect/Schema'
 import {
   EmulatorHeaderRecord,
   EmulatorResponseStatus,
+  emulatorJobHeader,
   handlerFailedHeader,
   redactCredentialFields,
   redactCredentialQuery
@@ -26,7 +27,6 @@ import {
 import {
   matchMicrosoftRoute,
   microsoftApiRoutes,
-  microsoftJobHeader,
   registerMicrosoftApi,
   requestSeqHeader
 } from './microsoft/api.ts'
@@ -217,9 +217,10 @@ export type MicrosoftEmulatorOptions = {
    */
   readonly copyInProgressPolls?: number
   /**
-   * How long (ms, integer 0-10000, default 25) the first message write to reach the handler holds
-   * its message; an overlapping write to that message gets 409. Non-overlapping writes both apply
-   * (an emulator extrapolation). `0` only rejects writes that overlap the handler itself.
+   * How long (ms, integer 0-10000, default 25) the first committed message write holds its
+   * message (a refused or faulted write holds nothing); an overlapping write to that message gets
+   * 409. Non-overlapping writes both apply (an emulator extrapolation). `0` only rejects writes
+   * that overlap the handler itself.
    */
   readonly conflictWindowMs?: number
   /** Drill knobs (tests only): make the emulator disagree with one conformance claim. */
@@ -693,7 +694,7 @@ export const makeMicrosoftEmulator = async (
     const headers = new Headers({
       accept: 'application/json',
       [requestSeqHeader]: String(entry.seq),
-      [microsoftJobHeader]: jobId
+      [emulatorJobHeader]: jobId
     })
 
     // Only non-credential headers the routes read are forwarded.
@@ -719,7 +720,16 @@ export const makeMicrosoftEmulator = async (
 
       if (fault === undefined) return false
 
-      job.faultAnswer = applyFault(fault, context())
+      try {
+        job.faultAnswer = applyFault(fault, context())
+      } catch (error) {
+        // The fault's answer could not be built (the route did not fail): the core answers its
+        // handler failure, and the fault is not used up.
+        entry.responseError = 'the emulator could not build or produce the response'
+
+        throw error
+      }
+
       entry.fault = 'status'
 
       return true
@@ -733,7 +743,7 @@ export const makeMicrosoftEmulator = async (
     if (job.faultAnswer !== undefined) return job.faultAnswer
 
     if (response.headers.has(handlerFailedHeader)) {
-      entry.responseError = 'the route handler failed'
+      entry.responseError ??= 'the route handler failed'
 
       return responseFailed(request, entry.seq)
     }

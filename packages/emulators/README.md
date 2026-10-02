@@ -810,9 +810,10 @@ Emulator extrapolations (no fixture). This list predates the fixture-only rule a
 cases need each of these to run, except request-shape latitude (accepted request variations; no
 invented wire behaviour) and the last, which is opt-in and off by default:
 
-- **Concurrency window.** The first write (update or move) to reach the handler holds the message
-  for `conflictWindowMs` (default 25); an overlapping write gets 409; non-overlapping writes both
-  apply (the immutable-id case moves, then updates, the same message).
+- **Concurrency window.** The first committed write (update or move) holds the message for
+  `conflictWindowMs` (default 25; a refused or faulted write holds nothing); an overlapping write
+  gets 409; non-overlapping writes both apply (the immutable-id case moves, then updates, the same
+  message).
 - **Id counters.** Created ids (events, drafts, drive items) and change keys come from counters
   that only advance, so a reversible case ends at the seed except the counters.
 - **Removal.** A deleted or cancelled event, a permanently deleted draft, and a deleted folder

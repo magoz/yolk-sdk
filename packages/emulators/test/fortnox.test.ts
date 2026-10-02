@@ -770,6 +770,8 @@ describe('faults', () => {
         }
       })
 
+      const before = target.snapshot()
+
       // The core's own error handler (which logs) is never reached.
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       let logged = 0
@@ -792,7 +794,38 @@ describe('faults', () => {
           responseError: 'the route handler failed'
         })
       ])
+      expect(target.snapshot()).toEqual(before)
       expect((await call(target, 'GET', '/3/invoices')).status).toBe(200)
+    })
+  )
+
+  it.effect('a write handler that throws partway writes nothing', () =>
+    Effect.promise(async () => {
+      // Sending an invoice by email marks it Sent, then reads the clock for the outbox entry.
+      const target = await emulator({
+        now: () => {
+          throw new Error('synthetic clock failure')
+        }
+      })
+
+      const before = target.snapshot()
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+      const failed = await call(target, 'GET', '/3/invoices/104/email').finally(() =>
+        consoleError.mockRestore()
+      )
+
+      expect(failed.status).toBe(500)
+      expect(await errorCode(failed)).toBe(fortnoxEmulatorErrorCodes.upstreamError)
+      expect(target.ledger.entries()).toEqual([
+        expect.objectContaining({
+          path: '/3/invoices/104/email',
+          status: 500,
+          responseError: 'the route handler failed'
+        })
+      ])
+      // Neither the Sent flag nor the outbox entry (nor any counter) reached the state.
+      expect(target.snapshot()).toEqual(before)
     })
   )
 
@@ -909,6 +942,10 @@ describe('faults', () => {
           })
         ])
         expect(target.ledger.entries()[0]?.fault).toBeUndefined()
+        // The fault's answer, not the route, failed.
+        expect(target.ledger.entries()[0]?.responseError).toBe(
+          'the emulator could not build or produce the response'
+        )
         expect(target.faults.list()[0]).toMatchObject({ remaining: 1, applied: 0 })
 
         // Once its response can be built, the kept fault applies.

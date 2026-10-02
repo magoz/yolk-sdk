@@ -267,7 +267,8 @@ On every HTTP connector emulator and MCP, a fault is chosen only for a request t
 answer, so a refused request never uses one up and a misplaced fault stays listed in
 `faults.list()` instead of passing silently. On Fortnox and Microsoft Graph, a refusal is the
 provider's error envelope (a 404 for an unknown id, or a 400 or 409 for a state or value the route
-refuses) rather than a not-emulated 400, and it uses up no fault either.
+refuses) rather than the shared `{ error: { type: 'not_emulated' } }` 400, and it uses up no fault
+either.
 
 ## Drills
 

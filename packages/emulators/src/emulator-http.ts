@@ -166,3 +166,19 @@ export const handlerFailedHeader = 'x-emulator-handler-failed'
 /** The core route's answer when its handler threw (see `handlerFailedHeader`). */
 export const handlerFailedResponse = (): Response =>
   new Response(null, { status: 500, headers: { [handlerFailedHeader]: '1' } })
+
+/**
+ * Internal request header a stateful wrapper sets on the requests it forwards to its core: the
+ * id of the wrapper's job for that request (the fault decision the core route asks for, and what
+ * the route decided). Ids come from a counter that never resets (the ledger sequence does), so a
+ * ledger clear never makes two jobs share one. Clients cannot set it: wrappers build the core
+ * request headers themselves.
+ */
+export const emulatorJobHeader = 'x-emulator-job-id'
+
+/**
+ * What a core route answers when the wrapper returns the real answer itself (a fault, or in the
+ * shared wrapper's resolved mode a refusal), so that answer never depends on the core runtime's
+ * lifecycle: a reset or a close before it is read never cancels it.
+ */
+export const answeredOutsideCore = (): Response => new Response(null, { status: 204 })
