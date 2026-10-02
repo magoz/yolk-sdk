@@ -7,8 +7,30 @@
  * Completions wire, written by `pnpm conformance:gateway --live --owner-approved --account <label>`.
  * The DeepSeek fixture was recorded with `deepseek/deepseek-v4.1-flash`, now the default reasoning
  * model, so `vercelAiGatewayConformanceDefaultModels` names the model of every committed fixture.
+ *
+ * The classifier (`POST /v1/evaluate`) cases and fixtures are exported apart from the chat arrays
+ * (`vercelAiGatewayClassifierConformanceCases` / `vercelAiGatewayClassifierConformanceFixtures`).
+ * Their fixtures are synthetic placeholders (`evidence: 'unverified'`) until an owner-approved live
+ * probe records them.
  */
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
+import { vercelAiGatewayClassifierBooleanFixture } from './classifier-boolean.ts'
+import {
+  VercelAiGatewayClassifierConformanceConfig,
+  vercelAiGatewayClassifierBooleanCase,
+  vercelAiGatewayClassifierChoiceCase,
+  vercelAiGatewayClassifierConformanceCases,
+  vercelAiGatewayClassifierConformanceDefaultModels,
+  vercelAiGatewayClassifierErrorEnvelopeCase,
+  vercelAiGatewayClassifierScoreCase,
+  type VercelAiGatewayClassifierConformanceCase,
+  type VercelAiGatewayClassifierConformanceModels,
+  type VercelAiGatewayClassifierConformanceRequirements,
+  type VercelAiGatewayClassifierConformanceSettings
+} from './classifier-cases.ts'
+import { vercelAiGatewayClassifierChoiceFixture } from './classifier-choice.ts'
+import { vercelAiGatewayClassifierErrorEnvelopeFixture } from './classifier-error-envelope.ts'
+import { vercelAiGatewayClassifierScoreFixture } from './classifier-score.ts'
 import {
   VercelAiGatewayConformanceConfig,
   vercelAiGatewayConformanceCases,
@@ -42,7 +64,22 @@ export {
   vercelAiGatewayDeepSeekReasoningFixture,
   vercelAiGatewayErrorEnvelopeFixture,
   vercelAiGatewayPlainTextFixture,
-  vercelAiGatewayToolCallDeltasFixture
+  vercelAiGatewayToolCallDeltasFixture,
+  VercelAiGatewayClassifierConformanceConfig,
+  vercelAiGatewayClassifierBooleanCase,
+  vercelAiGatewayClassifierChoiceCase,
+  vercelAiGatewayClassifierConformanceCases,
+  vercelAiGatewayClassifierConformanceDefaultModels,
+  vercelAiGatewayClassifierErrorEnvelopeCase,
+  vercelAiGatewayClassifierScoreCase,
+  type VercelAiGatewayClassifierConformanceCase,
+  type VercelAiGatewayClassifierConformanceModels,
+  type VercelAiGatewayClassifierConformanceRequirements,
+  type VercelAiGatewayClassifierConformanceSettings,
+  vercelAiGatewayClassifierBooleanFixture,
+  vercelAiGatewayClassifierChoiceFixture,
+  vercelAiGatewayClassifierErrorEnvelopeFixture,
+  vercelAiGatewayClassifierScoreFixture
 }
 
 /** Every Vercel AI Gateway wire fixture, for replaying a whole conformance suite at once. */
@@ -51,4 +88,12 @@ export const vercelAiGatewayConformanceFixtures: ReadonlyArray<WireFixture> = [
   vercelAiGatewayDeepSeekReasoningFixture,
   vercelAiGatewayToolCallDeltasFixture,
   vercelAiGatewayErrorEnvelopeFixture
+]
+
+/** Every Vercel AI Gateway classifier (`/v1/evaluate`) wire fixture, in case order. */
+export const vercelAiGatewayClassifierConformanceFixtures: ReadonlyArray<WireFixture> = [
+  vercelAiGatewayClassifierBooleanFixture,
+  vercelAiGatewayClassifierChoiceFixture,
+  vercelAiGatewayClassifierScoreFixture,
+  vercelAiGatewayClassifierErrorEnvelopeFixture
 ]

@@ -3,6 +3,7 @@ import type * as Schema from 'effect/Schema'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { LLMError } from '@yolk-sdk/agent/loop'
 import { makeOpenAiProviderLayer, type OpenAiRequestExtras } from '../openai/provider.ts'
+import { vercelAiGatewayCredentialConfig } from './ai-gateway-credential-internal.ts'
 
 export const vercelAiGatewayProviderId = 'vercel_ai_gateway'
 
@@ -135,9 +136,7 @@ export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProvider
   )
 
 const vercelAiGatewayEnvironmentConfig = Effect.gen(function* () {
-  const apiKey = yield* Config.Redacted('AI_GATEWAY_API_KEY').pipe(
-    Config.orElse(() => Config.Redacted('VERCEL_OIDC_TOKEN'))
-  )
+  const apiKey = yield* vercelAiGatewayCredentialConfig
 
   const maxCompletionTokens = yield* Config.Int('AI_GATEWAY_MAX_COMPLETION_TOKENS')
 

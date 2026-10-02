@@ -9,31 +9,32 @@ For the current provider catalog and setup snippets, see [Model providers](../in
 
 ## Pick a provider subpath
 
-| Subpath                                                | Purpose                                                                             |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/providers/openai`                     | Codex OAuth and token broker helpers                                                |
-| `@yolk-sdk/agent/providers/openai/provider`            | OpenAI-compatible chat provider factory                                             |
-| `@yolk-sdk/agent/providers/openai/conformance`         | OpenAI chat, Codex Responses, and Codex usage fixtures and conformance cases        |
-| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | Vercel AI Gateway provider factory and configuration                                |
-| `@yolk-sdk/agent/providers/vercel/conformance`         | Gateway wire fixtures for replay tests with `@yolk-sdk/conformance`                 |
-| `@yolk-sdk/agent/providers/opencode/go-provider`       | OpenCode Go API-key provider for three host-selected protocols                      |
-| `@yolk-sdk/agent/providers/opencode/usage`             | Best-effort Go allowance snapshots using an API key                                 |
-| `@yolk-sdk/agent/providers/opencode/conformance`       | OpenCode Go wire fixtures and conformance cases (protocols and usage) for replay    |
-| `@yolk-sdk/agent/providers/openai/codex`               | Codex request, authorization header, and token broker helpers                       |
-| `@yolk-sdk/agent/providers/openai/codex-usage`         | Best-effort Codex subscription-allowance snapshots                                  |
-| `@yolk-sdk/agent/providers/openai/codex-provider`      | OpenAI Codex provider factory                                                       |
-| `@yolk-sdk/agent/providers/anthropic`                  | Claude OAuth and token broker helpers                                               |
-| `@yolk-sdk/agent/providers/anthropic/claude`           | Claude authorization URL, callback parsing, and token broker helpers                |
-| `@yolk-sdk/agent/providers/anthropic/usage`            | Best-effort Claude subscription-allowance snapshots                                 |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider`  | Claude provider factory                                                             |
-| `@yolk-sdk/agent/providers/anthropic/conformance`      | Anthropic Messages and Claude usage fixtures and conformance cases for replay tests |
-| `@yolk-sdk/agent/providers/xai`                        | Grok subscription OAuth and token broker helpers                                    |
-| `@yolk-sdk/agent/providers/xai/grok`                   | Grok PKCE/device constants, callback parsing, auth, and broker helpers              |
-| `@yolk-sdk/agent/providers/xai/grok-provider`          | Grok subscription Responses provider factory                                        |
-| `@yolk-sdk/agent/providers/xai/usage`                  | Best-effort Grok subscription-allowance snapshots                                   |
-| `@yolk-sdk/agent/providers/xai/conformance`            | Grok Responses and Grok usage fixtures and conformance cases for replay tests       |
-| `@yolk-sdk/agent/providers/subscription-usage`         | Shared allowance snapshot and safe error schemas                                    |
-| `@yolk-sdk/agent/oauth`                                | Provider-neutral access-token and broker contracts                                  |
+| Subpath                                                  | Purpose                                                                                 |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/providers/openai`                       | Codex OAuth and token broker helpers                                                    |
+| `@yolk-sdk/agent/providers/openai/provider`              | OpenAI-compatible chat provider factory                                                 |
+| `@yolk-sdk/agent/providers/openai/conformance`           | OpenAI chat, Codex Responses, and Codex usage fixtures and conformance cases            |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider`   | Vercel AI Gateway provider factory and configuration                                    |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-classifier` | Vercel AI Gateway [classifier model](./classifier-models) layer (`/v1/evaluate`)        |
+| `@yolk-sdk/agent/providers/vercel/conformance`           | Gateway chat and classifier wire fixtures for replay tests with `@yolk-sdk/conformance` |
+| `@yolk-sdk/agent/providers/opencode/go-provider`         | OpenCode Go API-key provider for three host-selected protocols                          |
+| `@yolk-sdk/agent/providers/opencode/usage`               | Best-effort Go allowance snapshots using an API key                                     |
+| `@yolk-sdk/agent/providers/opencode/conformance`         | OpenCode Go wire fixtures and conformance cases (protocols and usage) for replay        |
+| `@yolk-sdk/agent/providers/openai/codex`                 | Codex request, authorization header, and token broker helpers                           |
+| `@yolk-sdk/agent/providers/openai/codex-usage`           | Best-effort Codex subscription-allowance snapshots                                      |
+| `@yolk-sdk/agent/providers/openai/codex-provider`        | OpenAI Codex provider factory                                                           |
+| `@yolk-sdk/agent/providers/anthropic`                    | Claude OAuth and token broker helpers                                                   |
+| `@yolk-sdk/agent/providers/anthropic/claude`             | Claude authorization URL, callback parsing, and token broker helpers                    |
+| `@yolk-sdk/agent/providers/anthropic/usage`              | Best-effort Claude subscription-allowance snapshots                                     |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider`    | Claude provider factory                                                                 |
+| `@yolk-sdk/agent/providers/anthropic/conformance`        | Anthropic Messages and Claude usage fixtures and conformance cases for replay tests     |
+| `@yolk-sdk/agent/providers/xai`                          | Grok subscription OAuth and token broker helpers                                        |
+| `@yolk-sdk/agent/providers/xai/grok`                     | Grok PKCE/device constants, callback parsing, auth, and broker helpers                  |
+| `@yolk-sdk/agent/providers/xai/grok-provider`            | Grok subscription Responses provider factory                                            |
+| `@yolk-sdk/agent/providers/xai/usage`                    | Best-effort Grok subscription-allowance snapshots                                       |
+| `@yolk-sdk/agent/providers/xai/conformance`              | Grok Responses and Grok usage fixtures and conformance cases for replay tests           |
+| `@yolk-sdk/agent/providers/subscription-usage`           | Shared allowance snapshot and safe error schemas                                        |
+| `@yolk-sdk/agent/oauth`                                  | Provider-neutral access-token and broker contracts                                      |
 
 ## Provide fresh credentials at runtime
 

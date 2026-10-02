@@ -226,6 +226,58 @@ describe('runCheck on a fixture workspace', () => {
   })
 })
 
+describe('classification core boundary', () => {
+  it('keeps provider code out of the classification core, by subpath or relative path', () => {
+    const root = fixtureDirectory()
+
+    scaffoldPackages(root)
+    write(
+      root,
+      'packages/agent/package.json',
+      JSON.stringify({
+        ...agentManifest,
+        exports: {
+          ...agentManifest.exports,
+          './classification': './src/classification/index.ts',
+          './providers/vercel/ai-gateway-classifier':
+            './src/providers/vercel/ai-gateway-classifier.ts'
+        }
+      })
+    )
+    write(
+      root,
+      'packages/agent/src/providers/vercel/ai-gateway-classifier.ts',
+      `export const p = 1\n`
+    )
+    write(
+      root,
+      'packages/agent/src/classification/leak.ts',
+      `import { p } from '../providers/vercel/ai-gateway-classifier.ts'\nimport { q } from '@yolk-sdk/agent/providers/vercel/ai-gateway-classifier'\nimport fs from 'node:fs'\n\nexport const probe = [p, q, fs]\n`
+    )
+    write(
+      root,
+      'packages/agent/src/classification/ok.ts',
+      `import { protocol } from '@yolk-sdk/agent/protocol'\n\nexport const probe = protocol\n`
+    )
+    write(
+      root,
+      'packages/agent/src/providers/vercel/uses-core.ts',
+      `import { c } from '../../classification/index.ts'\n\nexport const probe = c\n`
+    )
+    write(root, 'packages/agent/src/classification/index.ts', `export const c = 1\n`)
+
+    const leak = violationsFor(root, 'packages/agent/src/classification/leak.ts')
+
+    expect(leak.map(violation => [violation.specifier, violation.forbidden]).sort()).toEqual([
+      ['../providers/vercel/ai-gateway-classifier.ts', '@yolk-sdk/agent/providers'],
+      ['@yolk-sdk/agent/providers/vercel/ai-gateway-classifier', '@yolk-sdk/agent/providers'],
+      ['node:fs', 'node:']
+    ])
+    expect(violationsFor(root, 'packages/agent/src/classification/ok.ts')).toEqual([])
+    expect(violationsFor(root, 'packages/agent/src/providers/vercel/uses-core.ts')).toEqual([])
+  })
+})
+
 describe('conformance and connector import rules', () => {
   const scaffoldConformance = (root: string): void => {
     scaffoldPackages(root)

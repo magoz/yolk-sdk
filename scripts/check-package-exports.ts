@@ -74,6 +74,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
     expectedExports: [
       './package.json',
       '.',
+      './classification',
       './client',
       './compaction',
       './loop',
@@ -94,6 +95,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './providers/openai/realtime',
       './providers/openai/speech',
       './providers/vercel/ai-gateway-provider',
+      './providers/vercel/ai-gateway-classifier',
       './providers/vercel/conformance',
       './providers/opencode/go-provider',
       './providers/opencode/usage',

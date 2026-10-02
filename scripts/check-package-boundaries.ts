@@ -132,6 +132,12 @@ const rules: ReadonlyArray<BoundaryRule> = [
     forbiddenImports: agentCoreForbiddenImports
   },
   {
+    // The classifier contract is provider-neutral: no provider code (by subpath or by a relative
+    // path, which the resolved-owner check maps to `@yolk-sdk/agent/providers/*`).
+    packageDir: 'packages/agent/src/classification',
+    forbiddenImports: [...agentCoreForbiddenImports, '@yolk-sdk/agent/providers']
+  },
+  {
     packageDir: 'packages/agent/src/tools',
     forbiddenImports: agentCoreForbiddenImports
   },

@@ -36,28 +36,28 @@ pnpm add -D @yolk-sdk/emulators@canary effect@4.0.0-rc.115
 
 There is no root export. Import an explicit subpath:
 
-| Subpath                               | Purpose                                                                                                             |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/emulators/router`          | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` (Effect; no Node builtins)                 |
-| `@yolk-sdk/emulators/gateway`         | `makeGatewayEmulator`, `gatewayEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)               |
-| `@yolk-sdk/emulators/openai`          | `makeOpenAiEmulator`, `openAiEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)                 |
-| `@yolk-sdk/emulators/anthropic`       | `makeAnthropicEmulator`, `anthropicEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)           |
-| `@yolk-sdk/emulators/codex`           | `makeCodexEmulator`, `codexEmulatorRoutes`, fault and scripted-turn schemas (ChatGPT Codex Responses)               |
-| `@yolk-sdk/emulators/xai`             | `makeXAiGrokEmulator`, `xAiGrokEmulatorRoutes`, fault and scripted-turn schemas (Grok CLI proxy Responses)          |
-| `@yolk-sdk/emulators/opencode`        | `makeOpenCodeGoEmulator`, `openCodeGoEmulatorRoutes` (OpenCode Go chat, Messages, Responses, and usage)             |
-| `@yolk-sdk/emulators/email`           | `makeEmailEmulator`, `emailEmulatorRoutes`, seed and fault schemas (plain-JSON `EmailClient` backend)               |
-| `@yolk-sdk/emulators/r2`              | `makeR2Emulator`, `r2EmulatorRoutes`, seed and fault schemas (plain-JSON R2 port backend)                           |
-| `@yolk-sdk/emulators/node`            | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1`         |
-| `@yolk-sdk/emulators/fortnox`         | `makeFortnoxEmulator`, `fortnoxEmulatorRoutes`, `fortnoxEmulatorQuirks`, seed and fault schemas (Node only)         |
-| `@yolk-sdk/emulators/microsoft`       | `makeMicrosoftEmulator`, `microsoftEmulatorRoutes`, seed and fault schemas (Node only)                              |
-| `@yolk-sdk/emulators/dropbox`         | `makeDropboxEmulator`, `dropboxEmulatorRoutes`, seed and fault schemas (Node only)                                  |
-| `@yolk-sdk/emulators/notion`          | `makeNotionEmulator`, `notionEmulatorRoutes`, seed and fault schemas (Node only)                                    |
-| `@yolk-sdk/emulators/todoist`         | `makeTodoistEmulator`, `todoistEmulatorRoutes`, seed and fault schemas (Node only)                                  |
-| `@yolk-sdk/emulators/telegram`        | `makeTelegramEmulator`, `telegramEmulatorRoutes`, seed and fault schemas (Node only)                                |
-| `@yolk-sdk/emulators/github`          | `makeGithubEmulator`, `githubEmulatorRoutes`, seed and fault schemas (Node only)                                    |
-| `@yolk-sdk/emulators/google`          | `makeGoogleEmulator`, `googleEmulatorRoutes`, seed and fault schemas (Gmail, Calendar, Drive; Node only)            |
-| `@yolk-sdk/emulators/linkedin-search` | `makeLinkedInSearchEmulator`, `linkedInSearchEmulatorRoutes`, seed and fault schemas (Exa, Enrich Layer; Node only) |
-| `@yolk-sdk/emulators/mcp`             | `makeMcpEmulator`, `mcpEmulatorRoutes`, seed and fault schemas (synthetic MCP servers; Node only)                   |
+| Subpath                               | Purpose                                                                                                                                |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`          | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer` (Effect; no Node builtins)                                    |
+| `@yolk-sdk/emulators/gateway`         | `makeGatewayEmulator`, `gatewayEmulatorRoutes`, `gatewayEvaluateEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler) |
+| `@yolk-sdk/emulators/openai`          | `makeOpenAiEmulator`, `openAiEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)                                    |
+| `@yolk-sdk/emulators/anthropic`       | `makeAnthropicEmulator`, `anthropicEmulatorRoutes`, fault and scripted-turn schemas (plain fetch handler)                              |
+| `@yolk-sdk/emulators/codex`           | `makeCodexEmulator`, `codexEmulatorRoutes`, fault and scripted-turn schemas (ChatGPT Codex Responses)                                  |
+| `@yolk-sdk/emulators/xai`             | `makeXAiGrokEmulator`, `xAiGrokEmulatorRoutes`, fault and scripted-turn schemas (Grok CLI proxy Responses)                             |
+| `@yolk-sdk/emulators/opencode`        | `makeOpenCodeGoEmulator`, `openCodeGoEmulatorRoutes` (OpenCode Go chat, Messages, Responses, and usage)                                |
+| `@yolk-sdk/emulators/email`           | `makeEmailEmulator`, `emailEmulatorRoutes`, seed and fault schemas (plain-JSON `EmailClient` backend)                                  |
+| `@yolk-sdk/emulators/r2`              | `makeR2Emulator`, `r2EmulatorRoutes`, seed and fault schemas (plain-JSON R2 port backend)                                              |
+| `@yolk-sdk/emulators/node`            | `serveFetchHandler` (scoped Effect) and `startFetchHandlerServer` (Promise): serve a handler on `127.0.0.1`                            |
+| `@yolk-sdk/emulators/fortnox`         | `makeFortnoxEmulator`, `fortnoxEmulatorRoutes`, `fortnoxEmulatorQuirks`, seed and fault schemas (Node only)                            |
+| `@yolk-sdk/emulators/microsoft`       | `makeMicrosoftEmulator`, `microsoftEmulatorRoutes`, seed and fault schemas (Node only)                                                 |
+| `@yolk-sdk/emulators/dropbox`         | `makeDropboxEmulator`, `dropboxEmulatorRoutes`, seed and fault schemas (Node only)                                                     |
+| `@yolk-sdk/emulators/notion`          | `makeNotionEmulator`, `notionEmulatorRoutes`, seed and fault schemas (Node only)                                                       |
+| `@yolk-sdk/emulators/todoist`         | `makeTodoistEmulator`, `todoistEmulatorRoutes`, seed and fault schemas (Node only)                                                     |
+| `@yolk-sdk/emulators/telegram`        | `makeTelegramEmulator`, `telegramEmulatorRoutes`, seed and fault schemas (Node only)                                                   |
+| `@yolk-sdk/emulators/github`          | `makeGithubEmulator`, `githubEmulatorRoutes`, seed and fault schemas (Node only)                                                       |
+| `@yolk-sdk/emulators/google`          | `makeGoogleEmulator`, `googleEmulatorRoutes`, seed and fault schemas (Gmail, Calendar, Drive; Node only)                               |
+| `@yolk-sdk/emulators/linkedin-search` | `makeLinkedInSearchEmulator`, `linkedInSearchEmulatorRoutes`, seed and fault schemas (Exa, Enrich Layer; Node only)                    |
+| `@yolk-sdk/emulators/mcp`             | `makeMcpEmulator`, `mcpEmulatorRoutes`, seed and fault schemas (synthetic MCP servers; Node only)                                      |
 
 ## Routing
 
@@ -379,8 +379,8 @@ cases in `@yolk-sdk/agent/providers/openai/conformance` (Codex) and
 
 ## Fixture-only routes
 
-The OpenCode Go routes and the Claude, Codex, and Grok subscription-usage routes follow a stricter
-rule than the earlier model routes (whose behaviour above is unchanged): response behaviour comes
+The OpenCode Go routes, the Claude, Codex, and Grok subscription-usage routes, and the Gateway
+classifier route follow a stricter rule than the earlier model routes (whose behaviour above is unchanged): response behaviour comes
 only from the committed conformance fixtures.
 
 - A request that matches a recorded request's shape, within the request-shape latitude below,
@@ -407,6 +407,33 @@ only from the committed conformance fixtures.
   statuses of 400-599 only.
 
 All fixtures behind these routes are synthetic and the routes are `unverified`.
+
+## Gateway classifier route
+
+The Gateway emulator also answers AI Gateway's classifier route `POST /v1/evaluate` (Gateway calls
+classification "evaluation"), fixture-only, from the four synthetic classifier fixtures in
+`@yolk-sdk/agent/providers/vercel/conformance` (boolean, choice, score, and the unknown-model
+`{ message, error_type }` envelope). A request with a non-empty bearer credential, the recorded
+`accept` and `content-type`, no query, and a body matching one recording (the `model` and question
+`type` exact; any other string; the recorded question ids, option keys, and level count) gets
+that recording's response; anything else (another model, `providerOptions`, other questions)
+answers 400 not-emulated. The route keeps its own manifest (`gatewayEvaluateEmulatorRoutes`,
+`unverified`), ledger, faults, scripted errors, and coverage (`emulator.evaluate`, control plane
+`/_emulate/evaluate/*`); the chat route's manifest, coverage, and top-level APIs are unchanged, and
+`reset()` and `POST /_emulate/reset` reset both.
+
+```ts
+import { makeGatewayEmulator } from '@yolk-sdk/emulators/gateway'
+
+const gateway = makeGatewayEmulator()
+
+gateway.evaluate.faults.add({
+  kind: 'status',
+  status: 429,
+  headers: { 'retry-after': '2' },
+  count: 1
+})
+```
 
 ## OpenCode Go emulator
 
@@ -2046,8 +2073,8 @@ it.
 
 ## Evidence
 
-`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`, `codexEmulatorRoutes`,
-`xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
+`gatewayEmulatorRoutes`, `gatewayEvaluateEmulatorRoutes`, `openAiEmulatorRoutes`,
+`anthropicEmulatorRoutes`, `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`, the three subscription-usage manifests,
 `emailEmulatorRoutes`, `r2EmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`,
 `dropboxEmulatorRoutes`, `notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`,
 `githubEmulatorRoutes`, `googleEmulatorRoutes`, `linkedInSearchEmulatorRoutes`, and

@@ -20,6 +20,15 @@
  * bodies, the non-streamed `chat.completion` body, and the answer to a request
  * without a `model` (404 `Model '' not found` with `param.modelId: null`).
  *
+ * The same fetch handler also answers the classifier route `POST /v1/evaluate`
+ * (AI Gateway calls classification "evaluation"; `emulator.evaluate`) with its
+ * own manifest (`gatewayEvaluateEmulatorRoutes`, unverified), ledger, faults,
+ * and turns. It is fixture-only: a request matching one of the four synthetic
+ * classifier conformance recordings (boolean, choice, score, unknown-model
+ * error envelope; `gateway-evaluate-recordings.ts`, copied as data) within the
+ * shared request-shape latitude gets that recording's response; anything else
+ * answers 400 not-emulated.
+ *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`,
  * `TextEncoder`, `URL`); no Effect runtime is required to use it.
  *
@@ -47,6 +56,16 @@ import {
   type ChatWireError,
   type ChatWireProfile
 } from './chat-completions.ts'
+import { composeFetch } from './emulator-compose.ts'
+import {
+  FixtureRouteFault,
+  makeFixtureRouteEmulator,
+  type FixtureRouteEmulator,
+  type FixtureRouteFaultKind,
+  type FixtureRouteLedgerEntry,
+  type FixtureRouteScriptedTurn
+} from './fixture-route.ts'
+import { gatewayEvaluateRecordings } from './gateway-evaluate-recordings.ts'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
 
 export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.ts'
@@ -54,6 +73,9 @@ export type { EmulatorEvidence, EmulatorRouteEvidence } from './route-evidence.t
 export { emulatorEvidenceHeader } from './route-evidence.ts'
 
 export const gatewayChatCompletionsPath = '/v1/chat/completions'
+
+/** The AI Gateway classifier ("evaluation") path. */
+export const gatewayEvaluatePath = '/v1/evaluate'
 
 /** Synthetic-safe default model ids, including the Gateway conformance defaults. */
 export const gatewayEmulatorDefaultModels: ReadonlyArray<string> = [
@@ -94,6 +116,27 @@ export const gatewayEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
     ],
     evidence: 'verified',
     observedAt: '2026-09-30'
+  }
+]
+
+/**
+ * Route evidence manifest of the classifier route (served by the same fetch handler, with its own
+ * ledger, faults, and coverage). Its recordings are synthetic placeholders, so it is unverified.
+ */
+export const gatewayEvaluateEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
+  {
+    method: 'POST',
+    path: gatewayEvaluatePath,
+    kind: 'provider',
+    write: false,
+    caseIds: [
+      'vercel-ai-gateway.classify.boolean',
+      'vercel-ai-gateway.classify.choice',
+      'vercel-ai-gateway.classify.score',
+      'vercel-ai-gateway.classify.error-envelope'
+    ],
+    evidence: 'unverified',
+    observedAt: undefined
   }
 ]
 
@@ -200,7 +243,24 @@ export type GatewayEmulatorOptions = {
   readonly eventsPerChunk?: number
 }
 
-export type GatewayEmulator = ChatCompletionsEmulator<GatewayScriptedTurn>
+/** A classifier-route fault (`status` 400-599, `error-after-chunks`, `truncate-after-chunks`). */
+export const GatewayEvaluateFault = FixtureRouteFault
+
+export type GatewayEvaluateFault = FixtureRouteFault
+
+export type GatewayEvaluateFaultKind = FixtureRouteFaultKind
+
+/** A classifier-route turn: a scripted error (status 400-599) only. */
+export type GatewayEvaluateScriptedTurn = FixtureRouteScriptedTurn
+
+export type GatewayEvaluateLedgerEntry = FixtureRouteLedgerEntry
+
+export type GatewayEvaluateEmulator = FixtureRouteEmulator
+
+/** The chat emulator, plus `evaluate`: the classifier route's own emulator API. */
+export type GatewayEmulator = ChatCompletionsEmulator<GatewayScriptedTurn> & {
+  readonly evaluate: GatewayEvaluateEmulator
+}
 
 const gatewayErrorEnvelope = (error: ChatWireError): Schema.Json => ({
   error: { message: error.message, type: error.type, code: error.code }
@@ -400,9 +460,18 @@ const validEventsPerChunk = (eventsPerChunk: number | undefined): number => {
  * turn, then model validation and defaults; a first matching chunk fault then
  * shapes the body. Only the first matching fault (in insertion order) applies. Credential headers are never
  * recorded, and the bearer value is never checked or stored.
+ *
+ * `POST /v1/evaluate` is fixture-only: a request with a non-empty bearer credential (never checked
+ * or stored), the recorded `accept` and `content-type`, no query, and a body matching one of the
+ * four classifier recordings (the discriminators `model` and `type` exact; any other string; the
+ * same keys, so the recorded question ids, option keys, and level count) gets the recorded
+ * response; anything else (another model, `providerOptions`, other questions) answers 400
+ * not-emulated. Its ledger, faults (statuses 400-599), scripted errors, and coverage are
+ * `emulator.evaluate` (control plane `/_emulate/evaluate/*`); `emulator.faults` and the other
+ * top-level APIs stay the chat route's. `reset()` and `POST /_emulate/reset` reset both.
  */
-export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): GatewayEmulator =>
-  makeChatCompletionsEmulator({
+export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): GatewayEmulator => {
+  const chat = makeChatCompletionsEmulator({
     path: gatewayChatCompletionsPath,
     routes: gatewayEmulatorRoutes,
     knownModels: options.knownModels ?? gatewayEmulatorDefaultModels,
@@ -434,3 +503,28 @@ export const makeGatewayEmulator = (options: GatewayEmulatorOptions = {}): Gatew
     inputInvalid: (input, reason) => new GatewayEmulatorInputInvalid({ input, reason }),
     wire: gatewayWireProfile(validEventsPerChunk(options.eventsPerChunk))
   })
+
+  const evaluate = makeFixtureRouteEmulator({
+    method: 'POST',
+    path: gatewayEvaluatePath,
+    routes: gatewayEvaluateEmulatorRoutes,
+    recordings: gatewayEvaluateRecordings,
+    credential: 'bearer',
+    headers: [],
+    inputInvalid: (input, reason) => new GatewayEmulatorInputInvalid({ input, reason })
+  })
+
+  return {
+    ...chat,
+    fetch: composeFetch({
+      routes: [{ name: 'evaluate', paths: [gatewayEvaluatePath], part: evaluate }],
+      fallback: chat,
+      control: request => chat.fetch(request)
+    }),
+    reset: () => {
+      chat.reset()
+      evaluate.reset()
+    },
+    evaluate
+  }
+}

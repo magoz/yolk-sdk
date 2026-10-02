@@ -1,0 +1,130 @@
+---
+title: Classifier models
+description: Ask typed questions about data and get calibrated probabilities instead of text.
+---
+
+Classifier models such as TypeSafe's Jev answer typed questions about one value with
+probabilities. They do not chat or generate text. Use them for fast, typed decisions: route a
+ticket, score urgency, or check whether a reply approves a result.
+
+AI Gateway calls this capability **evaluation** (`POST /v1/evaluate`). Yolk calls it
+**classification** everywhere (`classify`, `ClassifierModel`, `ClassificationResult`); the Gateway
+provider maps the wire name.
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect@4.0.0-rc.115
+```
+
+## Subpaths
+
+| Subpath                                                  | Use for                                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/classification`                         | provider-neutral questions, answers, usage, errors, and `classify`        |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-classifier` | `ClassifierModel` layer over AI Gateway `POST /v1/evaluate`               |
+| `@yolk-sdk/agent/providers/vercel/conformance`           | classifier conformance cases and synthetic fixtures for replay tests      |
+| `@yolk-sdk/emulators/gateway`                            | fixture-only `/v1/evaluate` route next to the Gateway chat emulator route |
+
+## Classify
+
+A classification is one `state` (a string, JSON object, or JSON array; an array is one state, not a
+batch) and named questions answered together. This fragment routes a ticket; `gatewayKey` is your
+host-owned AI Gateway API key or Vercel OIDC token.
+
+```ts
+import { Effect, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { classify } from '@yolk-sdk/agent/classification'
+import { makeVercelAiGatewayClassifierLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-classifier'
+
+const program = classify({
+  state: { subject: 'Invoice question', body: 'I was charged twice.' },
+  questions: {
+    route: {
+      type: 'choice',
+      instructions: 'Which team should handle this ticket?',
+      criteria: {
+        billing: 'Payments and refunds.',
+        bug: 'Product defects.',
+        other: 'Anything else.'
+      }
+    },
+    urgent: { type: 'boolean', instructions: 'Does the customer need an answer today?' }
+  }
+}).pipe(
+  Effect.map(result => ({
+    team: result.answers.route.choice, // 'billing' | 'bug' | 'other'
+    urgent: result.answers.urgent.probability > 0.7,
+    costUsd: result.usage?.costUsd
+  })),
+  Effect.provide(makeVercelAiGatewayClassifierLayer({ apiKey: Redacted.make(gatewayKey) })),
+  Effect.provide(FetchHttpClient.layer)
+)
+```
+
+`classify` types each answer from its question: a `choice` answer's `choice` is the union of that
+question's option keys. `VercelAiGatewayClassifierLayer` reads the same credential as the Gateway
+chat provider from the environment (`AI_GATEWAY_API_KEY`, falling back to `VERCEL_OIDC_TOKEN`) and
+provides the Fetch `HttpClient`.
+
+## Questions and answers
+
+| Question  | `criteria`                                                          | Answer                                                     |
+| --------- | ------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `boolean` | optional `{ true, false }` descriptions                             | `{ type: 'boolean', probability }` (probability of `true`) |
+| `choice`  | option key to a description or JSON value (2 to 255 options)        | `{ type: 'choice', choice, probabilities, confidence? }`   |
+| `score`   | ordinal levels, lowest first, as descriptions or JSON (2–10 levels) | `{ type: 'score', score, probabilities, confidence? }`     |
+
+Probabilities are kept exactly as the provider returns them (Jev rounds to two decimals) and are
+never renormalized. Every answer is checked against its question: a missing answer, an answer for
+a question that was not asked, a type mismatch, a choice that names no option, or a probability or
+confidence that is not a finite number in `[0, 1]` fails the classification.
+
+`ClassificationResult` carries `model`, `answers` (keyed by question id), `usage`
+(`inputTokens`, `outputTokens`, and `costUsd` when the provider reports a cost), and
+`providerMetadata`.
+
+## Errors
+
+Failures are typed errors in the Effect error channel, never result flags:
+
+| Error                           | When                                                                                                |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `ClassificationRequestInvalid`  | the request breaks the contract (for example 256 options); nothing is sent                          |
+| `ClassificationProviderError`   | the provider is unreachable or rejects the request; `provider` has the kind, status, and error code |
+| `ClassificationResponseInvalid` | the response or an answer does not fit the request; `usage` is kept because the request was billed  |
+
+Provider error messages are status-only (`Vercel AI Gateway returned 404`); they never carry the
+provider's body or your credential.
+
+## AI Gateway
+
+- Calls `POST https://ai-gateway.vercel.sh/v1/evaluate` with `typesafe-ai/jev` by default. Set
+  `model` to choose another classifier model, and `baseUrl` only for a trusted proxy or a local
+  emulator: the bearer credential is sent there.
+- `providerOptions` passes through unchanged, so Gateway options such as
+  `{ gateway: { zeroDataRetention: true, only: [...], models: [...] } }` reach the Gateway as you
+  write them.
+- `providerMetadata.gateway.cost` (US dollars) becomes `usage.costUsd`.
+- Evaluation fallback response headers (`x-ai-gateway-evaluation-fallback-*`) are kept in
+  `providerMetadata.evaluationFallbackHeaders`.
+- `choice` and `score` confidence is read from the answer, or else from
+  `providerMetadata.typesafe.confidence[questionId]`. Which one the live Gateway uses is not yet
+  verified.
+
+## Policy stays in your host
+
+Classification is a read with no side effects. A classifier can say a command looks destructive,
+but your host policy decides whether it runs. Thresholds, model choice, credentials, and what to do
+with each answer are host-owned.
+
+## Testing
+
+The four classifier conformance cases (`vercelAiGatewayClassifierConformanceCases`: boolean,
+choice, score, and the error envelope) need only an `HttpClient` and
+`VercelAiGatewayClassifierConformanceConfig`. Replay them from
+`vercelAiGatewayClassifierConformanceFixtures` with `ReplayHttpClient`, or run them against the
+`@yolk-sdk/emulators/gateway` emulator, whose `emulator.evaluate` part answers the same synthetic
+recordings. The fixtures are synthetic placeholders (`evidence: 'unverified'`) until an
+owner-approved live probe records them.

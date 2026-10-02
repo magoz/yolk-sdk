@@ -31,6 +31,10 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./classification": {
+      "types": "./src/classification/index.ts",
+      "default": "./src/classification/index.ts"
+    },
     "./client": {
       "types": "./src/client/index.ts",
       "default": "./src/client/index.ts"
@@ -102,6 +106,10 @@
     "./providers/vercel/ai-gateway-provider": {
       "types": "./src/providers/vercel/ai-gateway-provider.ts",
       "default": "./src/providers/vercel/ai-gateway-provider.ts"
+    },
+    "./providers/vercel/ai-gateway-classifier": {
+      "types": "./src/providers/vercel/ai-gateway-classifier.ts",
+      "default": "./src/providers/vercel/ai-gateway-classifier.ts"
     },
     "./providers/vercel/conformance": {
       "types": "./src/providers/vercel/conformance/index.ts",
@@ -197,6 +205,11 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
+      "./classification": {
+        "types": "./dist/classification/index.d.mts",
+        "import": "./dist/classification/index.mjs",
+        "default": "./dist/classification/index.mjs"
+      },
       "./client": {
         "types": "./dist/client/index.d.mts",
         "import": "./dist/client/index.mjs",
@@ -286,6 +299,11 @@
         "types": "./dist/providers/vercel/ai-gateway-provider.d.mts",
         "import": "./dist/providers/vercel/ai-gateway-provider.mjs",
         "default": "./dist/providers/vercel/ai-gateway-provider.mjs"
+      },
+      "./providers/vercel/ai-gateway-classifier": {
+        "types": "./dist/providers/vercel/ai-gateway-classifier.d.mts",
+        "import": "./dist/providers/vercel/ai-gateway-classifier.mjs",
+        "default": "./dist/providers/vercel/ai-gateway-classifier.mjs"
       },
       "./providers/vercel/conformance": {
         "types": "./dist/providers/vercel/conformance/index.d.mts",
