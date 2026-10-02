@@ -2,6 +2,8 @@ import { Data, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 import { Content, TextPart } from './content.ts'
+import { NestedToolCalls } from './nested-tool-calls.ts'
+import { AgentUsage } from './usage.ts'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
@@ -251,11 +253,36 @@ export class InteractionDescriptor extends Schema.Class<InteractionDescriptor>(
   actions: Schema.NonEmptyArray(InteractionActionDescriptor)
 }) {}
 
+/** Who may call a tool: the model directly, code mode scripts, or both (`all`, the default). */
+export const ToolCallableBy = Schema.Literals(['all', 'model', 'codemode'])
+
+export type ToolCallableBy = typeof ToolCallableBy.Type
+
+/** How scripts find a `codemode`-only tool: listed in the code mode description (default) or
+ * found through search. Only meaningful with `callableBy: 'codemode'`.
+ */
+export const ToolDiscovery = Schema.Literals(['listed', 'search'])
+
+export type ToolDiscovery = typeof ToolDiscovery.Type
+
+/** Registration-level exposure options: `discovery` exists only for `codemode`-only tools. */
+export type ToolExposure =
+  | { readonly callableBy?: 'all' | 'model'; readonly discovery?: never }
+  | { readonly callableBy: 'codemode'; readonly discovery?: ToolDiscovery }
+
 export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   name: NonEmptyTrimmedString,
   description: Schema.String,
   /** JSON Schema representation only (boolean | plain object). Not tool args, results, or HITL. */
   parameters: ToolJsonSchema,
+  /** Declaration-only JSON Schema of `ToolResult.structuredContent`. Never sent to providers
+   * and never used to validate results.
+   */
+  outputSchema: Schema.optional(ToolJsonSchema),
+  /** Absent means `all`. `codemode`-only definitions are never sent to providers. */
+  callableBy: Schema.optional(ToolCallableBy),
+  /** Only with `callableBy: 'codemode'`; absent means `listed`. */
+  discovery: Schema.optional(ToolDiscovery),
   approval: Schema.optional(ToolApprovalPolicy),
   background: Schema.optional(Schema.Boolean),
   execution: Schema.optional(Schema.Literal('background-v1')),
@@ -295,7 +322,15 @@ export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
   content: Content,
   isError: Schema.optional(Schema.Boolean),
   structuredContent: Schema.optional(Schema.Unknown),
-  acceptance: Schema.optional(BackgroundToolAccepted)
+  acceptance: Schema.optional(BackgroundToolAccepted),
+  /** Bounded audit record of nested tool calls (see `recordNestedToolCall`). Not model-visible:
+   * `toolResultMessageFromResult` drops it, so transcripts and providers never see it.
+   */
+  nestedCalls: Schema.optional(NestedToolCalls),
+  /** Summed usage reported by nested work. Not model-visible; the loop does not add it to run
+   * usage (hosts decide, as for subagents).
+   */
+  usage: Schema.optional(AgentUsage)
 }) {}
 
 /** One provider-facing acknowledgement for the original call; never append its terminal result again. */
@@ -1337,3 +1372,31 @@ export const makeInteractionToolResult = (input: {
 export const questionToolName = 'question'
 
 export const subagentToolName = 'subagent'
+
+/** Fail-closed set: approval, input, interaction, activated background, and the package-owned
+ * `question` and `subagent` tools never run from code mode, whatever `callableBy` says.
+ */
+export const isCodeModeFailClosed = (def: ToolDef): boolean =>
+  def.approval !== undefined ||
+  def.input !== undefined ||
+  def.interaction !== undefined ||
+  def.execution === 'background-v1' ||
+  def.name === questionToolName ||
+  def.name === subagentToolName
+
+/** Scripts may call the tool: `callableBy` is `all` (default) or `codemode`, outside the
+ * fail-closed set. Fail-closed tools marked `all` behave as `model`.
+ */
+export const isCodeModeCallable = (def: ToolDef): boolean =>
+  def.callableBy !== 'model' && !isCodeModeFailClosed(def)
+
+/** Provider-facing: everything except `codemode`-only definitions. */
+export const isProviderToolDef = (def: ToolDef): boolean => def.callableBy !== 'codemode'
+
+/** The definitions a model provider may receive; `codemode`-only tools are removed. */
+export const providerToolDefs = (tools: ReadonlyArray<ToolDef>): ReadonlyArray<ToolDef> =>
+  tools.every(isProviderToolDef) ? tools : tools.filter(isProviderToolDef)
+
+/** Effective discovery of a `codemode`-only tool (`listed` by default); undefined otherwise. */
+export const toolDiscovery = (def: ToolDef): ToolDiscovery | undefined =>
+  def.callableBy === 'codemode' ? (def.discovery ?? 'listed') : undefined

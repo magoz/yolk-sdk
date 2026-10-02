@@ -76,6 +76,7 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
     name,
     description: action?.description ?? `Invoke connector action ${actionId}.`,
     parameters: action?.inputSchema ?? Schema.Unknown,
+    output: action?.outputSchema,
     access: resolveAccess(options.access, actionId, action?.access),
     invalidParamsMessage: error =>
       `Invalid ${name} arguments: ${error instanceof Error ? error.message : String(error)}`,

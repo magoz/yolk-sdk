@@ -6,6 +6,9 @@ import type { LLMEvent } from '../llm-event.ts'
 
 export type LLMRequest = {
   readonly messages: ReadonlyArray<AgentMessage>
+  /** Provider-facing definitions. The loop omits `callableBy: 'codemode'` tools
+   * (`providerToolDefs`); hosts calling providers directly must do the same.
+   */
   readonly tools: ReadonlyArray<ToolDef>
   readonly model: string
   readonly systemPrompt: string

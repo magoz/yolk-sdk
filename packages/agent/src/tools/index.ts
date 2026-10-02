@@ -62,6 +62,8 @@ export type {
   InteractionToolRegistration,
   ModelVisibleToolErrorInput,
   ModelVisibleToolErrorStructuredContent,
+  NestedTool,
+  NestedToolExecutor,
   ToolExecutionInput,
   ToolMetadata,
   ToolModule,

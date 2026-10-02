@@ -1,6 +1,6 @@
 import { Effect, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
-import type { ToolDef } from '@yolk-sdk/agent/protocol'
+import { providerToolDefs, type ToolDef } from '@yolk-sdk/agent/protocol'
 import { VoiceToolBridgeError, type VoiceSessionConfig } from '@yolk-sdk/agent/voice'
 import { backgroundVoiceUnsupportedMessage } from '../../../background-execution-internal.ts'
 
@@ -327,17 +327,24 @@ const sessionConfigFromTools = ({
   }
 })
 
-/** Synchronous compatibility builder; throws VoiceToolBridgeError for activated tools. */
+/** Synchronous compatibility builder; throws VoiceToolBridgeError for activated tools.
+ * `callableBy: 'codemode'` definitions are omitted (never advertised to providers).
+ */
 export const makeOpenAiRealtimeSessionConfig = (
   input: OpenAiRealtimeSessionConfigInput
 ): OpenAiRealtimeSessionConfig =>
-  sessionConfigFromTools({ ...input, tools: input.tools.map(toOpenAiRealtimeTool) })
+  sessionConfigFromTools({
+    ...input,
+    tools: providerToolDefs(input.tools).map(toOpenAiRealtimeTool)
+  })
 
-/** Build before transport effects; catchTag('VoiceToolBridgeError') handles unsupported activation. */
+/** Build before transport effects; catchTag('VoiceToolBridgeError') handles unsupported activation.
+ * `callableBy: 'codemode'` definitions are omitted (never advertised to providers).
+ */
 export const makeOpenAiRealtimeSessionConfigEffect = (
   input: OpenAiRealtimeSessionConfigInput
 ): Effect.Effect<OpenAiRealtimeSessionConfig, VoiceToolBridgeError> =>
-  Effect.forEach(input.tools, toOpenAiRealtimeToolEffect).pipe(
+  Effect.forEach(providerToolDefs(input.tools), toOpenAiRealtimeToolEffect).pipe(
     Effect.map(tools => sessionConfigFromTools({ ...input, tools }))
   )
 

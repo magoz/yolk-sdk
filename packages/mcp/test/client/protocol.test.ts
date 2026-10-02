@@ -160,6 +160,36 @@ describe('MCP protocol helpers', () => {
     })
 
     expect(omitted.parameters).toEqual({ type: 'object', additionalProperties: true })
+    expect(Object.hasOwn(omitted, 'outputSchema')).toBe(false)
+  })
+
+  it('passes a present MCP outputSchema through as a declaration-only ToolDef.outputSchema', () => {
+    const outputSchema = { type: 'object', properties: { total: { type: 'number' } } }
+
+    const listed = Schema.decodeUnknownResult(ToolsListResult)({
+      tools: [{ name: 'count', outputSchema }]
+    })
+
+    expect(Result.isSuccess(listed)).toBe(true)
+
+    if (Result.isSuccess(listed)) {
+      const def = mcpToolToToolDef({
+        serverName: 'docs',
+        tool: listed.success.tools[0] ?? { name: 'count', outputSchema }
+      })
+
+      expect(def.outputSchema).toBe(outputSchema)
+      expect(def.callableBy).toBeUndefined()
+    }
+
+    for (const invalid of [true, 'object', [{ type: 'object' }], { n: Infinity }]) {
+      const def = mcpToolToToolDef({
+        serverName: 'docs',
+        tool: { name: 'count', outputSchema: invalid }
+      })
+
+      expect(Object.hasOwn(def, 'outputSchema')).toBe(false)
+    }
   })
 
   it('admits MCP inputSchema as a plain JSON object at tools/list decode, not ToolDef.make', () => {

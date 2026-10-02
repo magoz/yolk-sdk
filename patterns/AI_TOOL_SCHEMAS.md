@@ -12,6 +12,15 @@ change opaque tool arguments/results or HITL contracts. Provider requirements be
 than this shared representation. MCP tools/list accepts the object arm only and maps decode failure
 to typed validation errors. Background envelopes preserve boolean schemas as their arguments schema.
 
+## Output schemas and exposure
+
+- `ToolDef.outputSchema` (from `makeTool({ output })`, connector action `outputSchema`, or MCP
+  `outputSchema`) uses the same `ToolJsonSchema` representation and the same lowering as
+  `parameters`. It is declaration-only guidance for code mode: provider adapters never send it and
+  results are never validated against it, so provider rules below do not apply to it.
+- `callableBy: 'codemode'` definitions are not provider-facing at all; the loop and realtime
+  builders filter them with `providerToolDefs` before any adapter lowers schemas.
+
 ## OpenAI-compatible function parameters
 
 - Tool parameter JSON Schema sent to OpenAI-compatible providers must have root `{ "type": "object" }`.

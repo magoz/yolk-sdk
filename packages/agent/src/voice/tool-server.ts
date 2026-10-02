@@ -58,6 +58,11 @@ export const decideVoiceToolCall = (
 ): VoiceToolCallDecision => {
   const def = tools.find(tool => tool.name === call.name)
 
+  // Codemode-only tools are never advertised to providers; a provider call fails closed as unknown.
+  if (def?.callableBy === 'codemode') {
+    return VoiceToolCallDecision.Deny({ reason: `Tool is not configured: ${call.name}` })
+  }
+
   // Voice cannot bind activated approvals or represent background acceptance yet.
   if (def?.execution === 'background-v1') {
     return VoiceToolCallDecision.Deny({ reason: backgroundVoiceUnsupportedMessage })

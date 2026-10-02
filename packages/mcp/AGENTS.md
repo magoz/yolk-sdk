@@ -34,6 +34,7 @@
 - Server `handleHttpRequest` maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
 - Server stdio runner uses Effect `Stdio`; hosts provide the platform layer.
 - Preserve discovered MCP `title`, input/output schemas, and annotations when adapting tools.
+- `mcpToolToToolDef` passes a present plain-JSON-object `outputSchema` through as declaration-only `ToolDef.outputSchema` (never sent to providers) and omits any other value instead of failing the listing. It never sets `callableBy`; exposure is host policy.
 - Preserve MCP `structuredContent`, `isError`, and supported content blocks when adapting tool results.
 - Server maps protocol documents to MCP resource blocks with encoded `file:///...` URIs.
 - Export normal tool results/content; agent loop/providers stay MCP-agnostic.

@@ -7,6 +7,7 @@ import {
   ToolDef,
   ToolJsonSchemaObject,
   ToolResult,
+  decodeToolJsonSchemaObject,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
 import type { Content, ContentPart } from '@yolk-sdk/agent/protocol'
@@ -201,12 +202,24 @@ export const jsonRpcErrorToMcpError = (server: string, error: JsonRpcErrorObject
     cause: 'protocol'
   })
 
-export const mcpToolToToolDef = (input: { readonly serverName: string; readonly tool: McpTool }) =>
-  ToolDef.make({
+/** Adapts one listed MCP tool. A present `outputSchema` that is a plain JSON Schema object
+ * passes through as declaration-only `ToolDef.outputSchema`; any other value is omitted.
+ */
+export const mcpToolToToolDef = (input: {
+  readonly serverName: string
+  readonly tool: McpTool
+}) => {
+  const fields = {
     name: `${sanitizeMcpName(input.serverName)}_${sanitizeMcpName(input.tool.name)}`,
     description: input.tool.description ?? `MCP tool ${input.serverName}/${input.tool.name}`,
     parameters: input.tool.inputSchema ?? { type: 'object', additionalProperties: true }
+  }
+
+  return Option.match(decodeToolJsonSchemaObject(input.tool.outputSchema), {
+    onNone: () => ToolDef.make(fields),
+    onSome: outputSchema => ToolDef.make({ ...fields, outputSchema })
   })
+}
 
 export const sanitizeMcpName = (name: string) => {
   const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '_')
