@@ -118,6 +118,11 @@ git tag --list 'v<version>'
 git ls-remote --tags origin 'refs/tags/v<version>'
 ```
 
+Until the first stable release, finish with the owner-approved `latest` move on every public package
+(`npm dist-tag add @yolk-sdk/<name>@<version> latest`, owner OTP), as described in
+`patterns/PACKAGE_DISTRIBUTION.md` → Move `latest` to the new canary. The workflow only applies
+`--tag canary` to prereleases, so `latest` otherwise stays on an older canary.
+
 Preconditions:
 
 - release prep commit is on `main`
@@ -181,7 +186,7 @@ New package first publish:
 - After approval, first publish only the missing package from a packed tarball with interactive npm auth/OTP.
 - Then configure trust: `npm trust github @yolk-sdk/<name> --repo magoz/yolk-sdk --file publish.yml --allow-publish --yes`.
 - Rerun `.github/workflows/publish.yml`; it skips already-published tarballs and creates `v<version>`.
-- First publish of a brand-new package may leave `latest` on the canary version; note or correct intentionally.
+- First publish of a brand-new package sets `latest` to that canary. npm does not allow deleting `latest`; under the canary-only `latest` policy this is expected.
 
 Partial trusted-publish failure:
 

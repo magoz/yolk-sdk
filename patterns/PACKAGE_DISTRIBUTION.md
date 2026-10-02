@@ -73,6 +73,13 @@ Current release channel is `canary`. Consumers install canaries with npm dist-ta
 pnpm add @yolk-sdk/agent@canary
 ```
 
+Until the first stable release, npm `latest` also points at the newest canary on every public
+package. An untagged install (`pnpm add @yolk-sdk/agent`) then resolves to the same lockstep
+version as `@canary`, instead of an old canary that mixes versions with newer packages. The
+workflow publishes canaries with `--tag canary` only, so moving `latest` is a manual post-publish
+step (see [Move `latest` to the new canary](#move-latest-to-the-new-canary)). npm does not let you
+delete `latest`, and it assigns `latest` to a brand-new package's first version.
+
 ## Turbo Boundary
 
 Turbo is present for task orchestration/cache/order only.
@@ -240,6 +247,22 @@ git ls-remote --tags origin "refs/tags/v<version>"
 
 For lockstep canaries, verify every public package has the new `canary` dist-tag and `v<version>` exists locally and on origin.
 
+### Move `latest` to the new canary
+
+While no stable version exists, after the publish is verified, point `latest` at the new canary on
+every public package. This is an owner action with npm account auth; one OTP usually covers all
+commands if they run back to back:
+
+```bash
+version=<version>
+for package in agent mcp knowledge connectors sandbox vercel-workflows harness conformance emulators codemode; do
+  npm dist-tag add "@yolk-sdk/$package@$version" latest --otp=<code>
+done
+```
+
+Then confirm every package reports the same `latest` and `canary`. Stop doing this once a stable
+version exists; the workflow then publishes stable versions with `latest` itself.
+
 Requirements:
 
 - `@yolk-sdk` org exists and `magoz` is owner.
@@ -309,7 +332,7 @@ or npmjs.com → package → Settings → Trusted Publisher → GitHub Actions:
 - Workflow filename: `publish.yml`
 - Allowed action: `npm publish`
 
-Rerun `.github/workflows/publish.yml` from `main`. The workflow skips already-published tarballs and creates the missing `v<version>` tag. Verify all package dist-tags; npm may assign `latest` to the first version of a brand-new package even when `--tag canary` is used.
+Rerun `.github/workflows/publish.yml` from `main`. The workflow skips already-published tarballs and creates the missing `v<version>` tag. Verify all package dist-tags; npm assigns `latest` to the first version of a brand-new package even when `--tag canary` is used, which matches the canary-only `latest` policy above.
 
 ## Release Prep Order
 
