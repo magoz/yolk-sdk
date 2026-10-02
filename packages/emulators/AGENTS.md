@@ -35,7 +35,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/subscription-usage.ts`              | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go                                                                                                                                                    |
 | (internal)                            | `src/*-recordings.ts`                    | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                                                                                                                                                                  |
 | (internal)                            | `src/emulator-compose.ts`                | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                                                                                                                                                       |
-| (internal)                            | `src/emulator-http.ts`                   | Shared fault/scripted-error status and header validators (all emulators)                                                                                                                                                                                                      |
+| (internal)                            | `src/emulator-http.ts`                   | Shared header validators (all emulators) and the 200-599 fault/scripted-error status schema of the model and legacy emulators (the fixture-only ones check 400-599 themselves)                                                                                                |
 | (internal)                            | `src/route-evidence.ts`                  | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                                                                                                                                                             |
 | (internal)                            | `src/email-fixtures.ts`                  | Verbatim data copy of the email conformance `PortFixture`s (re-exported as `emailEmulatorFixtures`)                                                                                                                                                                           |
 | (internal)                            | `src/r2-fixtures.ts`                     | Verbatim data copy of the R2 conformance `PortFixture`s (re-exported as `r2EmulatorFixtures`)                                                                                                                                                                                 |
@@ -204,8 +204,9 @@ There is no root export or barrel.
   owner-approved live run (`live run of <case ids>`).
   204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
   turn is added. Route statuses follow the fixtures instead (for example a bodiless 204, or a 202
-  with a monitor `Location`). All emulators share these validators (`src/emulator-http.ts`,
-  internal, no Node builtins). Build a response before consuming its fault; a response that cannot
+  with a monitor `Location`). All emulators share the header validators (`src/emulator-http.ts`,
+  internal, no Node builtins); the fixture-only emulators check fault statuses as 400-599 in
+  their own schema, so a rejection names that range. Build a response before consuming its fault; a response that cannot
   be built, or a stateful route handler that throws, answers an evidence-tagged 500 in the
   service's error envelope, recorded in the ledger (`responseError`); that recovery never depends
   on the injectable clock (a clock that throws falls back to a fixed synthetic date). The
