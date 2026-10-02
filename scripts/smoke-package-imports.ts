@@ -62,6 +62,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       '.',
       './agent',
       './afloat',
+      './afloat/conformance',
       './conformance',
       './dropbox',
       './dropbox/conformance',
@@ -337,6 +338,8 @@ const main = async () => {
           'const mcpConformance = await import("@yolk-sdk/mcp/conformance")',
           'if (mcpConformance.mcpConformanceCases.length !== 9 || mcpConformance.mcpConformanceFixtures.length !== 16 || mcpConformance.mcpConformanceCases.some(testCase => testCase.safety !== "read") || typeof mcpConformance.makeMcpObservingHttpClient !== "function") throw new Error("Missing MCP conformance cases/fixtures")',
           'if (mcpConformance.selectMcpConformanceCases(mcpConformance.mcpConformanceCases, "modern").notApplicable.map(entry => entry.id).join() !== "mcp.legacy.session") throw new Error("MCP conformance era filter mismatch")',
+          'const afloatMcpConformance = await import("@yolk-sdk/connectors/afloat/conformance")',
+          'if (afloatMcpConformance.afloatMcpConformanceFixtures.length !== 8 || afloatMcpConformance.afloatMcpConformanceExpectedTools.length !== 9 || afloatMcpConformance.afloatMcpConformanceFixtures.some(fixture => fixture.endpoint !== "https://useafloat.com/mcp" || fixture.evidence !== "unverified") || afloatMcpConformance.afloatMcpConformanceNotApplicable.map(entry => entry.id).join() !== "mcp.legacy.session" || typeof afloatMcpConformance.makeAfloatMcpConformanceTarget !== "function") throw new Error("Missing Afloat MCP conformance target/fixtures")',
           'const linkedInSearchConformance = await import("@yolk-sdk/connectors/linkedin-search/conformance")',
           'if (linkedInSearchConformance.linkedInSearchConformanceCases.length !== 7 || linkedInSearchConformance.linkedInSearchConformanceFixtures.length !== 7) throw new Error("Missing LinkedIn search conformance cases/fixtures")',
           'if (linkedInSearchConformance.linkedInSearchConformanceCases.some(testCase => testCase.safety !== "read")) throw new Error("LinkedIn search conformance safety mismatch")',
@@ -473,7 +476,7 @@ const main = async () => {
           'if (linkedInRefused.status !== 400 || (await linkedInRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(linkedInEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("LinkedIn search emulator must fail closed without echoing the key")',
           'await linkedInEmulator.close()',
           'const mcpEmulatorModule = await import("@yolk-sdk/emulators/mcp")',
-          'if (mcpEmulatorModule.mcpEmulatorRoutes.length !== 9 || !mcpEmulatorModule.mcpEmulatorRoutes.every(route => route.evidence === "unverified" && !route.write)) throw new Error("MCP emulator manifest mismatch")',
+          'if (mcpEmulatorModule.mcpEmulatorRoutes.length !== 12 || !mcpEmulatorModule.mcpEmulatorRoutes.every(route => route.evidence === "unverified" && !route.write)) throw new Error("MCP emulator manifest mismatch")',
           'const mcpEmulator = await mcpEmulatorModule.makeMcpEmulator()',
           'const mcpProbe = (bearer, url = "https://mcp.example.test/modern/mcp") => new Request(url, { method: "POST", headers: { authorization: `Bearer ${bearer}`, accept: "application/json, text/event-stream", "content-type": "application/json", "mcp-method": "server/discover", "mcp-protocol-version": "2026-07-28" }, body: JSON.stringify({ jsonrpc: "2.0", id: "smoke-probe", method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientInfo": { name: "yolk", version: "0.1.0" }, "io.modelcontextprotocol/clientCapabilities": {} } } }) })',
           'const mcpDiscovered = await mcpEmulator.fetch(mcpProbe("synthetic-smoke-token"))',
@@ -483,6 +486,11 @@ const main = async () => {
           'if (mcpRejected.status !== 401 || !mcpRejected.headers.get("www-authenticate")?.startsWith("Bearer") || JSON.stringify([mcpEmulator.ledger.entries(), mcpEmulator.snapshot()]).includes(mcpEmulatorModule.mcpEmulatorReservedInvalidCredential)) throw new Error("MCP emulator must answer the recorded 401 without keeping the credential")',
           'const mcpRefused = await mcpEmulator.fetch(mcpProbe("synthetic-smoke-token", "https://mcp.example.test/modern/mcp?q=synthetic-smoke-token"))',
           'if (mcpRefused.status !== 400 || (await mcpRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(mcpEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("MCP emulator must fail closed without echoing the token")',
+          'const afloatDiscovered = await mcpEmulator.fetch(mcpProbe("afloat_synthetic-smoke-key-0001", "https://useafloat.com/mcp"))',
+          'if (afloatDiscovered.status !== 200 || (await afloatDiscovered.json()).id !== "smoke-probe") throw new Error("MCP emulator Afloat profile smoke failed")',
+          'const afloatRejected = await mcpEmulator.fetch(mcpProbe(mcpEmulatorModule.mcpEmulatorAfloatReservedInvalidCredential, "https://useafloat.com/mcp"))',
+          'if (afloatRejected.status !== 401 || afloatRejected.headers.get("www-authenticate") !== "Bearer") throw new Error("MCP emulator Afloat profile must answer the recorded 401")',
+          'if ((await mcpEmulator.fetch(mcpProbe("synthetic-smoke-token", "https://useafloat.com/mcp"))).status !== 400 || JSON.stringify(mcpEmulator.ledger.entries()).includes("synthetic-smoke-key-0001")) throw new Error("MCP emulator Afloat profile must refuse a bearer without afloat_ and never keep the key")',
           'await mcpEmulator.close()'
         ].join('\n')
     )

@@ -2,39 +2,46 @@
  * Stateful MCP emulator (the two synthetic servers of the MCP conformance fixtures: profile
  * `synthetic-modern` on `https://mcp.example.test/modern/mcp`, stateless `2026-07-28` with JSON
  * answers, and profile `synthetic-legacy` on `https://mcp.example.test/legacy/mcp`, an
- * `initialize` handshake with sessions and SSE answers), built on the upstream `@emulators/core`
- * custom runtime, with a request ledger, status and truncation faults, and an `/_emulate/*`
- * control plane.
+ * `initialize` handshake with sessions and SSE answers; and profile `afloat` on the provider
+ * endpoint `https://useafloat.com/mcp`, stateless `2026-07-28` with JSON answers and no session),
+ * built on the upstream `@emulators/core` custom runtime, with a request ledger, status and
+ * truncation faults, and an `/_emulate/*` control plane.
  *
  * It never imports SDK code: its answers are the sixteen synthetic `@yolk-sdk/mcp/conformance`
- * fixtures copied as data (`src/mcp/recordings.ts`), and every manifest row names the conformance
- * cases whose fixtures it answers (`mcpEmulatorRoutes`: one `RPC <origin><path>#<method>` row per
- * recorded JSON-RPC method of each profile, plus the legacy `GET` row; no row writes anything in a
- * real service). Response behaviour comes only from the fixtures, byte for byte: a JSON-RPC POST is
- * answered only when it equals a recorded request within the latitude below, with the recorded
- * answer, the request id substituted at exactly the recorded place (the top-level `id` of a JSON
- * answer, or the `id` of the SSE response event's payload; notification events and SSE `id:` lines
- * stay byte for byte; an answer that does not carry the recorded request id, such as the legacy era
- * probe's `id: null` error, is unchanged). The legacy `initialize` mints a session
- * `yolk-emu-session-<n>` (`n` from a counter that never resets, a form no seed holds), answered in
- * the recorded `mcp-session-id` header; `notifications/initialized` on that session answers the
- * recorded 202 and makes it ready; on a ready session `tools/list`, `tools/call`, and the standing
- * `GET` (the recorded 405) answer the recordings with the session's id. At most 256 sessions are
- * held: another `initialize` is refused before any fault. `reset` and `seed` clear the sessions.
- * The seed only selects which recorded modern listing `tools/list` answers (`modernListing`:
- * `one-page`, the default, or `two-pages`, whose first page issues the recorded cursor in the
- * generation that first issues it, and `<cursor>.g<generation>` after a reset or seed; the second
- * page answers only the cursor issued in the current generation). Every plan prepares its answer
- * before anything is written; its commit (minting a session, readying one, issuing a cursor) runs
- * only when no fault answers the request. Status faults (400-599) and `truncate-after-chunks`
- * faults apply only after a request is admitted and planned, and a faulted request writes nothing:
- * a truncation sends the prepared answer cut short and never runs the commit, so a truncated
- * `initialize` holds no session and leaves the counter and the cap where they were, and a truncated
- * first page issues no cursor. `match.route` selects one manifest row (a value naming no row is
- * rejected when the fault is added); `match.method` is the HTTP method. Anything else answers one
- * 400 not-emulated, ledgered with constant text only (`/<unrecognised>`, a standard method or
- * `<other>`, an empty query, no headers or body, a constant reason, and the route template or row),
- * that writes nothing and uses up no fault.
+ * fixtures copied as data (`src/mcp/recordings.ts`) and the eight derived
+ * `@yolk-sdk/connectors/afloat/conformance` fixtures copied as data
+ * (`src/mcp/afloat-recordings.ts`; derived from the provider's source, not recorded live, all
+ * unverified; one listing page of the published tool subset, the read call of `list-invoices`, its
+ * tool error, the absent tool, and the 401; answering those two derived `tools/call` fixtures, not
+ * only recorded calls, is in scope by the owner's decision), and every manifest row names the
+ * conformance cases whose fixtures it answers (`mcpEmulatorRoutes`: one
+ * `RPC <origin><path>#<method>` row per recorded JSON-RPC method of each profile, plus the legacy
+ * `GET` row; no row writes anything in a real service). Response behaviour comes only from the
+ * fixtures, byte for byte: a JSON-RPC POST is answered only when it equals a recorded request
+ * within the latitude below, with the recorded answer, the request id substituted at exactly the
+ * recorded place (the top-level `id` of a JSON answer, or the `id` of the SSE response event's
+ * payload; notification events and SSE `id:` lines stay byte for byte; an answer that does not
+ * carry the recorded request id, such as the legacy era probe's `id: null` error, is unchanged).
+ * The legacy `initialize` mints a session `yolk-emu-session-<n>` (`n` from a counter that never
+ * resets, a form no seed holds), answered in the recorded `mcp-session-id` header;
+ * `notifications/initialized` on that session answers the recorded 202 and makes it ready; on a
+ * ready session `tools/list`, `tools/call`, and the standing `GET` (the recorded 405) answer the
+ * recordings with the session's id. At most 256 sessions are held: another `initialize` is refused
+ * before any fault. `reset` and `seed` clear the sessions. The seed only selects which recorded
+ * modern listing `tools/list` answers (`modernListing`: `one-page`, the default, or `two-pages`,
+ * whose first page issues the recorded cursor in the generation that first issues it, and
+ * `<cursor>.g<generation>` after a reset or seed; the second page answers only the cursor issued in
+ * the current generation). Every plan prepares its answer before anything is written; its commit
+ * (minting a session, readying one, issuing a cursor) runs only when no fault answers the request.
+ * Status faults (400-599) and `truncate-after-chunks` faults apply only after a request is admitted
+ * and planned, and a faulted request writes nothing: a truncation sends the prepared answer cut
+ * short and never runs the commit, so a truncated `initialize` holds no session and leaves the
+ * counter and the cap where they were, and a truncated first page issues no cursor. `match.route`
+ * selects one manifest row (a value naming no row is rejected when the fault is added);
+ * `match.method` is the HTTP method. Anything else answers one 400 not-emulated, ledgered with
+ * constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no headers
+ * or body, a constant reason, and the route template or row), that writes nothing and uses up no
+ * fault.
  *
  * Not emulated: `DELETE` (the client never sends it), `ping`, `resources/*`, `prompts/*`,
  * `logging/*`, `completion/*`, `tasks/*`, JSON-RPC batches and client-sent responses, a JSON body
@@ -47,8 +54,13 @@
  * `guardOutput`: a request is recognised only on an emulated route shape, and any `Authorization`
  * header is exactly `Bearer <token>` with a recognisable bearer (the RFC 6750 `b64token` syntax, at
  * least 8 characters, a first character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, and a
- * character outside `[0-9.eE+-]`). A recognised request that repeats the bearer anywhere (its raw
- * path, the raw query or any query key or value, any request header name or value other than
+ * character outside `[0-9.eE+-]`). The Afloat rule (the wrapper's opt-in `bearerPrefixes`, the
+ * Telegram precedent): on `https://useafloat.com` a bearer is recognised only as
+ * `afloat_<remainder>`, and the remainder, not the key, must be recognisable (an Afloat key starts
+ * with the hex digit `a`, which fails the first-character rule); the remainder is the guarded
+ * secret below and what the digest takes, and a bearer without `afloat_` there, or with it on the
+ * synthetic origin, is unrecognisable. A recognised request that repeats the bearer anywhere (its
+ * raw path, the raw query or any query key or value, any request header name or value other than
  * `Authorization`, or its body, through the wrapper's fixpoint closure of tolerant percent-decoding
  * and JSON-unescaping, capped, where a cap refuses) is ledgered with constant text only. The
  * prepared output is checked the same way before any fault is decided or anything is committed: an
@@ -59,22 +71,26 @@
  * ledgered, or echoed: routes see only its digest (the wrapper's opt-in `bearerDigest`; SHA-256 of
  * the origin, a space, and the bearer), which they compare only with the digest of the public
  * reserved invalid credential `yolk-conformance-invalid-credential-0000` (itself a recognisable
- * bearer) to answer its recorded 401 byte for byte. Scope: the bearer is never copied from the
- * request into a response, the state, or `/_emulate/*`; the output guard also refuses a prepared
- * fixture answer, minted session id, or cursor that happens to contain it, but the emulator's other
- * constants (state values such as `initializing`, wrapper headers such as `x-emulator-evidence`)
- * and host-configured control-plane data (a fault body) may coincidentally equal a bearer and are
- * not checked. `makeMcpEmulator` also throws when a copied recording is not canonical JSON (every
- * JSON body and SSE `data:` payload equal to `JSON.stringify(JSON.parse(text))`), which id
- * substitution relies on.
+ * bearer), or on the Afloat profile of the remainder of `afloat_yolkconformanceinvalid0000`, to
+ * answer its recorded 401 byte for byte. Scope: the bearer is never copied from the request into a
+ * response, the state, or `/_emulate/*`; the output guard also refuses a prepared fixture answer,
+ * minted session id, or cursor that happens to contain it, but the emulator's other constants
+ * (state values such as `initializing`, wrapper headers such as `x-emulator-evidence`) and
+ * host-configured control-plane data (a fault body) may coincidentally equal a bearer and are not
+ * checked. `makeMcpEmulator` also throws when a copied recording is not canonical JSON (every JSON
+ * body and SSE `data:` payload equal to `JSON.stringify(JSON.parse(text))`), which id substitution
+ * relies on.
  *
  * Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
  * `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character
- * in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]`, that
- * occurs nowhere else in the request (any header name or value included) and in no answer or value
- * the request would store (never stored or ledgered; only its digest is compared, with the digest
- * of the public reserved invalid credential `yolk-conformance-invalid-credential-0000`, which
- * answers the recorded 401 on the era probe); extra request headers, except `mcp-*` headers other
+ * in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]` (on
+ * the Afloat profile, `afloat_` followed by such a value: an Afloat key starts with the hex digit
+ * `a`, so its remainder after `afloat_` is the value checked, guarded, and digested), that occurs
+ * nowhere else in the request (any header name or value included) and in no answer or value the
+ * request would store (never stored or ledgered; only its digest is compared, with the digest of
+ * the public reserved invalid credential `yolk-conformance-invalid-credential-0000`, or on the
+ * Afloat profile of the remainder of `afloat_yolkconformanceinvalid0000`, each answering the
+ * recorded 401 on its profile's era probe); extra request headers, except `mcp-*` headers other
  * than `mcp-method`, `mcp-name`, `mcp-protocol-version`, and `mcp-session-id`; a recorded header
  * value sent as several headers that the HTTP layer joins into the recorded value; JSON key order;
  * any JSON-RPC request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII
@@ -85,17 +101,19 @@
  * listing, the cursor this emulator issued in the current generation on the second page.
  * `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
  * (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET` on the modern
- * profile, JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
+ * or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on the synthetic
+ * profiles, an Afloat key whose remainder fails the rule above (such as one starting with a hex
+ * digit), JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
  * `prompts/*`, batches and client-sent responses, other members, a JSON body repeating a key
  * (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
- * arguments, protocol versions, or capabilities, extra client-info keys, and a legacy `initialize`
- * client info other than the recorded one), the MCP headers `accept`, `content-type`, `mcp-method`,
- * `mcp-protocol-version`, `mcp-name`, and `last-event-id` other than the recorded values or present
- * where none is recorded, any other `mcp-*` header (such as `mcp-param-*`), `mcp-session-id`
- * missing where recorded or present where not, an unknown session or one in the wrong phase, a
- * cursor not issued in the current generation, the reserved invalid credential on anything but the
- * era probe, a bearer repeated anywhere in the request, and a bearer an answer or a minted session
- * id or cursor would repeat) is not emulated.
+ * arguments, protocol versions, or capabilities, extra client-info keys, a cursor on the Afloat
+ * listing, and a legacy `initialize` client info other than the recorded one), the MCP headers
+ * `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id`
+ * other than the recorded values or present where none is recorded, any other `mcp-*` header (such
+ * as `mcp-param-*`), `mcp-session-id` missing where recorded or present where not, an unknown
+ * session or one in the wrong phase, a cursor not issued in the current generation, a reserved
+ * invalid credential on anything but its profile's era probe, a bearer repeated anywhere in the
+ * request, and a bearer an answer or a minted session id or cursor would repeat) is not emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeMcpEmulator` (importing this module has no side effects).
@@ -110,12 +128,16 @@ import {
   type McpApiEnv,
   type McpEmulatorDrills
 } from './mcp/api.ts'
+import { mcpEmulatorAfloatFixtures } from './mcp/afloat-recordings.ts'
 import { mcpEmulatorFixtures } from './mcp/recordings.ts'
 import {
   buildSeedState,
   decodeState,
   makeMcpRuntime,
   mcpBearerDigest,
+  mcpEmulatorAfloatKeyPrefix,
+  mcpEmulatorAfloatOrigin,
+  mcpEmulatorAfloatReservedInvalidCredential,
   mcpEmulatorOrigin,
   mcpEmulatorReservedInvalidCredential,
   type McpEmulatorSeed,
@@ -148,6 +170,10 @@ export {
   McpEmulatorSeed,
   McpEmulatorSession,
   McpEmulatorStateSchema,
+  mcpEmulatorAfloatKeyPrefix,
+  mcpEmulatorAfloatOrigin,
+  mcpEmulatorAfloatPath,
+  mcpEmulatorAfloatReservedInvalidCredential,
   mcpEmulatorLegacyPath,
   mcpEmulatorModernPath,
   mcpEmulatorOrigin,
@@ -156,6 +182,8 @@ export {
   mcpEmulatorSessionPrefix,
   type McpEmulatorState
 } from './mcp/state.ts'
+
+export { mcpEmulatorAfloatFixtures } from './mcp/afloat-recordings.ts'
 
 export {
   mcpEmulatorFixtures,
@@ -251,9 +279,24 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
     throw new Error('the reserved invalid MCP credential is not a recognisable bearer')
   }
 
+  // The Afloat profile guards the remainder after `afloat_`: it must be recognisable instead.
+  const afloatReservedRemainder = mcpEmulatorAfloatReservedInvalidCredential.slice(
+    mcpEmulatorAfloatKeyPrefix.length
+  )
+
+  if (
+    !mcpEmulatorAfloatReservedInvalidCredential.startsWith(mcpEmulatorAfloatKeyPrefix) ||
+    !isRecognisableBearerValue(afloatReservedRemainder)
+  ) {
+    throw new Error('the reserved invalid Afloat credential has no recognisable remainder')
+  }
+
   // Id substitution re-serialises the response message: a recording copied in a non-canonical
   // JSON form would answer other bytes, so it fails here, loudly.
-  const recordingProblems = mcpRecordingProblems(mcpEmulatorFixtures)
+  const recordingProblems = mcpRecordingProblems([
+    ...mcpEmulatorFixtures,
+    ...mcpEmulatorAfloatFixtures
+  ])
 
   if (recordingProblems.length > 0) {
     throw new Error(`non-canonical MCP recordings: ${recordingProblems.join('; ')}`)
@@ -275,6 +318,7 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
       unauthorizedWithoutChallenge: drills.unauthorizedWithoutChallenge === true
     },
     reservedDigest: mcpBearerDigest(mcpEmulatorReservedInvalidCredential, mcpEmulatorOrigin),
+    afloatReservedDigest: mcpBearerDigest(afloatReservedRemainder, mcpEmulatorAfloatOrigin),
     runtime
   }
 
@@ -297,6 +341,7 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
         unrecognisedAuthorization: unrecognisedAuthorizationReason
       },
       bearerDigest: mcpBearerDigest,
+      bearerPrefixes: { [mcpEmulatorAfloatOrigin]: mcpEmulatorAfloatKeyPrefix },
       constantRefusals: true,
       guardAllHeaders: true,
       guardOutput: true,

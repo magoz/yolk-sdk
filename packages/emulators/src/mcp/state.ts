@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto'
 import { Result } from 'effect'
 import * as Schema from 'effect/Schema'
 
-/** The reserved origin both synthetic profiles answer on; another origin is not emulated. */
+/** The reserved origin both synthetic profiles answer on. */
 export const mcpEmulatorOrigin = 'https://mcp.example.test'
 
 /** The synthetic modern server: stateless `2026-07-28`, JSON answers. */
@@ -26,6 +26,25 @@ export const mcpEmulatorLegacyPath = '/legacy/mcp'
  * emulator compares a bearer with (through its digest), answered the recorded 401.
  */
 export const mcpEmulatorReservedInvalidCredential = 'yolk-conformance-invalid-credential-0000'
+
+/** The Afloat profile's origin (the provider endpoint `https://useafloat.com/mcp`). */
+export const mcpEmulatorAfloatOrigin = 'https://useafloat.com'
+
+/** The Afloat profile: stateless `2026-07-28`, JSON answers, no session. */
+export const mcpEmulatorAfloatPath = '/mcp'
+
+/**
+ * The fixed public prefix of an Afloat key. On the Afloat origin a bearer is recognised only as
+ * `afloat_<remainder>`, and the remainder is the guarded secret (`a` is a hex digit, so the whole
+ * key fails the shared first-character rule).
+ */
+export const mcpEmulatorAfloatKeyPrefix = 'afloat_'
+
+/**
+ * The public reserved invalid Afloat credential of the MCP auth case, answered the recorded 401 on
+ * the Afloat profile (compared only through the digest of its remainder).
+ */
+export const mcpEmulatorAfloatReservedInvalidCredential = 'afloat_yolkconformanceinvalid0000'
 
 /** The minted session id form (`yolk-emu-session-<n>`, `n` from a counter that never resets). */
 export const mcpEmulatorSessionPrefix = 'yolk-emu-session-'

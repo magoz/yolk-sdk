@@ -92,6 +92,7 @@ export const r2TokenPatterns: ReadonlyArray<RegExp> = [
   /\bAKIA[0-9A-Z]{16}\b/,
   /\bAIza[0-9A-Za-z_-]{35}/,
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
+  /\bafloat_[A-Za-z0-9]{16,}/,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/
 ]

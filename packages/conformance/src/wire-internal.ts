@@ -63,6 +63,8 @@ const tokenPrefixPatterns: ReadonlyArray<RegExp> = [
   /\bAKIA[0-9A-Z]{16}\b/,
   /\bAIza[0-9A-Za-z_-]{35}/,
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
+  // Afloat API keys (`afloat_` and a long alphanumeric remainder)
+  /\bafloat_[A-Za-z0-9]{16,}/,
   // JSON Web Tokens (OIDC/OAuth access tokens)
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/
 ]

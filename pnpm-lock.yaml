@@ -431,6 +431,10 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.0-rc.115
+    devDependencies:
+      '@yolk-sdk/mcp':
+        specifier: workspace:^
+        version: link:../mcp
 
   packages/emulators:
     dependencies:

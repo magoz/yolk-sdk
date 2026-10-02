@@ -106,7 +106,7 @@ describe('run-telegram-conformance arguments', () => {
     }
 
     expect(() => parse(['--allow-irreversible'])).toThrow('--allow-irreversible requires a value')
-    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument: --run-id')
+    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument (not shown)')
   })
 
   it('reads seeds from flags over env', () => {

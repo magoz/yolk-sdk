@@ -1,7 +1,8 @@
 /**
  * MCP emulator route table (internal): one wire route per recorded HTTP shape (`POST /modern/mcp`,
- * `POST /legacy/mcp`, `GET /legacy/mcp`), each answering only the JSON-RPC methods its profile's
- * fixtures record, as manifest variants (`RPC <origin><path>#<method>`, plus the `GET` row).
+ * `POST /legacy/mcp`, `GET /legacy/mcp` on the synthetic origin, and `POST /mcp` on the Afloat
+ * origin), each answering only the JSON-RPC methods its profile's fixtures record, as manifest
+ * variants (`RPC <origin><path>#<method>`, plus the `GET` row).
  *
  * A request is admitted only when it equals a recorded request (`src/mcp/recordings.ts`) within
  * the latitude: the MCP headers (`accept`, `content-type`, `mcp-method`, `mcp-protocol-version`,
@@ -33,6 +34,7 @@ import {
   type StatefulRoute,
   type StreamedAnswer
 } from '../stateful-emulator.ts'
+import { mcpEmulatorAfloatFixtures } from './afloat-recordings.ts'
 import {
   mcpEmulatorFixtures,
   type McpRecordedExchange,
@@ -41,6 +43,8 @@ import {
   type McpRecordedResponse
 } from './recordings.ts'
 import {
+  mcpEmulatorAfloatOrigin,
+  mcpEmulatorAfloatPath,
   mcpEmulatorLegacyPath,
   mcpEmulatorModernPath,
   mcpEmulatorOrigin,
@@ -86,8 +90,10 @@ export const mcpEmulatorDrillKnobs: ReadonlyArray<keyof McpEmulatorDrills> = [
 
 export type McpApiEnv = {
   readonly drills: Readonly<Record<keyof McpEmulatorDrills, boolean>>
-  /** The digest of the reserved invalid credential on the emulated origin. */
+  /** The digest of the reserved invalid credential on the synthetic origin. */
   readonly reservedDigest: string
+  /** The digest of the reserved invalid Afloat credential's remainder on the Afloat origin. */
+  readonly afloatReservedDigest: string
   /** Runtime data the commits advance (never in the state). */
   readonly runtime: McpRuntime
 }
@@ -103,10 +109,14 @@ const fieldOf = (value: Schema.Json | undefined, key: string): Schema.Json | und
 
 // The recorded exchanges the routes answer, by fixture id and exchange index.
 
+/** Every copied fixture: the synthetic profiles', then the Afloat profile's. */
+const allFixtures: ReadonlyArray<McpRecordedFixture> = [
+  ...mcpEmulatorFixtures,
+  ...mcpEmulatorAfloatFixtures
+]
+
 const exchangeOf = (fixtureId: string, index: number): McpRecordedExchange => {
-  const exchange = mcpEmulatorFixtures
-    .find(fixture => fixture.id === fixtureId)
-    ?.exchanges.at(index)
+  const exchange = allFixtures.find(fixture => fixture.id === fixtureId)?.exchanges.at(index)
 
   if (exchange === undefined) {
     throw new Error(`the MCP recordings have no exchange ${index} in ${fixtureId}`)
@@ -118,6 +128,8 @@ const exchangeOf = (fixtureId: string, index: number): McpRecordedExchange => {
 const modern = (caseId: string) => `${caseId}.modern.synthetic`
 
 const legacy = (caseId: string) => `${caseId}.legacy.synthetic`
+
+const afloat = (caseId: string) => `${caseId}.afloat.synthetic`
 
 const recorded = {
   modernDiscover: exchangeOf(modern('mcp.negotiation.era'), 0),
@@ -136,7 +148,13 @@ const recorded = {
   legacyList: exchangeOf(legacy('mcp.negotiation.era'), 4),
   legacyCallRead: exchangeOf(legacy('mcp.tools.call-read'), -1),
   legacyCallToolError: exchangeOf(legacy('mcp.tools.call-tool-error'), -1),
-  legacyCallAbsent: exchangeOf(legacy('mcp.errors.unknown-tool'), -1)
+  legacyCallAbsent: exchangeOf(legacy('mcp.errors.unknown-tool'), -1),
+  afloatDiscover: exchangeOf(afloat('mcp.negotiation.era'), 0),
+  afloatRejected: exchangeOf(afloat('mcp.auth.rejected'), 0),
+  afloatList: exchangeOf(afloat('mcp.negotiation.era'), 1),
+  afloatCallRead: exchangeOf(afloat('mcp.tools.call-read'), -1),
+  afloatCallToolError: exchangeOf(afloat('mcp.tools.call-tool-error'), -1),
+  afloatCallAbsent: exchangeOf(afloat('mcp.errors.unknown-tool'), -1)
 }
 
 type RecordedKey = keyof typeof recorded
@@ -154,10 +172,14 @@ const recordedCursor = (() => {
 
 // The manifest: one row per recorded JSON-RPC method of each profile, plus the GET row.
 
-const casesSending = (path: string, sends: (request: McpRecordedRequest) => boolean) => [
+const casesSending = (
+  origin: string,
+  path: string,
+  sends: (request: McpRecordedRequest) => boolean
+) => [
   ...new Set(
-    mcpEmulatorFixtures.flatMap(fixture =>
-      fixture.endpoint === `${mcpEmulatorOrigin}${path}` &&
+    allFixtures.flatMap(fixture =>
+      fixture.endpoint === `${origin}${path}` &&
       fixture.exchanges.some(exchange => sends(exchange.request))
         ? [fixture.caseId]
         : []
@@ -171,12 +193,13 @@ const rpcMethodOf = (request: McpRecordedRequest): string | undefined => {
   return Predicate.isString(method) ? method : undefined
 }
 
-const rpcRow = (path: string, method: string): EmulatorRouteEvidence => ({
+const rpcRow = (origin: string, path: string, method: string): EmulatorRouteEvidence => ({
   method: 'RPC',
-  path: `${mcpEmulatorOrigin}${path}#${method}`,
+  path: `${origin}${path}#${method}`,
   kind: 'connector',
   write: false,
   caseIds: casesSending(
+    origin,
     path,
     request => request.method === 'POST' && rpcMethodOf(request) === method
   ),
@@ -193,20 +216,34 @@ const legacyMethods = [
   'tools/call'
 ] as const
 
-const modernRows = modernMethods.map(method => rpcRow(mcpEmulatorModernPath, method))
+const modernRows = modernMethods.map(method =>
+  rpcRow(mcpEmulatorOrigin, mcpEmulatorModernPath, method)
+)
 
-const legacyRows = legacyMethods.map(method => rpcRow(mcpEmulatorLegacyPath, method))
+const legacyRows = legacyMethods.map(method =>
+  rpcRow(mcpEmulatorOrigin, mcpEmulatorLegacyPath, method)
+)
+
+/** The Afloat profile records the modern methods only (no paging, no session). */
+const afloatRows = modernMethods.map(method =>
+  rpcRow(mcpEmulatorAfloatOrigin, mcpEmulatorAfloatPath, method)
+)
 
 const getRow: EmulatorRouteEvidence = {
   method: 'GET',
   path: `${mcpEmulatorOrigin}${mcpEmulatorLegacyPath}`,
   kind: 'connector',
   write: false,
-  caseIds: casesSending(mcpEmulatorLegacyPath, request => request.method === 'GET'),
+  caseIds: casesSending(
+    mcpEmulatorOrigin,
+    mcpEmulatorLegacyPath,
+    request => request.method === 'GET'
+  ),
   evidence: 'unverified'
 }
 
-const rowOf = (path: string, method: string): string => `${mcpEmulatorOrigin}${path}#${method}`
+const rowOf = (path: string, method: string, origin: string = mcpEmulatorOrigin): string =>
+  `${origin}${path}#${method}`
 
 // Answers: the recorded bytes, with only the request id, session id, and cursor substituted.
 
@@ -571,6 +608,9 @@ const noQuery = (request: EmulatedRequest): NotEmulated | undefined =>
 const isReserved = (request: EmulatedRequest, env: McpApiEnv): boolean =>
   request.bearerDigest === env.reservedDigest
 
+const isAfloatReserved = (request: EmulatedRequest, env: McpApiEnv): boolean =>
+  request.bearerDigest === env.afloatReservedDigest
+
 const reservedOnlyOnProbe = 'the reserved invalid credential is answered only on the era probe'
 
 // Plans and commits.
@@ -611,12 +651,19 @@ const drillErrorResponse = JSON.stringify({
   error: { code: -32_603, message: 'Synthetic drill error.' }
 })
 
+/** The listed tools that write, which the `writeToolMarkedReadOnly` drill marks read-only. */
+const writeToolNames: ReadonlySet<string> = new Set([
+  'create_synthetic_note',
+  'create-receipt-upload'
+])
+
 /** Drill transforms of an answer, by the recorded exchange it answers. */
 const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpApiEnv) => {
   const drills = env.drills
 
   switch (key) {
-    case 'modernDiscover': {
+    case 'modernDiscover':
+    case 'afloatDiscover': {
       let next = answer
 
       if (drills.discoverWithoutResultType) {
@@ -652,6 +699,7 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
     case 'modernFirstPage':
     case 'modernSecondPage':
     case 'legacyList':
+    case 'afloatList':
       return drills.writeToolMarkedReadOnly
         ? mapResponse(
             answer,
@@ -663,7 +711,7 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
                 ? {
                     ...result,
                     tools: tools.map(tool =>
-                      isJsonObject(tool) && tool['name'] === 'create_synthetic_note'
+                      isJsonObject(tool) && writeToolNames.has(String(tool['name']))
                         ? { ...tool, annotations: { readOnlyHint: true } }
                         : tool
                     )
@@ -675,6 +723,7 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
 
     case 'modernCallRead':
     case 'legacyCallRead':
+    case 'afloatCallRead':
       return drills.readCallAnswersToolError
         ? mapResponse(
             answer,
@@ -685,16 +734,18 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
 
     case 'modernCallToolError':
     case 'legacyCallToolError':
+    case 'afloatCallToolError':
       return drills.invalidCallAnswersRpcError
         ? mapResponse(answer, id, () => ({
             jsonrpc: '2.0',
             id,
-            error: { code: -32_602, message: 'Invalid arguments: noteId must be a string.' }
+            error: { code: -32_602, message: 'Synthetic drill: invalid arguments.' }
           }))
         : answer
 
     case 'modernCallAbsent':
-    case 'legacyCallAbsent': {
+    case 'legacyCallAbsent':
+    case 'afloatCallAbsent': {
       if (!drills.absentCallAnswersResult) return answer
 
       const result: JsonObject = {
@@ -705,12 +756,13 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
       return mapResponse({ ...answer, status: 200 }, id, () => ({
         jsonrpc: '2.0',
         id,
-        result: key === 'modernCallAbsent' ? { ...result, resultType: 'complete' } : result
+        result: key === 'legacyCallAbsent' ? result : { ...result, resultType: 'complete' }
       }))
     }
 
     case 'modernRejected':
-    case 'legacyRejected': {
+    case 'legacyRejected':
+    case 'afloatRejected': {
       if (!drills.unauthorizedWithoutChallenge) return answer
 
       const { 'www-authenticate': _challenge, ...headers } = answer.headers
@@ -832,7 +884,8 @@ const planAnswer =
 const routeEvidenceOf = (
   method: string,
   path: string,
-  variants: ReadonlyArray<EmulatorRouteEvidence>
+  variants: ReadonlyArray<EmulatorRouteEvidence>,
+  origin: string = mcpEmulatorOrigin
 ) => ({
   method,
   path,
@@ -840,7 +893,7 @@ const routeEvidenceOf = (
   write: false,
   caseIds: [...new Set(variants.flatMap(variant => variant.caseIds))],
   evidence: 'unverified' as const,
-  origin: mcpEmulatorOrigin,
+  origin,
   variants
 })
 
@@ -991,5 +1044,62 @@ const legacyGetRoute: McpRoute = {
   }
 }
 
+/**
+ * `POST /mcp` on the Afloat origin: the Afloat profile (stateless `2026-07-28`, JSON answers, no
+ * session, one listing page). Its bearer is `afloat_<remainder>` (the wrapper's `bearerPrefixes`),
+ * so routes see the digest of the remainder.
+ */
+const afloatRoute: McpRoute = {
+  ...routeEvidenceOf('POST', mcpEmulatorAfloatPath, afloatRows, mcpEmulatorAfloatOrigin),
+  body: 'json',
+  admit: (request, env) => {
+    const query = noQuery(request)
+
+    if (query !== undefined) return query
+
+    const method = fieldOf(request.json, 'method')
+    const variant = (name: string) => rowOf(mcpEmulatorAfloatPath, name, mcpEmulatorAfloatOrigin)
+
+    if (method === 'server/discover') {
+      const matched = matchRpc(request, ['afloatDiscover'])
+
+      if (isNotEmulated(matched)) return matched
+
+      return isAfloatReserved(request, env)
+        ? admission(variant(method), admitted(matched, request), planAnswer('afloatRejected'))
+        : admission(variant(method), admitted(matched, request), planAnswer('afloatDiscover'))
+    }
+
+    if (isAfloatReserved(request, env)) return notEmulated(reservedOnlyOnProbe)
+
+    if (method === 'tools/list') {
+      const matched = matchRpc(request, ['afloatList'])
+
+      return isNotEmulated(matched)
+        ? matched
+        : admission(variant(method), admitted(matched, request), planAnswer('afloatList'))
+    }
+
+    if (method === 'tools/call') {
+      const matched = matchRpc(request, [
+        'afloatCallRead',
+        'afloatCallToolError',
+        'afloatCallAbsent'
+      ])
+
+      if (isNotEmulated(matched)) return matched
+
+      return admission(variant(method), admitted(matched, request), planAnswer(matched.key))
+    }
+
+    return notEmulated('this JSON-RPC method is not emulated on the Afloat profile')
+  }
+}
+
 /** The route table: one wire route per recorded HTTP shape, each with its manifest variants. */
-export const mcpApiRoutes: ReadonlyArray<McpRoute> = [modernRoute, legacyRoute, legacyGetRoute]
+export const mcpApiRoutes: ReadonlyArray<McpRoute> = [
+  modernRoute,
+  legacyRoute,
+  legacyGetRoute,
+  afloatRoute
+]

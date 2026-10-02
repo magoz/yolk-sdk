@@ -117,8 +117,8 @@ describe('run-github-conformance arguments', () => {
       )
     }
 
-    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument: --run-id')
-    expect(() => parse(['--token', liveToken])).toThrow('Unknown argument: --token')
+    expect(() => parse(['--run-id', 'run-mine'])).toThrow('Unknown argument (not shown)')
+    expect(() => parse(['--token', liveToken])).toThrow('Unknown argument (not shown)')
   })
 
   it('reads seeds from flags over env', () => {

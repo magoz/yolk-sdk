@@ -81,6 +81,7 @@ import { githubConformanceFixtures } from '../packages/connectors/src/github/con
 import { googleConformanceCases } from '../packages/connectors/src/google/conformance/cases.ts'
 import { googleConformanceFixtures } from '../packages/connectors/src/google/conformance/index.ts'
 import { linkedInSearchConformanceCases } from '../packages/connectors/src/linkedin-search/conformance/cases.ts'
+import { afloatMcpConformanceFixtures } from '../packages/connectors/src/afloat/conformance/index.ts'
 import { linkedInSearchConformanceFixtures } from '../packages/connectors/src/linkedin-search/conformance/index.ts'
 import { microsoftConformanceCases } from '../packages/connectors/src/microsoft/conformance/cases.ts'
 import { microsoftConformanceFixtures } from '../packages/connectors/src/microsoft/conformance/index.ts'
@@ -416,6 +417,7 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ...googleConformanceFixtures,
   ...linkedInSearchConformanceFixtures,
   ...mcpConformanceFixtures,
+  ...afloatMcpConformanceFixtures,
   ...portFixtureEvidence(emailConformanceCases, emailConformanceFixtures),
   ...portFixtureEvidence(r2ConformanceCases, r2ConformanceFixtures)
 ])

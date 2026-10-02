@@ -1,8 +1,9 @@
 /**
- * Shared pieces of the Dropbox, Notion, Todoist, Telegram, GitHub, Google, and LinkedIn search
- * connector conformance runners (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`,
+ * Shared pieces of the Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and MCP
+ * conformance runners (`run-dropbox-conformance.ts`, `run-notion-conformance.ts`,
  * `run-todoist-conformance.ts`, `run-telegram-conformance.ts`, `run-github-conformance.ts`,
- * `run-google-conformance.ts`, `run-linkedin-search-conformance.ts`; not a CLI). Each runner
+ * `run-google-conformance.ts`, `run-linkedin-search-conformance.ts`, `run-mcp-conformance.ts`; not
+ * a CLI). Each runner
  * supplies a `ConnectorConformanceRunner` (its cases, seed sources, fixture modules, credential,
  * and ports) and gets the behaviour below, the owner-approval and CI gates included. The Fortnox
  * and Microsoft runners (`run-fortnox-conformance.ts`, `run-microsoft-conformance.ts`) keep their own
@@ -24,20 +25,24 @@
  *   Telegram, GitHub, and Google), and is an unknown argument everywhere else.
  * - A runner whose provider puts the credential in request URLs (Telegram's `/bot<token>/`)
  *   supplies `scrubRecording` and `replayAccessToken`: recorded exchanges have the live token
- *   replaced before the fixture is built, and replay verification resolves the replay token.
- *   For every runner, staging then refuses (before any fixture or checklist is built) a recording
- *   in which the live access token, or a long `:`-separated part of it, survives anywhere it could
- *   be written or printed (see `inspectRecordingForAccessToken`), or that holds a body the guard
- *   cannot inspect (only strict UTF-8 text without NUL characters is inspectable: an allowlist,
- *   not a list of refused formats); a last check refuses rendered files or checklist lines carrying
- *   it.
+ *   replaced before the fixture is built, and replay verification resolves the replay token. For
+ *   every runner, staging then refuses (before any fixture or checklist is built) a recording in
+ *   which the live access token, a long `:`-separated part of it, a part the runner names in
+ *   `tokenSecretParts` (Afloat's key remainder), or any 16-character fragment of one of them (a
+ *   capped echo), survives anywhere it could be written or printed (see
+ *   `inspectRecordingForAccessToken`), or that holds a body the guard cannot inspect (only strict
+ *   UTF-8 text without NUL characters is inspectable: an allowlist, not a list of refused formats);
+ *   a last check refuses rendered files or checklist lines carrying it.
  * - Every line a live run prints (the report, cleanup WARN lines, leftover warnings, the run's own
  *   failure, staging output) goes through `redactAccessToken`: a provider can echo the live token
  *   into a field a case reports, before any staging guard runs. Raw, percent-encoded, and base64
  *   forms are replaced by `<redacted live token>`; a line still holding an escaped form is withheld
- *   whole, and so is a line holding 16 or more consecutive token characters, raw or base64 (a
- *   report truncated inside an echoed token). The whole message is withheld when the token only
- *   appears once its lines are joined with whitespace removed (a token folded across lines).
+ *   whole, and so is a line holding 16 or more consecutive token characters, raw or base64, in any
+ *   decoded variant of it (percent- and escape-decoded, either order, tolerant of an escape the
+ *   report's length cap cut short): a report truncated inside an echoed token, encoded or not. A
+ *   runner's `tokenSecretParts` are redacted the same way, so an echo of the secret part alone is
+ *   caught too. The whole message is withheld when the token only appears once its lines are joined
+ *   with whitespace removed (a token folded across lines).
  * - `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After
  *   the run it builds `verified` fixtures for the cases that passed, re-runs each case on replay
  *   against its new fixture, and renders every fixture module plus the seeds module. Only if every
@@ -119,7 +124,12 @@ import {
 export type SeedSource<K extends string> = {
   readonly key: K
   readonly flag: string
-  readonly env: string
+  /**
+   * The environment variable the seed may also come from (the flag wins). Omitted: the flag only,
+   * for a seed that opts in to something a person must ask for on each run (a tool call), which an
+   * inherited environment must never switch on.
+   */
+  readonly env?: string
   readonly description: string
 }
 
@@ -161,6 +171,17 @@ export type SeedRecord<K extends string> = { readonly [P in K]?: string }
 export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>, E, R> = {
   /** Lower-case provider name: the recordings directory and `pnpm conformance:<provider>`. */
   readonly provider: string
+  /**
+   * The command that runs this runner, for the usage text and the staged files (default
+   * `pnpm conformance:<provider>`), for a runner whose provider is not its script name (the MCP
+   * runner's `pnpm conformance:mcp --target afloat`).
+   */
+  readonly command?: string
+  /**
+   * Where promoted fixtures go, relative to the repository root (default
+   * `packages/connectors/src/<provider>/conformance/`).
+   */
+  readonly fixturesDir?: string
   /** Display name, for example `Dropbox`. */
   readonly displayName: string
   /** What to run against, for example `a practice Dropbox account`. */
@@ -260,6 +281,16 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
    * printed). `description` completes "<tokenEnv> must be ...".
    */
   readonly tokenFormat?: { readonly pattern: RegExp; readonly description: string }
+  /**
+   * Secret parts of the access token that a provider may echo without the rest, for a token
+   * whose public prefix is not part of the secret (an Afloat key: the remainder after `afloat_`).
+   * Each part is guarded exactly like the token itself (see `namedLiveSecrets`): every printed
+   * live-run line is redacted of it (raw, percent-encoded, escaped, base64, and 16-character
+   * fragments), and staging refuses a recording, rendered file, or checklist line that carries it.
+   * `:`-separated parts are always guarded (see `accessTokenForms`) and need no entry. Omitted: the
+   * token alone, as before.
+   */
+  readonly tokenSecretParts?: (accessToken: string) => ReadonlyArray<string>
   /** JSON keys whose string values usually name a person, a file, or a page. */
   readonly nameKeys: RegExp
   /** JSON keys whose string values hold document or message text. */
@@ -290,6 +321,18 @@ export type ConnectorConformanceRunner<K extends string, S extends SeedRecord<K>
    */
   readonly usageTarget?: string
 }
+
+/** The command that runs a runner (`command`, else `pnpm conformance:<provider>`). */
+export const runnerCommand = (runner: {
+  readonly provider: string
+  readonly command?: string
+}): string => runner.command ?? `pnpm conformance:${runner.provider}`
+
+/** Where a runner's promoted fixtures go (`fixturesDir`, else the provider's conformance dir). */
+const runnerFixturesDir = (runner: {
+  readonly provider: string
+  readonly fixturesDir?: string
+}): string => runner.fixturesDir ?? `packages/connectors/src/${runner.provider}/conformance/`
 
 /** A runner of any error and requirement type (only its data is read). */
 type RunnerData<K extends string, S extends SeedRecord<K>> = Omit<
@@ -377,8 +420,15 @@ const irreversibleUsage = <K extends string, S extends SeedRecord<K>>(runner: Ru
                                   ${ids.join(', ')}`
 }
 
+/** One seed's usage lines: its flag, what it is, and where else it may come from. */
+const seedUsage = <K extends string>(source: SeedSource<K>): string => {
+  const from = source.env === undefined ? 'flag only, never the environment' : `env ${source.env}`
+
+  return `  ${`${source.flag} <value>`.padEnd(32)}${source.description}\n${' '.repeat(34)}(${from})`
+}
+
 export const usage = <K extends string, S extends SeedRecord<K>>(runner: RunnerData<K, S>) =>
-  `Usage: pnpm conformance:${runner.provider} [--live --owner-approved --account <label>] [options]
+  `Usage: ${runnerCommand(runner)} [--live --owner-approved --account <label>] [options]
 
 Dry run by default: prints each case, its safety, and whether it would run. No network I/O and no
 credential read.
@@ -397,19 +447,22 @@ Options:
                                   and stage them in a new run directory under
                                   .conformance-recordings/${runner.provider}/ (gitignored) for manual
                                   ${runner.reviewNotice === undefined ? 'scrubbing and promotion' : 'promotion (see below)'}
-${runner.seedSources
-  .map(
-    source =>
-      `  ${`${source.flag} <value>`.padEnd(32)}${source.description}\n${' '.repeat(34)}(env ${source.env})`
-  )
-  .join('\n')}
+${runner.seedSources.map(seedUsage).join('\n')}
   --help
 
 ${runner.tokenEnv} is read from the environment only: ${runner.tokenScopes}.${extraTokensUsage(runner.extraTokens)} Use
 ${runner.usageTarget ?? `${runner.practiceTarget}, never a real one`}, and never run live in CI. Recordings are never written
 over committed fixtures: ${runner.reviewNotice?.promote ?? 'scrub the staged files'}, copy them into
-packages/connectors/src/${runner.provider}/conformance/, and update the ${runner.displayName} conformance
+${runnerFixturesDir(runner)}, and update the ${runner.displayName} conformance
 tests in the same change (fixture ids, evidence, and account change).`
+
+/**
+ * The constant refusal for an unknown argument. It never repeats any of the argument's text: not a
+ * value (`--flag=value`), not a stray argument, and not even a flag name, since a flag-shaped
+ * argument can itself be a credential (`--<secret>`). Argument errors print before any redaction is
+ * installed, so they must carry nothing from the command line.
+ */
+export const unknownArgumentMessage = 'Unknown argument (not shown)'
 
 /**
  * Parse CLI arguments (without the node/script prefix) and seed environment variables. Throws on
@@ -434,6 +487,8 @@ export const parseRunArgs = <K extends string, S extends SeedRecord<K>>(
   const seeds: Partial<Record<K, string>> = {}
 
   for (const source of runner.seedSources) {
+    if (source.env === undefined) continue
+
     const value = env[source.env]?.trim()
 
     if (value !== undefined && value.length > 0) {
@@ -441,7 +496,7 @@ export const parseRunArgs = <K extends string, S extends SeedRecord<K>>(
     }
   }
 
-  parseFlags(argv, (flag, argument, value) => {
+  parseFlags(argv, (flag, _argument, value) => {
     const seed = runner.seedSources.find(source => source.flag === flag)
 
     if (seed !== undefined) {
@@ -505,7 +560,7 @@ export const parseRunArgs = <K extends string, S extends SeedRecord<K>>(
       }
 
       default:
-        throw new Error(`Unknown argument: ${argument}`)
+        throw new Error(unknownArgumentMessage)
     }
   })
 
@@ -650,21 +705,44 @@ export const liveSecrets = <S>(inputs: LiveInputs<S>): ReadonlyArray<string> => 
 /**
  * Every live secret with the name a staging refusal gives it: `the live access token` for a
  * runner without `extraTokens` (the wording every single-token runner prints), otherwise
- * `the live secret <ENV>`, so the owner learns which key leaked (never the key itself).
+ * `the live secret <ENV>`, so the owner learns which key leaked (never the key itself). A runner's
+ * `tokenSecretParts` follow the token, under the token's name.
  */
 export const namedLiveSecrets = <S>(
-  runner: { readonly tokenEnv: string; readonly extraTokens?: ReadonlyArray<ExtraToken> },
+  runner: {
+    readonly tokenEnv: string
+    readonly extraTokens?: ReadonlyArray<ExtraToken>
+    readonly tokenSecretParts?: (accessToken: string) => ReadonlyArray<string>
+  },
   inputs: LiveInputs<S>
-): ReadonlyArray<{ readonly label: string; readonly secret: string }> =>
-  runner.extraTokens === undefined && inputs.extraTokens === undefined
-    ? [{ label: 'the live access token', secret: inputs.accessToken }]
-    : [
-        { label: `the live secret ${runner.tokenEnv}`, secret: inputs.accessToken },
-        ...Object.entries(inputs.extraTokens ?? {}).map(([env, secret]) => ({
-          label: `the live secret ${env}`,
-          secret
-        }))
-      ]
+): ReadonlyArray<{ readonly label: string; readonly secret: string }> => {
+  const tokenLabel =
+    runner.extraTokens === undefined && inputs.extraTokens === undefined
+      ? 'the live access token'
+      : `the live secret ${runner.tokenEnv}`
+
+  const parts = (runner.tokenSecretParts?.(inputs.accessToken) ?? []).flatMap(secret =>
+    secret.length > 0 && secret !== inputs.accessToken ? [{ label: tokenLabel, secret }] : []
+  )
+
+  return [
+    { label: tokenLabel, secret: inputs.accessToken },
+    ...parts,
+    ...Object.entries(inputs.extraTokens ?? {}).map(([env, secret]) => ({
+      label: `the live secret ${env}`,
+      secret
+    }))
+  ]
+}
+
+/**
+ * Every live secret a runner's printed lines are redacted of: `namedLiveSecrets` without names
+ * (for a runner without `tokenSecretParts`, exactly `liveSecrets`).
+ */
+export const runnerLiveSecrets = <S>(
+  runner: Parameters<typeof namedLiveSecrets>[0],
+  inputs: LiveInputs<S>
+): ReadonlyArray<string> => namedLiveSecrets(runner, inputs).map(({ secret }) => secret)
 
 /**
  * Everything a live run needs, or why it must refuse (before any network): CI, a missing owner
@@ -767,7 +845,7 @@ export const renderFixtureModule = <K extends string, S extends SeedRecord<K>>(
     ` * ${spec.doc}`,
     ' *',
     ` * Verified recording (${fixture.recordedAt}), ${runner.reviewNotice?.stagedFixture ?? 'scrubbed and promoted by hand'} from`,
-    ` * \`pnpm conformance:${runner.provider} --live --owner-approved --account <label> --record\`.`,
+    ` * \`${runnerCommand(runner)} --live --owner-approved --account <label> --record\`.`,
     ' */',
     `export const ${spec.exportName}: WireFixture = ${JSON.stringify(fixture, null, 2)}`,
     ''
@@ -825,7 +903,7 @@ export const renderSeedsModule = <K extends string, S extends SeedRecord<K>>(
     '/**',
     ` * Seed ${runner.seedNoun} used by the committed ${runner.displayName} fixtures (synthetic until ${runner.reviewNotice?.stagedSeeds ?? 'a scrubbed recording'} is`,
     ` * promoted). Replaying the fixtures needs these exact seeds in \`${runner.configName}\`.`,
-    ` * \`pnpm conformance:${runner.provider} --live --owner-approved --account <label> --record\` stages an`,
+    ` * \`${runnerCommand(runner)} --live --owner-approved --account <label> --record\` stages an`,
     ' * updated copy for manual promotion together with the fixtures it records.',
     ' */',
     `export const ${runner.seedsExportName}: ${runner.seedsTypeName} = {`,
@@ -1121,7 +1199,7 @@ export const recordingReviewChecklist = <K extends string, S extends SeedRecord<
   }
 
   lines.push(
-    `PROMOTE by hand: ${runner.reviewNotice?.promote ?? 'scrub'}, copy into packages/connectors/src/${runner.provider}/conformance/, run pnpm format:fix,`,
+    `PROMOTE by hand: ${runner.reviewNotice?.promote ?? 'scrub'}, copy into ${runnerFixturesDir(runner)}, run pnpm format:fix,`,
     `  and update the ${runner.displayName} conformance tests in the same change (fixture ids, evidence, account change).`
   )
 
@@ -1247,10 +1325,12 @@ const escapesDecoded = (text: string): string => {
 const unfolded = (text: string): string => text.replace(/\s+|\\[rnt]/g, '')
 
 /**
- * True when `text`, raw or with its escapes decoded, contains any form of the token. Each variant
- * is also searched with whitespace removed, so folded (MIME-style) base64 is found too.
+ * Every variant of `text` the guards search: raw, percent-decoded, escape-decoded, both decodings
+ * in either order, and each of those with whitespace removed (folded, MIME-style base64). The
+ * decoders are tolerant: an escape they cannot complete (a report cap cut `\u00` or `%2` short, at
+ * the end or anywhere) is left as it is, and every complete escape around it is still decoded.
  */
-const textHasToken = (text: string, forms: ReadonlyArray<string>): boolean => {
+const decodedVariants = (text: string): ReadonlyArray<string> => {
   const decoded = [
     text,
     percentDecoded(text),
@@ -1259,10 +1339,12 @@ const textHasToken = (text: string, forms: ReadonlyArray<string>): boolean => {
     escapesDecoded(percentDecoded(text))
   ]
 
-  const variants = decoded.flatMap(variant => [variant, unfolded(variant)])
-
-  return variants.some(variant => forms.some(form => variant.includes(form)))
+  return [...new Set(decoded.flatMap(variant => [variant, unfolded(variant)]))]
 }
+
+/** True when any decoded variant of `text` (see `decodedVariants`) contains one of `forms`. */
+const textHasToken = (text: string, forms: ReadonlyArray<string>): boolean =>
+  decodedVariants(text).some(variant => forms.some(form => variant.includes(form)))
 
 /** True when `text` holds the token (see `accessTokenForms`), raw, escaped, or encoded. */
 export const textContainsAccessToken = (text: string, accessToken: string): boolean =>
@@ -1320,18 +1402,20 @@ export const redactAccessToken = (text: string, accessToken: string): string => 
 const tokenFragmentMinLength = 16
 
 /**
- * True when `line` holds any of `tokenFragmentForms`: a report or warning that a length cap cut
- * in the middle of an echoed token still leaks a usable part of it, so such a line is withheld
- * whole.
+ * True when any decoded variant of `line` (see `decodedVariants`: percent- and escape-decoded,
+ * tolerantly, in either order) holds any of `tokenFragmentForms`: a report or warning that a length
+ * cap cut in the middle of an echoed token, raw or encoded, still leaks a usable part of it, so
+ * such a line is withheld whole (fail closed: never a part of it).
  */
 const hasTokenFragment = (line: string, accessToken: string): boolean =>
-  tokenFragmentForms(accessToken).some(form => line.includes(form))
+  textHasToken(line, tokenFragmentForms(accessToken))
 
 /**
  * Every `tokenFragmentMinLength` window of the token, verbatim and base64-encoded (standard and
- * URL-safe, every byte alignment), so a capped report that cut a raw or base64 echo short is
- * still recognised. A base64 core drops the groups it shares with the surrounding bytes, so an
- * encoded fragment can match text that encodes as few as 12 consecutive token characters: this
+ * URL-safe, every byte alignment), so a capped report that cut an echo short is still recognised
+ * (`hasTokenFragment` searches every decoded variant of the line, so percent- and escape-encoded
+ * echoes are covered too). A base64 core drops the groups it shares with the surrounding bytes, so
+ * an encoded fragment can match text that encodes as few as 12 consecutive token characters: this
  * errs toward withholding.
  */
 const tokenFragmentForms = (accessToken: string): ReadonlyArray<string> => {
@@ -1344,6 +1428,25 @@ const tokenFragmentForms = (accessToken: string): ReadonlyArray<string> => {
 
   return [...new Set(windows.flatMap(window => [window, ...base64Cores(window)]))]
 }
+
+/**
+ * What the staging guards look for: every form of the secret (`accessTokenForms`) and every
+ * `tokenFragmentMinLength` window of it (`tokenFragmentForms`). A recording or rendered file that
+ * holds any of them, in any decoded variant (see `decodedVariants`), is never staged: a capped
+ * echo of the secret (the remainder of an Afloat key cut to 63 characters plus `...`, raw,
+ * `\u`-escaped, or percent-encoded) leaks almost all of it, so a fragment counts as the secret.
+ */
+const stagingForms = (secret: string): ReadonlyArray<string> => [
+  ...new Set([...accessTokenForms(secret), ...tokenFragmentForms(secret)])
+]
+
+/**
+ * True when `text` holds the secret or a 16-character fragment of it, raw, encoded, or in any
+ * decoded variant (see `stagingForms`): the check over rendered files, seeds, and the review
+ * checklist before anything is staged.
+ */
+export const textCarriesSecret = (text: string, secret: string): boolean =>
+  textHasToken(text, stagingForms(secret))
 
 /** Every string (keys included) of a parsed JSON value. */
 const jsonStrings = (value: unknown): ReadonlyArray<string> => {
@@ -1504,7 +1607,8 @@ const inspectExchanges = (
   accessToken: string,
   binary: BinaryBodies
 ): TokenVerdict => {
-  const forms = accessTokenForms(accessToken)
+  // The token and every 16-character fragment of it: a capped echo is refused like the whole.
+  const forms = stagingForms(accessToken)
 
   const headerTexts = (headers: Readonly<Record<string, string>> | undefined) =>
     Object.entries(headers ?? {}).flat()
@@ -1529,7 +1633,8 @@ const inspectExchanges = (
  * Look for the live access token everywhere a staged fixture or the review checklist could carry
  * it: request URLs, header names and values, request bodies (every JSON string value), and response
  * headers and bodies (text, decoded `bodyBase64`, and reassembled stream chunks). `token` when any
- * form of it is found (see `accessTokenForms`); `uninspectable` when a body is outside the
+ * form of it, or any 16-character fragment of it, is found in any decoded variant (see
+ * `stagingForms`); `uninspectable` when a body is outside the
  * allowlist of what the guard can read, strict UTF-8 text without NUL characters (so binary,
  * compressed, and UTF-16 bodies, and undecodable base64, are refused whatever they contain);
  * otherwise `clean`.
@@ -1612,7 +1717,7 @@ const verifiedFixture = <K extends string, S extends SeedRecord<K>, E, R>(
       recordedAt,
       account: inputs.account,
       endpoint: spec.endpoint ?? runner.endpoint,
-      note: `Recorded from ${runner.practiceTarget} by pnpm conformance:${runner.provider} --live --record.`,
+      note: `Recorded from ${runner.practiceTarget} by ${runnerCommand(runner)} --live --record.`,
       exchanges
     })
 
@@ -1817,8 +1922,9 @@ export const stageRecordings = <K extends string, S extends SeedRecord<K>, E, R>
     // Last line of defence, over exactly what would be written and printed (seeds included).
     const texts = [...files.map(file => file.contents), ...checklist]
 
+    // The secret or any 16-character fragment of it, in any decoded variant (`textCarriesSecret`).
     const carried = namedLiveSecrets(runner, inputs).find(({ secret }) =>
-      texts.some(text => textContainsAccessToken(text, secret))
+      texts.some(text => textCarriesSecret(text, secret))
     )
 
     if (carried !== undefined) {
@@ -2028,7 +2134,7 @@ export const runLive = <K extends string, S extends SeedRecord<K>, E, R>(
   liveIo: LiveRunIo = processLiveRunIo
 ) =>
   Effect.gen(function* () {
-    const io = liveSecrets(inputs).reduce(redactingLiveRunIo, liveIo)
+    const io = runnerLiveSecrets(runner, inputs).reduce(redactingLiveRunIo, liveIo)
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
 
     const recorderOptions = recorderOptionsFor(runner)
@@ -2125,7 +2231,7 @@ export const runConnectorConformanceCli = <K extends string, S extends SeedRecor
     }
 
     // The run's own failure and the after-interrupt leftover lines are redacted too.
-    const cliIo = liveSecrets(checked.inputs).reduce(redactingCliIo, processCliIo)
+    const cliIo = runnerLiveSecrets(runner, checked.inputs).reduce(redactingCliIo, processCliIo)
 
     void runInterruptibly(runLive(runner, options, checked.inputs), processSignals, cliIo, {
       afterInterrupt: leftoverWarnings(

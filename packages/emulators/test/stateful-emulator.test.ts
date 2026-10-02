@@ -1,11 +1,12 @@
 /**
  * The shared `src/stateful-emulator.ts` wrapper's opt-in guarantees, over a fake core (no
  * `@emulators/core`): multi-segment `{name+}` parameters, raw parameter patterns (matched in full,
- * no `g` or `y` flag), the fail-closed mode (constant-text ledger entries for unrecognised
- * requests and Authorization headers, every parameter patterned at build, the bearer guarded as a
- * secret in queries, recorded headers, bodies, a route's decoded body views, and plan-time
- * reasons), the opt-in per-origin bearer digest (`bearerDigest`), route variants (manifest rows,
- * ledger routes, coverage, `match.route`, build checks), truncation faults on streamed commits
+ * no `g` or `y` flag), the fail-closed mode (constant-text ledger entries for unrecognised requests
+ * and Authorization headers, every parameter patterned at build, the bearer guarded as a secret in
+ * queries, recorded headers, bodies, a route's decoded body views, and plan-time reasons), the
+ * opt-in per-origin bearer digest (`bearerDigest`), per-origin bearer prefixes (`bearerPrefixes`:
+ * the remainder guarded and digested; build checks), route variants (manifest rows, ledger routes,
+ * coverage, `match.route`, build checks), truncation faults on streamed commits
  * (`makeChunkedStatefulEmulator`; one that cannot apply answers 500 unused), constant refusals
  * (`constantRefusals`: no request text before admission, a match-all fault unused), the resolved
  * mode (`resolveRequest`: a path-carried token guarded and scrubbed), `json-or-empty` bodies,
@@ -446,6 +447,118 @@ describe('fail-closed mode: the opt-in per-origin bearer digest', () => {
 
     // A request without a bearer never computes a digest: refused by the shape as before.
     expect((await api.fetch(get('/digest'))).status).toBe(400)
+  })
+})
+
+describe('fail-closed mode: the opt-in per-origin bearer prefixes', () => {
+  const origin = 'https://api.example.test'
+  const remainder = 'synthetic-prefixed-remainder-0001'
+  const prefixed = `pre_${remainder}`
+
+  it.each([
+    [
+      'without fail-closed mode',
+      false,
+      { [origin]: 'pre_' },
+      'bearerPrefixes needs fail-closed mode'
+    ],
+    [
+      'with a key that is no origin',
+      true,
+      { [`${origin}/path`]: 'pre_' },
+      'bearerPrefixes takes origins only'
+    ],
+    [
+      'with an empty prefix',
+      true,
+      { [origin]: '' },
+      'bearerPrefixes takes 1 to 32 b64token characters'
+    ],
+    [
+      'with a prefix outside b64token',
+      true,
+      { [origin]: 'pre fix' },
+      'bearerPrefixes takes 1 to 32 b64token characters'
+    ],
+    [
+      'with a prefix over 32 characters',
+      true,
+      { [origin]: 'p'.repeat(33) },
+      'bearerPrefixes takes 1 to 32 b64token characters'
+    ]
+  ] as const)('refuses to build %s', async (_label, failClosed, bearerPrefixes, message) => {
+    await expect(build([digestEcho], failClosed, { bearerPrefixes })).rejects.toThrow(message)
+  })
+
+  it('without the option, a fail-closed emulator guards and digests the whole bearer', async () => {
+    const whole = 'synthetic-whole-bearer-0001'
+    const api = await build([digestEcho], true, { bearerDigest: sha256Digest })
+    const authorization = `Bearer ${whole}`
+
+    expect(await (await api.fetch(get('/digest', { authorization }))).text()).toBe(
+      sha256Digest(whole, origin)
+    )
+
+    // A part of the bearer is no repeat; the whole bearer is.
+    const part = await api.fetch(get('/digest', { authorization, 'x-note': 'whole-bearer-0001' }))
+
+    expect(part.status).toBe(200)
+
+    const repeat = await api.fetch(get('/digest', { authorization, 'x-note': whole }))
+
+    expect(repeat.status).toBe(400)
+    expect(api.ledger.entries().at(-1)?.notEmulated).toBe(
+      'a recorded request header repeats the credential'
+    )
+    expect(JSON.stringify(api.ledger.entries())).not.toContain(whole)
+
+    // A prefixed key keeps the plain rule: the prefix is part of the bearer it digests.
+    expect(
+      await (await api.fetch(get('/digest', { authorization: `Bearer ${prefixed}` }))).text()
+    ).toBe(sha256Digest(prefixed, origin))
+  })
+
+  it('on its origin, the remainder after the prefix is the bearer it guards and digests', async () => {
+    const api = await build([digestEcho], true, {
+      bearerDigest: sha256Digest,
+      bearerPrefixes: { [origin]: 'pre_' }
+    })
+
+    const authorization = `Bearer ${prefixed}`
+
+    expect(await (await api.fetch(get('/digest', { authorization }))).text()).toBe(
+      sha256Digest(remainder, origin)
+    )
+
+    // The remainder alone, repeated, is a credential repeat.
+    const repeat = await api.fetch(get('/digest', { authorization, 'x-note': remainder }))
+
+    expect(repeat.status).toBe(400)
+    expect(api.ledger.entries().at(-1)?.notEmulated).toBe(
+      'a recorded request header repeats the credential'
+    )
+
+    // A bearer without the prefix is unrecognisable there, and so is a remainder that fails the
+    // recognisable-bearer rule (it starts with a hex digit).
+    for (const bearer of ['synthetic-unprefixed-bearer-0001', `pre_0${remainder}`]) {
+      const refused = await api.fetch(get('/digest', { authorization: `Bearer ${bearer}` }))
+
+      expect(refused.status, bearer).toBe(400)
+      expect(api.ledger.entries().at(-1)?.notEmulated, bearer).toBe(
+        'synthetic: unrecognisable authorization'
+      )
+    }
+
+    // Another origin keeps the plain rule: the whole prefixed bearer is guarded and digested.
+    const elsewhere = await api.fetchOn('https://other.example.test')(
+      get('/digest', { authorization })
+    )
+
+    expect(await elsewhere.text()).toBe(sha256Digest(prefixed, 'https://other.example.test'))
+
+    const kept = [JSON.stringify(api.ledger.entries()), JSON.stringify(api.snapshot())].join('\n')
+
+    expect(kept).not.toContain(remainder)
   })
 })
 

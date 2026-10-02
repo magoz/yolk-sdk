@@ -387,8 +387,21 @@ because the client negotiates the modern era. The two call cases stop at their p
 the tool server publishes no `readOnlyHint`. The auth case does not apply, because the tool server
 has no authentication. The MCP emulator (`@yolk-sdk/emulators/mcp`) answers both synthetic servers
 from these fixtures and passes every applicable case offline (give the target a synthetic
-`Authorization: Bearer` header). No case is observed live yet; provider targets and live runs come
-later.
+`Authorization: Bearer` header). No case is observed live yet.
+
+Provider targets live with the provider, never in `@yolk-sdk/mcp`.
+`@yolk-sdk/connectors/afloat/conformance` builds the Afloat target by running the real
+`afloat.mcp_auth` action (`makeAfloatMcpConformanceTarget`: `https://useafloat.com/mcp`, modern
+`2026-07-28`, `Authorization: Bearer <afloat_ key>`, the reserved invalid key
+`afloat_yolkconformanceinvalid0000` for the auth case), names the published nine-tool subset as
+seeds (`afloatMcpConformanceLiveSeeds`; no `readTool`, so a live run calls a tool only when a person
+names one), and ships eight fixtures derived from the provider's source (owner-supplied; not a live
+recording; every case but `mcp.legacy.session` applies). `pnpm conformance:mcp --target afloat`
+previews the run (a dry run: no network, no credential read); adding `--live --owner-approved
+--account <label>` runs the cases by hand with the owner's approval (`AFLOAT_API_KEY` from the
+environment only; refused in CI; tool calls only with the `--read-tool` flag, never from the
+environment); the MCP emulator serves them as profile `afloat`. See [Afloat MCP
+conformance](../connectors/afloat#conformance-cases). The Figma target is not available yet.
 
 ## Connector conformance
 

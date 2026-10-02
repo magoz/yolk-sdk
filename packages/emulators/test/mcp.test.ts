@@ -21,11 +21,21 @@ import {
   mcpConformanceSyntheticOrigin,
   mcpConformanceSyntheticSessionId
 } from '@yolk-sdk/mcp/conformance'
+import { afloatMcpServerUrl } from '@yolk-sdk/connectors/afloat'
+import {
+  afloatMcpConformanceFixtures,
+  afloatMcpConformanceInvalidCredential
+} from '@yolk-sdk/connectors/afloat/conformance'
 import {
   McpEmulatorInputInvalid,
   emulatorEvidenceHeader,
   isMcpEmulatedRequestId,
   makeMcpEmulator,
+  mcpEmulatorAfloatFixtures,
+  mcpEmulatorAfloatKeyPrefix,
+  mcpEmulatorAfloatOrigin,
+  mcpEmulatorAfloatPath,
+  mcpEmulatorAfloatReservedInvalidCredential,
   mcpEmulatorFixtures,
   mcpEmulatorOrigin,
   mcpEmulatorReservedInvalidCredential,
@@ -44,6 +54,13 @@ const modernUrl = `${mcpEmulatorOrigin}/modern/mcp`
 
 const legacyUrl = `${mcpEmulatorOrigin}/legacy/mcp`
 
+const afloatUrl = `${mcpEmulatorAfloatOrigin}${mcpEmulatorAfloatPath}`
+
+/** A synthetic Afloat key the emulator accepts: `afloat_` and a recognisable remainder. */
+const afloatToken = 'afloat_synthetic-mcp-unit-key-0001'
+
+const afloatReserved = mcpEmulatorAfloatReservedInvalidCredential
+
 /** A synthetic bearer the emulator accepts (never account data). */
 const token = 'synthetic-mcp-unit-token-0001'
 
@@ -52,7 +69,9 @@ const reserved = mcpEmulatorReservedInvalidCredential
 const row = (url: string, method: string) => `${url}#${method}`
 
 const fixtureById = (id: string): McpRecordedFixture => {
-  const fixture = mcpEmulatorFixtures.find(candidate => candidate.id === id)
+  const fixture = [...mcpEmulatorFixtures, ...mcpEmulatorAfloatFixtures].find(
+    candidate => candidate.id === id
+  )
 
   if (fixture === undefined) throw new Error(`no fixture ${id}`)
 
@@ -82,7 +101,10 @@ const recorded = {
   legacyInitialized: exchangeOf(legacyEra, 2),
   legacyGet: exchangeOf(legacyEra, 3),
   legacyList: exchangeOf(legacyEra, 4),
-  legacyCallRead: exchangeOf('mcp.tools.call-read.legacy.synthetic', -1)
+  legacyCallRead: exchangeOf('mcp.tools.call-read.legacy.synthetic', -1),
+  afloatDiscover: exchangeOf('mcp.negotiation.era.afloat.synthetic', 0),
+  afloatList: exchangeOf('mcp.negotiation.era.afloat.synthetic', 1),
+  afloatCallRead: exchangeOf('mcp.tools.call-read.afloat.synthetic', -1)
 }
 
 type Send = {
@@ -230,7 +252,10 @@ describe('manifest', () => {
       `RPC ${row(legacyUrl, 'notifications/initialized')}`,
       `RPC ${row(legacyUrl, 'tools/list')}`,
       `RPC ${row(legacyUrl, 'tools/call')}`,
-      `GET ${legacyUrl}`
+      `GET ${legacyUrl}`,
+      `RPC ${row(afloatUrl, 'server/discover')}`,
+      `RPC ${row(afloatUrl, 'tools/list')}`,
+      `RPC ${row(afloatUrl, 'tools/call')}`
     ])
 
     for (const route of mcpEmulatorRoutes) {
@@ -265,6 +290,18 @@ describe('manifest', () => {
       'mcp.tools.call-tool-error',
       'mcp.errors.unknown-tool'
     ])
+    expect(caseIdsOf(row(afloatUrl, 'server/discover'))).toEqual(
+      ids.filter(id => id !== 'mcp.legacy.session')
+    )
+    expect(caseIdsOf(row(afloatUrl, 'tools/list'))).toEqual(
+      ids.filter(id => id !== 'mcp.legacy.session' && id !== 'mcp.auth.rejected')
+    )
+    expect(caseIdsOf(row(afloatUrl, 'tools/call'))).toEqual([
+      'mcp.modern.stateless',
+      'mcp.tools.call-read',
+      'mcp.tools.call-tool-error',
+      'mcp.errors.unknown-tool'
+    ])
   })
 
   it('coverage counts each row; the control plane serves the same', async () => {
@@ -274,7 +311,7 @@ describe('manifest', () => {
 
       const counts = emulator.coverage().routes.map(route => route.requests)
 
-      expect(counts).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0])
+      expect(counts).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
       const served = await emulator
         .fetch(new Request(`${mcpEmulatorOrigin}/_emulate/coverage`))
@@ -292,6 +329,13 @@ describe('the data copy', () => {
     expect(modernUrl).toBe(mcpConformanceSyntheticModernUrl)
     expect(legacyUrl).toBe(mcpConformanceSyntheticLegacyUrl)
     expect(mcpEmulatorReservedInvalidCredential).toBe(mcpConformanceInvalidCredential)
+  })
+
+  it('the Afloat copy equals @yolk-sdk/connectors/afloat/conformance, and the constants agree', () => {
+    expect(mcpEmulatorAfloatFixtures).toEqual(afloatMcpConformanceFixtures)
+    expect(afloatUrl).toBe(afloatMcpServerUrl)
+    expect(mcpEmulatorAfloatReservedInvalidCredential).toBe(afloatMcpConformanceInvalidCredential)
+    expect(mcpRecordingProblems(mcpEmulatorAfloatFixtures)).toEqual([])
   })
 
   it('every recorded answer is canonical JSON; a non-canonical copy fails loudly', () => {
@@ -347,11 +391,26 @@ describe('the data copy', () => {
     expect(isRecognisableBearerValue(mcpEmulatorReservedInvalidCredential)).toBe(true)
     expect(isRecognisableBearerValue(token)).toBe(true)
   })
+
+  it('an Afloat key fails the plain rule; its remainder after afloat_ is the recognisable part', () => {
+    const remainder = (key: string) => key.slice(mcpEmulatorAfloatKeyPrefix.length)
+
+    for (const key of [afloatReserved, afloatToken]) {
+      expect(key.startsWith(mcpEmulatorAfloatKeyPrefix)).toBe(true)
+      expect(isRecognisableBearerValue(key)).toBe(false)
+      expect(isRecognisableBearerValue(remainder(key))).toBe(true)
+    }
+  })
 })
 
 /** The recorded bearer of a fixture's requests: the reserved credential for the auth case. */
-const bearerOf = (fixture: McpRecordedFixture) =>
-  fixture.caseId === 'mcp.auth.rejected' ? reserved : token
+const bearerOf = (fixture: McpRecordedFixture) => {
+  const afloat = fixture.endpoint === afloatUrl
+
+  if (fixture.caseId === 'mcp.auth.rejected') return afloat ? afloatReserved : reserved
+
+  return afloat ? afloatToken : token
+}
 
 /** Seed a fixture's replay needs (the paged listing only for `mcp.tools.list` modern). */
 const seedOf = (fixture: McpRecordedFixture): McpEmulatorOptions =>
@@ -416,12 +475,25 @@ const replay = async (
     let expectedText = recordedText(exchange)
 
     if (id !== undefined && idFor(id) !== id) {
-      const from = `{"jsonrpc":"2.0","id":${JSON.stringify(id)},`
-      const to = `{"jsonrpc":"2.0","id":${JSON.stringify(idFor(id))},`
+      // The synthetic answers open with the id; the Afloat answers (the server SDK's member order
+      // `result`, `jsonrpc`, `id`) close with it, except their errors, which open with it.
+      const forms = [
+        [
+          `{"jsonrpc":"2.0","id":${JSON.stringify(id)},`,
+          `{"jsonrpc":"2.0","id":${JSON.stringify(idFor(id))},`
+        ],
+        [
+          `,"jsonrpc":"2.0","id":${JSON.stringify(id)}}`,
+          `,"jsonrpc":"2.0","id":${JSON.stringify(idFor(id))}}`
+        ]
+      ] as const
 
       // Exactly one place carries the recorded request id (none on the id-null and 401 answers).
-      expect(expectedText.split(from).length, label).toBeLessThanOrEqual(2)
-      expectedText = expectedText.replace(from, to)
+      const places = forms.reduce((count, [from]) => count + expectedText.split(from).length - 1, 0)
+
+      expect(places, label).toBeLessThanOrEqual(1)
+
+      for (const [from, to] of forms) expectedText = expectedText.replace(from, to)
     }
 
     expect(answer.status, label).toBe(exchange.response.status)
@@ -432,8 +504,8 @@ const replay = async (
 }
 
 describe('drift: every fixture replayed byte for byte', () => {
-  // The data copy, equal to `mcpConformanceFixtures` (checked above).
-  for (const fixture of mcpEmulatorFixtures) {
+  // The data copies, equal to `mcpConformanceFixtures` and `afloatMcpConformanceFixtures`.
+  for (const fixture of [...mcpEmulatorFixtures, ...mcpEmulatorAfloatFixtures]) {
     it(`${fixture.id} alone`, async () => {
       await withEmulator(seedOf(fixture), async emulator => {
         await replay(emulator, fixture)
@@ -452,7 +524,7 @@ describe('drift: every fixture replayed byte for byte', () => {
 
   it('every one-page fixture in suite order on ONE emulator', async () => {
     await withEmulator({}, async emulator => {
-      for (const fixture of mcpEmulatorFixtures) {
+      for (const fixture of [...mcpEmulatorFixtures, ...mcpEmulatorAfloatFixtures]) {
         if (seedOf(fixture).seed === undefined) await replay(emulator, fixture)
       }
 
@@ -556,8 +628,99 @@ const refusals: ReadonlyArray<Refusal> = [
   },
   {
     name: 'another path',
-    request: () => requestFor(recorded.modernDiscover, { url: `${mcpEmulatorOrigin}/mcp` }),
+    request: () => requestFor(recorded.modernDiscover, { url: `${mcpEmulatorOrigin}/other/mcp` }),
     reason: noRoute
+  },
+  {
+    name: 'the Afloat path on the synthetic origin',
+    request: () => requestFor(recorded.afloatDiscover, { url: `${mcpEmulatorOrigin}/mcp` }),
+    reason: 'this route is recorded on https://useafloat.com only'
+  },
+  {
+    name: 'a synthetic path on the Afloat origin',
+    request: () =>
+      requestFor(recorded.modernDiscover, {
+        url: `${mcpEmulatorAfloatOrigin}/modern/mcp`,
+        bearer: afloatToken
+      }),
+    reason: 'this route is recorded on https://mcp.example.test only'
+  },
+  {
+    name: 'a bearer without afloat_ on the Afloat profile',
+    request: () => requestFor(recorded.afloatDiscover, { bearer: token }),
+    reason: 'an unrecognisable Authorization header is not emulated'
+  },
+  {
+    name: 'an Afloat key whose remainder starts with a hex digit (a real key shape)',
+    request: () =>
+      requestFor(recorded.afloatDiscover, { bearer: `afloat_${'0123456789abcdef'.repeat(4)}` }),
+    reason: 'an unrecognisable Authorization header is not emulated'
+  },
+  {
+    name: 'an Afloat key on the synthetic profiles',
+    request: () => requestFor(recorded.modernDiscover, { bearer: afloatToken }),
+    reason: 'an unrecognisable Authorization header is not emulated'
+  },
+  {
+    name: 'a GET on the Afloat profile',
+    request: () =>
+      requestFor(recorded.afloatDiscover, { method: 'GET', body: undefined, bearer: afloatToken }),
+    reason: noRoute
+  },
+  {
+    name: 'a cursor on the Afloat listing',
+    request: () =>
+      requestFor(recorded.afloatList, {
+        bearer: afloatToken,
+        body: paramsWith(recorded.afloatList, { cursor: 'synthetic-cursor-0001' })
+      }),
+    reason: 'params other than the recorded ones are not emulated'
+  },
+  {
+    name: 'prompts/list on the Afloat profile',
+    request: () =>
+      requestFor(recorded.afloatList, {
+        bearer: afloatToken,
+        headers: { 'mcp-method': 'prompts/list' },
+        body: bodyWith(recorded.afloatList, { method: 'prompts/list' })
+      }),
+    reason: 'this JSON-RPC method is not emulated on the Afloat profile'
+  },
+  {
+    name: 'another Afloat tool',
+    request: () =>
+      requestFor(recorded.afloatCallRead, {
+        bearer: afloatToken,
+        headers: { 'mcp-name': 'get-invoice-pdf' },
+        body: paramsWith(recorded.afloatCallRead, {
+          name: 'get-invoice-pdf',
+          arguments: { invoiceId: 'yolksyntheticinvoice0001' }
+        })
+      }),
+    reason: 'params other than the recorded ones are not emulated'
+  },
+  {
+    name: 'other Afloat arguments',
+    request: () =>
+      requestFor(recorded.afloatCallRead, {
+        bearer: afloatToken,
+        body: paramsWith(recorded.afloatCallRead, { arguments: { size: 25 } })
+      }),
+    reason: 'params other than the recorded ones are not emulated'
+  },
+  {
+    name: 'the reserved invalid Afloat credential on tools/list',
+    request: () => requestFor(recorded.afloatList, { bearer: afloatReserved }),
+    reason: 'the reserved invalid credential is answered only on the era probe'
+  },
+  {
+    name: 'mcp-session-id on an Afloat request',
+    request: () =>
+      requestFor(recorded.afloatDiscover, {
+        bearer: afloatToken,
+        headers: { 'mcp-session-id': 'yolk-emu-session-1' }
+      }),
+    reason: 'mcp-session-id must be sent exactly where the recording sends one'
   },
   {
     name: 'another origin',
@@ -1058,6 +1221,157 @@ describe('the credential guard', () => {
         body: recorded.legacyCallRead.request.body
       })
       expect(await controlPlaneText(emulator)).not.toContain(token)
+    })
+  })
+})
+
+describe('the Afloat credential rule: afloat_ and a guarded remainder', () => {
+  const remainder = afloatToken.slice(mcpEmulatorAfloatKeyPrefix.length)
+
+  it('answers the reserved invalid Afloat credential the recorded 401, byte for byte', async () => {
+    await withEmulator({}, async emulator => {
+      const exchange = exchangeOf('mcp.auth.rejected.afloat.synthetic', 0)
+      const answer = await emulator.fetch(requestFor(exchange, { bearer: afloatReserved }))
+
+      expect(answer.status).toBe(401)
+      expect(responseHeaders(answer)).toEqual(exchange.response.headers)
+      expect(await answer.text()).toBe(recordedText(exchange))
+
+      // The synthetic reserved credential is no Afloat key: it is not emulated there.
+      expect((await emulator.fetch(requestFor(exchange, { bearer: reserved }))).status).toBe(400)
+
+      const text = await controlPlaneText(emulator)
+
+      expect(text).not.toContain(afloatReserved.slice(mcpEmulatorAfloatKeyPrefix.length))
+      expect(text.toLowerCase()).not.toContain('bearer')
+    })
+  })
+
+  const escaped = remainder.replace('s', '\\u0073')
+
+  const repeats: ReadonlyArray<readonly [string, () => Request, string]> = [
+    [
+      'the whole key as the request id',
+      () =>
+        requestFor(recorded.afloatDiscover, {
+          bearer: afloatToken,
+          body: bodyWith(recorded.afloatDiscover, { id: afloatToken })
+        }),
+      'the request body repeats the credential'
+    ],
+    [
+      'the remainder alone, JSON-escaped in the client info',
+      () =>
+        requestFor(recorded.afloatDiscover, {
+          bearer: afloatToken,
+          body: JSON.stringify(
+            paramsWith(recorded.afloatDiscover, {
+              _meta: {
+                'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                'io.modelcontextprotocol/clientInfo': { name: 'ESCAPED', version: '1' },
+                'io.modelcontextprotocol/clientCapabilities': {}
+              }
+            })
+          ).replace('ESCAPED', escaped)
+        }),
+      'the request body repeats the credential'
+    ],
+    [
+      'the remainder percent-encoded in a query value',
+      () =>
+        requestFor(recorded.afloatDiscover, {
+          bearer: afloatToken,
+          url: `${afloatUrl}?x=${remainder.replace('s', '%73')}`
+        }),
+      'the query repeats the credential'
+    ],
+    [
+      'the remainder in the mcp-name header',
+      () =>
+        requestFor(recorded.afloatCallRead, {
+          bearer: afloatToken,
+          headers: { 'mcp-name': remainder }
+        }),
+      'a recorded request header repeats the credential'
+    ],
+    [
+      'the whole key in a header the ledger does not record',
+      () =>
+        requestFor(recorded.afloatDiscover, {
+          bearer: afloatToken,
+          headers: { 'x-trace': afloatToken }
+        }),
+      'a request header repeats the credential'
+    ]
+  ]
+
+  for (const [name, request, reason] of repeats) {
+    it(`refuses ${name}: constant text, nothing kept or echoed`, async () => {
+      await withEmulator({}, async emulator => {
+        const before = emulator.snapshot()
+
+        emulator.faults.add({ kind: 'status', status: 503 })
+
+        const answer = await emulator.fetch(request())
+        const text = await answer.text()
+
+        expect(answer.status).toBe(400)
+        expect(text).not.toContain(remainder)
+        expect(emulator.ledger.entries().at(-1)).toMatchObject({
+          path: '/<unrecognised>',
+          query: {},
+          headers: {},
+          notEmulated: reason
+        })
+        expect(emulator.snapshot()).toEqual(before)
+        expect(emulator.faults.list().map(fault => fault.applied)).toEqual([0])
+        expect(await controlPlaneText(emulator)).not.toContain(remainder)
+
+        // The unused match-all fault still answers the next valid request.
+        expect((await emulator.fetch(valid())).status).toBe(503)
+      })
+    })
+  }
+
+  it('an admitted Afloat request keeps fixture text only: neither key nor remainder recorded', async () => {
+    await withEmulator({}, async emulator => {
+      const answer = await emulator.fetch(
+        requestFor(recorded.afloatCallRead, { bearer: afloatToken })
+      )
+
+      const text = await answer.text()
+
+      expect(answer.status).toBe(200)
+      expect(text).toBe(recordedText(recorded.afloatCallRead))
+      expect(emulator.ledger.entries().at(-1)).toMatchObject({
+        path: '/mcp',
+        route: row(afloatUrl, 'tools/call'),
+        body: recorded.afloatCallRead.request.body
+      })
+      expect(await controlPlaneText(emulator)).not.toContain(remainder)
+    })
+  })
+
+  it('a key whose remainder the answer holds is refused by the output guard', async () => {
+    await withEmulator({}, async emulator => {
+      const bearer = 'afloat_yolksyntheticinvoice0001'
+
+      expect(recordedText(recorded.afloatCallRead)).toContain('yolksyntheticinvoice0001')
+
+      emulator.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const answer = await emulator.fetch(requestFor(recorded.afloatCallRead, { bearer }))
+      const text = await answer.text()
+
+      expect(answer.status).toBe(400)
+      expect(JSON.parse(text)).toEqual({
+        error: {
+          type: 'not_emulated',
+          message: 'Not emulated: the answer would repeat the credential'
+        }
+      })
+      expect(text).not.toContain('yolksyntheticinvoice0001')
+      expect(emulator.faults.list().map(fault => fault.applied)).toEqual([0])
     })
   })
 })

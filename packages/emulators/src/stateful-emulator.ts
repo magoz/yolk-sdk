@@ -112,7 +112,10 @@
  * with the constant credential-repeat entry, so no answer or stored value repeats the bearer, while
  * routes still see only its digest. `uniqueJsonKeys` refuses a JSON body in which an object repeats
  * a key (after unescaping). Routes also see every request header name
- * (`EmulatedRequest.headerNames`), never a credential value.
+ * (`EmulatedRequest.headerNames`), never a credential value. `bearerPrefixes` (fail-closed mode
+ * only) gives an origin a fixed bearer prefix (`/mcp` gives `https://useafloat.com` the Afloat key
+ * prefix `afloat_`): there a bearer is recognised only as `<prefix><remainder>`, and the remainder,
+ * which must itself be a recognisable bearer, is the guarded secret and the digest input.
  *
  * Resolved mode (opt-in, `resolveRequest`; not with `failClosed`; used by `/todoist` and
  * `/telegram`) serves an emulator whose credential the wrapper cannot find by itself (a Telegram
@@ -973,6 +976,19 @@ export type StatefulEmulatorConfig<State, Env> = {
    */
   readonly bearerDigest?: (bearer: string, origin: string) => string
   /**
+   * Opt-in, fail-closed mode only (checked at build): per arrival origin, a fixed literal prefix
+   * (1 to 32 `b64token` characters) every bearer on that origin must start with. On such an origin
+   * an `Authorization` header is recognised only as `Bearer <prefix><remainder>`, and the
+   * REMAINDER, not the whole bearer, must be a recognisable bearer (`isRecognisableBearerValue`):
+   * it is the guarded secret (checked for repeats, scrubbed, never stored) and what `bearerDigest`
+   * receives. A bearer without the prefix is an unrecognisable `Authorization` header there. This
+   * serves keys whose fixed public prefix starts with a hex digit or an escape letter (an Afloat
+   * `afloat_` key), whose secret part is guarded instead, as resolved mode guards a Telegram bot
+   * token's secret part. Other origins keep the plain rule. Omitted: the plain rule everywhere, as
+   * before.
+   */
+  readonly bearerPrefixes?: Readonly<Record<string, string>>
+  /**
    * Opt-in, fail-closed mode only (checked at build): every refusal is ledgered with constant text
    * only, like an unrecognised request (`/<unrecognised>`, a standard method or `<other>`, an
    * empty query, no headers or body), keeping only its constant route (template or variant) and
@@ -1081,12 +1097,29 @@ const bearerPattern = /^bearer\s+\S+/i
  */
 const recognisableBearerPattern = /^Bearer ([^\s]{8,})$/
 
-/** The fail-closed bearer of an `Authorization` header, or `undefined` when unrecognisable. */
-const recognisableBearer = (authorization: string | null): string | undefined => {
+/**
+ * The fail-closed secret of an `Authorization` header, or `undefined` when unrecognisable. Without
+ * a `prefix` it is the whole bearer. With one (`bearerPrefixes`, for the origin the request arrived
+ * on) the bearer must be `<prefix><remainder>`, and the secret is the remainder: it, not the
+ * bearer, must be recognisable (a key whose fixed prefix starts with a hex digit or an escape
+ * letter guards its secret part, the Telegram precedent).
+ */
+const recognisableBearer = (
+  authorization: string | null,
+  prefix: string | undefined
+): string | undefined => {
   const bearer = recognisableBearerPattern.exec(authorization ?? '')?.[1]
 
-  return bearer !== undefined && isRecognisableBearerValue(bearer) ? bearer : undefined
+  if (bearer === undefined) return undefined
+
+  const secret =
+    prefix === undefined ? bearer : bearer.startsWith(prefix) ? bearer.slice(prefix.length) : ''
+
+  return isRecognisableBearerValue(secret) ? secret : undefined
 }
+
+/** A `bearerPrefixes` prefix: 1 to 32 `b64token` characters (no `=`). */
+const bearerPrefixPattern = /^[A-Za-z0-9\-._~+/]{1,32}$/
 
 /** The raw query of a request URL (after `?`, before `#`), or `undefined` when it has none. */
 const rawQuery = (requestUrl: string): string | undefined => {
@@ -1468,6 +1501,22 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
   if (config.bearerDigest !== undefined && config.failClosed === undefined) {
     throw new Error('bearerDigest needs fail-closed mode (failClosed)')
+  }
+
+  if (config.bearerPrefixes !== undefined) {
+    if (config.failClosed === undefined) {
+      throw new Error('bearerPrefixes needs fail-closed mode (failClosed)')
+    }
+
+    for (const [origin, prefix] of Object.entries(config.bearerPrefixes)) {
+      if (!URL.canParse(origin) || new URL(origin).origin !== origin) {
+        throw new Error(`bearerPrefixes takes origins only (${origin})`)
+      }
+
+      if (!bearerPrefixPattern.test(prefix)) {
+        throw new Error(`bearerPrefixes takes 1 to 32 b64token characters (${origin})`)
+      }
+    }
   }
 
   for (const option of ['constantRefusals', 'guardAllHeaders', 'guardOutput'] as const) {
@@ -2124,7 +2173,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
     if (failClosed !== undefined) {
       const authorization = request.headers.get('authorization')
-      const bearer = recognisableBearer(authorization)
+      const bearer = recognisableBearer(authorization, config.bearerPrefixes?.[arrivedOn])
 
       // Its credential cannot be extracted and scrubbed: nothing of the request is kept.
       if (authorization !== null && bearer === undefined) {
