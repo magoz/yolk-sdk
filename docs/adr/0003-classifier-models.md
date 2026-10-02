@@ -1,6 +1,6 @@
 # Classifier models
 
-Status: accepted. One wire detail is pending verification (see Open items).
+Status: accepted. The wire shape was confirmed by a live probe on 2026-10-02 (see Live observation).
 
 Agents and hosts need fast, typed decisions about data: route a ticket, score urgency, check
 whether a message approves a result. Classifier models such as TypeSafe's Jev answer typed
@@ -120,11 +120,25 @@ guardrails. Classification stays separate from authorization: a classifier can s
 destructive, but host policy decides whether it runs. An approval-policy hook that consults a
 classifier is a possible later addition and stays host-owned.
 
+## Live observation
+
+Owner-approved probe of `POST /v1/evaluate` with `typesafe-ai/jev` and synthetic state, 2026-10-02:
+
+- `choice` and `score` answers carry `confidence` on the answer, and AI Gateway repeats it in
+  `providerMetadata.typesafe.confidence[questionId]`. Boolean answers have no confidence.
+- Score levels are indexed from 0: `probabilities` keys are `"0"` to `"n-1"`, and `score` is the
+  probability-weighted level index.
+- `usage` is `{ inputTokens, outputTokens }`; `providerMetadata.gateway.cost` is a decimal USD
+  string (about $0.00002 for one request with three questions).
+- Latency from a European client: about 300 ms round trip per warm call (Gateway-reported provider
+  time about 220–240 ms); 100 to 200 concurrent requests finished in 0.8–1.3 s with no rate-limit
+  errors. A code mode script classifying 200 items through `makeClassifierTool` took 1.5–1.7 s.
+
+The conformance fixtures stay `unverified` until they are re-recorded through the replay-verified
+write gate.
+
 ## Open items
 
-- **Confidence on `/v1/evaluate`**: the documented example omits `confidence` for `choice` and
-  `score`; the AI SDK reads it from `providerMetadata.typesafe.confidence`. One owner-approved live
-  call settles whether `confidence` is a field or metadata before the schema is fixed.
 - **Other transports**: TypeSafe's System One protocol (`/v1/systemone`, `noul` for boolean) is
   served by TypeSafe directly, Gateway's `/typesafe` path, OpenRouter, and OpenCode Zen. Add one
   System One provider with a per-service base URL when a host needs it. Cloudflare Workers AI wraps

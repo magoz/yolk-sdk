@@ -110,8 +110,9 @@ provider's body or your credential.
 - Evaluation fallback response headers (`x-ai-gateway-evaluation-fallback-*`) are kept in
   `providerMetadata.evaluationFallbackHeaders`.
 - `choice` and `score` confidence is read from the answer, or else from
-  `providerMetadata.typesafe.confidence[questionId]`. Which one the live Gateway uses is not yet
-  verified.
+  `providerMetadata.typesafe.confidence[questionId]`. The live Gateway sends both.
+- Score levels are indexed from 0: `probabilities` keys run from `"0"` to `"n-1"` and `score` is
+  the probability-weighted level index.
 
 ## Classify from code mode scripts
 
