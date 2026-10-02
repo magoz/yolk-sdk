@@ -66,6 +66,9 @@ type IndexedToolResultMessage = {
   readonly message: ToolResultMessage
 }
 
+/** Model-visible rejection for dispatch after Stop, shared by tool calls and code mode nested calls. */
+const workflowStoppedMessage = 'Workflow execution is stopped or unavailable'
+
 const workflowEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}`
 
 const workflowErrorEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}:error`
@@ -364,7 +367,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
         beforeNestedCall: () =>
           assertChildAdmission(context, workflowRunId).pipe(
             Effect.provideService(AgentWorkflowStore, store),
-            Effect.mapError(() => 'Workflow execution is stopped or unavailable')
+            Effect.mapError(() => workflowStoppedMessage)
           )
       })
 
@@ -417,7 +420,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
                   new ToolError({
                     tool: call.name,
                     cause: 'execution',
-                    message: 'Workflow execution is stopped or unavailable'
+                    message: workflowStoppedMessage
                   })
               ),
               Effect.flatMap(() => {

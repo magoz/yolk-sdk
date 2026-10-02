@@ -49,7 +49,7 @@ export const vercelAiGatewayClassifierScoreFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"model":"typesafe-ai/jev","answers":{"urgency":{"type":"score","score":3,"probabilities":{"0":0.01,"1":0.04,"2":0.15,"3":0.8},"confidence":0.77}},"usage":{"inputTokens":66,"outputTokens":0},"providerMetadata":{"gateway":{"cost":"0.000002772"}}}'
+        body: '{"model":"typesafe-ai/jev","answers":{"urgency":{"type":"score","score":2.74,"probabilities":{"0":0.01,"1":0.04,"2":0.15,"3":0.8},"confidence":0.77}},"usage":{"inputTokens":66,"outputTokens":0},"providerMetadata":{"gateway":{"cost":"0.000002772"}}}'
       }
     }
   ]

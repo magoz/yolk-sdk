@@ -2,12 +2,14 @@
 import { ConfigProvider, Effect, Layer, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  ClassificationProviderError,
   ClassifierModel,
   type ClassificationRequest,
   type ClassificationResult
 } from '@yolk-sdk/agent/classification'
 import {
   contentPartText,
+  ProviderErrorInfo,
   providerToolDefs,
   ToolCall,
   ToolResult,
@@ -173,6 +175,34 @@ describe('withAgentCodeMode', () => {
         )
       }
     })
+  )
+
+  it.effect(
+    'fails with a config error when the classifier layer fails for a reason other than auth',
+    () =>
+      Effect.gen(function* () {
+        const failingLayer = Layer.effect(
+          ClassifierModel,
+          Effect.fail(
+            ClassificationProviderError.make({
+              message: 'synthetic classifier failure',
+              retryable: false,
+              provider: ProviderErrorInfo.make({ provider: 'synthetic', kind: 'server_error' })
+            })
+          )
+        )
+
+        const result = yield* withEnv(
+          withAgentCodeMode(nodeTextToolModules, { classifierLayer: failingLayer }),
+          { YOLK_CODEMODE: 'true' }
+        ).pipe(Effect.result)
+
+        expect(Result.isFailure(result)).toBe(true)
+
+        if (Result.isFailure(result)) {
+          expect(result.failure._tag).toBe('AgentCodeModeConfigError')
+        }
+      })
   )
 
   it.live('runs scripts with the pi executor through the resolved tool set', () =>

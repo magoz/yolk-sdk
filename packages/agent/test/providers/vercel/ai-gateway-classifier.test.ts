@@ -259,7 +259,7 @@ describe('Vercel AI Gateway classifier response decoding', () => {
       expect(urgency.answers).toEqual({
         urgency: {
           type: 'score',
-          score: 3,
+          score: 2.74,
           probabilities: { '0': 0.01, '1': 0.04, '2': 0.15, '3': 0.8 },
           confidence: 0.77
         }
