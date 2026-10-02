@@ -82,7 +82,7 @@ const { tools } = await client.listTools()
 
 ## Use Effect/Yolk tool adapters
 
-The high-level remote helpers use the official v2 client over an Effect `HttpClient` bridge. They negotiate modern MCP automatically, aggregate paginated tool lists, honor v2 routing headers and cache hints, and fall back to legacy servers. Discovered tools preserve provider `title`, `inputSchema`, `outputSchema`, and `annotations` metadata.
+The high-level remote helpers use the official v2 client over an Effect `HttpClient` bridge. They negotiate modern MCP automatically, aggregate paginated tool lists, honor v2 routing headers and cache hints, and fall back to legacy servers. Discovered tools preserve provider `title`, `inputSchema`, `outputSchema`, and `annotations` metadata. Pass `exposure` in the options (a `ToolExposure` value or `(tool, serverName) => ToolExposure`) to set code mode `callableBy`/`discovery` on the adapted definitions; `mcpToolToToolDef` takes the same option.
 
 ```ts
 import { Effect } from 'effect'

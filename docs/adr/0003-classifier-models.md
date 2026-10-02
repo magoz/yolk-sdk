@@ -99,6 +99,14 @@ interface ClassifierModel {
   conditional evaluation fallback (for example re-run with a language model when confidence falls
   below a threshold). Reads the `x-ai-gateway-evaluation-fallback-*` headers into metadata.
 - Maps Gateway `usage` and `providerMetadata.gateway.cost` into `ClassificationResult.usage`.
+- Retries 408, 429, 5xx, and transport failures up to `maxRetries` times (default 2, set on the
+  provider config; `0` disables) with exponential backoff and full jitter (base 250 ms, cap 4 s),
+  or after the response's `Retry-After` (delta-seconds or HTTP-date, capped at 10 s). Other 4xx
+  statuses and responses that fail to decode are never retried: the request was rejected, or it
+  was answered and billed. The retry is an Effect `Schedule` on the `Clock` (tests use
+  `TestClock`), interruption stops it, and the error after the last attempt keeps its typed shape
+  and `retryable` flag. Chat providers leave retries to the loop; a classification has no loop, so
+  the provider owns them.
 
 ### Code mode integration
 
@@ -109,8 +117,12 @@ tool registered with `callableBy: 'codemode'` and `discovery: 'listed'` (see
 any other tool; the record carries token usage only, and the cost stays in the classifier result's
 `structuredContent` (`usage.costUsd`). It caps concurrent classifications per script (default 100,
 keyed by the parent tool call id of the nested call id `<parentToolCallId>/<seq>`) so
-`Promise.all` over many items queues instead of flooding the provider. Scripts classify one item
-per call.
+`Promise.all` over many items queues instead of flooding the provider. A process-wide cap bounds
+all scripts together: each call takes its per-script permit and then a permit from a limiter
+shared across scripts and registrations (`processLimiter`; default the module-level
+`defaultClassifierProcessLimiter`, 200 concurrent classifications, sized from the live probe
+below; `makeClassifierConcurrencyLimiter(max)` builds another; `false` disables it). Waiting is
+interruptible and never leaks a permit. Scripts classify one item per call.
 
 ### Other uses
 
@@ -179,4 +191,8 @@ Tests must demonstrate:
 - Probabilities are not renormalized.
 - Credentials never appear in errors, metadata, or recordings.
 - Gateway fallback headers and cost map into the result.
-- The code mode classifier tool respects its concurrency cap and records usage per nested call.
+- The code mode classifier tool respects its per-script and process concurrency caps (an
+  interrupted waiting call leaks no permit) and records usage per nested call.
+- The AI Gateway provider retries 429 (honouring `Retry-After`), 408, 5xx, and transport failures,
+  never other 4xx or decode failures, stops on interruption, and keeps the typed error after the
+  last attempt.

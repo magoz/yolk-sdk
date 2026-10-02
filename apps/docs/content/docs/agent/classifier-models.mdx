@@ -113,11 +113,18 @@ provider's body or your credential.
   `providerMetadata.typesafe.confidence[questionId]`. The live Gateway sends both.
 - Score levels are indexed from 0: `probabilities` keys run from `"0"` to `"n-1"` and `score` is
   the probability-weighted level index.
+- 408, 429, 5xx, and transport failures are retried up to `maxRetries` times (default 2; `0`
+  disables) with exponential backoff and full jitter (base 250 ms, cap 4 s), or after the
+  response's `Retry-After` (seconds or an HTTP date, capped at 10 s). Other 4xx statuses and
+  responses that fail to decode are never retried. Delays use the Effect `Clock`, so `TestClock`
+  drives them in tests; interrupting the classification stops the retries. After the last attempt
+  you get the same typed error a single attempt would give.
 
 ## Classify from code mode scripts
 
 `makeClassifierTool` from `@yolk-sdk/codemode` exposes a `ClassifierModel` as a code-mode-only
-`classify` tool, so one script can classify many items with a concurrency cap. See
+`classify` tool, so one script can classify many items with per-script and per-process
+concurrency caps. See
 [Add code mode](../integrations/code-mode#classify-items-from-scripts).
 
 ## Policy stays in your host

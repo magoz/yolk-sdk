@@ -15,6 +15,8 @@ type ProviderFailureInput = {
   readonly message?: string
   readonly providerCode?: string
   readonly fallbackKind?: ProviderFailureKind
+  /** Current time for HTTP-date `Retry-After` values; defaults to `Date.now()`. */
+  readonly nowMs?: number
 }
 
 type ProviderErrorInfoInput = {
@@ -54,7 +56,8 @@ export const parseRetryAfterMs = (value: string | undefined) => {
   return numericDelayMs(Number(value.trim()))
 }
 
-export const parseRetryAfter = (value: string | undefined) => {
+/** `Retry-After` as delta-seconds or an HTTP-date relative to `nowMs` (default `Date.now()`). */
+export const parseRetryAfter = (value: string | undefined, nowMs?: number) => {
   if (value === undefined) {
     return undefined
   }
@@ -73,17 +76,17 @@ export const parseRetryAfter = (value: string | undefined) => {
     return undefined
   }
 
-  return numericDelayMs(timestamp - Date.now())
+  return numericDelayMs(timestamp - (nowMs ?? Date.now()))
 }
 
-export const retryAfterMsFromHeaders = (headers: HeaderMap | undefined) => {
+export const retryAfterMsFromHeaders = (headers: HeaderMap | undefined, nowMs?: number) => {
   if (headers === undefined) {
     return undefined
   }
 
   return (
     parseRetryAfterMs(headerValue(headers, 'retry-after-ms')) ??
-    parseRetryAfter(headerValue(headers, 'retry-after'))
+    parseRetryAfter(headerValue(headers, 'retry-after'), nowMs)
   )
 }
 
@@ -255,7 +258,7 @@ export const classifyProviderFailure = (input: ProviderFailureInput) => {
       }
 
       if (input.headers !== undefined) {
-        fields.retryAfterMs = retryAfterMsFromHeaders(input.headers)
+        fields.retryAfterMs = retryAfterMsFromHeaders(input.headers, input.nowMs)
       }
 
       return fields

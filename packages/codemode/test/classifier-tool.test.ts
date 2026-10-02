@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Deferred, Effect, Fiber } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   ClassificationProviderError,
@@ -9,7 +9,13 @@ import {
   type ClassificationResult
 } from '@yolk-sdk/agent/classification'
 import { ProviderErrorInfo, ToolCall } from '@yolk-sdk/agent/protocol'
-import { makeClassifierTool, makeCodeModeTool } from '../src/index.ts'
+import {
+  defaultClassifierProcessLimiter,
+  defaultClassifierProcessMaxConcurrency,
+  makeClassifierConcurrencyLimiter,
+  makeClassifierTool,
+  makeCodeModeTool
+} from '../src/index.ts'
 import { makePiCodeModeExecutor } from '../src/node.ts'
 import { context, moduleOf, runCode, text, type TestContext } from './fixtures.ts'
 
@@ -134,6 +140,177 @@ describe('makeClassifierTool', () => {
       const again = yield* runCode(modules, script('a'), { callId: 'call_a' })
 
       expect(text(again.content)).toContain('Return value:\n6')
+    })
+  )
+
+  it.live('caps classifications across scripts with a shared process limiter', () =>
+    Effect.gen(function* () {
+      const peaks = new Map<string, number>()
+      const active = new Map<string, number>()
+      let total = 0
+      let totalPeak = 0
+
+      const tool = makeClassifierTool<TestContext>({
+        maxConcurrency: 10,
+        processLimiter: makeClassifierConcurrencyLimiter(4),
+        classify: request =>
+          Effect.gen(function* () {
+            const script = String(request.state).split(' ')[0] ?? ''
+            const now = (active.get(script) ?? 0) + 1
+
+            active.set(script, now)
+            peaks.set(script, Math.max(peaks.get(script) ?? 0, now))
+            total++
+            totalPeak = Math.max(totalPeak, total)
+            yield* Effect.sleep('30 millis')
+            active.set(script, (active.get(script) ?? 1) - 1)
+            total--
+
+            return answer(request)
+          })
+      })
+
+      const modules = [
+        moduleOf('host', [makeCodeModeTool<TestContext>({ executor: makePiCodeModeExecutor() })]),
+        moduleOf('ai', [tool])
+      ]
+
+      const script = (
+        name: string
+      ) => `const items = Array.from({ length: 12 }, (_, index) => '${name} item ' + index)
+        const results = await Promise.all(items.map(state => tools.classify({ state, questions: ${JSON.stringify(question)} })))
+        return results.length`
+
+      const results = yield* Effect.all(
+        [
+          runCode(modules, script('a'), { callId: 'call_a' }),
+          runCode(modules, script('b'), { callId: 'call_b' })
+        ],
+        { concurrency: 'unbounded' }
+      )
+
+      expect(results.map(result => text(result.content))).toEqual([
+        expect.stringContaining('Return value:\n12'),
+        expect.stringContaining('Return value:\n12')
+      ])
+      expect(totalPeak).toBe(4)
+      expect(Math.max(...peaks.values())).toBeLessThanOrEqual(4)
+    })
+  )
+
+  it.live('shares a process limiter across registrations; false disables it', () =>
+    Effect.gen(function* () {
+      let total = 0
+      let totalPeak = 0
+
+      const classify = (request: ClassificationRequest) =>
+        Effect.gen(function* () {
+          total++
+          totalPeak = Math.max(totalPeak, total)
+          yield* Effect.sleep('20 millis')
+          total--
+
+          return answer(request)
+        })
+
+      const call = (name: string, id: string) =>
+        ToolCall.make({ id, name, params: { state: id, questions: question } })
+
+      const runAll = (limiter: ReturnType<typeof makeClassifierConcurrencyLimiter> | false) => {
+        const left = makeClassifierTool<TestContext>({
+          name: 'left',
+          classify,
+          processLimiter: limiter
+        })
+
+        const right = makeClassifierTool<TestContext>({
+          name: 'right',
+          classify,
+          processLimiter: limiter
+        })
+
+        total = 0
+        totalPeak = 0
+
+        return Effect.forEach(
+          Array.from({ length: 6 }, (_, index) => index),
+          index =>
+            Effect.all(
+              [
+                left.execute({ call: call('left', `left_${index}/1`), context }),
+                right.execute({ call: call('right', `right_${index}/1`), context })
+              ],
+              { concurrency: 'unbounded' }
+            ),
+          { concurrency: 'unbounded' }
+        )
+      }
+
+      yield* runAll(makeClassifierConcurrencyLimiter(3))
+      expect(totalPeak).toBe(3)
+
+      yield* runAll(false)
+      expect(totalPeak).toBe(12)
+
+      expect(defaultClassifierProcessMaxConcurrency).toBe(200)
+      expect(defaultClassifierProcessLimiter.max).toBe(200)
+      expect(makeClassifierConcurrencyLimiter(0).max).toBe(1)
+    })
+  )
+
+  it.live('releases script and process permits when a waiting call is interrupted', () =>
+    Effect.gen(function* () {
+      const limiter = makeClassifierConcurrencyLimiter(1)
+      const release = yield* Deferred.make<void>()
+      const started: Array<string> = []
+
+      const tool = makeClassifierTool<TestContext>({
+        maxConcurrency: 1,
+        processLimiter: limiter,
+        classify: request =>
+          Effect.gen(function* () {
+            started.push(String(request.state))
+
+            if (request.state === 'blocker') yield* Deferred.await(release)
+
+            return answer(request)
+          })
+      })
+
+      const execute = (id: string, state: string) =>
+        tool.execute({
+          call: ToolCall.make({ id, name: 'classify', params: { state, questions: question } }),
+          context
+        })
+
+      // The blocker holds the only process permit; script b's first call waits for it while
+      // holding b's script permit, and b's second call waits for that script permit.
+      const blocker = yield* Effect.forkChild(execute('call_a/1', 'blocker'))
+
+      yield* Effect.sleep('20 millis')
+
+      const waitingForProcess = yield* Effect.forkChild(execute('call_b/1', 'b1'))
+      const waitingForScript = yield* Effect.forkChild(execute('call_b/2', 'b2'))
+
+      yield* Effect.sleep('20 millis')
+      yield* Fiber.interrupt(waitingForProcess)
+      yield* Fiber.interrupt(waitingForScript)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(blocker)
+
+      // Leaked permits would block these forever.
+      const after = yield* Effect.all([execute('call_b/3', 'b3'), execute('call_c/1', 'c1')], {
+        concurrency: 'unbounded'
+      }).pipe(Effect.timeout('2 seconds'))
+
+      expect(after.map(result => result.isError)).toEqual([undefined, undefined])
+      expect(started).toEqual(['blocker', 'b3', 'c1'])
+
+      const held = yield* limiter
+        .withPermit(Effect.succeed('free'))
+        .pipe(Effect.timeout('1 second'))
+
+      expect(held).toBe('free')
     })
   )
 

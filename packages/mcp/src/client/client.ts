@@ -36,6 +36,7 @@ import {
   toolCallResultToToolResult,
   ToolsCallParams,
   type McpToolAnnotations,
+  type McpToolExposureResolver,
   type JsonRpcNotification,
   type JsonRpcResponse,
   type ToolsListResult
@@ -50,6 +51,8 @@ export type McpClientOptions = {
   readonly timeoutMs?: number
   readonly sdk?: SdkClientOptions
   readonly configureClient?: (client: SdkClient) => void
+  /** Code mode exposure of the listed tools' definitions (listing functions only). */
+  readonly exposure?: McpToolExposureResolver
 }
 
 export type McpResolvedTool = {
@@ -372,14 +375,21 @@ const requestLocalSession = (
     })
   )
 
-const resolvedMcpTools = (config: McpServerConfig, listed: ToolsListResult) =>
+const resolvedMcpTools = (
+  config: McpServerConfig,
+  listed: ToolsListResult,
+  options: McpClientOptions | undefined
+) =>
   listed.tools.map(tool => ({
     serverName: config.name,
     mcpToolName: tool.name,
     title: tool.title,
     outputSchema: tool.outputSchema,
     annotations: tool.annotations,
-    def: mcpToolToToolDef({ serverName: config.name, tool })
+    def:
+      options?.exposure === undefined
+        ? mcpToolToToolDef({ serverName: config.name, tool })
+        : mcpToolToToolDef({ serverName: config.name, tool, exposure: options.exposure })
   }))
 
 export const listRemoteMcpServerTools = (
@@ -406,7 +416,7 @@ export const listRemoteMcpServerTools = (
       )
     )
 
-    return resolvedMcpTools(config, listed)
+    return resolvedMcpTools(config, listed, options)
   })
 
 export const listLocalMcpServerTools = (
@@ -436,7 +446,7 @@ export const listLocalMcpServerTools = (
       )
     )
 
-    return resolvedMcpTools(config, listed)
+    return resolvedMcpTools(config, listed, options)
   })
 
 export const listMcpServerTools = (config: McpServerConfig, options?: McpClientOptions) =>

@@ -132,6 +132,42 @@ const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
 - Tools that poll (no timers in scripts) should stay `callableBy: 'model'` until they offer a wait
   parameter.
 
+### Connector and MCP tools
+
+Generated tools take the same exposure through an `exposure` option: one value for every tool, or
+a resolver per tool. Connector modules resolve per action (`(actionId, action) => exposure`, where
+`action` carries the declared `access`); MCP definitions resolve per listed tool
+(`(tool, serverName) => exposure`). This marks every connector action as a code-mode-only search
+tool:
+
+```ts
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+import { GithubConnector } from '@yolk-sdk/connectors/github'
+
+const github = makeConnectorToolModule<HostContext>(GithubConnector, {
+  integration: githubIntegration, // host-owned
+  layer: connectorLayer, // host-owned
+  exposure: { callableBy: 'codemode', discovery: 'search' }
+})
+```
+
+For MCP, pass `exposure` to `mcpToolToToolDef` or in the listing options; each resolved `def`
+then carries it:
+
+```ts
+import { listMcpServerTools } from '@yolk-sdk/mcp/client'
+
+const tools = listMcpServerTools(serverConfig, {
+  exposure: tool =>
+    tool.annotations?.['readOnlyHint'] === true
+      ? { callableBy: 'codemode', discovery: 'search' }
+      : { callableBy: 'model' }
+})
+```
+
+The fail-closed rules above still apply: resolution fails when an exposure contradicts the tool
+(for example `codemode` on a registration that requires approval).
+
 ## What scripts see
 
 - `code` is the body of an async function: top-level `await` and `return` work. Simple TypeScript
@@ -184,7 +220,10 @@ keeps the previous value.
 
 `makeClassifierTool` exposes a [classifier model](../agent/classifier-models) as a `codemode` +
 `listed` read tool named `classify`. Scripts classify one item per call; calls beyond
-`maxConcurrency` (default 100 per script, keyed by the parent tool call id) queue.
+`maxConcurrency` (default 100 per script, keyed by the parent tool call id) queue. All scripts
+together also share a process cap: `processLimiter` defaults to `defaultClassifierProcessLimiter`
+(200 concurrent classifications per process, shared by every classifier tool); build a separate
+one with `makeClassifierConcurrencyLimiter(max)` or pass `false` to disable it.
 
 ```ts
 import { Effect } from 'effect'

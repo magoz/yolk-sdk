@@ -66,8 +66,11 @@ export type { CodeModeLimits, MakeCodeModeToolOptions } from './tool.ts'
 export {
   ClassifierToolParams,
   classifierToolName,
+  defaultClassifierProcessLimiter,
+  defaultClassifierProcessMaxConcurrency,
   defaultClassifierToolMaxConcurrency,
+  makeClassifierConcurrencyLimiter,
   makeClassifierTool
 } from './classifier-tool.ts'
 
-export type { MakeClassifierToolOptions } from './classifier-tool.ts'
+export type { ClassifierConcurrencyLimiter, MakeClassifierToolOptions } from './classifier-tool.ts'

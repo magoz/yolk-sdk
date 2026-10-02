@@ -58,4 +58,4 @@ export {
   ToolsListResult
 } from './protocol.ts'
 
-export type { JsonRpcMessage as JsonRpcMessageType } from './protocol.ts'
+export type { JsonRpcMessage as JsonRpcMessageType, McpToolExposureResolver } from './protocol.ts'

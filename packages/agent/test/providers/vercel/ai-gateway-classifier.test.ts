@@ -1,4 +1,5 @@
-import { ConfigProvider, Effect, Layer, Redacted } from 'effect'
+import { Clock, ConfigProvider, Effect, Exit, Fiber, Layer, Redacted } from 'effect'
+import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientError, HttpClientResponse } from 'effect/unstable/http'
 import type { HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -15,6 +16,7 @@ import { ReplayHttpClient } from '@yolk-sdk/conformance/replay'
 import {
   VercelAiGatewayClassifierLayer,
   makeVercelAiGatewayClassifierLayer,
+  vercelAiGatewayClassifierDefaultMaxRetries,
   vercelAiGatewayClassifierDefaultModel,
   vercelAiGatewayEvaluateUrl,
   type VercelAiGatewayClassifierConfig
@@ -444,7 +446,12 @@ describe('Vercel AI Gateway classifier response decoding', () => {
 
 describe('Vercel AI Gateway classifier errors', () => {
   const statusFailure = (answer: Answer) =>
-    Effect.flip(runClassify({ state: 'Synthetic.', questions: approvalQuestions }, answer))
+    Effect.flip(
+      runClassify({ state: 'Synthetic.', questions: approvalQuestions }, answer, [], {
+        ...config,
+        maxRetries: 0
+      })
+    )
 
   it.effect('maps the Gateway error envelope to a sanitized typed error', () =>
     Effect.gen(function* () {
@@ -521,7 +528,10 @@ describe('Vercel AI Gateway classifier errors', () => {
           const model = yield* ClassifierModel
 
           return yield* model.classify({ state: 'Synthetic.', questions: approvalQuestions })
-        }).pipe(Effect.provide(makeVercelAiGatewayClassifierLayer(config)), Effect.provide(failing))
+        }).pipe(
+          Effect.provide(makeVercelAiGatewayClassifierLayer({ ...config, maxRetries: 0 })),
+          Effect.provide(failing)
+        )
       )
 
       expect(error).toMatchObject({
@@ -531,6 +541,226 @@ describe('Vercel AI Gateway classifier errors', () => {
         provider: { kind: 'network' }
       })
       expect(textOf(error)).not.toContain(secret)
+    })
+  )
+})
+
+describe('Vercel AI Gateway classifier retries', () => {
+  const okBody = success('{"approves":{"type":"boolean","probability":0.8}}')
+
+  type Step = Answer | 'transport'
+
+  /** Answers each request with the next step (the last step repeats), counting requests. */
+  const scripted = (steps: ReadonlyArray<Step>, sent: { count: number }) =>
+    Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make(request =>
+        Effect.suspend(() => {
+          const step = steps[Math.min(sent.count, steps.length - 1)] ?? 'transport'
+
+          sent.count++
+
+          if (step === 'transport') {
+            return Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request, description: 'synthetic' })
+              })
+            )
+          }
+
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(step.body, {
+                status: step.status ?? 200,
+                headers: { 'content-type': 'application/json', ...step.headers }
+              })
+            )
+          )
+        })
+      )
+    )
+
+  const classifyScripted = (
+    steps: ReadonlyArray<Step>,
+    sent: { count: number },
+    classifierConfig: VercelAiGatewayClassifierConfig = config
+  ) =>
+    Effect.gen(function* () {
+      const model = yield* ClassifierModel
+
+      return yield* model.classify({ state: 'Synthetic.', questions: approvalQuestions })
+    }).pipe(
+      Effect.provide(makeVercelAiGatewayClassifierLayer(classifierConfig)),
+      Effect.provide(scripted(steps, sent))
+    )
+
+  const rateLimited = (headers: Readonly<Record<string, string>>): Answer => ({
+    status: 429,
+    body: '{"message":"Synthetic: slow down","error_type":"rate_limit_exceeded"}',
+    headers
+  })
+
+  const unavailable: Answer = { status: 503, body: 'upstream unavailable' }
+
+  it.effect('waits for Retry-After (delta-seconds) after a 429, then succeeds', () =>
+    Effect.gen(function* () {
+      const sent = { count: 0 }
+
+      const fiber = yield* Effect.forkChild(
+        classifyScripted([rateLimited({ 'retry-after': '2' }), { body: okBody }], sent)
+      )
+
+      yield* TestClock.adjust('1999 millis')
+      expect(sent.count).toBe(1)
+
+      yield* TestClock.adjust('1 millis')
+
+      const result = yield* Fiber.join(fiber)
+
+      expect(sent.count).toBe(2)
+      expect(result.answers).toEqual({ approves: { type: 'boolean', probability: 0.8 } })
+    })
+  )
+
+  it.effect('reads an HTTP-date Retry-After against the clock and caps it at 10 s', () =>
+    Effect.gen(function* () {
+      const sent = { count: 0 }
+      const nowMs = yield* Clock.currentTimeMillis
+
+      const fiber = yield* Effect.forkChild(
+        classifyScripted(
+          [
+            rateLimited({ 'retry-after': new Date(nowMs + 3_000).toUTCString() }),
+            rateLimited({ 'retry-after': '120' }),
+            { body: okBody }
+          ],
+          sent
+        )
+      )
+
+      yield* TestClock.adjust('2999 millis')
+      expect(sent.count).toBe(1)
+      yield* TestClock.adjust('1 millis')
+      expect(sent.count).toBe(2)
+
+      // 120 s is capped at 10 s.
+      yield* TestClock.adjust('9999 millis')
+      expect(sent.count).toBe(2)
+      yield* TestClock.adjust('1 millis')
+
+      yield* Fiber.join(fiber)
+      expect(sent.count).toBe(3)
+    })
+  )
+
+  it.effect('retries 503 twice with jittered backoff within 250 ms and 500 ms, then succeeds', () =>
+    Effect.gen(function* () {
+      const sent = { count: 0 }
+
+      const fiber = yield* Effect.forkChild(
+        classifyScripted([unavailable, unavailable, { body: okBody }], sent)
+      )
+
+      yield* TestClock.adjust('250 millis')
+      expect(sent.count).toBe(2)
+      yield* TestClock.adjust('500 millis')
+
+      const result = yield* Fiber.join(fiber)
+
+      expect(sent.count).toBe(3)
+      expect(result.usage).toEqual(billedUsage)
+    })
+  )
+
+  it.effect('retries 408 and transport failures', () =>
+    Effect.gen(function* () {
+      const sent = { count: 0 }
+
+      const fiber = yield* Effect.forkChild(
+        classifyScripted([{ status: 408, body: '' }, 'transport', { body: okBody }], sent)
+      )
+
+      yield* TestClock.adjust('1 second')
+      yield* Fiber.join(fiber)
+      expect(sent.count).toBe(3)
+    })
+  )
+
+  it.effect('never retries other 4xx statuses or undecodable responses', () =>
+    Effect.gen(function* () {
+      for (const status of [400, 401, 404, 413, 422]) {
+        const sent = { count: 0 }
+
+        const error = yield* Effect.flip(
+          classifyScripted([{ status, body: '{"message":"Synthetic"}' }, { body: okBody }], sent)
+        )
+
+        expect(error, String(status)).toMatchObject({
+          _tag: 'ClassificationProviderError',
+          provider: { status }
+        })
+        expect(sent.count, String(status)).toBe(1)
+      }
+
+      const sent = { count: 0 }
+
+      const malformed = yield* Effect.flip(
+        classifyScripted([{ body: 'not json' }, { body: okBody }], sent)
+      )
+
+      expect(malformed).toBeInstanceOf(ClassificationResponseInvalid)
+      expect(sent.count).toBe(1)
+    })
+  )
+
+  it.effect('fails with the last typed error after exhausting retries', () =>
+    Effect.gen(function* () {
+      const sent = { count: 0 }
+      const fiber = yield* Effect.forkChild(Effect.flip(classifyScripted([unavailable], sent)))
+
+      yield* TestClock.adjust('1 second')
+
+      const error = yield* Fiber.join(fiber)
+
+      expect(sent.count).toBe(3)
+      expect(error).toBeInstanceOf(ClassificationProviderError)
+      expect(error).toMatchObject({
+        message: 'Vercel AI Gateway returned 503',
+        retryable: true,
+        provider: { provider: 'vercel_ai_gateway', kind: 'server_error', status: 503 }
+      })
+
+      // `maxRetries` is configurable.
+      const once = { count: 0 }
+
+      const configured = yield* Effect.forkChild(
+        Effect.flip(classifyScripted([unavailable], once, { ...config, maxRetries: 1 }))
+      )
+
+      yield* TestClock.adjust('1 second')
+      yield* Fiber.join(configured)
+      expect(once.count).toBe(2)
+      expect(vercelAiGatewayClassifierDefaultMaxRetries).toBe(2)
+    })
+  )
+
+  it.effect('stops retrying when interrupted during backoff', () =>
+    Effect.gen(function* () {
+      const sent = { count: 0 }
+
+      const fiber = yield* Effect.forkChild(
+        classifyScripted([rateLimited({ 'retry-after': '5' })], sent)
+      )
+
+      yield* TestClock.adjust('1 second')
+      expect(sent.count).toBe(1)
+
+      const exit = yield* Fiber.interrupt(fiber).pipe(Effect.andThen(Fiber.await(fiber)))
+
+      yield* TestClock.adjust('1 minute')
+      expect(Exit.hasInterrupts(exit)).toBe(true)
+      expect(sent.count).toBe(1)
     })
   )
 })

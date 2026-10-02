@@ -17,6 +17,13 @@ Add the code mode tool contract (ADR 0002, step 1) without adding code mode itse
   activated background, `question`, and `subagent` tools never run from code mode; `resolveTools`
   fails `codemode_unsupported_tool` when they are marked `codemode` and `invalid_tool_exposure` for
   `discovery` without `codemode`, and warns when codemode-only tools have no nested-access tool.
+- Exposure for generated tools: `makeConnectorToolRegistration` and `makeConnectorToolModule`
+  accept `exposure`, a `ToolExposure` value or a resolver `(actionId, action) => ToolExposure`
+  (`ConnectorToolExposureResolver`; `action` is the declared `id`/`description`/`access`, or
+  `undefined` for an undeclared action id). `mcpToolToToolDef` and the MCP listing functions
+  (`McpClientOptions.exposure`) accept the same option as `McpToolExposureResolver`, a value or
+  `(tool, serverName) => ToolExposure`. Without it neither adapter sets `callableBy`/`discovery`;
+  the fail-closed rules above still apply at resolution.
 - Codemode-only tools never reach providers: `run`, `runModelTurn`, capability checks, and the
   OpenAI Realtime session builders omit them. Provider-issued calls to them fail closed as unknown
   tools (`prepareToolBatch` synthetic error result, `ResolvedToolSet.execute` `not_found`, voice

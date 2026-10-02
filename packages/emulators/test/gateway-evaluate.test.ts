@@ -5,7 +5,8 @@
  * classifier, in-process and over a loopback socket, and its faults map through the provider.
  * Tests may import SDK packages; the emulator source never does.
  */
-import { Effect, Layer, Predicate, Redacted } from 'effect'
+import { Effect, Fiber, Layer, Predicate, Redacted } from 'effect'
+import { TestClock } from 'effect/testing'
 import type * as Schema from 'effect/Schema'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -226,6 +227,31 @@ describe('Gateway classifier conformance cases against the emulator', () => {
     })
   )
 
+  // The recorded request shape: faults apply only to admitted requests.
+  const classifyAdmittedRequest = (emulator: GatewayEmulator, maxRetries?: number) =>
+    Effect.gen(function* () {
+      const model = yield* ClassifierModel
+
+      return yield* model.classify({
+        state: 'Another synthetic reply.',
+        questions: {
+          approves: {
+            type: 'boolean',
+            instructions: 'Does the reply approve the delivered result?',
+            criteria: { true: 'Approves.', false: 'Rejects.' }
+          }
+        }
+      })
+    }).pipe(
+      Effect.provide(
+        makeVercelAiGatewayClassifierLayer(
+          maxRetries === undefined
+            ? { apiKey: Redacted.make(credential) }
+            : { apiKey: Redacted.make(credential), maxRetries }
+        ).pipe(Layer.provide(inProcessLayer(emulator)))
+      )
+    )
+
   it.effect('maps a 429 fault with retry-after through the real classifier', () =>
     Effect.gen(function* () {
       const emulator = makeGatewayEmulator()
@@ -236,29 +262,7 @@ describe('Gateway classifier conformance cases against the emulator', () => {
         headers: { 'retry-after': '3' }
       })
 
-      const error = yield* Effect.flip(
-        Effect.gen(function* () {
-          const model = yield* ClassifierModel
-
-          // The recorded request shape: faults apply only to admitted requests.
-          return yield* model.classify({
-            state: 'Another synthetic reply.',
-            questions: {
-              approves: {
-                type: 'boolean',
-                instructions: 'Does the reply approve the delivered result?',
-                criteria: { true: 'Approves.', false: 'Rejects.' }
-              }
-            }
-          })
-        }).pipe(
-          Effect.provide(
-            makeVercelAiGatewayClassifierLayer({ apiKey: Redacted.make(credential) }).pipe(
-              Layer.provide(inProcessLayer(emulator))
-            )
-          )
-        )
-      )
+      const error = yield* Effect.flip(classifyAdmittedRequest(emulator, 0))
 
       expect(error).toMatchObject({
         _tag: 'ClassificationProviderError',
@@ -266,6 +270,30 @@ describe('Gateway classifier conformance cases against the emulator', () => {
         retryable: true,
         provider: { kind: 'rate_limit', status: 429, retryAfterMs: 3000 }
       })
+    })
+  )
+
+  it.effect('a one-shot 429 fault is retried after retry-after by the real classifier', () =>
+    Effect.gen(function* () {
+      const emulator = makeGatewayEmulator()
+
+      emulator.evaluate.faults.add({
+        kind: 'status',
+        status: 429,
+        headers: { 'retry-after': '3' },
+        count: 1
+      })
+
+      const fiber = yield* Effect.forkChild(classifyAdmittedRequest(emulator))
+
+      yield* TestClock.adjust('2999 millis')
+      expect(emulator.evaluate.ledger.entries().map(entry => entry.status)).toEqual([429])
+      yield* TestClock.adjust('1 millis')
+
+      const result = yield* Fiber.join(fiber)
+
+      expect(result.answers).toMatchObject({ approves: { type: 'boolean' } })
+      expect(emulator.evaluate.ledger.entries().map(entry => entry.status)).toEqual([429, 200])
     })
   )
 })

@@ -68,8 +68,13 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   the timeout.
 - Code mode access is `write`; nested calls keep their own access metadata.
 - `makeClassifierTool` takes the classifier `classify` function or service; provider options stay
-  host-owned. The concurrency cap is per script: semaphores are keyed by the parent tool call id
-  of `<parentToolCallId>/<seq>` (else the call id) and removed when idle. `costUsd` has no
+  host-owned. Each call takes the per-script permit, then a process permit (in that order, so a
+  script's queue never holds process permits). Per-script semaphores are keyed by the parent tool
+  call id of `<parentToolCallId>/<seq>` (else the call id) and removed when idle. The process
+  limiter (`processLimiter`) is shared across scripts and registrations: the module-level
+  `defaultClassifierProcessLimiter` (200) unless the host passes one from
+  `makeClassifierConcurrencyLimiter(max)` or `false`. Both use `Semaphore.withPermits`, so
+  interruption while waiting never leaks a permit. `costUsd` has no
   `AgentUsage` field: nested-call records carry token usage only, and cost stays in the result's
   `structuredContent.usage`.
 
@@ -81,4 +86,5 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   backstops), bounding, store rebuild and bounds.
 - `test/pi-executor.test.ts` also covers store and image limits, cancellation, and the executor
   concurrency cap.
-- `test/classifier-tool.test.ts`: classifier tool through scripts, per-script cap, errors.
+- `test/classifier-tool.test.ts`: classifier tool through scripts, per-script and process caps
+  (shared across scripts and registrations, `false`), permits released on interruption, errors.

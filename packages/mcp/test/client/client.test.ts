@@ -374,6 +374,25 @@ describe('MCP client', () => {
     })
   )
 
+  it.effect('applies the exposure option to listed tool definitions', () =>
+    Effect.gen(function* () {
+      const tools = yield* listRemoteMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+        {
+          securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false },
+          exposure: tool =>
+            tool.annotations?.['readOnlyHint'] === true
+              ? { callableBy: 'codemode', discovery: 'search' }
+              : { callableBy: 'model' }
+        }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('metadata')))
+
+      expect(tools).toMatchObject([
+        { mcpToolName: 'search', def: { callableBy: 'codemode', discovery: 'search' } }
+      ])
+    })
+  )
+
   it.effect('falls back to initialize-based remote servers', () =>
     Effect.gen(function* () {
       const tools = yield* listRemoteMcpServerTools(

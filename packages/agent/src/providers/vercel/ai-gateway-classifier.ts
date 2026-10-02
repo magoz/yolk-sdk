@@ -11,10 +11,28 @@
  * (US dollars, a decimal string) becomes `usage.costUsd`, and `x-ai-gateway-evaluation-fallback-*`
  * response headers are kept in `providerMetadata.evaluationFallbackHeaders`.
  *
- * Unverified wire detail: where `choice` and `score` confidence lives. A `confidence` on the
- * answer wins; otherwise `providerMetadata.typesafe.confidence[questionId]` is used.
+ * Confidence: a `confidence` on the answer wins; otherwise
+ * `providerMetadata.typesafe.confidence[questionId]` is used (the live Gateway sends both).
+ *
+ * Retries: 408, 429, 5xx, and transport failures are retried up to `maxRetries` times (default
+ * 2) with exponential backoff and full jitter (base 250 ms, cap 4 s), or after the response's
+ * `Retry-After` (delta-seconds or HTTP-date, also `retry-after-ms`) capped at 10 s. Other 4xx
+ * statuses and undecodable responses are never retried. Delays run on the Effect `Clock`, and
+ * interruption stops the retries.
  */
-import { Effect, Layer, Option, Predicate, Redacted, Result } from 'effect'
+import {
+  Cause,
+  Clock,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Random,
+  Redacted,
+  Result,
+  Schedule
+} from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import {
@@ -52,6 +70,15 @@ export const vercelAiGatewayClassifierDefaultModel = 'typesafe-ai/jev'
 /** Response headers kept in `providerMetadata.evaluationFallbackHeaders`. */
 export const vercelAiGatewayEvaluationFallbackHeaderPrefix = 'x-ai-gateway-evaluation-fallback-'
 
+/** Retries after the first attempt unless `maxRetries` is set. */
+export const vercelAiGatewayClassifierDefaultMaxRetries = 2
+
+const retryBaseDelayMs = 250
+
+const retryMaxBackoffMs = 4_000
+
+const retryAfterMaxMs = 10_000
+
 const providerName = 'Vercel AI Gateway'
 
 export type VercelAiGatewayClassifierConfig = {
@@ -66,6 +93,11 @@ export type VercelAiGatewayClassifierConfig = {
   readonly baseUrl?: string
   /** Extra request headers; the auth and content-negotiation headers always win. */
   readonly extraHeaders?: Readonly<Record<string, string>>
+  /**
+   * Retries of a 408, 429, 5xx, or transport failure; default
+   * `vercelAiGatewayClassifierDefaultMaxRetries` (2). `0` disables retries.
+   */
+  readonly maxRetries?: number
 }
 
 const evaluateUrl = (baseUrl: string | undefined): string =>
@@ -259,24 +291,34 @@ type StatusFailureInput = {
   readonly provider: string
   readonly status: number
   readonly headers: Readonly<Record<string, string>>
+  readonly nowMs: number
   providerCode?: string
   message?: string
 }
 
-/** Classify a non-2xx answer: status, Gateway error type, and retry delay; never the body text. */
+/** Classify a non-2xx answer: status, Gateway error type, and retry delay (an HTTP-date
+ * `Retry-After` is read against the Effect `Clock`); never the body text.
+ */
 const statusError = (
   status: number,
   headers: Readonly<Record<string, string>>,
   text: string
 ): Effect.Effect<ClassificationProviderError> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(EvaluateErrorWire))(text).pipe(
-    Effect.option,
-    Effect.map(envelope => {
+  Effect.all([
+    Schema.decodeUnknownEffect(Schema.fromJsonString(EvaluateErrorWire))(text).pipe(Effect.option),
+    Clock.currentTimeMillis
+  ]).pipe(
+    Effect.map(([envelope, nowMs]) => {
       const decoded = Option.getOrUndefined(envelope)
       const providerCode = decoded?.error_type ?? decoded?.error?.code ?? decoded?.error?.type
       const message = decoded?.message ?? decoded?.error?.message
 
-      const failure: StatusFailureInput = { provider: vercelAiGatewayProviderId, status, headers }
+      const failure: StatusFailureInput = {
+        provider: vercelAiGatewayProviderId,
+        status,
+        headers,
+        nowMs
+      }
 
       if (providerCode !== undefined) failure.providerCode = providerCode
 
@@ -314,9 +356,61 @@ const encodeRequestBody = (
   )
 }
 
-const classifyWith =
-  (config: VercelAiGatewayClassifierConfig, client: HttpClient.HttpClient) =>
-  (input: ClassificationRequest): Effect.Effect<ClassificationResult, ClassificationError> =>
+/** 408, 429, 5xx, and transport failures (no status) are retried; nothing else is. */
+const retriableFailure = (error: ClassificationError): error is ClassificationProviderError => {
+  if (!Predicate.isTagged(error, 'ClassificationProviderError')) return false
+
+  const status = error.provider.status
+
+  if (status === undefined) return error.provider.kind === 'network'
+
+  return status === 408 || status === 429 || (status >= 500 && status <= 599)
+}
+
+/** `Retry-After` capped at 10 s, else full jitter over `min(4 s, 250 ms * 2^(retry - 1))`. */
+const retryDelayMs = (error: ClassificationProviderError, retry: number) => {
+  const retryAfterMs = error.provider.retryAfterMs
+
+  if (retryAfterMs !== undefined && Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
+    return Effect.succeed(Math.min(retryAfterMs, retryAfterMaxMs))
+  }
+
+  const ceiling = Math.min(retryMaxBackoffMs, retryBaseDelayMs * 2 ** (retry - 1))
+
+  return Random.next.pipe(Effect.map(random => Math.floor(random * ceiling)))
+}
+
+const maxRetriesOf = (config: VercelAiGatewayClassifierConfig) => {
+  const maxRetries = config.maxRetries ?? vercelAiGatewayClassifierDefaultMaxRetries
+
+  return Number.isFinite(maxRetries) ? Math.max(0, Math.floor(maxRetries)) : 0
+}
+
+/** Retry schedule over classification errors; ends (failing with the last error) on a
+ * non-retriable error or after `maxRetries` retries.
+ */
+const retrySchedule = (maxRetries: number) =>
+  Schedule.fromStepWithMetadata(
+    Effect.succeed((metadata: Schedule.InputMetadata<ClassificationError>) => {
+      const error = metadata.input
+
+      if (metadata.attempt > maxRetries || !retriableFailure(error)) {
+        return Cause.done(metadata.attempt)
+      }
+
+      return retryDelayMs(error, metadata.attempt).pipe(
+        Effect.map((delayMs): [number, Duration.Duration] => [
+          metadata.attempt,
+          Duration.millis(delayMs)
+        ])
+      )
+    })
+  )
+
+const classifyWith = (config: VercelAiGatewayClassifierConfig, client: HttpClient.HttpClient) => {
+  const schedule = retrySchedule(maxRetriesOf(config))
+
+  return (input: ClassificationRequest): Effect.Effect<ClassificationResult, ClassificationError> =>
     Effect.gen(function* () {
       const request = yield* decodeClassificationRequest(input)
       const model = config.model ?? vercelAiGatewayClassifierDefaultModel
@@ -332,26 +426,31 @@ const classifyWith =
         HttpClientRequest.bodyText(body, 'application/json')
       )
 
-      const response = yield* client
-        .execute(httpRequest)
-        .pipe(
+      const attempt = Effect.gen(function* () {
+        const response = yield* client
+          .execute(httpRequest)
+          .pipe(
+            Effect.mapError(() =>
+              transportError('network', `${providerName} classification request failed`)
+            )
+          )
+
+        const text = yield* response.text.pipe(
           Effect.mapError(() =>
-            transportError('network', `${providerName} classification request failed`)
+            transportError('network', `Could not read ${providerName} classification response`)
           )
         )
 
-      const text = yield* response.text.pipe(
-        Effect.mapError(() =>
-          transportError('network', `Could not read ${providerName} classification response`)
-        )
-      )
+        if (response.status < 200 || response.status >= 300) {
+          return yield* Effect.fail(yield* statusError(response.status, response.headers, text))
+        }
 
-      if (response.status < 200 || response.status >= 300) {
-        return yield* Effect.fail(yield* statusError(response.status, response.headers, text))
-      }
+        return yield* decodeEvaluateResponse(text, response.headers, request, model)
+      })
 
-      return yield* decodeEvaluateResponse(text, response.headers, request, model)
+      return yield* Effect.retry(attempt, schedule)
     }).pipe(Effect.withSpan('VercelAiGatewayClassifier.classify'))
+}
 
 /**
  * AI Gateway classifier layer for `ClassifierModel`. Hosts provide the `HttpClient` and the
