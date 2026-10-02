@@ -76,13 +76,8 @@ export type FixtureRecording = {
 
 // Fault and scripted-error statuses on fixture-only routes: errors only (400-599), so no control
 // answers a success that no fixture records.
-const FixtureRouteErrorStatus = EmulatorStatusFault.fields.status.check(
-  Schema.makeFilter(status =>
-    status >= 400
-      ? true
-      : 'fixture-only routes take fault and scripted-error statuses of 400 or above'
-  )
-)
+// One range check, so a rejection names the range actually accepted.
+const FixtureRouteErrorStatus = Schema.Int.check(Schema.isBetween({ minimum: 400, maximum: 599 }))
 
 const FixtureRouteStatusFault = Schema.Struct({
   ...EmulatorStatusFault.fields,

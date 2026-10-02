@@ -543,3 +543,15 @@ describe('openCodeGoEmulatorRoutes', () => {
     }
   })
 })
+
+describe('fault status range (fixture-only usage route)', () => {
+  it('names the accepted range (400-599) when it refuses a fault status', () => {
+    const emulator = makeOpenCodeGoEmulator()
+
+    for (const status of [200, 302, 399, 600]) {
+      expect(() => emulator.usage.faults.add({ kind: 'status', status }), String(status)).toThrow(
+        /between 400 and 599/
+      )
+    }
+  })
+})
