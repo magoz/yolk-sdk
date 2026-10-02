@@ -1,6 +1,6 @@
 /**
- * Recordings parity for the fixture-only routes: for every OpenCode Go fixture and every
- * subscription-usage fixture, the fixture's recorded request (plus the credential and headers the
+ * Recordings parity for the fixture-only routes: for every OpenCode Go fixture, every
+ * subscription-usage fixture, and every Gateway classifier (`/v1/evaluate`) fixture, the fixture's recorded request (plus the credential and headers the
  * SDK sends, which recordings never keep) is sent to the emulator and the response is compared
  * with the recording: the status, the `content-type`, the SSE event kinds in order (event name and
  * payload `type`), each event's and body's field names and value types (its outline), and the
@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest'
 import { anthropicClaudeUsageSnapshotFixture } from '@yolk-sdk/agent/providers/anthropic/conformance'
 import { openAiCodexUsageSnapshotFixture } from '@yolk-sdk/agent/providers/openai/conformance'
 import { openCodeGoConformanceFixtures } from '@yolk-sdk/agent/providers/opencode/conformance'
+import { vercelAiGatewayClassifierConformanceFixtures } from '@yolk-sdk/agent/providers/vercel/conformance'
 import { xAiGrokUsageSnapshotFixture } from '@yolk-sdk/agent/providers/xai/conformance'
 import {
   isWireStreamResponse,
@@ -23,6 +24,8 @@ import {
 import { makeAnthropicEmulator } from '../src/anthropic.ts'
 import { makeCodexEmulator } from '../src/codex.ts'
 import { isJsonObject } from '../src/emulator-kernel.ts'
+import { makeGatewayEmulator } from '../src/gateway.ts'
+import { gatewayEvaluateRecordings } from '../src/gateway-evaluate-recordings.ts'
 import { makeOpenCodeGoEmulator } from '../src/opencode.ts'
 import { openCodeGoRecordings } from '../src/opencode-recordings.ts'
 import {
@@ -179,7 +182,12 @@ const parity: ReadonlyArray<ParityEntry> = [
     fetch: (request: Request) => makeOpenCodeGoEmulator().fetch(request),
     headers: goHeaders(fixture)
   })),
-  ...usageFamilies
+  ...usageFamilies,
+  ...vercelAiGatewayClassifierConformanceFixtures.map(fixture => ({
+    fixture,
+    fetch: (request: Request) => makeGatewayEmulator().fetch(request),
+    headers: { authorization: 'Bearer synthetic-gateway-key' }
+  }))
 ]
 
 const expectParity = (observed: Answer, recorded: Answer, label: string) => {
@@ -190,7 +198,7 @@ const expectParity = (observed: Answer, recorded: Answer, label: string) => {
 }
 
 describe('fixture-only routes answer exactly their recordings', () => {
-  it('covers every Go fixture and every usage fixture', () => {
+  it('covers every Go, usage, and Gateway classifier fixture', () => {
     expect(parity.map(entry => entry.fixture.caseId)).toEqual([
       'opencode.go.chat.stream.plain-text',
       'opencode.go.messages.stream.plain-text',
@@ -199,7 +207,11 @@ describe('fixture-only routes answer exactly their recordings', () => {
       'opencode.go.usage.snapshot',
       'anthropic.claude.usage.snapshot',
       'openai.codex.usage.snapshot',
-      'xai.grok.usage.snapshot'
+      'xai.grok.usage.snapshot',
+      'vercel-ai-gateway.classify.boolean',
+      'vercel-ai-gateway.classify.choice',
+      'vercel-ai-gateway.classify.score',
+      'vercel-ai-gateway.classify.error-envelope'
     ])
   })
 
@@ -222,7 +234,8 @@ describe('fixture-only routes answer exactly their recordings', () => {
       ...openCodeGoRecordings,
       anthropicClaudeUsageRecording,
       codexUsageRecording,
-      xAiGrokUsageRecording
+      xAiGrokUsageRecording,
+      ...gatewayEvaluateRecordings
     ]
 
     expect(copies.map(copy => copy.fixtureId)).toEqual(parity.map(entry => entry.fixture.id))

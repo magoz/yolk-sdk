@@ -67,6 +67,7 @@ const agentCoreForbiddenImports = [
 const conformanceForbiddenImports = [
   ...retiredImports,
   '@yolk-sdk/agent',
+  '@yolk-sdk/codemode',
   '@yolk-sdk/connectors',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
@@ -83,8 +84,25 @@ const conformanceForbiddenImports = [
 const emulatorsForbiddenImports = [
   ...retiredImports,
   '@yolk-sdk/agent',
+  '@yolk-sdk/codemode',
   '@yolk-sdk/conformance',
   '@yolk-sdk/connectors',
+  '@yolk-sdk/harness',
+  '@yolk-sdk/knowledge',
+  '@yolk-sdk/mcp',
+  '@yolk-sdk/sandbox',
+  '@yolk-sdk/vercel-workflows',
+  'next',
+  'react'
+]
+
+// Code mode depends only on `@yolk-sdk/agent`. Listed explicitly for the same self-import reason
+// as conformance.
+const codeModeForbiddenImports = [
+  ...retiredImports,
+  '@yolk-sdk/conformance',
+  '@yolk-sdk/connectors',
+  '@yolk-sdk/emulators',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
   '@yolk-sdk/mcp',
@@ -130,6 +148,12 @@ const rules: ReadonlyArray<BoundaryRule> = [
   {
     packageDir: 'packages/agent/src/compaction',
     forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    // The classifier contract is provider-neutral: no provider code (by subpath or by a relative
+    // path, which the resolved-owner check maps to `@yolk-sdk/agent/providers/*`).
+    packageDir: 'packages/agent/src/classification',
+    forbiddenImports: [...agentCoreForbiddenImports, '@yolk-sdk/agent/providers']
   },
   {
     packageDir: 'packages/agent/src/tools',
@@ -182,10 +206,34 @@ const rules: ReadonlyArray<BoundaryRule> = [
     excludedDirs: ['packages/sandbox/src/agent.ts']
   },
   {
+    // Agent never imports code mode: code mode builds on the agent tool contract.
+    packageDir: 'packages/agent/src',
+    forbiddenImports: ['@yolk-sdk/codemode']
+  },
+  {
+    packageDir: 'packages/codemode/src',
+    forbiddenImports: codeModeForbiddenImports
+  },
+  {
+    // The code mode core is runtime-neutral: no Node builtins and no pi runtime (worker thread,
+    // wasm loader). Only the pure `@earendil-works/pi-codemode/declarations` and `/source`
+    // subpaths are allowed; the pi executor lives behind `@yolk-sdk/codemode/node`.
+    packageDir: 'packages/codemode/src',
+    forbiddenImports: [
+      'node:',
+      '@earendil-works/pi-codemode$',
+      '@earendil-works/pi-codemode/worker',
+      'quickjs-wasi',
+      '@yolk-sdk/codemode/node'
+    ],
+    excludedDirs: ['packages/codemode/src/node.ts']
+  },
+  {
     packageDir: 'packages/harness/src',
     forbiddenImports: [
       ...retiredImports,
       '@yolk-sdk/agent',
+      '@yolk-sdk/codemode',
       '@yolk-sdk/knowledge',
       '@yolk-sdk/mcp',
       '@yolk-sdk/sandbox',

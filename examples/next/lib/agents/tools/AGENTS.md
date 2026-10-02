@@ -18,6 +18,14 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 | `telegram_send_message`                                                   | yes  | yes   | no                                     | optional Telegram connector tool; requires user config; available to subagents                      |
 | remote MCP                                                                | yes  | no    | via bootstrap                          | namespaced `<server>_<tool>`                                                                        |
 | `subagent`                                                                | yes  | no    | no                                     | top-level child-agent delegation; no recursive delegation in v1                                     |
+| `codemode` / `classify`                                                   | flag | no    | no                                     | `YOLK_CODEMODE` only; top-level text; `classify` needs AI Gateway credentials; see below            |
+
+## Code mode exposure
+
+- Wired in `../codemode-tool-modules.ts`, not here: the pi executor is Node-only and this directory stays Cloudflare-portable.
+- Default `callableBy: 'all'` for curated read/compute tools (`web_fetch`, `web_search`, `just_bash`, knowledge, storage) and remote MCP tools.
+- Only while the flag is on, `skill`, `manage_skills`, `telegram_send_message`, and Workflow `subagent_status`/`subagent_wait` become `callableBy: 'model'`: instruction loading, persistent writes, and outbound messages stay deliberate model calls; the Workflow lookups are orchestrator-intercepted polls.
+- `question`, `compose_draft`, `subagent`, and approval tools are fail-closed by the package. `classify` is package-default `codemode` + `listed`.
 
 ## Rules
 

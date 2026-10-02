@@ -32,6 +32,7 @@ import {
 } from '@/lib/services/agent-workflow/live-layer'
 import { WorkflowChildRecord, WorkflowRegistryError } from '@/lib/services/agent-workflow/registry'
 import { AgentTextRuntimeFactory, ChildWorkflowIdentity } from './child-runtime-host'
+import type { AgentTextRuntimeOptions } from './text-response'
 import { AgentTextRuntimeFactoryLive, ChildWorkflowIdentityLive } from './child-runtime-live'
 
 export class WorkflowAgentContext extends Schema.Class<WorkflowAgentContext>(
@@ -95,7 +96,11 @@ const unavailableSubagent = ({ call }: { readonly call: ToolCall }) =>
     })
   )
 
-export const workflowRuntime = (request: AgentRouteRequest, context: WorkflowAgentContext) =>
+export const workflowRuntime = (
+  request: AgentRouteRequest,
+  context: WorkflowAgentContext,
+  options: Pick<AgentTextRuntimeOptions, 'beforeNestedCall'> = {}
+) =>
   Effect.gen(function* () {
     const factory = yield* AgentTextRuntimeFactory
 
@@ -104,7 +109,7 @@ export const workflowRuntime = (request: AgentRouteRequest, context: WorkflowAge
       context.userId,
       '/agent/workflow',
       context.childType === undefined
-        ? { executeSubagent: unavailableSubagent, modules: lookupModules }
+        ? { executeSubagent: unavailableSubagent, modules: lookupModules, ...options }
         : { childType: context.childType }
     )
   }).pipe(Effect.provide(AgentTextRuntimeFactoryLive))

@@ -226,6 +226,127 @@ describe('runCheck on a fixture workspace', () => {
   })
 })
 
+describe('classification core boundary', () => {
+  it('keeps provider code out of the classification core, by subpath or relative path', () => {
+    const root = fixtureDirectory()
+
+    scaffoldPackages(root)
+    write(
+      root,
+      'packages/agent/package.json',
+      JSON.stringify({
+        ...agentManifest,
+        exports: {
+          ...agentManifest.exports,
+          './classification': './src/classification/index.ts',
+          './providers/vercel/ai-gateway-classifier':
+            './src/providers/vercel/ai-gateway-classifier.ts'
+        }
+      })
+    )
+    write(
+      root,
+      'packages/agent/src/providers/vercel/ai-gateway-classifier.ts',
+      `export const p = 1\n`
+    )
+    write(
+      root,
+      'packages/agent/src/classification/leak.ts',
+      `import { p } from '../providers/vercel/ai-gateway-classifier.ts'\nimport { q } from '@yolk-sdk/agent/providers/vercel/ai-gateway-classifier'\nimport fs from 'node:fs'\n\nexport const probe = [p, q, fs]\n`
+    )
+    write(
+      root,
+      'packages/agent/src/classification/ok.ts',
+      `import { protocol } from '@yolk-sdk/agent/protocol'\n\nexport const probe = protocol\n`
+    )
+    write(
+      root,
+      'packages/agent/src/providers/vercel/uses-core.ts',
+      `import { c } from '../../classification/index.ts'\n\nexport const probe = c\n`
+    )
+    write(root, 'packages/agent/src/classification/index.ts', `export const c = 1\n`)
+
+    const leak = violationsFor(root, 'packages/agent/src/classification/leak.ts')
+
+    expect(leak.map(violation => [violation.specifier, violation.forbidden]).sort()).toEqual([
+      ['../providers/vercel/ai-gateway-classifier.ts', '@yolk-sdk/agent/providers'],
+      ['@yolk-sdk/agent/providers/vercel/ai-gateway-classifier', '@yolk-sdk/agent/providers'],
+      ['node:fs', 'node:']
+    ])
+    expect(violationsFor(root, 'packages/agent/src/classification/ok.ts')).toEqual([])
+    expect(violationsFor(root, 'packages/agent/src/providers/vercel/uses-core.ts')).toEqual([])
+  })
+})
+
+describe('code mode boundaries', () => {
+  const scaffoldCodeMode = (root: string): void => {
+    scaffoldPackages(root)
+    write(
+      root,
+      'packages/codemode/package.json',
+      JSON.stringify({
+        name: '@yolk-sdk/codemode',
+        exports: { '.': './src/index.ts', './node': './src/node.ts' }
+      })
+    )
+    write(root, 'packages/codemode/src/index.ts', `export const core = 1\n`)
+    write(root, 'packages/mcp/src/rel.ts', `export const rel = 1\n`)
+  }
+
+  it('keeps the core runtime-neutral and the pi runtime behind the node subpath', () => {
+    const root = fixtureDirectory()
+
+    scaffoldCodeMode(root)
+    write(
+      root,
+      'packages/codemode/src/leak.ts',
+      `import { a } from '@earendil-works/pi-codemode'\nimport { b } from '@earendil-works/pi-codemode/worker'\nimport { c } from 'quickjs-wasi'\nimport { d } from './node.ts'\nimport fs from 'node:fs'\nimport { rel } from '../../mcp/src/rel'\n\nexport const probe = [a, b, c, d, fs, rel]\n`
+    )
+    write(
+      root,
+      'packages/codemode/src/ok.ts',
+      `import { renderDeclarations } from '@earendil-works/pi-codemode/declarations'\nimport { protocol } from '@yolk-sdk/agent/protocol'\nimport { core } from './index.ts'\n\nexport const probe = [renderDeclarations, protocol, core]\n`
+    )
+    write(
+      root,
+      'packages/codemode/src/node.ts',
+      `import { a } from '@earendil-works/pi-codemode'\nimport * as nodeModule from 'node:module'\nimport { core } from './index.ts'\n\nexport const probe = [a, nodeModule, core]\n`
+    )
+
+    expect(
+      violationsFor(root, 'packages/codemode/src/leak.ts')
+        .map(violation => violation.forbidden)
+        .sort()
+    ).toEqual([
+      '@earendil-works/pi-codemode$',
+      '@earendil-works/pi-codemode/worker',
+      '@yolk-sdk/codemode/node',
+      '@yolk-sdk/mcp',
+      'node:',
+      'quickjs-wasi'
+    ])
+    expect(violationsFor(root, 'packages/codemode/src/ok.ts')).toEqual([])
+    expect(violationsFor(root, 'packages/codemode/src/node.ts')).toEqual([])
+  })
+
+  it('keeps code mode out of the agent package', () => {
+    const root = fixtureDirectory()
+
+    scaffoldCodeMode(root)
+    write(
+      root,
+      'packages/agent/src/loop/uses-codemode.ts',
+      `import { core } from '@yolk-sdk/codemode'\nimport { other } from '../../../codemode/src/index.ts'\n\nexport const probe = [core, other]\n`
+    )
+
+    expect(
+      violationsFor(root, 'packages/agent/src/loop/uses-codemode.ts').map(
+        violation => violation.forbidden
+      )
+    ).toEqual(['@yolk-sdk/codemode', '@yolk-sdk/codemode'])
+  })
+})
+
 describe('conformance and connector import rules', () => {
   const scaffoldConformance = (root: string): void => {
     scaffoldPackages(root)

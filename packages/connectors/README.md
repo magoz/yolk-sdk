@@ -1782,6 +1782,22 @@ when adapting other write-capable connectors. This currently includes write-capa
 Calendar, Notion, Todoist, Telegram, and R2 actions; hosts should provide an `access` resolver for
 those actions rather than relying on the fallback.
 
+Code mode exposure is host policy too. Pass `exposure` as one `ToolExposure` value or a resolver
+`(actionId, action) => ToolExposure` (`action` carries the declared `access`, or is `undefined` for
+an undeclared action id). Without it the tools keep the agent default (`callableBy: 'all'`).
+`resolveTools` still rejects invalid combinations, such as `codemode` on a tool that needs approval:
+
+```ts
+const toolModule = makeConnectorToolModule(GoogleConnector, {
+  integration,
+  layer: HostConnectorLayer,
+  exposure: (_actionId, action) =>
+    action?.access === 'read'
+      ? { callableBy: 'codemode', discovery: 'search' }
+      : { callableBy: 'model' }
+})
+```
+
 Afloat MCP auth reads an `afloat_` API key from the host runtime credential and returns the
 canonical MCP endpoint and required `2026-07-28` protocol version. Keep the API key server-side;
 never expose the auth action through a model-callable connector module.

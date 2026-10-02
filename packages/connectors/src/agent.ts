@@ -8,8 +8,8 @@ import {
   type ToolModule,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
-import { ToolResult } from '@yolk-sdk/agent/protocol'
-import type { ConnectorActionAccess } from './action.ts'
+import { ToolResult, type ToolExposure } from '@yolk-sdk/agent/protocol'
+import type { ConnectorAction, ConnectorActionAccess } from './action.ts'
 import type { Connector } from './connector.ts'
 import type { ConnectorIntegration } from './integration.ts'
 import type { ProviderFailure } from './result.ts'
@@ -20,12 +20,27 @@ export type ConnectorIntegrationResolver<Context> =
 
 export type ConnectorToolAccessResolver = ToolAccess | ((actionId: string) => ToolAccess)
 
+/** The declared metadata of a connector action, as exposure resolvers see it. */
+export type ConnectorToolActionInfo = Pick<ConnectorAction, 'id' | 'description' | 'access'>
+
+/** Code mode exposure for connector tools: one value for every action, or per action (`action`
+ * is `undefined` when the connector does not declare `actionId`). Omitted: the agent defaults
+ * (`callableBy: 'all'`).
+ */
+export type ConnectorToolExposureResolver =
+  | ToolExposure
+  | ((actionId: string, action: ConnectorToolActionInfo | undefined) => ToolExposure)
+
 export type MakeConnectorToolModuleOptions<Context, Env> = {
   readonly integration: ConnectorIntegrationResolver<Context>
   readonly layer: Layer.Layer<Env>
   readonly moduleId?: string
   readonly namePrefix?: string
   readonly access?: ConnectorToolAccessResolver
+  /** Applied through `makeTool`'s `callableBy`/`discovery`; `resolveTools` still rejects invalid
+   * combinations (for example `discovery` without `callableBy: 'codemode'`).
+   */
+  readonly exposure?: ConnectorToolExposureResolver
 }
 
 const resolveIntegration = <Context>(
@@ -51,6 +66,12 @@ const resolveAccess = (
   return resolver ?? actionAccess ?? 'read'
 }
 
+const resolveExposure = (
+  resolver: ConnectorToolExposureResolver | undefined,
+  actionId: string,
+  action: ConnectorToolActionInfo | undefined
+): ToolExposure => (Predicate.isFunction(resolver) ? resolver(actionId, action) : (resolver ?? {}))
+
 const failureContent = (failure: ProviderFailure) => `${failure.code}: ${failure.message}`
 
 const successContent = (value: unknown) => {
@@ -73,9 +94,11 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
   const name = toolName(options.namePrefix, actionId)
 
   return makeTool({
+    ...resolveExposure(options.exposure, actionId, action),
     name,
     description: action?.description ?? `Invoke connector action ${actionId}.`,
     parameters: action?.inputSchema ?? Schema.Unknown,
+    output: action?.outputSchema,
     access: resolveAccess(options.access, actionId, action?.access),
     invalidParamsMessage: error =>
       `Invalid ${name} arguments: ${error instanceof Error ? error.message : String(error)}`,

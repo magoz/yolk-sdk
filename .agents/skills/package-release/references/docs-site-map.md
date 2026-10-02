@@ -50,6 +50,14 @@ Map changed code to docs that must be inspected or updated.
 | credential slot/config key | `integrations/connectors.mdx`, `connectors/index.mdx`, `troubleshooting.mdx`                                      |
 | agent adapter              | `integrations/connector-tool.mdx`, `api-reference/integrations.mdx`                                               |
 
+## Code mode package
+
+| Change                                  | Docs                                                                                          |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| code mode tool, executor, limits, store | `integrations/code-mode.mdx`, `api-reference/integrations.mdx`, `packages/codemode/README.md` |
+| classifier tool                         | `integrations/code-mode.mdx`, `agent/classifier-models.mdx`                                   |
+| Next/Workflow setup                     | `integrations/code-mode.mdx`, `integrations/vercel-workflow.mdx`                              |
+
 ## Conformance and emulators packages
 
 | Change                                        | Docs                                                                                              |

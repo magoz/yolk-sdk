@@ -207,13 +207,39 @@ export {
   decodeToolJsonSchema,
   decodeToolJsonSchemaObject,
   isToolJsonSchemaObject,
+  isCodeModeCallable,
+  isCodeModeFailClosed,
+  isProviderToolDef,
   makeBackgroundToolAcceptedResult,
+  providerToolDefs,
+  ToolCallableBy,
   ToolDef,
+  ToolDiscovery,
+  toolDiscovery,
   ToolJsonSchema,
   ToolJsonSchemaObject,
   ToolResult,
   validateInteractionSubmission
 } from './tool.ts'
+
+export {
+  emptyNestedToolCallRecorder,
+  nestedToolCallMaxArgsBytes,
+  nestedToolCallMaxCalls,
+  nestedToolCallMaxErrorChars,
+  nestedToolCallMaxTotalArgsBytes,
+  nestedToolCallResultFields,
+  NestedToolCallRecord,
+  NestedToolCalls,
+  NestedToolCallStatus,
+  recordNestedToolCall
+} from './nested-tool-calls.ts'
+
+export type {
+  NestedToolCallInput,
+  NestedToolCallRecorder,
+  NestedToolCallResultFields
+} from './nested-tool-calls.ts'
 
 export type {
   ErrorToolResultInput,
@@ -232,7 +258,8 @@ export type {
   PlainQuestionAnswer,
   PlainQuestionResponse,
   PlainToolApprovalResponse,
-  QuestionResponseStructuredContent
+  QuestionResponseStructuredContent,
+  ToolExposure
 } from './tool.ts'
 
 export {

@@ -15,6 +15,7 @@ const packages: ReadonlyArray<PackageManifest> = [
     name: '@yolk-sdk/agent',
     exports: [
       '.',
+      './classification',
       './client',
       './compaction',
       './loop',
@@ -35,6 +36,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './providers/openai/realtime',
       './providers/openai/speech',
       './providers/vercel/ai-gateway-provider',
+      './providers/vercel/ai-gateway-classifier',
       './providers/vercel/conformance',
       './providers/opencode/go-provider',
       './providers/opencode/usage',
@@ -118,6 +120,7 @@ const packages: ReadonlyArray<PackageManifest> = [
     ]
   },
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
+  { name: '@yolk-sdk/codemode', exports: ['.', './node'] },
   { name: '@yolk-sdk/vercel-workflows', exports: ['.', './effect', './testing', './workflow'] },
   {
     name: '@yolk-sdk/harness',
@@ -203,6 +206,8 @@ const main = async () => {
       type: 'module',
       private: true,
       dependencies: {
+        // Dependency of @yolk-sdk/codemode; tarballs are extracted, not installed.
+        '@earendil-works/pi-codemode': '1.0.0',
         '@effect/platform-node': '4.0.0-rc.115',
         // Dependency of @yolk-sdk/emulators (./fortnox); tarballs are extracted, not installed.
         '@emulators/core': '0.12.0',
@@ -288,6 +293,11 @@ const main = async () => {
           'if (typeof conformanceCase.defineConformanceCase !== "function" || typeof conformanceCase.expectEqual !== "function" || typeof runner.runConformance !== "function" || typeof runner.formatConformanceReport !== "function") throw new Error("Missing conformance case/runner exports")',
           'if (runner.conformanceSkipReason({ kind: "live", account: "synthetic" }, { id: "example.case.write", safety: "write-reversible" }) !== "writes-not-allowed") throw new Error("Conformance safety policy mismatch")',
           'if (gatewayFixtures.vercelAiGatewayConformanceCases.length !== 4 || !gatewayFixtures.vercelAiGatewayConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Gateway conformance cases")',
+          'if (gatewayFixtures.vercelAiGatewayClassifierConformanceFixtures.length !== 4 || gatewayFixtures.vercelAiGatewayClassifierConformanceCases.length !== 4 || !gatewayFixtures.vercelAiGatewayClassifierConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Gateway classifier conformance cases/fixtures")',
+          'const classification = await import("@yolk-sdk/agent/classification")',
+          'if (typeof classification.classify !== "function" || typeof classification.ClassifierModel !== "function" || typeof classification.decodeClassifierAnswers !== "function") throw new Error("Missing classification exports")',
+          'const gatewayClassifier = await import("@yolk-sdk/agent/providers/vercel/ai-gateway-classifier")',
+          'if (typeof gatewayClassifier.makeVercelAiGatewayClassifierLayer !== "function" || gatewayClassifier.vercelAiGatewayClassifierDefaultModel !== "typesafe-ai/jev") throw new Error("Missing Gateway classifier exports")',
           'const openAiConformance = await import("@yolk-sdk/agent/providers/openai/conformance")',
           'if (openAiConformance.openAiConformanceFixtures.length !== 4 || openAiConformance.openAiConformanceCases.length !== 4 || !openAiConformance.openAiConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing OpenAI conformance cases/fixtures")',
           'const anthropicConformance = await import("@yolk-sdk/agent/providers/anthropic/conformance")',
@@ -380,6 +390,11 @@ const main = async () => {
           'const r2Refused = r2Emulator.call("R2ObjectClient", "get", { bucket: "yolk-synthetic-bucket", key: "k", maxBytes: 1 })',
           'if (JSON.stringify(r2Reply) !== JSON.stringify({ response: r2Fixture.response }) || !("notEmulated" in r2Refused) || r2Emulator.ledger.entries().length !== 2 || r2Emulator.coverage().notEmulatedCalls !== 1 || typeof r2Conformance.r2PortsLayerFromBackend(r2Emulator) !== "object") throw new Error("R2 emulator smoke failed")',
           'if (typeof (await import("@yolk-sdk/emulators/node")).serveFetchHandler !== "function") throw new Error("Missing emulator node exports")',
+          'const codemode = await import("@yolk-sdk/codemode")',
+          'for (const symbol of ["makeCodeModeTool", "makeClassifierTool", "makeClassifierConcurrencyLimiter", "codeModeStoreFromToolResults", "renderCodeModeDescription", "searchCodeModeTools"]) { if (typeof codemode[symbol] !== "function") throw new Error(`Missing code mode export: ${symbol}`) }',
+          'const codemodeNode = await import("@yolk-sdk/codemode/node")',
+          'const codemodeResult = await codemodeNode.makePiCodeModeExecutor().execute("const n: number = 2; return n * 21", { tools: [], globals: [], timeoutMs: 10000, memoryLimitBytes: 64 * 1024 * 1024, store: {}, signal: new AbortController().signal })',
+          'if (!codemodeResult.ok || codemodeResult.value !== 42) throw new Error(`Code mode executor smoke failed: ${JSON.stringify(codemodeResult)}`)',
           'const fortnoxEmulatorModule = await import("@yolk-sdk/emulators/fortnox")',
           'if (fortnoxEmulatorModule.fortnoxEmulatorRoutes.length !== 10 || !fortnoxEmulatorModule.fortnoxEmulatorRoutes.every(route => route.evidence === "unverified")) throw new Error("Fortnox emulator manifest mismatch")',
           'const fortnoxEmulator = await fortnoxEmulatorModule.makeFortnoxEmulator()',

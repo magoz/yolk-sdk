@@ -66,6 +66,9 @@ type IndexedToolResultMessage = {
   readonly message: ToolResultMessage
 }
 
+/** Model-visible rejection for dispatch after Stop, shared by tool calls and code mode nested calls. */
+const workflowStoppedMessage = 'Workflow execution is stopped or unavailable'
+
 const workflowEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}`
 
 const workflowErrorEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}:error`
@@ -355,7 +358,18 @@ export async function runAgentWorkflowToolBatchStep(input: {
       latestUsage = usage
       const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
       yield* assertChildAdmission(context, getWorkflowMetadata().workflowRunId)
-      const runtime = yield* workflowRuntime(request, context)
+
+      const store = yield* AgentWorkflowStore
+
+      // Code mode nested calls bypass the ToolExecutor decorator below, so they get the same
+      // stop/admission check before each dispatch.
+      const runtime = yield* workflowRuntime(request, context, {
+        beforeNestedCall: () =>
+          assertChildAdmission(context, workflowRunId).pipe(
+            Effect.provideService(AgentWorkflowStore, store),
+            Effect.mapError(() => workflowStoppedMessage)
+          )
+      })
 
       const prepared = yield* prepareToolBatch({
         calls,
@@ -396,7 +410,6 @@ export async function runAgentWorkflowToolBatchStep(input: {
       })
 
       const executor = yield* ToolExecutor.pipe(Effect.provide(runtime.layer))
-      const store = yield* AgentWorkflowStore
       yield* toolStream.pipe(
         Stream.provideService(ToolExecutor, {
           execute: (call, options) =>
@@ -407,7 +420,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
                   new ToolError({
                     tool: call.name,
                     cause: 'execution',
-                    message: 'Workflow execution is stopped or unavailable'
+                    message: workflowStoppedMessage
                   })
               ),
               Effect.flatMap(() => {

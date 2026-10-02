@@ -15,7 +15,8 @@
  * - FAIL: a verified connector write route has a missing, unreadable, or future `observedAt`.
  * - FAIL: a verified connector write route cites no case ids.
  * - FAIL: a verified route cites case ids, but no cited case is backed by a `verified` fixture
- *   (only checked when fixture evidence is supplied; the CLI loads the Gateway, OpenAI chat,
+ *   (only checked when fixture evidence is supplied; the CLI loads the Gateway chat and
+ *   classifier, OpenAI chat,
  *   Codex Responses, Anthropic Messages, Grok Responses, OpenCode Go, subscription-usage (Claude,
  *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google,
  *   LinkedIn search, MCP, email port, and R2 port fixtures).
@@ -58,7 +59,11 @@ import {
 import { openCodeGoConformanceCases } from '../packages/agent/src/providers/opencode/conformance/cases.ts'
 import { openCodeGoConformanceFixtures } from '../packages/agent/src/providers/opencode/conformance/index.ts'
 import { vercelAiGatewayConformanceCases } from '../packages/agent/src/providers/vercel/conformance/cases.ts'
-import { vercelAiGatewayConformanceFixtures } from '../packages/agent/src/providers/vercel/conformance/index.ts'
+import { vercelAiGatewayClassifierConformanceCases } from '../packages/agent/src/providers/vercel/conformance/classifier-cases.ts'
+import {
+  vercelAiGatewayClassifierConformanceFixtures,
+  vercelAiGatewayConformanceFixtures
+} from '../packages/agent/src/providers/vercel/conformance/index.ts'
 import { xAiGrokConformanceCases } from '../packages/agent/src/providers/xai/conformance/cases.ts'
 import {
   xAiGrokConformanceFixtures,
@@ -100,7 +105,10 @@ import {
 import { dropboxEmulatorRoutes } from '../packages/emulators/src/dropbox.ts'
 import { emailEmulatorRoutes } from '../packages/emulators/src/email.ts'
 import { fortnoxEmulatorRoutes } from '../packages/emulators/src/fortnox.ts'
-import { gatewayEmulatorRoutes } from '../packages/emulators/src/gateway.ts'
+import {
+  gatewayEmulatorRoutes,
+  gatewayEvaluateEmulatorRoutes
+} from '../packages/emulators/src/gateway.ts'
 import { githubEmulatorRoutes } from '../packages/emulators/src/github.ts'
 import { googleEmulatorRoutes } from '../packages/emulators/src/google.ts'
 import { linkedInSearchEmulatorRoutes } from '../packages/emulators/src/linkedin-search.ts'
@@ -194,6 +202,7 @@ export type EvidenceCheckInput = {
 /** Every emulator manifest the repo ships. Add new emulators here. */
 export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'gateway', routes: gatewayEmulatorRoutes },
+  { name: 'gateway-evaluate', routes: gatewayEvaluateEmulatorRoutes },
   { name: 'openai', routes: openAiEmulatorRoutes },
   { name: 'anthropic', routes: anthropicEmulatorRoutes },
   { name: 'codex', routes: codexEmulatorRoutes },
@@ -320,6 +329,7 @@ export const loadPendingEvidence = (file: string = pendingEvidenceFile): Pending
 /** Every conformance case id the manifests may cite. */
 export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...vercelAiGatewayConformanceCases.map(testCase => testCase.id),
+  ...vercelAiGatewayClassifierConformanceCases.map(testCase => testCase.id),
   ...openAiConformanceCases.map(testCase => testCase.id),
   ...anthropicConformanceCases.map(testCase => testCase.id),
   ...openAiCodexConformanceCases.map(testCase => testCase.id),
@@ -377,7 +387,7 @@ export const portFixtureEvidence = (
   )
 
 /**
- * Evidence of every committed Gateway, OpenAI chat, Codex Responses, Anthropic Messages, Grok
+ * Evidence of every committed Gateway (chat and classifier), OpenAI chat, Codex Responses, Anthropic Messages, Grok
  * Responses, OpenCode Go, subscription-usage (Claude, Codex, Grok), Fortnox, Microsoft, Dropbox,
  * Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, MCP, email port, and R2 port
  * fixture, by case id.
@@ -387,6 +397,7 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ReadonlyArray<EmulatorEvidence>
 > = fixtureEvidenceByCase([
   ...vercelAiGatewayConformanceFixtures,
+  ...vercelAiGatewayClassifierConformanceFixtures,
   ...openAiConformanceFixtures,
   ...anthropicConformanceFixtures,
   ...openAiCodexConformanceFixtures,

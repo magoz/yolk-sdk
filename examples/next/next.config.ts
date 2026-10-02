@@ -11,6 +11,8 @@ const workspaceRoot = join(exampleDir, '../..')
 const nextConfig: NextConfig = {
   reactCompiler: true,
   outputFileTracingRoot: workspaceRoot,
+  // Code mode's pi executor loads its worker file and quickjs.wasm from disk; keep them unbundled.
+  serverExternalPackages: ['@yolk-sdk/codemode', '@earendil-works/pi-codemode', 'quickjs-wasi'],
   // Next's synchronous config boundary; trust only the injected development hostname.
   allowedDevOrigins: getAllowedDevOrigins(
     process.env.NODE_ENV === 'development' ? process.env.PORTLESS_URL : undefined

@@ -599,6 +599,7 @@ describe('repo emulator manifests', () => {
     expect(repoPending.problems).toEqual([])
     expect(evidenceReportFailed(report)).toBe(false)
     expect(knownConformanceCaseIds.has('vercel-ai-gateway.stream.plain-text')).toBe(true)
+    expect(knownConformanceCaseIds.has('vercel-ai-gateway.classify.error-envelope')).toBe(true)
     expect(knownConformanceCaseIds.has('fortnox.invoice.list-populated')).toBe(true)
     expect(knownConformanceCaseIds.has('openai.chat.json.plain-text')).toBe(true)
     expect(knownConformanceCaseIds.has('anthropic.messages.stream.max-tokens')).toBe(true)
@@ -620,6 +621,7 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('mcp.auth.rejected')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
+      'gateway-evaluate',
       'openai',
       'anthropic',
       'codex',
@@ -661,9 +663,10 @@ describe('repo emulator manifests', () => {
       'unverified'
     ])
 
-    // Every new route (usage, OpenCode Go, Dropbox, Notion, Google, LinkedIn search) is unverified
-    // and backed by unverified fixtures.
+    // Every new route (Gateway classifier, usage, OpenCode Go, Dropbox, Notion, Google, LinkedIn
+    // search) is unverified and backed by unverified fixtures.
     for (const name of [
+      'gateway-evaluate',
       'anthropic-usage',
       'codex-usage',
       'xai-usage',

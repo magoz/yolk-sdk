@@ -262,6 +262,9 @@ importers:
       '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../../packages/agent
+      '@yolk-sdk/codemode':
+        specifier: workspace:^
+        version: link:../../packages/codemode
       '@yolk-sdk/connectors':
         specifier: workspace:^
         version: link:../../packages/connectors
@@ -398,6 +401,18 @@ importers:
       react:
         specifier: '>=19'
         version: 19.2.3
+
+  packages/codemode:
+    dependencies:
+      '@earendil-works/pi-codemode':
+        specifier: 1.0.0
+        version: 1.0.0
+      '@yolk-sdk/agent':
+        specifier: workspace:^
+        version: link:../agent
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.115
 
   packages/conformance:
     dependencies:
@@ -1281,6 +1296,10 @@ packages:
 
   '@drizzle-team/brocli@0.12.1':
     resolution: {integrity: sha512-yHwomvolVafvUXhy5TdiJVkuNCxXn+bKOs2aWiWEQh/5YaV97Oa/abJz3dmx7lxgIUsUlS1Jl4mEfvJPo3YsVw==}
+
+  '@earendil-works/pi-codemode@1.0.0':
+    resolution: {integrity: sha512-LPpFI4+T9NzDnhBDs15izWAolaoM8xnwqdziRd6Zx8BQeoEPvzefD2vMMzSyF0rOtq34TfQqkZ0ki16f6cGdMg==}
+    engines: {node: '>=22.19.0'}
 
   '@ecies/ciphers@0.2.5':
     resolution: {integrity: sha512-GalEZH4JgOMHYYcYmVqnFirFsjZHeoGMDt9IxEnM9F7GRUUyUksJ7Ou53L83WHJq3RWKD3AcBpo0iQh0oMpf8A==}
@@ -8784,6 +8803,9 @@ packages:
   quickjs-wasi@3.4.0:
     resolution: {integrity: sha512-ttKaBD8u0RXhz2UqDU8wOEruhxADt0WWHfMfnNR8aO0UyhlifFS6NvPYFbyhASjqIp2/1dpneoP1IzBUxION1w==}
 
+  quickjs-wasi@3.6.2:
+    resolution: {integrity: sha512-FCqGtGOrMgzUiIrMNMA2YnsOxCNwo31dzqXvclXUC6xeT35NJLKXQJsvbeCTjvoFAwZgEAPg8U6+KAPDGXn8Mg==}
+
   range-parser@1.2.1:
     resolution: {integrity: sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg==}
     engines: {node: '>= 0.6'}
@@ -11430,6 +11452,10 @@ snapshots:
       which: 4.0.0
 
   '@drizzle-team/brocli@0.12.1': {}
+
+  '@earendil-works/pi-codemode@1.0.0':
+    dependencies:
+      quickjs-wasi: 3.6.2
 
   '@ecies/ciphers@0.2.5(@noble/ciphers@1.3.0)':
     dependencies:
@@ -19107,6 +19133,8 @@ snapshots:
       quickjs-emscripten-core: 0.32.0
 
   quickjs-wasi@3.4.0: {}
+
+  quickjs-wasi@3.6.2: {}
 
   range-parser@1.2.1: {}
 

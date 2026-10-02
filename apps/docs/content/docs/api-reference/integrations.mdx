@@ -1,6 +1,6 @@
 ---
 title: Integration APIs
-description: Public MCP, knowledge, connector, and sandbox APIs.
+description: Public MCP, knowledge, connector, sandbox, and code mode APIs.
 ---
 
 ## Portable connector annotations
@@ -354,6 +354,15 @@ See [Connectors catalog](../integrations/connectors) for action ids.
 | `@yolk-sdk/sandbox/agent`   | `makeSandboxToolModule`, `makeSandboxToolModuleFromApi`, `sandboxToolName`                                                 |
 | `@yolk-sdk/sandbox/vercel`  | `makeVercelSandboxLayer`, `makeVercelSandboxLayerWithClient`                                                               |
 | `@yolk-sdk/sandbox/testing` | `makeFakeSandboxLayer`, `makeInMemorySandboxStateStoreLayer`                                                               |
+
+## Code mode
+
+| Subpath                   | Main exports                                                                                                                                                                                                                                                          |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`      | `makeCodeModeTool`, `CodeModeExecutor`, `CodeModeLimits`, `defaultCodeModeLimits`, `codeModeStoreFromToolResults`, `renderCodeModeDescription`, `selectCodeModeListing`, `searchCodeModeTools`, `boundCodeModeSegments`, `makeClassifierTool`, `ClassifierToolParams` |
+| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`, `defaultMaxConcurrentExecutions`                                                                                                                                                                                                            |
+
+See [Add code mode](../integrations/code-mode).
 
 ## Connector file APIs
 

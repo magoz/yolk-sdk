@@ -8,7 +8,7 @@ Effect `HttpClient` routing that points code at them.
 | Subpath                               | Source                                   | Role                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@yolk-sdk/emulators/router`          | `src/router.ts`                          | `EmulatorRoute`, `EmulatedHttpClient.layer`, `InProcessHttpClient.layer`                                                                                                                                                                                                                                           |
-| `@yolk-sdk/emulators/gateway`         | `src/gateway.ts`                         | Vercel AI Gateway fetch-handler emulator and its route evidence manifest                                                                                                                                                                                                                                           |
+| `@yolk-sdk/emulators/gateway`         | `src/gateway.ts`                         | Vercel AI Gateway fetch-handler emulator (chat, fixture-only classifier `/v1/evaluate`) and manifests                                                                                                                                                                                                              |
 | `@yolk-sdk/emulators/openai`          | `src/openai.ts`                          | OpenAI Chat Completions fetch-handler emulator and its manifest                                                                                                                                                                                                                                                    |
 | `@yolk-sdk/emulators/anthropic`       | `src/anthropic.ts`                       | Anthropic Messages fetch-handler emulator and its manifest                                                                                                                                                                                                                                                         |
 | `@yolk-sdk/emulators/codex`           | `src/codex.ts`                           | ChatGPT Codex Responses fetch-handler emulator and its manifest                                                                                                                                                                                                                                                    |
@@ -33,7 +33,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/responses.ts`                       | OpenAI Responses core (`makeResponsesEmulator`) shared by `/codex` and `/xai` (not `/opencode`, which is fixture-only)                                                                                                                                                                                             |
 | (internal)                            | `src/fixture-route.ts`                   | Fixture-only route core (`makeFixtureRouteEmulator`): recorded answers, 400 not-emulated otherwise; used by every Go and usage route                                                                                                                                                                               |
 | (internal)                            | `src/subscription-usage.ts`              | Subscription-usage `GET` routes on the fixture-only core (`makeSubscriptionUsageEmulator`) for Claude, Codex, Grok, and Go                                                                                                                                                                                         |
-| (internal)                            | `src/*-recordings.ts`                    | Go and usage fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`)                                                                                                                                                                                                       |
+| (internal)                            | `src/*-recordings.ts`                    | Go, usage, and Gateway classifier fixture exchanges copied as data (`opencode-recordings.ts`, `subscription-usage-recordings.ts`, `gateway-evaluate-recordings.ts`)                                                                                                                                                |
 | (internal)                            | `src/emulator-compose.ts`                | Path dispatch of several kernel-built parts behind one origin (`composeFetch`, `withSubscriptionUsage`)                                                                                                                                                                                                            |
 | (internal)                            | `src/emulator-http.ts`                   | Shared header validators (all emulators) and the 200-599 fault/scripted-error status schema of the model and legacy emulators (the fixture-only ones check 400-599 themselves); the stateful wrappers' internal core header and answer helpers (`handlerFailedHeader`, `emulatorJobHeader`, `answeredOutsideCore`) |
 | (internal)                            | `src/route-evidence.ts`                  | `EmulatorRouteEvidence`, the evidence header, `bindRouteHandlers`                                                                                                                                                                                                                                                  |
@@ -122,7 +122,7 @@ There is no root export or barrel.
   the Gateway route is `verified`, with `test/gateway-recordings.test.ts` comparing the emulator's
   response shapes with them; the OpenAI, Anthropic, Codex, Grok, OpenCode Go, and subscription-usage
   ones are synthetic placeholders), copied as data, never imported. Each emulated route lists the
-  conformance case ids it follows in its manifest (`gatewayEmulatorRoutes`, `openAiEmulatorRoutes`,
+  conformance case ids it follows in its manifest (`gatewayEmulatorRoutes`, `gatewayEvaluateEmulatorRoutes`, `openAiEmulatorRoutes`,
   `anthropicEmulatorRoutes`, `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`,
   `openCodeGoEmulatorRoutes`, `anthropicSubscriptionUsageEmulatorRoutes`,
   `codexSubscriptionUsageEmulatorRoutes`, `xAiGrokSubscriptionUsageEmulatorRoutes`,
@@ -155,8 +155,10 @@ There is no root export or barrel.
   within the shared kernel faults and scripted error turns; a scripted or default replacement body
   must keep the recorded JSON shape. A recordings-parity test per fixture
   (`test/fixture-recordings.test.ts`) compares status, event kinds and order, field names, and
-  content. Scope: the four `/opencode` routes and the three subscription-usage routes (Claude,
-  Codex, Grok) today, on `src/fixture-route.ts`, the `/email` port emulator (its own
+  content. Scope: the four `/opencode` routes, the three subscription-usage routes (Claude,
+  Codex, Grok), and the Gateway classifier route (`POST /v1/evaluate`, `emulator.evaluate`, its own
+  unverified manifest `gatewayEvaluateEmulatorRoutes` and control plane `/_emulate/evaluate/*`,
+  composed beside the chat route like the usage routes) today, on `src/fixture-route.ts`, the `/email` port emulator (its own
   latitude, not-emulated answer, faults, and parity test, below; it does not use the kernel), and
   the stateful `/dropbox`, `/notion`, `/github`, `/google`, `/linkedin-search`, and `/mcp` emulators
   and `/todoist` and `/telegram` emulators (all on `src/stateful-emulator.ts`; each with its own
@@ -887,7 +889,10 @@ There is no root export or barrel.
 ## Tests
 
 `test/router.test.ts`, `test/router-redirects.test.ts` (redirects and `mapRequest` never escape the
-route table, with a second unrouted loopback server), `test/gateway.test.ts`, `test/openai.test.ts`,
+route table, with a second unrouted loopback server), `test/gateway.test.ts`,
+`test/gateway-evaluate.test.ts` (the classifier route: recorded answers, not-emulated refusals, its
+own ledger, faults, scripted errors, and control plane, and the four classifier conformance cases
+in-process and over a loopback socket through the real Gateway classifier), `test/openai.test.ts`,
 `test/chat-completions.test.ts` (shared core and per-emulator parameters, including each emulator's
 streamed framing), `test/emulator-http.test.ts` (the credential header and query-parameter rules
 agree with the conformance ones), `test/node.test.ts`, `test/gateway-conformance.test.ts` (the
@@ -907,8 +912,8 @@ output-limit policy, ledger, scripted turns, faults, control plane, and manifest
 over a loopback socket, disagreement drills, and 429 `retry-after` / mid-stream `error` and
 `response.failed` events / dropped connection / truncation faults through the real Codex and Grok
 providers, pinning Grok's required terminal event, Codex's EOF-completion compatibility, and the 426
-for a missing client version), `test/fixture-recordings.test.ts` (recordings parity: each Go and
-usage fixture's recorded request answered with the recorded status, content type, event kinds and
+for a missing client version), `test/fixture-recordings.test.ts` (recordings parity: each Go, usage, and
+Gateway classifier fixture's recorded request answered with the recorded status, content type, event kinds and
 order, field names, and content; data copies equal to the fixtures; a drift drill),
 `test/opencode.test.ts` (recorded answers, the documented latitude, 400 not-emulated rejections that
 leave faults and turns untouched, per-part controls, control planes, coverage, reset, manifest),

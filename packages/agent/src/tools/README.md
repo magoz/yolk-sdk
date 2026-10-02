@@ -62,6 +62,25 @@ Voice, background activation, and host-less execution fail closed. See
 `patterns/AGENT_HITL.md` for host wiring and `test/tools/interaction-host.ts` for the fake-effect
 reference (acceptance is separate from claim; no product or provider integration).
 
+## Output schemas, exposure, and nested tool access
+
+These are the code mode contract (`docs/adr/0002-code-mode.md`); this package does not run scripts.
+
+- `makeTool({ output })` adds declaration-only `ToolDef.outputSchema`, lowered like `parameters`.
+- `callableBy: 'all' | 'model' | 'codemode'` (default `all`) and, for `codemode` only,
+  `discovery: 'listed' | 'search'` (default `listed`) decide who may call a tool. Codemode-only
+  tools never reach providers. Approval, input, interaction, activated background, `question`, and
+  `subagent` tools never run from code mode; `resolveTools` rejects `callableBy: 'codemode'` on them.
+- `nestedToolAccess: true` gives a registration's `execute` a `nested` executor with the other
+  code-mode-callable tools of the same resolution and host context. Nested calls run through the
+  resolved execute path and fail closed with model-visible error results. Assign nested call ids as
+  `<parentToolCallId>/<seq>`.
+- `describe: ({ tools }) => string` on a nested-access registration computes its resolved
+  description from those nested tools (for example a code mode catalog); `def.description` stays
+  the static fallback.
+- Report nested calls on the result with protocol `recordNestedToolCall` and
+  `nestedToolCallResultFields`; the bounded record and summed usage never reach the model.
+
 ## Recoverable tool failures
 
 Use `modelVisibleToolError(...)` for expected failures the model can recover from: validation,

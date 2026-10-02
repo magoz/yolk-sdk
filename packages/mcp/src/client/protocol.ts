@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option } from 'effect'
+import { Array as Arr, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AudioPart,
@@ -7,9 +7,10 @@ import {
   ToolDef,
   ToolJsonSchemaObject,
   ToolResult,
+  decodeToolJsonSchemaObject,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
-import type { Content, ContentPart } from '@yolk-sdk/agent/protocol'
+import type { Content, ContentPart, ToolExposure } from '@yolk-sdk/agent/protocol'
 import { McpError } from './errors.ts'
 
 export const latestMcpProtocolVersion = '2026-07-28'
@@ -201,12 +202,52 @@ export const jsonRpcErrorToMcpError = (server: string, error: JsonRpcErrorObject
     cause: 'protocol'
   })
 
-export const mcpToolToToolDef = (input: { readonly serverName: string; readonly tool: McpTool }) =>
-  ToolDef.make({
+/** Code mode exposure for adapted MCP tools: one value for every tool, or per listed tool.
+ * Omitted: the agent defaults (`callableBy: 'all'`). `resolveTools` still rejects invalid
+ * combinations (for example `discovery` without `callableBy: 'codemode'`).
+ */
+export type McpToolExposureResolver =
+  | ToolExposure
+  | ((tool: McpTool, serverName: string) => ToolExposure)
+
+type McpToolDefFields = {
+  name: string
+  description: string
+  parameters: ToolDef['parameters']
+  outputSchema?: ToolDef['outputSchema']
+  callableBy?: ToolDef['callableBy']
+  discovery?: ToolDef['discovery']
+}
+
+/** Adapts one listed MCP tool. A present `outputSchema` that is a plain JSON Schema object
+ * passes through as declaration-only `ToolDef.outputSchema`; any other value is omitted.
+ * `exposure` (host policy) sets `callableBy`/`discovery`; without it neither is set.
+ */
+export const mcpToolToToolDef = (input: {
+  readonly serverName: string
+  readonly tool: McpTool
+  readonly exposure?: McpToolExposureResolver
+}) => {
+  const fields: McpToolDefFields = {
     name: `${sanitizeMcpName(input.serverName)}_${sanitizeMcpName(input.tool.name)}`,
     description: input.tool.description ?? `MCP tool ${input.serverName}/${input.tool.name}`,
     parameters: input.tool.inputSchema ?? { type: 'object', additionalProperties: true }
-  })
+  }
+
+  const outputSchema = decodeToolJsonSchemaObject(input.tool.outputSchema)
+
+  if (Option.isSome(outputSchema)) fields.outputSchema = outputSchema.value
+
+  const exposure = Predicate.isFunction(input.exposure)
+    ? input.exposure(input.tool, input.serverName)
+    : input.exposure
+
+  if (exposure?.callableBy !== undefined) fields.callableBy = exposure.callableBy
+
+  if (exposure?.discovery !== undefined) fields.discovery = exposure.discovery
+
+  return ToolDef.make(fields)
+}
 
 export const sanitizeMcpName = (name: string) => {
   const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '_')

@@ -40,6 +40,7 @@ import {
   hitlResponseEvent,
   questionResponseStructuredContent,
   makeSubagentRunId,
+  providerToolDefs,
   ToolApprovalRequest,
   toolResultMessageFromResult,
   SubagentCompleted,
@@ -325,7 +326,7 @@ const validateCapabilities = (
     return Effect.void
   }
 
-  if (!capabilities.tools && config.tools.length > 0) {
+  if (!capabilities.tools && providerToolDefs(config.tools).length > 0) {
     return Effect.fail(unsupportedInputError('Tools are not supported by this model'))
   }
 
@@ -1091,7 +1092,34 @@ const prepareInteractionCall = (input: {
     })
   })
 
+// Provider-issued calls to codemode-only tools fail closed exactly like unknown tools,
+// without prompting or dispatching the executor.
+const unavailableCodeModeOnlyCall = (call: ToolCall, index: number) =>
+  PreparedToolCall.Result({
+    index,
+    call,
+    events: [],
+    result: ToolResult.make({
+      toolCallId: call.id,
+      content: `Tool is not configured: ${call.name}`,
+      isError: true
+    })
+  })
+
 const prepareToolCall = (input: {
+  readonly tools: ReadonlyArray<ToolDef>
+  readonly responses: ReadonlyArray<HitlResponse>
+  readonly handlers: Readonly<Record<string, InputToolHandler>>
+  readonly preflights: Readonly<Record<string, InteractionPreflight>>
+  readonly receipts: ReadonlyMap<string, InteractionReceipt>
+  readonly call: ToolCall
+  readonly index: number
+}): Effect.Effect<PreparedToolCall> =>
+  toolDefFor(input.tools, input.call)?.callableBy === 'codemode'
+    ? Effect.succeed(unavailableCodeModeOnlyCall(input.call, input.index))
+    : prepareModelToolCall(input)
+
+const prepareModelToolCall = (input: {
   readonly tools: ReadonlyArray<ToolDef>
   readonly responses: ReadonlyArray<HitlResponse>
   readonly handlers: Readonly<Record<string, InputToolHandler>>
@@ -1478,7 +1506,7 @@ const makeLlmStream = (
   const makeStream = () =>
     input.provider.stream({
       messages: result.messages,
-      tools: input.config.tools,
+      tools: providerToolDefs(input.config.tools),
       model: input.config.model,
       reasoningEffort: input.config.reasoningEffort,
       systemPrompt: input.config.systemPrompt
@@ -1521,7 +1549,7 @@ const makeModelOnlyLlmStream = (
   const makeStream = () =>
     input.provider.stream({
       messages: result.messages,
-      tools: input.config.tools,
+      tools: providerToolDefs(input.config.tools),
       model: input.config.model,
       reasoningEffort: input.config.reasoningEffort,
       systemPrompt: input.config.systemPrompt

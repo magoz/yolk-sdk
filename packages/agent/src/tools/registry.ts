@@ -12,6 +12,8 @@ import * as Schema from 'effect/Schema'
 import * as SchemaAST from 'effect/SchemaAST'
 import { ToolError, ToolExecutor, type ToolExecutionOptions } from '@yolk-sdk/agent/loop'
 import {
+  isCodeModeCallable,
+  isCodeModeFailClosed,
   isToolJsonSchemaObject,
   makeErrorToolResult,
   makeInteractionToolResult,
@@ -31,6 +33,7 @@ import {
   type InteractionResponseValidator,
   type ToolApprovalPolicy,
   type ToolCall,
+  type ToolExposure,
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName } from '../protocol/tool.ts'
@@ -58,7 +61,9 @@ export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
       'input_unsupported_policy',
       'input_validation_required',
       'interaction_unsupported_policy',
-      'interaction_validation_required'
+      'interaction_validation_required',
+      'codemode_unsupported_tool',
+      'invalid_tool_exposure'
     ])
   }
 ) {}
@@ -138,9 +143,43 @@ export const modelVisibleToolErrorResult = (call: ToolCall, error: ModelVisibleT
     structuredContent: modelVisibleToolErrorStructuredContent(error)
   })
 
+/** One tool scripts may call, with its module id as the grouping/search namespace. */
+export type NestedTool = {
+  readonly def: ToolDef
+  readonly moduleId: string
+  /** The module's `ToolModule.description`, when set. */
+  readonly moduleDescription?: string
+}
+
+/** Nested tool access for registrations with `nestedToolAccess: true` (for example a code mode
+ * tool). Scoped to the same `resolveTools` resolution and host context.
+ */
+export type NestedToolExecutor = {
+  /** Code-mode-callable tools (`callableBy` all or codemode, outside the fail-closed set),
+   * excluding every registration with nested tool access (no recursion).
+   */
+  readonly tools: ReadonlyArray<NestedTool>
+  /** Runs through the same path as `ResolvedToolSet.execute` (parameter validation, resolved
+   * enablement, and registration-level host wrappers). Unknown, disabled, and non-callable tools
+   * and tool failures become model-visible error results; it never fails. The caller assigns
+   * call ids, by convention `<parentToolCallId>/<seq>`, so hosts can derive idempotency keys.
+   * Decorators applied outside `ResolvedToolSet.execute` (for example a wrapped ToolExecutor)
+   * do not see nested calls.
+   */
+  readonly execute: (call: ToolCall) => Effect.Effect<ToolResult>
+}
+
+/** Computes a nested-access registration's resolved description from the tools its scripts can
+ * call (for example a code mode catalog). Honored by `resolveTools` only for registrations with
+ * `nestedToolAccess: true`; the static `def.description` stays the fallback elsewhere.
+ */
+export type NestedToolDescriber = (input: { readonly tools: ReadonlyArray<NestedTool> }) => string
+
 export type ToolExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
+  /** Present only for registrations with `nestedToolAccess: true`. Wrappers must forward it. */
+  readonly nested?: NestedToolExecutor
 }
 
 export type SchemaToolExecutionInput<Context, Params> = ToolExecutionInput<Context> & {
@@ -154,6 +193,12 @@ export type ToolRegistration<Context> = {
   readonly access: ToolAccess
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
+  /** Receive a `nested` executor over the other code-mode-callable tools of the resolution. */
+  readonly nestedToolAccess?: boolean
+  /** With `nestedToolAccess: true`, the resolved definition's description is computed from the
+   * nested tools of the resolution instead of `def.description`.
+   */
+  readonly describe?: NestedToolDescriber
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
   /** Present only on schema-backed input registrations; owns user-payload validation. */
@@ -220,18 +265,30 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly name: string
   readonly description: string
   readonly parameters: ParamsSchema
+  /** Schema of `ToolResult.structuredContent`, lowered like `parameters` into
+   * `ToolDef.outputSchema` for declarations only. Results are not validated against it.
+   */
+  readonly output?: Schema.Top
   readonly access: ToolAccess
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
+  /** Receive a `nested` executor over the other code-mode-callable tools of the resolution. */
+  readonly nestedToolAccess?: boolean
+  /** With `nestedToolAccess: true`, compute the resolved description from the nested tools. */
+  readonly describe?: NestedToolDescriber
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
   readonly execute: (
     input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
   ) => Effect.Effect<ToolResult, ToolError | ModelVisibleToolError>
-}
+} & ToolExposure
 
 export type ToolModule<Context> = {
   readonly id: string
+  /** What the module's tools are for; nested-access registrations (for example code mode) show it
+   * with the namespace and index it for tool search.
+   */
+  readonly description?: string
   readonly tools: ReadonlyArray<ToolRegistration<Context>>
 }
 
@@ -243,6 +300,7 @@ export type ToolMetadata = {
 
 type ResolvedRegistration<Context> = {
   readonly moduleId: string
+  readonly moduleDescription: string | undefined
   readonly tool: ToolRegistration<Context>
 }
 
@@ -272,7 +330,13 @@ const resolveModuleTools = <Context>(toolModule: ToolModule<Context>, context: C
   Effect.forEach(toolModule.tools, tool =>
     enabled(tool, context).pipe(
       Effect.map(isToolEnabled =>
-        isToolEnabled ? Option.some({ moduleId: toolModule.id, tool }) : Option.none()
+        isToolEnabled
+          ? Option.some({
+              moduleId: toolModule.id,
+              moduleDescription: toolModule.description,
+              tool
+            })
+          : Option.none()
       )
     )
   ).pipe(Effect.map(Arr.getSomes))
@@ -487,12 +551,17 @@ const invalidParamsMessage = (
 type MakeToolRegistrationFields = {
   def: ToolDef
   background?: boolean
+  nestedToolAccess?: boolean
+  describe?: NestedToolDescriber
 }
 
 type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
   name: string
   description: string
   parameters: ReturnType<typeof jsonSchemaFromSchema>
+  outputSchema?: ReturnType<typeof jsonSchemaFromSchema>
+  callableBy?: ToolDef['callableBy']
+  discovery?: ToolDef['discovery']
   approval: MakeToolOptions<Context, ParamsSchema>['approval']
   background?: boolean
 }
@@ -510,6 +579,18 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
           approval: options.approval
         }
 
+        if (options.output !== undefined) {
+          fields.outputSchema = jsonSchemaFromSchema(options.output)
+        }
+
+        if (options.callableBy !== undefined) {
+          fields.callableBy = options.callableBy
+        }
+
+        if (options.discovery !== undefined) {
+          fields.discovery = options.discovery
+        }
+
         if (options.background !== undefined) {
           fields.background = options.background
         }
@@ -521,6 +602,14 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
 
   if (options.background !== undefined) {
     registration.background = options.background
+  }
+
+  if (options.nestedToolAccess !== undefined) {
+    registration.nestedToolAccess = options.nestedToolAccess
+  }
+
+  if (options.describe !== undefined) {
+    registration.describe = options.describe
   }
 
   const tails: Pick<
@@ -542,7 +631,7 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     access: options.access,
     approval: options.approval,
     isEnabled: options.isEnabled,
-    execute: ({ call, context }) =>
+    execute: ({ call, context, nested }) =>
       Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
         Effect.matchEffect({
           onFailure: error => {
@@ -561,7 +650,9 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
           },
           onSuccess: params =>
             options
-              .execute({ call, context, params })
+              .execute(
+                nested === undefined ? { call, context, params } : { call, context, params, nested }
+              )
               .pipe(
                 Effect.catchTag('ModelVisibleToolError', error =>
                   Effect.succeed(modelVisibleToolErrorResult(call, error))
@@ -572,6 +663,47 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   }
 
   return Object.assign(registration, tails)
+}
+
+type ToolDefFields = {
+  name: ToolDef['name']
+  description: ToolDef['description']
+  parameters: ToolDef['parameters']
+  outputSchema?: ToolDef['outputSchema']
+  callableBy?: ToolDef['callableBy']
+  discovery?: ToolDef['discovery']
+  approval?: ToolDef['approval']
+  background?: ToolDef['background']
+  execution?: ToolDef['execution']
+  input?: ToolDef['input']
+  interaction?: ToolDef['interaction']
+}
+
+// Explicit field selection: `ToolDef.make` would retain excess own keys of a spread instance.
+const withToolDescription = (def: ToolDef, description: string): ToolDef => {
+  const fields: ToolDefFields = {
+    name: def.name,
+    description,
+    parameters: def.parameters
+  }
+
+  if (def.outputSchema !== undefined) fields.outputSchema = def.outputSchema
+
+  if (def.callableBy !== undefined) fields.callableBy = def.callableBy
+
+  if (def.discovery !== undefined) fields.discovery = def.discovery
+
+  if (def.approval !== undefined) fields.approval = def.approval
+
+  if (def.background !== undefined) fields.background = def.background
+
+  if (def.execution !== undefined) fields.execution = def.execution
+
+  if (def.input !== undefined) fields.input = def.input
+
+  if (def.interaction !== undefined) fields.interaction = def.interaction
+
+  return ToolDef.make(fields)
 }
 
 const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistration<Context>>) => {
@@ -845,6 +977,35 @@ export const resolveTools = <Context>(
         )
       }
 
+      if (tool.def.discovery !== undefined && tool.def.callableBy !== 'codemode') {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'invalid_tool_exposure',
+            message: `Tool ${tool.def.name} sets discovery without callableBy 'codemode'.`
+          })
+        )
+      }
+
+      // Fail-closed tools never run from code mode; marking them codemode-only is an error
+      // rather than a silently unreachable tool. A nested-access registration is never
+      // script-callable itself, so codemode-only would make it unreachable too.
+      if (
+        tool.def.callableBy === 'codemode' &&
+        (isCodeModeFailClosed(tool.def) ||
+          activated(tool) ||
+          tool.approval !== undefined ||
+          tool.input !== undefined ||
+          tool.interaction !== undefined ||
+          tool.nestedToolAccess === true)
+      ) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'codemode_unsupported_tool',
+            message: `Tool ${tool.def.name} cannot be callableBy 'codemode': approval, input, interaction, background, question, subagent, and nested-access tools never run from code mode.`
+          })
+        )
+      }
+
       // Loop-owned tool names keep their own lifecycle: `question` is intercepted before dispatch
       // and `subagent` already owns an explicit acknowledgement helper keyed on its top-level params.
       if (activated(tool) && loopOwnedToolNames.has(tool.def.name)) {
@@ -942,9 +1103,33 @@ export const resolveTools = <Context>(
       }
     }
 
-    const tools = Arr.map(resolved, item =>
-      activated(item.tool) ? backgroundToolDef(item.tool.def) : item.tool.def
+    // Script-callable registrations: never fail-closed tools, never nested-access registrations.
+    const nestedRegistrations = resolved.filter(
+      item =>
+        item.tool.nestedToolAccess !== true &&
+        item.tool.approval === undefined &&
+        item.tool.input === undefined &&
+        item.tool.interaction === undefined &&
+        !activated(item.tool) &&
+        isCodeModeCallable(item.tool.def)
     )
+
+    const nestedTools: ReadonlyArray<NestedTool> = nestedRegistrations.map(item =>
+      item.moduleDescription === undefined
+        ? { def: item.tool.def, moduleId: item.moduleId }
+        : { def: item.tool.def, moduleId: item.moduleId, moduleDescription: item.moduleDescription }
+    )
+
+    const describedDef = (tool: ToolRegistration<Context>): ToolDef =>
+      tool.nestedToolAccess === true && tool.describe !== undefined
+        ? withToolDescription(tool.def, tool.describe({ tools: nestedTools }))
+        : tool.def
+
+    const tools = Arr.map(resolved, item => {
+      const def = describedDef(item.tool)
+
+      return activated(item.tool) ? backgroundToolDef(def) : def
+    })
 
     const metadata = Arr.map(resolved, item => ({
       moduleId: item.moduleId,
@@ -989,6 +1174,82 @@ export const resolveTools = <Context>(
       )
     )
 
+    const codeModeOnlyNames = resolved.flatMap(item =>
+      item.tool.def.callableBy === 'codemode' ? [item.tool.def.name] : []
+    )
+
+    if (
+      codeModeOnlyNames.length > 0 &&
+      !resolved.some(item => item.tool.nestedToolAccess === true)
+    ) {
+      yield* Effect.logWarning(
+        `Code-mode-only tools are unreachable without a nested tool access registration: ${codeModeOnlyNames.join(', ')}`
+      )
+    }
+
+    const executionInput = (
+      tool: ToolRegistration<Context>,
+      call: ToolCall
+    ): ToolExecutionInput<Context> =>
+      tool.nestedToolAccess === true ? { call, context, nested } : { call, context }
+
+    const executeRegistration = (
+      match: ResolvedRegistration<Context>,
+      call: ToolCall,
+      executionOptions?: ToolExecutionOptions
+    ): Effect.Effect<ToolResult, ToolError> => {
+      if (match.tool.def.input !== undefined) {
+        return Effect.fail(
+          new ToolError({
+            tool: call.name,
+            cause: 'unavailable',
+            message: `Input tool "${call.name}" requires user input and cannot execute directly.`
+          })
+        )
+      }
+
+      if (match.tool.def.interaction !== undefined) {
+        return executeInteractionTool({
+          registration: match.tool,
+          call,
+          context,
+          ref: executionOptions?.interaction,
+          host: options.interactionHost
+        })
+      }
+
+      const host = options.backgroundHost
+      const validate = match.tool.validate
+
+      return activated(match.tool) && host !== undefined && validate !== undefined
+        ? executeBackgroundTool({
+            request: call,
+            context,
+            host,
+            validate: businessCall =>
+              validate(businessCall).pipe(
+                Effect.catchIf(
+                  (error): error is InvalidToolParamsError =>
+                    error instanceof InvalidToolParamsError,
+                  error =>
+                    Effect.succeed(
+                      modelVisibleToolErrorResult(
+                        businessCall,
+                        modelVisibleToolError({
+                          tool: error.tool,
+                          message: error.message,
+                          reason: 'validation'
+                        })
+                      )
+                    )
+                )
+              ),
+            execute: businessCall => match.tool.execute(executionInput(match.tool, businessCall))
+          })
+        : match.tool.execute(executionInput(match.tool, call))
+    }
+
+    // Model-facing dispatch: codemode-only tools are unknown here (fail closed as not found).
     const execute = (call: ToolCall, executionOptions?: ToolExecutionOptions) =>
       executionOptions?.interaction !== undefined
         ? executeInteractionTool({
@@ -999,62 +1260,49 @@ export const resolveTools = <Context>(
             host: options.interactionHost
           })
         : Option.match(
-            Arr.findFirst(resolved, item => item.tool.def.name === call.name),
+            Arr.findFirst(
+              resolved,
+              item => item.tool.def.name === call.name && item.tool.def.callableBy !== 'codemode'
+            ),
             {
               onNone: () => Effect.fail(missingToolError(call.name)),
-              onSome: match => {
-                if (match.tool.def.input !== undefined) {
-                  return Effect.fail(
-                    new ToolError({
-                      tool: call.name,
-                      cause: 'unavailable',
-                      message: `Input tool "${call.name}" requires user input and cannot execute directly.`
-                    })
-                  )
-                }
-
-                if (match.tool.def.interaction !== undefined) {
-                  return executeInteractionTool({
-                    registration: match.tool,
-                    call,
-                    context,
-                    ref: executionOptions?.interaction,
-                    host: options.interactionHost
-                  })
-                }
-
-                const host = options.backgroundHost
-                const validate = match.tool.validate
-
-                return activated(match.tool) && host !== undefined && validate !== undefined
-                  ? executeBackgroundTool({
-                      request: call,
-                      context,
-                      host,
-                      validate: businessCall =>
-                        validate(businessCall).pipe(
-                          Effect.catchIf(
-                            (error): error is InvalidToolParamsError =>
-                              error instanceof InvalidToolParamsError,
-                            error =>
-                              Effect.succeed(
-                                modelVisibleToolErrorResult(
-                                  businessCall,
-                                  modelVisibleToolError({
-                                    tool: error.tool,
-                                    message: error.message,
-                                    reason: 'validation'
-                                  })
-                                )
-                              )
-                          )
-                        ),
-                      execute: businessCall => match.tool.execute({ call: businessCall, context })
-                    })
-                  : match.tool.execute({ call, context })
-              }
+              onSome: match => executeRegistration(match, call, executionOptions)
             }
           )
+
+    const nested: NestedToolExecutor = {
+      tools: nestedTools,
+      execute: call =>
+        Option.match(
+          Arr.findFirst(nestedRegistrations, item => item.tool.def.name === call.name),
+          {
+            onNone: () => {
+              const known = resolved.some(item => item.tool.def.name === call.name)
+
+              return Effect.succeed(
+                modelVisibleToolErrorResult(
+                  call,
+                  modelVisibleToolError({
+                    tool: call.name,
+                    reason: known ? 'unavailable' : 'not_found',
+                    message: known
+                      ? `Tool is not callable from code mode: ${call.name}`
+                      : `Tool is not configured: ${call.name}`
+                  })
+                )
+              )
+            },
+            onSome: match =>
+              executeRegistration(match, call).pipe(
+                Effect.catchTag('ToolError', error =>
+                  Effect.succeed(
+                    makeErrorToolResult({ toolCallId: call.id, content: error.message })
+                  )
+                )
+              )
+          }
+        )
+    }
 
     return {
       tools,

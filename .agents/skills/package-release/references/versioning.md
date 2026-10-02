@@ -16,6 +16,7 @@ Public packages are lockstep/fixed:
 @yolk-sdk/harness
 @yolk-sdk/conformance
 @yolk-sdk/emulators
+@yolk-sdk/codemode
 ```
 
 All public packages share one version, even if only one package changed.

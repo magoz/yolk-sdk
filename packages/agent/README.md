@@ -18,45 +18,47 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                                | Purpose                                                                                       |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/protocol`                             | Wire messages, events, content, usage, tool schemas                                           |
-| `@yolk-sdk/agent/loop`                                 | Stateless LLM/tool loop                                                                       |
-| `@yolk-sdk/agent/loop/testing`                         | Faux provider and tool executor test helpers                                                  |
-| `@yolk-sdk/agent/runtime`                              | Transcript or append-backed runtime orchestration                                             |
-| `@yolk-sdk/agent/client`                               | HTTP/NDJSON transport, HITL resume, retry/error state helpers                                 |
-| `@yolk-sdk/agent/compaction`                           | Host-owned compaction budgets, checkpoints, formatting, retry                                 |
-| `@yolk-sdk/agent/tools`                                | Tool registry, typed inputs, interactions, subagents/questions                                |
-| `@yolk-sdk/agent/react`                                | Headless React chat hook, reducer, selectors, and render model                                |
-| `@yolk-sdk/agent/oauth`                                | Provider-neutral OAuth token and broker contracts                                             |
-| `@yolk-sdk/agent/providers/openai`                     | OpenAI/Codex OAuth and broker helpers                                                         |
-| `@yolk-sdk/agent/providers/openai/codex`               | OpenAI Codex request and auth helpers                                                         |
-| `@yolk-sdk/agent/providers/openai/codex-usage`         | Codex subscription-allowance snapshots                                                        |
-| `@yolk-sdk/agent/providers/openai/codex-provider`      | Codex LLM provider factory                                                                    |
-| `@yolk-sdk/agent/providers/openai/provider`            | OpenAI-compatible LLM provider factory                                                        |
-| `@yolk-sdk/agent/providers/openai/conformance`         | Synthetic OpenAI chat, Codex Responses, and Codex usage fixtures and conformance cases        |
-| `@yolk-sdk/agent/providers/openai/realtime`            | OpenAI Realtime session config and event codecs                                               |
-| `@yolk-sdk/agent/providers/openai/speech`              | OpenAI text-to-speech and transcription adapters                                              |
-| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | Vercel AI Gateway Chat Completions provider factory                                           |
-| `@yolk-sdk/agent/providers/vercel/conformance`         | Verified Gateway wire fixtures plus conformance cases for `@yolk-sdk/conformance`             |
-| `@yolk-sdk/agent/providers/opencode/go-provider`       | OpenCode Go Chat Completions, Messages, and Responses provider                                |
-| `@yolk-sdk/agent/providers/opencode/usage`             | OpenCode Go subscription-allowance snapshots                                                  |
-| `@yolk-sdk/agent/providers/opencode/conformance`       | Synthetic OpenCode Go (per protocol, commentary replay, usage) fixtures and conformance cases |
-| `@yolk-sdk/agent/providers/anthropic`                  | Anthropic/Claude OAuth and broker helpers                                                     |
-| `@yolk-sdk/agent/providers/anthropic/claude`           | Claude request and auth helpers                                                               |
-| `@yolk-sdk/agent/providers/anthropic/usage`            | Claude subscription-allowance snapshots                                                       |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider`  | Claude LLM provider factory                                                                   |
-| `@yolk-sdk/agent/providers/anthropic/conformance`      | Synthetic Anthropic Messages and Claude usage fixtures and conformance cases                  |
-| `@yolk-sdk/agent/providers/xai`                        | Grok subscription OAuth and token broker helpers                                              |
-| `@yolk-sdk/agent/providers/xai/grok`                   | Grok subscription request and auth helpers                                                    |
-| `@yolk-sdk/agent/providers/xai/grok-provider`          | Grok subscription LLM provider factory                                                        |
-| `@yolk-sdk/agent/providers/xai/usage`                  | Grok subscription-allowance snapshots                                                         |
-| `@yolk-sdk/agent/providers/xai/conformance`            | Synthetic Grok Responses and Grok usage fixtures and conformance cases                        |
-| `@yolk-sdk/agent/providers/subscription-usage`         | Shared allowance snapshot and safe error schemas                                              |
-| `@yolk-sdk/agent/skillset`                             | Portable skill and slash-command parsing/catalogs                                             |
-| `@yolk-sdk/agent/voice`                                | Voice protocol, controller, tool handler, projection, speech                                  |
-| `@yolk-sdk/agent/voice/browser`                        | Browser WebRTC voice transport                                                                |
-| `@yolk-sdk/agent/voice/react`                          | Headless browser voice React hook                                                             |
+| Subpath                                                  | Purpose                                                                                       |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/protocol`                               | Wire messages, events, content, usage, tool schemas                                           |
+| `@yolk-sdk/agent/loop`                                   | Stateless LLM/tool loop                                                                       |
+| `@yolk-sdk/agent/loop/testing`                           | Faux provider and tool executor test helpers                                                  |
+| `@yolk-sdk/agent/runtime`                                | Transcript or append-backed runtime orchestration                                             |
+| `@yolk-sdk/agent/client`                                 | HTTP/NDJSON transport, HITL resume, retry/error state helpers                                 |
+| `@yolk-sdk/agent/compaction`                             | Host-owned compaction budgets, checkpoints, formatting, retry                                 |
+| `@yolk-sdk/agent/classification`                         | Classifier model contract: typed questions, answers, usage, errors                            |
+| `@yolk-sdk/agent/tools`                                  | Tool registry, typed inputs, interactions, subagents/questions                                |
+| `@yolk-sdk/agent/react`                                  | Headless React chat hook, reducer, selectors, and render model                                |
+| `@yolk-sdk/agent/oauth`                                  | Provider-neutral OAuth token and broker contracts                                             |
+| `@yolk-sdk/agent/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                         |
+| `@yolk-sdk/agent/providers/openai/codex`                 | OpenAI Codex request and auth helpers                                                         |
+| `@yolk-sdk/agent/providers/openai/codex-usage`           | Codex subscription-allowance snapshots                                                        |
+| `@yolk-sdk/agent/providers/openai/codex-provider`        | Codex LLM provider factory                                                                    |
+| `@yolk-sdk/agent/providers/openai/provider`              | OpenAI-compatible LLM provider factory                                                        |
+| `@yolk-sdk/agent/providers/openai/conformance`           | Synthetic OpenAI chat, Codex Responses, and Codex usage fixtures and conformance cases        |
+| `@yolk-sdk/agent/providers/openai/realtime`              | OpenAI Realtime session config and event codecs                                               |
+| `@yolk-sdk/agent/providers/openai/speech`                | OpenAI text-to-speech and transcription adapters                                              |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider`   | Vercel AI Gateway Chat Completions provider factory                                           |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-classifier` | Vercel AI Gateway classifier (`POST /v1/evaluate`) layer                                      |
+| `@yolk-sdk/agent/providers/vercel/conformance`           | Verified Gateway chat fixtures, synthetic classifier fixtures, and conformance cases          |
+| `@yolk-sdk/agent/providers/opencode/go-provider`         | OpenCode Go Chat Completions, Messages, and Responses provider                                |
+| `@yolk-sdk/agent/providers/opencode/usage`               | OpenCode Go subscription-allowance snapshots                                                  |
+| `@yolk-sdk/agent/providers/opencode/conformance`         | Synthetic OpenCode Go (per protocol, commentary replay, usage) fixtures and conformance cases |
+| `@yolk-sdk/agent/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers                                                     |
+| `@yolk-sdk/agent/providers/anthropic/claude`             | Claude request and auth helpers                                                               |
+| `@yolk-sdk/agent/providers/anthropic/usage`              | Claude subscription-allowance snapshots                                                       |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider`    | Claude LLM provider factory                                                                   |
+| `@yolk-sdk/agent/providers/anthropic/conformance`        | Synthetic Anthropic Messages and Claude usage fixtures and conformance cases                  |
+| `@yolk-sdk/agent/providers/xai`                          | Grok subscription OAuth and token broker helpers                                              |
+| `@yolk-sdk/agent/providers/xai/grok`                     | Grok subscription request and auth helpers                                                    |
+| `@yolk-sdk/agent/providers/xai/grok-provider`            | Grok subscription LLM provider factory                                                        |
+| `@yolk-sdk/agent/providers/xai/usage`                    | Grok subscription-allowance snapshots                                                         |
+| `@yolk-sdk/agent/providers/xai/conformance`              | Synthetic Grok Responses and Grok usage fixtures and conformance cases                        |
+| `@yolk-sdk/agent/providers/subscription-usage`           | Shared allowance snapshot and safe error schemas                                              |
+| `@yolk-sdk/agent/skillset`                               | Portable skill and slash-command parsing/catalogs                                             |
+| `@yolk-sdk/agent/voice`                                  | Voice protocol, controller, tool handler, projection, speech                                  |
+| `@yolk-sdk/agent/voice/browser`                          | Browser WebRTC voice transport                                                                |
+| `@yolk-sdk/agent/voice/react`                            | Headless browser voice React hook                                                             |
 
 ## Imports
 
@@ -754,6 +756,47 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
   overflow such as `{"n":1e999}` takes the same mapper-specific fallbacks. Approval identifiers,
   gates, deny, and execution schema validation are unchanged.
 
+## Classifier models
+
+`@yolk-sdk/agent/classification` is a provider-neutral contract for classifier models such as
+TypeSafe's Jev: one `state` (a string, JSON object, or JSON array) and named `boolean`, `choice`
+(2-255 options), or `score` (2-10 levels, lowest first) questions, answered together with
+probabilities. `classify` types each answer from its question (a choice answer's `choice` is the
+union of its option keys) and checks every answer against its question. Probabilities are kept as
+returned, never renormalized. Failures are typed (`ClassificationRequestInvalid`,
+`ClassificationProviderError`, `ClassificationResponseInvalid`); a response that fails to decode
+keeps the billed `usage`. Classification is a read; authorization stays host policy.
+
+`@yolk-sdk/agent/providers/vercel/ai-gateway-classifier` calls AI Gateway `POST /v1/evaluate`
+(Gateway calls this evaluation) with `typesafe-ai/jev` by default and the same Gateway credential
+as the chat provider:
+
+```ts
+import { Effect, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { classify } from '@yolk-sdk/agent/classification'
+import { makeVercelAiGatewayClassifierLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-classifier'
+
+const program = classify({
+  state: { subject: 'Invoice question', body: 'I was charged twice.' },
+  questions: {
+    route: {
+      type: 'choice',
+      instructions: 'Which team should handle this ticket?',
+      criteria: { billing: 'Payments and refunds.', bug: 'Product defects.' }
+    }
+  }
+}).pipe(
+  Effect.map(result => result.answers.route.choice), // 'billing' | 'bug'
+  Effect.provide(makeVercelAiGatewayClassifierLayer({ apiKey: Redacted.make(gatewayKey) })),
+  Effect.provide(FetchHttpClient.layer)
+)
+```
+
+`providerOptions` passes through unchanged (for example `{ gateway: { zeroDataRetention: true } }`).
+`providerMetadata.gateway.cost` becomes `usage.costUsd`, and `x-ai-gateway-evaluation-fallback-*`
+response headers are kept in `providerMetadata.evaluationFallbackHeaders`.
+
 ## Subagents
 
 `subagent` is the package-owned contract for child-agent delegation. The SDK provides schema,
@@ -879,6 +922,7 @@ aborts, and implementation bugs outside typed tool execution.
 
 - Core loop/protocol/runtime/tools have no React, Next.js, provider SDKs, auth, storage drivers, or app concepts.
 - `@yolk-sdk/agent/compaction` combines pure planning/formatting helpers with Effect-native transformer and retry adapters; hosts own thresholds, summaries, compaction payloads, and durable compactor policy.
+- `@yolk-sdk/agent/classification` is provider-neutral (no Node, React, or provider code); provider subpaths supply `ClassifierModel` layers.
 - `@yolk-sdk/agent/react` is headless and uses React as an optional peer.
 - Provider subpaths own vendor wire/auth mechanics only; hosts own token storage, refresh, routing, and policy.
 - `@yolk-sdk/agent/providers/openai/speech` is server integration requiring runtime

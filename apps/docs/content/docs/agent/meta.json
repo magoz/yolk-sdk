@@ -7,6 +7,7 @@
     "tools-hitl",
     "client-react",
     "voice",
+    "classifier-models",
     "providers-oauth"
   ]
 }

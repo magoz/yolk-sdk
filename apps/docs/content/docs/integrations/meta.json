@@ -9,6 +9,7 @@
     "knowledge-search",
     "connector-tool",
     "sandbox",
+    "code-mode",
     "vercel-workflow"
   ]
 }

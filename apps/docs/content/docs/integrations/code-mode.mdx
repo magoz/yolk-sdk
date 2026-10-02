@@ -1,0 +1,307 @@
+---
+title: Add code mode
+description: Let the model write one short script that calls many tools and returns only what matters.
+---
+
+Code mode gives the model one tool, `codemode`, whose only input is a JavaScript program. The
+script calls your resolved tools as `await tools.<id>(args)`, filters and aggregates their results
+inside a confined sandbox, and returns a small value. Nested results never enter the conversation;
+only the script output and return value do. Use it for paginated, bulk, and aggregate work that
+would otherwise cost one model turn per tool call.
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/codemode@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
+```
+
+Requires Node.js 22.19 or later. The executor is server-only.
+
+## Subpaths
+
+| Subpath                   | Use for                                                                                                                                |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`      | `makeCodeModeTool`, the `CodeModeExecutor` interface, catalog and search helpers, `codeModeStoreFromToolResults`, `makeClassifierTool` |
+| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: a fresh QuickJS (WebAssembly) VM in a worker thread per script                                               |
+
+## Set up
+
+Add the code mode tool next to your other tool modules. This fragment assumes host-owned
+`HostContext`, `hostModules`, and `hostContext` values.
+
+```ts
+import { Effect } from 'effect'
+import { resolveTools } from '@yolk-sdk/agent/tools'
+import { makeCodeModeTool } from '@yolk-sdk/codemode'
+import { makePiCodeModeExecutor } from '@yolk-sdk/codemode/node'
+
+// Module scope: one executor per process, so its concurrency cap is per process.
+const executor = makePiCodeModeExecutor({ maxConcurrentExecutions: 4 })
+
+const codemode = makeCodeModeTool<HostContext>({ executor })
+
+const program = Effect.gen(function* () {
+  const toolSet = yield* resolveTools(
+    [{ id: 'codemode', tools: [codemode] }, ...hostModules],
+    hostContext
+  )
+
+  return toolSet
+})
+```
+
+Pass `toolSet.tools` and the executor layer to the loop as usual. The resolved `codemode`
+definition lists the tools scripts can call.
+
+### Next.js
+
+Keep the engine out of the bundle so its worker file and `quickjs.wasm` stay on disk:
+
+```ts title="next.config.ts"
+import type { NextConfig } from 'next'
+
+const nextConfig: NextConfig = {
+  serverExternalPackages: ['@yolk-sdk/codemode', '@earendil-works/pi-codemode', 'quickjs-wasi']
+}
+
+export default nextConfig
+```
+
+Next file tracing then includes the worker file and the wasm module automatically. If you bundle
+the engine anyway, pass `wasm` and `workerUrl` to `makePiCodeModeExecutor`.
+
+### Vercel Workflow
+
+Run the code mode call inside your tool-batch step (`'use step'`), like any other tool call. Never
+run scripts inside a `'use workflow'` function: the workflow sandbox cannot host the engine, every
+nested call would become durable events, and a busy loop could not be stopped.
+
+- Pass `deadline` so the script timeout fits the step's remaining function budget. The timeout is
+  clamped to the deadline minus 5 seconds and never drops below 1 second.
+- Nested calls get ids `<toolCallId>/<seq>`. Derive idempotency keys from them (for example
+  `codemode:<toolCallId>:<seq>`) if you enable step retries or guard external actions.
+- The step output holds the bounded script result and the bounded nested-call record, never raw
+  nested results.
+
+```ts
+const codemode = makeCodeModeTool<HostContext>({
+  executor,
+  deadline: context => context.stepDeadlineMs // epoch milliseconds, host-owned
+})
+```
+
+## Choose what scripts can call
+
+Exposure is set on each tool with `callableBy` and, for code-mode-only tools, `discovery`:
+
+| Setting                                         | Model calls it | Scripts call it | In the `codemode` description                                              |
+| ----------------------------------------------- | -------------- | --------------- | -------------------------------------------------------------------------- |
+| `callableBy: 'all'` (default)                   | yes            | yes             | one line: how scripts call it and what it resolves to (outside the budget) |
+| `callableBy: 'model'`                           | yes            | no              | no                                                                         |
+| `callableBy: 'codemode'`, `discovery: 'listed'` | no             | yes             | TypeScript declaration, within the inline budget                           |
+| `callableBy: 'codemode'`, `discovery: 'search'` | no             | yes             | never; scripts find it with `searchTools()`                                |
+
+```ts
+import { makeTool } from '@yolk-sdk/agent/tools'
+
+const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
+  name: 'list_invoices',
+  description: 'List invoices, newest first, one page at a time.',
+  parameters: ListInvoicesParams, // host-owned Effect Schema
+  output: InvoicePage, // calls resolve to structuredContent of this shape
+  access: 'read',
+  callableBy: 'codemode',
+  discovery: 'search',
+  execute: ({ params }) => listInvoicePage(params) // host-owned
+})
+```
+
+- Approval, input, interaction, and background tools, and the `question` and `subagent` tools,
+  never run from code mode. Marking them `all` behaves as `model`; marking them `codemode` fails
+  resolution.
+- `codemode`-only tools are never sent to model providers.
+- Listed tools fill an inline budget (default 3,000 estimated tokens) fairly across tool modules:
+  each round every module places its cheapest remaining tool. `all` tools are already declared to
+  the model, so their lines sit outside the budget.
+- `search` tools contribute nothing to the description: no namespace heading, hint, or count.
+  Adding or removing them, even a whole module of them, leaves the description byte-identical and
+  the prompt cache intact. One fixed line always tells scripts to use `searchTools()`,
+  `describeTool()`, and `describeNamespace()` for unlisted tools.
+- Give a module a `description` (`{ id, description, tools }`) to show it under the module's
+  heading, return it from `describeNamespace()`, and make it searchable.
+- Tools that poll (no timers in scripts) should stay `callableBy: 'model'` until they offer a wait
+  parameter.
+
+### Connector and MCP tools
+
+Generated tools take the same exposure through an `exposure` option: one value for every tool, or
+a resolver per tool. Connector modules resolve per action (`(actionId, action) => exposure`, where
+`action` carries the declared `access`); MCP definitions resolve per listed tool
+(`(tool, serverName) => exposure`). This marks every connector action as a code-mode-only search
+tool:
+
+```ts
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+import { GithubConnector } from '@yolk-sdk/connectors/github'
+
+const github = makeConnectorToolModule<HostContext>(GithubConnector, {
+  integration: githubIntegration, // host-owned
+  layer: connectorLayer, // host-owned
+  exposure: { callableBy: 'codemode', discovery: 'search' }
+})
+```
+
+For MCP, pass `exposure` to `mcpToolToToolDef` or in the listing options; each resolved `def`
+then carries it:
+
+```ts
+import { listMcpServerTools } from '@yolk-sdk/mcp/client'
+
+const tools = listMcpServerTools(serverConfig, {
+  exposure: tool =>
+    tool.annotations?.['readOnlyHint'] === true
+      ? { callableBy: 'codemode', discovery: 'search' }
+      : { callableBy: 'model' }
+})
+```
+
+The fail-closed rules above still apply: resolution fails when an exposure contradicts the tool
+(for example `codemode` on a registration that requires approval).
+
+## What scripts see
+
+- `code` is the body of an async function: top-level `await` and `return` work. Simple TypeScript
+  annotations are stripped; enums and namespaces are rejected with a clear error.
+- `tools.<id>(args)` runs the tool through the resolved tool set with your host context: inputs are
+  decoded, disabled tools stay unavailable, and registration wrappers run. A call resolves to
+  `structuredContent` for tools with an output schema and to the text content otherwise, and
+  rejects with an `Error` when the tool returns an error result. Unknown names suggest close
+  matches. Calls still running when the script ends are cancelled.
+- A nested call that is interrupted rejects with `tools.<id> was cancelled.`; one whose tool
+  fails with a defect rejects with `tools.<id> failed unexpectedly.` and is recorded as `error`.
+- Globals: `text()`, `console.log()`, `image()`, `exit()`, `ALL_TOOLS`,
+  `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`,
+  and `store(key, value)` / `load(key)`.
+- No Node.js, network, filesystem, `require`, `fetch`, or timers.
+
+The result starts with `Script completed` or `Script failed`, then the wall time, the output in
+order, and the JSON return value. A failed script keeps its partial output, the error, and the
+tool calls already made, which are not undone. `ToolResult.nestedCalls` records every nested call
+(id, name, compact arguments, status, duration, truncated error, usage) for your audit log; the
+model never sees it.
+
+## Keep state between scripts
+
+`store()` writes from successful scripts come back in
+`structuredContent.codemode.storeWrites`. Rebuild the store from the transcript and pass it back
+with `loadStore`; this works the same in stateless routes, Workflow steps, and Durable Objects:
+
+```ts
+import { Effect } from 'effect'
+import { codeModeStoreFromToolResults, makeCodeModeTool } from '@yolk-sdk/codemode'
+
+const codemode = makeCodeModeTool<HostContext>({
+  executor,
+  // `{ toolName, result }` for prior tool results, oldest first (host-owned lookup).
+  loadStore: context => Effect.succeed(codeModeStoreFromToolResults(context.priorToolResults))
+})
+```
+
+`codeModeStoreFromToolResults` applies only results whose `toolName` is the code mode tool's name
+(default `codemode`; pass `{ toolName }` if you renamed it), so another tool cannot inject store
+writes by returning code-mode-shaped `structuredContent`. Transcript `ToolResultMessage`s carry no
+tool name: pair each with the name of the assistant tool call it answers.
+
+Values are small JSON only: 256 KiB per value and 1 MiB in total (characters of JSON, as the engine
+counts them). Scripts get an error beyond them, and the rebuilt store drops offending writes and
+keeps the previous value.
+
+## Classify items from scripts
+
+`makeClassifierTool` exposes a [classifier model](../agent/classifier-models) as a `codemode` +
+`listed` read tool named `classify`. Scripts classify one item per call; calls beyond
+`maxConcurrency` (default 100 per script, keyed by the parent tool call id) queue. All scripts
+together also share a process cap: `processLimiter` defaults to `defaultClassifierProcessLimiter`
+(200 concurrent classifications per process, shared by every classifier tool); build a separate
+one with `makeClassifierConcurrencyLimiter(max)` or pass `false` to disable it.
+
+```ts
+import { Effect } from 'effect'
+import { ClassifierModel } from '@yolk-sdk/agent/classification'
+import { makeClassifierTool } from '@yolk-sdk/codemode'
+
+const classifyTool = Effect.gen(function* () {
+  const model = yield* ClassifierModel
+
+  return makeClassifierTool<HostContext>({ classify: model, maxConcurrency: 100 })
+})
+```
+
+A script can then triage a whole inbox in one tool call:
+
+```js
+const messages = await tools.list_messages({ folder: 'inbox', limit: 50 })
+const results = await Promise.all(
+  messages.map(message =>
+    tools.classify({
+      state: { subject: message.subject, from: message.from },
+      questions: { urgent: { type: 'boolean', instructions: 'Does this need a reply today?' } }
+    })
+  )
+)
+return messages.filter((_, index) => results[index].answers.urgent.probability > 0.7).map(m => m.id)
+```
+
+Each call reports token usage on the nested-call record; the cost (`costUsd`) stays in the
+classifier result's `structuredContent.usage`. Classifier errors reject the call with a safe
+message.
+
+## Limits
+
+| Limit              | Default | Notes                                                                 |
+| ------------------ | ------- | --------------------------------------------------------------------- |
+| `timeoutMs`        | 120000  | includes nested calls and queue time; clamped by `deadline`           |
+| `memoryLimitBytes` | 64 MiB  | VM heap cap; allocations beyond it fail inside the script             |
+| `maxNestedCalls`   | 256     | later calls reject with an `Error` and do not run                     |
+| `maxOutputChars`   | 40000   | the result keeps the head and tail with an omission marker in between |
+| `maxImages`        | 8       | later images are dropped with an omission note                        |
+| `maxImageBytes`    | 4 MiB   | base64 image data in total; an image beyond it is dropped with a note |
+
+Set them with `makeCodeModeTool({ limits: { ... } })`. The executor's `maxConcurrentExecutions`
+(default 4) caps concurrent scripts per executor; Fluid compute shares instances between requests.
+If an executor does not stop at `timeoutMs`, the tool returns a `timeout` failure 5 seconds later
+and aborts the executor's signal.
+
+## Security notes
+
+- Scripts run in a fresh QuickJS VM compiled to WebAssembly, in a fresh worker thread. The only
+  capability is calling the injected tools and helpers; timeouts, aborts, and runaway regular
+  expressions stop the worker without blocking your event loop.
+- Nested calls are ordinary tool calls with your host context. Code mode adds no permissions:
+  the tools you expose to scripts are the authority you grant, and the `codemode` tool itself is
+  `write` access.
+- Decorators you wrap around the `ToolExecutor` (outside `ResolvedToolSet.execute`), such as a
+  per-call run-admission or stop check, see only the `codemode` call, never the nested calls of its
+  script. Put per-call checks in `beforeNestedCall` or in registration-level wrappers:
+
+  ```ts
+  const codemode = makeCodeModeTool<HostContext>({
+    executor,
+    // Fails with a message to reject the nested call; it is recorded as an error and never runs.
+    beforeNestedCall: ({ call, context }) => assertRunActive(context, call) // host-owned
+  })
+  ```
+
+- The pi engine buffers script output (text and images) on the host thread without a limit while
+  the script runs; only the timeout bounds it. The result is bounded afterwards
+  (`maxOutputChars`, `maxImages`, `maxImageBytes`).
+- The worker inherits a copy of the host's `process.env`. Scripts cannot read it (the VM has no
+  `process`), but keep that in mind for engine-level vulnerabilities.
+- The VM's clock and `Math.random` come from the engine's WASI shim.
+- Approvals inside scripts are not supported yet; approval-gated tools never run from code mode.
+- Node prints one `ExperimentalWarning` per process for `stripTypeScriptTypes`.
+
+## Other runtimes
+
+`CodeModeExecutor` is a plain interface. Hosts on Workers or other runtimes can supply their own
+engine and keep the same tool, catalog, store, and result handling.

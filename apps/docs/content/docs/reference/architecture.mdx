@@ -12,6 +12,7 @@ host app / runtime / UI
   -> @yolk-sdk/knowledge
   -> @yolk-sdk/connectors
   -> @yolk-sdk/sandbox
+  -> @yolk-sdk/codemode
   -> @yolk-sdk/vercel-workflows
   -> @yolk-sdk/harness
 
@@ -34,6 +35,7 @@ Rules of thumb:
 - `agent/runtime` adds generic session orchestration, not app persistence.
 - `mcp` adapts MCP tools/results to agent protocol, but the loop stays MCP-agnostic.
 - `knowledge`, `connectors`, and `sandbox` expose optional agent adapters behind explicit subpaths.
+- `codemode` builds on the agent tool contract (`callableBy`, nested tool access) and depends only on `agent` among Yolk packages; its root is runtime-neutral and the Node pi executor lives behind `codemode/node`. `agent` never imports it.
 - `vercel-workflows` stays generic over serializable `unknown` payloads and does not import agent protocol.
 - `harness` owns run lifecycle (claims, inbox, drains). It is not the agent loop and does not add a Workflow driver.
 - `conformance` (experimental) depends only on `effect`: it records, replays, and fault-injects HTTP wire fixtures for tests, defines port fixtures for non-HTTP host ports (such as `EmailClient`), defines conformance cases, and runs them behind a safety policy; it never performs network I/O itself. Provider fixture and case modules such as `agent/providers/vercel/conformance` import it; runtime code does not.

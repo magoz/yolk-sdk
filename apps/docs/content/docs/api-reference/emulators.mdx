@@ -70,17 +70,19 @@ Provide `httpLayer` below the code under test, for example a Gateway provider la
 
 `@yolk-sdk/emulators/gateway`
 
-| Export                                  | Purpose                                                                                          |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `makeGatewayEmulator(options?)`         | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/chat/completions`             |
-| `gatewayEmulatorRoutes`                 | Route evidence manifest: `method`, `path`, `kind`, `write`, `caseIds`, `evidence`, `observedAt`  |
-| `GatewayFault`, `GatewayScriptedTurn`   | Schemas and types for wire faults and scripted turns                                             |
-| `GatewayLedgerEntry`, `GatewayCoverage` | Ledger entry and coverage report types                                                           |
-| `gatewayEmulatorDefaultModels`          | Synthetic-safe default model ids (includes `openai/gpt-4.1-nano` and the DeepSeek ids)           |
-| `gatewayEmulatorDefaultReasoningModels` | `deepseek/deepseek-v3.2` and `deepseek/deepseek-v4.1-flash`                                      |
-| `gatewayEmulatorDefaultEventsPerChunk`  | `2`: SSE events per network chunk by default                                                     |
-| `emulatorEvidenceHeader`                | `x-emulator-evidence`, set to `unverified` on every response from an unverified route            |
-| `GatewayEmulatorInputInvalid`           | Thrown by `faults.add` / `script.enqueue` for invalid input, and for an invalid `eventsPerChunk` |
+| Export                                            | Purpose                                                                                          |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `makeGatewayEmulator(options?)`                   | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/chat/completions`             |
+| `gatewayEmulatorRoutes`                           | Route evidence manifest: `method`, `path`, `kind`, `write`, `caseIds`, `evidence`, `observedAt`  |
+| `gatewayEvaluateEmulatorRoutes`                   | Manifest of the fixture-only classifier route `POST /v1/evaluate` (`unverified`)                 |
+| `GatewayEvaluateFault`, `GatewayEvaluateEmulator` | Classifier-route fault schema and its emulator API (`emulator.evaluate`)                         |
+| `GatewayFault`, `GatewayScriptedTurn`             | Schemas and types for wire faults and scripted turns                                             |
+| `GatewayLedgerEntry`, `GatewayCoverage`           | Ledger entry and coverage report types                                                           |
+| `gatewayEmulatorDefaultModels`                    | Synthetic-safe default model ids (includes `openai/gpt-4.1-nano` and the DeepSeek ids)           |
+| `gatewayEmulatorDefaultReasoningModels`           | `deepseek/deepseek-v3.2` and `deepseek/deepseek-v4.1-flash`                                      |
+| `gatewayEmulatorDefaultEventsPerChunk`            | `2`: SSE events per network chunk by default                                                     |
+| `emulatorEvidenceHeader`                          | `x-emulator-evidence`, set to `unverified` on every response from an unverified route            |
+| `GatewayEmulatorInputInvalid`                     | Thrown by `faults.add` / `script.enqueue` for invalid input, and for an invalid `eventsPerChunk` |
 
 The Gateway route is `verified`: its wire shapes follow the verified live recordings of
 2026-09-30 in `@yolk-sdk/agent/providers/vercel/conformance`, with synthetic ids, costs, and
@@ -108,6 +110,14 @@ credential is never checked or stored.
 count network chunks, each packing up to `eventsPerChunk` events. Emulators never redirect and always send a body: fault and scripted-error statuses
 exclude 1xx, 204, 205, and every 3xx (including 304), header names and values must be valid, and a
 `location` header is rejected.
+
+The same fetch handler answers the classifier route `POST /v1/evaluate` (AI Gateway calls
+classification "evaluation"), fixture-only: a request matching one of the four synthetic
+classifier recordings in `@yolk-sdk/agent/providers/vercel/conformance` (the `model` and question
+`type` exact, any other string, the recorded question ids, option keys, and level count) gets the
+recorded answer; anything else answers 400 not-emulated. It has its own unverified manifest
+(`gatewayEvaluateEmulatorRoutes`), ledger, faults (statuses 400-599), scripted errors, and coverage
+(`emulator.evaluate`, control plane `/_emulate/evaluate/*`); `reset()` resets both routes.
 
 The ledger records every emulated API request (control-plane requests are not recorded): method,
 path, parsed body, model, `stream`, the `max_tokens` limit (`maxCompletionTokens`, never
