@@ -206,6 +206,9 @@ Cloudflare fallback, and run `pnpm cloudflare:check`.
     - Exception: first publish of a new npm package name may be a local packed-tarball publish after explicit approval; see `references/publishing.md`.
     - Before UI/`gh` trigger, confirm current `main` contains the version bump commit.
     - After action completes, verify every public package dist-tag and new `v<version>` git tag.
+    - Until the first stable release, ask the owner to approve moving `latest` to the new canary on
+      every public package (`npm dist-tag add`, owner OTP); see `patterns/PACKAGE_DISTRIBUTION.md`
+      → Move `latest` to the new canary. Verify every package then reports the same `latest` and `canary`.
 
 ## PR Workflow
 
