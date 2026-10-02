@@ -38,8 +38,14 @@ const codemode = makeCodeModeTool<HostContext>({
   loadStore: context => Effect.succeed(codeModeStoreFromToolResults(context.priorToolResults))
 })
 
-const toolSet =
-  yield * resolveTools([{ id: 'codemode', tools: [codemode] }, ...hostModules], hostContext)
+const program = Effect.gen(function* () {
+  const toolSet = yield* resolveTools(
+    [{ id: 'codemode', tools: [codemode] }, ...hostModules],
+    hostContext
+  )
+
+  return toolSet
+})
 ```
 
 `HostContext`, `hostModules`, and `hostContext` are host-owned placeholders.

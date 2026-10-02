@@ -1,13 +1,19 @@
 // @vitest-environment node
-import { ConfigProvider, Effect, Layer, Predicate, Result } from 'effect'
+import { ConfigProvider, Effect, Layer, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   ClassifierModel,
   type ClassificationRequest,
   type ClassificationResult
 } from '@yolk-sdk/agent/classification'
-import { contentPartText, providerToolDefs, ToolCall, type Content } from '@yolk-sdk/agent/protocol'
-import type { ToolModule } from '@yolk-sdk/agent/tools'
+import {
+  contentPartText,
+  providerToolDefs,
+  ToolCall,
+  ToolResult,
+  type Content
+} from '@yolk-sdk/agent/protocol'
+import { makeTool, type ToolModule } from '@yolk-sdk/agent/tools'
 import { agentCodeModeModelOnlyTools, withAgentCodeMode } from './codemode-tool-modules.ts'
 import { nodeTextToolModules } from './tools/registry.ts'
 import { resolveAgentToolSet } from './tools/resolve-toolset.ts'
@@ -200,6 +206,65 @@ describe('withAgentCodeMode', () => {
       )
       expect(result.nestedCalls?.calls.map(call => [call.name, call.status])).toEqual([
         ['classify', 'ok']
+      ])
+    })
+  )
+
+  it.live('runs the run-admission guard before every nested call (Workflow stop)', () =>
+    Effect.gen(function* () {
+      const executed: Array<string> = []
+      let stopped = false
+
+      const Params = Schema.Struct({ step: Schema.String })
+
+      const probeModule: ToolModule<AgentToolContext> = {
+        id: 'probe',
+        tools: [
+          makeTool<AgentToolContext, typeof Params>({
+            name: 'probe',
+            description: 'Records a step',
+            access: 'write',
+            parameters: Params,
+            execute: ({ call, params }) =>
+              Effect.sync(() => {
+                executed.push(params.step)
+                // The user stops the run while the script is still going.
+                stopped = true
+
+                return ToolResult.make({ toolCallId: call.id, content: `did ${params.step}` })
+              })
+          })
+        ]
+      }
+
+      const modules = yield* withEnv(
+        withAgentCodeMode([probeModule], {
+          beforeNestedCall: () =>
+            stopped ? Effect.fail('Workflow execution is stopped or unavailable') : Effect.void
+        }),
+        { YOLK_CODEMODE: 'true' }
+      )
+
+      const toolSet = yield* resolveAgentToolSet({ modules, context })
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_stop',
+          name: 'codemode',
+          params: {
+            code: `await tools.probe({ step: 'first' })
+                   let second = 'ran'
+                   try { await tools.probe({ step: 'second' }) } catch (error) { second = String(error) }
+                   return second`
+          }
+        })
+      )
+
+      expect(executed).toEqual(['first'])
+      expect(text(result.content)).toContain('Workflow execution is stopped or unavailable')
+      expect(result.nestedCalls?.calls.map(call => [call.name, call.status])).toEqual([
+        ['probe', 'ok'],
+        ['probe', 'error']
       ])
     })
   )

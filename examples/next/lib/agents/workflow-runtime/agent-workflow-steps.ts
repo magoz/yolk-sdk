@@ -355,7 +355,18 @@ export async function runAgentWorkflowToolBatchStep(input: {
       latestUsage = usage
       const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
       yield* assertChildAdmission(context, getWorkflowMetadata().workflowRunId)
-      const runtime = yield* workflowRuntime(request, context)
+
+      const store = yield* AgentWorkflowStore
+
+      // Code mode nested calls bypass the ToolExecutor decorator below, so they get the same
+      // stop/admission check before each dispatch.
+      const runtime = yield* workflowRuntime(request, context, {
+        beforeNestedCall: () =>
+          assertChildAdmission(context, workflowRunId).pipe(
+            Effect.provideService(AgentWorkflowStore, store),
+            Effect.mapError(() => 'Workflow execution is stopped or unavailable')
+          )
+      })
 
       const prepared = yield* prepareToolBatch({
         calls,
@@ -396,7 +407,6 @@ export async function runAgentWorkflowToolBatchStep(input: {
       })
 
       const executor = yield* ToolExecutor.pipe(Effect.provide(runtime.layer))
-      const store = yield* AgentWorkflowStore
       yield* toolStream.pipe(
         Stream.provideService(ToolExecutor, {
           execute: (call, options) =>

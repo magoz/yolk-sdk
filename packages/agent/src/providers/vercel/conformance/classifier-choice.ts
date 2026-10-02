@@ -2,10 +2,12 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
  * AI Gateway `POST /v1/evaluate` answering one `choice` question about a JSON object state, with
- * per-option probabilities and the confidence under `providerMetadata.typesafe.confidence` (one of
- * the two plausible confidence placements; the live shape is unverified).
+ * per-option probabilities and the confidence only under `providerMetadata.typesafe.confidence`
+ * (the live Gateway, probe 2026-10-02, sends it both there and on the answer; this fixture covers
+ * the metadata fallback).
  *
- * Synthetic placeholder (`evidence: 'unverified'`) until an owner-approved live probe replaces it.
+ * Synthetic placeholder (`evidence: 'unverified'`) until it is re-recorded through the
+ * replay-verified write gate.
  */
 export const vercelAiGatewayClassifierChoiceFixture: WireFixture = {
   id: 'vercel-ai-gateway.classify.choice.synthetic',

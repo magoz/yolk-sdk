@@ -52,7 +52,10 @@ import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/c
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
 import { loadRuntimeSkillset } from '@/lib/agents/skillset/project-source'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
-import { withAgentCodeMode } from '@/lib/agents/codemode-tool-modules'
+import {
+  withAgentCodeMode,
+  type AgentCodeModeNestedCallGuard
+} from '@/lib/agents/codemode-tool-modules'
 import { makeTextToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import {
   makeSkillManagerToolModule,
@@ -108,6 +111,8 @@ export type AgentTextRuntimeOptions = {
     input: SubagentExecutionInput<AgentToolContext>
   ) => Effect.Effect<ToolResult, ToolError>
   readonly modules?: ReadonlyArray<ToolModule<AgentToolContext>>
+  /** Run admission for code mode nested calls; see `AgentCodeModeOptions.beforeNestedCall`. */
+  readonly beforeNestedCall?: AgentCodeModeNestedCallGuard
 }
 
 const agentTextSubagents: ReadonlyArray<SubagentDefinition> = [
@@ -578,7 +583,12 @@ export const makeAgentTextRuntime = (
     const toolSet = yield* resolveAgentToolSet({
       modules:
         options.childType === undefined
-          ? yield* withAgentCodeMode(toolModules)
+          ? yield* withAgentCodeMode(
+              toolModules,
+              options.beforeNestedCall === undefined
+                ? {}
+                : { beforeNestedCall: options.beforeNestedCall }
+            )
           : withoutInputTools(
               toolModules.map(module => ({
                 ...module,

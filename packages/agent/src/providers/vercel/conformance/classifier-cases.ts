@@ -223,7 +223,7 @@ export const vercelAiGatewayClassifierScoreCase: VercelAiGatewayClassifierConfor
     title: 'A score question picks one ordinal level with per-level probabilities',
     safety: 'read',
     docs: 'A `score` question lists 2 to 10 ordinal levels in `criteria`, lowest first; its answer is `{ type: "score", score, probabilities }`.',
-    wire: 'A JSON array state with one four-level score question succeeds: the answer is `score` with an integer `score`, between one and four probabilities in [0, 1], and a confidence in [0, 1] (on the answer or in `providerMetadata.typesafe.confidence`), plus token usage. Whether levels count from 0 or 1 is not part of the claim.',
+    wire: 'A JSON array state with one four-level score question succeeds: the answer is `score` with a `score` in [0, 3] (the probability-weighted, zero-based level index, possibly fractional), between one and four probabilities in [0, 1], and a confidence in [0, 1] (on the answer or in `providerMetadata.typesafe.confidence`), plus token usage.',
     fixtures: [vercelAiGatewayClassifierScoreFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* VercelAiGatewayClassifierConformanceConfig
@@ -244,9 +244,14 @@ export const vercelAiGatewayClassifierScoreCase: VercelAiGatewayClassifierConfor
         'expected one answer per question'
       )
       yield* expectEqual(answer.type, 'score', 'expected a score answer')
-      yield* expectConformance(Number.isInteger(answer.score), 'expected an integer score level', {
-        actual: answer.score
-      })
+      // `score` is the probability-weighted, zero-based level index, so it may be fractional.
+      yield* expectConformance(
+        Number.isFinite(answer.score) &&
+          answer.score >= 0 &&
+          answer.score <= urgencyLevels.length - 1,
+        'expected a score within the zero-based level range',
+        { actual: answer.score }
+      )
       yield* expectConformance(
         probabilities.length > 0 &&
           probabilities.length <= urgencyLevels.length &&

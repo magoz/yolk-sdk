@@ -2,10 +2,12 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
  * AI Gateway `POST /v1/evaluate` answering one `score` question about a JSON array state, with
- * per-level probabilities and the confidence on the answer (the other plausible confidence
- * placement; the live shape, including the score's level base, is unverified).
+ * per-level probabilities and the confidence on the answer. The live Gateway (probe 2026-10-02)
+ * sends confidence both on the answer and in `providerMetadata.typesafe.confidence`, and `score` is
+ * the probability-weighted, zero-based level index.
  *
- * Synthetic placeholder (`evidence: 'unverified'`) until an owner-approved live probe replaces it.
+ * Synthetic placeholder (`evidence: 'unverified'`) until it is re-recorded through the
+ * replay-verified write gate.
  */
 export const vercelAiGatewayClassifierScoreFixture: WireFixture = {
   id: 'vercel-ai-gateway.classify.score.synthetic',

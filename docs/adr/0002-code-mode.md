@@ -115,8 +115,8 @@ script after every step, and cannot enforce a timeout on a busy loop.
 - **Duration**: clamp the script timeout to the step's remaining function budget minus a margin;
   default 120 s.
 - **Retries**: Yolk workflow steps default to one attempt, so a crashed step fails the batch rather
-  than silently re-running nested writes. Each nested call receives a stable idempotency key
-  `codemode:<toolCallId>:<seq>` for hosts that enable retries or guard external actions.
+  than silently re-running nested writes. Nested call ids are `<toolCallId>/<seq>`; hosts that
+  enable retries or guard external actions derive stable idempotency keys from them.
 - **Step output**: return the bounded script output and a bounded nested-call record, never raw
   nested results.
 - **Concurrency**: cap concurrent executions per instance (Fluid compute shares instances) and the

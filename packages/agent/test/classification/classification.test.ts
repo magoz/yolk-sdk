@@ -167,6 +167,32 @@ describe('classifier answers', () => {
     )
   })
 
+  it('keep `__proto__` question ids and option keys as own answers and probabilities', () => {
+    // JSON.parse creates own `__proto__` properties, as a provider response body would.
+    const specialQuestions = JSON.parse(
+      '{"__proto__":{"type":"choice","instructions":"Pick","criteria":{"__proto__":"special","plain":"plain"}}}'
+    )
+
+    const raw = JSON.parse(
+      '{"__proto__":{"type":"choice","choice":"__proto__","probabilities":{"__proto__":0.8,"plain":0.2}}}'
+    )
+
+    const decoded = decodeClassifierAnswers(specialQuestions, raw)
+
+    expect(Result.isSuccess(decoded)).toBe(true)
+
+    if (Result.isSuccess(decoded)) {
+      expect(Object.keys(decoded.success)).toEqual(['__proto__'])
+      expect(Object.getPrototypeOf(decoded.success)).toBe(Object.prototype)
+
+      const answer = Object.getOwnPropertyDescriptor(decoded.success, '__proto__')?.value
+
+      expect(answer?.type).toBe('choice')
+      expect(Object.keys(answer?.probabilities ?? {})).toEqual(['__proto__', 'plain'])
+      expect(Object.getOwnPropertyDescriptor(answer?.probabilities, '__proto__')?.value).toBe(0.8)
+    }
+  })
+
   it('keep only contract fields', () => {
     expect(
       decodeClassifierAnswer(booleanQuestion, {

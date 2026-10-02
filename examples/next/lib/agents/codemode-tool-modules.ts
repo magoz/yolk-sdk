@@ -1,9 +1,14 @@
 import { Config, Data, Effect, Option, type Layer } from 'effect'
-import { ClassifierModel } from '@yolk-sdk/agent/classification'
-import { ToolDef } from '@yolk-sdk/agent/protocol'
+import { ClassifierModel, type ClassificationProviderError } from '@yolk-sdk/agent/classification'
+import { ToolDef, type ToolCall } from '@yolk-sdk/agent/protocol'
 import { VercelAiGatewayClassifierLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-classifier'
 import type { ToolModule, ToolRegistration } from '@yolk-sdk/agent/tools'
-import { makeClassifierTool, makeCodeModeTool, type CodeModeExecutor } from '@yolk-sdk/codemode'
+import {
+  makeClassifierTool,
+  makeCodeModeTool,
+  type CodeModeExecutor,
+  type MakeCodeModeToolOptions
+} from '@yolk-sdk/codemode'
 import { makePiCodeModeExecutor } from '@yolk-sdk/codemode/node'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
 
@@ -47,17 +52,42 @@ const withModelOnlyExposure = (
 ): ReadonlyArray<ToolModule<AgentToolContext>> =>
   modules.map(module => ({ ...module, tools: module.tools.map(modelOnly) }))
 
-/** The AI Gateway classifier when `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` is configured. */
-const gatewayClassifier = (layer: Layer.Layer<ClassifierModel, unknown>) =>
+/**
+ * The AI Gateway classifier when `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` is configured. Only
+ * missing credentials (an `auth` provider failure) leave it out; any other layer failure is a
+ * configuration error rather than a silently absent tool.
+ */
+const gatewayClassifier = (layer: Layer.Layer<ClassifierModel, ClassificationProviderError>) =>
   Effect.gen(function* () {
     return yield* ClassifierModel
-  }).pipe(Effect.provide(layer), Effect.option)
+  }).pipe(
+    Effect.provide(layer),
+    Effect.map(Option.some),
+    Effect.catchTag('ClassificationProviderError', error =>
+      error.provider.kind === 'auth'
+        ? Effect.succeed(Option.none<ClassifierModel['Service']>())
+        : Effect.fail(
+            new AgentCodeModeConfigError({ message: 'AI Gateway classifier is misconfigured' })
+          )
+    )
+  )
+
+/** Runs before every nested call of a script; a failure rejects that call without executing it. */
+export type AgentCodeModeNestedCallGuard = (input: {
+  readonly call: ToolCall
+  readonly context: AgentToolContext
+}) => Effect.Effect<void, string>
 
 export type AgentCodeModeOptions = {
   /** Default: the process-wide pi executor. */
   readonly executor?: CodeModeExecutor
   /** Default: the package AI Gateway classifier layer read from the environment. */
-  readonly classifierLayer?: Layer.Layer<ClassifierModel, unknown>
+  readonly classifierLayer?: Layer.Layer<ClassifierModel, ClassificationProviderError>
+  /**
+   * Per-nested-call run admission. Executor decorators (such as the Workflow tool-batch stop check)
+   * never see nested calls, so hosts that guard dispatch there must pass the same check here.
+   */
+  readonly beforeNestedCall?: AgentCodeModeNestedCallGuard
 }
 
 /**
@@ -75,12 +105,18 @@ export const withAgentCodeMode = (
 
     if (!enabled) return modules
 
+    const toolOptions: MakeCodeModeToolOptions<AgentToolContext> = {
+      executor: options.executor ?? agentCodeModeExecutor
+    }
+
     const codeModeModule: ToolModule<AgentToolContext> = {
       id: 'codemode',
       tools: [
-        makeCodeModeTool<AgentToolContext>({
-          executor: options.executor ?? agentCodeModeExecutor
-        })
+        makeCodeModeTool<AgentToolContext>(
+          options.beforeNestedCall === undefined
+            ? toolOptions
+            : { ...toolOptions, beforeNestedCall: options.beforeNestedCall }
+        )
       ]
     }
 

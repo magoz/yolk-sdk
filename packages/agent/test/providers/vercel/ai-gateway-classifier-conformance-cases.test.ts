@@ -368,26 +368,48 @@ describe('Vercel AI Gateway classifier conformance disagreement drills', () => {
     })
   )
 
-  it.effect('fails the score case for a non-integer level or more probabilities than levels', () =>
+  it.effect('passes the score case for a fractional, probability-weighted score', () =>
     Effect.gen(function* () {
-      expect(
-        yield* drill(
-          vercelAiGatewayClassifierScoreCase,
-          withResponse(vercelAiGatewayClassifierScoreFixture, 'fractional', body => {
-            answerOf(body, 'urgency').score = 2.5
-          })
-        )
-      ).toEqual(mismatch('expected an integer score level'))
+      const report = yield* runConformance([vercelAiGatewayClassifierScoreCase], {
+        target: { kind: 'replay' },
+        now,
+        layer: () =>
+          Layer.mergeAll(
+            ReplayHttpClient.layer([
+              withResponse(vercelAiGatewayClassifierScoreFixture, 'fractional', body => {
+                answerOf(body, 'urgency').score = 2.86
+              })
+            ]),
+            configLayer
+          )
+      })
 
-      expect(
-        yield* drill(
-          vercelAiGatewayClassifierScoreCase,
-          withResponse(vercelAiGatewayClassifierScoreFixture, 'extra-level', body => {
-            recordOf(answerOf(body, 'urgency').probabilities)['4'] = 0
-          })
-        )
-      ).toEqual(mismatch('expected at most one probability in [0, 1] per level'))
+      expect(report.results[0]?.status).toBe('passed')
     })
+  )
+
+  it.effect(
+    'fails the score case for an out-of-range level or more probabilities than levels',
+    () =>
+      Effect.gen(function* () {
+        expect(
+          yield* drill(
+            vercelAiGatewayClassifierScoreCase,
+            withResponse(vercelAiGatewayClassifierScoreFixture, 'out-of-range', body => {
+              answerOf(body, 'urgency').score = 3.5
+            })
+          )
+        ).toEqual(mismatch('expected a score within the zero-based level range'))
+
+        expect(
+          yield* drill(
+            vercelAiGatewayClassifierScoreCase,
+            withResponse(vercelAiGatewayClassifierScoreFixture, 'extra-level', body => {
+              recordOf(answerOf(body, 'urgency').probabilities)['4'] = 0
+            })
+          )
+        ).toEqual(mismatch('expected at most one probability in [0, 1] per level'))
+      })
   )
 
   it.effect('fails the error case for an auth failure or a missing Gateway error type', () =>

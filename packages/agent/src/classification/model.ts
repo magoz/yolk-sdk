@@ -76,17 +76,18 @@ const decodeProbabilities = (
 ): Result.Result<ClassifierProbabilities, ClassificationAnswerIssueReason> => {
   if (!isFieldObject(value)) return Result.fail('invalid_probability')
 
-  const probabilities: Record<string, number> = {}
+  const entries: Array<readonly [string, number]> = []
 
   for (const key of Object.keys(value)) {
     const probability = ownField(value, key)
 
     if (!isProbability(probability)) return Result.fail('invalid_probability')
 
-    probabilities[key] = probability
+    entries.push([key, probability])
   }
 
-  return Result.succeed(probabilities)
+  // `Object.fromEntries` defines own data properties, so keys such as `__proto__` are kept.
+  return Result.succeed(Object.fromEntries(entries))
 }
 
 type ConfidenceField = { confidence?: number }
@@ -181,7 +182,7 @@ export const decodeClassifierAnswers = (
     return Result.fail({ reason: 'malformed_answer', questionId: questionIds[0] ?? '' })
   }
 
-  const answers: Record<string, ClassifierAnswer> = {}
+  const entries: Array<readonly [string, ClassifierAnswer]> = []
 
   for (const [questionId, question] of Object.entries(questions)) {
     if (!Object.hasOwn(raw, questionId)) {
@@ -192,8 +193,11 @@ export const decodeClassifierAnswers = (
 
     if (Result.isFailure(answer)) return Result.fail({ reason: answer.failure, questionId })
 
-    answers[questionId] = answer.success
+    entries.push([questionId, answer.success])
   }
+
+  // Own data properties: question ids such as `__proto__` stay answers, not prototypes.
+  const answers: Record<string, ClassifierAnswer> = Object.fromEntries(entries)
 
   for (const questionId of Object.keys(raw)) {
     if (!Object.hasOwn(questions, questionId)) {
