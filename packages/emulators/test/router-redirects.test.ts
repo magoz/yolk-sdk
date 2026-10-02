@@ -72,10 +72,10 @@ describe('EmulatedHttpClient redirects', () => {
 
       const client = yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer))
 
+      // Bodyless on purpose: Node 22's fetch fails to replay a Uint8Array body on a 307 (fixed in
+      // Node 24), and this control only needs to prove native fetch follows the redirect.
       const response = yield* client.execute(
-        HttpClientRequest.post(`${routedUrl}/v1/chat/completions`).pipe(
-          HttpClientRequest.bodyText('{}', 'application/json')
-        )
+        HttpClientRequest.post(`${routedUrl}/v1/chat/completions`)
       )
 
       expect(response.status).toBe(200)
