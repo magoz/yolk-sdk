@@ -184,7 +184,7 @@ keeps the previous value.
 
 `makeClassifierTool` exposes a [classifier model](../agent/classifier-models) as a `codemode` +
 `listed` read tool named `classify`. Scripts classify one item per call; calls beyond
-`maxConcurrency` (default 4 per script, keyed by the parent tool call id) queue.
+`maxConcurrency` (default 100 per script, keyed by the parent tool call id) queue.
 
 ```ts
 import { Effect } from 'effect'
@@ -194,7 +194,7 @@ import { makeClassifierTool } from '@yolk-sdk/codemode'
 const classifyTool = Effect.gen(function* () {
   const model = yield* ClassifierModel
 
-  return makeClassifierTool<HostContext>({ classify: model, maxConcurrency: 4 })
+  return makeClassifierTool<HostContext>({ classify: model, maxConcurrency: 100 })
 })
 ```
 

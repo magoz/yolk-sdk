@@ -28,7 +28,7 @@ import {
 export const classifierToolName = 'classify'
 
 /** Default cap of concurrent classifications per script. */
-export const defaultClassifierToolMaxConcurrency = 4
+export const defaultClassifierToolMaxConcurrency = 100
 
 type ClassifierModelService = (typeof ClassifierModel)['Service']
 
@@ -40,7 +40,7 @@ export type MakeClassifierToolOptions = {
   /** Default `classify`. */
   readonly name?: string
   /** Concurrent classifications per script (keyed by the parent tool call id of the nested call
-   * id `<parentToolCallId>/<seq>`, or the call id itself); default 4.
+   * id `<parentToolCallId>/<seq>`, or the call id itself); default 100.
    */
   readonly maxConcurrency?: number
   readonly description?: string

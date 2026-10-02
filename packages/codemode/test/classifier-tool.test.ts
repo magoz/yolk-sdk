@@ -36,7 +36,7 @@ describe('makeClassifierTool', () => {
     expect(tool.def.parameters).toMatchObject({ type: 'object', required: ['state', 'questions'] })
     expect(JSON.stringify(tool.def.parameters)).not.toContain('providerOptions')
     expect(tool.def.outputSchema).toMatchObject({ type: 'object', required: ['model', 'answers'] })
-    expect(tool.def.description).toContain('at most 4 classifications of one script run at once')
+    expect(tool.def.description).toContain('at most 100 classifications of one script run at once')
   })
 
   it.live('classifies from scripts with compact answers, the full result, and usage', () =>

@@ -94,7 +94,7 @@ unexpectedly`. If an executor misses its deadline, the tool returns a `timeout` 
 
 `makeClassifierTool({ classify })` wraps a `ClassifierModel` from `@yolk-sdk/agent/classification`
 as a `codemode` + `listed` read tool (default name `classify`). Scripts classify one item per call;
-calls beyond `maxConcurrency` (default 4 per script, keyed by the parent tool call id) queue.
+calls beyond `maxConcurrency` (default 100 per script, keyed by the parent tool call id) queue.
 Nested-call records carry token usage; cost stays in the result's `structuredContent.usage`.
 
 ## Host responsibilities
