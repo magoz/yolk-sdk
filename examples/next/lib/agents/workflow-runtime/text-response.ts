@@ -52,6 +52,7 @@ import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/c
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
 import { loadRuntimeSkillset } from '@/lib/agents/skillset/project-source'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
+import { withAgentCodeMode } from '@/lib/agents/codemode-tool-modules'
 import { makeTextToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import {
   makeSkillManagerToolModule,
@@ -577,7 +578,7 @@ export const makeAgentTextRuntime = (
     const toolSet = yield* resolveAgentToolSet({
       modules:
         options.childType === undefined
-          ? toolModules
+          ? yield* withAgentCodeMode(toolModules)
           : withoutInputTools(
               toolModules.map(module => ({
                 ...module,

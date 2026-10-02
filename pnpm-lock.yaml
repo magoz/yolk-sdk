@@ -262,6 +262,9 @@ importers:
       '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../../packages/agent
+      '@yolk-sdk/codemode':
+        specifier: workspace:^
+        version: link:../../packages/codemode
       '@yolk-sdk/connectors':
         specifier: workspace:^
         version: link:../../packages/connectors
