@@ -1274,3 +1274,94 @@ describe('fault match.route', () => {
     expect(target.faults.list()).toEqual([])
   })
 })
+
+describe('request lifecycle', () => {
+  const projectBody = JSON.stringify({
+    name: 'yolk-conformance-run-synthetic-parent',
+    parent_id: '6XSyntheticWork0'
+  })
+
+  const projectRequest = () =>
+    new Request(`${origin}${api('/projects')}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: projectBody
+    })
+
+  it('refuses a consumed or locked body as unreadable, ledgered, no fault used', async () => {
+    const consumed = projectRequest()
+
+    await consumed.text()
+
+    const locked = projectRequest()
+
+    expect(locked.body?.getReader()).toBeDefined()
+
+    for (const request of [consumed, locked]) {
+      const target = await emulator()
+
+      await expectRefusedWithoutFault(
+        target,
+        () => target.fetch(request),
+        'the request body is unreadable'
+      )
+      expect(target.ledger.entries()[0]).toMatchObject({
+        path: '/api/v1/projects',
+        status: 400,
+        notEmulated: 'the request body is unreadable'
+      })
+      expect(target.ledger.entries()[0]?.body).toBeUndefined()
+    }
+  })
+
+  it.each(['reset', 'close'] as const)(
+    'a fault answer and a refusal stay readable after %s',
+    async step => {
+      const target = await emulator()
+
+      target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const faulted = await call(target, 'GET', api('/labels?limit=200'))
+      const refused = await call(target, 'GET', api('/projects/6XSyntheticWork0'))
+
+      await (step === 'reset' ? target.reset() : target.close())
+
+      expect(await faulted.json()).toEqual({
+        error: { type: 'emulator_fault', message: 'Emulator fault: status 503.' }
+      })
+      expect(await refused.json()).toEqual({
+        error: {
+          type: 'not_emulated',
+          message:
+            'Not emulated: reading a seeded project is not emulated (no fixture records its answer)'
+        }
+      })
+    }
+  )
+
+  it('an unencodable refusal reason answers the handler-failure 500', async () => {
+    const target = await emulator()
+    const seed = target.snapshot()
+
+    target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+    // An unpaired surrogate as an unknown body key: the handler's reason would carry it.
+    const failed = await call(target, 'POST', api('/projects'), { rawBody: '{"\\ud800":1}' })
+
+    expect(failed.status).toBe(500)
+    expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+    expect(await failed.json()).toEqual({
+      error: {
+        type: 'emulator_error',
+        message: 'Synthetic: the emulator could not build the response.'
+      }
+    })
+    expect(target.ledger.entries()[0]).toMatchObject({
+      status: 500,
+      responseError: 'the route handler failed'
+    })
+    expect(target.ledger.entries()[0]?.notEmulated).toBeUndefined()
+    expect(target.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
+    expect(target.snapshot()).toEqual(seed)
+  })
+})

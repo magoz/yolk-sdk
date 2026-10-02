@@ -992,3 +992,70 @@ describe('fault match.route', () => {
     expect(target.faults.list()).toEqual([])
   })
 })
+
+describe('request lifecycle', () => {
+  const sendRequest = () =>
+    new Request(`${origin}/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(sendBody)
+    })
+
+  it('refuses a consumed or locked body as unreadable, ledgered, no fault used', async () => {
+    const consumed = sendRequest()
+
+    await consumed.text()
+
+    const locked = sendRequest()
+
+    expect(locked.body?.getReader()).toBeDefined()
+
+    for (const request of [consumed, locked]) {
+      const target = await emulator()
+
+      const text = await expectRefusedWithoutFault(
+        target,
+        () => target.fetch(request),
+        'the request body is unreadable'
+      )
+
+      expect(target.ledger.entries()[0]).toMatchObject({
+        path: '/bot<redacted>/sendMessage',
+        status: 400,
+        notEmulated: 'the request body is unreadable'
+      })
+      expect(target.ledger.entries()[0]?.body).toBeUndefined()
+      expect(target.snapshot().sentMessages).toEqual([])
+      await expectNoToken(target, text)
+    }
+  })
+
+  it.each(['reset', 'close'] as const)(
+    'a fault answer and a refusal stay readable after %s',
+    async step => {
+      const target = await emulator()
+
+      target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const faulted = await call(target, 'POST', `/bot${token}/getChat`, {
+        body: { chat_id: '-1001000000001' }
+      })
+
+      const refused = await call(target, 'POST', `/bot${token}/sendMessage`, {
+        body: { ...sendBody, chat_id: '-1009999999999' }
+      })
+
+      await (step === 'reset' ? target.reset() : target.close())
+
+      expect(await faulted.json()).toEqual({
+        error: { type: 'emulator_fault', message: 'Emulator fault: status 503.' }
+      })
+      expect(await refused.json()).toEqual({
+        error: {
+          type: 'not_emulated',
+          message: 'Not emulated: sendMessage to a chat the bot is not a member of is not emulated'
+        }
+      })
+    }
+  )
+})

@@ -246,8 +246,9 @@ const sendMessage: RouteHandler = (state, request, env) => {
 
   const { text, disable_web_page_preview: disablePreview } = body
 
-  if (!Predicate.isString(text) || text === '')
+  if (!Predicate.isString(text) || text === '') {
     return notEmulated('text must be a non-empty string')
+  }
 
   if (disablePreview !== true) {
     return notEmulated('disable_web_page_preview other than true (as recorded) is not emulated')

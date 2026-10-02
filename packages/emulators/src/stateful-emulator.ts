@@ -126,10 +126,15 @@
  * body that repeats one (raw or percent-decoded once, and in any parsed JSON key, string, or
  * number) is refused with a constant reason before anything else is checked. The ledger records
  * the resolution's path and the query as sent (credential-named keys redacted), faults'
- * `match.path` compares that path, and the core is sent it too, so the credential never reaches
- * the core. More opt-ins, off by default: a `json-or-empty` route body (JSON of any media type, or
- * none), `makeHeaderlessStatefulEmulator` (ledger entries without a `headers` field), and
- * `errorTexts` (the texts of the recovery answers).
+ * `match.path` compares that path, and routes and the core see it too (routes see no header
+ * names), so the credential never reaches a route or the core. A body that is already consumed or
+ * locked is refused as unreadable; a refusal reason that cannot be percent-encoded (an unpaired
+ * surrogate) is a handler failure (500). Fault answers and refusals are decided in the core with
+ * the commit, but returned by the wrapper itself, so a reset or a close before they are read never
+ * cancels them (only a commit's answer is the core's own). Resolved mode records no request
+ * header (`recordHeaders` must be empty). More opt-ins, off by default: a `json-or-empty` route
+ * body (JSON of any media type, or none), `makeHeaderlessStatefulEmulator` (ledger entries without
+ * a `headers` field), and `errorTexts` (the texts of the recovery answers).
  *
  * @experimental
  */
@@ -214,9 +219,10 @@ const ChunkCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 /**
  * Optional fault filter; an omitted field matches every request. `method` is the HTTP method
- * (never a manifest row's `RPC`). `path` is the raw request path; ending in `*`, a prefix. `route`
- * is a manifest row path, compared with the request's ledger route: the template of its matched
- * route, or the manifest variant its route admitted it as (see `StatefulRouteBinding.variants`).
+ * (never a manifest row's `RPC`). `path` is the raw request path (in resolved mode, the
+ * resolution's ledger path); ending in `*`, a prefix. `route` is a manifest row path, compared
+ * with the request's ledger route: the template of its matched route, or the manifest variant its
+ * route admitted it as (see `StatefulRouteBinding.variants`).
  * A `route` that names no manifest row of the emulator could never match, so adding the fault
  * rejects it (a route with variants is matched by its variant rows, never its template).
  */
@@ -225,6 +231,8 @@ export const StatefulFaultMatch = Schema.Struct({
   path: Schema.optionalKey(Schema.String),
   route: Schema.optionalKey(Schema.String)
 })
+
+export type StatefulFaultMatch = typeof StatefulFaultMatch.Type
 
 /**
  * A status fault: answer matching requests with this status (400-599), headers, and body before
@@ -279,8 +287,8 @@ export type StatefulLedgerEntry = {
   readonly seq: number
   readonly method: string
   /**
-   * Raw request path; in fail-closed mode with guarded secrets scrubbed, and `/<unrecognised>` for
-   * an unrecognised request.
+   * Raw request path; in fail-closed mode with guarded secrets scrubbed, in resolved mode the
+   * resolution's ledger path (scrubbed), and `/<unrecognised>` for an unrecognised request.
    */
   readonly path: string
   /** Path template of the matched route. */
@@ -322,14 +330,21 @@ export type StatefulCoverage = {
 
 /**
  * A ledger entry of an emulator built with `makeHeaderlessStatefulEmulator`, which records no
- * request header: the entry carries no `headers` field.
+ * request header and takes status faults only: the entry carries no `headers` field, no
+ * `bodyBytes` (it has no `bytes` routes), and only a `status` fault.
  */
-export type StatefulHeaderlessLedgerEntry = Omit<StatefulLedgerEntry, 'headers'>
+export type StatefulHeaderlessLedgerEntry = Omit<
+  StatefulLedgerEntry,
+  'headers' | 'bodyBytes' | 'fault'
+> & {
+  /** Set when a fault answered the request. */
+  readonly fault?: 'status'
+}
 
 /** One routed API request, as a route sees it. */
 export type EmulatedRequest = {
   readonly method: string
-  /** Raw (still percent-encoded) path. */
+  /** Raw (still percent-encoded) path; in resolved mode, the resolution's ledger path. */
   readonly path: string
   /**
    * Path parameters, percent-decoded once; in resolved mode (`resolveRequest`), the parameters the
@@ -346,7 +361,7 @@ export type EmulatedRequest = {
   readonly header: (name: string) => string | undefined
   /**
    * The lower-case names of every request header, credential headers included (names only, never
-   * a credential value). Absent on a request built elsewhere.
+   * a credential value); none in resolved mode. Absent on a request built elsewhere.
    */
   readonly headerNames?: ReadonlyArray<string> | undefined
   /** Parsed JSON body (`json` routes, and `json-or-empty` routes with a body). */
@@ -929,7 +944,9 @@ export type StatefulEmulatorConfig<State, Env> = {
    * `guardedPath`, or the body, each raw or percent-decoded once (`repeatsSecret`), and a JSON body
    * also in any key, string, or number once parsed and as it would be recorded
    * (`jsonRepeatsSecret`). Those refusals keep the request's scrubbed fields and never record the
-   * body. Omitted: the wrapper matches routes itself, as before.
+   * body. Routes see the ledger path and no header names; fault answers and refusals are returned
+   * outside the core; `recordHeaders` must be empty (checked at build). See the module header.
+   * Omitted: the wrapper matches routes itself, as before.
    */
   readonly resolveRequest?: (request: Request, url: URL) => StatefulResolution<State, Env>
   /**
@@ -1219,7 +1236,15 @@ type Job<State, Env> = {
   notEmulated?: string
   /** Set when `guardOutput` refused the prepared output (a constant credential-repeat entry). */
   credentialRepeat?: boolean
+  /** Resolved mode: the fault's answer, decided in the core but returned outside it. */
+  faultAnswer?: Response
 }
+
+/**
+ * Resolved mode: what the core answers when the wrapper returns the real answer itself (a fault or
+ * a refusal), so that answer never depends on the core runtime's lifecycle.
+ */
+const answeredOutsideCore = (): Response => new Response(null, { status: 204 })
 
 const withEvidence = (response: Response, evidence: EmulatorEvidence): Response => {
   const headers = new Headers(response.headers)
@@ -1294,11 +1319,24 @@ const snapshotEntry = (entry: MutableLedgerEntry): StatefulLedgerEntry => ({
   headers: { ...entry.headers }
 })
 
+/** Whether an entry records no truncation fault (only a status fault, if any). */
+const hasStatusFaultOnly = <Entry extends { readonly fault?: MutableLedgerEntry['fault'] }>(
+  entry: Entry
+): entry is Entry & { readonly fault?: 'status' } => entry.fault !== 'truncate-after-chunks'
+
 /** `makeHeaderlessStatefulEmulator`: the entry without its (always empty) `headers` field. */
 const snapshotHeaderlessEntry = ({
   headers: _headers,
+  bodyBytes: _bodyBytes,
   ...entry
-}: MutableLedgerEntry): StatefulHeaderlessLedgerEntry => ({ ...entry, query: { ...entry.query } })
+}: MutableLedgerEntry): StatefulHeaderlessLedgerEntry => {
+  const copy = { ...entry, query: { ...entry.query } }
+
+  if (hasStatusFaultOnly(copy)) return copy
+
+  // Unreachable: a headerless emulator decodes status faults only.
+  throw new Error('a headerless stateful emulator records status faults only')
+}
 
 /**
  * Resolved mode: the constant reason when a recognised request repeats a guarded secret, or
@@ -1317,8 +1355,13 @@ const lexicalCredentialRepeat = async (
 
   if (repeatsSecret(guardedPath, secrets)) return 'the request path repeats the credential'
 
-  // Read from a copy: the route reads the body again.
-  const text = request.body === null ? '' : await readText(request.clone())
+  // Read from a copy: the route reads the body again. A body that is already consumed or locked
+  // cannot be copied or read: the route's body check refuses it as unreadable.
+  const copy = request.body === null ? undefined : Result.try(() => request.clone())
+
+  if (copy !== undefined && Result.isFailure(copy)) return undefined
+
+  const text = copy === undefined ? '' : await readText(copy.success)
 
   if (text === undefined || text === '') return undefined
 
@@ -1416,6 +1459,11 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
     throw new Error('resolveRequest (resolved mode) and failClosed exclude each other')
   }
 
+  // Resolved mode checks no request header for a credential repeat, so it records none.
+  if (config.resolveRequest !== undefined && config.recordHeaders.length > 0) {
+    throw new Error('resolveRequest (resolved mode) records no request header (recordHeaders)')
+  }
+
   const resolveRequest = config.resolveRequest
   const errorTexts = config.errorTexts ?? defaultErrorTexts
 
@@ -1483,11 +1531,21 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
       const planned = job.admission.plan(state, { env: config.env, seq: job.seq })
 
       if (isNotEmulated(planned)) {
+        // Resolved mode keeps every refusal reason percent-encodable: one that is not (an unpaired
+        // surrogate) is a handler failure.
+        if (
+          resolveRequest !== undefined &&
+          Result.isFailure(Result.try(() => encodeURIComponent(planned.reason)))
+        ) {
+          return handlerFailedResponse()
+        }
+
         const reason = scrubSecrets(planned.reason, job.secrets)
 
         job.notEmulated = reason
 
-        return notEmulatedResponse(reason)
+        // Resolved mode: the wrapper answers the refusal itself, outside the core.
+        return resolveRequest === undefined ? notEmulatedResponse(reason) : answeredOutsideCore()
       }
 
       const streamed = isStreamedCommit(planned)
@@ -1507,7 +1565,15 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
       const decision = job.decideFault(streamed ? planned.answer.chunks.length : undefined)
 
-      if (decision.kind === 'answer') return decision.response
+      if (decision.kind === 'answer') {
+        if (resolveRequest === undefined) return decision.response
+
+        // Resolved mode: the fault's answer is returned outside the core, so a reset or a close
+        // before it is read never cancels it.
+        job.faultAnswer = decision.response
+
+        return answeredOutsideCore()
+      }
 
       if (!streamed) return planned()
 
@@ -1868,15 +1934,17 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
       bearerDigest = digest.success
     }
 
+    // Resolved mode: routes see the ledgered path and no header names, never the credential a
+    // path segment or a header name may carry.
     const admitted = matched.route.admit(
       {
         method: request.method.toUpperCase(),
-        path: url.pathname,
+        path: guardedPath === undefined ? url.pathname : entry.path,
         params: matched.params,
         query: url.searchParams,
         rawQuery: rawQuery(request.url) ?? '',
         header,
-        headerNames: [...request.headers.keys()],
+        headerNames: guardedPath === undefined ? [...request.headers.keys()] : [],
         json,
         bytes,
         bearerDigest
@@ -1976,9 +2044,12 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
         // The constant credential-repeat entry keeps the route template, as a request repeat does.
         if (job.credentialRepeat === true) entry.route = matched.route.path
+
+        // Resolved mode: the wrapper answers the refusal itself, outside the core.
+        if (guardedPath !== undefined) return notEmulatedResponse(job.notEmulated)
       }
 
-      return response
+      return job.faultAnswer ?? response
     } finally {
       jobs.delete(jobId)
     }

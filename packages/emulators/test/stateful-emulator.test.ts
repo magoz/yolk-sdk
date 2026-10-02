@@ -1704,6 +1704,9 @@ const pathSecret = '87654321'
 
 type ResolvedInput = { readonly id: string; readonly json: Schema.Json | undefined }
 
+/** The path and header names each admission of `pathNote` saw. */
+const pathNoteSeen: Array<{ readonly path: string; readonly headerNames: unknown }> = []
+
 /** A route of the resolved-mode emulator: its plan echoes `echo` into a reason, else writes. */
 const pathNote = statefulRoute<State, undefined, ResolvedInput>(
   {
@@ -1715,7 +1718,11 @@ const pathNote = statefulRoute<State, undefined, ResolvedInput>(
     evidence: 'unverified'
   },
   'json-or-empty',
-  request => ({ id: request.params.id ?? '', json: request.json }),
+  request => {
+    pathNoteSeen.push({ path: request.path, headerNames: request.headerNames })
+
+    return { id: request.params.id ?? '', json: request.json }
+  },
   (state, input) => {
     const echoed = isJsonObject(input.json) ? input.json.echo : undefined
 
@@ -1763,11 +1770,39 @@ const resolvePathToken = (request: Request, url: URL): StatefulResolution<State,
   }
 }
 
-/** A resolved-mode, headerless emulator over a fake core that records the paths it is sent. */
+/**
+ * A resolved-mode, headerless emulator over a fake core that records the paths it is sent and,
+ * like the real core, errors every body it answered once it is reset or closed.
+ */
 const buildResolved = async (
   extra: Partial<Omit<StatefulEmulatorConfig<State, undefined>, 'recordHeaders'>> = {}
 ) => {
   const corePaths: Array<string> = []
+  const abortBodies: Array<() => void> = []
+
+  const tracked = (response: Response): Response => {
+    const source = response.body?.getReader()
+
+    if (source === undefined) return response
+
+    const body = new ReadableStream<Uint8Array>({
+      start: controller => {
+        abortBodies.push(() => controller.error(new Error('synthetic: the core aborted the body')))
+      },
+      pull: async controller => {
+        const next = await source.read()
+
+        if (next.done) controller.close()
+        else controller.enqueue(next.value)
+      }
+    })
+
+    return new Response(body, { status: response.status, headers: response.headers })
+  }
+
+  const abortAll = () => {
+    for (const abort of abortBodies.splice(0)) abort()
+  }
 
   const api = await makeHeaderlessStatefulEmulator<State, undefined, State>(
     {
@@ -1789,16 +1824,21 @@ const buildResolved = async (
         fetch: request => {
           corePaths.push(request.url)
 
-          return Promise.resolve(dispatch(state, request))
+          return Promise.resolve(tracked(dispatch(state, request)))
         },
         baseUrl: 'http://core.invalid',
         snapshot: () => ({ ...state }),
         restore: next => {
+          abortAll()
           state = { ...next }
 
           return Promise.resolve()
         },
-        close: () => Promise.resolve()
+        close: () => {
+          abortAll()
+
+          return Promise.resolve()
+        }
       }
     }
   )
@@ -1825,10 +1865,110 @@ const keptTexts = async (api: Awaited<ReturnType<typeof buildResolved>>['api']) 
 }
 
 describe('opt-in resolved mode (resolveRequest)', () => {
-  it('refuses to build together with fail-closed mode', async () => {
-    await expect(
-      build([echo], true, { resolveRequest: () => ({ kind: 'unrecognised', reason: 'x' }) })
-    ).rejects.toThrow('resolveRequest (resolved mode) and failClosed exclude each other')
+  it('refuses to build together with fail-closed mode or recorded headers', async () => {
+    const resolveRequest = () => ({ kind: 'unrecognised', reason: 'x' }) as const
+
+    await expect(build([echo], true, { resolveRequest })).rejects.toThrow(
+      'resolveRequest (resolved mode) and failClosed exclude each other'
+    )
+    await expect(build([echo], false, { resolveRequest })).rejects.toThrow(
+      'resolveRequest (resolved mode) records no request header (recordHeaders)'
+    )
+  })
+
+  it('a resolution that throws answers the untagged 500 with the unhandled text', async () => {
+    const resolveRequest = () => {
+      throw new Error('synthetic resolution failure')
+    }
+
+    const errorTexts = { failed: 'x', closed: 'y', unhandled: 'Synthetic: unhandled.' }
+
+    for (const [extra, message] of [
+      [{ resolveRequest, errorTexts }, 'Synthetic: unhandled.'],
+      [{ resolveRequest }, 'the emulator failed to handle the request']
+    ] as const) {
+      const { api } = await buildResolved(extra)
+      const failed = await api.fetch(postNote(`/t/${pathToken}/notes/1`, '{}'))
+
+      expect(failed.status).toBe(500)
+      expect(failed.headers.get('x-emulator-evidence')).toBeNull()
+      expect(await failed.json()).toEqual({ error: { message, type: 'emulator_error' } })
+      expect(api.ledger.entries()).toEqual([])
+    }
+  })
+
+  it('refuses a consumed or locked body as unreadable, ledgered, with no fault used', async () => {
+    const consumed = postNote(`/t/${pathToken}/notes/1`, '{}')
+
+    await consumed.text()
+
+    const locked = postNote(`/t/${pathToken}/notes/1`, '{}')
+
+    expect(locked.body?.getReader()).toBeDefined()
+
+    for (const request of [consumed, locked]) {
+      const { api } = await buildResolved()
+
+      api.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const refused = await api.fetch(request)
+
+      expect(refused.status).toBe(400)
+      expect(await refused.json()).toEqual({
+        error: { type: 'not_emulated', message: 'Not emulated: the request body is unreadable' }
+      })
+      expect(api.ledger.entries()[0]).toMatchObject({
+        path: '/t/<redacted>/notes/1',
+        status: 400,
+        notEmulated: 'the request body is unreadable'
+      })
+      expect(api.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
+    }
+  })
+
+  it.each(['reset', 'close'] as const)(
+    'fault answers and refusals are answered outside the core: readable after %s',
+    async step => {
+      const { api } = await buildResolved()
+
+      api.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const faulted = await api.fetch(postNote(`/t/${pathToken}/notes/1`, '{}'))
+      const refused = await api.fetch(postNote(`/t/${pathToken}/notes/1`, '{"echo":"plain"}'))
+      const committed = await api.fetch(postNote(`/t/${pathToken}/notes/2`, '{}'))
+
+      await (step === 'reset' ? api.reset() : api.close())
+
+      expect(await faulted.json()).toEqual({
+        error: { type: 'emulator_fault', message: 'Emulator fault: status 503.' }
+      })
+      expect(await refused.json()).toEqual({
+        error: { type: 'not_emulated', message: 'Not emulated: the plan saw plain' }
+      })
+      // The commit's answer is the core's own: the core's lifecycle applies to it.
+      await expect(committed.text()).rejects.toThrow('synthetic: the core aborted the body')
+    }
+  )
+
+  it('a plan reason that cannot be percent-encoded answers the handler-failure 500', async () => {
+    const { api } = await buildResolved()
+
+    api.faults.add({ kind: 'status', status: 503, count: 1 })
+
+    // An unpaired surrogate the plan echoes into its reason.
+    const failed = await api.fetch(postNote(`/t/${pathToken}/notes/1`, '{"echo":"\\ud800"}'))
+
+    expect(failed.status).toBe(500)
+    expect(failed.headers.get('x-emulator-evidence')).toBe('unverified')
+    expect(await failed.json()).toEqual({
+      error: { message: 'the emulator could not build the response', type: 'emulator_error' }
+    })
+    expect(api.ledger.entries()[0]).toMatchObject({
+      status: 500,
+      responseError: 'the route handler failed'
+    })
+    expect(api.ledger.entries()[0]?.notEmulated).toBeUndefined()
+    expect(api.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
   })
 
   it('ledgers an unrecognised request with constant text only, the method as sent', async () => {
@@ -1951,6 +2091,8 @@ describe('opt-in resolved mode (resolveRequest)', () => {
   it('scrubs plan-time reasons; faults match, and the core sees, the ledgered path', async () => {
     const { api, corePaths } = await buildResolved()
 
+    pathNoteSeen.length = 0
+
     const echoed = await api.fetch(postNote(`/t/${pathToken}/notes/1`, '{"echo":"plain"}'))
 
     expect(await echoed.json()).toEqual({
@@ -1979,6 +2121,13 @@ describe('opt-in resolved mode (resolveRequest)', () => {
     ])
     expect(corePaths.join('\n')).not.toContain(pathSecret)
     expect(corePaths).toHaveLength(3)
+
+    // Routes see the ledgered path and no header names, never the path-carried credential.
+    expect(pathNoteSeen).toEqual([
+      { path: '/t/<redacted>/notes/1', headerNames: [] },
+      { path: '/t/<redacted>/notes/2', headerNames: [] },
+      { path: '/t/<redacted>/notes/3', headerNames: [] }
+    ])
   })
 
   it('records the query as sent (credential-named keys redacted), never parsed', async () => {
