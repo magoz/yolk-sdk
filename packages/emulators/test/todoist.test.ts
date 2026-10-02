@@ -1249,3 +1249,185 @@ describe('control plane', () => {
     expect(target.ledger.entries()).toEqual([])
   })
 })
+
+describe('fault match.route', () => {
+  it('rejects one naming no manifest row, at faults.add and over the control plane', async () => {
+    const target = await emulator()
+    const fault = { kind: 'status', status: 503, match: { route: '/api/v1/sections' } } as const
+
+    expect(() => target.faults.add(fault)).toThrow(TodoistEmulatorInputInvalid)
+    expect(() => target.faults.add(fault)).toThrow(
+      'match.route must name a manifest row of this emulator'
+    )
+
+    const posted = await target.fetch(
+      new Request(`${origin}/_emulate/faults`, { method: 'POST', body: JSON.stringify(fault) })
+    )
+
+    expect(posted.status).toBe(400)
+    expect(await posted.json()).toEqual({
+      error: {
+        type: 'emulator_error',
+        message: 'invalid fault: match.route must name a manifest row of this emulator'
+      }
+    })
+    expect(target.faults.list()).toEqual([])
+  })
+})
+
+describe('request lifecycle', () => {
+  const projectBody = JSON.stringify({
+    name: 'yolk-conformance-run-synthetic-parent',
+    parent_id: '6XSyntheticWork0'
+  })
+
+  const projectRequest = () =>
+    new Request(`${origin}${api('/projects')}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: projectBody
+    })
+
+  it('refuses a consumed or locked body as unreadable, ledgered, no fault used', async () => {
+    const consumed = projectRequest()
+
+    await consumed.text()
+
+    const locked = projectRequest()
+
+    expect(locked.body?.getReader()).toBeDefined()
+
+    for (const request of [consumed, locked]) {
+      const target = await emulator()
+
+      await expectRefusedWithoutFault(
+        target,
+        () => target.fetch(request),
+        'the request body is unreadable'
+      )
+      expect(target.ledger.entries()[0]).toMatchObject({
+        path: '/api/v1/projects',
+        status: 400,
+        notEmulated: 'the request body is unreadable'
+      })
+      expect(target.ledger.entries()[0]?.body).toBeUndefined()
+    }
+  })
+
+  it.each(['reset', 'close'] as const)(
+    'a fault answer and a refusal stay readable after %s',
+    async step => {
+      const target = await emulator()
+
+      target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const faulted = await call(target, 'GET', api('/labels?limit=200'))
+      const refused = await call(target, 'GET', api('/projects/6XSyntheticWork0'))
+
+      await (step === 'reset' ? target.reset() : target.close())
+
+      expect(await faulted.json()).toEqual({
+        error: { type: 'emulator_fault', message: 'Emulator fault: status 503.' }
+      })
+      expect(await refused.json()).toEqual({
+        error: {
+          type: 'not_emulated',
+          message:
+            'Not emulated: reading a seeded project is not emulated (no fixture records its answer)'
+        }
+      })
+    }
+  )
+
+  it('an unencodable refusal reason answers the handler-failure 500', async () => {
+    const target = await emulator()
+    const seed = target.snapshot()
+
+    target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+    // An unpaired surrogate as an unknown body key: the handler's reason would carry it.
+    const failed = await call(target, 'POST', api('/projects'), { rawBody: '{"\\ud800":1}' })
+
+    expect(failed.status).toBe(500)
+    expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+    expect(await failed.json()).toEqual({
+      error: {
+        type: 'emulator_error',
+        message: 'Synthetic: the emulator could not build the response.'
+      }
+    })
+    expect(target.ledger.entries()[0]).toMatchObject({
+      status: 500,
+      responseError: 'the route handler failed'
+    })
+    expect(target.ledger.entries()[0]?.notEmulated).toBeUndefined()
+    expect(target.faults.list()[0]).toMatchObject({ applied: 0, remaining: 1 })
+    expect(target.snapshot()).toEqual(seed)
+  })
+
+  it('a body-repeat refusal reads the request body; a query refusal leaves it unread', async () => {
+    const target = await emulator()
+
+    const repeating = new Request(`${origin}${api('/projects')}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: token, parent_id: '6XSyntheticWork0' })
+    })
+
+    await expectNotEmulated(
+      await target.fetch(repeating),
+      'the request body repeats the credential'
+    )
+    expect(repeating.bodyUsed).toBe(true)
+    await expectNotEmulated(await target.fetch(repeating), 'the request body is unreadable')
+
+    const unknownKey = new Request(`${origin}${api('/projects?x=1')}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: projectBody
+    })
+
+    await expectNotEmulated(await target.fetch(unknownKey), 'the query parameter x')
+    expect(unknownKey.bodyUsed).toBe(false)
+
+    expect(target.ledger.entries().map(entry => [entry.seq, entry.notEmulated])).toEqual([
+      [1, 'the request body repeats the credential'],
+      [2, 'the request body is unreadable'],
+      [3, 'the query parameter x is not emulated on this route']
+    ])
+    expect(JSON.stringify(target.ledger.entries())).not.toContain(token)
+  })
+
+  const inFlight: ReadonlyArray<readonly [string, (target: TodoistEmulator) => Promise<Response>]> =
+    [
+      ['a read', target => call(target, 'GET', api('/labels?limit=200'))],
+      ['a write', target => target.fetch(projectRequest())]
+    ]
+
+  it.each(inFlight)(
+    'a close while %s is in flight answers the 500, writing nothing',
+    async (_label, send) => {
+      const target = await emulator()
+      const seed = target.snapshot()
+      const pending = send(target)
+
+      await target.close()
+
+      const failed = await pending
+
+      expect(failed.status).toBe(500)
+      expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(await failed.json()).toEqual({
+        error: {
+          type: 'emulator_error',
+          message: 'Synthetic: the emulator could not build the response.'
+        }
+      })
+      expect(target.ledger.entries()[0]).toMatchObject({
+        status: 500,
+        responseError: 'the route handler answered no eligibility verdict'
+      })
+      expect(target.snapshot()).toEqual(seed)
+    }
+  )
+})

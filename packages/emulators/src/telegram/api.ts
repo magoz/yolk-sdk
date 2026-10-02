@@ -1,14 +1,15 @@
 /**
- * Telegram Bot API emulator API: the route table (evidence, query allowlist, core path, handler),
- * the token-aware route resolution, and the registration of the stateful handlers on the
- * `@emulators/core` app (internal; re-exported by `src/telegram.ts`).
+ * Telegram Bot API emulator API: the route table (evidence, query allowlist, guarded path,
+ * handler) and the token-aware route resolution (internal; re-exported by `src/telegram.ts`, which
+ * runs the table on the shared stateful wrapper, `src/stateful-emulator.ts`, in its resolved
+ * mode).
  *
  * The bot token is part of every Bot API URL (`/bot<token>/<method>`, `/file/bot<token>/<path>`).
  * It is required, but it never reaches the core, the state, the ledger, a not-emulated message, or
  * a response. Resolution fails closed: only a request whose raw path is exactly an emulated route
  * shape is recognised, and its token is taken from that exact segment; every other request is
  * ledgered and answered with constant text only. For a recognised request the ledgered path reads
- * `/bot<redacted>/...`, the core learns only whether the token names a bot, and the wrapper
+ * `/bot<redacted>/...`, the routes learn only whether the token names a bot, and the wrapper
  * scrubs the token and its secret part from the ledger and refuses a path, query, or body that
  * repeats them (raw, percent-decoded, or in any parsed JSON key, string value, or number).
  *
@@ -17,22 +18,18 @@
  *
  * @experimental
  */
-import type { Hono } from '@emulators/core'
 import { Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
-import { handlerFailedResponse } from '../emulator-http.ts'
-import type { EmulatorRouteEvidence } from '../route-evidence.ts'
 import {
-  commit,
-  coreResponse,
-  isRefusal,
-  notEmulatedCoreResponse,
-  parseJsonText,
-  refuse,
-  type CoreOutcome,
-  type CoreRefusal,
-  type StatefulFixtureResolution
-} from '../stateful-fixture.ts'
+  isNotEmulated,
+  notEmulated,
+  statefulRoute,
+  type Commit,
+  type EmulatedRequest,
+  type NotEmulated,
+  type StatefulResolution,
+  type StatefulRoute
+} from '../stateful-emulator.ts'
 import type { TelegramEmulatorChat, TelegramEmulatorState } from './state.ts'
 
 /** Drill knobs (tests only): each makes the emulator disagree with one conformance claim. */
@@ -53,8 +50,11 @@ export type TelegramApiEnv = {
   readonly drills: Required<TelegramEmulatorDrills>
 }
 
-/** Internal core header: whether the request's token names a bot (`known`) or not (`none`). */
-export const telegramBotHeader = 'x-emulator-telegram-bot'
+/**
+ * The route parameter the resolution supplies instead of the token: whether the token names a bot
+ * (`known`) or not (`none`). The token itself never reaches a route.
+ */
+const botParam = 'bot'
 
 type RouteRequest = {
   readonly query: URLSearchParams
@@ -67,18 +67,18 @@ type RouteRequest = {
   readonly knownBot: boolean
 }
 
-/** A route handler: validate without writing (a refusal), then `commit` the writes. */
+/** A route handler (the wrapper's plan): validate without writing, then return the commit. */
 type RouteHandler = (
   state: TelegramEmulatorState,
   request: RouteRequest,
   env: TelegramApiEnv
-) => CoreOutcome
+) => Commit | NotEmulated
 
-type TelegramApiRoute = EmulatorRouteEvidence & {
+type TelegramApiRoute = {
+  readonly route: StatefulRoute<TelegramEmulatorState, TelegramApiEnv>
   readonly queryKeys: ReadonlyArray<string>
-  /** Path of the core route (never a token). */
-  readonly corePath: string
-  readonly handler: RouteHandler
+  /** The token-free path the request must not repeat the token in (the method, or `/file`). */
+  readonly guardedPath: string
 }
 
 const validateCase = 'telegram.validate.get-chat'
@@ -112,38 +112,38 @@ const mediaType = (contentType: string | null): string | undefined =>
 const bodyObject = (
   request: RouteRequest,
   keys: ReadonlyArray<string>
-): Schema.JsonObject | CoreRefusal => {
+): Schema.JsonObject | NotEmulated => {
   if (mediaType(request.contentType) !== 'application/json') {
-    return refuse('Bot API bodies other than application/json are not emulated')
+    return notEmulated('Bot API bodies other than application/json are not emulated')
   }
 
   if (!isJsonObject(request.body)) {
-    return refuse('a request body that is not a JSON object is not emulated')
+    return notEmulated('a request body that is not a JSON object is not emulated')
   }
 
   const sent = Object.keys(request.body)
 
   if (sent.some(key => !keys.includes(key))) {
-    return refuse('a body field this method does not take is not emulated')
+    return notEmulated('a body field this method does not take is not emulated')
   }
 
   return keys.every(key => sent.includes(key))
     ? request.body
-    : refuse(
+    : notEmulated(
         `requests without each of the recorded body fields (${keys.join(', ')}) are not emulated`
       )
 }
 
-const noBody = (request: RouteRequest): CoreRefusal | undefined =>
-  request.hasBody ? refuse('a request body is not emulated on this method') : undefined
+const noBody = (request: RouteRequest): NotEmulated | undefined =>
+  request.hasBody ? notEmulated('a request body is not emulated on this method') : undefined
 
 /** The chat a well-formed `chat_id` names, `null` for none, or a refusal. */
 const chatOf = (
   state: TelegramEmulatorState,
   chatId: Schema.Json | undefined
-): TelegramEmulatorChat | null | CoreRefusal => {
+): TelegramEmulatorChat | null | NotEmulated => {
   if (!Predicate.isString(chatId) || !chatIdPattern.test(chatId)) {
-    return refuse('chat_id must be a chat id string (an integer or a public @username)')
+    return notEmulated('chat_id must be a chat id string (an integer or a public @username)')
   }
 
   return state.chats.find(chat => String(chat.id) === chatId) ?? null
@@ -153,27 +153,27 @@ const chatOf = (
 const botApiError = (env: TelegramApiEnv, status: number, description: string): Response =>
   json(env.drills.errorsAs200 ? 200 : status, { ok: false, error_code: status, description })
 
-const knownBotOnly = (request: RouteRequest): CoreRefusal | undefined =>
+const knownBotOnly = (request: RouteRequest): NotEmulated | undefined =>
   request.knownBot
     ? undefined
-    : refuse('a bot token that names no bot is emulated only on getChat (as recorded)')
+    : notEmulated('a bot token that names no bot is emulated only on getChat (as recorded)')
 
-// Handlers: validate (refuse) first, then `commit` the writes.
+// Handlers: validate (not emulated) first, then return the commit that writes.
 
 const getChat: RouteHandler = (state, request, env) => {
   const body = bodyObject(request, ['chat_id'])
 
-  if (isRefusal(body)) return body
+  if (isNotEmulated(body)) return body
 
   const chat = chatOf(state, body.chat_id)
 
-  if (isRefusal(chat)) return chat
+  if (isNotEmulated(chat)) return chat
 
-  if (!request.knownBot) return commit(() => botApiError(env, 401, 'Unauthorized'))
+  if (!request.knownBot) return () => botApiError(env, 401, 'Unauthorized')
 
-  if (chat === null) return commit(() => botApiError(env, 400, 'Bad Request: chat not found'))
+  if (chat === null) return () => botApiError(env, 400, 'Bad Request: chat not found')
 
-  return commit(() =>
+  return () =>
     json(200, {
       ok: !env.drills.getChatOkFalse,
       result: {
@@ -185,7 +185,6 @@ const getChat: RouteHandler = (state, request, env) => {
         max_reaction_count: chat.max_reaction_count
       }
     })
-  )
 }
 
 const getFile: RouteHandler = (state, request, env) => {
@@ -197,10 +196,10 @@ const getFile: RouteHandler = (state, request, env) => {
   const file = state.files.find(item => item.file_id === fileId)
 
   if (file === undefined) {
-    return refuse('getFile of a file id the bot did not receive is not emulated')
+    return notEmulated('getFile of a file id the bot did not receive is not emulated')
   }
 
-  return commit(() =>
+  return () =>
     json(200, {
       ok: true,
       result: {
@@ -210,7 +209,6 @@ const getFile: RouteHandler = (state, request, env) => {
         file_path: file.file_path
       }
     })
-  )
 }
 
 const downloadFile: RouteHandler = (state, request) => {
@@ -220,15 +218,13 @@ const downloadFile: RouteHandler = (state, request) => {
 
   const file = state.files.find(item => item.file_path === request.filePath)
 
-  if (file === undefined) return refuse('a file path getFile did not answer is not emulated')
+  if (file === undefined) return notEmulated('a file path getFile did not answer is not emulated')
 
-  return commit(
-    () =>
-      new Response(new TextEncoder().encode(file.content), {
-        status: 200,
-        headers: { 'content-type': 'application/octet-stream' }
-      })
-  )
+  return () =>
+    new Response(new TextEncoder().encode(file.content), {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' }
+    })
 }
 
 const sendMessage: RouteHandler = (state, request, env) => {
@@ -238,25 +234,27 @@ const sendMessage: RouteHandler = (state, request, env) => {
 
   const body = bodyObject(request, ['chat_id', 'text', 'disable_web_page_preview'])
 
-  if (isRefusal(body)) return body
+  if (isNotEmulated(body)) return body
 
   const chat = chatOf(state, body.chat_id)
 
-  if (isRefusal(chat)) return chat
+  if (isNotEmulated(chat)) return chat
 
   if (chat === null) {
-    return refuse('sendMessage to a chat the bot is not a member of is not emulated')
+    return notEmulated('sendMessage to a chat the bot is not a member of is not emulated')
   }
 
   const { text, disable_web_page_preview: disablePreview } = body
 
-  if (!Predicate.isString(text) || text === '') return refuse('text must be a non-empty string')
-
-  if (disablePreview !== true) {
-    return refuse('disable_web_page_preview other than true (as recorded) is not emulated')
+  if (!Predicate.isString(text) || text === '') {
+    return notEmulated('text must be a non-empty string')
   }
 
-  return commit(() => {
+  if (disablePreview !== true) {
+    return notEmulated('disable_web_page_preview other than true (as recorded) is not emulated')
+  }
+
+  return () => {
     // Read the clock before anything is written: a failing clock sends nothing.
     const now = env.now()
 
@@ -286,34 +284,44 @@ const sendMessage: RouteHandler = (state, request, env) => {
         text
       }
     })
-  })
+  }
 }
+
+/** The route's request, as the handlers see it (the wrapper checked and parsed the body). */
+const routeRequest = (request: EmulatedRequest): RouteRequest => ({
+  query: request.query,
+  filePath: request.params.filePath,
+  body: request.json,
+  // A non-empty body is valid JSON by now (`json-or-empty`), so it always parses.
+  hasBody: request.json !== undefined,
+  contentType: request.header('content-type') ?? null,
+  knownBot: request.params[botParam] === 'known'
+})
 
 const route = (
   method: string,
   path: string,
-  corePath: string,
+  guardedPath: string,
   write: boolean,
   caseIds: ReadonlyArray<string>,
   handler: RouteHandler,
   queryKeys: ReadonlyArray<string> = []
 ): TelegramApiRoute => ({
-  method,
-  path,
-  kind: 'connector',
-  write,
-  caseIds,
-  evidence: 'unverified',
+  route: statefulRoute(
+    { method, path, kind: 'connector', write, caseIds, evidence: 'unverified' },
+    'json-or-empty',
+    routeRequest,
+    (state, request, context) => handler(state, request, context.env)
+  ),
   queryKeys,
-  corePath,
-  handler
+  guardedPath
 })
 
 /** The route table: evidence plus handler. `telegramEmulatorRoutes` is its evidence part. */
 export const telegramApiRoutes: ReadonlyArray<TelegramApiRoute> = [
   route('POST', '/bot{token}/getChat', '/getChat', false, [validateCase, errorCase], getChat),
   route('GET', '/bot{token}/getFile', '/getFile', false, [fileCase], getFile, ['file_id']),
-  route('GET', '/file/bot{token}/{filePath}', '/file/:filePath', false, [fileCase], downloadFile),
+  route('GET', '/file/bot{token}/{filePath}', '/file', false, [fileCase], downloadFile),
   route('POST', '/bot{token}/sendMessage', '/sendMessage', true, [sendCase], sendMessage)
 ]
 
@@ -349,7 +357,10 @@ const unrecognisedReason = 'no emulated Bot API route for this method and path'
  * Every other request is `unrecognised`: the wrapper ledgers and answers it with constant text
  * only, so nothing it carries can leak.
  */
-export const resolveTelegramRequest = (request: Request, url: URL): StatefulFixtureResolution => {
+export const resolveTelegramRequest = (
+  request: Request,
+  url: URL
+): StatefulResolution<TelegramEmulatorState, TelegramApiEnv> => {
   const method = request.method.toUpperCase()
   const fileMatch = filePathPattern.exec(url.pathname)
   const botMatch = fileMatch === null ? botPathPattern.exec(url.pathname) : null
@@ -363,7 +374,7 @@ export const resolveTelegramRequest = (request: Request, url: URL): StatefulFixt
         : `/bot{token}/${botMatch[2] ?? ''}`
 
   const matched = telegramApiRoutes.find(
-    candidate => candidate.method === method && candidate.path === template
+    candidate => candidate.route.method === method && candidate.route.path === template
   )
 
   const filePath = fileMatch?.[2]
@@ -384,11 +395,11 @@ export const resolveTelegramRequest = (request: Request, url: URL): StatefulFixt
       ? `/bot<redacted>/${botMatch?.[2] ?? ''}`
       : `/file/bot<redacted>/${filePath}`
 
-  const refuse = (reason: string): StatefulFixtureResolution => ({
-    kind: 'not-emulated',
+  const refuse = (reason: string): StatefulResolution<TelegramEmulatorState, TelegramApiEnv> => ({
+    kind: 'refused',
     ledgerPath,
     reason,
-    route: matched,
+    route: matched.route,
     secrets
   })
 
@@ -409,82 +420,18 @@ export const resolveTelegramRequest = (request: Request, url: URL): StatefulFixt
     return refuse('repeated query parameters are not emulated')
   }
 
+  // Routes see whether the token names a bot and the file path, never the token.
+  const bot = /^0+:/.test(token) ? 'none' : 'known'
+
   return {
     kind: 'route',
     ledgerPath,
-    route: matched,
-    corePath:
+    route: matched.route,
+    params: filePath === undefined ? { [botParam]: bot } : { [botParam]: bot, filePath },
+    guardedPath:
       filePath === undefined
-        ? `${matched.corePath}${url.search}`
-        : `/file/${encodeURIComponent(filePath)}`,
-    coreHeaders: { [telegramBotHeader]: /^0+:/.test(token) ? 'none' : 'known' },
+        ? `${matched.guardedPath}${url.search}`
+        : `${matched.guardedPath}/${encodeURIComponent(filePath)}`,
     secrets
-  }
-}
-
-const decodeSegment = (segment: string): string | undefined => {
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return undefined
-  }
-}
-
-const handle = async (
-  raw: Request,
-  state: TelegramEmulatorState,
-  env: TelegramApiEnv
-): Promise<Response> => {
-  const url = new URL(raw.url)
-
-  const filePath = url.pathname.startsWith('/file/')
-    ? decodeSegment(url.pathname.slice('/file/'.length))
-    : undefined
-
-  const matched = telegramApiRoutes.find(
-    candidate =>
-      candidate.method === raw.method.toUpperCase() &&
-      (candidate.corePath === url.pathname ||
-        (candidate.corePath === '/file/:filePath' && filePath !== undefined))
-  )
-
-  if (matched === undefined) return notEmulatedCoreResponse('no emulated Bot API route')
-
-  const text = await raw.text()
-
-  const outcome = matched.handler(
-    state,
-    {
-      query: url.searchParams,
-      filePath,
-      body: text === '' ? undefined : parseJsonText(text),
-      hasBody: text !== '',
-      contentType: raw.headers.get('content-type'),
-      knownBot: raw.headers.get(telegramBotHeader) === 'known'
-    },
-    env
-  )
-
-  return coreResponse(outcome, raw)
-}
-
-/**
- * Register every route of the table on the core app under its token-free core path, over the
- * generation's state. A handler that throws answers `handlerFailedResponse()`, which the wrapper
- * turns into its 500 with `responseError` in the ledger.
- */
-export const registerTelegramApi = (
-  app: Hono,
-  state: TelegramEmulatorState,
-  env: TelegramApiEnv
-): void => {
-  for (const apiRoute of telegramApiRoutes) {
-    app.on(apiRoute.method, apiRoute.corePath, async context => {
-      try {
-        return await handle(context.req.raw, state, env)
-      } catch {
-        return handlerFailedResponse()
-      }
-    })
   }
 }

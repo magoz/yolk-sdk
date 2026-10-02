@@ -967,3 +967,179 @@ function sendChat() {
     max_reaction_count: 11
   }
 }
+
+describe('fault match.route', () => {
+  it('rejects one naming no manifest row, at faults.add and over the control plane', async () => {
+    const target = await emulator()
+    const fault = { kind: 'status', status: 503, match: { route: '/bot{token}/getMe' } } as const
+
+    expect(() => target.faults.add(fault)).toThrow(TelegramEmulatorInputInvalid)
+    expect(() => target.faults.add(fault)).toThrow(
+      'match.route must name a manifest row of this emulator'
+    )
+
+    const posted = await target.fetch(
+      new Request(`${origin}/_emulate/faults`, { method: 'POST', body: JSON.stringify(fault) })
+    )
+
+    expect(posted.status).toBe(400)
+    expect(await posted.json()).toEqual({
+      error: {
+        type: 'emulator_error',
+        message: 'invalid fault: match.route must name a manifest row of this emulator'
+      }
+    })
+    expect(target.faults.list()).toEqual([])
+  })
+})
+
+describe('request lifecycle', () => {
+  const sendRequest = () =>
+    new Request(`${origin}/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(sendBody)
+    })
+
+  it('refuses a consumed or locked body as unreadable, ledgered, no fault used', async () => {
+    const consumed = sendRequest()
+
+    await consumed.text()
+
+    const locked = sendRequest()
+
+    expect(locked.body?.getReader()).toBeDefined()
+
+    for (const request of [consumed, locked]) {
+      const target = await emulator()
+
+      const text = await expectRefusedWithoutFault(
+        target,
+        () => target.fetch(request),
+        'the request body is unreadable'
+      )
+
+      expect(target.ledger.entries()[0]).toMatchObject({
+        path: '/bot<redacted>/sendMessage',
+        status: 400,
+        notEmulated: 'the request body is unreadable'
+      })
+      expect(target.ledger.entries()[0]?.body).toBeUndefined()
+      expect(target.snapshot().sentMessages).toEqual([])
+      await expectNoToken(target, text)
+    }
+  })
+
+  it.each(['reset', 'close'] as const)(
+    'a fault answer and a refusal stay readable after %s',
+    async step => {
+      const target = await emulator()
+
+      target.faults.add({ kind: 'status', status: 503, count: 1 })
+
+      const faulted = await call(target, 'POST', `/bot${token}/getChat`, {
+        body: { chat_id: '-1001000000001' }
+      })
+
+      const refused = await call(target, 'POST', `/bot${token}/sendMessage`, {
+        body: { ...sendBody, chat_id: '-1009999999999' }
+      })
+
+      await (step === 'reset' ? target.reset() : target.close())
+
+      expect(await faulted.json()).toEqual({
+        error: { type: 'emulator_fault', message: 'Emulator fault: status 503.' }
+      })
+      expect(await refused.json()).toEqual({
+        error: {
+          type: 'not_emulated',
+          message: 'Not emulated: sendMessage to a chat the bot is not a member of is not emulated'
+        }
+      })
+    }
+  )
+
+  it('a body-repeat refusal reads the request body; a query refusal leaves it unread', async () => {
+    const target = await emulator()
+
+    const repeating = new Request(`${origin}/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...sendBody, text: `hi ${secretPart}` })
+    })
+
+    const first = await expectNotEmulated(
+      await target.fetch(repeating),
+      'the request body repeats the credential'
+    )
+
+    expect(repeating.bodyUsed).toBe(true)
+
+    const second = await expectNotEmulated(
+      await target.fetch(repeating),
+      'the request body is unreadable'
+    )
+
+    const queried = new Request(`${origin}/bot${token}/sendMessage?x=1`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(sendBody)
+    })
+
+    await expectNotEmulated(
+      await target.fetch(queried),
+      'a query parameter this method does not take'
+    )
+    expect(queried.bodyUsed).toBe(false)
+
+    expect(target.ledger.entries().map(entry => [entry.seq, entry.notEmulated])).toEqual([
+      [1, 'the request body repeats the credential'],
+      [2, 'the request body is unreadable'],
+      [3, 'a query parameter this method does not take is not emulated']
+    ])
+    expect(target.snapshot().sentMessages).toEqual([])
+    await expectNoToken(target, first, second)
+  })
+
+  const inFlight: ReadonlyArray<
+    readonly [string, (target: TelegramEmulator) => Promise<Response>]
+  > = [
+    [
+      'a read',
+      target =>
+        call(
+          target,
+          'GET',
+          `/bot${token}/getFile?file_id=BQACAgIAAxkDAAIC-yolk_synthetic_file_0001`
+        )
+    ],
+    ['a send', target => target.fetch(sendRequest())]
+  ]
+
+  it.each(inFlight)(
+    'a close while %s is in flight answers the 500, sending nothing',
+    async (_label, send) => {
+      const target = await emulator()
+      const pending = send(target)
+
+      await target.close()
+
+      const failed = await pending
+
+      expect(failed.status).toBe(500)
+      expect(failed.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+      expect(await failed.json()).toEqual({
+        error: {
+          type: 'emulator_error',
+          message: 'Synthetic: the emulator could not build the response.'
+        }
+      })
+      expect(target.ledger.entries()[0]).toMatchObject({
+        status: 500,
+        responseError: 'the route handler answered no eligibility verdict'
+      })
+      expect(target.snapshot().sentMessages).toEqual([])
+      await expectNoToken(target)
+    }
+  )
+})

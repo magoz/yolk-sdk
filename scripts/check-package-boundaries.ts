@@ -238,9 +238,10 @@ const rules: ReadonlyArray<BoundaryRule> = [
   // `src/fortnox/**`, `src/microsoft.ts`, `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`,
   // `src/notion.ts`, `src/notion/**`, `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`,
   // `src/telegram/**`, `src/github.ts`, `src/github/**`, `src/google.ts`, `src/google/**`,
-  // `src/linkedin-search.ts`, `src/linkedin-search/**`, `src/mcp.ts`, `src/mcp/**`). Their shared
-  // wrappers (`src/stateful-emulator.ts`, `src/stateful-fixture.ts`) and the helpers both import
-  // (`src/stateful-secrets.ts`) stay runtime-portable and take the core from them.
+  // `src/linkedin-search.ts`, `src/linkedin-search/**`, `src/mcp.ts`, `src/mcp/**`), and the
+  // core adapter they share (`src/stateful-core.ts`). Their shared wrapper
+  // (`src/stateful-emulator.ts`) and its credential helpers (`src/stateful-secrets.ts`) stay
+  // runtime-portable and take the core from them.
   {
     packageDir: 'packages/emulators/src',
     forbiddenImports: ['node:', '@emulators/core'],
@@ -265,7 +266,8 @@ const rules: ReadonlyArray<BoundaryRule> = [
       'packages/emulators/src/linkedin-search.ts',
       'packages/emulators/src/linkedin-search',
       'packages/emulators/src/mcp.ts',
-      'packages/emulators/src/mcp'
+      'packages/emulators/src/mcp',
+      'packages/emulators/src/stateful-core.ts'
     ]
   }
 ]

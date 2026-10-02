@@ -1171,8 +1171,10 @@ ledgered 400 not-emulated, `{ error: { type: 'not_emulated', message: 'Not emula
 (`notEmulated` in the ledger), with no guessed provider status, envelope, or error code. That covers
 unknown routes and methods, missing or malformed credentials, query parameters, body fields, and
 values no fixture records. A refused request writes nothing and uses up no fault (eligibility is
-checked against the request and the state before any fault is chosen). They share one
-internal wrapper (ledger, faults, control plane, clock-free recovery); each returns
+checked against the request and the state before any fault is chosen, and the check, the fault
+decision, and the write run together, so concurrent requests never interleave). They run on the
+internal stateful wrapper the Dropbox, Notion, GitHub, Google, LinkedIn search, and MCP emulators
+share (ledger, faults, control plane, clock-free recovery); each returns
 `{ fetch, ledger, faults, reset, seed, snapshot, coverage, close }` (Todoist adds `cursors`). Each
 call has its own state; `await close()` when done (later requests answer 503).
 
@@ -1320,7 +1322,8 @@ raw, percent-decoded, or in any parsed JSON key, string value, or number (so `\u
 numbers such as `1.2345678e7` are caught). Refusal messages never quote a request key or value. A
 token whose bot id is `0` names no bot: `getChat` answers the recorded 401 `Unauthorized` (`{ ok:
 false, error_code: 401, description }`); other methods with it are not emulated. Fault `match.path`
-uses the redacted path; `match.route` the manifest template (`/bot{token}/sendMessage`).
+uses the redacted path; `match.route` the manifest template (`/bot{token}/sendMessage`). In both the
+Todoist and Telegram emulators, a `match.route` naming no manifest route is rejected when added.
 
 `sendMessage` is irreversible on the real service: the emulator records each sent message in its
 state (`sentMessages`: `message_id` from 101, `chat_id`, `text`, `date` from the `now` clock in
