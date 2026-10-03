@@ -185,6 +185,36 @@ const schemaRecord = (record: JsonObject, key: string): JsonObject | undefined =
 const requiredKeys = (schema: JsonObject): ReadonlySet<string> =>
   new Set((schemaArray(schema, 'required') ?? []).filter(Predicate.isString))
 
+// Each `$ref` hop of a schema, starting with the schema itself (bounded).
+const refHops = (schema: Schema.Json | undefined, definitions: JsonObject): Array<JsonObject> => {
+  const hops: Array<JsonObject> = []
+  let current = schema
+
+  for (let hop = 0; hop < maxSchemaDepth; hop++) {
+    const record = jsonObject(current)
+
+    if (record === undefined) return hops
+
+    hops.push(record)
+
+    const ref = ownValue(record, '$ref')
+
+    if (!Predicate.isString(ref) || !ref.startsWith(localDefinitionPrefix)) return hops
+
+    const name = ref.slice(localDefinitionPrefix.length)
+
+    if (!Object.hasOwn(definitions, name)) return hops
+
+    current = definitions[name]
+  }
+
+  return hops
+}
+
+// A schema whose `$ref` did not resolve (non-local, `#/definitions/...`, missing, or too deep) is
+// unknown: its siblings may be ignored by the dialect (draft-07), so it never justifies a drop.
+const isUnresolvedRef = (record: JsonObject) => Object.hasOwn(record, '$ref')
+
 const resolveSchema = (
   schema: Schema.Json | undefined,
   definitions: JsonObject
@@ -257,10 +287,8 @@ const admitsNull = (
 ): boolean => {
   if (depth > maxSchemaDepth) return true
 
-  // Keywords beside a `$ref` still apply; `nullable` there must not be lost by resolving.
-  const unresolved = jsonObject(schema)
-
-  if (unresolved !== undefined && ownValue(unresolved, 'nullable') === true) return true
+  // Keywords beside a `$ref` still apply; `nullable` on any hop must not be lost by resolving.
+  if (refHops(schema, definitions).some(hop => ownValue(hop, 'nullable') === true)) return true
 
   const resolved = resolveSchema(schema, definitions)
 
@@ -268,7 +296,7 @@ const admitsNull = (
 
   const record = jsonObject(resolved)
 
-  if (record === undefined) return true
+  if (record === undefined || isUnresolvedRef(record)) return true
 
   const known = memo.get(record)
 
@@ -354,7 +382,7 @@ const unionMemberMatches = (
 
   const record = jsonObject(resolved)
 
-  if (record === undefined) return true
+  if (record === undefined || isUnresolvedRef(record)) return true
 
   if (Object.hasOwn(record, 'type') && !typeAccepts(record['type'], value)) return false
 
@@ -380,7 +408,11 @@ const unionMemberMatches = (
 
     const propertyRecord = jsonObject(propertySchema)
 
-    if (propertyRecord !== undefined && !matchesLiteral(propertyRecord, propertyValue)) {
+    if (
+      propertyRecord !== undefined &&
+      !isUnresolvedRef(propertyRecord) &&
+      !matchesLiteral(propertyRecord, propertyValue)
+    ) {
       return false
     }
   }
@@ -516,7 +548,14 @@ const normalizeValue = (
 
   const resolved = jsonObject(resolveSchema(schema, walk.definitions))
 
-  if (resolved === undefined || visited.has(resolved) || walk.budget.remaining <= 0) return value
+  if (
+    resolved === undefined ||
+    isUnresolvedRef(resolved) ||
+    visited.has(resolved) ||
+    walk.budget.remaining <= 0
+  ) {
+    return value
+  }
 
   walk.budget.remaining -= 1
   visited.add(resolved)
@@ -566,12 +605,16 @@ const hasNestedResourceId = (root: Schema.Json): boolean => {
 
     if (scanned > maxScannedNodes) return true
 
-    if (isJsonArray(node)) {
-      pending.push(...node)
-    } else if (isJsonObject(node)) {
-      if (node !== root && Object.hasOwn(node, '$id')) return true
+    if (isJsonObject(node) && node !== root && Object.hasOwn(node, '$id')) return true
 
-      pending.push(...Object.values(node))
+    const children = isJsonArray(node) ? node : isJsonObject(node) ? Object.values(node) : []
+
+    // Enqueue one by one (no argument spread) and stop at the bound: huge `enum`/`default` data
+    // must not throw or stall before the limit applies.
+    for (const child of children) {
+      if (pending.length + scanned > maxScannedNodes) return true
+
+      pending.push(child)
     }
   }
 

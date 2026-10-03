@@ -633,15 +633,54 @@ describe('registry null omission for optional non-nullable properties', () => {
   })
 
   it('leaves the remainder unchanged once the work budget is spent', () => {
-    const exhausting: ToolJsonSchema = {
-      type: 'object',
-      properties: { x: { type: 'string' } },
-      allOf: Array.from({ length: 10_000 }, (_, index) => ({ title: `part ${index}` }))
+    // A small schema with many argument objects: each element costs one schema visit.
+    const list: ToolJsonSchema = {
+      type: 'array',
+      items: { type: 'object', properties: { x: { type: 'string' } } }
     }
 
-    const value = { x: null }
+    const elements = Array.from({ length: 10_050 }, () => ({ x: null }))
+    const normalized = omitNullOptionalToolArguments(list, elements)
 
-    expect(omitNullOptionalToolArguments(exhausting, value)).toBe(value)
+    expect(Array.isArray(normalized)).toBe(true)
+
+    if (!Array.isArray(normalized)) return
+
+    expect(normalized[0]).toEqual({})
+    expect(normalized.at(-1)).toEqual({ x: null })
+  })
+
+  it('treats unresolved and chained references conservatively', () => {
+    const value = { v: null }
+
+    // `nullable` on an intermediate $ref hop.
+    const chained: ToolJsonSchema = {
+      type: 'object',
+      properties: { v: { $ref: '#/$defs/A' } },
+      $defs: { A: { $ref: '#/$defs/B', nullable: true }, B: { type: 'string' } }
+    }
+
+    expect(omitNullOptionalToolArguments(chained, value)).toBe(value)
+
+    // draft-07 ignores siblings of $ref; an unresolved #/definitions ref is unknown, not its
+    // sibling `type`.
+    const draft07: ToolJsonSchema = {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      properties: { v: { $ref: '#/definitions/S', type: 'string' } },
+      definitions: { S: { type: ['string', 'null'] } }
+    }
+
+    expect(omitNullOptionalToolArguments(draft07, value)).toBe(value)
+
+    // Huge data positions are scanned within the bound without throwing.
+    const hugeDefault: ToolJsonSchema = {
+      type: 'object',
+      properties: { v: { type: 'string' } },
+      default: Array.from({ length: 1_000_000 }, () => null)
+    }
+
+    expect(() => omitNullOptionalToolArguments(hugeDefault, value)).not.toThrow()
   })
 
   it('never drops a null declared by a nested conjunction', () => {
