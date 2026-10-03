@@ -6,6 +6,7 @@ import {
   AgentOutputUsage,
   AgentUsage,
   emptyNestedToolCallRecorder,
+  makeNestedToolCallRecorder,
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxCalls,
   nestedToolCallMaxErrorChars,
@@ -78,6 +79,37 @@ describe('nested tool call record', () => {
     expect(fields.nestedCalls.calls.at(-1)?.id).toBe(`call_parent/${nestedToolCallMaxCalls}`)
     expect(fields.nestedCalls.complete).toBe(false)
     expect(fields.usage?.input.total).toBe(nestedToolCallMaxCalls + 4)
+  })
+
+  it('keeps per-status counts of every call, dropped calls included', () => {
+    const statuses = ['ok', 'error', 'cancelled', 'ok', 'ok'] as const
+
+    const recorder = statuses
+      .map((status, index) => ({ ...nestedCall(index + 1), status }))
+      .reduce(recordNestedToolCall, makeNestedToolCallRecorder({ maxCalls: 2 }))
+
+    const fields = nestedToolCallResultFields(recorder)
+
+    expect(fields.nestedCalls.calls.map(call => call.id)).toEqual([
+      'call_parent/1',
+      'call_parent/2'
+    ])
+    expect(fields.nestedCalls.complete).toBe(false)
+    expect(fields.nestedCalls.counts).toEqual({ ok: 3, error: 1, cancelled: 1 })
+  })
+
+  it('sizes the record from maxCalls while keeping the byte budgets', () => {
+    const inputs = Array.from({ length: 768 }, (_, index) => nestedCall(index + 1))
+
+    const fields = nestedToolCallResultFields(
+      inputs.reduce(recordNestedToolCall, makeNestedToolCallRecorder({ maxCalls: 768 }))
+    )
+
+    const total = fields.nestedCalls.calls.reduce((sum, call) => sum + utf8Bytes(call.args), 0)
+
+    expect(fields.nestedCalls.calls).toHaveLength(768)
+    expect(fields.nestedCalls.counts?.ok).toBe(768)
+    expect(total).toBeLessThanOrEqual(nestedToolCallMaxTotalArgsBytes)
   })
 
   it('cuts arguments to the per-call byte bound on character boundaries', () => {

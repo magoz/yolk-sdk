@@ -224,6 +224,8 @@ export {
 
 export {
   emptyNestedToolCallRecorder,
+  makeNestedToolCallRecorder,
+  NestedToolCallCounts,
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxCalls,
   nestedToolCallMaxErrorChars,

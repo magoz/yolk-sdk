@@ -49,6 +49,13 @@ import {
   unsupportedBackgroundSchema,
   type BackgroundToolHost
 } from './background.ts'
+import {
+  executeLedgered,
+  resolveToolLedgerOptions,
+  toolIdempotencyKey,
+  type ToolLedgerAbandonedInput,
+  type ToolLedgerOptions
+} from './ledger.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
@@ -166,11 +173,11 @@ export type NestedToolExecutor = {
    */
   readonly tools: ReadonlyArray<NestedTool>
   /** Runs through the same path as `ResolvedToolSet.execute` (parameter validation, resolved
-   * enablement, and registration-level host wrappers). Unknown, disabled, and non-callable tools
-   * and tool failures become model-visible error results; it never fails. The caller assigns
-   * call ids, by convention `<parentToolCallId>/<seq>`, so hosts can derive idempotency keys.
-   * Decorators applied outside `ResolvedToolSet.execute` (for example a wrapped ToolExecutor)
-   * do not see nested calls.
+   * enablement, registration-level host wrappers, and the tool ledger when one is configured).
+   * Unknown, disabled, and non-callable tools and tool failures become model-visible error
+   * results; it never fails. The caller assigns call ids `<parentToolCallId>/<seq>`: they are the
+   * nested calls' ledger keys (with the parent call id as `parentKey`). Decorators applied outside
+   * `ResolvedToolSet.execute` (for example a wrapped ToolExecutor) do not see nested calls.
    */
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult>
 }
@@ -186,6 +193,18 @@ export type ToolExecutionInput<Context> = {
   readonly context: Context
   /** Present only for registrations with `nestedToolAccess: true`. Wrappers must forward it. */
   readonly nested?: NestedToolExecutor
+  /** Present when `resolveTools` has a tool ledger: the ledger scope plus the call's ledger key
+   * (`call.id`, or `<parentCallId>/<seq>` for nested calls), stable across re-executions. Pass it
+   * to external APIs that deduplicate writes. Wrappers must forward it.
+   */
+  readonly idempotencyKey?: string
+}
+
+type ToolExecutionInputFields<Context> = {
+  call: ToolCall
+  context: Context
+  nested?: NestedToolExecutor
+  idempotencyKey?: string
 }
 
 export type SchemaToolExecutionInput<Context, Params> = ToolExecutionInput<Context> & {
@@ -213,6 +232,11 @@ export type ToolRegistration<Context> = {
    * and the selected server action handlers. Never combined with approval/background.
    */
   readonly interaction?: InteractionToolRegistration<Context>
+  /** Result of a ledgered call found abandoned (claimed earlier, lease expired, no result),
+   * instead of the default "may already have been applied" error. Receives the call's nested
+   * ledger entries. The call is never executed again either way.
+   */
+  readonly abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
 }
 
 /** Server-owned per-action handlers for one interaction registration. `validate`
@@ -282,6 +306,8 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly nestedToolAccess?: boolean
   /** With `nestedToolAccess: true`, compute the resolved description from the nested tools. */
   readonly describe?: NestedToolDescriber
+  /** See `ToolRegistration.abandonedResult`. */
+  readonly abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
   readonly execute: (
@@ -553,6 +579,7 @@ type MakeToolRegistrationFields = {
   background?: boolean
   nestedToolAccess?: boolean
   describe?: NestedToolDescriber
+  abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
 }
 
 type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
@@ -612,6 +639,10 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     registration.describe = options.describe
   }
 
+  if (options.abandonedResult !== undefined) {
+    registration.abandonedResult = options.abandonedResult
+  }
+
   // Decode what `def.parameters` advertises: the JSON codec, not the type-side schema.
   const decodeParams = decodeToolArguments(options.parameters)
 
@@ -634,8 +665,10 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     access: options.access,
     approval: options.approval,
     isEnabled: options.isEnabled,
-    execute: ({ call, context, nested }) =>
-      decodeParams(call.params).pipe(
+    execute: input => {
+      const { call } = input
+
+      return decodeParams(call.params).pipe(
         Effect.matchEffect({
           onFailure: error => {
             const message = invalidParamsMessage(options, error)
@@ -651,11 +684,10 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
               )
             )
           },
+          // Forwards `nested` and `idempotencyKey` exactly as the registry passed them.
           onSuccess: params =>
             options
-              .execute(
-                nested === undefined ? { call, context, params } : { call, context, params, nested }
-              )
+              .execute({ ...input, params })
               .pipe(
                 Effect.catchTag('ModelVisibleToolError', error =>
                   Effect.succeed(modelVisibleToolErrorResult(call, error))
@@ -663,6 +695,7 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
               )
         })
       )
+    }
   }
 
   return Object.assign(registration, tails)
@@ -959,6 +992,10 @@ export const resolveTools = <Context>(
      * No adapter means interaction tools are unavailable, never an in-memory fallback.
      */
     readonly interactionHost?: InteractionHost
+    /** Durable tool-call ledger: ledgered calls (default every non-`read` tool, top-level and
+     * nested) run at most once per ledger key across re-executions. Absent: unchanged behavior.
+     */
+    readonly ledger?: ToolLedgerOptions
   } = {}
 ): Effect.Effect<ResolvedToolSet, ToolRegistryError> =>
   Effect.gen(function* () {
@@ -1217,16 +1254,32 @@ export const resolveTools = <Context>(
       )
     }
 
+    const ledger =
+      options.ledger === undefined ? undefined : resolveToolLedgerOptions(options.ledger)
+
     const executionInput = (
       tool: ToolRegistration<Context>,
-      call: ToolCall
-    ): ToolExecutionInput<Context> =>
-      tool.nestedToolAccess === true ? { call, context, nested } : { call, context }
+      call: ToolCall,
+      ledgerCall: ToolCall,
+      idempotencyKey: string | undefined
+    ): ToolExecutionInput<Context> => {
+      const input: ToolExecutionInputFields<Context> = { call, context }
 
+      // Nested calls belong to the original (ledger) call, whatever argument normalization did.
+      if (tool.nestedToolAccess === true) input.nested = nestedFor(ledgerCall)
+
+      if (idempotencyKey !== undefined) input.idempotencyKey = idempotencyKey
+
+      return input
+    }
+
+    // The single ledger seam: top-level and nested calls of ordinary registrations pass here.
+    // Input and interaction tools keep their own HITL receipts and are never ledgered.
     const executeRegistration = (
       match: ResolvedRegistration<Context>,
       call: ToolCall,
-      executionOptions?: ToolExecutionOptions
+      executionOptions?: ToolExecutionOptions,
+      parentCallId?: string
     ): Effect.Effect<ToolResult, ToolError> => {
       if (match.tool.def.input !== undefined) {
         return Effect.fail(
@@ -1248,6 +1301,31 @@ export const resolveTools = <Context>(
         })
       }
 
+      if (ledger === undefined) return runRegistration(match, call, undefined)
+
+      const idempotencyKey = toolIdempotencyKey(ledger.store.scope, call.id)
+
+      const policyInput =
+        parentCallId === undefined
+          ? { call, moduleId: match.moduleId, access: match.tool.access }
+          : { call, moduleId: match.moduleId, access: match.tool.access, parentCallId }
+
+      return ledger.isLedgered(policyInput)
+        ? executeLedgered({
+            options: ledger,
+            call,
+            parentKey: parentCallId,
+            execute: runRegistration(match, call, idempotencyKey),
+            abandonedResult: match.tool.abandonedResult
+          })
+        : runRegistration(match, call, idempotencyKey)
+    }
+
+    const runRegistration = (
+      match: ResolvedRegistration<Context>,
+      call: ToolCall,
+      idempotencyKey: string | undefined
+    ): Effect.Effect<ToolResult, ToolError> => {
       const host = options.backgroundHost
       const validate = match.tool.validate
       const def = match.tool.def
@@ -1277,10 +1355,13 @@ export const resolveTools = <Context>(
                     )
                 )
               ),
-            execute: businessCall => match.tool.execute(executionInput(match.tool, businessCall))
+            execute: businessCall =>
+              match.tool.execute(executionInput(match.tool, businessCall, call, idempotencyKey))
           })
         : businessCallFor(def, call).pipe(
-            Effect.flatMap(normalized => match.tool.execute(executionInput(match.tool, normalized)))
+            Effect.flatMap(normalized =>
+              match.tool.execute(executionInput(match.tool, normalized, call, idempotencyKey))
+            )
           )
     }
 
@@ -1305,7 +1386,7 @@ export const resolveTools = <Context>(
             }
           )
 
-    const nested: NestedToolExecutor = {
+    const nestedFor = (parent: ToolCall): NestedToolExecutor => ({
       tools: nestedTools,
       execute: call =>
         Option.match(
@@ -1328,7 +1409,7 @@ export const resolveTools = <Context>(
               )
             },
             onSome: match =>
-              executeRegistration(match, call).pipe(
+              executeRegistration(match, call, undefined, parent.id).pipe(
                 Effect.catchTag('ToolError', error =>
                   Effect.succeed(
                     makeErrorToolResult({ toolCallId: call.id, content: error.message })
@@ -1337,7 +1418,7 @@ export const resolveTools = <Context>(
               )
           }
         )
-    }
+    })
 
     return {
       tools,
