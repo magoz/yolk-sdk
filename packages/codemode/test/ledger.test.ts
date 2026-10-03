@@ -523,6 +523,40 @@ describe('code mode nested-call record and hooks', () => {
     })
   )
 
+  it.effect('never lets an afterNestedCall that throws synchronously change the result', () =>
+    Effect.gen(function* () {
+      const settled: Array<unknown> = []
+
+      const { executor } = scriptedExecutor(async call => {
+        settled.push(await call('lookup', { query: 'a' }))
+
+        return 'done'
+      })
+
+      const modules = codeModeModules(executor, [queryTool('lookup')], {
+        afterNestedCall: () => {
+          throw new Error('metrics exporter threw')
+        }
+      })
+
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+      const toolSet = yield* resolveTools(modules, context)
+
+      const result = yield* toolSet
+        .execute(ToolCall.make({ id: 'call_1', name: 'codemode', params: { code: 'script' } }))
+        .pipe(Effect.provide(logger))
+
+      expect(result.isError).toBeUndefined()
+      expect(settled).toEqual(['lookup:a'])
+      expect(result.nestedCalls?.calls.map(record => record.status)).toEqual(['ok'])
+      expect(result.nestedCalls?.counts).toEqual({ ok: 1, error: 0, cancelled: 0 })
+      expect(messages).toContainEqual([
+        expect.stringContaining('afterNestedCall failed for call_1/1')
+      ])
+    })
+  )
+
   it.effect('reports nested outcomes to afterNestedCall, including interrupted calls', () =>
     Effect.gen(function* () {
       const seen: Array<CodeModeAfterNestedCallInput<TestContext>> = []

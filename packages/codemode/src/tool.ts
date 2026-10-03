@@ -140,7 +140,8 @@ export type MakeCodeModeToolOptions<Context> = {
    * `interrupted` (cancelled, for example still running when the script ended). `durationMs`
    * covers the execution; `result` is present when the call produced one. Calls rejected by
    * `beforeNestedCall` or the call limit never ran and are not reported. The script waits for the
-   * hook before it sees the call settle.
+   * hook before it sees the call settle. A failing hook (a failure, a defect, or a synchronous
+   * throw) is logged and never changes the call's result.
    */
   readonly afterNestedCall?: (input: CodeModeAfterNestedCallInput<Context>) => Effect.Effect<void>
 }
@@ -393,12 +394,12 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                   : Effect.gen(function* () {
                       const started = yield* Clock.currentTimeMillis
 
-                      // Host observability never changes the call: a hook failure, defects included,
-                      // is only logged.
+                      // Host observability never changes the call: a hook failure, defects and
+                      // synchronous throws included, is only logged.
                       const afterNestedCallSafely = (
                         hookInput: CodeModeAfterNestedCallInput<Context>
                       ) =>
-                        afterNestedCall(hookInput).pipe(
+                        Effect.suspend(() => afterNestedCall(hookInput)).pipe(
                           Effect.exit,
                           Effect.flatMap(hookExit =>
                             Exit.isSuccess(hookExit)

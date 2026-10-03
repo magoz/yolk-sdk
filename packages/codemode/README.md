@@ -97,7 +97,8 @@ const program = Effect.gen(function* () {
 - `afterNestedCall({ call, outcome, durationMs, context, result? })` runs after each admitted
   nested call with `success`, `failure` (error result or unexpected failure), or `interrupted`
   (cancelled, for example still running when the script ended). Calls rejected before running are
-  not reported. A failing hook is logged and never changes the call's result.
+  not reported. A failing hook (a failure, a defect, or a synchronous throw) is logged and never
+  changes the call's result.
 - A nested call that is interrupted rejects with `<label> was cancelled.`; a defect rejects with
   `<label> failed unexpectedly.` (the same label as above). If an executor misses its deadline, the tool returns a `timeout` failure
   `timeoutMs` + 5 s after the start and aborts it.
