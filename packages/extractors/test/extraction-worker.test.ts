@@ -534,15 +534,23 @@ describe('isolated extraction in a worker thread', () => {
         const invalid = yield* Effect.forEach(
           [
             { maxOldGenerationSizeMb: 0 },
-            // The process-wide pool has four slots; a layer can only lower its share.
+            // The realm-wide pool has four slots; a layer can only lower its share.
             { maxConcurrentWorkers: 5 },
             { maxQueueWaitMs: 0 },
             // Above Node's largest timer delay, `setTimeout` would fire after 1 ms.
-            { timeoutMs: 2 ** 31 },
+            // (`maxQueueWaitMs` defaults to `timeoutMs`, so it is set to isolate the `timeoutMs` cap.)
+            { timeoutMs: 2 ** 31, maxQueueWaitMs: 1_000 },
             { maxQueueWaitMs: 2 ** 31 }
           ],
           isolation => Effect.exit(inWorker(input, isolation))
         )
+
+        // The largest delay Node honours is accepted.
+        const largest = yield* Effect.exit(
+          inWorker(input, { timeoutMs: 2 ** 31 - 1, maxQueueWaitMs: 2 ** 31 - 1 })
+        )
+
+        expect(Exit.isSuccess(largest)).toBe(true)
 
         for (const exit of [loader, ...invalid])
           expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)

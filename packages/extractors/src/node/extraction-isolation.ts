@@ -18,7 +18,10 @@ export type WorkerIsolationOptions = {
   readonly maxYoungGenerationSizeMb?: number
   /** Stack of the worker's main thread, in MB. Default 4 (Node's own default). */
   readonly stackSizeMb?: number
-  /** Wall-clock time a worker may run before it is terminated, in ms. Default 30,000. */
+  /**
+   * Wall-clock time a worker may run before it is terminated, in ms. Default 30,000. At most
+   * 2³¹−1 (Node's largest timer delay).
+   */
   readonly timeoutMs?: number
   /**
    * This layer's share of the realm-wide worker pool: at most this many of its extractions run at
@@ -31,6 +34,7 @@ export type WorkerIsolationOptions = {
    * How long an extraction may wait for a worker slot, in ms, before it fails with
    * `reason: 'busy'` without starting a worker. Slots are handed out first come, first served, and
    * a slot freed after the deadline never admits the extraction. Default: the layer's `timeoutMs`.
+   * At most 2³¹−1 (Node's largest timer delay).
    */
   readonly maxQueueWaitMs?: number
   /**
