@@ -61,7 +61,12 @@ export {
   makeCodeModeTool
 } from './tool.ts'
 
-export type { CodeModeLimits, MakeCodeModeToolOptions } from './tool.ts'
+export type {
+  CodeModeAfterNestedCallInput,
+  CodeModeLimits,
+  CodeModeNestedCallOutcome,
+  MakeCodeModeToolOptions
+} from './tool.ts'
 
 export {
   ClassifierToolParams,

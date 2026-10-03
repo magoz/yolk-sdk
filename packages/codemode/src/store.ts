@@ -10,6 +10,8 @@ export type CodeModeStructuredContent = {
   readonly codemode: {
     readonly ok: boolean
     readonly storeWrites?: CodeModeStoreWrites
+    /** Set on the result of a re-executed call whose earlier execution was abandoned. */
+    readonly interrupted?: true
   }
 }
 
