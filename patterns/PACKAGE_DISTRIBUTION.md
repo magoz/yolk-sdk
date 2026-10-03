@@ -46,7 +46,8 @@ Current Changesets config:
       "@yolk-sdk/harness",
       "@yolk-sdk/conformance",
       "@yolk-sdk/emulators",
-      "@yolk-sdk/codemode"
+      "@yolk-sdk/codemode",
+      "@yolk-sdk/extractors"
     ]
   ],
   "updateInternalDependencies": "patch",
@@ -137,6 +138,11 @@ Requirements:
 - source maps optional.
 - package-local `build`, `check`, and `test:run` scripts stay consistent.
 
+Exception: `@yolk-sdk/extractors` also builds `dist/node/extraction-worker.mjs` as one
+self-contained file (its dependencies inlined, the optional `xlsx` peer left as a dynamic
+import). It runs in its own worker thread, so Effect identity does not matter there, and hosts
+only have to ship that file and `xlsx` (ADR 0004).
+
 ## Dependency Policy
 
 Current canary policy: keep runtime libraries in package `dependencies` unless singleton identity matters at runtime. This makes first canary installs simpler and avoids peer-resolution friction while APIs are unstable.
@@ -147,7 +153,16 @@ Host-owned singletons/platform deps to revisit before stable releases:
 - `react`: optional peer for `@yolk-sdk/agent/react`.
 - `workflow`: current dependency for `@yolk-sdk/vercel-workflows`; revisit peer if host version skew matters.
 
-Current exception: `@yolk-sdk/agent` keeps `react` as an optional peer for the `./react` subpath. Keep platform-specific deps behind explicit subpaths.
+Current exceptions:
+
+- `@yolk-sdk/agent` keeps `react` as an optional peer for the `./react` subpath.
+- `@yolk-sdk/extractors` keeps SheetJS (`xlsx`, `>=0.20.3`) as an optional peer, loaded lazily by
+  `./node` only when an XLSX file is extracted. Fixed SheetJS releases ship only as a tarball from
+  `cdn.sheetjs.com` (npm `xlsx` stops at the vulnerable 0.18.5), and a published package must not
+  depend on a URL. Consumers install `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`; the
+  workspace installs the same tarball as a dev dependency (see `docs/adr/0004-extractors-package.md`).
+
+Keep platform-specific deps behind explicit subpaths.
 
 ## Public Package Set
 
@@ -163,6 +178,7 @@ Publish all public packages together:
 - `@yolk-sdk/conformance` (experimental)
 - `@yolk-sdk/emulators` (experimental)
 - `@yolk-sdk/codemode`
+- `@yolk-sdk/extractors`
 
 Rationale: lockstep versions are simpler when every public `packages/*` package is published together. Private app workspaces stay private; unstable public packages document instability in README.
 
@@ -238,7 +254,8 @@ for package in \
   @yolk-sdk/harness \
   @yolk-sdk/conformance \
   @yolk-sdk/emulators \
-  @yolk-sdk/codemode; do
+  @yolk-sdk/codemode \
+  @yolk-sdk/extractors; do
   npm view "$package" dist-tags --json
 done
 git fetch --tags
@@ -256,7 +273,7 @@ commands if they run back to back:
 
 ```bash
 version=<version>
-for package in agent mcp knowledge connectors sandbox vercel-workflows harness conformance emulators codemode; do
+for package in agent mcp knowledge connectors sandbox vercel-workflows harness conformance emulators codemode extractors; do
   npm dist-tag add "@yolk-sdk/$package@$version" latest --otp=<code>
 done
 ```
@@ -295,7 +312,7 @@ The Action publishes canaries with npm tag `canary` and stable versions with `la
 
 Trusted publishing can only be configured after a package exists on npm. For a renamed/new `@yolk-sdk/*` package, the first publish is the only approved local publish exception.
 
-Pending first publish: `@yolk-sdk/conformance`, `@yolk-sdk/emulators`, and `@yolk-sdk/codemode` still need the local first publish and trusted-publisher setup below, done by the owner.
+Pending first publish: `@yolk-sdk/conformance`, `@yolk-sdk/emulators`, `@yolk-sdk/codemode`, and `@yolk-sdk/extractors` still need the local first publish and trusted-publisher setup below, done by the owner.
 
 Preconditions:
 

@@ -175,6 +175,8 @@ filtering, and any coordination with the content document store.
   `KnowledgeSummarizer`, and `SearchIndexStore` layers. Summary/title values may be absent, but the
   current pipeline still requires the summarizer service.
 - Own concrete extraction, embeddings, search SQL/vector storage, and upload URLs.
+  `@yolk-sdk/extractors/knowledge` provides a `KnowledgeExtractor` for PDF, DOCX, XLSX, PPTX, and
+  text files (`FileKnowledgeExtractorLayer`) on top of its Node `FileExtractor`.
 - Keep slug uniqueness scoped to the host boundary.
 
 ## Boundaries

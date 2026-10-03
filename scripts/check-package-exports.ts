@@ -202,6 +202,12 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
     root: 'full'
   },
   {
+    packageDir: 'packages/extractors',
+    packageName: '@yolk-sdk/extractors',
+    expectedExports: ['./package.json', '.', './knowledge', './node', './node/extraction-worker'],
+    root: 'full'
+  },
+  {
     packageDir: 'packages/vercel-workflows',
     packageName: '@yolk-sdk/vercel-workflows',
     expectedExports: ['./package.json', '.', './effect', './testing', './workflow'],

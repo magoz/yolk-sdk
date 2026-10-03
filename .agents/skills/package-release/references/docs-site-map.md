@@ -58,6 +58,19 @@ Map changed code to docs that must be inspected or updated.
 | classifier tool                         | `integrations/code-mode.mdx`, `agent/classifier-models.mdx`                                   |
 | Next/Workflow setup                     | `integrations/code-mode.mdx`, `integrations/vercel-workflow.mdx`                              |
 
+## Extractors package
+
+| Change                                           | Docs                                                                              |
+| ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| formats, limits, errors, SheetJS install         | `packages/extractors/README.md`, `docs/adr/0004-extractors-package.md`            |
+| XLSX hyperlinks, archive validation, UTF-16 rule | `packages/extractors/README.md`, `packages/extractors/AGENTS.md`, ADR 0004        |
+| knowledge adapter                                | `packages/extractors/README.md`, `packages/knowledge/README.md` (extraction note) |
+
+The docs site lists `@yolk-sdk/extractors` (role and subpaths) in `index.mdx` and
+`reference/packages.mdx`, and its `extractors/knowledge -> knowledge` edge in
+`reference/architecture.mdx`; update those with the package list or dependency direction. There
+is no dedicated API page yet; the README is the API reference.
+
 ## Conformance and emulators packages
 
 | Change                                        | Docs                                                                                              |

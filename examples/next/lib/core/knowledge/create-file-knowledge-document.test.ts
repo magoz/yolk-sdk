@@ -7,10 +7,10 @@ import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'
 import { KnowledgeFileError } from '@yolk-sdk/knowledge/errors'
 import type { PutKnowledgeFileInput } from '@yolk-sdk/knowledge/files'
+import { FileExtractionError, FileExtractor } from '@yolk-sdk/extractors'
+import { FileExtractorLayer } from '@yolk-sdk/extractors/node'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
-import { FileExtractionError } from '@/lib/services/file-extractor/errors'
 import { createFileKnowledgeDocument } from './create-file-knowledge-document'
 import { deleteKnowledgeDocument } from './delete-knowledge-document'
 import { getKnowledgeContext } from './get-knowledge-context'
@@ -141,7 +141,7 @@ describeWithDb('createFileKnowledgeDocument', () => {
           })
         ),
         Effect.provide(DefaultKnowledgeChunkerLive()),
-        Effect.provide(FileExtractor.layer),
+        Effect.provide(FileExtractorLayer),
         Effect.provide(Db.layer),
         Effect.scoped
       )

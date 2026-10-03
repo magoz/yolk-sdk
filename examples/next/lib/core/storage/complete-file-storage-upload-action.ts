@@ -8,7 +8,7 @@ import { AppLayer } from '@/lib/layers'
 import { ValidationError } from '@/lib/core/errors'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
-import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
+import { FileExtractorLayer } from '@yolk-sdk/extractors/node'
 import { R2KnowledgeFileBlobStoreLayer } from '@/lib/services/knowledge/live-layer'
 import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
@@ -20,7 +20,7 @@ const CompleteFileStorageUploadActionLayer = Layer.mergeAll(
   AppLayer,
   AppKnowledgeSearchLayer.pipe(Layer.provide(AppLayer)),
   R2KnowledgeFileBlobStoreLayer,
-  FileExtractor.layer
+  FileExtractorLayer
 )
 
 export const completeFileStorageUploadAction = async (input: {

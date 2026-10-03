@@ -61,6 +61,7 @@ metadata.
 - `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./afloat`, `./afloat/conformance`, `./conformance`, `./dropbox`, `./dropbox/conformance`, `./email`, `./email/conformance`, `./figma`, `./fortnox`, `./fortnox/conformance`, `./github`, `./github/conformance`, `./google`, `./google/conformance`, `./linkedin-search`, `./linkedin-search/conformance`, `./microsoft`, `./microsoft/conformance`, `./notion`, `./notion/conformance`, `./r2-storage`, `./r2-storage/conformance`, `./telegram`, `./telegram/conformance`, `./todoist`, and `./todoist/conformance`. `./conformance` (experimental) holds conformance/testing-only Effect `HttpClient` bridges to the connector HTTP ports (string, binary read, and binary write with upload sessions) plus a static credential resolver and the `ConformanceCleanupReporter` reference; it is not a production adapter.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/codemode` owns code mode (ADR 0002): the root exports `makeCodeModeTool`, the `CodeModeExecutor` interface, catalog rendering and discovery helpers, result bounding, `codeModeStoreFromToolResults`, and `makeClassifierTool`; `./node` exports the Node-only pi executor (`makePiCodeModeExecutor`).
+- `@yolk-sdk/extractors` owns file text extraction (ADR 0004): the root exports the runtime-portable contract (`FileInput`, `ExtractedFile`, formats, the `Schema.TaggedError` errors, `fileFormatFor`, `defaultFileExtractorLimits`, and the `FileExtractor` service tag) with no parser imports; `./node` exports the Node `FileExtractor` layers (PDF via `unpdf`, DOCX via `mammoth`, XLSX via the lazily loaded SheetJS optional peer, PPTX and Office archive validation via `fflate` and `node:zlib`/`node:stream`) and `normalizeOfficeArchive`; `./knowledge` exports `FileKnowledgeExtractorLayer`, a `@yolk-sdk/knowledge/extraction` `KnowledgeExtractor` backed by `FileExtractor`.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, `./testing` exports the `TestWorkflowWorld` behavioral emulator, and hosts own concrete Workflow directives.
 - `@yolk-sdk/harness` owns run lifecycle (coordinator, store, inbox, driver, outcome). Public subpaths: `./coordinator`, `./store`, `./inbox`, `./driver`, `./driver/memory`, `./driver/durable-object`, and `./outcome`. It does not replace `@yolk-sdk/agent/loop`.
 - `@yolk-sdk/conformance` (experimental) owns wire fixtures, port fixtures (`PortFixture`: one recorded call through a host port that is not HTTP), offline fail-closed replay, wire faults, recording over a host-provided `HttpClient`, conformance case definitions, and the safety-gated case runner. Public subpaths: `./fixture`, `./replay`, `./record`, `./case`, and `./runner`; there is no root export. It performs no network I/O itself.
@@ -76,6 +77,7 @@ metadata.
 - MCP internals live under `packages/mcp/src/*`, not separate workspace packages.
 - Sandbox internals live under `packages/sandbox/src/*`, not separate workspace packages.
 - Code mode internals live under `packages/codemode/src/*`, not app code.
+- Extractor internals live under `packages/extractors/src/*`; Node-only code lives under `packages/extractors/src/node/*` (entry `src/node/index.ts`).
 - Vercel Workflow internals live under `packages/vercel-workflows/src/*`, not app code.
 - Harness internals live under `packages/harness/src/*`, not app code.
 - Conformance internals live under `packages/conformance/src/*`, not app code.
@@ -85,6 +87,7 @@ metadata.
   - `packages/mcp/test/{client,server,conformance}`
   - `packages/sandbox/test/{core,agent,vercel}.test.ts`
   - `packages/codemode/test`
+  - `packages/extractors/test`
   - `packages/vercel-workflows/test`
   - `packages/harness/test`
   - `packages/conformance/test`
@@ -99,6 +102,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/sandbox root -> Effect only; ./agent -> sandbox core + @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
 @yolk-sdk/codemode root -> @yolk-sdk/agent/{protocol,loop,tools,classification} + Effect + @earendil-works/pi-codemode/declarations (pure); ./node -> codemode core + @earendil-works/pi-codemode (exact 1.0.0) + node:module; @yolk-sdk/agent never imports code mode
+@yolk-sdk/extractors root -> Effect only (no parsers, no Node builtins); ./node -> extractors root + Effect + unpdf + mammoth + fflate + node:zlib/node:stream/node:buffer + lazily imported SheetJS (`xlsx` optional peer >=0.20.3); ./knowledge -> extractors root + @yolk-sdk/knowledge/{documents,errors,extraction}; @yolk-sdk/knowledge never imports extractors
 @yolk-sdk/vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
 @yolk-sdk/harness core -> Effect only; ./outcome -> @yolk-sdk/agent/{protocol,loop,compaction}; no app/auth/UI/product policy
 @yolk-sdk/conformance -> Effect only (no @yolk-sdk/*, Node builtins, React, Next); hosts supply the network HttpClient
@@ -128,7 +132,7 @@ Conformance import rule (canonical statement; other docs reference it): in `pack
 - Use explicit `exports`; avoid broad root barrels for feature APIs.
 - No top-level env reads, service construction, SDK clients, or network calls in packages.
 - Import types as types; Oxlint enforces `typescript/consistent-type-imports`.
-- Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/codemode/node`, `@yolk-sdk/mcp/client/node`, `@yolk-sdk/mcp/server/node`, `@yolk-sdk/emulators/node`, `@yolk-sdk/emulators/fortnox`, `@yolk-sdk/emulators/microsoft`, `@yolk-sdk/emulators/dropbox`, `@yolk-sdk/emulators/notion`, `@yolk-sdk/emulators/todoist`, `@yolk-sdk/emulators/telegram`, `@yolk-sdk/emulators/github`, `@yolk-sdk/emulators/google`, `@yolk-sdk/emulators/linkedin-search`, `@yolk-sdk/emulators/mcp`).
+- Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/codemode/node`, `@yolk-sdk/extractors/node`, `@yolk-sdk/mcp/client/node`, `@yolk-sdk/mcp/server/node`, `@yolk-sdk/emulators/node`, `@yolk-sdk/emulators/fortnox`, `@yolk-sdk/emulators/microsoft`, `@yolk-sdk/emulators/dropbox`, `@yolk-sdk/emulators/notion`, `@yolk-sdk/emulators/todoist`, `@yolk-sdk/emulators/telegram`, `@yolk-sdk/emulators/github`, `@yolk-sdk/emulators/google`, `@yolk-sdk/emulators/linkedin-search`, `@yolk-sdk/emulators/mcp`).
 - Prefer runtime-portable Effect APIs in package code.
 
 ## Workspace Setup
@@ -150,6 +154,7 @@ Conformance import rule (canonical statement; other docs reference it): in `pack
 - Boundary script prevents knowledge from importing MCP/React/Next/Node.
 - Boundary script prevents sandbox core from importing agent deps and `@vercel/sandbox` outside `packages/sandbox/src/vercel`.
 - Boundary script keeps `@yolk-sdk/codemode` to `@yolk-sdk/agent` among Yolk packages, keeps Node builtins, the pi runtime (`@earendil-works/pi-codemode` root and `/worker`, `quickjs-wasi`), and `@yolk-sdk/codemode/node` out of the code mode core (only `packages/codemode/src/node.ts` may use them), and prevents `@yolk-sdk/agent` from importing code mode.
+- Boundary script keeps `@yolk-sdk/extractors` to `@yolk-sdk/knowledge` among Yolk packages, and only in `packages/extractors/src/knowledge.ts`; keeps Node builtins, the parsers (`unpdf`, `mammoth`, `xlsx`, `fflate`), and `@yolk-sdk/extractors/node` out of the root and `./knowledge` (only `packages/extractors/src/node/**` may use them); and prevents `@yolk-sdk/knowledge` from importing extractors.
 - Boundary script prevents harness from importing agent/knowledge/MCP/Next/React/Node except `packages/harness/src/outcome.ts`, which may import `@yolk-sdk/agent/{loop,protocol,compaction}`.
 - Boundary script prevents conformance from importing other `@yolk-sdk/*` packages, Node builtins, React, or Next.
 - Boundary script enforces the conformance import rule from [Dependency Direction](#dependency-direction).

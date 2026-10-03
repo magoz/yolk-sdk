@@ -13,7 +13,8 @@
       "@yolk-sdk/harness",
       "@yolk-sdk/conformance",
       "@yolk-sdk/emulators",
-      "@yolk-sdk/codemode"
+      "@yolk-sdk/codemode",
+      "@yolk-sdk/extractors"
     ]
   ],
   "linked": [],
