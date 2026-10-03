@@ -13,6 +13,7 @@ Generic host tool registration and resolution.
 - `ModelVisibleToolError` helpers for recoverable, model-visible tool failures.
 - Model-argument decoding through the advertised JSON codec (`null` on `Schema.optional` means
   absent) and `omitNullOptionalToolArguments`, which `resolveTools` applies to every call.
+- `withToolArgumentsErrorHint` for actionable unknown-key validation messages.
 
 ## Use it when
 

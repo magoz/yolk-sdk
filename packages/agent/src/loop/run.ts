@@ -70,6 +70,7 @@ import {
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName, validInteractionReceipt } from '../protocol/tool.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-arguments-internal.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
@@ -710,10 +711,10 @@ const questionToolResult = (
   })
 }
 
-const invalidQuestionToolResult = (call: ToolCall) =>
+const invalidQuestionToolResult = (call: ToolCall, error: Schema.SchemaError) =>
   ToolResult.make({
     toolCallId: call.id,
-    content: 'Invalid question arguments.',
+    content: withToolArgumentsErrorHint(`Invalid question arguments: ${error.message}`, error),
     isError: true,
     structuredContent: { type: 'question_invalid' }
   })
@@ -740,7 +741,7 @@ const prepareQuestionCall = (
       return PreparedToolCall.Result({
         index,
         call,
-        result: invalidQuestionToolResult(call),
+        result: invalidQuestionToolResult(call, decoded.failure),
         events: []
       })
     }
@@ -899,7 +900,10 @@ const prepareInputCall = (input: {
         events: [],
         result: ToolResult.make({
           toolCallId: input.call.id,
-          content: `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+          content: withToolArgumentsErrorHint(
+            `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+            validCall.failure
+          ),
           isError: true
         })
       })
@@ -1067,7 +1071,10 @@ const prepareInteractionCall = (input: {
         events: [],
         result: ToolResult.make({
           toolCallId: input.call.id,
-          content: `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+          content: withToolArgumentsErrorHint(
+            `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+            validCall.failure
+          ),
           isError: true
         })
       })

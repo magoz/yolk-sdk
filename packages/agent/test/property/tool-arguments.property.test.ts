@@ -238,7 +238,7 @@ describe('tool argument property tests', () => {
   )
 
   it.effect.prop(
-    'an unknown key is rejected when it carries a value and ignored when it is null',
+    'an unknown key is rejected with a hint, with a value and with null',
     [propertyCaseArbitrary],
     ([input]) =>
       Effect.gen(function* () {
@@ -250,17 +250,16 @@ describe('tool argument property tests', () => {
 
           if (!isRecord(valid)) continue
 
-          const baseline = yield* decodeThroughRegistry(input.family, valid)
-          const withValue = yield* decodeThroughRegistry(input.family, { ...valid, unknown: 'x' })
-          const withNull = yield* decodeThroughRegistry(input.family, { ...valid, unknown: null })
+          for (const unknown of ['x', null]) {
+            const run = yield* decodeThroughRegistry(input.family, { ...valid, unknown })
 
-          expect(withValue.received).toHaveLength(0)
-          expect(withValue.result).toMatchObject({
-            isError: true,
-            structuredContent: { type: 'model_visible_tool_error', reason: 'validation' }
-          })
-          expect(withNull.result.isError).toBeUndefined()
-          expect(asJson(withNull.received)).toEqual(asJson(baseline.received))
+            expect(run.received).toHaveLength(0)
+            expect(run.result).toMatchObject({
+              isError: true,
+              content: expect.stringContaining('Unknown argument "unknown"'),
+              structuredContent: { type: 'model_visible_tool_error', reason: 'validation' }
+            })
+          }
         }
       }),
     propertyOptions

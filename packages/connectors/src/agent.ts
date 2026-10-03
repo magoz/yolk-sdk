@@ -4,6 +4,7 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   makeTool,
+  withToolArgumentsErrorHint,
   type ToolAccess,
   type ToolModule,
   type ToolRegistration
@@ -101,7 +102,10 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
     output: action?.outputSchema,
     access: resolveAccess(options.access, actionId, action?.access),
     invalidParamsMessage: error =>
-      `Invalid ${name} arguments: ${error instanceof Error ? error.message : String(error)}`,
+      withToolArgumentsErrorHint(
+        `Invalid ${name} arguments: ${error instanceof Error ? error.message : String(error)}`,
+        error
+      ),
     execute: ({ call, context, params }) =>
       resolveIntegration(options.integration, context).pipe(
         Effect.flatMap(integration =>

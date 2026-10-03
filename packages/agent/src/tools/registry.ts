@@ -37,6 +37,7 @@ import {
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName } from '../protocol/tool.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-arguments-internal.ts'
 import {
   decodeToolArguments,
   omitNullOptionalToolArguments,
@@ -553,7 +554,9 @@ const invalidParamsMessage = (
     readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
   },
   error: Schema.SchemaError
-) => options.invalidParamsMessage?.(error) ?? `Invalid ${options.name} arguments: ${String(error)}`
+) =>
+  options.invalidParamsMessage?.(error) ??
+  withToolArgumentsErrorHint(`Invalid ${options.name} arguments: ${String(error)}`, error)
 
 type MakeToolRegistrationFields = {
   def: ToolDef

@@ -2,7 +2,7 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolRegistration } from '@yolk-sdk/agent/tools'
+import { makeTool, withToolArgumentsErrorHint, type ToolRegistration } from '@yolk-sdk/agent/tools'
 import {
   KnowledgeAvailabilitySchema,
   NonNegativeInteger,
@@ -193,7 +193,10 @@ export const makeKnowledgeLookupTool = <Context>(
     parameters: KnowledgeLookupParams,
     access: 'read',
     invalidParamsMessage: error =>
-      `Invalid knowledge lookup arguments: ${error instanceof Error ? error.message : String(error)}`,
+      withToolArgumentsErrorHint(
+        `Invalid knowledge lookup arguments: ${error instanceof Error ? error.message : String(error)}`,
+        error
+      ),
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         if (params.operation === 'search') {
@@ -233,7 +236,10 @@ export const makeKnowledgeManageTool = <Context>(
     parameters: KnowledgeManageParams,
     access: 'write',
     invalidParamsMessage: error =>
-      `Invalid knowledge manage arguments: ${error instanceof Error ? error.message : String(error)}`,
+      withToolArgumentsErrorHint(
+        `Invalid knowledge manage arguments: ${error instanceof Error ? error.message : String(error)}`,
+        error
+      ),
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         switch (params.operation) {

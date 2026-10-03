@@ -19,10 +19,10 @@ import { ToolCall, type ToolJsonSchema } from '@yolk-sdk/agent/protocol'
 //    fields still reject `null`; unknown keys are rejected at any depth, also through declarations
 //    whose JSON codec bypasses their own parser.
 // 2. `omitNullOptionalToolArguments` covers properties advertised as optional WITHOUT `null`
-//    (`Schema.optionalKey(X)`, raw/MCP JSON Schemas) and `null` on keys a closed object does not
-//    declare (provider-flattened unions show every branch's fields). Strict-mode models still fill
-//    those with `null`; the registry drops such a `null` before any registration decodes or forwards
-//    the arguments.
+//    (`Schema.optionalKey(X)`, raw/MCP JSON Schemas) and `null` on an undeclared key that another
+//    member of the enclosing union declares (provider-flattened unions show every member's
+//    fields). Strict-mode models still fill those with `null`; the registry drops such a `null`
+//    before any registration decodes or forwards the arguments.
 
 type ToolArgumentsSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
 
@@ -259,14 +259,44 @@ const matchesLiteral = (schema: JsonObject, value: Schema.Json) => {
   return enumValues === undefined || enumValues.includes(value)
 }
 
+const noSiblingKeys: ReadonlySet<string> = new Set()
+
+// Property names declared by any member of a union. Provider-flattened schemas (Anthropic) show
+// the model every member's fields, so a `null` on one of these keys means "not sent".
+const unionPropertyNames = (
+  members: ReadonlyArray<Schema.Json>,
+  definitions: JsonObject
+): ReadonlySet<string> => {
+  const names = new Set<string>()
+
+  for (const member of members) {
+    const record = jsonObject(resolveSchema(member, definitions))
+
+    if (record === undefined) continue
+
+    for (const part of [record, ...(schemaArray(record, 'allOf') ?? [])]) {
+      const properties = schemaRecord(
+        jsonObject(resolveSchema(part, definitions)) ?? {},
+        'properties'
+      )
+
+      for (const name of Object.keys(properties ?? {})) names.add(name)
+    }
+  }
+
+  return names
+}
+
 /** Whether a union member can describe the value. Object members are matched on literal
- * discriminators, required keys, and closed property sets; optional `null` values count as absent
- * so a strict-mode `null` does not disqualify the intended member.
+ * discriminators, required keys, and closed property sets; optional `null` values, and `null` on
+ * a key only another member declares, count as absent so a strict-mode `null` does not
+ * disqualify the intended member.
  */
 const unionMemberMatches = (
   member: Schema.Json,
   value: Schema.Json,
-  definitions: JsonObject
+  definitions: JsonObject,
+  siblingKeys: ReadonlySet<string>
 ): boolean => {
   const resolved = resolveSchema(member, definitions)
 
@@ -295,7 +325,10 @@ const unionMemberMatches = (
     const propertySchema = resolveSchema(ownValue(properties, key), definitions)
 
     if (propertySchema === undefined) {
-      if (ownValue(record, 'additionalProperties') === false && propertyValue !== null) {
+      if (
+        ownValue(record, 'additionalProperties') === false &&
+        !(propertyValue === null && siblingKeys.has(key))
+      ) {
         return false
       }
 
@@ -318,14 +351,17 @@ const normalizeObject = (
   schema: JsonObject,
   value: JsonObject,
   definitions: JsonObject,
-  depth: number
+  depth: number,
+  siblingKeys: ReadonlySet<string>
 ): JsonObject => {
   const properties = schemaRecord(schema, 'properties')
   const additionalProperties = ownValue(schema, 'additionalProperties')
 
-  const closed = additionalProperties === false
-
-  if (properties === undefined && !closed && jsonObject(additionalProperties) === undefined) {
+  if (
+    properties === undefined &&
+    siblingKeys.size === 0 &&
+    jsonObject(additionalProperties) === undefined
+  ) {
     return value
   }
 
@@ -337,12 +373,16 @@ const normalizeObject = (
     const declaredSchema = properties === undefined ? undefined : ownValue(properties, key)
     const propertySchema = declaredSchema ?? additionalProperties
 
-    // `null` means "not sent": drop it on optional non-nullable properties, and on keys a closed
-    // object does not declare (e.g. another branch's field from a provider-flattened union).
+    // `null` means "not sent": drop it on optional non-nullable properties, and on an undeclared
+    // key only another member of the enclosing union declares (provider-flattened unions show
+    // every member's fields). Any other undeclared key stays and fails decoding, so a misspelled
+    // `null` (e.g. a "clear" meant for another key) never silently succeeds.
     if (
       propertyValue === null &&
       !required.has(key) &&
-      (declaredSchema === undefined ? closed : !admitsNull(declaredSchema, definitions, 0))
+      (declaredSchema === undefined
+        ? siblingKeys.has(key)
+        : !admitsNull(declaredSchema, definitions, 0))
     ) {
       changed = true
 
@@ -392,18 +432,26 @@ const normalizeUnion = (
   definitions: JsonObject,
   depth: number
 ): Schema.Json => {
-  const candidates = members.filter(member => unionMemberMatches(member, value, definitions))
+  const siblingKeys = unionPropertyNames(members, definitions)
+
+  const candidates = members.filter(member =>
+    unionMemberMatches(member, value, definitions, siblingKeys)
+  )
+
   const [candidate] = candidates
 
   // Ambiguous or unmatched unions stay untouched; the decoder reports the real error.
-  return candidates.length === 1 ? normalizeValue(candidate, value, definitions, depth + 1) : value
+  return candidates.length === 1
+    ? normalizeValue(candidate, value, definitions, depth + 1, siblingKeys)
+    : value
 }
 
 const normalizeValue = (
   schema: Schema.Json | undefined,
   value: Schema.Json,
   definitions: JsonObject,
-  depth: number
+  depth: number,
+  siblingKeys: ReadonlySet<string> = noSiblingKeys
 ): Schema.Json => {
   if (depth > maxSchemaDepth || !(isJsonObject(value) || isJsonArray(value))) return value
 
@@ -414,7 +462,7 @@ const normalizeValue = (
   let normalized: Schema.Json = value
 
   for (const member of schemaArray(resolved, 'allOf') ?? []) {
-    normalized = normalizeValue(member, normalized, definitions, depth + 1)
+    normalized = normalizeValue(member, normalized, definitions, depth + 1, siblingKeys)
   }
 
   for (const key of ['anyOf', 'oneOf']) {
@@ -427,12 +475,15 @@ const normalizeValue = (
 
   const record = jsonObject(normalized)
 
-  return record === undefined ? normalized : normalizeObject(resolved, record, definitions, depth)
+  return record === undefined
+    ? normalized
+    : normalizeObject(resolved, record, definitions, depth, siblingKeys)
 }
 
 /** Drops `null` from model-produced tool arguments only where the advertised JSON Schema marks
  * the property optional and does not admit `null` (for example `Schema.optionalKey(X)` or a raw
- * MCP schema), or where a closed object (`additionalProperties: false`) does not declare the key. Follows local `$ref`/`$defs`, `allOf`, discriminated `anyOf`/`oneOf`, and arrays;
+ * MCP schema), or on an undeclared key that another member of the enclosing union declares
+ * (provider-flattened unions show every member's fields). Follows local `$ref`/`$defs`, `allOf`, discriminated `anyOf`/`oneOf`, and arrays;
  * ambiguous unions are left untouched. A declared nullable value is never rewritten. Non-JSON
  * arguments and unchanged arguments are returned as the same reference.
  */

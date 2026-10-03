@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { QuestionToolParams, ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
 import { questionToolName } from '../protocol/tool.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-arguments-internal.ts'
 import { makeTool, type ToolModule, type ToolRegistration } from './registry.ts'
 
 export { questionToolName }
@@ -39,7 +40,10 @@ export const makeQuestionToolRegistration = <Context>(
     parameters: QuestionToolParams,
     access: 'read',
     invalidParamsMessage: error =>
-      `Invalid question arguments: ${error instanceof Error ? error.message : String(error)}`,
+      withToolArgumentsErrorHint(
+        `Invalid question arguments: ${error instanceof Error ? error.message : String(error)}`,
+        error
+      ),
     execute: ({ call, context, params }) =>
       call.name === questionToolName
         ? options.execute({ call, context, params })

@@ -10,6 +10,7 @@ import {
   type ToolJsonSchema
 } from '@yolk-sdk/agent/protocol'
 import {
+  EmptyToolParams,
   makeInputTool,
   makeInteractionTool,
   makeQuestionToolModule,
@@ -608,7 +609,7 @@ const closedDeclaration = <S extends Schema.Top>(schema: S) =>
 const expectValidationError = (result: ToolResult, key: string) =>
   expect(result).toMatchObject({
     isError: true,
-    content: expect.stringContaining('Expected no excess property'),
+    content: expect.stringContaining(`Unknown argument "${key}"`),
     structuredContent: {
       type: 'model_visible_tool_error',
       reason: 'validation',
@@ -702,6 +703,56 @@ describe('unknown tool argument keys', () => {
     })
   )
 
+  it.effect('names unknown keys and lists the allowed keys at their path', () =>
+    Effect.gen(function* () {
+      const { tool } = capturingTool(Nested)
+      const toolSet = yield* resolveOne(tool)
+
+      const root = yield* toolSet.execute(call({ id: 'a', start: 'x' }))
+
+      expect(root.content).toContain('Invalid probe arguments: SchemaError(')
+      expect(root.content).toContain(
+        'Unknown argument "start". Allowed arguments: id, note, child.'
+      )
+
+      const nested = yield* toolSet.execute(call({ id: 'a', child: { tag: 't', extra: true } }))
+
+      expect(nested.content).toContain('Unknown argument "extra" in "child". Allowed there: tag.')
+
+      const union = capturingTool(Operations)
+      const unionSet = yield* resolveOne(union.tool)
+      const branch = yield* unionSet.execute(call({ kind: 'delete', reason: 'r', force: true }))
+
+      expect(branch.content).toContain('Unknown argument "force". Allowed arguments: kind, reason.')
+
+      const empty = capturingTool(EmptyToolParams)
+      const emptySet = yield* resolveOne(empty.tool)
+      const none = yield* emptySet.execute(call({ verbose: true }))
+
+      expect(none.content).toContain('Unknown argument "verbose". Allowed arguments: none.')
+    })
+  )
+
+  it.effect('rejects null on a key no union member declares instead of dropping it', () =>
+    Effect.gen(function* () {
+      const Task = Schema.Struct({
+        id: Schema.String,
+        dueDate: Schema.optional(Schema.NullOr(Schema.String))
+      })
+
+      const { tool, received } = capturingTool(Task)
+      const toolSet = yield* resolveOne(tool)
+
+      // A misspelled "clear" must not silently succeed without clearing anything.
+      expectValidationError(yield* toolSet.execute(call({ id: 'a', due_date: null })), 'due_date')
+      expect(received).toHaveLength(0)
+
+      yield* toolSet.execute(call({ id: 'a', dueDate: null }))
+
+      expect(received).toEqual([{ id: 'a', dueDate: null }])
+    })
+  )
+
   it.effect('selects the union member that declares every sent key', () =>
     Effect.gen(function* () {
       const { tool, received } = capturingTool(
@@ -771,7 +822,13 @@ describe('unknown tool argument keys', () => {
       expect(
         Array.from(events).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
       ).toMatchObject({
-        result: { isError: true, structuredContent: { type: 'question_invalid' } }
+        result: {
+          isError: true,
+          content: expect.stringContaining(
+            'Unknown argument "placeholder" in "questions.0". Allowed there: id, prompt, options, multiple, allowCustom, required.'
+          ),
+          structuredContent: { type: 'question_invalid' }
+        }
       })
     })
   )

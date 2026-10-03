@@ -18,6 +18,8 @@ export {
 
 export { omitNullOptionalToolArguments } from './arguments.ts'
 
+export { withToolArgumentsErrorHint } from '../protocol/tool-arguments-internal.ts'
+
 export { makeInputTool, makeInputToolDef, makeInputToolModule } from './input.ts'
 
 export type { MakeInputToolOptions, InputToolModule } from './input.ts'
