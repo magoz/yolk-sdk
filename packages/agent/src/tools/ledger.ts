@@ -281,7 +281,9 @@ export const defaultToolLedgerMaxWaitMs = 150_000
 
 export const defaultToolLedgerMaxResultBytes = 1024 * 1024
 
-/** Timeout of one `store.complete` attempt (three attempts at most). */
+/** Timeout of one `store.complete` attempt (three attempts at most) and of each `store.heartbeat`.
+ * It only cuts interruptible store work (see `ToolLedgerStore`).
+ */
 export const toolLedgerCompleteTimeoutMs = 5_000
 
 /** UTF-8 byte budget of `ToolLedgerEntry.args`. */
@@ -664,6 +666,22 @@ const ledgerUnavailable = (call: ToolCall) => (error: ToolLedgerError) =>
     message: `The tool ledger is unavailable (${error.message}); ${call.name} was not run.`
   })
 
+// One store write, failing with a `ToolLedgerError` once `toolLedgerCompleteTimeoutMs` passes.
+// The timeout interrupts the operation and waits for it to stop, so it only bounds interruptible
+// store work (the `ToolLedgerStore` contract).
+const boundedStoreWrite = <A>(
+  write: Effect.Effect<A, ToolLedgerError>
+): Effect.Effect<A, ToolLedgerError> =>
+  write.pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.millis(toolLedgerCompleteTimeoutMs),
+      orElse: () =>
+        Effect.fail(
+          new ToolLedgerError({ message: `timed out after ${toolLedgerCompleteTimeoutMs} ms` })
+        )
+    })
+  )
+
 const succeededOutcome = (result: ToolResult, maxBytes: number): ToolLedgerOutcome =>
   ToolLedgerSucceeded.make({ result: toolLedgerResult(result, maxBytes) })
 
@@ -808,34 +826,27 @@ export const executeLedgered = (input: {
     const heartbeat = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
 
-      yield* store.heartbeat({
-        key,
-        leaseExpiresAtMs: now + options.leaseMs,
-        leaseMs: options.leaseMs
-      })
+      yield* boundedStoreWrite(
+        store.heartbeat({
+          key,
+          leaseExpiresAtMs: now + options.leaseMs,
+          leaseMs: options.leaseMs
+        })
+      )
     }).pipe(
       Effect.catch(error =>
         Effect.logWarning(`Tool ledger heartbeat failed for ${key}: ${error.message}`)
       )
     )
 
-    // Each attempt is bounded, so a hung store never holds the call (or its interruption) for
-    // long; an outcome that cannot be recorded leaves the entry claimed (it reads as abandoned).
+    // Each attempt is bounded, so a hung (interruptible) store never holds the call or its
+    // interruption for long; an outcome that cannot be recorded leaves the entry claimed (it reads
+    // as abandoned).
     const complete = (outcome: ToolLedgerOutcome) =>
       Effect.gen(function* () {
         const completedAtMs = yield* Clock.currentTimeMillis
 
-        yield* store.complete({ key, outcome, completedAtMs }).pipe(
-          Effect.timeoutOrElse({
-            duration: Duration.millis(toolLedgerCompleteTimeoutMs),
-            orElse: () =>
-              Effect.fail(
-                new ToolLedgerError({
-                  message: `timed out after ${toolLedgerCompleteTimeoutMs} ms`
-                })
-              )
-          })
-        )
+        yield* boundedStoreWrite(store.complete({ key, outcome, completedAtMs }))
       }).pipe(
         Effect.retry({ times: 2 }),
         Effect.catch(error =>

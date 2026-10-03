@@ -421,6 +421,37 @@ describe('tool ledger', () => {
     })
   )
 
+  it.effect('times out and logs a hung heartbeat', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+      const store: ToolLedgerStore = { ...memory, heartbeat: () => Effect.never }
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+
+      const running = yield* Effect.forkChild(
+        execute([noteTool(probe, { sleep: '10 seconds' })], noteCall(), {
+          store,
+          leaseMs: 6_000
+        }).pipe(Effect.provide(logger))
+      )
+
+      yield* TestClock.adjust('10 seconds')
+
+      const result = yield* Fiber.join(running)
+      const [entry] = yield* memory.entries
+
+      expect(result.content).toBe('appended hot lead (1)')
+      expect(entry?.outcome?._tag).toBe('Succeeded')
+      // First heartbeat at 2 s, timed out at 7 s; the next one starts 2 s later.
+      expect(messages).toEqual([
+        [
+          `Tool ledger heartbeat failed for call_1: timed out after ${toolLedgerCompleteTimeoutMs} ms`
+        ]
+      ])
+    })
+  )
+
   it.effect('never re-executes an abandoned call', () =>
     Effect.gen(function* () {
       const probe = makeProbe()
