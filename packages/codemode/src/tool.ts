@@ -17,6 +17,7 @@ import {
   boundNestedToolCallArgs,
   makeNestedToolCallRecorder,
   nestedToolCallMaxErrorChars,
+  nestedToolCallRecordLimit,
   nestedToolCallResultFields,
   recordNestedToolCall,
   truncateCodePoints,
@@ -76,7 +77,8 @@ export type CodeModeLimits = {
   /** VM heap cap. Default 64 MiB. */
   readonly memoryLimitBytes?: number
   /** Nested tool calls per script; further calls reject with an Error. Default 256. The
-   * `nestedCalls` record keeps up to this many calls (argument byte budgets still apply).
+   * `nestedCalls` record keeps up to this many calls, at most `nestedToolCallMaxRecordedCalls`
+   * (4096) whatever the limit (argument byte budgets still apply).
    */
   readonly maxNestedCalls?: number
   /** Model-visible result characters, cut head and tail with an omission marker. Default 40000. */
@@ -391,10 +393,26 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                   : Effect.gen(function* () {
                       const started = yield* Clock.currentTimeMillis
 
+                      // Host observability never changes the call: a hook failure, defects included,
+                      // is only logged.
+                      const afterNestedCallSafely = (
+                        hookInput: CodeModeAfterNestedCallInput<Context>
+                      ) =>
+                        afterNestedCall(hookInput).pipe(
+                          Effect.exit,
+                          Effect.flatMap(hookExit =>
+                            Exit.isSuccess(hookExit)
+                              ? Effect.void
+                              : Effect.logWarning(
+                                  `Code mode afterNestedCall failed for ${nestedCall.id}; ignored: ${Cause.pretty(hookExit.cause)}`
+                                )
+                          )
+                        )
+
                       return yield* nested.execute(nestedCall).pipe(
                         Effect.onExit(exit =>
                           Effect.flatMap(Clock.currentTimeMillis, finished =>
-                            afterNestedCall(
+                            afterNestedCallSafely(
                               Exit.isSuccess(exit)
                                 ? {
                                     call: nestedCall,
@@ -671,7 +689,7 @@ const abandonedScriptResult =
     const text = [
       `Script interrupted: an earlier execution of this ${call.name} call (${call.id}) started but never recorded a result. The script was not run again.`,
       listing,
-      'Read-only calls are not ledgered and are not listed. Verify the state these calls affect before repeating any work.'
+      'Calls the ledger policy skips (by default read-only calls) are not listed. Verify the state these calls affect before repeating any work.'
     ].join('\n\n')
 
     const structuredContent: CodeModeStructuredContent = {
@@ -681,7 +699,10 @@ const abandonedScriptResult =
           : {
               ok: false,
               interrupted: true,
-              interruptedCalls: interruptedCalls(nested, limits.maxNestedCalls)
+              interruptedCalls: interruptedCalls(
+                nested,
+                nestedToolCallRecordLimit(limits.maxNestedCalls)
+              )
             }
     }
 

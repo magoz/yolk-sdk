@@ -252,6 +252,34 @@ describe('tool ledger', () => {
     })
   )
 
+  it.effect('ignores a non-finite deadline', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore()
+      const tools = [noteTool(probe, { sleep: '1 minute' })]
+      const first = yield* Effect.forkChild(execute(tools, noteCall(), { store }))
+
+      yield* TestClock.adjust('1 second')
+
+      const second = yield* Effect.forkChild(
+        execute(tools, noteCall(), { store, maxWaitMs: 3_000, deadline: () => Number.NaN }).pipe(
+          Effect.timeoutOption('10 seconds')
+        )
+      )
+
+      yield* TestClock.adjust('10 seconds')
+
+      const timedOut = yield* Fiber.join(second)
+
+      expect(Option.getOrUndefined(timedOut)?.structuredContent).toMatchObject({
+        reason: 'timeout',
+        details: { state: 'in_flight' }
+      })
+
+      yield* Fiber.interrupt(first)
+    })
+  )
+
   it.effect('fails closed when a polling claim fails', () =>
     Effect.gen(function* () {
       const probe = makeProbe()

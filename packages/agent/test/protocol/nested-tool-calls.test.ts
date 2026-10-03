@@ -11,7 +11,9 @@ import {
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxCalls,
   nestedToolCallMaxErrorChars,
+  nestedToolCallMaxRecordedCalls,
   nestedToolCallMaxTotalArgsBytes,
+  nestedToolCallRecordLimit,
   nestedToolCallResultFields,
   recordNestedToolCall,
   ToolResult,
@@ -100,6 +102,32 @@ describe('nested tool call record', () => {
     ])
     expect(fields.nestedCalls.complete).toBe(false)
     expect(fields.nestedCalls.counts).toEqual({ ok: 3, error: 1, cancelled: 1 })
+  })
+
+  it('keeps the record size finite whatever maxCalls says', () => {
+    expect(makeNestedToolCallRecorder({ maxCalls: Number.POSITIVE_INFINITY }).maxCalls).toBe(
+      nestedToolCallMaxRecordedCalls
+    )
+    expect(makeNestedToolCallRecorder({ maxCalls: 1e9 }).maxCalls).toBe(
+      nestedToolCallMaxRecordedCalls
+    )
+    expect(makeNestedToolCallRecorder({ maxCalls: Number.NaN }).maxCalls).toBe(
+      nestedToolCallMaxCalls
+    )
+    expect(nestedToolCallRecordLimit(-3)).toBe(0)
+    expect(nestedToolCallRecordLimit(12.7)).toBe(12)
+
+    const unbounded: NestedToolCallRecorder = {
+      ...emptyNestedToolCallRecorder,
+      maxCalls: Number.POSITIVE_INFINITY
+    }
+
+    const recorded = Array.from({ length: nestedToolCallMaxRecordedCalls + 5 }, (_, index) =>
+      nestedCall(index + 1)
+    ).reduce(recordNestedToolCall, unbounded)
+
+    expect(recorded.calls).toHaveLength(nestedToolCallMaxRecordedCalls)
+    expect(recorded.complete).toBe(false)
   })
 
   it('sizes the record from maxCalls while keeping the byte budgets', () => {

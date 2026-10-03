@@ -15,6 +15,17 @@ const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty
  */
 export const nestedToolCallMaxCalls = 256
 
+/** Ceiling of any record's `maxCalls`: a larger (or infinite) limit keeps this many calls. */
+export const nestedToolCallMaxRecordedCalls = 4096
+
+/** The number of calls a record keeps for a requested `maxCalls`: whole, within
+ * `0..nestedToolCallMaxRecordedCalls`; `NaN` and absent mean `nestedToolCallMaxCalls`.
+ */
+export const nestedToolCallRecordLimit = (maxCalls: number | undefined): number =>
+  maxCalls === undefined || Number.isNaN(maxCalls)
+    ? nestedToolCallMaxCalls
+    : Math.max(0, Math.min(nestedToolCallMaxRecordedCalls, Math.floor(maxCalls)))
+
 /** UTF-8 byte budget for one recorded call's compact JSON arguments. */
 export const nestedToolCallMaxArgsBytes = 8 * 1024
 
@@ -95,8 +106,9 @@ export type NestedToolCallRecorder = {
   readonly counts?: StatusCounts
 }
 
-/** An empty recorder keeping at most `maxCalls` calls (default `nestedToolCallMaxCalls`); the
- * argument byte budgets are fixed.
+/** An empty recorder keeping at most `maxCalls` calls (default `nestedToolCallMaxCalls`, clamped
+ * by `nestedToolCallRecordLimit` to at most `nestedToolCallMaxRecordedCalls`); the argument byte
+ * budgets are fixed.
  */
 export const makeNestedToolCallRecorder = (
   options: { readonly maxCalls?: number } = {}
@@ -104,7 +116,7 @@ export const makeNestedToolCallRecorder = (
   calls: [],
   complete: true,
   argsBytes: 0,
-  maxCalls: Math.max(0, Math.floor(options.maxCalls ?? nestedToolCallMaxCalls)),
+  maxCalls: nestedToolCallRecordLimit(options.maxCalls),
   counts: zeroCounts
 })
 
@@ -180,7 +192,7 @@ export const recordNestedToolCall = (
     [input.status]: previousCounts[input.status] + 1
   }
 
-  const maxCalls = recorder.maxCalls ?? nestedToolCallMaxCalls
+  const maxCalls = nestedToolCallRecordLimit(recorder.maxCalls)
 
   const withUsage = (fields: RecorderFields): NestedToolCallRecorder => {
     if (usage !== undefined) {

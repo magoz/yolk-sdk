@@ -1,4 +1,4 @@
-import { type Duration, Effect, Fiber } from 'effect'
+import { type Duration, Effect, Fiber, Logger } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
@@ -489,6 +489,37 @@ describe('code mode nested-call record and hooks', () => {
       expect(result.nestedCalls?.calls.at(-1)?.id).toBe('call_1/700')
       expect(result.nestedCalls?.counts).toEqual({ ok: 700, error: 0, cancelled: 0 })
       expect(result.nestedCalls?.complete).toBe(true)
+    })
+  )
+
+  it.effect('never lets a failing afterNestedCall change the nested result', () =>
+    Effect.gen(function* () {
+      const settled: Array<unknown> = []
+
+      const { executor } = scriptedExecutor(async call => {
+        settled.push(await call('lookup', { query: 'a' }))
+
+        return 'done'
+      })
+
+      const modules = codeModeModules(executor, [queryTool('lookup')], {
+        afterNestedCall: () => Effect.die('metrics exporter crashed')
+      })
+
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+      const toolSet = yield* resolveTools(modules, context)
+
+      const result = yield* toolSet
+        .execute(ToolCall.make({ id: 'call_1', name: 'codemode', params: { code: 'script' } }))
+        .pipe(Effect.provide(logger))
+
+      expect(result.isError).toBeUndefined()
+      expect(settled).toEqual(['lookup:a'])
+      expect(result.nestedCalls?.counts).toEqual({ ok: 1, error: 0, cancelled: 0 })
+      expect(messages).toContainEqual([
+        expect.stringContaining('afterNestedCall failed for call_1/1')
+      ])
     })
   )
 

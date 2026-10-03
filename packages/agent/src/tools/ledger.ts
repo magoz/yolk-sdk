@@ -254,7 +254,9 @@ export type ToolLedgerOptions = {
    * wait ends is abandoned and the call times out). Default 150000.
    */
   readonly maxWaitMs?: number
-  /** Epoch milliseconds by which a wait must end (for example the step's function budget). */
+  /** Epoch milliseconds by which a wait must end (for example the step's function budget). A
+   * non-finite value is ignored.
+   */
   readonly deadline?: () => number | undefined
   /** UTF-8 bytes of a stored result's compact JSON. Default 1 MiB (see `toolLedgerResult`). */
   readonly maxResultBytes?: number
@@ -508,7 +510,8 @@ export const resolveToolLedgerOptions = (options: ToolLedgerOptions): ResolvedTo
     store: options.store,
     isLedgered: options.isLedgered ?? defaultToolLedgerPolicy,
     leaseMs,
-    // At most half the lease, so one late heartbeat never lets a live lease lapse.
+    // At most half the lease: renewal margin so a single late heartbeat does not let the lease
+    // lapse. Not a guarantee: a stalled process or store can still let it expire.
     heartbeatIntervalMs: Math.min(
       positive(options.heartbeatIntervalMs, Math.max(1, Math.floor(leaseMs / 3))),
       Math.max(1, Math.floor(leaseMs / 2))
@@ -697,7 +700,13 @@ export const executeLedgered = (input: {
     }
 
     const startedAt = yield* Clock.currentTimeMillis
-    const deadline = options.deadline?.()
+    const requestedDeadline = options.deadline?.()
+
+    // A non-finite deadline (NaN, Infinity) is no deadline; `maxWaitMs` still bounds the wait.
+    const deadline =
+      requestedDeadline !== undefined && Number.isFinite(requestedDeadline)
+        ? requestedDeadline
+        : undefined
 
     const waitUntil = Math.min(
       startedAt + options.maxWaitMs,
