@@ -7,11 +7,11 @@ import { OfficeArchiveError } from '../errors.ts'
 import type { OfficeFileFormat } from '../format.ts'
 import { defaultFileExtractorLimits } from '../limits.ts'
 import type { FileExtractorLimits } from '../limits.ts'
+import { sheetJsTextViews } from './sheetjs-xml.ts'
 import {
   contentTypesRouteToBinary,
   isAlternateFormatEntry,
-  relationshipsRouteToBinary,
-  sheetJsTextViews
+  relationshipsRouteToBinary
 } from './xlsx-routing.ts'
 
 export type OfficeArchiveLimits = Pick<

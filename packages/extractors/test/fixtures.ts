@@ -7,6 +7,7 @@ import { FileExtractor } from '../src/service.ts'
 import type { FileInput } from '../src/format.ts'
 import { makeFileExtractorLayer } from '../src/node/live-layer.ts'
 import type { FileExtractorOptions } from '../src/node/live-layer.ts'
+import type { FileExtractorLimits } from '../src/limits.ts'
 import type { SheetJsLoader } from '../src/node/sheetjs.ts'
 import { isSheetJsInputName } from '../src/node/xlsx-sheetjs-input.ts'
 
@@ -16,12 +17,17 @@ export const encode = (text: string) => new TextEncoder().encode(text)
 
 export const decode = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes)
 
+/**
+ * Extract through the Node layer. Parsing runs in the test thread (`isolation: 'none'`) unless
+ * the options choose a worker, so the recording SheetJS loader can observe every call;
+ * `test/extraction-worker.test.ts` covers the worker.
+ */
 export const extractWith = (input: FileInput, options: FileExtractorOptions = {}) =>
   Effect.gen(function* () {
     const extractor = yield* FileExtractor
 
     return yield* extractor.extract(input)
-  }).pipe(Effect.provide(makeFileExtractorLayer(options)))
+  }).pipe(Effect.provide(makeFileExtractorLayer({ isolation: 'none', ...options })))
 
 export const xlsxInput = (bytes: Uint8Array, filename = 'book.xlsx'): FileInput => ({
   filename,
@@ -230,9 +236,7 @@ export const xlsbHyperlinkSheet = (last: number) =>
 
 /** One `read` call made through a recording loader. */
 export type SheetJsCall = {
-  /** The archive SheetJS received. */
   readonly bytes: Uint8Array
-  /** Entry names of that archive. */
   readonly names: ReadonlyArray<string>
   /** The options the extractor passed, copied before SheetJS adds its defaults. */
   readonly options: XLSX.ParsingOptions
@@ -272,3 +276,122 @@ export const allCells = (workbook: XLSX.WorkBook): ReadonlyArray<XLSX.CellObject
       key.startsWith('!') ? [] : [cell]
     )
   )
+
+/** A worksheet part with a `dimension` and raw `sheetData` (and XML after it). */
+export const worksheet = (sheetData: string, dimension: string, after = '') =>
+  strToU8(
+    `${xmlHeader}<worksheet xmlns="${mainNs}" xmlns:r="${relNs}"><dimension ref="${dimension}"/><sheetData>${sheetData}</sheetData>${after}</worksheet>`
+  )
+
+/** A one-sheet workbook whose worksheet XML is `sheet`, plus any extra parts. */
+export const singleSheetParts = (sheet: Uint8Array, extra: Record<string, Uint8Array> = {}) => {
+  const parts = workbookParts([{ name: 'Sheet1' }])
+
+  parts['xl/worksheets/sheet1.xml'] = sheet
+
+  return { ...parts, ...extra }
+}
+
+/** Unprotected SheetJS with its defaults (formulas on): the control for each attack. */
+export const readDirectly = (parts: Record<string, Uint8Array>) =>
+  XLSX.read(zipParts(parts), { type: 'array' })
+
+/** Extract with the recording loader; SheetJS ran once on an allowlisted archive. */
+export const extractRecorded = (parts: Record<string, Uint8Array>) =>
+  Effect.gen(function* () {
+    const calls: Array<SheetJsCall> = []
+
+    const result = yield* extractWith(xlsxInput(zipParts(parts)), {
+      loadSheetJs: recordingSheetJs(calls)
+    })
+
+    expect(calls).toHaveLength(1)
+
+    const call = calls[0]
+
+    if (call === undefined) throw new Error('SheetJS was not called')
+
+    expectAllowlisted(call.names)
+
+    return { result, call }
+  })
+
+/** Extraction fails with `message` before SheetJS is loaded. */
+export const expectRejected = (
+  parts: Record<string, Uint8Array>,
+  message: string,
+  limits: Partial<FileExtractorLimits> = {}
+) =>
+  Effect.gen(function* () {
+    const calls: Array<SheetJsCall> = []
+
+    const error = yield* extractWith(xlsxInput(zipParts(parts)), {
+      limits,
+      loadSheetJs: recordingSheetJs(calls)
+    }).pipe(Effect.flip)
+
+    expect(error._tag).toBe('FileExtractionError')
+    expect(error.message).toBe(message)
+    expect(calls).toHaveLength(0)
+  })
+
+export const zipText = (text: string) => Uint8Array.from(strToU8(text))
+
+export const docxMediaType =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+export const pptxMediaType =
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+
+export const makeDocx = (text: string) =>
+  zipSync({
+    '[Content_Types].xml': zipText(
+      '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
+    ),
+    '_rels/.rels': zipText(
+      '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
+    ),
+    'word/document.xml': zipText(
+      `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`
+    )
+  })
+
+export const makePptx = () =>
+  zipSync({
+    '[Content_Types].xml': zipText('<Types/>'),
+    'ppt/presentation.xml': zipText('<p:presentation/>'),
+    'ppt/slides/slide2.xml': zipText('<a:p><a:r><a:t>Second</a:t></a:r></a:p>'),
+    'ppt/slides/slide1.xml': zipText('<a:p><a:r><a:t>First &amp; one</a:t></a:r></a:p>'),
+    'ppt/notesSlides/notesSlide1.xml': zipText('<a:p><a:r><a:t>Speaker note</a:t></a:r></a:p>')
+  })
+
+export const makePdf = (text: string) => {
+  const stream = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`
+
+  const objects = [
+    '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj',
+    '2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj',
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj',
+    `4 0 obj<</Length ${stream.length}>>stream\n${stream}\nendstream endobj`,
+    '5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj'
+  ]
+
+  let body = '%PDF-1.4\n'
+  const offsets: Array<number> = []
+
+  for (const object of objects) {
+    offsets.push(body.length)
+    body += `${object}\n`
+  }
+
+  const startXref = body.length
+
+  const rows = [
+    '0000000000 65535 f ',
+    ...offsets.map(offset => `${offset.toString().padStart(10, '0')} 00000 n `)
+  ]
+
+  return encode(
+    `${body}xref\n0 6\n${rows.join('\n')}\ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n${startXref}\n%%EOF`
+  )
+}

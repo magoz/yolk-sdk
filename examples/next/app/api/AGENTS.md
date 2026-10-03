@@ -14,6 +14,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 | `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge               |
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex streaming HTTP proxy |
 | `internal/cloudflare/AGENTS.md`                | Bridge auth/header/token contracts     |
+| `internal/extractors-smoke/route.ts`           | Extractor worker production smoke      |
 
 ## Status Conventions
 
@@ -36,6 +37,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 - `auth/[...all]/route.ts` may use `Effect.runPromise()` to construct better-auth's handler at the Next boundary.
 - Agent-route exceptions live in `agent/AGENTS.md`.
 - `internal/cloudflare/*` routes require `YOLK_CLOUDFLARE_BRIDGE_SECRET`; do not expose to browsers.
+- `internal/extractors-smoke/route.ts` is a test-only check of `@yolk-sdk/extractors` worker isolation in production builds. It takes no input and answers 404 unless `YOLK_EXTRACTORS_SMOKE=true`. See [Extractor worker](../../README.md#extractor-worker).
 - Browser/WebRTC specifics stay in `examples/next/app/agent/use-realtime-voice.ts` and `examples/next/lib/agents/realtime/*`, not route bodies.
 
 ## Anti-Patterns

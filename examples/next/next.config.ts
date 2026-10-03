@@ -11,8 +11,17 @@ const workspaceRoot = join(exampleDir, '../..')
 const nextConfig: NextConfig = {
   reactCompiler: true,
   outputFileTracingRoot: workspaceRoot,
-  // Code mode's pi executor loads its worker file and quickjs.wasm from disk; keep them unbundled.
-  serverExternalPackages: ['@yolk-sdk/codemode', '@earendil-works/pi-codemode', 'quickjs-wasi'],
+  // Code mode's pi executor loads its worker file and quickjs.wasm from disk, and the extractors
+  // start their parser worker beside their own module and load SheetJS inside it; keep them
+  // unbundled, as npm consumers must. Turbopack still bundles workspace links, so here the
+  // extractor worker runs from `packages/extractors/src` (see the README's "Extractor worker").
+  serverExternalPackages: [
+    '@yolk-sdk/codemode',
+    '@earendil-works/pi-codemode',
+    'quickjs-wasi',
+    '@yolk-sdk/extractors',
+    'xlsx'
+  ],
   // Next's synchronous config boundary; trust only the injected development hostname.
   allowedDevOrigins: getAllowedDevOrigins(
     process.env.NODE_ENV === 'development' ? process.env.PORTLESS_URL : undefined

@@ -39,6 +39,10 @@
     "./node": {
       "types": "./src/node/index.ts",
       "default": "./src/node/index.ts"
+    },
+    "./node/extraction-worker": {
+      "types": "./src/node/extraction-worker.ts",
+      "default": "./src/node/extraction-worker.ts"
     }
   },
   "files": [
@@ -67,6 +71,11 @@
         "types": "./dist/node/index.d.mts",
         "import": "./dist/node/index.mjs",
         "default": "./dist/node/index.mjs"
+      },
+      "./node/extraction-worker": {
+        "types": "./dist/node/extraction-worker.d.mts",
+        "import": "./dist/node/extraction-worker.mjs",
+        "default": "./dist/node/extraction-worker.mjs"
       }
     }
   },

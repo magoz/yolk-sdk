@@ -17,7 +17,8 @@ into a public package, `@yolk-sdk/extractors`, that the apps consume.
 | Subpaths   | Root: portable contract and service tag. `./node`: the implementation. `./knowledge`: `KnowledgeExtractor` adapter.           |
 | SheetJS    | Optional peer `xlsx >=0.20.3`, lazily imported, version-checked at runtime. Hosts install the SheetJS CDN tarball.            |
 | Archives   | Every DOCX, XLSX, and PPTX goes through bounded ZIP validation and is rebuilt as a stored archive before any parser reads it. |
-| SheetJS    | SheetJS only reads an allowlisted archive the extractor builds; XLSB/ODS/Numbers input is also rejected early.                |
+| SheetJS    | SheetJS only reads an archive the extractor builds (workbook and styles generated); XLSB/ODS/Numbers input is rejected early. |
+| Isolation  | Every PDF, DOCX, XLSX, and PPTX parse runs in a fresh worker thread with heap, stack, and time limits; failures are typed.    |
 | Formulas   | SheetJS runs with `cellFormula: false`: cached values only, formula-only cells are empty.                                     |
 | Hyperlinks | Read and removed before SheetJS parses; external targets shown as `text <url>` through an indexed lookup.                     |
 | UTF-16     | XLSX parts whose stripped bytes decode as BOM-marked UTF-16 with a hyperlink tag are rejected.                                |
@@ -38,7 +39,7 @@ Hosts keep upload policy, auth, storage, and what the text is used for.
   `FileExtractor` `Context.Service` tag. It imports no parsers and no Node builtins, so other
   runtimes can provide their own implementation.
 - `@yolk-sdk/extractors/node`: `FileExtractorLayer` and `makeFileExtractorLayer({ limits,
-loadSheetJs })`. It covers PDF (`unpdf`), DOCX (`mammoth`), XLSX (SheetJS), and PPTX and archive
+isolation, loadSheetJs })`. It covers PDF (`unpdf`), DOCX (`mammoth`), XLSX (SheetJS), and PPTX and archive
   validation (`fflate`, `node:zlib`, `node:stream`). It also exports `normalizeOfficeArchive` for
   hosts that validate Office bytes outside extraction, as 10x does for email attachments. Its
   output is a validated, rebuilt archive for storage or other parsers, never SheetJS input.
@@ -71,7 +72,8 @@ be strict SemVer and at least 0.20.3 by SemVer precedence (a 0.20.3 prerelease i
 anything that is not strict SemVer is `invalid`). A missing, foreign, or outdated module fails with `SheetJsUnavailableError`
 (`missing | invalid | outdated`), whose message carries the install command. A host that ignores
 peer warnings therefore cannot silently run 0.18.5. Tests swap SheetJS through the loader instead
-of mocking modules.
+of mocking modules. A function cannot be passed to a worker, so `loadSheetJs` only works with
+`isolation: 'none'`; the worker always imports the installed `xlsx` with the same check.
 
 In the workspace, the package (dev dependency) and `examples/next` install the CDN tarball. Under
 pnpm 11 defaults, a direct tarball dependency needs no settings changes. `blockExoticSubdeps`
@@ -117,29 +119,58 @@ repeated rows and columns, and none of those parts pass through the XML hyperlin
 
 Two review rounds showed that imitating this in detection rules keeps losing (`//` collapse,
 case-sensitive `Type`, `<` inside quoted values). So the guarantee comes from construction:
-SheetJS never receives the uploaded archive. `buildSheetJsInput` writes a new stored archive with
-only these entries, each a validated, hyperlink-stripped part found by case-insensitive name and
-written under its canonical name:
+SheetJS never receives the uploaded archive. A third round showed that choosing the parser is
+not enough: SheetJS's XML parsers also do far more work than the size of some allowed parts.
+`unescapexml` recurses over an unterminated CDATA section with quadratic output.
+`parse_wb_xml` decodes the whole prefix of the workbook at every `</definedName>`. Sheets that
+share an `r:id`, or that only SheetJS's grammar sees (`<` inside a quoted value), parse one
+worksheet once per declaration. And with `cellText` it re-parses a cell's number format for
+every cell. So parts SheetJS reads are generated or checked, never copied blindly.
+`buildSheetJsInput` writes a new stored archive with only these entries, each under its canonical
+name:
 
-| Entry                        | Source and reason                                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `[Content_Types].xml`        | Generated. Names the XML workbook and the parts below, so no attacker `Override` or `PartName` exists. |
-| `_rels/.rels`                | Generated. SheetJS 0.20.3 does not read it; kept so the input is a well-formed OPC package.            |
-| `xl/workbook.xml`            | The validated main part: sheet names, order, and the 1904 date system.                                 |
-| `xl/_rels/workbook.xml.rels` | Generated: one worksheet relationship per included sheet, ids copied only when they need no escaping.  |
-| `xl/worksheets/sheet<n>.xml` | Sheet `n`'s worksheet, when its relationship is a worksheet resolving to `xl/worksheets/*.xml`.        |
-| `xl/sharedStrings.xml`       | Shared strings (by workbook relationship, else the conventional path): cell text.                      |
-| `xl/styles.xml`              | Number formats and cell formats: SheetJS's display text (`cell.w`) for dates, percentages, …           |
-| `docProps/core.xml`          | Core properties (by package relationship, else the conventional path): the workbook title.             |
+| Entry                        | Source and reason                                                                                                                            |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[Content_Types].xml`        | Generated. Names the XML workbook and the parts below, so no attacker `Override` or `PartName` exists.                                       |
+| `_rels/.rels`                | Generated. SheetJS 0.20.3 does not read it; kept so the input is a well-formed OPC package.                                                  |
+| `xl/workbook.xml`            | Generated: the sheets in order (name, `sheetId`, hidden state, `r:id="rId<n>"`) and `date1904`; no defined names, views, or calc properties. |
+| `xl/_rels/workbook.xml.rels` | Generated: `rId<n>` → `worksheets/sheet<n>.xml` for every sheet.                                                                             |
+| `xl/worksheets/sheet<n>.xml` | Copied: sheet `n`'s worksheet, when its relationship is an internal worksheet resolving to an `.xml` part.                                   |
+| `xl/sharedStrings.xml`       | Copied: shared strings (by workbook relationship, else the conventional path): cell text.                                                    |
+| `xl/styles.xml`              | Generated: number formats and one cell format per source cell format (`cell.w` for dates, percentages, currency).                            |
 
-Sheet `n` is stored as `xl/worksheets/sheet<n>.xml`, which is also where SheetJS looks when it
-cannot match a relationship, and each source part is stored once, so a part shared by several
-sheets is parsed once. A workbook with more `<sheet>` elements than `maxXlsxSheets` fails before
-SheetJS. Left out because SheetJS does not need them for cell values or display text: themes
-(read only with `cellStyles`), `docProps/app.xml` (sheet names come from the workbook),
-worksheet relationships, comments and threaded comments, VML and drawings, `.bin` parts,
-`META-INF/*`, `Index*`, `objectdata.xml`, external links, pivot caches, calculation chains,
-metadata, people, and `customXml`.
+Generated workbook. The extractor reads `xl/workbook.xml` twice: with SheetJS's own grammar
+(`tagregex1`, `parsexmltag`, `strip_ns(head) === '<sheet'`) and with a strict `[^<>]*` scan. The
+counts and raw names must agree, and either count above `maxXlsxSheets` fails first. Names are
+decoded as SheetJS decodes them (`unescapexml(utf8read(…))`) and re-escaped so SheetJS reads
+them back exactly. A name that is missing, holds CDATA, or repeats another ignoring case (as
+Excel compares them) is rejected, as are a workbook with no sheets and two sheets on one
+worksheet part. SheetJS therefore sees exactly the sheets the extractor counted, and each
+worksheet part is parsed at most once. Sheets without a usable worksheet (chart sheets, non-XML
+parts) keep their name and position, but their `sheet<n>.xml` does not exist, so SheetJS skips
+them. SheetJS needs nothing else from the workbook for cell values: `parse_wb_defaults` fills
+the rest.
+
+Generated styles. The stylesheet is read the way `parse_sty_xml` reads it (comments and doctype
+removed, the first `numFmts` and `cellXfs` regions, SheetJS's tag grammar). The extractor keeps
+`numFmt` codes of at most 255 characters after unescaping, which is Excel's own limit, with no
+CDATA, and at most 1,000 of them. It writes one `<xf numFmtId>` per source `xf`, in order, so
+cell `s` indexes keep their meaning, up to Excel's 64,000. Dropped formats show as General.
+Fonts, fills, borders, cell styles, and dxfs are read only with `cellStyles`, so they are left
+out. The positive controls (Excel-like, LibreOffice-shaped, and Google-Sheets-shaped workbooks,
+dates, 1904 dates, percentages, currency, and text formats) match SheetJS reading the original
+file.
+
+Copied parts. A worksheet or shared-strings part in which SheetJS could meet `<![CDATA[`, raw or
+after one `unescapexml` in any text view, is rejected: `str` cells are decoded twice, so
+`&lt;![CDATA[` counts too. Excel, LibreOffice, and Google Sheets never write CDATA there. The
+title is read from `docProps/core.xml` by the extractor (`str_match_xml` on `dc:title`, then
+`unescapexml`), so core properties never reach SheetJS.
+
+Left out because SheetJS does not need them for cell values or display text: themes (read only
+with `cellStyles`), `docProps/*`, worksheet relationships, comments and threaded comments, VML
+and drawings, `.bin` parts, `META-INF/*`, `Index*`, `objectdata.xml`, external links, pivot
+caches, calculation chains, metadata, people, and `customXml`.
 
 Why `parse_zip` can only take the XLSX path with this input (checked against
 `node_modules/xlsx/xlsx.mjs` 0.20.3): the archive starts with a ZIP local header, so `readSync`
@@ -187,17 +218,58 @@ objects; `cellStyles` would also force stub cells), `sheetStubs: false`, `bookDe
 `bookProps`, `bookSheets`, `bookVBA: false`, `dense: false` (sheets keyed by address), and
 `cellText: true`.
 
+### Worker isolation
+
+Each fix above closes a path someone found. The parsers (SheetJS's 1 MB `xlsx.mjs`, PDF.js,
+mammoth) are too large to prove linear, and in-process nothing can pre-empt a synchronous
+`read`: a V8 heap abort takes down the whole process and every request it serves. So every PDF,
+DOCX, XLSX, and PPTX extraction runs in a fresh `worker_threads` worker
+(`extraction-isolation.ts`), following `@yolk-sdk/codemode/node`.
+
+- The input is copied into a transferred `ArrayBuffer`. The worker validates the archive, runs
+  the parser, renders the bounded text, and posts only the `ExtractedFile` or a serialized error
+  (with its archive cause) back. Parser objects never cross.
+- `resourceLimits`: 256 MB old generation, 32 MB young generation, 4 MB stack. A 30 s wall-clock
+  timer runs on `setTimeout`, not the Effect `Clock`, so a test clock cannot stall it. At most 4
+  workers per layer, through a `Semaphore`. Defaults are configurable (`isolation`) and checked
+  at layer build. 256 MB holds SheetJS's cells for the default limits several times over and
+  PDF.js's working set for ordinary PDFs, and 4 such workers stay inside a 2 GB serverless
+  function. Legitimate files parse in well under a second, so 30 s only stops runaway work.
+- The worker is terminated in the scope's release on every exit, including interruption.
+  `ERR_WORKER_OUT_OF_MEMORY` maps to `reason: 'resource-limit'`, the timer to `'timeout'`, a
+  worker that never posted `Started` (a missing or unloadable worker file) to
+  `'worker-unavailable'`, and a later crash or exit to `'worker-failed'`. All are
+  `FileExtractionError`s, and the host keeps running. A worker that cannot start never falls back
+  to in-process parsing.
+- `isolation: 'none'` parses in the calling thread. It exists for runtimes without worker threads
+  and for tests that observe SheetJS through `loadSheetJs`, and it is documented as unsafe for
+  untrusted input.
+- Packaging: the entry is `dist/node/extraction-worker.mjs` (subpath
+  `./node/extraction-worker`). Its URL is derived at runtime from the isolation module's own
+  `import.meta.url`. Turbopack copies a literal `new URL('./…', import.meta.url)` as an asset whose
+  imports do not resolve, and Next.js 16.1.3 panics on `new Worker(new URL(…))`. Hosts keep
+  `@yolk-sdk/extractors` and `xlsx` in `serverExternalPackages`. With that, a standalone Next.js
+  16 build of a consumer installed from the packed tarball traces the worker and its imports, and
+  the extraction, heap-limit, and timeout paths work from the traced files only.
+- Cost: about 150–250 ms per extraction to start a worker and load Effect and the parser. A pool
+  can come later.
+
 ### Residual risks
 
-- SheetJS still parses the allowlisted XML parts (workbook, worksheets, shared strings, styles,
-  core properties) with its own code. Hyperlinks are stripped and formulas, comments, and drawings
-  are out, but any other expansion inside those parsers runs before the extractor's budgets; the
-  cell-visit and character limits apply only afterwards.
-- Our `<sheet>` count can differ from SheetJS's for malformed `xl/workbook.xml` (for example `<`
-  inside a quoted attribute). Sheets SheetJS sees beyond ours have no part to read and are skipped,
-  but SheetJS still walks them.
-- Sheet text comes from SheetJS; hyperlink annotations come from the extractor's own parse of the
-  same parts. For malformed workbooks the two can disagree, which can only drop annotations.
+- SheetJS still parses the worksheets and shared strings as uploaded (validated,
+  hyperlink-stripped, CDATA-free), and unpdf, mammoth, and the PPTX reader parse their parts. No
+  other super-linear path is known with the options used, but one found later runs before the
+  extractor's budgets. The worker limits are the backstop. They bound the V8 heap, stack, and
+  time, not memory outside the heap (Buffers), so the input and expanded-archive limits stay.
+- The generated workbook and styles follow SheetJS 0.20.3's reading. A later SheetJS that reads
+  more from these parts could change display text, not safety.
+- Sheet text comes from SheetJS; hyperlink annotations come from the extractor's parse of the
+  same worksheet parts, mapped through the same generated sheet list.
+- `examples/next` links the package from the workspace, which Turbopack bundles, so its worker
+  runs from `packages/extractors/src`. Output file tracing misses the worker's 21 runtime
+  packages, so a Vercel deployment of the example fails closed (`worker-unavailable`) until a
+  follow-up adds a self-contained worker bundle or dist export conditions for workspace
+  packages. npm consumers are not affected.
 
 ## Hyperlinks
 
@@ -236,16 +308,26 @@ without the blow-up:
    it is built or CSV-scanned, so a long label over many empty cells costs constant time per cell.
 
 Measured with `node --max-old-space-size=1024` on the research files (`/tmp/xlsx-research`)
-through the built `dist`. Times are for `extract` only; RSS growth is measured around the call
-(peak process RSS stayed at 123–149 MB).
+through the built `dist` and the default layer (worker isolation). Times are for `extract` only
+and include about 140 ms to start the worker. RSS growth is measured around the call and
+includes the worker; peak process RSS stayed at 165–242 MB. The `r3-*` files are the round-3
+attacks; the plain-SheetJS column uses the extractor's read options on the original file.
 
-| File                | Plain SheetJS 0.20.3 `read`    | `FileExtractor` (package)                                  |
-| ------------------- | ------------------------------ | ---------------------------------------------------------- |
-| `base.xlsx`         | links kept                     | 24 ms, +8 MB RSS, `acme.example <https://acme.example/>` … |
-| `column.xlsx`       | 920 ms, 313 MB RSS             | 31 ms, +9 MB RSS, internal link omitted                    |
-| `fullsheet.xlsx`    | heap exhausted at 1 GB (crash) | 30 ms, +9 MB RSS, internal link omitted                    |
-| `ods-disguise.xlsx` | ODS repeat expansion           | 4 ms, rejected before SheetJS loads                        |
-| `bin-target.xlsx`   | XLSB `BrtHLink` expansion      | 7 ms, rejected before SheetJS loads                        |
+| File                   | Plain SheetJS 0.20.3 `read`               | `FileExtractor` (package)                                    |
+| ---------------------- | ----------------------------------------- | ------------------------------------------------------------ |
+| `base.xlsx`            | links kept                                | 160 ms, +46 MB RSS, `acme.example <https://acme.example/>` … |
+| `column.xlsx`          | 920 ms, 313 MB RSS                        | 180 ms, +45 MB RSS, internal link omitted                    |
+| `block.xlsx`           | per-cell link expansion                   | 154 ms, +45 MB RSS, internal link omitted                    |
+| `fullsheet.xlsx`       | heap exhausted at 1 GB (crash)            | 154 ms, +46 MB RSS, internal link omitted                    |
+| `quadratic.xlsx`       | quadratic hyperlink scan                  | 199 ms, +41 MB RSS, links kept                               |
+| `ods-disguise.xlsx`    | ODS repeat expansion                      | 145 ms, rejected before SheetJS loads                        |
+| `ods-doubleslash.xlsx` | ODS through `META-INF//manifest.xml`      | 152 ms, rejected (`//` entry name)                           |
+| `bin-target.xlsx`      | XLSB `BrtHLink` expansion                 | 145 ms, rejected before SheetJS loads                        |
+| `lowercase-type.xlsx`  | XLSB through a lower-case `type`          | 131 ms, rejected before SheetJS loads                        |
+| `r3-definedname.xlsx`  | 300,000 `</definedName>`: > 60 s, killed  | 245 ms, +104 MB RSS, text extracted (no defined names)       |
+| `r3-numfmt.xlsx`       | 1 MB format × 2,000 cells: heap exhausted | 179 ms, +48 MB RSS, cells show General                       |
+| `r3-cdata.xlsx`        | 3 CDATA cells (2 KB file): 2.9 GB RSS     | 142 ms, rejected (CDATA)                                     |
+| `r3-sheets.xlsx`       | 2,000 hidden `<sheet>`s: heap exhausted   | 149 ms, rejected (sheet limit)                               |
 
 ## UTF-16 parts
 

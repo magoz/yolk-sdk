@@ -6,19 +6,25 @@ upload size policy, auth, storage, and what the text is used for.
 
 ## Subpaths
 
-| Subpath                          | Source              | Role                                                                                                      |
-| -------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/extractors`           | `src/index.ts`      | Types, `Schema.TaggedError` errors, `fileFormatFor`, limits, `sanitizeExtractedText`, `FileExtractor` tag |
-| `@yolk-sdk/extractors/node`      | `src/node/index.ts` | `FileExtractorLayer`, `makeFileExtractorLayer`, `normalizeOfficeArchive`                                  |
-| `@yolk-sdk/extractors/knowledge` | `src/knowledge.ts`  | `FileKnowledgeExtractorLayer`, `makeFileKnowledgeExtractor`                                               |
+| Subpath                          | Source                          | Role                                                                                                      |
+| -------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/extractors`           | `src/index.ts`                  | Types, `Schema.TaggedError` errors, `fileFormatFor`, limits, `sanitizeExtractedText`, `FileExtractor` tag |
+| `@yolk-sdk/extractors/node`      | `src/node/index.ts`             | `FileExtractorLayer`, `makeFileExtractorLayer`, `normalizeOfficeArchive`                                  |
+| `…/node/extraction-worker`       | `src/node/extraction-worker.ts` | Worker entry; a no-op when imported outside a worker                                                      |
+| `@yolk-sdk/extractors/knowledge` | `src/knowledge.ts`              | `FileKnowledgeExtractorLayer`, `makeFileKnowledgeExtractor`                                               |
 
 Root files: `errors.ts`, `format.ts`, `limits.ts`, `sanitize.ts`, `service.ts`. Node files (`src/node/`):
-`live-layer.ts` (dispatch, PDF/DOCX/PPTX/XLSX), `office-archive.ts` (bounded ZIP validation,
-hyperlink strip, UTF-16 guard), `xlsx-sheetjs-input.ts` (the allowlisted archive SheetJS reads),
-`xlsx-routing.ts` (early XLSB/ODS/Numbers rejection), `xlsx-parts.ts` (part lookup, workbook
-sheets, relationships), `sheetjs.ts` (lazy loader, version check, read options, workbook guards),
-`xlsx-text.ts` (bounded CSV + annotations), `xlsx-hyperlinks.ts` (tag resolution, indexed lookup),
-`xlsx-range.ts` (strict ranges), `pptx-text.ts`, `xml-text.ts` (entities, attributes).
+`live-layer.ts` (options, dispatch to a worker or in-process), `extraction-isolation.ts` (worker
+spawn, limits, timeout, semaphore, failure reasons), `extraction-worker.ts` (worker entry),
+`extraction-worker-protocol.ts` (message schemas, error round trip), `extract-file.ts`
+(PDF/DOCX/XLSX/PPTX extraction), `office-archive.ts` (bounded ZIP validation, hyperlink strip,
+UTF-16 guard), `xlsx-sheetjs-input.ts` (the archive SheetJS reads), `xlsx-workbook.ts`
+(generated workbook), `xlsx-styles.ts` (generated stylesheet), `sheetjs-xml.ts` (SheetJS XML
+grammar ports, CDATA check, core title), `xlsx-routing.ts` (early XLSB/ODS/Numbers rejection),
+`xlsx-parts.ts` (part lookup, relationships), `sheetjs.ts` (lazy loader, version check, read
+options, workbook guards), `xlsx-text.ts` (bounded CSV + annotations), `xlsx-hyperlinks.ts` (tag
+resolution, indexed lookup), `xlsx-range.ts` (strict ranges), `pptx-text.ts`, `xml-text.ts`
+(entities, attributes).
 
 ## Boundaries
 
@@ -29,6 +35,9 @@ sheets, relationships), `sheetjs.ts` (lazy loader, version check, read options, 
 - SheetJS is an optional peer (`>=0.20.3`, from the SheetJS CDN tarball). Import it only through the
   injectable loader in `sheetjs.ts` (default `() => import('xlsx')`); never a static import, never
   in the root. Keep `xlsx` types out of public declarations (the loader is typed `() => Promise<unknown>`).
+  The worker always uses the default loader; a `loadSheetJs` function only works with
+  `isolation: 'none'` (anything else is a layer defect). unpdf and mammoth are imported lazily
+  inside `extract-file.ts`.
 
 ## Design rules
 
@@ -45,19 +54,34 @@ sheets, relationships), `sheetjs.ts` (lazy loader, version check, read options, 
   Latin-1 round-trip so other bytes are unchanged, before SheetJS.
   Capture start tags as they are removed (`maxXlsxHyperlinks` + 1 to detect truncation), then
   reject parts whose stripped bytes decode as BOM-marked UTF-16 with a hyperlink tag.
-- XLSX: SheetJS never receives the uploaded archive, only `buildSheetJsInput`'s rebuild (the
-  security guarantee). Allowlist, emitted under these canonical names: generated
-  `[Content_Types].xml`, `_rels/.rels` (never read by SheetJS 0.20.3; keeps the input a valid
-  OPC package), and `xl/_rels/workbook.xml.rels` (no attacker override, part name, type, or target
-  reaches SheetJS); `xl/workbook.xml` (sheet names, order, date system); sheet `n`'s worksheet as
-  `xl/worksheets/sheet<n>.xml`, only when its workbook relationship is a worksheet resolving to
-  `xl/worksheets/*.xml` (SheetJS's own fallback name, each source part once); `xl/sharedStrings.xml`
-  (cell text); `xl/styles.xml` (number formats behind `cell.w`); `docProps/core.xml` (title).
-  Themes (read only with `cellStyles`), `docProps/app.xml` (sheet names come from the workbook),
-  worksheet relationships, comments, VML, drawings, `.bin`, markers, external links, pivot caches,
-  calc chains, metadata, and `customXml` are excluded. Source parts are found ignoring case and
-  must end in `.xml`. Adding a part needs proof that SheetJS needs it for cell values or display
-  text, and a test that it cannot reach a non-XLSX parser.
+- Parts SheetJS reads are generated or sanitised, never copied, unless a test proves its parser
+  stays linear on them. SheetJS's XML parsers have super-linear paths that routing does not
+  control: `unescapexml` over CDATA, per-cell number-format evaluation, `definedName` slicing,
+  and `r:id` fan-out.
+- XLSX: SheetJS never receives the uploaded archive, only `buildSheetJsInput`'s rebuild. Every
+  entry has a canonical name:
+  - generated: `[Content_Types].xml`, `_rels/.rels`, and `xl/_rels/workbook.xml.rels` (sheet `n`
+    is `rId<n>` → `worksheets/sheet<n>.xml`);
+  - generated `xl/workbook.xml` (`xlsx-workbook.ts`): sheets in order (name re-escaped so SheetJS
+    reads it back exactly, `sheetId`, `hidden`/`veryHidden`) and `date1904`, nothing else. Sheets
+    are counted twice, by SheetJS's grammar (`tagregex1`, `strip_ns(head) === '<sheet'`) and by
+    the strict `[^<>]*` scan. Disagreeing counts or names, a missing, CDATA, or repeated (ignoring
+    case) name, no sheets, or two sheets on one worksheet part are rejected as
+    `XLSX workbook is malformed.`;
+  - generated `xl/styles.xml` (`xlsx-styles.ts`): read with SheetJS's own regions and grammar;
+    `numFmt` codes of at most 255 characters after unescaping, at most 1,000, and no CDATA; one
+    `<xf numFmtId>` per source `xf`, in order, at most 64,000;
+  - copied: sheet `n`'s worksheet as `xl/worksheets/sheet<n>.xml` when its relationship is an
+    internal worksheet resolving to any `.xml` part, and `xl/sharedStrings.xml`. Both are rejected
+    when SheetJS could meet `<![CDATA[`, raw or after one `unescapexml`, in any text view.
+
+  `docProps/*` is never handed over: the title comes from `coreTitle` (`sheetJsElementText` on
+  `dc:title`). Themes, worksheet relationships, comments, VML, drawings, `.bin`, markers,
+  external links, pivot caches, calc chains, metadata, and `customXml` are excluded. Source parts
+  are found ignoring case and must end in `.xml`. Adding a part needs proof that SheetJS needs it
+  for cell values or display text, a test that it cannot reach a non-XLSX parser, and generation
+  or a linearity test.
+
 - SheetJS `read` options live in `sheetJsReadOptions` (`sheetjs.ts`): `cellFormula: false`
   (shared-formula copies and array-formula scans), `cellHTML`, `cellNF`, `cellStyles`,
   `cellDates`, `sheetStubs`, `book*` off, `dense: false`, `cellText: true`. Pass a fresh copy per
@@ -72,8 +96,21 @@ sheets, relationships), `sheetjs.ts` (lazy loader, version check, read options, 
   lazy `[\s\S]*?` retried from every start (see `pptx-text.ts` `elementMatches`). The one
   exception is the routing scan's copy of SheetJS `tagregex1`: a quoted value may hold `<`, but
   each attempt stops at the next quote of its kind, so the scan stays linear.
-- `buildSheetJsInput` fails a workbook with more `<sheet>` elements than `maxXlsxSheets` before
-  SheetJS runs.
+- `buildSheetJsInput` fails a workbook with more `<sheet>` elements than `maxXlsxSheets`, counted
+  by either scan (a `<` inside a quoted attribute still counts), before SheetJS runs. SheetJS then
+  sees exactly the sheets the extractor counted.
+- Isolation: PDF, DOCX, XLSX, and PPTX run in a fresh worker per extraction
+  (`extraction-isolation.ts`). Input bytes are copied into a transferred buffer, and only the
+  `ExtractedFile` or a serialized error comes back. Defaults: 256 MB old generation, 32 MB young,
+  4 MB stack, a 30 s wall-clock `setTimeout` (never the Effect `Clock`, so a test clock cannot
+  stall it), and 4 workers per layer (a `Semaphore`). The worker is terminated in the scope's
+  release on every exit, including interruption. Failures map to `FileExtractionError` `reason`:
+  `ERR_WORKER_OUT_OF_MEMORY` → `resource-limit`, timer → `timeout`, no `Started` message →
+  `worker-unavailable`, later crash or exit → `worker-failed`. Never fall back to in-process.
+- The default worker URL is derived at runtime from `import.meta.url` (`extraction-isolation` →
+  `extraction-worker`, `.ts` or `.mjs`). Never write `new URL('./…', import.meta.url)` or
+  `new Worker(new URL(…))` for it: Turbopack copies the former as an asset whose imports cannot
+  resolve, and panics on the latter.
 - Links resolve through `xl/workbook.xml` sheet `r:id` → workbook rels → worksheet part (any
   extension) → worksheet rels `TargetMode="External"`. Show only normalized `http:`/`https:`/`mailto:`
   targets (≤ 2,048 characters, longer links dropped), append `#location` like SheetJS; omit
@@ -101,10 +138,21 @@ sheets, relationships), `sheetjs.ts` (lazy loader, version check, read options, 
   positives. Real-SheetJS controls show each expanding route, a recording loader proves SheetJS is
   never called, and `buildSheetJsInput` on the unchecked parts shows the allowlist alone holds.
 - `test/xlsx-sheetjs-input.test.ts`: shared/array formulas and many comments (controls expand,
-  extraction does not), cached vs formula-only cells, generated parts, canonical names, sheet
-  limit, and positive controls (SheetJS-written and Excel-like workbooks, text and title).
-- Every test that reaches SheetJS uses `recordingSheetJs` and `expectAllowlisted` from
-  `test/fixtures.ts`.
+  extraction does not), cached vs formula-only cells, generated parts, canonical names (any `.xml`
+  worksheet), shared parts and shared `r:id`s, sheets only SheetJS sees (`<` in an attribute),
+  repeated names, sheet limit, and positive controls (SheetJS-written and Excel-like workbooks,
+  text and title).
+- Every extraction test that reaches SheetJS uses `recordingSheetJs` and `expectAllowlisted` from
+  `test/fixtures.ts` (through `extractRecorded`); controls call `XLSX.read` directly on fixtures
+  (`readDirectly`). `extractWith` defaults to `isolation: 'none'` so the recording loader sees
+  every call.
+- `test/xlsx-generated-parts.test.ts`: defined-name flood, exact sheet names, 1904 dates, hidden
+  sheets, a huge reused number format, format caps, CDATA (cells, shared strings, escaped, title),
+  and LibreOffice- and Google-Sheets-shaped workbooks (hand-written, compared with SheetJS).
+- `test/extraction-worker.test.ts`: real workers and SheetJS: every format matches in-process
+  output, typed errors and causes cross the boundary, a 16 MB heap gives `resource-limit` and the
+  process keeps working, a 1 ms timeout, spawn failure, early exit, the concurrency limit, and
+  layer defects.
 - `test/xlsx-text.test.ts`: 10x bounded CSV tests (ranges, quoting, budgets, visit preflight).
 - `test/xlsx-hyperlinks.test.ts`: link output, schemes, overlap, sheet mapping, full-sheet/column
   ranges (SheetJS never sees a tag, via a recording loader), budget marker, cap, display/target

@@ -204,7 +204,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/extractors',
     packageName: '@yolk-sdk/extractors',
-    expectedExports: ['./package.json', '.', './knowledge', './node'],
+    expectedExports: ['./package.json', '.', './knowledge', './node', './node/extraction-worker'],
     root: 'full'
   },
   {

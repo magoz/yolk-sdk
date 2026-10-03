@@ -44,8 +44,8 @@ export const decodeXmlEntities = (text: string) =>
 // once rather than once per starting position.
 const attributePattern = /(?<![\w.:-])([\w.:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
 
-/** Attributes of one start tag, entity-decoded, keyed by their qualified name. */
-export const xmlAttributes = (tag: string): ReadonlyMap<string, string> => {
+/** Attributes of one start tag as written (not decoded), keyed by qualified name; first wins. */
+export const rawXmlAttributes = (tag: string): ReadonlyMap<string, string> => {
   const attributes = new Map<string, string>()
 
   for (const match of tag.matchAll(attributePattern)) {
@@ -53,11 +53,17 @@ export const xmlAttributes = (tag: string): ReadonlyMap<string, string> => {
     const value = match[2] ?? match[3]
 
     if (name !== undefined && value !== undefined && !attributes.has(name))
-      attributes.set(name, decodeXmlEntities(value))
+      attributes.set(name, value)
   }
 
   return attributes
 }
+
+/** Attributes of one start tag, entity-decoded, keyed by their qualified name. */
+export const xmlAttributes = (tag: string): ReadonlyMap<string, string> =>
+  new Map(
+    Array.from(rawXmlAttributes(tag), ([name, value]) => [name, decodeXmlEntities(value)] as const)
+  )
 
 /** The value of a namespace-prefixed attribute such as `r:id`, whatever the prefix. */
 export const prefixedAttribute = (attributes: ReadonlyMap<string, string>, localName: string) => {

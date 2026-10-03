@@ -20,7 +20,9 @@ export type SheetJs = {
  *   every shared-formula dependent and scans every earlier array formula for each cell, before
  *   any extractor budget runs. Cached values still render; formula-only cells render empty.
  * - `cellHTML: false`: no rich-text HTML (`cell.h`) we never read.
- * - `cellText: true`: keep the formatted display text (`cell.w`) the CSV uses.
+ * - `cellText: true`: keep the formatted display text (`cell.w`) the CSV uses. SheetJS formats
+ *   every styled cell inside `read`, with work proportional to the format code, so it only ever
+ *   reads the generated `xl/styles.xml` (codes of at most 255 characters, `xlsx-styles.ts`).
  * - `cellNF`, `cellStyles`, `cellDates: false`: no format strings or style objects; dates stay
  *   serial numbers whose `cell.w` carries the formatted date (`cellStyles` would also force
  *   `sheetStubs`).
@@ -170,14 +172,4 @@ export const asXlsxWorkbook = (parsed: unknown): XlsxWorkbook | undefined => {
   }
 
   return { SheetNames: sheetNames, Sheets: parsed.Sheets }
-}
-
-/** The workbook title from its core properties, when SheetJS read one. */
-export const workbookTitle = (parsed: unknown) => {
-  if (!Predicate.hasProperty(parsed, 'Props') || !Predicate.hasProperty(parsed.Props, 'Title'))
-    return undefined
-
-  const title = parsed.Props.Title
-
-  return Predicate.isString(title) && title.trim().length > 0 ? title : undefined
 }

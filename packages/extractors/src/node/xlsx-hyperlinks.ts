@@ -1,15 +1,6 @@
 import { Buffer } from 'node:buffer'
 import type { StrippedHyperlinkTags } from './office-archive.ts'
-import {
-  directoryOf,
-  indexParts,
-  relationships,
-  relationshipsPathFor,
-  resolvePartPath,
-  utf8Text,
-  workbookPartPath,
-  workbookSheets
-} from './xlsx-parts.ts'
+import { indexParts, relationships, relationshipsPathFor, utf8Text } from './xlsx-parts.ts'
 import type { Relationship } from './xlsx-parts.ts'
 import { parseCellRange } from './xlsx-range.ts'
 import type { CellRange } from './xlsx-range.ts'
@@ -89,13 +80,20 @@ const hyperlinkFrom = (
     : { range, target, display: capDisplay(display) }
 }
 
+/** A sheet of the workbook and the validated worksheet part SheetJS reads for it, if any. */
+export type HyperlinkSheet = {
+  readonly name: string
+  readonly part: string | undefined
+}
+
 /**
- * Map the hyperlink tags removed from a workbook to worksheet names through `xl/workbook.xml`,
- * its relationships, and each worksheet's relationships (targets need not end in `.xml`).
+ * Map the hyperlink tags removed from a workbook to its sheets (the same sheet list and worksheet
+ * parts SheetJS reads, from `buildSheetJsInput`) through each worksheet's relationships.
  */
 export const resolveXlsxHyperlinks = (
   parts: Readonly<Record<string, Uint8Array>>,
-  hyperlinkTags: StrippedHyperlinkTags
+  hyperlinkTags: StrippedHyperlinkTags,
+  sheets: ReadonlyArray<HyperlinkSheet>
 ): XlsxHyperlinks => {
   const bySheet = new Map<string, ReadonlyArray<XlsxHyperlink>>()
 
@@ -103,22 +101,13 @@ export const resolveXlsxHyperlinks = (
 
   const index = indexParts(parts)
   const text = (path: string) => utf8Text(index.find(path)?.bytes)
-  const workbookRelationships = relationships(text(relationshipsPathFor(workbookPartPath)))
 
-  for (const { name, id } of workbookSheets(text(workbookPartPath))) {
-    const relationship = id === undefined ? undefined : workbookRelationships.get(id)
+  for (const { name, part } of sheets) {
+    const tags = part === undefined ? undefined : hyperlinkTags.get(part)
 
-    if (name === undefined || relationship === undefined || bySheet.has(name)) continue
+    if (part === undefined || tags === undefined || bySheet.has(name)) continue
 
-    const sheetPart = index.find(
-      resolvePartPath(directoryOf(workbookPartPath), relationship.target)
-    )
-
-    const tags = sheetPart === undefined ? undefined : hyperlinkTags.get(sheetPart.name)
-
-    if (sheetPart === undefined || tags === undefined) continue
-
-    const sheetRelationships = relationships(text(relationshipsPathFor(sheetPart.name)))
+    const sheetRelationships = relationships(text(relationshipsPathFor(part)))
 
     const links = tags.flatMap(linkTag => {
       const link = hyperlinkFrom(linkTag, sheetRelationships)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Cause, Effect, Exit } from 'effect'
-import { strToU8, unzipSync, zipSync } from 'fflate'
+import { unzipSync, zipSync } from 'fflate'
 import * as XLSX from 'xlsx'
 import {
   FileExtractionError,
@@ -10,77 +10,24 @@ import {
   UnsupportedFileFormatError
 } from '../src/index.ts'
 import { minimumXlsxTextCharacters } from '../src/limits.ts'
-import { withAcquiredPdfDocument } from '../src/node/live-layer.ts'
+import { withAcquiredPdfDocument } from '../src/node/extract-file.ts'
 import { omittedHyperlinksMarkerReserve } from '../src/node/xlsx-text.ts'
 import {
+  docxMediaType,
   encode,
   expectAllowlisted,
   extractWith,
+  makeDocx,
+  makePdf,
+  makePptx,
+  pptxMediaType,
   recordingSheetJs,
   workbookParts,
   xlsxInput,
-  zipParts
+  zipParts,
+  zipText
 } from './fixtures.ts'
 import type { SheetJsCall } from './fixtures.ts'
-
-const zipText = (text: string) => Uint8Array.from(strToU8(text))
-
-const docxMediaType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-
-const pptxMediaType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-
-const makeDocx = (text: string) =>
-  zipSync({
-    '[Content_Types].xml': zipText(
-      '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
-    ),
-    '_rels/.rels': zipText(
-      '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
-    ),
-    'word/document.xml': zipText(
-      `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`
-    )
-  })
-
-const makePptx = () =>
-  zipSync({
-    '[Content_Types].xml': zipText('<Types/>'),
-    'ppt/presentation.xml': zipText('<p:presentation/>'),
-    'ppt/slides/slide2.xml': zipText('<a:p><a:r><a:t>Second</a:t></a:r></a:p>'),
-    'ppt/slides/slide1.xml': zipText('<a:p><a:r><a:t>First &amp; one</a:t></a:r></a:p>'),
-    'ppt/notesSlides/notesSlide1.xml': zipText('<a:p><a:r><a:t>Speaker note</a:t></a:r></a:p>')
-  })
-
-const makePdf = (text: string) => {
-  const stream = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`
-
-  const objects = [
-    '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj',
-    '2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj',
-    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj',
-    `4 0 obj<</Length ${stream.length}>>stream\n${stream}\nendstream endobj`,
-    '5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj'
-  ]
-
-  let body = '%PDF-1.4\n'
-  const offsets: Array<number> = []
-
-  for (const object of objects) {
-    offsets.push(body.length)
-    body += `${object}\n`
-  }
-
-  const startXref = body.length
-
-  const rows = [
-    '0000000000 65535 f ',
-    ...offsets.map(offset => `${offset.toString().padStart(10, '0')} 00000 n `)
-  ]
-
-  return encode(
-    `${body}xref\n0 6\n${rows.join('\n')}\ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n${startXref}\n%%EOF`
-  )
-}
 
 const sheetJsBytes = () => {
   const workbook = XLSX.utils.book_new()

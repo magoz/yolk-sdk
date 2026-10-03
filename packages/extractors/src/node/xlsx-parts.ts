@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { prefixedAttribute, xmlAttributes } from './xml-text.ts'
+import { xmlAttributes } from './xml-text.ts'
 
 /** The main workbook part every validated XLSX archive contains. */
 export const workbookPartPath = 'xl/workbook.xml'
@@ -53,8 +53,6 @@ export const indexParts = (parts: Readonly<Record<string, Uint8Array>>): PartInd
 const startTagPattern = (localName: string) =>
   new RegExp(`<(?:[\\w.-]+:)?${localName}(?=[\\s/>])[^<>]*>`, 'g')
 
-const sheetTag = startTagPattern('sheet')
-
 const relationshipTag = startTagPattern('Relationship')
 
 export type Relationship = {
@@ -83,17 +81,3 @@ export const relationships = (xml: string): ReadonlyMap<string, Relationship> =>
 
   return byId
 }
-
-export type WorkbookSheet = {
-  readonly name: string | undefined
-  /** The `r:id` of the sheet's workbook relationship (any namespace prefix). */
-  readonly id: string | undefined
-}
-
-/** `<sheet>` elements of `xl/workbook.xml`, in workbook order. */
-export const workbookSheets = (xml: string): ReadonlyArray<WorkbookSheet> =>
-  Array.from(xml.matchAll(sheetTag), ([tag]) => {
-    const attributes = xmlAttributes(tag)
-
-    return { name: attributes.get('name'), id: prefixedAttribute(attributes, 'id') }
-  })

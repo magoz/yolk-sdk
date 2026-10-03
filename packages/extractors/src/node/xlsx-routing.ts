@@ -1,4 +1,5 @@
-import { Buffer } from 'node:buffer'
+import { sheetJsTags, sheetJsTextViews } from './sheetjs-xml.ts'
+import type { SheetJsTag } from './sheetjs-xml.ts'
 
 /**
  * Early, exact rejection of XLSX input that SheetJS 0.20.3 would hand to its ODS, Numbers, or
@@ -7,31 +8,6 @@ import { Buffer } from 'node:buffer'
  * `buildSheetJsInput` (`xlsx-sheetjs-input.ts`), which contains no marker entries and no `.bin`
  * parts whatever these checks decide.
  */
-
-const swapUtf16ByteOrder = (bytes: Buffer) =>
-  Buffer.from(bytes.subarray(0, bytes.length - (bytes.length % 2))).swap16()
-
-/**
- * The texts SheetJS can read from a part: its Latin-1 ("binary") view and, for BOM-marked parts,
- * the UTF-16 decodings of `cc2str` (little- and big-endian from byte 2, including its
- * `arr[1]/arr[2]` Buffer check) plus an extra odd-offset big-endian decode.
- */
-export const sheetJsTextViews = (content: Uint8Array): ReadonlyArray<string> => {
-  const bytes = Buffer.from(content.buffer, content.byteOffset, content.byteLength)
-  const latin1 = bytes.toString('latin1')
-  const littleEndian = bytes[0] === 0xff && bytes[1] === 0xfe
-  const bigEndian = bytes[0] === 0xfe && bytes[1] === 0xff
-  const offsetBigEndian = bytes[1] === 0xfe && bytes[2] === 0xff
-
-  if (!littleEndian && !bigEndian && !offsetBigEndian) return [latin1]
-
-  return [
-    latin1,
-    bytes.subarray(2).toString('utf16le'),
-    swapUtf16ByteOrder(bytes.subarray(2)).toString('utf16le'),
-    swapUtf16ByteOrder(bytes.subarray(3)).toString('utf16le')
-  ]
-}
 
 /**
  * An entry name as SheetJS looks it up: its ZIP reader (`cfb_add`) keeps a name that already
@@ -66,73 +42,11 @@ export const isAlternateFormatEntry = (name: string) => {
   )
 }
 
-/**
- * SheetJS's own tag pattern (`tagregex1`, used for every part it parses): quoted values may hold
- * `<` and `>`. Each attempt stops at the next quote of its kind, so a scan stays linear.
- */
-const sheetJsTag =
-  /<[/?]?[a-zA-Z0-9:_-]+(?:\s+[^"\s?<>/]+\s*=\s*(?:"[^"]*"|'[^']*'|[^'"<>\s=]+))*\s*[/?]?>/gm
-
-/** SheetJS `attregexg`. */
-const sheetJsAttribute = /\s([^"\s?>/]+)\s*=\s*((?:")([^"]*)(?:")|(?:')([^']*)(?:')|([^'">\s]+))/g
-
-type SheetJsTag = {
-  /** The tag up to its first space, line feed, or carriage return (SheetJS `y[0]`). */
-  readonly head: string
-  readonly attributes: ReadonlyMap<string, string>
-}
-
-/**
- * Port of SheetJS `parsexmltag`: exact-case keys (plus lower-cased copies), a namespace prefix
- * dropped, an unprefixed name cut at its first `_`, the last value winning. Values are raw.
- */
-const parseSheetJsTag = (tag: string): SheetJsTag => {
-  let end = 0
-
-  for (; end < tag.length; end += 1) {
-    const code = tag.charCodeAt(end)
-
-    if (code === 32 || code === 10 || code === 13) break
-  }
-
-  const attributes = new Map<string, string>()
-
-  if (end === tag.length) return { head: tag, attributes }
-
-  for (const [match] of tag.matchAll(sheetJsAttribute)) {
-    const text = match.slice(1)
-    let equals = text.indexOf('=')
-    let name = text.slice(0, equals).trim()
-
-    while (text.charCodeAt(equals + 1) === 32) equals += 1
-
-    const quoteCode = text.charCodeAt(equals + 1)
-    const quoted = quoteCode === 34 || quoteCode === 39 ? 1 : 0
-    const value = text.slice(equals + 1 + quoted, text.length - quoted)
-    const colon = name.indexOf(':')
-
-    if (colon < 0) {
-      if (name.indexOf('_') > 0) name = name.slice(0, name.indexOf('_'))
-    } else {
-      const local = (colon === 5 && name.startsWith('xmlns') ? 'xmlns' : '') + name.slice(colon + 1)
-
-      if (attributes.has(local) && name.slice(colon - 3, colon) === 'ext') continue
-
-      name = local
-    }
-
-    attributes.set(name, value)
-    attributes.set(name.toLowerCase(), value)
-  }
-
-  return { head: tag.slice(0, end), attributes }
-}
-
 /** Whether any tag SheetJS would parse from any view of `content` satisfies `test`. */
 const someSheetJsTag = (content: Uint8Array, test: (tag: SheetJsTag) => boolean) =>
   sheetJsTextViews(content).some(text => {
-    for (const [tag] of text.matchAll(sheetJsTag)) {
-      if (test(parseSheetJsTag(tag))) return true
+    for (const tag of sheetJsTags(text)) {
+      if (test(tag)) return true
     }
 
     return false

@@ -122,7 +122,10 @@ const packages: ReadonlyArray<PackageManifest> = [
   },
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
   { name: '@yolk-sdk/codemode', exports: ['.', './node'] },
-  { name: '@yolk-sdk/extractors', exports: ['.', './knowledge', './node'] },
+  {
+    name: '@yolk-sdk/extractors',
+    exports: ['.', './knowledge', './node', './node/extraction-worker']
+  },
   { name: '@yolk-sdk/vercel-workflows', exports: ['.', './effect', './testing', './workflow'] },
   {
     name: '@yolk-sdk/harness',
@@ -419,6 +422,20 @@ const main = async () => {
           'const smokeXlsx = new Uint8Array(SheetJs.write(smokeBook, { type: "array", bookType: "xlsx" }))',
           'const extracted = await SmokeEffect.runPromise(SmokeEffect.gen(function* () { const extractor = yield* extractorsNode.FileExtractor; return yield* extractor.extract({ filename: "links.xlsx", mediaType: "", bytes: smokeXlsx }) }).pipe(SmokeEffect.provide(extractorsNode.FileExtractorLayer)))',
           'if (extracted.content !== "# Links\\nAcme <https://acme.example/>") throw new Error(`Extractor smoke failed: ${JSON.stringify(extracted)}`)',
+          // The default layer parses in the packaged worker file; prove it exists and enforces its limits.
+          'const { existsSync: smokeExists } = await import("node:fs")',
+          'const smokeWorkerFile = new URL("./extraction-worker.mjs", import.meta.resolve("@yolk-sdk/extractors/node"))',
+          'if (!smokeExists(smokeWorkerFile) || import.meta.resolve("@yolk-sdk/extractors/node/extraction-worker") !== smokeWorkerFile.href) throw new Error("Missing packaged extraction worker")',
+          'const extractWithLayer = (layer, filename, bytes) => SmokeEffect.runPromise(SmokeEffect.gen(function* () { const extractor = yield* extractorsNode.FileExtractor; return yield* extractor.extract({ filename, mediaType: "", bytes }) }).pipe(SmokeEffect.provide(layer), SmokeEffect.flip))',
+          'const smokeTimeout = await extractWithLayer(extractorsNode.makeFileExtractorLayer({ isolation: { timeoutMs: 1 } }), "links.xlsx", smokeXlsx)',
+          'if (smokeTimeout.reason !== "timeout") throw new Error(`Extractor worker timeout smoke failed: ${JSON.stringify(smokeTimeout)}`)',
+          'const heavyBook = SheetJs.utils.book_new()',
+          'SheetJs.utils.book_append_sheet(heavyBook, SheetJs.utils.aoa_to_sheet(Array.from({ length: 30000 }, (_, row) => Array.from({ length: 10 }, () => row))), "Heavy")',
+          'const heavyXlsx = new Uint8Array(SheetJs.write(heavyBook, { type: "array", bookType: "xlsx", compression: true }))',
+          'const smokeHeap = await extractWithLayer(extractorsNode.makeFileExtractorLayer({ isolation: { maxOldGenerationSizeMb: 16 } }), "heavy.xlsx", heavyXlsx)',
+          'if (smokeHeap.reason !== "resource-limit") throw new Error(`Extractor worker heap smoke failed: ${JSON.stringify(smokeHeap)}`)',
+          'const smokeMissingWorker = await extractWithLayer(extractorsNode.makeFileExtractorLayer({ isolation: { workerUrl: new URL("./missing-worker.mjs", smokeWorkerFile) } }), "links.xlsx", smokeXlsx)',
+          'if (smokeMissingWorker.reason !== "worker-unavailable") throw new Error(`Extractor worker spawn smoke failed: ${JSON.stringify(smokeMissingWorker)}`)',
           'const knowledgeExtraction = await import("@yolk-sdk/knowledge/extraction")',
           'const knowledgeDocument = await SmokeEffect.runPromise(SmokeEffect.gen(function* () { const extractor = yield* knowledgeExtraction.KnowledgeExtractor; return yield* extractor.extract({ source: { _tag: "Text" }, content: new TextEncoder().encode("hello knowledge") }) }).pipe(SmokeEffect.provide(extractorsKnowledge.FileKnowledgeExtractorLayer.pipe(SmokeLayer.provide(extractorsNode.FileExtractorLayer)))))',
           'if (knowledgeDocument.content !== "hello knowledge") throw new Error("Knowledge extractor smoke failed")',

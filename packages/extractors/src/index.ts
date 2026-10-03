@@ -3,6 +3,7 @@
 
 export {
   FileExtractionError,
+  FileExtractionFailureReason,
   minimumSheetJsVersion,
   OfficeArchiveError,
   SheetJsUnavailableError,

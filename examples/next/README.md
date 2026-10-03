@@ -139,3 +139,28 @@ After configuration and any separately approved schema preparation, start with
 `pnpm dev`. For manual setup without provisioning, install dependencies and copy
 `examples/next/.env.example` to `examples/next/.env.local`, supplying approved
 configuration; the template alone is not a runnable environment.
+
+## Extractor worker
+
+`@yolk-sdk/extractors` parses PDF, DOCX, XLSX, and PPTX uploads in a `worker_threads` worker with
+heap and time limits. The worker file is started from beside the package's own module, so npm
+consumers list the package in `serverExternalPackages` (done in `next.config.ts`).
+
+This app links the package from the workspace, and Turbopack bundles workspace links even when
+they are listed there. The worker therefore runs from `packages/extractors/src` through Node's
+type stripping, which works with `next build` and `next start` in the repository.
+
+**Known gap: Vercel deployments of this example.** Output file tracing does not include the
+worker's runtime files, so a deployed function would fail closed with
+`FileExtractionError` `reason: 'worker-unavailable'`. Those files are the package source plus
+effect, fflate, unpdf, SheetJS, and mammoth with its transitive dependencies (21 packages
+measured). Tracing includes would need version-pinned paths into pnpm's store, which is too
+fragile. The preferred follow-up is either a self-contained worker bundle in the package, or dist
+export conditions for workspace packages so Turbopack externalizes them. npm consumers are not
+affected: a standalone build of a consumer app installed from the packed tarball traces the
+worker and its dependencies.
+
+To check the worker in a production build, run `next build`, then start the app with
+`YOLK_EXTRACTORS_SMOKE=true next start`. Then call `GET /api/internal/extractors-smoke`, which is
+404 without the variable. It returns one extraction, and the `reason` of a run against a 16 MB
+heap (`resource-limit`) and of a 1 ms timeout (`timeout`).

@@ -5,10 +5,14 @@ import * as XLSX from 'xlsx'
 import {
   allCells,
   decode,
-  expectAllowlisted,
+  expectRejected,
+  extractRecorded,
   extractWith,
+  readDirectly,
   recordingSheetJs,
+  singleSheetParts,
   workbookParts,
+  worksheet,
   xlsxInput,
   zipParts
 } from './fixtures.ts'
@@ -21,43 +25,6 @@ const mainNs = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 const relNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
 const packageRelNs = 'http://schemas.openxmlformats.org/package/2006/relationships'
-
-const worksheet = (sheetData: string, dimension: string, after = '') =>
-  strToU8(
-    `${xmlHeader}<worksheet xmlns="${mainNs}" xmlns:r="${relNs}"><dimension ref="${dimension}"/><sheetData>${sheetData}</sheetData>${after}</worksheet>`
-  )
-
-/** A one-sheet workbook whose worksheet XML is `sheet`, plus any extra parts. */
-const singleSheetParts = (sheet: Uint8Array, extra: Record<string, Uint8Array> = {}) => {
-  const parts = workbookParts([{ name: 'Sheet1' }])
-
-  parts['xl/worksheets/sheet1.xml'] = sheet
-
-  return { ...parts, ...extra }
-}
-
-/** Unprotected SheetJS with its defaults (formulas on): the control for each attack. */
-const readDirectly = (parts: Record<string, Uint8Array>) =>
-  XLSX.read(zipParts(parts), { type: 'array' })
-
-const extractRecorded = (parts: Record<string, Uint8Array>) =>
-  Effect.gen(function* () {
-    const calls: Array<SheetJsCall> = []
-
-    const result = yield* extractWith(xlsxInput(zipParts(parts)), {
-      loadSheetJs: recordingSheetJs(calls)
-    })
-
-    expect(calls).toHaveLength(1)
-
-    const call = calls[0]
-
-    if (call === undefined) throw new Error('SheetJS was not called')
-
-    expectAllowlisted(call.names)
-
-    return { result, call }
-  })
 
 const comments = (count: number) =>
   strToU8(
@@ -207,12 +174,13 @@ describe('the allowlisted SheetJS input', () => {
     })
   )
 
-  it.effect('stores sheets under canonical names, matching sources ignoring case', () =>
+  it.effect('stores worksheets under canonical names, matching sources ignoring case', () =>
     Effect.gen(function* () {
       const parts = workbookParts([
         { name: 'Upper', rows: [['u']], path: 'xl/worksheets/Data.XML' },
         { name: 'Elsewhere', rows: [['e']], path: 'xl/other/sheet2.xml' },
-        { name: 'Third', rows: [['t']] }
+        { name: 'Binary', rows: [['b']], path: 'xl/worksheets/sheet3.data' },
+        { name: 'Fourth', rows: [['f']] }
       ])
 
       const rels = parts['xl/_rels/workbook.xml.rels']
@@ -225,17 +193,19 @@ describe('the allowlisted SheetJS input', () => {
 
       const { result, call } = yield* extractRecorded(parts)
 
-      // Only worksheets under xl/worksheets/ are handed over; sheet 3 keeps its position.
-      expect(call.names).toEqual(
-        expect.arrayContaining(['xl/worksheets/sheet1.xml', 'xl/worksheets/sheet3.xml'])
-      )
-      expect(call.names).not.toContain('xl/worksheets/sheet2.xml')
-      expect(result.content).toBe('# Upper\nu\n\n# Third\nt')
-      expect(result.metadata.sheetNames).toEqual(['Upper', 'Elsewhere', 'Third'])
+      // Any `.xml` part related as a worksheet is handed over under its position's name; the
+      // non-XML part is not, and its sheet keeps its name with no content.
+      expect(call.names.filter(name => name.startsWith('xl/worksheets/'))).toEqual([
+        'xl/worksheets/sheet1.xml',
+        'xl/worksheets/sheet2.xml',
+        'xl/worksheets/sheet4.xml'
+      ])
+      expect(result.content).toBe('# Upper\nu\n\n# Elsewhere\ne\n\n# Fourth\nf')
+      expect(result.metadata.sheetNames).toEqual(['Upper', 'Elsewhere', 'Binary', 'Fourth'])
     })
   )
 
-  it.effect('hands a worksheet part shared by several sheets over once', () =>
+  it.effect('rejects two sheets on one worksheet part, which SheetJS would parse twice (F4)', () =>
     Effect.gen(function* () {
       const parts = workbookParts([
         { name: 'A', rows: [['shared']] },
@@ -250,12 +220,85 @@ describe('the allowlisted SheetJS input', () => {
         decode(rels).replace('worksheets/sheet2.xml', 'worksheets/sheet1.xml')
       )
 
-      const { result, call } = yield* extractRecorded(parts)
+      // Control: SheetJS parses and keeps the shared part once per sheet.
+      const direct = readDirectly(parts)
 
-      expect(call.names.filter(name => name.startsWith('xl/worksheets/'))).toEqual([
-        'xl/worksheets/sheet1.xml'
+      expect(direct.Sheets.A?.A1?.v).toBe('shared')
+      expect(direct.Sheets.B?.A1?.v).toBe('shared')
+
+      yield* expectRejected(parts, 'XLSX workbook is malformed.')
+    })
+  )
+
+  it.effect('rejects two sheets sharing one r:id (F4)', () =>
+    Effect.gen(function* () {
+      const parts = workbookParts([
+        { name: 'A', rows: [['shared']] },
+        { name: 'B', rows: [['other']] }
       ])
-      expect(result.content).toBe('# A\nshared')
+
+      parts['xl/workbook.xml'] = strToU8(decode(parts['xl/workbook.xml']).replace('rId2', 'rId1'))
+
+      const direct = readDirectly(parts)
+
+      expect(direct.Sheets.A?.A1?.v).toBe('shared')
+      expect(direct.Sheets.B?.A1?.v).toBe('shared')
+
+      yield* expectRejected(parts, 'XLSX workbook is malformed.')
+    })
+  )
+
+  it.effect('rejects sheets only SheetJS sees, which reparse a worksheet each (R3-S1)', () =>
+    Effect.gen(function* () {
+      const extra = 20
+      const parts = workbookParts([{ name: 'Data', rows: [['1', '2', '3']] }])
+
+      // A `<` inside a quoted value hides each tag from a `[^<>]*` scan, not from SheetJS.
+      parts['xl/workbook.xml'] = strToU8(
+        decode(parts['xl/workbook.xml']).replace(
+          '</sheets>',
+          `${Array.from({ length: extra }, (_, index) => `<sheet name="Extra${index}" odd="<" sheetId="${index + 2}" r:id="rId1"/>`).join('')}</sheets>`
+        )
+      )
+
+      // Control: SheetJS walks every extra sheet and keeps a full copy of the worksheet for each.
+      const direct = readDirectly(parts)
+
+      expect(direct.SheetNames).toHaveLength(extra + 1)
+      expect(direct.Sheets[`Extra${extra - 1}`]?.C1?.v).toBe('3')
+
+      yield* expectRejected(parts, 'XLSX workbook is malformed.')
+    })
+  )
+
+  it.effect('counts sheets with a `<` in an attribute against the sheet limit', () =>
+    Effect.gen(function* () {
+      const parts = workbookParts([
+        { name: 'A', rows: [['a']] },
+        { name: 'B', rows: [['b']] }
+      ])
+
+      parts['xl/workbook.xml'] = strToU8(
+        decode(parts['xl/workbook.xml']).replace(
+          '</sheets>',
+          '<sheet name="C" odd="<" sheetId="3" r:id="rId1"/></sheets>'
+        )
+      )
+
+      yield* expectRejected(parts, 'XLSX exceeds the worksheet or cell-visit limit.', {
+        maxXlsxSheets: 2
+      })
+    })
+  )
+
+  it.effect('rejects sheet names that repeat ignoring case', () =>
+    Effect.gen(function* () {
+      const parts = workbookParts([
+        { name: 'Report', rows: [['a']] },
+        { name: 'REPORT', rows: [['b']] }
+      ])
+
+      yield* expectRejected(parts, 'XLSX workbook is malformed.')
     })
   )
 
@@ -305,9 +348,8 @@ describe('positive controls', () => {
       const direct = readDirectly(parts)
       const { result, call } = yield* extractRecorded(parts)
 
-      expect(call.names).toEqual(
-        expect.arrayContaining(['xl/sharedStrings.xml', 'xl/styles.xml', 'docProps/core.xml'])
-      )
+      expect(call.names).toEqual(expect.arrayContaining(['xl/sharedStrings.xml', 'xl/styles.xml']))
+      expect(call.names).not.toContain('docProps/core.xml')
       expect(result.content).toBe('# Inventory\nName,Count\nAlpha,2')
       expect(result.content).toBe(
         `# Inventory\n${XLSX.utils.sheet_to_csv(direct.Sheets.Inventory ?? {})}`
@@ -334,8 +376,7 @@ describe('positive controls', () => {
         'xl/worksheets/sheet1.xml',
         'xl/worksheets/sheet2.xml',
         'xl/sharedStrings.xml',
-        'xl/styles.xml',
-        'docProps/core.xml'
+        'xl/styles.xml'
       ])
 
       // Number formats come through styles.xml: a custom percentage and a built-in date.
