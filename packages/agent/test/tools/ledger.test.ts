@@ -8,6 +8,7 @@ import {
   inlineBase64AttachmentSource,
   NestedToolCallRecord,
   NestedToolCalls,
+  TextPart,
   ToolCall,
   ToolDef,
   ToolResult
@@ -953,6 +954,43 @@ describe('tool ledger', () => {
     )
 
     expect(tiny).toEqual(ToolResult.make({ toolCallId: 'call_1', content: '', isError: true }))
+  })
+
+  it('cuts a multi-megabyte text result to the bound without losing its prefix', () => {
+    const bytes = (result: ToolResult) => new TextEncoder().encode(JSON.stringify(result)).length
+    const text = 'é😀x\u0001'.repeat(1_000_000)
+    const stored = toolLedgerResult(ToolResult.make({ toolCallId: 'call_1', content: text }))
+    const content = resultText(stored)
+    const kept = content.slice(0, content.indexOf('…'))
+
+    expect(bytes(stored)).toBeLessThanOrEqual(1024 * 1024)
+    // The longest fitting prefix: one more code point would not fit.
+    expect(bytes(stored)).toBeGreaterThan(1024 * 1024 - 8)
+    expect(text.startsWith(kept)).toBe(true)
+    expect(content).toMatch(/…\n\n\[The stored copy of this result was reduced/)
+  })
+
+  it('appends no truncation marker when the whole text fits', () => {
+    const parts = Array.from({ length: 20 }, (_, index) => `${index}`.padStart(10, '-'))
+    const text = parts.join('')
+
+    const expected = ToolResult.make({
+      toolCallId: 'call_1',
+      content: `${text}\n\n[The stored copy of this result was reduced to fit the tool ledger bound.]`
+    })
+
+    const maxBytes = new TextEncoder().encode(JSON.stringify(expected)).length
+
+    // As 20 text parts the content does not fit; as one string (with the note) it does.
+    const stored = toolLedgerResult(
+      ToolResult.make({
+        toolCallId: 'call_1',
+        content: parts.map(part => TextPart.make({ text: part }))
+      }),
+      maxBytes
+    )
+
+    expect(stored).toEqual(expected)
   })
 
   it('drops nestedCalls before structuredContent when reducing a stored result', () => {

@@ -386,16 +386,43 @@ const withNote = (content: Content): Content =>
 
 const resultBytes = (fields: StoredResultFields) => utf8ByteLength(compactJson(fields) ?? '')
 
-// The longest prefix of `text` (whole code points) whose cut content keeps the result within
-// `maxBytes`, measured on the actual serialized JSON (escapes such as `\u0001` take six bytes).
-// Below that: the note alone, then an empty content.
-const fitText = (base: StoredResultFields, text: string, maxBytes: number): ToolResult => {
-  const characters = Array.from(text)
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
 
-  const cut = (count: number): StoredResultFields => ({
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
+
+// At most `maxUnits` UTF-16 code units of `text`, never splitting a surrogate pair.
+const codeUnitPrefix = (text: string, maxUnits: number) => {
+  if (text.length <= maxUnits) return text
+
+  const end =
+    maxUnits > 0 &&
+    isHighSurrogate(text.charCodeAt(maxUnits - 1)) &&
+    isLowSurrogate(text.charCodeAt(maxUnits))
+      ? maxUnits - 1
+      : maxUnits
+
+  return text.slice(0, end)
+}
+
+// The whole `text` when it fits, else its longest prefix (whole code points) whose cut content
+// keeps the result within `maxBytes`, measured on the actual serialized JSON (escapes such as
+// `\u0001` take six bytes). Below that: the note alone, then an empty content.
+const fitText = (base: StoredResultFields, text: string, maxBytes: number): ToolResult => {
+  const withText = (kept: string): StoredResultFields => ({
     ...base,
-    content: `${characters.slice(0, count).join('')}${truncationMarker}\n\n${reducedNote}`
+    content: `${kept}\n\n${reducedNote}`
   })
+
+  const whole = withText(text)
+
+  if (resultBytes(whole) <= maxBytes) return ToolResult.make(whole)
+
+  // Every code unit serializes to at least one byte, so a longer prefix never fits: cutting first
+  // keeps a multi-megabyte text from being split into code points and re-joined in full.
+  const characters = Array.from(codeUnitPrefix(text, maxBytes))
+
+  const cut = (count: number) =>
+    withText(`${characters.slice(0, count).join('')}${truncationMarker}`)
 
   if (resultBytes(cut(0)) > maxBytes) {
     const noteOnly: StoredResultFields = { ...base, content: reducedNote }
@@ -403,8 +430,10 @@ const fitText = (base: StoredResultFields, text: string, maxBytes: number): Tool
     return ToolResult.make(resultBytes(noteOnly) <= maxBytes ? noteOnly : { ...base, content: '' })
   }
 
+  // `cut(characters.length)` never fits: it is the whole text plus the marker, or a prefix of at
+  // least `maxBytes` bytes plus the marker.
   let fits = 0
-  let tooLong = characters.length + 1
+  let tooLong = characters.length
 
   while (tooLong - fits > 1) {
     const middle = Math.floor((fits + tooLong) / 2)
