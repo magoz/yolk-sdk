@@ -302,6 +302,40 @@ describe('code mode with a tool ledger', () => {
     })
   )
 
+  it.effect('marks interrupted calls incomplete when the ledger already cut their arguments', () =>
+    Effect.gen(function* () {
+      const log: WriteLog = []
+      const store = makeInMemoryToolLedgerStore()
+      const note = 'n'.repeat(nestedToolCallMaxArgsBytes + 1_000)
+
+      const { executor } = scriptedExecutor(async call => {
+        await call('sales_manage', { note })
+
+        return 'done'
+      })
+
+      const modules = codeModeModules(executor, [salesManage(log, { block: note })])
+      const crashed = yield* Effect.forkChild(runLedgered(modules, { store }))
+
+      yield* waitUntil(() => log.length === 1)
+      yield* Fiber.interrupt(crashed)
+      yield* TestClock.adjust('1 minute')
+
+      const result = yield* runLedgered(modules, { store })
+
+      const structured = yield* Schema.decodeUnknownEffect(InterruptedContent)(
+        result.structuredContent
+      )
+
+      const [entry] = structured.codemode.interruptedCalls.calls
+
+      // One call, within the per-call and total budgets here, but cut when it was claimed.
+      expect(structured.codemode.interruptedCalls.calls).toHaveLength(1)
+      expect(entry?.args.endsWith('…')).toBe(true)
+      expect(structured.codemode.interruptedCalls.complete).toBe(false)
+    })
+  )
+
   it.effect('reports a different long script under the same call id as a conflict', () =>
     Effect.gen(function* () {
       const log: WriteLog = []

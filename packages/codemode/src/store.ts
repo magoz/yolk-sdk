@@ -36,9 +36,10 @@ export type CodeModeInterruptedCall = {
 /**
  * `structuredContent.codemode.interruptedCalls`: plain JSON, in sequence order, bounded like
  * `nestedCalls` (at most `limits.maxNestedCalls` calls; arguments within 8 KiB per call and
- * 32 KiB in total). `complete: false` means calls were dropped or arguments cut here; `counts`
- * covers every ledgered nested call, dropped ones included. Read-only calls are not ledgered and
- * never appear.
+ * 32 KiB in total). `complete: false` means calls were dropped or arguments cut, here or already
+ * in the ledger entry (`ToolLedgerEntry.argsTruncated`); `counts` covers every ledgered nested
+ * call, dropped ones included. Calls the ledger policy skips (by default read-only calls) never
+ * appear.
  */
 export type CodeModeInterruptedCalls = {
   readonly calls: ReadonlyArray<CodeModeInterruptedCall>

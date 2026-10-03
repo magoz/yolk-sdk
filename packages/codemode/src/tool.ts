@@ -632,7 +632,8 @@ const interruptedCalls = (
 
     const { args, bytes, truncated } = boundNestedToolCallArgs(entry.args, argsBytes)
 
-    if (truncated) complete = false
+    // `argsTruncated`: the ledger already cut the arguments when the call was claimed.
+    if (truncated || entry.argsTruncated) complete = false
 
     argsBytes += bytes
     calls.push({ key: entry.key, toolName: entry.toolName, args, status })

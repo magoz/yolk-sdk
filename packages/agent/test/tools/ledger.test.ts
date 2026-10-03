@@ -323,6 +323,7 @@ describe('tool ledger', () => {
       expect(conflict.structuredContent).toMatchObject({ details: { state: 'conflict' } })
       // The preview stays bounded; the digest covers the full arguments.
       expect(entry?.args.endsWith('…')).toBe(true)
+      expect(entry?.argsTruncated).toBe(true)
       expect(entry?.argsDigest).toMatch(/^[0-9a-f]{64}$/)
     })
   )
@@ -335,6 +336,8 @@ describe('tool ledger', () => {
 
       expect(left.argsDigest).toBe(right.argsDigest)
       expect(left.args).toBe('{"b":[1,{"y":2,"x":1}],"a":"é"}')
+      expect(left.argsTruncated).toBe(false)
+      expect(toolLedgerArgs('x'.repeat(9_000)).argsTruncated).toBe(true)
       expect(toolLedgerArgs({ a: 'é' }).argsDigest).not.toBe(left.argsDigest)
       expect(yield* store.entries).toEqual([])
     })
@@ -694,6 +697,7 @@ describe('tool ledger', () => {
         toolName: 'append_note',
         args: '{}',
         argsDigest: 'digest',
+        argsTruncated: false,
         claimedAtMs: 1,
         leaseExpiresAtMs: 2,
         completedAtMs: 2,

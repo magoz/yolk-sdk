@@ -41,7 +41,7 @@ export type ToolLedgerOutcome = typeof ToolLedgerOutcome.Type
 /**
  * One persisted ledger entry. `key` is the top-level `call.id`, or `<parentCallId>/<seq>` for a
  * nested call (then `parentKey` is the parent call id). `args` is the compact JSON of the call
- * arguments, cut to 8 KiB (an audit preview). `argsDigest` is the SHA-256 of the full arguments'
+ * arguments, cut to 8 KiB (an audit preview; `argsTruncated` says it was cut). `argsDigest` is the SHA-256 of the full arguments'
  * canonical JSON (see `toolLedgerArgs`); conflict detection compares it with the tool name, never
  * the preview. An entry without `outcome` is claimed: running under a live lease, or abandoned
  * once the lease expired. Plain wire data: persist it with `Schema.toCodecJson(ToolLedgerEntry)`.
@@ -51,6 +51,7 @@ export class ToolLedgerEntry extends Schema.Class<ToolLedgerEntry>('ToolLedgerEn
   parentKey: Schema.optional(NonEmptyTrimmedString),
   toolName: NonEmptyTrimmedString,
   args: Schema.String,
+  argsTruncated: Schema.Boolean,
   argsDigest: Schema.String,
   claimedAtMs: Schema.Number,
   leaseExpiresAtMs: Schema.Number,
@@ -92,6 +93,8 @@ export type ToolLedgerClaimRequest = {
   readonly toolName: string
   /** Bounded preview of the arguments (`toolLedgerArgs`); store it as given. */
   readonly args: string
+  /** Whether `args` was cut (`toolLedgerArgs`); store it as given. */
+  readonly argsTruncated: boolean
   /** SHA-256 of the full arguments (`toolLedgerArgs`); store it as given. */
   readonly argsDigest: string
   /** The caller's `Clock` time. */
@@ -116,6 +119,7 @@ type ClaimRequestFields = {
   parentKey?: string
   toolName: string
   args: string
+  argsTruncated: boolean
   argsDigest: string
   nowMs: number
   leaseExpiresAtMs: number
@@ -275,6 +279,8 @@ const compactJson = (value: unknown): string | undefined =>
 export type ToolLedgerArgs = {
   /** Compact JSON within `toolLedgerMaxArgsBytes`, cut with a trailing `…`: an audit preview. */
   readonly args: string
+  /** Whether `args` was cut, so it no longer holds every argument. */
+  readonly argsTruncated: boolean
   /** Lower-case hex SHA-256 of the full arguments' canonical JSON. */
   readonly argsDigest: string
 }
@@ -305,15 +311,17 @@ const canonicalArguments = (compact: string) =>
 
 /**
  * The ledger's record of call arguments: `args`, their compact JSON cut to
- * `toolLedgerMaxArgsBytes` (an audit preview), and `argsDigest`, the lower-case hex SHA-256 of the
+ * `toolLedgerMaxArgsBytes` (an audit preview; `argsTruncated` says it was cut), and `argsDigest`, the lower-case hex SHA-256 of the
  * full arguments' canonical JSON (compact, object keys sorted). Conflict detection compares
  * `argsDigest`, so arguments that differ only past the preview still conflict.
  */
 export const toolLedgerArgs = (params: unknown): ToolLedgerArgs => {
   const compact = compactToolArguments(params)
+  const args = truncateUtf8(compact, toolLedgerMaxArgsBytes)
 
   return {
-    args: truncateUtf8(compact, toolLedgerMaxArgsBytes),
+    args,
+    argsTruncated: args !== compact,
     argsDigest: sha256Hex(canonicalArguments(compact))
   }
 }
@@ -616,13 +624,14 @@ export const executeLedgered = (input: {
     const { call, options } = input
     const { store } = options
     const key = call.id
-    const { args, argsDigest } = toolLedgerArgs(call.params)
+    const { args, argsTruncated, argsDigest } = toolLedgerArgs(call.params)
 
     const claim = (nowMs: number) => {
       const request: ClaimRequestFields = {
         key,
         toolName: call.name,
         args,
+        argsTruncated,
         argsDigest,
         nowMs,
         leaseExpiresAtMs: nowMs + options.leaseMs,
@@ -762,6 +771,7 @@ type EntryFields = {
   parentKey?: string
   toolName: string
   args: string
+  argsTruncated: boolean
   argsDigest: string
   claimedAtMs: number
   leaseExpiresAtMs: number
@@ -774,6 +784,7 @@ const entryFields = (entry: ToolLedgerEntry): EntryFields => {
     key: entry.key,
     toolName: entry.toolName,
     args: entry.args,
+    argsTruncated: entry.argsTruncated,
     argsDigest: entry.argsDigest,
     claimedAtMs: entry.claimedAtMs,
     leaseExpiresAtMs: entry.leaseExpiresAtMs
@@ -806,6 +817,7 @@ export const makeInMemoryToolLedgerStore = (
           key: request.key,
           toolName: request.toolName,
           args: request.args,
+          argsTruncated: request.argsTruncated,
           argsDigest: request.argsDigest,
           claimedAtMs: request.nowMs,
           leaseExpiresAtMs: request.leaseExpiresAtMs
