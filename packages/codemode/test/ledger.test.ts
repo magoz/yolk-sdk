@@ -2,11 +2,19 @@ import { type Duration, Effect, Fiber } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  nestedToolCallMaxArgsBytes,
+  nestedToolCallMaxTotalArgsBytes,
+  ToolCall,
+  ToolResult
+} from '@yolk-sdk/agent/protocol'
 import {
   makeInMemoryToolLedgerStore,
   makeTool,
   resolveTools,
+  toolLedgerArgs,
+  ToolLedgerFailed,
+  ToolLedgerSucceeded,
   type ToolLedgerOptions,
   type ToolModule,
   type ToolRegistration
@@ -15,6 +23,7 @@ import {
   makeCodeModeTool,
   type CodeModeAfterNestedCallInput,
   type CodeModeExecutor,
+  type CodeModeInterruptedCalls,
   type MakeCodeModeToolOptions
 } from '../src/index.ts'
 import { context, moduleOf, queryTool, text, type TestContext } from './fixtures.ts'
@@ -109,6 +118,30 @@ const waitUntil = (condition: () => boolean) =>
     expect(condition()).toBe(true)
   })
 
+// The documented `interruptedCalls` shape, decoded to prove the result is plain wire data.
+const InterruptedContent = Schema.Struct({
+  codemode: Schema.Struct({
+    ok: Schema.Literal(false),
+    interrupted: Schema.Literal(true),
+    interruptedCalls: Schema.Struct({
+      calls: Schema.Array(
+        Schema.Struct({
+          key: Schema.String,
+          toolName: Schema.String,
+          args: Schema.String,
+          status: Schema.Literals(['applied', 'failed', 'unknown'])
+        })
+      ),
+      complete: Schema.Boolean,
+      counts: Schema.Struct({
+        applied: Schema.Number,
+        failed: Schema.Number,
+        unknown: Schema.Number
+      })
+    })
+  })
+})
+
 describe('code mode with a tool ledger', () => {
   it.effect('never re-runs a crashed script and reports its applied and unknown writes', () =>
     Effect.gen(function* () {
@@ -144,7 +177,30 @@ describe('code mode with a tool ledger', () => {
         { note: 'second', key: 'wrun_1:call_1/3' }
       ])
       expect(result.isError).toBe(true)
-      expect(result.structuredContent).toEqual({ codemode: { ok: false, interrupted: true } })
+      expect(result.structuredContent).toEqual({
+        codemode: {
+          ok: false,
+          interrupted: true,
+          interruptedCalls: {
+            calls: [
+              {
+                key: 'call_1/1',
+                toolName: 'sales_manage',
+                args: '{"note":"first"}',
+                status: 'applied'
+              },
+              {
+                key: 'call_1/3',
+                toolName: 'sales_manage',
+                args: '{"note":"second"}',
+                status: 'unknown'
+              }
+            ],
+            complete: true,
+            counts: { applied: 1, failed: 0, unknown: 1 }
+          }
+        }
+      })
       expect(content).toContain(
         'Script interrupted: an earlier execution of this codemode call (call_1) started but never recorded a result. The script was not run again.'
       )
@@ -160,6 +216,88 @@ describe('code mode with a tool ledger', () => {
       yield* runLedgered(modules, { store })
       expect(state.runs).toBe(1)
       expect(log).toHaveLength(2)
+    })
+  )
+
+  it.effect('bounds the interrupted calls in structuredContent like nestedCalls', () =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+      const { executor, state } = scriptedExecutor(async () => 'never runs')
+      const modules = codeModeModules(executor, [], { limits: { maxNestedCalls: 5 } })
+
+      const lease = { nowMs: 0, leaseExpiresAtMs: 1_000, leaseMs: 1_000 }
+
+      const claimNested = (key: string, args: string) =>
+        store.claim({ key, parentKey: 'call_1', toolName: 'sales_manage', args, ...lease })
+
+      // An abandoned script with six ledgered nested writes: big arguments, mixed outcomes.
+      yield* store.claim({
+        key: 'call_1',
+        toolName: 'codemode',
+        args: toolLedgerArgs({ code: 'script' }),
+        ...lease
+      })
+
+      for (let seq = 1; seq <= 6; seq++) {
+        const key = `call_1/${seq}`
+
+        yield* claimNested(key, toolLedgerArgs({ note: 'é'.repeat(5_000) }))
+
+        if (seq === 1) {
+          yield* store.complete({
+            key,
+            completedAtMs: 1,
+            outcome: ToolLedgerSucceeded.make({
+              result: ToolResult.make({ toolCallId: key, content: 'noted' })
+            })
+          })
+        }
+
+        if (seq === 2) {
+          yield* store.complete({
+            key,
+            completedAtMs: 1,
+            outcome: ToolLedgerFailed.make({
+              error: { tool: 'sales_manage', cause: 'execution', message: 'rejected' }
+            })
+          })
+        }
+      }
+
+      yield* TestClock.adjust('2 seconds')
+
+      const result = yield* runLedgered(modules, { store })
+
+      const structured = yield* Schema.decodeUnknownEffect(InterruptedContent)(
+        result.structuredContent
+      )
+
+      // The decoded shape is assignable to the exported type.
+      const interrupted: CodeModeInterruptedCalls = structured.codemode.interruptedCalls
+
+      expect(state.runs).toBe(0)
+      expect(structured.codemode).toMatchObject({ ok: false, interrupted: true })
+      expect(interrupted.complete).toBe(false)
+      expect(interrupted.counts).toEqual({ applied: 1, failed: 1, unknown: 4 })
+      expect(interrupted.calls.map(call => [call.key, call.status])).toEqual([
+        ['call_1/1', 'applied'],
+        ['call_1/2', 'failed'],
+        ['call_1/3', 'unknown'],
+        ['call_1/4', 'unknown'],
+        ['call_1/5', 'unknown']
+      ])
+
+      const argsBytes = (interrupted.calls ?? []).map(
+        call => new TextEncoder().encode(call.args).length
+      )
+
+      expect(Math.max(...argsBytes)).toBeLessThanOrEqual(nestedToolCallMaxArgsBytes)
+      expect(argsBytes.reduce((total, bytes) => total + bytes, 0)).toBeLessThanOrEqual(
+        nestedToolCallMaxTotalArgsBytes
+      )
+      // Plain JSON: survives a JSON round trip unchanged.
+      expect(JSON.parse(JSON.stringify(result.structuredContent))).toEqual(result.structuredContent)
+      expect(text(result.content)).toContain('- call_1/2 sales_manage')
     })
   )
 

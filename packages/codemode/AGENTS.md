@@ -48,8 +48,11 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   never talks to the store. It supplies `abandonedResult` (`abandonedScriptResult` in `tool.ts`):
   an abandoned `codemode` call returns an interrupted `isError` result listing its ledgered
   nested entries as applied, failed, or unknown, bounded by `maxOutputChars`, with
-  `structuredContent.codemode` `{ ok: false, interrupted: true }`. Never re-run a script on
-  re-execution; deterministic replay is phase 2 (ADR 0002).
+  `structuredContent.codemode` `{ ok: false, interrupted: true, interruptedCalls }`
+  (`CodeModeInterruptedCalls` in `store.ts`: `{ key, toolName, args, status }` per call, plain JSON,
+  bounded like `nestedCalls` by `maxNestedCalls` and the protocol's 8/32 KiB argument budgets, with
+  `complete` and per-status `counts` over every entry). Never re-run a script on re-execution;
+  deterministic replay is phase 2 (ADR 0002).
 - Record every executed nested call with `recordNestedToolCall` over
   `makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })` (per-status counts survive
   dropped entries); calls still running when the script ends are interrupted (`FiberSet.clear`) and
@@ -136,7 +139,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   backstops), bounding, store rebuild and bounds, the rejection prefix, and unprefixed nested-call
   records.
 - `test/ledger.test.ts`: the tool ledger through code mode (crash then re-execution returns the
-  interrupted listing and runs nothing, completed replay, concurrent duplicates wait), records past
+  interrupted listing and `interruptedCalls` and runs nothing, `interruptedCalls` bounds, completed
+  replay, concurrent duplicates wait), records past
   256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
 - `test/classifier-tool.test.ts`: classifier tool through scripts, per-script and process caps
   (shared across scripts and registrations, `false`), permits released on interruption, errors.

@@ -112,8 +112,13 @@ Hosts that re-execute steps (Vercel Workflow's queue is at-least-once) pass a du
 - still running elsewhere: the call waits for it (up to `maxWaitMs`/`deadline`);
 - abandoned (the earlier execution crashed): an interrupted error result lists that script's
   ledgered nested calls as applied, failed, or unknown (started, no recorded result), states that
-  they were not undone, and asks the model to verify; `structuredContent.codemode` is
-  `{ ok: false, interrupted: true }`.
+  they were not undone, and asks the model to verify. Hosts get the same entries in
+  `structuredContent.codemode` without calling the store again:
+  `{ ok: false, interrupted: true, interruptedCalls: { calls, complete, counts } }`, where each call
+  is `{ key, toolName, args, status: 'applied' | 'failed' | 'unknown' }` (`args` compact JSON cut
+  with a trailing `…`), bounded like `nestedCalls` (`maxNestedCalls` calls, 8 KiB of arguments per
+  call, 32 KiB in total; `complete: false` when cut), and `counts` covers every entry. Types:
+  `CodeModeInterruptedCalls`, `CodeModeInterruptedCall`, `CodeModeInterruptedCallStatus`.
 
 Nested write calls are ledgered under `<toolCallId>/<seq>` and receive a stable `idempotencyKey`.
 Read-only nested calls bypass the ledger by default and are not listed.

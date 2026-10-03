@@ -12,6 +12,41 @@ export type CodeModeStructuredContent = {
     readonly storeWrites?: CodeModeStoreWrites
     /** Set on the result of a re-executed call whose earlier execution was abandoned. */
     readonly interrupted?: true
+    /** With `interrupted`: the abandoned execution's ledgered nested calls. */
+    readonly interruptedCalls?: CodeModeInterruptedCalls
+  }
+}
+
+/** What an abandoned execution's ledgered nested call is known to have done: `applied` (recorded
+ * a result), `failed` (recorded a `ToolError` or an `isError` result), or `unknown` (started, no
+ * recorded outcome, so it may have been applied).
+ */
+export type CodeModeInterruptedCallStatus = 'applied' | 'failed' | 'unknown'
+
+/** One ledgered nested call of an abandoned execution. `key` is its ledger key
+ * (`<toolCallId>/<seq>`); `args` is compact JSON, cut with a trailing `…` (then no longer JSON).
+ */
+export type CodeModeInterruptedCall = {
+  readonly key: string
+  readonly toolName: string
+  readonly args: string
+  readonly status: CodeModeInterruptedCallStatus
+}
+
+/**
+ * `structuredContent.codemode.interruptedCalls`: plain JSON, in sequence order, bounded like
+ * `nestedCalls` (at most `limits.maxNestedCalls` calls; arguments within 8 KiB per call and
+ * 32 KiB in total). `complete: false` means calls were dropped or arguments cut here; `counts`
+ * covers every ledgered nested call, dropped ones included. Read-only calls are not ledgered and
+ * never appear.
+ */
+export type CodeModeInterruptedCalls = {
+  readonly calls: ReadonlyArray<CodeModeInterruptedCall>
+  readonly complete: boolean
+  readonly counts: {
+    readonly applied: number
+    readonly failed: number
+    readonly unknown: number
   }
 }
 

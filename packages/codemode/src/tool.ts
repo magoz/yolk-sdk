@@ -15,6 +15,9 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   makeNestedToolCallRecorder,
+  nestedToolCallMaxArgsBytes,
+  nestedToolCallMaxErrorChars,
+  nestedToolCallMaxTotalArgsBytes,
   nestedToolCallResultFields,
   recordNestedToolCall,
   contentPartText,
@@ -56,7 +59,12 @@ import {
   defaultCodeModeMaxImages
 } from './output.ts'
 import { searchCodeModeTools } from './search.ts'
-import type { CodeModeStructuredContent } from './store.ts'
+import type {
+  CodeModeInterruptedCall,
+  CodeModeInterruptedCalls,
+  CodeModeInterruptedCallStatus,
+  CodeModeStructuredContent
+} from './store.ts'
 
 /** Default name of the code mode tool. */
 export const codeModeToolName = 'codemode'
@@ -577,12 +585,49 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
 
 const argsPreviewChars = 200
 
-const argsPreview = (args: string) => {
-  const characters = Array.from(args)
+const truncateCharacters = (text: string, maxCharacters: number) => {
+  const characters = Array.from(text)
 
-  return characters.length <= argsPreviewChars
-    ? args
-    : `${characters.slice(0, argsPreviewChars - 1).join('')}…`
+  return characters.length <= maxCharacters
+    ? text
+    : `${characters.slice(0, maxCharacters - 1).join('')}…`
+}
+
+const textEncoder = new TextEncoder()
+
+const utf8Bytes = (text: string) => textEncoder.encode(text).length
+
+// Cuts on code point boundaries so surrogate pairs and multi-byte characters stay whole.
+const truncateUtf8 = (text: string, maxBytes: number) => {
+  if (utf8Bytes(text) <= maxBytes) return text
+
+  const budget = maxBytes - utf8Bytes('…')
+
+  if (budget < 0) return ''
+
+  let bytes = 0
+  let kept = ''
+
+  for (const character of text) {
+    const size = utf8Bytes(character)
+
+    if (bytes + size > budget) break
+
+    kept += character
+    bytes += size
+  }
+
+  return `${kept}…`
+}
+
+const interruptedCallStatus = (entry: ToolLedgerEntry): CodeModeInterruptedCallStatus => {
+  const outcome = entry.outcome
+
+  if (outcome === undefined) return 'unknown'
+
+  if (Predicate.isTagged(outcome, 'Failed')) return 'failed'
+
+  return outcome.result.isError === true ? 'failed' : 'applied'
 }
 
 const nestedEntryState = (entry: ToolLedgerEntry) => {
@@ -593,19 +638,61 @@ const nestedEntryState = (entry: ToolLedgerEntry) => {
   }
 
   if (Predicate.isTagged(outcome, 'Failed'))
-    return `completed with an error: ${outcome.error.message}`
+    return `completed with an error: ${truncateCharacters(outcome.error.message, nestedToolCallMaxErrorChars)}`
 
   return outcome.result.isError === true ? 'completed with an error result' : 'applied'
+}
+
+/** The bounded, wire-safe `interruptedCalls` of an abandoned execution's nested ledger entries:
+ * the `nestedCalls` record bounds (`maxCalls`, 8 KiB of arguments per call, 32 KiB in total).
+ */
+const interruptedCalls = (
+  nested: ReadonlyArray<ToolLedgerEntry>,
+  maxCalls: number
+): CodeModeInterruptedCalls => {
+  const counts = { applied: 0, failed: 0, unknown: 0 }
+  const calls: Array<CodeModeInterruptedCall> = []
+  let argsBytes = 0
+  let complete = true
+
+  for (const entry of nested) {
+    const status = interruptedCallStatus(entry)
+
+    counts[status]++
+
+    if (calls.length >= maxCalls) {
+      complete = false
+      continue
+    }
+
+    const limit = Math.max(
+      0,
+      Math.min(nestedToolCallMaxArgsBytes, nestedToolCallMaxTotalArgsBytes - argsBytes)
+    )
+
+    const args = truncateUtf8(entry.args, limit)
+
+    if (args !== entry.args) complete = false
+
+    argsBytes += utf8Bytes(args)
+    calls.push({ key: entry.key, toolName: entry.toolName, args, status })
+  }
+
+  return { calls, complete, counts }
 }
 
 /**
  * The result of a code mode call whose earlier execution was abandoned (claimed, lease expired,
  * no result recorded). The script never runs again: the result lists that execution's ledgered
- * nested calls as applied, failed, or unknown, and says they were not undone.
+ * nested calls as applied, failed, or unknown, and says they were not undone. The text is bounded
+ * by `maxOutputChars`; `structuredContent.codemode.interruptedCalls` carries the same entries for
+ * hosts, bounded like `nestedCalls`.
  */
 const abandonedScriptResult =
-  (maxChars: number) =>
+  (limits: Required<CodeModeLimits>) =>
   ({ call, nested }: ToolLedgerAbandonedInput): ToolResult => {
+    const maxChars = limits.maxOutputChars
+
     const listing =
       nested.length === 0
         ? 'No ledgered nested tool calls were recorded for that execution.'
@@ -613,7 +700,7 @@ const abandonedScriptResult =
             `Ledgered nested tool calls of that execution (they were not undone):`,
             ...nested.map(
               entry =>
-                `- ${entry.key} ${entry.toolName} ${argsPreview(entry.args)}: ${nestedEntryState(entry)}`
+                `- ${entry.key} ${entry.toolName} ${truncateCharacters(entry.args, argsPreviewChars)}: ${nestedEntryState(entry)}`
             )
           ].join('\n')
 
@@ -624,7 +711,11 @@ const abandonedScriptResult =
     ].join('\n\n')
 
     const structuredContent: CodeModeStructuredContent = {
-      codemode: { ok: false, interrupted: true }
+      codemode: {
+        ok: false,
+        interrupted: true,
+        interruptedCalls: interruptedCalls(nested, limits.maxNestedCalls)
+      }
     }
 
     return ToolResult.make({
@@ -666,7 +757,7 @@ export const makeCodeModeTool = <Context>(
     access: 'write',
     nestedToolAccess: true,
     describe: ({ tools }) => renderCodeModeDescription({ tools, inlineBudget, store }),
-    abandonedResult: abandonedScriptResult(limits.maxOutputChars),
+    abandonedResult: abandonedScriptResult(limits),
     execute: ({
       call,
       context,

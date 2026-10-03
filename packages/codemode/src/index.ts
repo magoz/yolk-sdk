@@ -51,7 +51,13 @@ export {
   maxCodeModeStoreValueChars
 } from './store.ts'
 
-export type { CodeModeStructuredContent, CodeModeToolResultEntry } from './store.ts'
+export type {
+  CodeModeInterruptedCall,
+  CodeModeInterruptedCalls,
+  CodeModeInterruptedCallStatus,
+  CodeModeStructuredContent,
+  CodeModeToolResultEntry
+} from './store.ts'
 
 export {
   codeModeDeadlineMarginMs,
