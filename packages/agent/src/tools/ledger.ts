@@ -16,7 +16,7 @@ import {
 } from '../protocol/bounded-text.ts'
 import { subagentToolName } from '../protocol/tool.ts'
 import type { ToolAccess } from './registry.ts'
-import { sha256Hex } from './sha256.ts'
+import { sha256HexSync } from './sha256.ts'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
@@ -355,7 +355,7 @@ export const toolLedgerArgs = (params: unknown): ToolLedgerArgs => {
   return {
     args,
     argsTruncated: args !== compact,
-    argsDigest: sha256Hex(canonicalArguments(compact))
+    argsDigest: sha256HexSync(canonicalArguments(compact))
   }
 }
 

@@ -643,6 +643,22 @@ describe('tool ledger', () => {
     })
   )
 
+  it('pins the argsDigest format: SHA-256 hex of sorted-key canonical JSON', () => {
+    const args = toolLedgerArgs({
+      zeta: [1, 2.5, -0, 1e21, '\u00fc'],
+      '\u00e9': { b: true, a: null },
+      A: 'x',
+      '\u00df': [{ y: 1, x: [] }]
+    })
+
+    // Keys sorted by UTF-16 code units (A < zeta < ß < é); JSON.stringify number rules.
+    const canonical =
+      '{"A":"x","zeta":[1,2.5,0,1e+21,"\u00fc"],"\u00df":[{"x":[],"y":1}],"\u00e9":{"a":null,"b":true}}'
+
+    expect(args.argsDigest).toBe('2057e870a5ba91cd8ff8867ab281a396ed31171656adcb25f07599f904b613a4')
+    expect(args.argsDigest).toBe(createHash('sha256').update(canonical).digest('hex'))
+  })
+
   it('digests arguments nested too deeply to canonicalize from their compact JSON', () => {
     type Nested = number | { readonly a: Nested }
 

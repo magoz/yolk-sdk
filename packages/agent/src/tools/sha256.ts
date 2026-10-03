@@ -1,6 +1,10 @@
-// Synchronous, runtime-neutral SHA-256 (FIPS 180-4) for the tool ledger's argument digest. Web
-// Crypto is asynchronous: an await before every claim would add an event-loop turn to each
-// ledgered call and break `TestClock`-driven host tests, and it is missing in some runtimes.
+// SHA-256 (FIPS 180-4) for the tool ledger's `argsDigest`: a conflict fingerprint over call
+// arguments, not a security boundary (no secrets, keys, or signatures pass through it). It is
+// synchronous so `toolLedgerArgs` stays a pure synchronous helper with no failure path before
+// `claim`, and ledgered calls never wait on asynchronous work that `TestClock` cannot see (Web
+// Crypto's `digest` resolves outside the Effect scheduler). Plain TypeScript keeps it
+// runtime-neutral. Its output is standard SHA-256: tests check it against FIPS vectors and
+// `node:crypto`, so stored digests stay valid if it is ever replaced.
 
 const roundConstants = Uint32Array.from([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -22,7 +26,7 @@ const rotateRight = (value: number, bits: number) => (value >>> bits) | (value <
 const word = (words: Uint32Array, index: number) => words[index] ?? 0
 
 /** Lower-case hex SHA-256 of the UTF-8 encoding of `text`. */
-export const sha256Hex = (text: string): string => {
+export const sha256HexSync = (text: string): string => {
   const data = new TextEncoder().encode(text)
   const paddedLength = Math.ceil((data.length + 9) / 64) * 64
   const bytes = new Uint8Array(paddedLength)
