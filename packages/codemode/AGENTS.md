@@ -41,10 +41,22 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   (a defect) rejects with `failed unexpectedly` and records `error`.
 - `executor.execute` has an Effect backstop at `timeoutMs` + 5 s (`timeout` failure, signal
   aborted); waits for nested fibers to stop after interruption are bounded by 5 s each.
-- Nested call ids are `<toolCallId>/<seq>` (1-based) so hosts can derive idempotency keys. Calls
-  rejected by `maxNestedCalls` get no id and are not recorded.
-- Record every executed nested call with `recordNestedToolCall`; calls still running when the script
-  ends are interrupted (`FiberSet.clear`) and recorded `cancelled`. Never store nested results.
+- Nested call ids are `<toolCallId>/<seq>` (1-based); they are the nested calls' ledger keys
+  (`@yolk-sdk/agent/tools` ledger, parent key `<toolCallId>`), and executors get a stable
+  `idempotencyKey`. Calls rejected by `maxNestedCalls` get no id and are not recorded.
+- The tool ledger lives in `@yolk-sdk/agent/tools` (`resolveTools(..., { ledger })`); code mode
+  never talks to the store. It supplies `abandonedResult` (`abandonedScriptResult` in `tool.ts`):
+  an abandoned `codemode` call returns an interrupted `isError` result listing its ledgered
+  nested entries as applied, failed, or unknown, bounded by `maxOutputChars`, with
+  `structuredContent.codemode` `{ ok: false, interrupted: true }`. Never re-run a script on
+  re-execution; deterministic replay is phase 2 (ADR 0002).
+- Record every executed nested call with `recordNestedToolCall` over
+  `makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })` (per-status counts survive
+  dropped entries); calls still running when the script ends are interrupted (`FiberSet.clear`) and
+  recorded `cancelled`. Never store nested results.
+- `afterNestedCall` wraps only `nested.execute` (not `beforeNestedCall` rejections) in `onExit`:
+  outcome `success` (no `isError`), `failure` (error result or non-interrupt failure), or
+  `interrupted` (interrupts only); the script sees the call settle after the hook.
 - Description: intro, globals one line each, nested tools by namespace (with the module
   `description` under the heading), then one fixed line pointing to `searchTools`/`describeTool`/
   `describeNamespace`. `codemode` + `listed` tools are declared with pi's renderer within
@@ -123,5 +135,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
 - `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,
   backstops), bounding, store rebuild and bounds, the rejection prefix, and unprefixed nested-call
   records.
+- `test/ledger.test.ts`: the tool ledger through code mode (crash then re-execution returns the
+  interrupted listing and runs nothing, completed replay, concurrent duplicates wait), records past
+  256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
 - `test/classifier-tool.test.ts`: classifier tool through scripts, per-script and process caps
   (shared across scripts and registrations, `false`), permits released on interruption, errors.

@@ -55,8 +55,9 @@ const program = Effect.gen(function* () {
 - Scripts call tools as `await tools.<id>(args)`. Every nested call runs through the resolution's
   normal execute path (input decoding, enablement, registration wrappers, same host context), gets
   the id `<toolCallId>/<seq>`, and is recorded on the result's `nestedCalls` with status, duration,
-  truncated error, and usage. Nested results never reach the model; only the script output and
-  return value do.
+  truncated error, and usage. The record keeps up to `maxNestedCalls` calls (argument byte budgets
+  still apply) and per-status `counts` over every call. Nested results never reach the model; only
+  the script output and return value do.
 - A call resolves to `structuredContent` for tools with an output schema and to the text content
   otherwise; error results, `beforeNestedCall` failures, and calls past `maxNestedCalls` reject
   with an `Error` whose message is `tools.<id>: <text>`, or `tools["<name>"]: <text>` for a tool
@@ -93,9 +94,29 @@ const program = Effect.gen(function* () {
   `ToolResultMessage`s carry no tool name: pair each with its assistant tool call's name.
 - `beforeNestedCall({ call, context })` runs before each nested call; a failure rejects that call in
   the script with `<label>: <message>` and records it as `error` without executing it.
+- `afterNestedCall({ call, outcome, durationMs, context, result? })` runs after each admitted
+  nested call with `success`, `failure` (error result or unexpected failure), or `interrupted`
+  (cancelled, for example still running when the script ended). Calls rejected before running are
+  not reported.
 - A nested call that is interrupted rejects with `<label> was cancelled.`; a defect rejects with
   `<label> failed unexpectedly.` (the same label as above). If an executor misses its deadline, the tool returns a `timeout` failure
   `timeoutMs` + 5 s after the start and aborts it.
+
+## Re-execution and the tool ledger
+
+Hosts that re-execute steps (Vercel Workflow's queue is at-least-once) pass a durable ledger to
+`resolveTools(modules, context, { ledger: { store } })` (see `@yolk-sdk/agent/tools`). The
+`codemode` call is itself ledgered, so a re-executed call never runs its script again:
+
+- completed: the stored result is returned;
+- still running elsewhere: the call waits for it (up to `maxWaitMs`/`deadline`);
+- abandoned (the earlier execution crashed): an interrupted error result lists that script's
+  ledgered nested calls as applied, failed, or unknown (started, no recorded result), states that
+  they were not undone, and asks the model to verify; `structuredContent.codemode` is
+  `{ ok: false, interrupted: true }`.
+
+Nested write calls are ledgered under `<toolCallId>/<seq>` and receive a stable `idempotencyKey`.
+Read-only nested calls bypass the ledger by default and are not listed.
 
 ## Limits
 
@@ -103,7 +124,7 @@ const program = Effect.gen(function* () {
 | ------------------ | ------- | --------------------------------------------------------- |
 | `timeoutMs`        | 120000  | Clamped to `deadline(context)` minus 5 s, never below 1 s |
 | `memoryLimitBytes` | 64 MiB  | QuickJS heap cap                                          |
-| `maxNestedCalls`   | 256     | Further calls reject with an `Error`                      |
+| `maxNestedCalls`   | 256     | Further calls reject; also sizes the `nestedCalls` record |
 | `maxOutputChars`   | 40000   | Head-and-tail cut with an omission marker                 |
 | `maxImages`        | 8       | Later images are dropped with a note                      |
 | `maxImageBytes`    | 4 MiB   | Base64 characters of images in total                      |
@@ -130,7 +151,7 @@ permits. Nested-call records carry token usage; cost stays in the result's
 - Where the tool is advertised (voice sessions do not get it in v1), deadlines, and limits.
 - Next.js: `serverExternalPackages: ['@yolk-sdk/codemode', '@earendil-works/pi-codemode', 'quickjs-wasi']`.
 - Vercel Workflow: run the code mode call inside the tool-batch step (`'use step'`), never inside a
-  `'use workflow'` function.
+  `'use workflow'` function, and supply a durable tool ledger: steps are at-least-once.
 
 ## Boundaries
 

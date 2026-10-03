@@ -14,6 +14,8 @@ Generic host tool registration and resolution.
 - Model-argument decoding through the advertised JSON codec (`null` on `Schema.optional` means
   absent) and `omitNullOptionalToolArguments`, which `resolveTools` applies to every call.
 - `withToolArgumentsErrorHint` for actionable unknown-key validation messages.
+- The durable tool-call ledger contract (`ToolLedgerStore`, `ToolLedgerEntry`) and an in-memory
+  reference store, so re-executed write calls never run twice.
 
 ## Use it when
 
@@ -82,7 +84,55 @@ These are the code mode contract (`docs/adr/0002-code-mode.md`); this package do
   description from those nested tools (for example a code mode catalog); `def.description` stays
   the static fallback.
 - Report nested calls on the result with protocol `recordNestedToolCall` and
-  `nestedToolCallResultFields`; the bounded record and summed usage never reach the model.
+  `nestedToolCallResultFields` over `makeNestedToolCallRecorder({ maxCalls })`; the bounded record
+  (with per-status `counts` over every call) and summed usage never reach the model.
+
+## Durable tool ledger
+
+Hosts that re-execute steps (Vercel Workflow's queue is at-least-once, sequentially and
+concurrently) pass a durable ledger to `resolveTools`. Ledgered calls (default: every non-`read`
+tool, top-level and nested code mode calls alike) run at most once per key:
+
+| Claim       | Meaning                                        | What happens                                                     |
+| ----------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `Fresh`     | key was absent; this execution owns the claim  | runs, heartbeats the lease, records the outcome                  |
+| `Completed` | an outcome is recorded                         | returns the stored result (or the stored `ToolError`), no run    |
+| `InFlight`  | another execution holds a live lease           | waits until completed/abandoned or the deadline; never runs      |
+| `Abandoned` | lease expired without an outcome (crashed run) | never runs; model-visible "may already have been applied" result |
+
+```ts
+import { Effect } from 'effect'
+import { classifyToolLedgerEntry, resolveTools, type ToolLedgerStore } from '@yolk-sdk/agent/tools'
+
+// Host-owned storage scoped to one Workflow run (sketch; `db` calls are host code).
+const makeRunToolLedger = (runId: string): ToolLedgerStore => ({
+  scope: runId,
+  // Atomic insert-if-absent; otherwise classify the stored entry without changing it.
+  claim: request =>
+    db.claimToolCall(runId, request, entry => classifyToolLedgerEntry(entry, request.nowMs)),
+  heartbeat: ({ key, leaseExpiresAtMs }) => db.extendLeaseIfClaimed(runId, key, leaseExpiresAtMs),
+  complete: ({ key, outcome, completedAtMs }) =>
+    db.completeOnce(runId, key, outcome, completedAtMs),
+  list: parentKey => db.listChildren(runId, parentKey)
+})
+
+const resolveStepTools = Effect.gen(function* () {
+  return yield* resolveTools(modules, context, {
+    ledger: { store: makeRunToolLedger(workflowRunId), deadline: () => stepDeadlineMs }
+  })
+})
+```
+
+- Persist entries with `Schema.toCodecJson(ToolLedgerEntry)`. Stored results are bounded
+  (`maxResultBytes`, default 1 MiB) and wire-safe; the live call still returns the full result.
+- Keys are `call.id` and `<parentCallId>/<seq>` for nested calls. Scope the store so keys cannot
+  collide: one run, plus the turn when a provider can reuse call ids across turns.
+- Executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions; forward it to
+  external APIs that deduplicate, for a crash between their commit and the ledger's `complete`.
+- Override the policy with `isLedgered`, and the timing with `leaseMs` (30 s), `heartbeatIntervalMs`
+  (a third of the lease), `pollIntervalMs` (1 s), `maxWaitMs` (150 s), and `deadline`.
+- `makeInMemoryToolLedgerStore` is for tests and single-process hosts; it does not survive
+  restarts and cannot protect Workflow steps.
 
 ## Recoverable tool failures
 

@@ -41,6 +41,26 @@ Run [code mode](./code-mode#vercel-workflow) calls inside your tool-batch step, 
 Workflow stop or run-admission check, do not see nested calls; pass the same check to
 `makeCodeModeTool` as `beforeNestedCall`.
 
+## Tool steps run at least once
+
+Vercel's queue can deliver a tool-batch step again after a crash, or while the first execution is
+still running, even with the default `noWorkflowStepRetry`. Supply a durable tool ledger, scoped
+to the Workflow run, where your step resolves tools:
+
+```ts
+const toolSet = await Effect.runPromise(
+  resolveTools(modules, context, {
+    ledger: { store: makeRunToolLedger(workflowRunId), deadline: () => stepDeadlineMs }
+  })
+)
+```
+
+`makeRunToolLedger` is your `ToolLedgerStore` (for example Postgres); see
+[Ledger writes](../agent/tools-hitl#ledger-writes-for-re-executed-steps). Re-executed write calls and
+code mode scripts then return their stored result, wait for the running execution, or report that
+an abandoned call may already have been applied. They never run twice. The package itself never
+builds tool sets, so there is nothing to configure on `runVercelAgentWorkflow`.
+
 ## Durable stream rule
 
 Use distinct finalization paths:

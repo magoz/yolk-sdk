@@ -143,6 +143,29 @@ export async function runAgentWorkflow(input: { request: unknown; context: unkno
 `runToolBatchStep` may instead be Workflow orchestration calling concrete per-call steps. Keep provider calls, tools, persistence, telemetry, and Effect runtimes in
 those steps, not in the `'use workflow'` orchestration body.
 
+## Tool steps are at-least-once
+
+Vercel's queue delivers steps at least once. A tool-batch step can run again after a crash and,
+in practice, concurrently with a first execution that is still running, even with
+`noWorkflowStepRetry`. Retry policy cannot prevent duplicate writes; a durable tool ledger can.
+This package does not build tool sets or call `runToolBatch` (your step does), so wire the ledger
+where you resolve tools inside the step:
+
+```ts
+// Inside the host's tool-batch 'use step' function.
+const resolveStepTools = Effect.gen(function* () {
+  return yield* resolveTools(modules, context, {
+    ledger: { store: makeRunToolLedger(workflowRunId), deadline: () => stepDeadlineMs }
+  })
+})
+```
+
+`resolveTools` and `ToolLedgerStore` come from `@yolk-sdk/agent/tools`; `makeRunToolLedger` is your
+durable store (for example Postgres) scoped to the Workflow run. Re-executed write calls,
+including code mode scripts and their nested writes, then return their recorded result, wait for
+the running execution, or report that an abandoned call may already have been applied, and never
+run twice. An in-memory store does not protect steps.
+
 ## Independent children
 
 `orchestrateWorkflowToolBatch` runs a full-batch `preflight` before any `execute` callback,

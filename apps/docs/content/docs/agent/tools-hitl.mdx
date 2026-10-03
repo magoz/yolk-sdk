@@ -95,6 +95,56 @@ Every tool declares one access level:
 
 The SDK records access metadata. Your host enforces approval policy.
 
+## Ledger writes for re-executed steps
+
+Durable hosts re-execute steps: Vercel Workflow's queue is at-least-once, so a tool-batch step
+runs again after a crash and sometimes concurrently with a first execution that is still running.
+Pass a durable ledger when you resolve tools and every non-`read` call, including the nested calls
+of a [code mode](../integrations/code-mode#survive-step-re-execution) script, runs at most once per
+key:
+
+```ts
+import { Effect } from 'effect'
+import { classifyToolLedgerEntry, resolveTools, type ToolLedgerStore } from '@yolk-sdk/agent/tools'
+
+// Your storage, scoped to one run. `db` is host code (for example Drizzle over Postgres).
+const makeRunToolLedger = (runId: string): ToolLedgerStore => ({
+  scope: runId,
+  // Atomic: insert a claimed entry if the key is absent, else classify the stored entry.
+  claim: request =>
+    db.claimToolCall(runId, request, entry => classifyToolLedgerEntry(entry, request.nowMs)),
+  // Extend the lease only while the entry has no outcome.
+  heartbeat: ({ key, leaseExpiresAtMs }) => db.extendLeaseIfClaimed(runId, key, leaseExpiresAtMs),
+  // Record the outcome once; ignore later completions.
+  complete: ({ key, outcome, completedAtMs }) =>
+    db.completeOnce(runId, key, outcome, completedAtMs),
+  // Entries whose parentKey is the given key (a script's nested calls).
+  list: parentKey => db.listChildren(runId, parentKey)
+})
+
+const resolveStepTools = Effect.gen(function* () {
+  return yield* resolveTools(modules, requestContext, {
+    ledger: { store: makeRunToolLedger(runId), deadline: () => stepDeadlineMs }
+  })
+})
+```
+
+| Claim       | When                                           | Result                                                         |
+| ----------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| `Fresh`     | first execution of the key                     | runs, heartbeats its lease, stores the outcome                 |
+| `Completed` | an outcome is stored                           | returns the stored result (or the stored `ToolError`), no run  |
+| `InFlight`  | another execution holds a live lease           | waits for it up to `maxWaitMs`/`deadline`; never runs          |
+| `Abandoned` | the lease expired without an outcome (a crash) | never runs; tells the model it may have been applied to verify |
+
+- Keys are `call.id`, and `<parentCallId>/<seq>` for nested calls. Scope the store to one run (add
+  the turn if your provider can reuse call ids across turns).
+- Persist `ToolLedgerEntry` with `Schema.toCodecJson(ToolLedgerEntry)`. Stored results are bounded
+  (`maxResultBytes`, default 1 MiB) and wire-safe; the live call still returns the full result.
+- Tool executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions. Pass it
+  to external APIs that deduplicate, which covers a crash between their commit and `complete`.
+- Change which calls are ledgered with `isLedgered`. Without `ledger`, execution is unchanged.
+- `makeInMemoryToolLedgerStore()` is for tests and single-process hosts only.
+
 ## Ask a human
 
 Human-in-the-loop is protocol-level:
