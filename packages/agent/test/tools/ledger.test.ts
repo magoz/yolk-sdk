@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto'
-import { Cause, type Duration, Effect, Exit, Fiber, Logger, Option, Predicate } from 'effect'
+import {
+  Cause,
+  type Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Logger,
+  Option,
+  Predicate,
+  Result
+} from 'effect'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
@@ -697,11 +707,54 @@ describe('tool ledger', () => {
   it('digests arguments nested too deeply to canonicalize from their compact JSON', () => {
     type Nested = number | { readonly a: Nested }
 
-    let deep: Nested = 1
+    const nest = (depth: number): Nested => {
+      let nested: Nested = 1
 
-    // Deep enough to overflow the canonical recursion, shallow enough for JSON.stringify/parse.
-    for (let depth = 0; depth < 5_000; depth++) deep = { a: deep }
+      for (let level = 0; level < depth; level++) nested = { a: nested }
 
+      return nested
+    }
+
+    // Mirrors the per-level stack cost of the ledger's canonical recursion.
+    const canonicalLike = (value: Nested): string =>
+      Predicate.isNumber(value)
+        ? JSON.stringify(value)
+        : `{${Object.keys(value)
+            .sort()
+            .map(key => `${JSON.stringify(key)}:${canonicalLike(value.a)}`)
+            .join(',')}}`
+
+    const deepestPassing = (passes: (depth: number) => boolean) => {
+      let low = 1
+      let high = 100_000
+
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2)
+
+        if (passes(middle)) low = middle
+        else high = middle - 1
+      }
+
+      return low
+    }
+
+    // Stack limits differ between runtimes (Node 22 overflows JSON.stringify at a depth Node 24
+    // handles), so measure them here. Use three quarters of the JSON round-trip limit: headroom for
+    // the ledger's deeper call site, yet past the canonical recursion's limit, so the ledger falls
+    // back to digesting the compact JSON.
+    const roundTripLimit = deepestPassing(depth =>
+      Result.isSuccess(Result.try(() => JSON.parse(JSON.stringify(nest(depth)))))
+    )
+
+    const canonicalLimit = deepestPassing(depth =>
+      Result.isSuccess(Result.try(() => canonicalLike(nest(depth))))
+    )
+
+    const depth = Math.floor(roundTripLimit * 0.75)
+
+    expect(depth).toBeGreaterThan(canonicalLimit)
+
+    const deep = nest(depth)
     const compact = JSON.stringify(deep)
     const digested = toolLedgerArgs(deep)
 
