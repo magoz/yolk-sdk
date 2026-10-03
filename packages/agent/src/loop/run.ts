@@ -70,7 +70,7 @@ import {
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName, validInteractionReceipt } from '../protocol/tool.ts'
-import { withToolArgumentsErrorHint } from '../protocol/tool-arguments-internal.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
@@ -725,6 +725,7 @@ const invalidQuestionToolResult = (call: ToolCall, error: Schema.SchemaError) =>
 const decodeQuestionToolParams = Schema.decodeUnknownEffect(
   Schema.toCodecJson(QuestionToolParams),
   {
+    errors: 'all',
     onExcessProperty: 'error'
   }
 )

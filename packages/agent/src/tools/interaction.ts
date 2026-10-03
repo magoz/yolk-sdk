@@ -95,19 +95,22 @@ const omitNullsAbsentFrom = (input: unknown, decoded: unknown): unknown => {
  * advertises, so `null` on `Schema.optional(X)` means absent. Handlers receive the decoded JSON
  * with those keys omitted (re-checked by `decodeExact`); any other JSON-changing transform or
  * default is still rejected. */
-const decodeCallExact = <S extends SyncSchema>(
-  schema: S,
-  input: unknown
-): Effect.Effect<S['Type'], Schema.SchemaError | InteractionValidationError> =>
-  decodeToolArguments(schema, { onExcessProperty: 'error' })(input).pipe(
-    Effect.flatMap(decoded => {
-      const params = omitUndefinedKeys(decoded)
+const makeDecodeCallExact = <S extends SyncSchema>(schema: S) => {
+  const decode = decodeToolArguments(schema)
 
-      return interactionJsonEquals(params, omitNullsAbsentFrom(omitUndefinedKeys(input), params))
-        ? decodeExact(schema, params)
-        : Effect.fail(exactJsonError())
-    })
-  )
+  return (
+    input: unknown
+  ): Effect.Effect<S['Type'], Schema.SchemaError | InteractionValidationError> =>
+    decode(input).pipe(
+      Effect.flatMap(decoded => {
+        const params = omitUndefinedKeys(decoded)
+
+        return interactionJsonEquals(params, omitNullsAbsentFrom(omitUndefinedKeys(input), params))
+          ? decodeExact(schema, params)
+          : Effect.fail(exactJsonError())
+      })
+    )
+}
 
 export type MakeInteractionToolOptions<
   Context,
@@ -257,7 +260,9 @@ export const makeInteractionTool = <
     })()
   )
 
-  const validateCall = (params: unknown) => decodeCallExact(callSchema, params).pipe(Effect.asVoid)
+  const decodeCall = makeDecodeCallExact(options.callParameters ?? EmptyToolParams)
+
+  const validateCall = (params: unknown) => decodeCall(params).pipe(Effect.asVoid)
 
   const validateResponse = (data: unknown) =>
     decodeExact(options.response, data).pipe(Effect.asVoid)
@@ -278,7 +283,7 @@ export const makeInteractionTool = <
         execute: ({ data, context, submissionId, call }) =>
           decodeExact(options.response, data).pipe(
             Effect.flatMap(decoded =>
-              decodeCallExact(options.callParameters ?? EmptyToolParams, call.params).pipe(
+              decodeCall(call.params).pipe(
                 Effect.flatMap(params =>
                   action.execute({
                     data: decoded,

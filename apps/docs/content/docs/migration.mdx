@@ -73,10 +73,11 @@ advertised. `null` on `Schema.optional(X)` now decodes as omitted instead of fai
 (`Schema.optionalKey(X)`, the subagent `model`/`reasoning_effort`, raw MCP schemas) before any
 registration sees the call. Advertised schemas are unchanged. Non-finite numbers stay rejected.
 Unknown keys are now rejected (`onExcessProperty: 'error'`) instead of silently stripped, matching
-the `additionalProperties: false` that tool schemas already advertised; the error names each
-unknown key and lists the allowed ones. A `null` is ignored only on a key another member of the same
-union declares (provider-flattened unions). Callers or fixtures that sent extra keys to a tool now get a model-visible
-validation error, and app wrappers that only existed to reject unknown keys can be removed.
+the `additionalProperties: false` that tool schemas already advertised; one error reports every
+issue, naming each unknown key with the allowed ones (root `Schema.Struct({})` tools included). A
+`null` is ignored only on a key another member of the same union declares (provider-flattened
+unions). Callers or fixtures that sent extra keys to a tool now get a model-visible validation
+error, and app wrappers that only existed to reject unknown keys can be removed.
 If you worked around this with `Schema.optional(Schema.NullOr(X))` plus `null`-to-`undefined`
 mapping, `Schema.optional(X)` is now enough; app wrappers that re-decoded with the JSON codec can
 use `makeTool` directly. Custom `invalidParamsMessage` callbacks can keep the unknown-key hint with

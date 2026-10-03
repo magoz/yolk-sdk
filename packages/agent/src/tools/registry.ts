@@ -9,7 +9,6 @@ import {
   type JsonSchema
 } from 'effect'
 import * as Schema from 'effect/Schema'
-import * as SchemaAST from 'effect/SchemaAST'
 import { ToolError, ToolExecutor, type ToolExecutionOptions } from '@yolk-sdk/agent/loop'
 import {
   isCodeModeCallable,
@@ -37,9 +36,10 @@ import {
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName } from '../protocol/tool.ts'
-import { withToolArgumentsErrorHint } from '../protocol/tool-arguments-internal.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 import {
   decodeToolArguments,
+  isEmptyStructSchema,
   omitNullOptionalToolArguments,
   omitNullOptionalToolCallArguments
 } from './arguments.ts'
@@ -409,16 +409,6 @@ const hasJsonSchemaType = (input: Schema.Json, type: string) => {
   const schema = jsonObject(input)
 
   return schema !== undefined && jsonField(schema, 'type') === type
-}
-
-const isEmptyStructSchema = (schema: Schema.Top) => {
-  const ast = Schema.toEncoded(schema).ast
-
-  return (
-    SchemaAST.isObjects(ast) &&
-    ast.propertySignatures.length === 0 &&
-    ast.indexSignatures.length === 0
-  )
 }
 
 const isEmptyRecordJsonSchema = (schema: typeof ToolJsonSchema.Type) =>

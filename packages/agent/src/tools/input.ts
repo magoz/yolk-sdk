@@ -150,7 +150,7 @@ export const makeInputTool = <Context, ResponseSchema extends SyncSchema>(
 
   // Model-produced call params decode through the advertised JSON codec; user payloads below
   // keep the original type-side schema.
-  const decodeCall = decodeToolArguments(callSchema, { onExcessProperty: 'error' })
+  const decodeCall = decodeToolArguments(callSchema)
 
   const validateCall: InputToolHandler['validateCall'] = params =>
     decodeCall(params).pipe(Effect.asVoid)

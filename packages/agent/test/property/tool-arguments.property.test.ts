@@ -15,6 +15,7 @@ class Prompt extends Schema.Class<Prompt>('Prompt')({
 // (`Schema.optional(Schema.NullOr(X))`) are excluded: their `null` is meaningful, not omission.
 const families = {
   emptyParams: EmptyToolParams,
+  emptyStruct: Schema.Struct({}),
   flatOptional: Schema.Struct({
     text: Schema.String,
     note: Schema.optional(Schema.String),
@@ -57,6 +58,7 @@ type Family = keyof typeof families
 
 const familyNames = Schema.Literals([
   'emptyParams',
+  'emptyStruct',
   'flatOptional',
   'nestedOptional',
   'arrayOfOptional',

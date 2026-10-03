@@ -350,6 +350,45 @@ describe('registry null omission for optional non-nullable properties', () => {
     })
   )
 
+  it('never drops a null that another allOf conjunct declares or requires', () => {
+    const composed: ToolJsonSchema = {
+      anyOf: [
+        {
+          allOf: [
+            { type: 'object', properties: { kind: { const: 'a' } }, required: ['kind'] },
+            { type: 'object', properties: { clear: { type: ['string', 'null'] } } }
+          ]
+        },
+        {
+          type: 'object',
+          properties: { kind: { const: 'b' }, other: { type: 'string' } },
+          required: ['kind']
+        }
+      ]
+    }
+
+    const meaningful = { kind: 'a', clear: null }
+
+    // `clear` is declared (nullable) by A's second conjunct: keep it.
+    expect(omitNullOptionalToolArguments(composed, meaningful)).toBe(meaningful)
+    // `other` is only declared by sibling member B: a strict-mode null means "not sent".
+    expect(omitNullOptionalToolArguments(composed, { kind: 'a', other: null })).toEqual({
+      kind: 'a'
+    })
+
+    const requiredElsewhere: ToolJsonSchema = {
+      allOf: [
+        { type: 'object', properties: { id: { type: 'string' } } },
+        { type: 'object', required: ['id'] }
+      ]
+    }
+
+    const nullId = { id: null }
+
+    // Optional in one conjunct, required in another: leave it for the decoder to reject.
+    expect(omitNullOptionalToolArguments(requiredElsewhere, nullId)).toBe(nullId)
+  })
+
   it('leaves ambiguous unions and required properties untouched', () => {
     const parameters: ToolJsonSchema = {
       anyOf: [
@@ -750,6 +789,65 @@ describe('unknown tool argument keys', () => {
       yield* toolSet.execute(call({ id: 'a', dueDate: null }))
 
       expect(received).toEqual([{ id: 'a', dueDate: null }])
+    })
+  )
+
+  it.effect('reports every unknown key and every invalid field in one error', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(Nested)
+      const toolSet = yield* resolveOne(tool)
+
+      const result = yield* toolSet.execute(
+        call({ id: 1, start: 'x', end: 'y', child: { tag: 't', extra: true } })
+      )
+
+      expect(received).toHaveLength(0)
+      expect(result.content).toContain(
+        'Unknown argument "start". Allowed arguments: id, note, child.'
+      )
+      expect(result.content).toContain(
+        'Unknown argument "end". Allowed arguments: id, note, child.'
+      )
+      expect(result.content).toContain('Unknown argument "extra" in "child". Allowed there: tag.')
+      expect(result.content).toContain('Expected string')
+    })
+  )
+
+  it.effect('rejects unknown keys on root empty-struct and no-argument tools', () =>
+    Effect.gen(function* () {
+      for (const parameters of [Schema.Struct({}), EmptyToolParams]) {
+        const { tool, received } = capturingTool(parameters)
+        const toolSet = yield* resolveOne(tool)
+
+        expect(tool.def.parameters).toMatchObject({ type: 'object', additionalProperties: false })
+
+        const result = yield* toolSet.execute(call({ verbose: true, limit: 3 }))
+
+        expect(received).toHaveLength(0)
+        expect(result.content).toContain('Unknown argument "verbose". Allowed arguments: none.')
+        expect(result.content).toContain('Unknown argument "limit". Allowed arguments: none.')
+
+        const accepted = yield* toolSet.execute(call({}))
+
+        expect(accepted.isError).toBeUndefined()
+      }
+    })
+  )
+
+  it.effect('keeps an own __proto__ argument an own key so it is rejected', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(
+        Schema.Struct({ id: Schema.String, mode: Schema.optionalKey(Schema.String) })
+      )
+
+      const toolSet = yield* resolveOne(tool)
+
+      // JSON.parse creates an own `__proto__` key; normalization must not turn it into a prototype.
+      const params: unknown = JSON.parse('{"id":"x","mode":null,"__proto__":null}')
+      const result = yield* toolSet.execute(call(params))
+
+      expect(received).toHaveLength(0)
+      expectValidationError(result, '__proto__')
     })
   )
 

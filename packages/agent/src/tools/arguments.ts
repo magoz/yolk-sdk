@@ -1,6 +1,6 @@
 import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
-import type * as SchemaAST from 'effect/SchemaAST'
+import * as SchemaAST from 'effect/SchemaAST'
 import * as SchemaIssue from 'effect/SchemaIssue'
 import { ToolCall, type ToolJsonSchema } from '@yolk-sdk/agent/protocol'
 
@@ -108,17 +108,46 @@ export const omitUndefinedKeys = (value: unknown): unknown => {
  * `"NaN"`/`"Infinity"`/`"-Infinity"` for bare `Schema.Number`; JSON arguments never carried
  * non-finite numbers before, so any non-finite number in the decoded value is a validation error.
  */
+/** `Schema.Struct({})`: Effect parses an empty struct as any non-nullish value, without an
+ * excess-property check, while it is advertised as a closed empty object. */
+export const isEmptyStructSchema = (schema: Schema.Top) => {
+  const ast = Schema.toEncoded(schema).ast
+
+  return (
+    SchemaAST.isObjects(ast) &&
+    ast.propertySignatures.length === 0 &&
+    ast.indexSignatures.length === 0
+  )
+}
+
+const NoArguments = Schema.Record(Schema.String, Schema.Never)
+
 export const decodeToolArguments = <S extends ToolArgumentsSchema>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => {
-  const decode = Schema.decodeUnknownEffect(Schema.toCodecJson(schema), {
+  // Report every issue (each unknown key, each invalid field) so the model can fix the call in one
+  // retry, and reject unknown keys as the closed advertised schema says.
+  const parseOptions: SchemaAST.ParseOptions = {
+    errors: 'all',
     onExcessProperty: 'error',
     ...options
-  })
+  }
+
+  const decode = Schema.decodeUnknownEffect(Schema.toCodecJson(schema), parseOptions)
+
+  // A root empty struct would accept unknown keys; check it as "no arguments" first.
+  const checkNoArguments = isEmptyStructSchema(schema)
+    ? Schema.decodeUnknownEffect(NoArguments, parseOptions)
+    : undefined
+
+  const decodeChecked = (input: unknown) =>
+    checkNoArguments === undefined
+      ? decode(input)
+      : checkNoArguments(input).pipe(Effect.flatMap(() => decode(input)))
 
   return (input: unknown): Effect.Effect<S['Type'], Schema.SchemaError> =>
-    decode(omitUndefinedKeys(input)).pipe(
+    decodeChecked(omitUndefinedKeys(input)).pipe(
       Effect.flatMap(decoded => {
         const path = nonFiniteNumberPath(decoded, [], new Set())
 
@@ -259,7 +288,48 @@ const matchesLiteral = (schema: JsonObject, value: Schema.Json) => {
   return enumValues === undefined || enumValues.includes(value)
 }
 
-const noSiblingKeys: ReadonlySet<string> = new Set()
+// What the enclosing schema knows about the object being normalized:
+// - `siblingKeys`: names declared by any member of the enclosing union. Provider-flattened
+//   schemas (Anthropic) show the model every member's fields, so a `null` there means "not sent".
+// - `declared` / `required`: names declared / required anywhere in the enclosing `allOf`
+//   conjunction. One conjunct must never drop a `null` that another conjunct declares or requires.
+type ObjectScope = {
+  readonly siblingKeys: ReadonlySet<string>
+  readonly declared: ReadonlySet<string>
+  readonly required: ReadonlySet<string>
+}
+
+const noKeys: ReadonlySet<string> = new Set()
+
+const emptyScope: ObjectScope = { siblingKeys: noKeys, declared: noKeys, required: noKeys }
+
+const union = (left: ReadonlySet<string>, right: Iterable<string>): ReadonlySet<string> =>
+  new Set([...left, ...right])
+
+const withConjunction = (
+  scope: ObjectScope,
+  parts: ReadonlyArray<Schema.Json>,
+  definitions: JsonObject
+): ObjectScope => {
+  const declared = new Set<string>()
+  const required = new Set<string>()
+
+  for (const part of parts) {
+    const record = jsonObject(resolveSchema(part, definitions))
+
+    if (record === undefined) continue
+
+    for (const name of Object.keys(schemaRecord(record, 'properties') ?? {})) declared.add(name)
+
+    for (const name of requiredKeys(record)) required.add(name)
+  }
+
+  return {
+    siblingKeys: scope.siblingKeys,
+    declared: union(scope.declared, declared),
+    required: union(scope.required, required)
+  }
+}
 
 // Property names declared by any member of a union. Provider-flattened schemas (Anthropic) show
 // the model every member's fields, so a `null` on one of these keys means "not sent".
@@ -352,21 +422,23 @@ const normalizeObject = (
   value: JsonObject,
   definitions: JsonObject,
   depth: number,
-  siblingKeys: ReadonlySet<string>
+  scope: ObjectScope
 ): JsonObject => {
   const properties = schemaRecord(schema, 'properties')
   const additionalProperties = ownValue(schema, 'additionalProperties')
 
   if (
     properties === undefined &&
-    siblingKeys.size === 0 &&
+    scope.siblingKeys.size === 0 &&
     jsonObject(additionalProperties) === undefined
   ) {
     return value
   }
 
-  const required = requiredKeys(schema)
-  const normalized: { [key: string]: Schema.Json } = {}
+  const required = union(requiredKeys(schema), scope.required)
+  // Entries, not property assignment: an own `__proto__` key must stay an own key (and fail
+  // decoding as unknown) instead of replacing the rebuilt object's prototype.
+  const entries: Array<readonly [string, Schema.Json]> = []
   let changed = false
 
   for (const [key, propertyValue] of Object.entries(value)) {
@@ -381,7 +453,7 @@ const normalizeObject = (
       propertyValue === null &&
       !required.has(key) &&
       (declaredSchema === undefined
-        ? siblingKeys.has(key)
+        ? scope.siblingKeys.has(key) && !scope.declared.has(key)
         : !admitsNull(declaredSchema, definitions, 0))
     ) {
       changed = true
@@ -395,10 +467,10 @@ const normalizeObject = (
         : normalizeValue(propertySchema, propertyValue, definitions, depth + 1)
 
     changed ||= normalizedValue !== propertyValue
-    normalized[key] = normalizedValue
+    entries.push([key, normalizedValue])
   }
 
-  return changed ? normalized : value
+  return changed ? Object.fromEntries(entries) : value
 }
 
 const normalizeArray = (
@@ -430,9 +502,11 @@ const normalizeUnion = (
   members: ReadonlyArray<Schema.Json>,
   value: Schema.Json,
   definitions: JsonObject,
-  depth: number
+  depth: number,
+  scope: ObjectScope
 ): Schema.Json => {
   const siblingKeys = unionPropertyNames(members, definitions)
+  const memberScope: ObjectScope = { ...scope, siblingKeys }
 
   const candidates = members.filter(member =>
     unionMemberMatches(member, value, definitions, siblingKeys)
@@ -442,7 +516,7 @@ const normalizeUnion = (
 
   // Ambiguous or unmatched unions stay untouched; the decoder reports the real error.
   return candidates.length === 1
-    ? normalizeValue(candidate, value, definitions, depth + 1, siblingKeys)
+    ? normalizeValue(candidate, value, definitions, depth + 1, memberScope)
     : value
 }
 
@@ -451,7 +525,7 @@ const normalizeValue = (
   value: Schema.Json,
   definitions: JsonObject,
   depth: number,
-  siblingKeys: ReadonlySet<string> = noSiblingKeys
+  scope: ObjectScope = emptyScope
 ): Schema.Json => {
   if (depth > maxSchemaDepth || !(isJsonObject(value) || isJsonArray(value))) return value
 
@@ -460,15 +534,21 @@ const normalizeValue = (
   if (resolved === undefined) return value
 
   let normalized: Schema.Json = value
+  const allOf = schemaArray(resolved, 'allOf')
 
-  for (const member of schemaArray(resolved, 'allOf') ?? []) {
-    normalized = normalizeValue(member, normalized, definitions, depth + 1, siblingKeys)
+  const objectScope =
+    allOf === undefined ? scope : withConjunction(scope, [resolved, ...allOf], definitions)
+
+  for (const member of allOf ?? []) {
+    normalized = normalizeValue(member, normalized, definitions, depth + 1, objectScope)
   }
 
   for (const key of ['anyOf', 'oneOf']) {
     const members = schemaArray(resolved, key)
 
-    if (members !== undefined) normalized = normalizeUnion(members, normalized, definitions, depth)
+    if (members !== undefined) {
+      normalized = normalizeUnion(members, normalized, definitions, depth, objectScope)
+    }
   }
 
   if (isJsonArray(normalized)) return normalizeArray(resolved, normalized, definitions, depth)
@@ -477,13 +557,14 @@ const normalizeValue = (
 
   return record === undefined
     ? normalized
-    : normalizeObject(resolved, record, definitions, depth, siblingKeys)
+    : normalizeObject(resolved, record, definitions, depth, objectScope)
 }
 
 /** Drops `null` from model-produced tool arguments only where the advertised JSON Schema marks
  * the property optional and does not admit `null` (for example `Schema.optionalKey(X)` or a raw
  * MCP schema), or on an undeclared key that another member of the enclosing union declares
- * (provider-flattened unions show every member's fields). Follows local `$ref`/`$defs`, `allOf`, discriminated `anyOf`/`oneOf`, and arrays;
+ * (provider-flattened unions show every member's fields) and no conjunct of the enclosing `allOf`
+ * declares. Follows local `$ref`/`$defs`, `allOf`, discriminated `anyOf`/`oneOf`, and arrays;
  * ambiguous unions are left untouched. A declared nullable value is never rewritten. Non-JSON
  * arguments and unchanged arguments are returned as the same reference.
  */

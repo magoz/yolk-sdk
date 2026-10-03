@@ -27,7 +27,7 @@ import {
   type ToolRegistration,
   type ToolRegistryError
 } from './registry.ts'
-import { withToolArgumentsErrorHint } from '../protocol/tool-arguments-internal.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 
 export { subagentToolName }
 

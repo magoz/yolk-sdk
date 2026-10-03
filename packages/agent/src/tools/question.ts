@@ -2,7 +2,7 @@ import { Effect } from 'effect'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { QuestionToolParams, ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
 import { questionToolName } from '../protocol/tool.ts'
-import { withToolArgumentsErrorHint } from '../protocol/tool-arguments-internal.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 import { makeTool, type ToolModule, type ToolRegistration } from './registry.ts'
 
 export { questionToolName }

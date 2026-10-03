@@ -28,13 +28,12 @@ const unknownArgumentsIn = (
     Match.tag('UnexpectedKey', unexpected => {
       const key = path.at(-1)
 
-      if (key === undefined) return []
+      // Extra tuple elements (Arrays AST) are not argument names; the base message covers them.
+      if (key === undefined || !SchemaAST.isObjects(unexpected.ast)) return []
 
-      const allowed = SchemaAST.isObjects(unexpected.ast)
-        ? unexpected.ast.propertySignatures
-            .map(property => property.name)
-            .filter(Predicate.isString)
-        : []
+      const allowed = unexpected.ast.propertySignatures
+        .map(property => property.name)
+        .filter(Predicate.isString)
 
       return [{ parent: path.slice(0, -1), key, allowed }]
     }),
